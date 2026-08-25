@@ -69,6 +69,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "create":
             print(store.create().id)
             return 0
+        if args.cmd == "probe":
+            return run_probe(Path(args.var), Path(args.fixtures) if args.fixtures else Path("fixtures/period-smoke"))
+        if args.cmd == "mark-done":
+            mark_done(Path(args.skill), Path(args.var), Path(args.fixtures) if args.fixtures else None)
+            return 0
+        if args.cmd == "host-smoke":
+            fixtures = Path(args.fixtures) if args.fixtures else Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke"
+            return host_smoke(Path(args.var), fixtures)
         window = store.current()
         if args.cmd == "import":
             named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
@@ -114,14 +122,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(nxt.id)
             return 0
-        if args.cmd == "probe":
-            return run_probe(Path(args.var), Path(args.fixtures) if args.fixtures else Path("fixtures/period-smoke"))
-        if args.cmd == "mark-done":
-            mark_done(Path(args.skill), Path(args.var), Path(args.fixtures) if args.fixtures else None)
-            return 0
-        if args.cmd == "host-smoke":
-            fixtures = Path(args.fixtures) if args.fixtures else Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke"
-            return host_smoke(Path(args.var), fixtures)
     except FoundryError as exc:
         print(str(exc), file=sys.stderr)
         return 2

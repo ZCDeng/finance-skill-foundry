@@ -99,4 +99,6 @@ export function f3Denied(name: string): boolean {
   return name !== "query-locked";
 }
 
-registerTools();
+export function apply() {
+  return registerTools();
+}

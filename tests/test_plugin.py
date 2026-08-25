@@ -48,16 +48,21 @@ def _imported(tmp_path: Path):
 def test_bundle_declares_cordis_patch() -> None:
     data = json.loads(PACKAGE.read_text())
     assert data["dsh"]["bundle"]["patch"] == "./cordis.patch.yml"
+    patch = yaml.safe_load(PATCH.read_text())
+    inserted = patch[0]["insert"][0]
+    assert inserted["id"] == "finance-skill-foundry"
+    assert inserted["name"] == data["name"]
 
 
 def test_period_profile_omits_host_writers() -> None:
-    patch = yaml.safe_load(PATCH.read_text())
-    assert set(patch["tools"]) == set(REQUIRED_TOOLS)
-    period = patch["profiles"]["period"]
+    data = json.loads(PACKAGE.read_text())
+    foundry = data["dsh"]["foundry"]
+    assert set(foundry["tools"]) == set(REQUIRED_TOOLS)
+    period = foundry["profiles"]["period"]
     assert period["sandbox"] == "read-only"
     assert period["cwd_writable"] is False
     assert set(period["omit"]) >= {"bash", "dsh-tool-fs", "str-replace-editor"}
-    assert patch["profiles"]["f3"]["tools"] == ["query-locked"]
+    assert foundry["profiles"]["f3"]["tools"] == ["query-locked"]
 
 
 def test_startup_fails_when_tool_missing() -> None:

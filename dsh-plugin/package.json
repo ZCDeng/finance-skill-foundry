@@ -3,12 +3,45 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./index.js",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "foundry": {
+      "tools": [
+        "import",
+        "lock",
+        "record-questions",
+        "emit-brief",
+        "launch-formulator",
+        "query-locked",
+        "re-import"
+      ],
+      "profiles": {
+        "period": {
+          "sandbox": "read-only",
+          "cwd_writable": false,
+          "omit": ["bash", "dsh-tool-fs", "str-replace-editor"],
+          "tools": [
+            "import",
+            "lock",
+            "record-questions",
+            "emit-brief",
+            "launch-formulator",
+            "query-locked",
+            "re-import"
+          ]
+        },
+        "f3": {
+          "sandbox": "read-only",
+          "tools": ["query-locked"],
+          "deny_paths": ["catalog.duckdb", "formulator"]
+        }
+      }
     }
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./index.js"
   }
 }

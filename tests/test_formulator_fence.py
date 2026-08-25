@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from openpyxl import Workbook
 
 import importlib.util
@@ -101,7 +102,9 @@ def test_launch_uses_plugin_dir_and_per_window_home(tmp_path: Path) -> None:
     assert "--disable-data-connectors" not in spec["argv"]
     assert Path(spec["env"]["DATA_FORMULATOR_HOME"]) == window.store.formulator_dir / window.id
     assert spec["env"]["DF_PLUGIN_DIR"].endswith("formulator-plugin")
-    assert (Path(spec["home"]) / "connectors.yaml").read_text().count("locked_catalog") == 1
+    connectors = yaml.safe_load((Path(spec["home"]) / "connectors.yaml").read_text())
+    assert connectors["connectors"][0]["type"] == "locked_catalog"
+    assert connectors["connectors"][0]["auto_connect"] is True
     before = window.hashes()
     stop_lease(window)
     purge_formulator_home(window)
