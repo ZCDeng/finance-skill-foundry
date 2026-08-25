@@ -1,0 +1,27 @@
+[project]
+name = "finance-skill-foundry"
+version = "0.1.0"
+description = "Finance manager skill foundry: lock a period catalog, emit a tagged brief"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "duckdb>=1.5,<1.6",
+  "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyyaml>=6"]
+
+[project.scripts]
+foundry = "foundry.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["foundry*", "formulator-plugin*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

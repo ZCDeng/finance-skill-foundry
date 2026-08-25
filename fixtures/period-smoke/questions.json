@@ -1,0 +1,5 @@
+[
+  {"id": "q-gl", "text": "GL 合计是多少?", "required_table_ids": ["gl"]},
+  {"id": "q-ar", "text": "AR 合计是多少?", "required_table_ids": ["ar"]},
+  {"id": "q-cf", "text": "现金流净额?", "required_table_ids": ["cash_flow"]}
+]
