@@ -7,7 +7,7 @@ v1 kit: native DeepSeek harness (TypeScript/JS Cordis tools that exec this CLI),
 ## Store
 
 ```text
-var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,followup.jsonl}
+var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,schedules.json,workpaper.md,followup.jsonl}
 var/current
 var/formulator/<window_id>/
 var/skills/<skill_id>/SKILL.md
@@ -25,10 +25,11 @@ Keys stay in the process environment. Never write them into the window, skill, o
 
 ```bash
 foundry --var VAR create
-foundry --var VAR import --coa COA.xlsx --units UNITS.xlsx --named NAMED.json
+foundry --var VAR import --coa COA.xlsx --aux AUX.xlsx --map MAP.xlsx --named NAMED.json
 foundry --var VAR lock
 foundry --var VAR record-questions --questions QUESTIONS.json
 foundry --var VAR emit-brief
+foundry --var VAR workpaper
 foundry --var VAR query-locked --text "..." --tables gl --split-by unit_id --brief-window WINDOW
 ```
 

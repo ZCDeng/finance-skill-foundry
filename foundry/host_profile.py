@@ -70,8 +70,10 @@ class HostProfile:
         if tool == "import":
             return window.import_tables(
                 coa=Path(payload["coa"]),
-                units=Path(payload["units"]),
                 named=payload["named"],
+                aux=Path(payload["aux"]) if payload.get("aux") else None,
+                map=Path(payload["map"]) if payload.get("map") else None,
+                units=Path(payload["units"]) if payload.get("units") else None,
                 drop_dir=Path(payload["drop_dir"]) if payload.get("drop_dir") else None,
             )
         if tool == "lock":
@@ -94,8 +96,10 @@ class HostProfile:
         if tool == "re-import":
             return window.reimport(
                 coa=Path(payload["coa"]),
-                units=Path(payload["units"]),
                 named=payload["named"],
+                aux=Path(payload["aux"]) if payload.get("aux") else None,
+                map=Path(payload["map"]) if payload.get("map") else None,
+                units=Path(payload["units"]) if payload.get("units") else None,
                 drop_dir=Path(payload["drop_dir"]) if payload.get("drop_dir") else None,
             )
         raise FoundryError(f"unknown tool {tool}")

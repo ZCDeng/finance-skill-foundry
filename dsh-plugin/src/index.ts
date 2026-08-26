@@ -44,17 +44,11 @@ export function registerTools(available: ToolName[] = REQUIRED) {
   return REQUIRED.map((name) =>
     defineTool(name, (input) => {
       if (name === "import") {
-        return foundry([
-          "import",
-          "--coa",
-          input.coa,
-          "--units",
-          input.units,
-          "--named",
-          input.named,
-          "--drop-dir",
-          input.dropDir ?? "",
-        ]);
+        const args = ["import", "--coa", input.coa, "--named", input.named, "--drop-dir", input.dropDir ?? ""];
+        if (input.units) args.push("--units", input.units);
+        if (input.aux) args.push("--aux", input.aux);
+        if (input.map) args.push("--map", input.map);
+        return foundry(args);
       }
       if (name === "lock") return foundry(["lock"]);
       if (name === "record-questions") return foundry(["record-questions", "--questions", input.questions]);
@@ -74,17 +68,11 @@ export function registerTools(available: ToolName[] = REQUIRED) {
         ]);
       }
       if (name === "re-import") {
-        return foundry([
-          "re-import",
-          "--coa",
-          input.coa,
-          "--units",
-          input.units,
-          "--named",
-          input.named,
-          "--drop-dir",
-          input.dropDir ?? "",
-        ]);
+        const args = ["re-import", "--coa", input.coa, "--named", input.named, "--drop-dir", input.dropDir ?? ""];
+        if (input.units) args.push("--units", input.units);
+        if (input.aux) args.push("--aux", input.aux);
+        if (input.map) args.push("--map", input.map);
+        return foundry(args);
       }
       throw new Error(`unknown tool ${name}`);
     }),

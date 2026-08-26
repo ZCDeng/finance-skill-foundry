@@ -26,8 +26,10 @@ def run_probe(var_root: Path, fixtures: Path) -> int:
     named = json.loads((fixtures / "named.json").read_text())
     window.import_tables(
         coa=fixtures / named["coa"],
-        units=fixtures / named["units"],
         named=[{"id": item["id"], "path": fixtures / item["path"]} for item in named["tables"]],
+        aux=fixtures / named["aux"] if named.get("aux") else None,
+        map=fixtures / named["map"] if named.get("map") else None,
+        units=fixtures / named["units"] if named.get("units") else None,
         drop_dir=fixtures,
     )
     window.lock()

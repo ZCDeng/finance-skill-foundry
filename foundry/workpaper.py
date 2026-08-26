@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from foundry.caliber import CutLine, MapCut, as_number, format_aux
+from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
+from foundry.window import Window
+
+
+def coa_names(window: Window) -> dict[str, str]:
+    if "coa" not in window.table_names():
+        return {}
+    rows = window.query("SELECT account_code, account_name FROM coa")
+    return {str(code).strip(): str(name or "").strip() for code, name in rows}
+
+
+def line_dict(line: CutLine, names: dict[str, str]) -> dict[str, Any]:
+    return {
+        "node_id": line.node_id,
+        "node_name": line.node_name,
+        "account": line.account,
+        "account_name": names.get(line.account, ""),
+        "dims": [list(pair) for pair in line.dims],
+        "aux": format_aux(line.dims),
+        "amount": as_number(line.amount),
+        "match": line.match,
+        "conflict_nodes": list(line.conflict_nodes),
+    }
+
+
+def _item(
+    *,
+    item_id: str,
+    text: str,
+    tag: str,
+    origin: str,
+    table: str | None = None,
+    cut: str | None = None,
+    split_by: str | None = None,
+    claimed: float | int | None = None,
+    recomputed: float | int | None = None,
+    unmapped: float | int = 0,
+    conflict: float | int = 0,
+    nodes: list[dict[str, Any]] | None = None,
+    lines: list[dict[str, Any]] | None = None,
+    missing: list[str] | None = None,
+) -> dict[str, Any]:
+    tie = AGREED if claimed is not None and recomputed is not None and claimed == recomputed else None
+    return {
+        "id": item_id,
+        "schedule_id": item_id,
+        "text": text,
+        "tag": tag,
+        "origin": origin,
+        "table": table,
+        "cut": cut,
+        "split_by": split_by,
+        "claimed": claimed,
+        "recomputed": recomputed,
+        "unmapped": as_number(unmapped) if unmapped else 0,
+        "conflict": as_number(conflict) if conflict else 0,
+        "tie": tie,
+        "nodes": nodes or [],
+        "lines": lines or [],
+        "missing": missing or [],
+    }
+
+
+def schedule_missing(item_id: str, text: str, missing: list[str]) -> dict[str, Any]:
+    return _item(item_id=item_id, text=text, tag=NOT_IN_WINDOW, origin="brief", missing=missing)
+
+
+def schedule_from_cut(
+    *,
+    item_id: str,
+    text: str,
+    table: str,
+    cut: MapCut,
+    names: dict[str, str],
+    origin: str,
+    tag: str,
+) -> dict[str, Any]:
+    return _item(
+        item_id=item_id,
+        text=text,
+        tag=tag,
+        origin=origin,
+        table=table,
+        cut="map",
+        claimed=as_number(cut.claimed),
+        recomputed=as_number(cut.recomputed),
+        unmapped=cut.unmapped,
+        conflict=cut.conflict,
+        nodes=[{"id": node, "name": name, "amount": as_number(amount)} for node, name, amount in cut.nodes],
+        lines=[line_dict(line, names) for line in cut.lines],
+    )
+
+
+def schedule_from_lines(
+    *,
+    item_id: str,
+    text: str,
+    table: str,
+    lines: list[CutLine],
+    names: dict[str, str],
+    origin: str,
+    tag: str,
+    claimed: float | int,
+    recomputed: float | int | None = None,
+    split_by: str | None = None,
+) -> dict[str, Any]:
+    recomputed = claimed if recomputed is None else recomputed
+    return _item(
+        item_id=item_id,
+        text=text,
+        tag=tag,
+        origin=origin,
+        table=table,
+        split_by=split_by,
+        claimed=as_number(float(claimed)),
+        recomputed=as_number(float(recomputed)),
+        lines=[line_dict(line, names) for line in lines],
+    )
+
+
+def load_schedules(window: Window) -> dict[str, Any]:
+    path = window.schedules_path
+    if not path.exists():
+        return {"window_id": window.id, "hashes": window.hashes(), "items": []}
+    return json.loads(path.read_text())
+
+
+def next_followup_id(payload: dict[str, Any]) -> str:
+    count = sum(1 for item in payload.get("items", []) if item.get("origin") == "followup")
+    return f"followup-{count + 1}"
+
+
+def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: bool) -> None:
+    if replace:
+        payload = {"window_id": window.id, "hashes": window.hashes(), "items": items}
+    else:
+        payload = load_schedules(window)
+        payload["window_id"] = window.id
+        payload["hashes"] = payload.get("hashes") or window.hashes()
+        payload["items"] = list(payload.get("items") or []) + items
+    window.schedules_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    window.workpaper_path.write_text(render_workpaper(payload))
+
+
+def _hash_line(hashes: dict[str, Any]) -> str:
+    named = hashes.get("named") or {}
+    parts = [f"coa={hashes.get('coa') or '—'}", f"map={hashes.get('map') or '—'}"]
+    if hashes.get("aux"):
+        parts.append(f"aux={hashes['aux']}")
+    for table, digest in named.items():
+        parts.append(f"{table}={digest or '—'}")
+    return " ".join(parts)
+
+
+def _account_cell(line: dict[str, Any]) -> str:
+    code = str(line.get("account") or "")
+    name = str(line.get("account_name") or "")
+    if code and name:
+        return f"{code} {name}"
+    return code or "—"
+
+
+def _match_cell(line: dict[str, Any]) -> str:
+    match = str(line.get("match") or "")
+    conflicts = line.get("conflict_nodes") or []
+    if conflicts:
+        return f"{match} ({', '.join(str(item) for item in conflicts)})"
+    return match or "—"
+
+
+def render_workpaper(payload: dict[str, Any]) -> str:
+    lines = [
+        "# 本期计算底稿",
+        "",
+        f"窗口: {payload.get('window_id') or '—'}",
+        f"锁哈希: {_hash_line(payload.get('hashes') or {})}",
+        "本文件由锁库算出，不是模型起草。归档 Excel 不是底稿。",
+        "",
+    ]
+    for item in payload.get("items") or []:
+        lines.append(f"## {item.get('id')} · {item.get('text')}")
+        lines.append("")
+        origin = "稿外追问" if item.get("origin") == "followup" else "brief"
+        lines.append(f"来源: {origin}")
+        tag = item.get("tag") or ""
+        if item.get("origin") == "followup" and OUTSIDE not in tag:
+            tag = f"{OUTSIDE} / {tag}" if tag else OUTSIDE
+        lines.append(f"标签: {tag}")
+        if item.get("missing"):
+            lines.append(f"缺: {', '.join(item['missing'])}")
+            lines.append("无附表行。")
+            lines.append("")
+            continue
+        if item.get("table"):
+            lines.append(f"表: {item['table']}")
+        if item.get("claimed") is not None:
+            lines.append(f"{CLAIMED}: {item['claimed']}")
+        if item.get("recomputed") is not None:
+            lines.append(f"{RECOMPUTED}: {item['recomputed']}")
+        if item.get("unmapped"):
+            lines.append(f"未对照: {item['unmapped']}")
+        if item.get("conflict"):
+            lines.append(f"冲突: {item['conflict']}")
+        if item.get("tie"):
+            lines.append(f"勾稽: {item['tie']}")
+        rows = item.get("lines") or []
+        if not rows:
+            lines.append("无附表行。")
+            lines.append("")
+            continue
+        show_node = any(row.get("node_id") for row in rows)
+        header = "| 分析节点 | 科目 | 辅助 | 金额 | 对照 |" if show_node else "| 科目 | 辅助 | 金额 | 对照 |"
+        rule = "| --- | --- | --- | --- | --- |" if show_node else "| --- | --- | --- | --- |"
+        lines.append("")
+        lines.append(header)
+        lines.append(rule)
+        for row in rows:
+            account = _account_cell(row)
+            aux = row.get("aux") or "—"
+            amount = row.get("amount")
+            match = _match_cell(row)
+            if show_node:
+                node = row.get("node_id") or "—"
+                if node == "__unmapped__":
+                    node = "未对照"
+                elif node == "__conflict__":
+                    node = "冲突"
+                lines.append(f"| {node} | {account} | {aux} | {amount} | {match} |")
+            else:
+                lines.append(f"| {account} | {aux} | {amount} | {match} |")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"

@@ -28,7 +28,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_import = sub.add_parser("import")
     p_import.add_argument("--coa", required=True)
-    p_import.add_argument("--units", required=True)
+    p_import.add_argument("--aux", default="")
+    p_import.add_argument("--map", default="")
+    p_import.add_argument("--units", default="", help="optional shortcut dim of aux")
     p_import.add_argument("--named", required=True, help="JSON list of {id,path}")
     p_import.add_argument("--drop-dir", default="")
 
@@ -38,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     p_q.add_argument("--questions", required=True)
 
     sub.add_parser("emit-brief")
+    sub.add_parser("workpaper")
 
     p_query = sub.add_parser("query-locked")
     p_query.add_argument("--text", required=True)
@@ -49,7 +52,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_re = sub.add_parser("re-import")
     p_re.add_argument("--coa", required=True)
-    p_re.add_argument("--units", required=True)
+    p_re.add_argument("--aux", default="")
+    p_re.add_argument("--map", default="")
+    p_re.add_argument("--units", default="")
     p_re.add_argument("--named", required=True)
     p_re.add_argument("--drop-dir", default="")
 
@@ -82,8 +87,10 @@ def main(argv: list[str] | None = None) -> int:
             named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
             window.import_tables(
                 coa=Path(args.coa),
-                units=Path(args.units),
                 named=named,
+                aux=Path(args.aux) if args.aux else None,
+                map=Path(args.map) if args.map else None,
+                units=Path(args.units) if args.units else None,
                 drop_dir=Path(args.drop_dir) if args.drop_dir else None,
             )
             return 0
@@ -97,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "emit-brief":
             print(emit_brief(window), end="")
+            return 0
+        if args.cmd == "workpaper":
+            if not window.workpaper_path.exists():
+                raise FoundryError("workpaper not written")
+            print(window.workpaper_path.read_text(), end="")
             return 0
         if args.cmd == "query-locked":
             print(
@@ -116,8 +128,10 @@ def main(argv: list[str] | None = None) -> int:
             named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
             nxt = window.reimport(
                 coa=Path(args.coa),
-                units=Path(args.units),
                 named=named,
+                aux=Path(args.aux) if args.aux else None,
+                map=Path(args.map) if args.map else None,
+                units=Path(args.units) if args.units else None,
                 drop_dir=Path(args.drop_dir) if args.drop_dir else None,
             )
             print(nxt.id)

@@ -8,6 +8,13 @@ from typing import Any
 
 import duckdb
 
+from foundry.caliber import (
+    AUX_COLUMNS,
+    MAP_COLUMNS,
+    UNITS_COLUMNS,
+    filter_map_rows,
+    units_as_aux_rows,
+)
 from foundry.catalog import (
     checkpoint_and_close,
     file_hash,
@@ -118,6 +125,14 @@ class Window:
         return self.root / "followup.jsonl"
 
     @property
+    def schedules_path(self) -> Path:
+        return self.root / "schedules.json"
+
+    @property
+    def workpaper_path(self) -> Path:
+        return self.root / "workpaper.md"
+
+    @property
     def state(self) -> str:
         data = _read_json(self.state_path, {"state": "Open"})
         return str(data["state"])
@@ -129,8 +144,10 @@ class Window:
         self,
         *,
         coa: Path,
-        units: Path,
         named: list[dict[str, Any]],
+        aux: Path | None = None,
+        map: Path | None = None,
+        units: Path | None = None,
         drop_dir: Path | None = None,
     ) -> dict[str, Any]:
         if self.state not in {"Open", "Imported"}:
@@ -143,7 +160,14 @@ class Window:
         wal.unlink(missing_ok=True)
         con = duckdb.connect(str(staging))
         try:
-            manifest = self._load_into(con, coa=Path(coa), units=Path(units), named=named)
+            manifest = self._load_into(
+                con,
+                coa=Path(coa),
+                named=named,
+                aux=Path(aux) if aux else None,
+                map=Path(map) if map else None,
+                units=Path(units) if units else None,
+            )
         except Exception:
             con.close()
             staging.unlink(missing_ok=True)
@@ -155,7 +179,15 @@ class Window:
         target.unlink(missing_ok=True)
         staging.replace(target)
         _write_json(self.lock_path, {**manifest, "locked": False})
-        extras = self._list_extras(drop_dir, coa=Path(coa), units=Path(units), named=named)
+        extras = self._list_extras(
+            drop_dir,
+            coa=Path(coa),
+            named=named,
+            aux=Path(aux) if aux else None,
+            map=Path(map) if map else None,
+            units=Path(units) if units else None,
+        )
+        extras.extend(f"map:orphan:{code}" for code in manifest.get("map_orphans", []))
         _write_json(self.extras_path, extras)
         self._set_state("Imported")
         return manifest
@@ -165,19 +197,58 @@ class Window:
         con: duckdb.DuckDBPyConnection,
         *,
         coa: Path,
-        units: Path,
         named: list[dict[str, Any]],
+        aux: Path | None,
+        map: Path | None,
+        units: Path | None,
     ) -> dict[str, Any]:
         coa_headers, coa_rows = load_tabular(coa)
         require_columns(coa_headers, ["account_code", "account_name"], "CoA")
         if not coa_rows:
             raise LockRefused("CoA is empty")
-        units_headers, units_rows = load_tabular(units)
-        require_columns(units_headers, ["unit_id", "unit_name"], "units")
-        if not units_rows:
-            raise LockRefused("units are empty")
         write_table(con, "coa", coa_headers, coa_rows)
-        write_table(con, "units", units_headers, units_rows)
+        manifest: dict[str, Any] = {
+            "window_id": self.id,
+            "coa": self._file_meta(con, coa, "coa"),
+            "named": {},
+        }
+        aux_headers = list(AUX_COLUMNS)
+        aux_rows: list[tuple[Any, ...]] = []
+        if aux is not None:
+            aux_headers, loaded_aux = load_tabular(aux)
+            require_columns(aux_headers, AUX_COLUMNS, "aux")
+            if not loaded_aux:
+                raise LockRefused("aux is empty")
+            aux_rows.extend(loaded_aux)
+            manifest["aux"] = {"path": str(aux), "source_hash": file_hash(aux)}
+        if units is not None:
+            units_headers, units_rows = load_tabular(units)
+            require_columns(units_headers, UNITS_COLUMNS, "units")
+            if not units_rows:
+                raise LockRefused("units are empty")
+            write_table(con, "units", units_headers, units_rows)
+            if aux is None:
+                aux_rows.extend(units_as_aux_rows(units_headers, units_rows))
+            manifest["units"] = self._file_meta(con, units, "units")
+        if aux_rows:
+            write_table(con, "aux", aux_headers if aux is not None else AUX_COLUMNS, aux_rows)
+            loaded = self._live_hash(con, "aux")
+            if "aux" in manifest:
+                manifest["aux"]["loaded_hash"] = loaded
+            else:
+                manifest["aux"] = {"path": str(units), "loaded_hash": loaded}
+        if map is not None:
+            map_headers, map_rows = load_tabular(map)
+            require_columns(map_headers, MAP_COLUMNS, "map")
+            if not map_rows:
+                raise LockRefused("map is empty")
+            coa_codes = {str(row[coa_headers.index("account_code")]).strip() for row in coa_rows}
+            kept, orphans = filter_map_rows(map_headers, map_rows, coa_codes)
+            if not kept:
+                raise LockRefused("map has no in-window rows")
+            write_table(con, "map", map_headers, kept)
+            manifest["map"] = self._file_meta(con, map, "map")
+            manifest["map_orphans"] = orphans
         named_meta: dict[str, Any] = {}
         for item in named:
             table_id = str(item["id"])
@@ -186,24 +257,15 @@ class Window:
             if not rows:
                 raise LockRefused(f"named table {table_id} has zero rows")
             write_table(con, table_id, headers, rows)
-            named_meta[table_id] = {
-                "path": str(path),
-                "source_hash": file_hash(path),
-                "loaded_hash": self._live_hash(con, table_id),
-            }
+            named_meta[table_id] = self._file_meta(con, path, table_id)
+        manifest["named"] = named_meta
+        return manifest
+
+    def _file_meta(self, con: duckdb.DuckDBPyConnection, path: Path, table: str) -> dict[str, str]:
         return {
-            "window_id": self.id,
-            "coa": {
-                "path": str(coa),
-                "source_hash": file_hash(coa),
-                "loaded_hash": self._live_hash(con, "coa"),
-            },
-            "units": {
-                "path": str(units),
-                "source_hash": file_hash(units),
-                "loaded_hash": self._live_hash(con, "units"),
-            },
-            "named": named_meta,
+            "path": str(path),
+            "source_hash": file_hash(path),
+            "loaded_hash": self._live_hash(con, table),
         }
 
     def lock(self) -> dict[str, Any]:
@@ -241,6 +303,8 @@ class Window:
         manifest = _read_json(self.lock_path, {})
         return {
             "coa": manifest.get("coa", {}).get("source_hash"),
+            "aux": manifest.get("aux", {}).get("source_hash") or manifest.get("aux", {}).get("loaded_hash"),
+            "map": manifest.get("map", {}).get("source_hash"),
             "units": manifest.get("units", {}).get("source_hash"),
             "named": {k: v.get("source_hash") for k, v in manifest.get("named", {}).items()},
         }
@@ -280,8 +344,10 @@ class Window:
         self,
         *,
         coa: Path,
-        units: Path,
         named: list[dict[str, Any]],
+        aux: Path | None = None,
+        map: Path | None = None,
+        units: Path | None = None,
         drop_dir: Path | None = None,
     ) -> Window:
         handles = _read_json(self.handles_path, [])
@@ -291,7 +357,7 @@ class Window:
             self._ro_con.close()
             self._ro_con = None
         nxt = self.store.create()
-        nxt.import_tables(coa=coa, units=units, named=named, drop_dir=drop_dir)
+        nxt.import_tables(coa=coa, named=named, aux=aux, map=map, units=units, drop_dir=drop_dir)
         return nxt
 
     def _reader(self) -> duckdb.DuckDBPyConnection:
@@ -306,12 +372,17 @@ class Window:
         drop_dir: Path | None,
         *,
         coa: Path,
-        units: Path,
         named: list[dict[str, Any]],
+        aux: Path | None = None,
+        map: Path | None = None,
+        units: Path | None = None,
     ) -> list[str]:
         if drop_dir is None:
             return []
-        known = {coa.resolve(), units.resolve(), *(Path(item["path"]).resolve() for item in named)}
+        known = {coa.resolve(), *(Path(item["path"]).resolve() for item in named)}
+        for extra in (aux, map, units):
+            if extra is not None:
+                known.add(Path(extra).resolve())
         extras: list[str] = []
         for path in drop_dir.rglob("*"):
             if not path.is_file():
