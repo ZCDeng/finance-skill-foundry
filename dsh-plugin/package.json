@@ -22,7 +22,11 @@
         "period": {
           "sandbox": "read-only",
           "cwd_writable": false,
-          "omit": ["bash", "dsh-tool-fs", "str-replace-editor"],
+          "omit": [
+            "bash",
+            "dsh-tool-fs",
+            "str-replace-editor"
+          ],
           "tools": [
             "import",
             "lock",
@@ -35,9 +39,23 @@
         },
         "f3": {
           "sandbox": "read-only",
-          "tools": ["query-locked"],
-          "deny_paths": ["catalog.duckdb", "formulator"]
+          "tools": [
+            "query-locked"
+          ],
+          "deny_paths": [
+            "catalog.duckdb",
+            "formulator"
+          ]
         }
+      },
+      "methodSkills": {
+        "dir": "../method",
+        "ids": [
+          "financial-statements",
+          "reconciliation",
+          "variance-analysis",
+          "journal-entry"
+        ]
       }
     }
   },

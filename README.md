@@ -11,6 +11,7 @@ var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,schedu
 var/current
 var/formulator/<window_id>/
 var/skills/<skill_id>/SKILL.md
+method/{financial-statements,reconciliation,variance-analysis,journal-entry}/SKILL.md
 ```
 
 ## Pin
@@ -32,6 +33,16 @@ foundry --var VAR emit-brief
 foundry --var VAR workpaper
 foundry --var VAR query-locked --text "..." --tables gl --split-by unit_id --brief-window WINDOW
 ```
+
+## Method skills
+
+Four close methods ship in `method/`. They are kit files, not `var/skills/`.
+
+```bash
+foundry --var VAR method-skills
+```
+
+Numbers still come from the locked window. See `method/FOUNDRY.md`.
 
 ## Dev
 

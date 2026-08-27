@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("emit-brief")
     sub.add_parser("workpaper")
+    sub.add_parser("method-skills")
 
     p_query = sub.add_parser("query-locked")
     p_query.add_argument("--text", required=True)
@@ -82,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "host-smoke":
             fixtures = Path(args.fixtures) if args.fixtures else Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke"
             return host_smoke(Path(args.var), fixtures)
+        if args.cmd == "method-skills":
+            from foundry.method_skills import bundled_skill_files
+
+            for skill_id, path in bundled_skill_files().items():
+                print(f"{skill_id}\t{path}")
+            return 0
         window = store.current()
         if args.cmd == "import":
             named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
