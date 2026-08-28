@@ -24,7 +24,7 @@ Foundry `mark_done` is the only done signal. It runs the model-free fixture prob
 
 ## Period loop the skill must run
 
-1. Import chart of accounts, optional auxiliary dimensions, analysis map, and named statements. A units file may still be imported as a shortcut dim of aux.
+1. Import chart of accounts, optional auxiliary dimensions, analysis map, and named statements. A units file may still be imported as a shortcut dim of aux. She may paperclip-drop those files; pass the `@` paths (or the upload folder) to `import`. Do not `read_document` a GL or map — that dumps rows into the model. Uploads are not books.
 2. Lock. Empty CoA or a zero-row named table refuse lock. Missing aux or map still locks; a provided empty aux/map refuses.
 3. She writes this-window questions on the window.
 4. Emit a conclusion brief. A map-cut question aggregates by analysis node and tags `我重算`. Some items may be `not-in-this-window`. The same lock write writes a calculation workpaper (`workpaper.md`) she can tick: account + aux + amount, plus unmapped and conflicts. The model does not draft that file.

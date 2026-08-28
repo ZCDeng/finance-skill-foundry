@@ -19,6 +19,25 @@ def _store(ns: argparse.Namespace) -> WindowStore:
     return WindowStore(Path(ns.var))
 
 
+
+def _named_arg(raw: str):
+    if not raw:
+        return None
+    payload = Path(raw)
+    return json.loads(payload.read_text() if payload.is_file() else raw)
+
+
+def _import_kwargs(args: argparse.Namespace) -> dict:
+    return {
+        "coa": Path(args.coa) if args.coa else None,
+        "named": _named_arg(args.named),
+        "aux": Path(args.aux) if args.aux else None,
+        "map": Path(args.map) if args.map else None,
+        "units": Path(args.units) if args.units else None,
+        "drop_dir": Path(args.drop_dir) if args.drop_dir else None,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="foundry")
     parser.add_argument("--var", required=True)
@@ -27,11 +46,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("create")
 
     p_import = sub.add_parser("import")
-    p_import.add_argument("--coa", required=True)
+    p_import.add_argument("--coa", default="")
     p_import.add_argument("--aux", default="")
     p_import.add_argument("--map", default="")
     p_import.add_argument("--units", default="", help="optional shortcut dim of aux")
-    p_import.add_argument("--named", required=True, help="JSON list of {id,path}")
+    p_import.add_argument("--named", default="", help="JSON list of {id,path}; omit to map drop-dir stems")
     p_import.add_argument("--drop-dir", default="")
 
     sub.add_parser("lock")
@@ -42,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("emit-brief")
     sub.add_parser("workpaper")
     sub.add_parser("method-skills")
+    sub.add_parser("harness")
 
     p_query = sub.add_parser("query-locked")
     p_query.add_argument("--text", required=True)
@@ -52,11 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("launch-formulator")
 
     p_re = sub.add_parser("re-import")
-    p_re.add_argument("--coa", required=True)
+    p_re.add_argument("--coa", default="")
     p_re.add_argument("--aux", default="")
     p_re.add_argument("--map", default="")
     p_re.add_argument("--units", default="")
-    p_re.add_argument("--named", required=True)
+    p_re.add_argument("--named", default="")
     p_re.add_argument("--drop-dir", default="")
 
     p_probe = sub.add_parser("probe")
@@ -89,17 +109,14 @@ def main(argv: list[str] | None = None) -> int:
             for skill_id, path in bundled_skill_files().items():
                 print(f"{skill_id}\t{path}")
             return 0
+        if args.cmd == "harness":
+            from foundry.harness import harness_text
+
+            print(harness_text())
+            return 0
         window = store.current()
         if args.cmd == "import":
-            named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
-            window.import_tables(
-                coa=Path(args.coa),
-                named=named,
-                aux=Path(args.aux) if args.aux else None,
-                map=Path(args.map) if args.map else None,
-                units=Path(args.units) if args.units else None,
-                drop_dir=Path(args.drop_dir) if args.drop_dir else None,
-            )
+            window.import_tables(**_import_kwargs(args))
             return 0
         if args.cmd == "lock":
             window.lock()
@@ -132,15 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(launch_formulator(window)))
             return 0
         if args.cmd == "re-import":
-            named = json.loads(Path(args.named).read_text() if Path(args.named).is_file() else args.named)
-            nxt = window.reimport(
-                coa=Path(args.coa),
-                named=named,
-                aux=Path(args.aux) if args.aux else None,
-                map=Path(args.map) if args.map else None,
-                units=Path(args.units) if args.units else None,
-                drop_dir=Path(args.drop_dir) if args.drop_dir else None,
-            )
+            nxt = window.reimport(**_import_kwargs(args))
             print(nxt.id)
             return 0
     except FoundryError as exc:

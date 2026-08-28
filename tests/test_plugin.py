@@ -61,8 +61,9 @@ def test_period_profile_omits_host_writers() -> None:
     period = foundry["profiles"]["period"]
     assert period["sandbox"] == "read-only"
     assert period["cwd_writable"] is False
-    assert set(period["omit"]) >= {"bash", "dsh-tool-fs", "str-replace-editor"}
+    assert set(period["omit"]) >= {"bash", "dsh-tool-fs", "str-replace-editor", "read_document"}
     assert foundry["profiles"]["f3"]["tools"] == ["query-locked"]
+    assert "read_document" in foundry["profiles"]["f3"]["omit"]
 
 
 def test_startup_fails_when_tool_missing() -> None:
@@ -73,6 +74,11 @@ def test_startup_fails_when_tool_missing() -> None:
 def test_startup_fails_if_host_writers_mounted() -> None:
     with pytest.raises(FoundryError, match="host writers"):
         HostProfile("period", [*REQUIRED_TOOLS, "bash"])
+
+
+def test_startup_fails_if_read_document_mounted() -> None:
+    with pytest.raises(FoundryError, match="line leak"):
+        HostProfile("period", [*REQUIRED_TOOLS, "read_document"])
 
 
 def test_f3_cannot_execute_reimport(tmp_path: Path) -> None:

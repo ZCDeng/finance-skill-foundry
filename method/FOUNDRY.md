@@ -2,7 +2,7 @@
 
 These four close methods ship with the foundry kit. They are not the authored portable skill and they are not this-window questions.
 
-- Numbers come from the locked window catalog only. Do not invent trial-balance rows.
+- Numbers come from the locked window catalog only. Do not invent trial-balance rows. Paperclip uploads are an import drop; do not `read_document` a GL or map.
 - `~~erp` / `~~data warehouse` stay placeholders unless this window has named those tables.
 - Do not write `questions.md` or `questions.json` into `authoring/` or `var/skills/`.
 - Do not post journal entries. Foundry does not own the ERP.

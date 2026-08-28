@@ -10,6 +10,9 @@ const REQUIRED = [
   "re-import",
 ];
 
+export const HOST_WRITERS = ["bash", "dsh-tool-fs", "str-replace-editor"];
+export const LINE_LEAKS = ["read_document"];
+
 function foundry(args) {
   const bin = process.env.FOUNDRY_BIN ?? "foundry";
   const varRoot = process.env.FOUNDRY_VAR;
@@ -23,29 +26,36 @@ function foundry(args) {
   return result.stdout;
 }
 
+function importArgs(cmd, input) {
+  const args = [cmd];
+  if (input.dropDir) args.push("--drop-dir", input.dropDir);
+  if (input.coa) args.push("--coa", input.coa);
+  if (input.named) args.push("--named", input.named);
+  if (input.units) args.push("--units", input.units);
+  if (input.aux) args.push("--aux", input.aux);
+  if (input.map) args.push("--map", input.map);
+  return args;
+}
+
 export const name = "finance-skill-foundry";
+
+export function periodDenied(toolName) {
+  return HOST_WRITERS.includes(toolName) || LINE_LEAKS.includes(toolName);
+}
 
 export function registerTools(available = REQUIRED) {
   const missing = REQUIRED.filter((toolName) => !available.includes(toolName));
   if (missing.length) {
     throw new Error(`foundry plugin startup failed; missing tools: ${missing.join(",")}`);
   }
+  const leaks = available.filter((toolName) => periodDenied(toolName));
+  if (leaks.length) {
+    throw new Error(`period profile must omit ${leaks.join(",")}`);
+  }
   return REQUIRED.map((toolName) => ({
     name: toolName,
     run: (input) => {
-      if (toolName === "import") {
-        return foundry([
-          "import",
-          "--coa",
-          input.coa,
-          "--units",
-          input.units,
-          "--named",
-          input.named,
-          "--drop-dir",
-          input.dropDir ?? "",
-        ]);
-      }
+      if (toolName === "import") return foundry(importArgs("import", input));
       if (toolName === "lock") return foundry(["lock"]);
       if (toolName === "record-questions") return foundry(["record-questions", "--questions", input.questions]);
       if (toolName === "emit-brief") return foundry(["emit-brief"]);
@@ -63,19 +73,7 @@ export function registerTools(available = REQUIRED) {
           input.briefWindow ?? "",
         ]);
       }
-      if (toolName === "re-import") {
-        return foundry([
-          "re-import",
-          "--coa",
-          input.coa,
-          "--units",
-          input.units,
-          "--named",
-          input.named,
-          "--drop-dir",
-          input.dropDir ?? "",
-        ]);
-      }
+      if (toolName === "re-import") return foundry(importArgs("re-import", input));
       throw new Error(`unknown tool ${toolName}`);
     },
   }));
@@ -85,8 +83,8 @@ export function f3Allowlist() {
   return ["query-locked"];
 }
 
-export function f3Denied(name) {
-  return name !== "query-locked";
+export function f3Denied(toolName) {
+  return toolName !== "query-locked";
 }
 
 export function apply() {

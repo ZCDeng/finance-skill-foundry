@@ -5,6 +5,7 @@ from typing import Any
 
 from foundry.brief import emit_brief
 from foundry.errors import FoundryError, QueryRefused
+from foundry.harness import LINE_LEAKS
 from foundry.launch_formulator import launch_formulator
 from foundry.probe import run_probe
 from foundry.query import query_locked
@@ -38,6 +39,9 @@ class HostProfile:
         writers = self.tools & HOST_WRITERS
         if writers:
             raise FoundryError(f"period profile must omit host writers: {sorted(writers)}")
+        leaks = self.tools & LINE_LEAKS
+        if leaks:
+            raise FoundryError(f"period profile must omit line leaks: {sorted(leaks)}")
         if name == "period":
             missing = [tool for tool in REQUIRED_TOOLS if tool not in self.tools]
             if missing:
@@ -57,7 +61,12 @@ class HostProfile:
         if self.name != "f3":
             return False
         text = str(path)
-        return "catalog.duckdb" in text or "/formulator/" in text or text.endswith("/formulator")
+        return (
+            "catalog.duckdb" in text
+            or "/formulator/" in text
+            or text.endswith("/formulator")
+            or ".dsh-uploads" in text
+        )
 
     def execute(self, window: Window, tool: str, **payload: Any) -> Any:
         if tool not in self.tools:
@@ -69,8 +78,8 @@ class HostProfile:
             raise QueryRefused(f"{tool} refused in state {window.state}")
         if tool == "import":
             return window.import_tables(
-                coa=Path(payload["coa"]),
-                named=payload["named"],
+                coa=Path(payload["coa"]) if payload.get("coa") else None,
+                named=payload["named"] if "named" in payload else None,
                 aux=Path(payload["aux"]) if payload.get("aux") else None,
                 map=Path(payload["map"]) if payload.get("map") else None,
                 units=Path(payload["units"]) if payload.get("units") else None,
@@ -95,8 +104,8 @@ class HostProfile:
             )
         if tool == "re-import":
             return window.reimport(
-                coa=Path(payload["coa"]),
-                named=payload["named"],
+                coa=Path(payload["coa"]) if payload.get("coa") else None,
+                named=payload["named"] if "named" in payload else None,
                 aux=Path(payload["aux"]) if payload.get("aux") else None,
                 map=Path(payload["map"]) if payload.get("map") else None,
                 units=Path(payload["units"]) if payload.get("units") else None,

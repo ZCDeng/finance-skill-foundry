@@ -1,0 +1,20 @@
+# Merge these config keys into the installed file-upload plugin.
+# Install once:
+#   dsh plugin --profile web add dsh-file-upload@0.4.3
+# Do not insert a second `id: file-upload` row in foundry's cordis.patch.yml —
+# a double apply crashes on duplicate upload routes.
+#
+# Uploads are an input drop for foundry import. They are not a second books
+# surface. Period and F3 omit `read_document` so spreadsheet rows are not
+# converted to Markdown and sent to the model.
+- id: file-upload
+  config:
+    allowedExtensions:
+      - xlsx
+      - csv
+      - json
+    inlineTextLimit: 0
+    previewTextLimit: 0
+    sheetRowLimit: 1
+    maxSheets: 1
+    readLimit: 1

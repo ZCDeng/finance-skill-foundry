@@ -25,7 +25,8 @@
           "omit": [
             "bash",
             "dsh-tool-fs",
-            "str-replace-editor"
+            "str-replace-editor",
+            "read_document"
           ],
           "tools": [
             "import",
@@ -44,7 +45,14 @@
           ],
           "deny_paths": [
             "catalog.duckdb",
-            "formulator"
+            "formulator",
+            ".dsh-uploads"
+          ],
+          "omit": [
+            "bash",
+            "dsh-tool-fs",
+            "str-replace-editor",
+            "read_document"
           ]
         }
       },
@@ -56,6 +64,31 @@
           "variance-analysis",
           "journal-entry"
         ]
+      },
+      "companions": {
+        "file-upload": {
+          "id": "file-upload",
+          "package": "dsh-file-upload",
+          "version": "0.4.3",
+          "add": "dsh plugin --profile web add dsh-file-upload@0.4.3",
+          "source": "https://github.com/HongMing-Huang/dsh-file-upload",
+          "role": "input-drop",
+          "omitTools": [
+            "read_document"
+          ],
+          "config": {
+            "allowedExtensions": [
+              "xlsx",
+              "csv",
+              "json"
+            ],
+            "inlineTextLimit": 0,
+            "previewTextLimit": 0,
+            "sheetRowLimit": 1,
+            "maxSheets": 1,
+            "readLimit": 1
+          }
+        }
       }
     }
   },

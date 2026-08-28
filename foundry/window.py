@@ -25,6 +25,7 @@ from foundry.catalog import (
     write_table,
 )
 from foundry.errors import LockRefused, WindowBusy
+from foundry.harness import merge_import_sources
 
 STATES = ("Open", "Imported", "Locked", "Briefed", "FollowUp")
 QUERYABLE = {"Locked", "Briefed", "FollowUp"}
@@ -143,8 +144,8 @@ class Window:
     def import_tables(
         self,
         *,
-        coa: Path,
-        named: list[dict[str, Any]],
+        coa: Path | None = None,
+        named: list[dict[str, Any]] | None = None,
         aux: Path | None = None,
         map: Path | None = None,
         units: Path | None = None,
@@ -152,6 +153,21 @@ class Window:
     ) -> dict[str, Any]:
         if self.state not in {"Open", "Imported"}:
             raise LockRefused("import only before lock")
+        resolved = merge_import_sources(
+            coa=coa,
+            named=named,
+            aux=aux,
+            map=map,
+            units=units,
+            drop_dir=drop_dir,
+        )
+        coa = resolved.coa
+        named = resolved.named
+        aux = resolved.aux
+        map = resolved.map
+        units = resolved.units
+        if coa is None:
+            raise LockRefused("CoA is missing")
         if not named:
             raise LockRefused("named-table list is empty")
         staging = self.root / "catalog.duckdb.staging"
@@ -343,8 +359,8 @@ class Window:
     def reimport(
         self,
         *,
-        coa: Path,
-        named: list[dict[str, Any]],
+        coa: Path | None = None,
+        named: list[dict[str, Any]] | None = None,
         aux: Path | None = None,
         map: Path | None = None,
         units: Path | None = None,
