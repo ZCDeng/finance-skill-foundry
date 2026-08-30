@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from foundry.caliber import CutLine, MapCut, as_number, format_aux
 from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
+
+
+def _display_number(value: Decimal | float | int | str) -> int | str:
+    if isinstance(value, str):
+        return as_number(Decimal(value))
+    return as_number(value)
 
 
 def coa_names(window: Window) -> dict[str, str]:
@@ -38,10 +45,10 @@ def _item(
     table: str | None = None,
     cut: str | None = None,
     split_by: str | None = None,
-    claimed: float | int | None = None,
-    recomputed: float | int | None = None,
-    unmapped: float | int = 0,
-    conflict: float | int = 0,
+    claimed: Decimal | float | int | str | None = None,
+    recomputed: Decimal | float | int | str | None = None,
+    unmapped: Decimal | float | int | str = 0,
+    conflict: Decimal | float | int | str = 0,
     nodes: list[dict[str, Any]] | None = None,
     lines: list[dict[str, Any]] | None = None,
     missing: list[str] | None = None,
@@ -56,10 +63,10 @@ def _item(
         "table": table,
         "cut": cut,
         "split_by": split_by,
-        "claimed": claimed,
-        "recomputed": recomputed,
-        "unmapped": as_number(unmapped) if unmapped else 0,
-        "conflict": as_number(conflict) if conflict else 0,
+        "claimed": _display_number(claimed) if claimed is not None else None,
+        "recomputed": _display_number(recomputed) if recomputed is not None else None,
+        "unmapped": _display_number(unmapped) if unmapped else 0,
+        "conflict": _display_number(conflict) if conflict else 0,
         "tie": tie,
         "nodes": nodes or [],
         "lines": lines or [],
@@ -106,8 +113,8 @@ def schedule_from_lines(
     names: dict[str, str],
     origin: str,
     tag: str,
-    claimed: float | int,
-    recomputed: float | int | None = None,
+    claimed: Decimal | float | int | str | None,
+    recomputed: Decimal | float | int | str | None = None,
     split_by: str | None = None,
 ) -> dict[str, Any]:
     recomputed = claimed if recomputed is None else recomputed
@@ -118,8 +125,8 @@ def schedule_from_lines(
         origin=origin,
         table=table,
         split_by=split_by,
-        claimed=as_number(float(claimed)),
-        recomputed=as_number(float(recomputed)),
+        claimed=claimed,
+        recomputed=recomputed,
         lines=[line_dict(line, names) for line in lines],
     )
 

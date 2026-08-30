@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,31 @@ def test_named_not_on_brief_may_recompute(tmp_path: Path) -> None:
     assert "40" in answer
 
 
+def test_same_table_same_value_different_question_is_followup(tmp_path: Path) -> None:
+    _, window, _ = _locked(tmp_path)
+    record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
+    emit_brief(window)
+    answer = query_locked(window, "GL 另一个问法", required_table_ids=["gl"])
+    assert answer.startswith("稿外追问")
+    cited = query_locked(window, "GL 合计", required_table_ids=["gl"])
+    assert cited.startswith("报表声称")
+
+
+def test_question_id_does_not_bypass_required_table_match(tmp_path: Path) -> None:
+    _, window, _ = _locked(tmp_path)
+    record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
+    emit_brief(window)
+
+    answer = query_locked(
+        window,
+        "GL 合计",
+        required_table_ids=["gl", "ar"],
+        question_id="q1",
+    )
+
+    assert answer.startswith("稿外追问")
+
+
 def test_query_refuses_before_lock(tmp_path: Path) -> None:
     window = WindowStore(tmp_path / "var").create()
     with pytest.raises(QueryRefused):
@@ -99,3 +125,44 @@ def test_historical_brief_window_survives_reimport(tmp_path: Path) -> None:
     historical = store.get(window.id)
     answer = query_locked(historical, "GL 合计", required_table_ids=["gl"], brief_window_id=window.id)
     assert "100" in answer
+
+
+def test_decimal_followup_writes_jsonl(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    store = WindowStore(tmp_path / "var")
+    window = store.create()
+    coa = drop / "coa.csv"
+    coa.write_text("account_code,account_name\n1001,Cash\n", encoding="utf-8")
+    gl = drop / "gl.csv"
+    gl.write_text("account_code,amount\n1001,1.25\n", encoding="utf-8")
+    ar = drop / "ar.csv"
+    ar.write_text("account_code,amount\n1001,2.50\n", encoding="utf-8")
+    window.import_tables(
+        coa=coa,
+        named=[{"id": "gl", "path": gl}, {"id": "ar", "path": ar}],
+        drop_dir=drop,
+    )
+    window.lock()
+    record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
+    emit_brief(window)
+    answer = query_locked(window, "AR 合计", required_table_ids=["ar"])
+    assert "2.5" in answer or "2.50" in answer
+    payload = json.loads(window.followup_path.read_text().strip())
+    assert payload["value"] == "2.5"
+
+
+def test_split_by_requires_amount_column(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    store = WindowStore(tmp_path / "var")
+    window = store.create()
+    window.import_tables(
+        coa=_xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1001", "Cash"]]),
+        named=[{"id": "notes", "path": _xlsx(drop / "notes.xlsx", ["account_code", "unit_id"], [["1001", "OU1"]])}],
+        drop_dir=drop,
+    )
+    window.lock()
+    record_questions(window, [{"id": "q1", "text": "notes", "required_table_ids": ["notes"]}])
+    emit_brief(window)
+    with pytest.raises(QueryRefused, match="no amount"):
+        query_locked(window, "notes by unit", required_table_ids=["notes"], split_by="unit_id")

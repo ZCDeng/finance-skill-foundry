@@ -1,0 +1,9 @@
+{
+  "coa": "coa.xlsx",
+  "units": "units.xlsx",
+  "map": "map.xlsx",
+  "tables": [
+    {"id": "gl", "path": "gl.xlsx"},
+    {"id": "ar", "path": "ar.xlsx"}
+  ]
+}

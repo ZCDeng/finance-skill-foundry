@@ -6,6 +6,7 @@ type ToolName =
   | "record-questions"
   | "emit-brief"
   | "launch-formulator"
+  | "stop-formulator"
   | "query-locked"
   | "re-import";
 
@@ -15,6 +16,7 @@ const REQUIRED: ToolName[] = [
   "record-questions",
   "emit-brief",
   "launch-formulator",
+  "stop-formulator",
   "query-locked",
   "re-import",
 ];
@@ -54,7 +56,12 @@ export function periodDenied(name: string): boolean {
   return (HOST_WRITERS as readonly string[]).includes(name) || (LINE_LEAKS as readonly string[]).includes(name);
 }
 
-export function registerTools(available: ToolName[] = REQUIRED) {
+export function toolsForProfile(profile?: string): ToolName[] {
+  if (profile === "f3") return f3Allowlist();
+  return REQUIRED;
+}
+
+export function registerTools(available: ToolName[] = REQUIRED, options: { profile?: string; phase?: string } = {}) {
   const missing = REQUIRED.filter((name) => !available.includes(name));
   if (missing.length) {
     throw new Error(`foundry plugin startup failed; missing tools: ${missing.join(",")}`);
@@ -63,13 +70,15 @@ export function registerTools(available: ToolName[] = REQUIRED) {
   if (leaks.length) {
     throw new Error(`period profile must omit ${leaks.join(",")}`);
   }
-  return REQUIRED.map((name) =>
+  const enabled = toolsForProfile(options.profile ?? options.phase);
+  return enabled.map((name) =>
     defineTool(name, (input) => {
       if (name === "import") return foundry(importArgs("import", input));
       if (name === "lock") return foundry(["lock"]);
       if (name === "record-questions") return foundry(["record-questions", "--questions", input.questions]);
       if (name === "emit-brief") return foundry(["emit-brief"]);
       if (name === "launch-formulator") return foundry(["launch-formulator"]);
+      if (name === "stop-formulator") return foundry(["stop-formulator"]);
       if (name === "query-locked") {
         return foundry([
           "query-locked",
@@ -81,6 +90,8 @@ export function registerTools(available: ToolName[] = REQUIRED) {
           input.splitBy ?? "",
           "--brief-window",
           input.briefWindow ?? "",
+          "--question-id",
+          input.questionId ?? "",
         ]);
       }
       if (name === "re-import") return foundry(importArgs("re-import", input));
@@ -97,6 +108,6 @@ export function f3Denied(name: string): boolean {
   return name !== "query-locked";
 }
 
-export function apply() {
-  return registerTools();
+export function apply(context: { profile?: string; phase?: string } = {}) {
+  return registerTools(REQUIRED, { profile: context.profile ?? context.phase });
 }

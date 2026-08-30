@@ -10,12 +10,7 @@ from foundry.probe import fixture_root
 def test_cli_period_loop_and_reimport(tmp_path: Path) -> None:
     fixtures = fixture_root()
     var = tmp_path / "var"
-    named = json.dumps(
-        [
-            {"id": "gl", "path": str(fixtures / "gl.xlsx")},
-            {"id": "ar", "path": str(fixtures / "ar.xlsx")},
-        ]
-    )
+    named = str(fixtures / "named.json")
     assert main(["--var", str(var), "create"]) == 0
     assert (
         main(
@@ -61,3 +56,32 @@ def test_cli_period_loop_and_reimport(tmp_path: Path) -> None:
         == 0
     )
     assert (var / "current").exists()
+
+
+def test_cli_named_envelope_supplies_defaults(tmp_path: Path) -> None:
+    fixtures = fixture_root()
+    var = tmp_path / "var"
+    assert main(["--var", str(var), "create"]) == 0
+    assert main(["--var", str(var), "import", "--named", str(fixtures / "named.json")]) == 0
+    assert main(["--var", str(var), "lock"]) == 0
+
+
+def test_cli_named_envelope_cannot_escape_its_directory(tmp_path: Path) -> None:
+    var = tmp_path / "var"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    outside = tmp_path / "outside.csv"
+    outside.write_text("account_code,account_name,amount\n1001,Cash,1\n", encoding="utf-8")
+    descriptor = bundle / "named.json"
+    descriptor.write_text(
+        json.dumps(
+            {
+                "coa": "../outside.csv",
+                "tables": [{"id": "gl", "path": "../outside.csv"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["--var", str(var), "create"]) == 0
+    assert main(["--var", str(var), "import", "--named", str(descriptor)]) == 2

@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 
 from foundry.brief import emit_brief
 from foundry.caliber import cut_fact_by_map
+from foundry.errors import LockRefused
 from foundry.query import query_locked
 from foundry.questions import record_questions
 from foundry.window import WindowStore
@@ -133,7 +135,13 @@ def test_on_brief_map_query_does_not_duplicate_schedule(tmp_path: Path) -> None:
     )
     emit_brief(window)
     before = json.loads(window.schedules_path.read_text())
-    query_locked(window, "按分析节点拆 GL", required_table_ids=["gl"], split_by="analysis_node")
+    query_locked(
+        window,
+        "按分析节点拆 GL",
+        required_table_ids=["gl", "map"],
+        split_by="analysis_node",
+        question_id="q-map",
+    )
     after = json.loads(window.schedules_path.read_text())
     assert [item["id"] for item in after["items"]] == [item["id"] for item in before["items"]]
 

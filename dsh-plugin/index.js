@@ -6,6 +6,7 @@ const REQUIRED = [
   "record-questions",
   "emit-brief",
   "launch-formulator",
+  "stop-formulator",
   "query-locked",
   "re-import",
 ];
@@ -43,7 +44,12 @@ export function periodDenied(toolName) {
   return HOST_WRITERS.includes(toolName) || LINE_LEAKS.includes(toolName);
 }
 
-export function registerTools(available = REQUIRED) {
+export function toolsForProfile(profile) {
+  if (profile === "f3") return f3Allowlist();
+  return REQUIRED;
+}
+
+export function registerTools(available = REQUIRED, options = {}) {
   const missing = REQUIRED.filter((toolName) => !available.includes(toolName));
   if (missing.length) {
     throw new Error(`foundry plugin startup failed; missing tools: ${missing.join(",")}`);
@@ -52,7 +58,8 @@ export function registerTools(available = REQUIRED) {
   if (leaks.length) {
     throw new Error(`period profile must omit ${leaks.join(",")}`);
   }
-  return REQUIRED.map((toolName) => ({
+  const enabled = toolsForProfile(options.profile ?? options.phase);
+  return enabled.map((toolName) => ({
     name: toolName,
     run: (input) => {
       if (toolName === "import") return foundry(importArgs("import", input));
@@ -60,6 +67,7 @@ export function registerTools(available = REQUIRED) {
       if (toolName === "record-questions") return foundry(["record-questions", "--questions", input.questions]);
       if (toolName === "emit-brief") return foundry(["emit-brief"]);
       if (toolName === "launch-formulator") return foundry(["launch-formulator"]);
+      if (toolName === "stop-formulator") return foundry(["stop-formulator"]);
       if (toolName === "query-locked") {
         return foundry([
           "query-locked",
@@ -71,6 +79,8 @@ export function registerTools(available = REQUIRED) {
           input.splitBy ?? "",
           "--brief-window",
           input.briefWindow ?? "",
+          "--question-id",
+          input.questionId ?? "",
         ]);
       }
       if (toolName === "re-import") return foundry(importArgs("re-import", input));
@@ -87,6 +97,6 @@ export function f3Denied(toolName) {
   return toolName !== "query-locked";
 }
 
-export function apply() {
-  return registerTools();
+export function apply(context = {}) {
+  return registerTools(REQUIRED, { profile: context.profile ?? context.phase });
 }

@@ -1,13 +1,43 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from foundry.brief import emit_brief
-from foundry.launch_formulator import launch_spec, stop_lease
+from foundry.launch_formulator import launch_spec, stop_lease, write_connectors
 from foundry.probe import mark_done, run_probe
 from foundry.questions import record_questions
 from foundry.window import WindowStore
 from openpyxl import Workbook
+
+
+def _authored_skill_text() -> str:
+    return """# method
+
+This skill is an F2 finance method skill.
+
+It follows FOUNDRY.md and CONNECTORS.md, reads only the locked period brief,
+uses query-locked for follow-up calculations, and labels anything outside the
+locked window as 稿外追问.
+"""
+
+
+def _write_contract(skill: Path) -> None:
+    (skill / "foundry.json").write_text(
+        json.dumps(
+            {
+                "schema": "finance-skill-foundry/f2-skill@1",
+                "capability": "f2-period-analysis",
+                "period_tools": ["import", "lock", "record-questions", "emit-brief", "query-locked"],
+                "safety": {
+                    "questions_in_window": True,
+                    "no_read_document_books": True,
+                    "tag_followups": True,
+                },
+                "method_docs": ["FOUNDRY.md", "CONNECTORS.md"],
+            }
+        )
+    )
 
 
 def _xlsx(path: Path, headers: list[str], rows: list[list[object]]) -> Path:
@@ -39,7 +69,8 @@ def test_successor_brief_does_not_answer_prior_questions(tmp_path: Path) -> None
 
     skill = tmp_path / "skills" / "a4"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# method\n整理重点: 现金流\n")
+    (skill / "SKILL.md").write_text(_authored_skill_text())
+    _write_contract(skill)
     mark_done(skill, tmp_path / "var-probe", Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke")
 
     a4 = store.create()
@@ -67,7 +98,8 @@ def test_successor_formulator_home_does_not_list_prior_window(tmp_path: Path) ->
         drop_dir=drop,
     )
     a1.lock()
-    launch_spec(a1)
+    first_spec = launch_spec(a1)
+    write_connectors(Path(first_spec["home"]))
     assert (store.formulator_dir / a1.id).exists()
     stop_lease(a1)
     a4 = store.create()
@@ -86,7 +118,8 @@ def test_successor_formulator_home_does_not_list_prior_window(tmp_path: Path) ->
 def test_successor_without_prior_window_runs_fixture_loop(tmp_path: Path) -> None:
     skill = tmp_path / "skill"
     skill.mkdir()
-    (skill / "SKILL.md").write_text("# method\n整理重点: 新经理\n")
+    (skill / "SKILL.md").write_text(_authored_skill_text())
+    _write_contract(skill)
     fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke"
     mark_done(skill, tmp_path / "var", fixtures)
     assert run_probe(tmp_path / "var-f2", fixtures) == 0

@@ -22,6 +22,16 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["foundry*", "formulator-plugin*"]
 
+[tool.setuptools.package-data]
+foundry = [
+  "resources/fixtures/period-smoke/*",
+  "resources/method/*",
+  "resources/method/*/*",
+  "resources/dsh-plugin/*",
+  "resources/dsh-plugin/src/*",
+  "resources/formulator-plugin/*",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

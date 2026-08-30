@@ -1,0 +1,103 @@
+{
+  "name": "finance-skill-foundry-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "scripts": {
+    "test": "node ./test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "foundry": {
+      "tools": [
+        "import",
+        "lock",
+        "record-questions",
+        "emit-brief",
+        "launch-formulator",
+        "stop-formulator",
+        "query-locked",
+        "re-import"
+      ],
+      "profiles": {
+        "period": {
+          "sandbox": "read-only",
+          "cwd_writable": false,
+          "omit": [
+            "bash",
+            "dsh-tool-fs",
+            "str-replace-editor",
+            "read_document"
+          ],
+          "tools": [
+            "import",
+            "lock",
+            "record-questions",
+            "emit-brief",
+            "launch-formulator",
+            "stop-formulator",
+            "query-locked",
+            "re-import"
+          ]
+        },
+        "f3": {
+          "sandbox": "read-only",
+          "tools": [
+            "query-locked"
+          ],
+          "deny_paths": [
+            "catalog.duckdb",
+            "formulator",
+            ".dsh-uploads"
+          ],
+          "omit": [
+            "bash",
+            "dsh-tool-fs",
+            "str-replace-editor",
+            "read_document"
+          ]
+        }
+      },
+      "methodSkills": {
+        "dir": "../method",
+        "ids": [
+          "financial-statements",
+          "reconciliation",
+          "variance-analysis",
+          "journal-entry"
+        ]
+      },
+      "companions": {
+        "file-upload": {
+          "id": "file-upload",
+          "package": "dsh-file-upload",
+          "version": "0.4.3",
+          "add": "dsh plugin --profile web add dsh-file-upload@0.4.3",
+          "source": "https://github.com/HongMing-Huang/dsh-file-upload",
+          "role": "input-drop",
+          "omitTools": [
+            "read_document"
+          ],
+          "config": {
+            "allowedExtensions": [
+              "xlsx",
+              "csv",
+              "json"
+            ],
+            "inlineTextLimit": 0,
+            "previewTextLimit": 0,
+            "sheetRowLimit": 1,
+            "maxSheets": 1,
+            "readLimit": 1
+          }
+        }
+      }
+    }
+  },
+  "exports": {
+    ".": "./index.js"
+  }
+}

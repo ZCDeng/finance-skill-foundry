@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from foundry.errors import LockRefused
@@ -83,18 +84,18 @@ class CutLine:
     node_name: str
     account: str
     dims: tuple[tuple[str, str], ...]
-    amount: float
+    amount: Decimal
     match: str
     conflict_nodes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class MapCut:
-    claimed: float
-    recomputed: float
-    unmapped: float
-    conflict: float
-    nodes: list[tuple[str, str, float]]
+    claimed: Decimal
+    recomputed: Decimal
+    unmapped: Decimal
+    conflict: Decimal
+    nodes: list[tuple[str, str, Decimal]]
     lines: list[CutLine]
 
 
@@ -183,13 +184,13 @@ def _account_optional(headers: list[str], row: tuple[Any, ...]) -> str:
         return ""
 
 
-def _amount(headers: list[str], row: tuple[Any, ...]) -> float:
+def _amount(headers: list[str], row: tuple[Any, ...]) -> Decimal:
     if "amount" not in headers:
         raise LockRefused("fact table has no amount")
     value = row[headers.index("amount")]
     if value in (None, ""):
-        return 0.0
-    return float(value)
+        return Decimal("0")
+    return Decimal(str(value))
 
 
 def _account(headers: list[str], row: tuple[Any, ...]) -> str:
@@ -209,9 +210,9 @@ def cut_fact_by_map(
     entries = parse_map_entries(map_headers, map_rows)
     totals: dict[str, list[Any]] = {}
     lines: list[CutLine] = []
-    claimed = 0.0
-    unmapped = 0.0
-    conflict = 0.0
+    claimed = Decimal("0")
+    unmapped = Decimal("0")
+    conflict = Decimal("0")
     for row in fact_rows:
         amount = _amount(fact_headers, row)
         claimed += amount
@@ -241,7 +242,7 @@ def cut_fact_by_map(
             )
             continue
         hit = winners[0]
-        bucket = totals.setdefault(hit.node_id, [hit.node_name, 0.0])
+        bucket = totals.setdefault(hit.node_id, [hit.node_name, Decimal("0")])
         bucket[1] += amount
         lines.append(
             CutLine(
@@ -253,7 +254,7 @@ def cut_fact_by_map(
                 _MATCH_BY_PRIORITY[priority],
             )
         )
-    nodes = [(node_id, str(name), float(total)) for node_id, (name, total) in sorted(totals.items())]
+    nodes = [(node_id, str(name), total) for node_id, (name, total) in sorted(totals.items())]
     recomputed = sum(item[2] for item in nodes) + unmapped + conflict
     return MapCut(
         claimed=claimed,
@@ -268,13 +269,13 @@ def cut_fact_by_map(
 def fact_schedule_lines(headers: list[str], rows: list[tuple[Any, ...]]) -> list[CutLine]:
     if "amount" not in headers:
         return []
-    totals: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+    totals: dict[tuple[str, tuple[tuple[str, str], ...]], Decimal] = {}
     order: list[tuple[str, tuple[tuple[str, str], ...]]] = []
     for row in rows:
         key = (_account_optional(headers, row), tuple(fact_dims(headers, row)))
         if key not in totals:
             order.append(key)
-            totals[key] = 0.0
+            totals[key] = Decimal("0")
         totals[key] += _amount(headers, row)
     return [
         CutLine("", "", account, dims, totals[(account, dims)], MATCH_SOURCE) for account, dims in order
@@ -285,14 +286,14 @@ def fact_split_lines(headers: list[str], rows: list[tuple[Any, ...]], split_by: 
     if split_by not in headers or "amount" not in headers:
         return []
     index = headers.index(split_by)
-    totals: dict[tuple[str, str, tuple[tuple[str, str], ...]], float] = {}
+    totals: dict[tuple[str, str, tuple[tuple[str, str], ...]], Decimal] = {}
     order: list[tuple[str, str, tuple[tuple[str, str], ...]]] = []
     for row in rows:
         node = _cell(row, index)
         key = (node, _account_optional(headers, row), tuple(fact_dims(headers, row)))
         if key not in totals:
             order.append(key)
-            totals[key] = 0.0
+            totals[key] = Decimal("0")
         totals[key] += _amount(headers, row)
     return [
         CutLine(node, node, account, dims, totals[(node, account, dims)], MATCH_SPLIT)
@@ -316,11 +317,12 @@ def format_cut(cut: MapCut) -> str:
     return ", ".join(parts) if parts else "未对照=0"
 
 
-def _num(value: float) -> int | float:
-    if float(value).is_integer():
-        return int(value)
-    return value
+def _num(value: Decimal | float | int) -> int | str:
+    decimal = value if isinstance(value, Decimal) else Decimal(str(value))
+    if decimal == decimal.to_integral_value():
+        return int(decimal)
+    return format(decimal.normalize(), "f")
 
 
-def as_number(value: float) -> int | float:
+def as_number(value: Decimal | float | int) -> int | str:
     return _num(value)

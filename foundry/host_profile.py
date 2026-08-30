@@ -6,7 +6,7 @@ from typing import Any
 from foundry.brief import emit_brief
 from foundry.errors import FoundryError, QueryRefused
 from foundry.harness import LINE_LEAKS
-from foundry.launch_formulator import launch_formulator
+from foundry.launch_formulator import launch_formulator, stop_formulator
 from foundry.probe import run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
@@ -18,6 +18,7 @@ REQUIRED_TOOLS = (
     "record-questions",
     "emit-brief",
     "launch-formulator",
+    "stop-formulator",
     "query-locked",
     "re-import",
 )
@@ -26,9 +27,9 @@ F3_TOOLS = frozenset({"query-locked"})
 STATE_TOOLS = {
     "Open": frozenset({"import", "lock"}),
     "Imported": frozenset({"import", "lock"}),
-    "Locked": frozenset({"record-questions", "emit-brief", "launch-formulator", "re-import"}),
-    "Briefed": frozenset({"query-locked", "re-import"}),
-    "FollowUp": frozenset({"query-locked", "re-import"}),
+    "Locked": frozenset({"record-questions", "emit-brief", "launch-formulator", "stop-formulator", "re-import"}),
+    "Briefed": frozenset({"query-locked", "launch-formulator", "stop-formulator", "re-import"}),
+    "FollowUp": frozenset({"query-locked", "launch-formulator", "stop-formulator", "re-import"}),
 }
 
 
@@ -94,6 +95,8 @@ class HostProfile:
             return emit_brief(window)
         if tool == "launch-formulator":
             return launch_formulator(window)
+        if tool == "stop-formulator":
+            return stop_formulator(window)
         if tool == "query-locked":
             return query_locked(
                 window,
@@ -101,6 +104,7 @@ class HostProfile:
                 required_table_ids=payload["required_table_ids"],
                 split_by=payload.get("split_by"),
                 brief_window_id=payload.get("brief_window_id"),
+                question_id=payload.get("question_id"),
             )
         if tool == "re-import":
             return window.reimport(

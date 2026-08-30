@@ -11,6 +11,7 @@ from foundry.caliber import (
     fact_split_lines,
     fact_table_id,
     format_cut,
+    as_number,
 )
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused, QueryRefused
@@ -26,6 +27,17 @@ from foundry.workpaper import (
 )
 
 
+def _question_key(text: str) -> str:
+    return " ".join(text.strip().lower().split())
+
+
+def _json_default(value: Any) -> Any:
+    try:
+        return as_number(value)
+    except Exception as exc:
+        raise TypeError from exc
+
+
 def _facts(window: Window) -> list[dict[str, Any]]:
     path = window.root / "brief_facts.json"
     if not path.exists():
@@ -36,10 +48,14 @@ def _facts(window: Window) -> list[dict[str, Any]]:
 def _append_followup(window: Window, payload: dict[str, Any], schedule: dict[str, Any] | None = None) -> None:
     window.followup_path.parent.mkdir(parents=True, exist_ok=True)
     with window.followup_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(payload, ensure_ascii=False, default=_json_default) + "\n")
     if schedule is not None:
         persist_schedules(window, [schedule], replace=False)
     window._set_state("FollowUp")
+
+
+def _same_required(fact: dict[str, Any], required_table_ids: list[str]) -> bool:
+    return set(str(item) for item in fact.get("required_table_ids") or []) == set(required_table_ids)
 
 
 def query_locked(
@@ -49,7 +65,16 @@ def query_locked(
     required_table_ids: list[str],
     split_by: str | None = None,
     brief_window_id: str | None = None,
+    question_id: str | None = None,
 ) -> str:
+    if not required_table_ids:
+        raise QueryRefused("required_table_ids is required")
+    required_table_ids = [str(table).strip() for table in required_table_ids if str(table).strip()]
+    if not required_table_ids:
+        raise QueryRefused("required_table_ids is required")
+    citation_table_ids = list(required_table_ids)
+    if split_by in MAP_SPLITS and "map" not in citation_table_ids:
+        citation_table_ids.append("map")
     target = window
     if brief_window_id:
         target = WindowStore(window.store.var_root).get(brief_window_id)
@@ -76,6 +101,11 @@ def query_locked(
                 fact_row
                 for fact_row in _facts(target)
                 if fact_row.get("cut") == "map" and fact_row.get("table") == fact
+                and (
+                    (question_id and fact_row.get("id") == question_id)
+                    or (not question_id and _question_key(str(fact_row.get("text") or "")) == _question_key(text))
+                )
+                and _same_required(fact_row, citation_table_ids)
             ),
             None,
         )
@@ -95,6 +125,8 @@ def query_locked(
     table = required_table_ids[0]
     if split_by:
         cols = [row[0] for row in target.query(f"DESCRIBE {quote_ident(table)}")]
+        if "amount" not in cols:
+            raise QueryRefused(f"{table} has no amount")
         if split_by not in cols:
             raise QueryRefused(f"{split_by} not in {table}")
         rows = target.query(
@@ -111,7 +143,8 @@ def query_locked(
             names=account_names,
             origin="followup",
             tag=f"{OUTSIDE} / {RECOMPUTED}",
-            claimed=claimed,
+            claimed=None,
+            recomputed=claimed,
             split_by=split_by,
         )
         _append_followup(target, {"text": text, "tag": OUTSIDE}, schedule)
@@ -121,7 +154,12 @@ def query_locked(
         (
             fact
             for fact in _facts(target)
-            if fact.get("table") == table and fact.get("value") == value and fact.get("cut") != "map"
+            if fact.get("table") == table and fact.get("value") == as_number(value) and fact.get("cut") != "map"
+            and (
+                (question_id and fact.get("id") == question_id)
+                or (not question_id and _question_key(str(fact.get("text") or "")) == _question_key(text))
+            )
+            and _same_required(fact, citation_table_ids)
         ),
         None,
     )
@@ -136,7 +174,8 @@ def query_locked(
         names=account_names,
         origin="followup",
         tag=f"{OUTSIDE} / {RECOMPUTED}",
-        claimed=value,
+        claimed=None,
+        recomputed=value,
     )
-    _append_followup(target, {"text": text, "tag": OUTSIDE, "value": value}, schedule)
+    _append_followup(target, {"text": text, "tag": OUTSIDE, "value": as_number(value)}, schedule)
     return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}"

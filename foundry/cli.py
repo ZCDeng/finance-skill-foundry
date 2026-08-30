@@ -7,11 +7,12 @@ from pathlib import Path
 
 from foundry.brief import emit_brief
 from foundry.errors import FoundryError
-from foundry.launch_formulator import launch_formulator
+from foundry.launch_formulator import launch_formulator, purge_formulator_home, stop_formulator
 from foundry.host_profile import host_smoke
 from foundry.probe import mark_done, run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
+from foundry.resources import fixture_root
 from foundry.window import WindowStore
 
 
@@ -20,20 +21,58 @@ def _store(ns: argparse.Namespace) -> WindowStore:
 
 
 
-def _named_arg(raw: str):
+def _resolve_payload_path(base: Path | None, value: str) -> Path:
+    path = Path(value)
+    if base is None:
+        return path
+    root = base.resolve()
+    candidate = path.resolve() if path.is_absolute() else (root / path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise FoundryError(f"named path escapes descriptor directory: {value}") from exc
+    return candidate
+
+
+def _named_arg(raw: str) -> tuple[list[dict] | None, dict[str, Path]]:
     if not raw:
-        return None
+        return None, {}
     payload = Path(raw)
-    return json.loads(payload.read_text() if payload.is_file() else raw)
+    payload_file = payload.resolve() if payload.is_file() else None
+    base = payload_file.parent if payload_file else None
+    try:
+        data = json.loads(payload_file.read_text() if payload_file else raw)
+    except json.JSONDecodeError as exc:
+        raise FoundryError("named argument is not valid JSON") from exc
+    if isinstance(data, list):
+        return [
+            {**item, "path": str(_resolve_payload_path(base, str(item["path"])))}
+            for item in data
+        ], {}
+    if isinstance(data, dict) and "tables" in data:
+        defaults = {
+            key: _resolve_payload_path(base, str(data[key]))
+            for key in ("coa", "aux", "map", "units")
+            if data.get(key)
+        }
+        tables = [
+            {**item, "path": str(_resolve_payload_path(base, str(item["path"])))}
+            for item in data["tables"]
+        ]
+        return tables, defaults
+    if isinstance(data, dict):
+        return [{"id": key, "path": str(_resolve_payload_path(base, str(value)))} for key, value in data.items()], {}
+    return data, {}
 
 
 def _import_kwargs(args: argparse.Namespace) -> dict:
+    named, defaults = _named_arg(args.named)
     return {
-        "coa": Path(args.coa) if args.coa else None,
-        "named": _named_arg(args.named),
-        "aux": Path(args.aux) if args.aux else None,
-        "map": Path(args.map) if args.map else None,
-        "units": Path(args.units) if args.units else None,
+        "coa": Path(args.coa) if args.coa else defaults.get("coa"),
+        "named": named,
+        "aux": Path(args.aux) if args.aux else defaults.get("aux"),
+        "map": Path(args.map) if args.map else defaults.get("map"),
+        "units": Path(args.units) if args.units else defaults.get("units"),
         "drop_dir": Path(args.drop_dir) if args.drop_dir else None,
     }
 
@@ -68,8 +107,11 @@ def main(argv: list[str] | None = None) -> int:
     p_query.add_argument("--tables", required=True)
     p_query.add_argument("--split-by", default="")
     p_query.add_argument("--brief-window", default="")
+    p_query.add_argument("--question-id", default="")
 
     sub.add_parser("launch-formulator")
+    sub.add_parser("stop-formulator")
+    sub.add_parser("purge-formulator")
 
     p_re = sub.add_parser("re-import")
     p_re.add_argument("--coa", default="")
@@ -96,12 +138,12 @@ def main(argv: list[str] | None = None) -> int:
             print(store.create().id)
             return 0
         if args.cmd == "probe":
-            return run_probe(Path(args.var), Path(args.fixtures) if args.fixtures else Path("fixtures/period-smoke"))
+            return run_probe(Path(args.var), fixture_root(Path(args.fixtures) if args.fixtures else None))
         if args.cmd == "mark-done":
             mark_done(Path(args.skill), Path(args.var), Path(args.fixtures) if args.fixtures else None)
             return 0
         if args.cmd == "host-smoke":
-            fixtures = Path(args.fixtures) if args.fixtures else Path(__file__).resolve().parents[1] / "fixtures" / "period-smoke"
+            fixtures = fixture_root(Path(args.fixtures) if args.fixtures else None)
             return host_smoke(Path(args.var), fixtures)
         if args.cmd == "method-skills":
             from foundry.method_skills import bundled_skill_files
@@ -142,11 +184,18 @@ def main(argv: list[str] | None = None) -> int:
                     required_table_ids=args.tables.split(","),
                     split_by=args.split_by or None,
                     brief_window_id=args.brief_window or None,
+                    question_id=args.question_id or None,
                 )
             )
             return 0
         if args.cmd == "launch-formulator":
             print(json.dumps(launch_formulator(window)))
+            return 0
+        if args.cmd == "stop-formulator":
+            print(json.dumps(stop_formulator(window)))
+            return 0
+        if args.cmd == "purge-formulator":
+            purge_formulator_home(window)
             return 0
         if args.cmd == "re-import":
             nxt = window.reimport(**_import_kwargs(args))

@@ -90,6 +90,17 @@ def test_map_drop_refuses_duplicate_stems(tmp_path: Path) -> None:
         map_drop(drop)
 
 
+def test_map_drop_refuses_symlinks(tmp_path: Path) -> None:
+    drop = tmp_path / "uploads"
+    drop.mkdir()
+    outside = tmp_path / "outside.csv"
+    outside.write_text("account_code,amount\n1001,1\n", encoding="utf-8")
+    (drop / "gl.csv").symlink_to(outside)
+
+    with pytest.raises(LockRefused, match="symlink"):
+        map_drop(drop)
+
+
 def test_import_from_upload_drop_only(tmp_path: Path) -> None:
     drop = tmp_path / "uploads"
     _xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1001", "Cash"]])
@@ -143,4 +154,14 @@ def test_cli_import_from_drop_dir(tmp_path: Path, capsys: pytest.CaptureFixture[
 
 
 def test_drop_exts_match_catalog() -> None:
-    assert DROP_EXTS == {".xlsx", ".csv"}
+    assert DROP_EXTS == {".xlsx", ".csv", ".json"}
+
+
+def test_import_json_from_upload_drop(tmp_path: Path) -> None:
+    drop = tmp_path / "uploads"
+    _xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1001", "Cash"]])
+    (drop / "gl.json").write_text(json.dumps([{"account_code": "1001", "amount": "12.50"}]))
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(drop_dir=drop)
+    window.lock()
+    assert window.query("SELECT SUM(amount) FROM gl")[0][0].to_eng_string() == "12.50"

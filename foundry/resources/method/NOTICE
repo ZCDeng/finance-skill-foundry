@@ -1,0 +1,17 @@
+This repository includes skills originally published by Anthropic in the
+knowledge-work-plugins finance plugin.
+
+Source: https://github.com/anthropics/knowledge-work-plugins
+Copyright Anthropic
+Licensed under the Apache License, Version 2.0.
+
+Included skill paths:
+- finance/skills/financial-statements/SKILL.md
+- finance/skills/reconciliation/SKILL.md
+- finance/skills/variance-analysis/SKILL.md
+- finance/skills/journal-entry/SKILL.md
+
+The close-package web app in this repository is a derivative implementation of
+those skills' workflows, formats, checklists, and materiality guidance.
+Extracted SKILL.md copies add a short attribution banner and point connector
+placeholders at CONNECTORS.md.

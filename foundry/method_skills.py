@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from foundry.resources import resource_dir
+
 BUNDLED_IDS = (
     "financial-statements",
     "reconciliation",
@@ -11,7 +13,7 @@ BUNDLED_IDS = (
 
 
 def method_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "method"
+    return resource_dir("method")
 
 
 def bundled_skill_dirs() -> dict[str, Path]:

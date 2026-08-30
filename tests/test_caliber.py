@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -122,3 +123,30 @@ def test_map_required_question_without_map_is_not_in_window(tmp_path: Path) -> N
     text = emit_brief(window)
     assert "not-in-this-window" in text or "不在本窗口" in text
     assert "GL" in text or "gl" in text
+
+
+def test_csv_amount_import_preserves_decimal_precision(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    coa = drop / "coa.csv"
+    coa.write_text("account_code,account_name\n1001,Cash\n", encoding="utf-8")
+    gl = drop / "gl.csv"
+    gl.write_text("account_code,amount\n1001,9007199254740993.37\n", encoding="utf-8")
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(coa=coa, named=[{"id": "gl", "path": gl}], drop_dir=drop)
+    window.lock()
+    value = window.query("SELECT SUM(amount) FROM gl")[0][0]
+    assert value == Decimal("9007199254740993.37")
+
+
+def test_json_named_table_imports_object_rows(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    coa = drop / "coa.csv"
+    coa.write_text("account_code,account_name\n1001,Cash\n", encoding="utf-8")
+    gl = drop / "gl.json"
+    gl.write_text('[{"account_code":"1001","amount":"1.25"}]\n', encoding="utf-8")
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(coa=coa, named=[{"id": "gl", "path": gl}], drop_dir=drop)
+    window.lock()
+    assert window.query("SELECT SUM(amount) FROM gl")[0][0] == Decimal("1.25")

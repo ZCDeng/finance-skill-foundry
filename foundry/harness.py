@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from foundry.errors import FoundryError, LockRefused
+from foundry.resources import resource_dir
 
-PLUGIN_PACKAGE = Path(__file__).resolve().parents[1] / "dsh-plugin" / "package.json"
-OVERLAY = Path(__file__).resolve().parents[1] / "dsh-plugin" / "file-upload.overlay.yml"
+DSH_PLUGIN = resource_dir("dsh-plugin")
+PLUGIN_PACKAGE = DSH_PLUGIN / "package.json"
+OVERLAY = DSH_PLUGIN / "file-upload.overlay.yml"
 
 LINE_LEAKS = frozenset({"read_document"})
-DROP_EXTS = frozenset({".xlsx", ".csv"})
+DROP_EXTS = frozenset({".xlsx", ".csv", ".json"})
 RESERVED_STEMS = {
     "coa": "coa",
     "aux": "aux",
@@ -61,9 +63,18 @@ def file_upload_companion() -> dict[str, Any]:
 def map_drop(drop_dir: Path) -> DropMap:
     if not drop_dir.is_dir():
         raise LockRefused(f"drop-dir is not a directory: {drop_dir}")
+    root = drop_dir.resolve()
     by_stem: dict[str, Path] = {}
     result = DropMap()
-    for path in sorted(p for p in drop_dir.rglob("*") if p.is_file()):
+    for path in sorted(drop_dir.rglob("*")):
+        if path.is_symlink():
+            raise LockRefused(f"drop-dir symlink is refused: {path.relative_to(drop_dir)}")
+        if not path.is_file():
+            continue
+        try:
+            path.resolve().relative_to(root)
+        except ValueError as exc:
+            raise LockRefused(f"drop-dir path escapes root: {path}") from exc
         rel = str(path.relative_to(drop_dir))
         if path.suffix.lower() not in DROP_EXTS:
             result.skipped.append(rel)

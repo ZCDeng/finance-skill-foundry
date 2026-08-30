@@ -20,7 +20,23 @@ You are helping a finance manager author a portable analysis skill on the **pinn
 
 ## Done
 
-Foundry `mark_done` is the only done signal. It runs the model-free fixture probe (`foundry.probe`). Chat satisfaction is ignored. Cursor "validate then proceed" is the pattern, not the host.
+Foundry `mark_done` is the only done signal. It first validates a machine-readable `foundry.json` capability contract beside `SKILL.md`, then runs the model-free fixture probe (`foundry.probe`). Chat satisfaction is ignored. Cursor "validate then proceed" is the pattern, not the host.
+
+Required `foundry.json`:
+
+```json
+{
+  "schema": "finance-skill-foundry/f2-skill@1",
+  "capability": "f2-period-analysis",
+  "period_tools": ["import", "lock", "record-questions", "emit-brief", "query-locked"],
+  "safety": {
+    "questions_in_window": true,
+    "no_read_document_books": true,
+    "tag_followups": true
+  },
+  "method_docs": ["FOUNDRY.md", "CONNECTORS.md"]
+}
+```
 
 ## Period loop the skill must run
 
@@ -40,4 +56,3 @@ The kit ships four close methods under `method/`. They are not this authored ski
 - `journal-entry` — draft a balanced entry for review; do not post
 
 Inside foundry they follow `method/FOUNDRY.md`: numbers from the lock only.
-

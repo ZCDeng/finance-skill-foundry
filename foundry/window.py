@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,7 @@ from foundry.catalog import (
     load_tabular,
     quote_ident,
     require_columns,
+    sql_identifier,
     table_hash,
     write_table,
 )
@@ -29,6 +32,7 @@ from foundry.harness import merge_import_sources
 
 STATES = ("Open", "Imported", "Locked", "Briefed", "FollowUp")
 QUERYABLE = {"Locked", "Briefed", "FollowUp"}
+WINDOW_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -38,8 +42,17 @@ def _read_json(path: Path, default: Any) -> Any:
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp_path.write_text(text)
+        tmp_path.replace(path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @dataclass
@@ -62,16 +75,19 @@ class WindowStore:
         self.formulator_dir.mkdir(parents=True, exist_ok=True)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
-    def create(self) -> Window:
+    def create(self, *, make_current: bool = True) -> Window:
         window_id = uuid.uuid4().hex
         root = self.windows_dir / window_id
         root.mkdir(parents=True, exist_ok=True)
         window = Window(self, window_id)
         window._set_state("Open")
-        self._set_current(window_id)
+        if make_current:
+            self._set_current(window_id)
         return window
 
     def get(self, window_id: str) -> Window:
+        if not WINDOW_ID_RE.fullmatch(window_id):
+            raise LockRefused(f"unknown window {window_id}")
         root = self.windows_dir / window_id
         if not root.is_dir():
             raise LockRefused(f"unknown window {window_id}")
@@ -83,7 +99,8 @@ class WindowStore:
         return self.get(self.current_path.read_text().strip())
 
     def _set_current(self, window_id: str) -> None:
-        self.current_path.write_text(window_id + "\n")
+        self.get(window_id)
+        _write_text_atomic(self.current_path, window_id + "\n")
 
 
 class Window:
@@ -170,6 +187,8 @@ class Window:
             raise LockRefused("CoA is missing")
         if not named:
             raise LockRefused("named-table list is empty")
+        named = self._normalize_named(named)
+        self._assert_table_identifiers(named)
         staging = self.root / "catalog.duckdb.staging"
         staging.unlink(missing_ok=True)
         wal = Path(str(staging) + ".wal")
@@ -192,7 +211,6 @@ class Window:
         checkpoint_and_close(con)
         wal.unlink(missing_ok=True)
         target = self.catalog_path()
-        target.unlink(missing_ok=True)
         staging.replace(target)
         _write_json(self.lock_path, {**manifest, "locked": False})
         extras = self._list_extras(
@@ -207,6 +225,24 @@ class Window:
         _write_json(self.extras_path, extras)
         self._set_state("Imported")
         return manifest
+
+    def _normalize_named(self, named: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cleaned: list[dict[str, Any]] = []
+        for item in named:
+            if not isinstance(item, dict) or not item.get("id") or not item.get("path"):
+                raise LockRefused("named table requires id and path")
+            cleaned.append({"id": str(item["id"]).strip().lower().replace(" ", "_"), "path": str(item["path"])})
+        return cleaned
+
+    def _assert_table_identifiers(self, named: list[dict[str, Any]]) -> None:
+        tables = ["coa", "aux", "map", "units", *(str(item["id"]) for item in named)]
+        seen: dict[str, str] = {}
+        for table in tables:
+            ident = sql_identifier(table)
+            prior = seen.get(ident)
+            if prior is not None:
+                raise LockRefused(f"table identifier collision: {prior} and {table}")
+            seen[ident] = table
 
     def _load_into(
         self,
@@ -289,15 +325,27 @@ class Window:
             raise LockRefused("already locked; re-import to take a source edit")
         if self.state != "Imported" or not self.catalog_path().exists():
             raise LockRefused("no lockable catalog")
+        if self._write_con is not None:
+            checkpoint_and_close(self._write_con)
+            self._write_con = None
         manifest = _read_json(self.lock_path, {})
         if not manifest.get("named"):
             raise LockRefused("named-table list is empty")
+        if manifest.get("window_id") != self.id:
+            raise LockRefused("manifest window does not match catalog window")
+        manifest_tables = self._manifest_tables(manifest)
         con = duckdb.connect(str(self.catalog_path()))
         try:
-            for table_id, meta in manifest["named"].items():
+            actual_tables = {str(row[0]) for row in con.execute("SHOW TABLES").fetchall()}
+            if actual_tables != set(manifest_tables):
+                raise LockRefused("catalog tables do not match manifest")
+            for table_id, meta in manifest_tables.items():
                 count = con.execute(f"SELECT COUNT(*) FROM {quote_ident(table_id)}").fetchone()
                 if not count or count[0] == 0:
-                    raise LockRefused(f"named table {table_id} has zero rows")
+                    raise LockRefused(f"table {table_id} has zero rows")
+                if meta.get("source_hash") and meta.get("path"):
+                    if file_hash(Path(meta["path"])) != meta["source_hash"]:
+                        raise LockRefused(f"source hash changed for {table_id}")
                 live = self._live_hash(con, table_id)
                 if live != meta["loaded_hash"]:
                     raise LockRefused(f"loaded hash does not match source for {table_id}")
@@ -309,6 +357,23 @@ class Window:
         _write_json(self.lock_path, manifest)
         self._set_state("Locked")
         return manifest
+
+    def _manifest_tables(self, manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        tables: dict[str, dict[str, Any]] = {}
+        for table in ("coa", "aux", "map", "units"):
+            meta = manifest.get(table)
+            if meta is None:
+                continue
+            if not isinstance(meta, dict) or not meta.get("loaded_hash") or not meta.get("path"):
+                raise LockRefused(f"manifest metadata is incomplete for {table}")
+            tables[table] = meta
+        for table_id, meta in (manifest.get("named") or {}).items():
+            if not isinstance(meta, dict) or not meta.get("loaded_hash") or not meta.get("path"):
+                raise LockRefused(f"manifest metadata is incomplete for {table_id}")
+            tables[str(table_id)] = meta
+        if "coa" not in tables:
+            raise LockRefused("manifest metadata is incomplete for coa")
+        return tables
 
     def _live_hash(self, con: duckdb.DuckDBPyConnection, table: str) -> str:
         rel = con.execute(f"SELECT * FROM {quote_ident(table)}").fetchall()
@@ -372,8 +437,13 @@ class Window:
         if self._ro_con is not None:
             self._ro_con.close()
             self._ro_con = None
-        nxt = self.store.create()
-        nxt.import_tables(coa=coa, named=named, aux=aux, map=map, units=units, drop_dir=drop_dir)
+        nxt = self.store.create(make_current=False)
+        try:
+            nxt.import_tables(coa=coa, named=named, aux=aux, map=map, units=units, drop_dir=drop_dir)
+        except Exception:
+            shutil.rmtree(nxt.root, ignore_errors=True)
+            raise
+        self.store._set_current(nxt.id)
         return nxt
 
     def _reader(self) -> duckdb.DuckDBPyConnection:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from foundry.caliber import (
@@ -15,7 +16,7 @@ from foundry.catalog import quote_ident
 from foundry.errors import LockRefused
 from foundry.questions import load_questions
 from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
-from foundry.window import QUERYABLE, Window
+from foundry.window import Window
 from foundry.workpaper import (
     coa_names,
     persist_schedules,
@@ -31,7 +32,7 @@ def _table_rows(window: Window, table: str) -> tuple[list[str], list[tuple[Any, 
     return [str(h) for h in headers], rows
 
 
-def _aggregate(window: Window, table: str) -> float | int:
+def _aggregate(window: Window, table: str) -> Decimal | int:
     names = window.table_names()
     if table not in names:
         raise LockRefused(f"table {table} not in lock")
@@ -40,14 +41,16 @@ def _aggregate(window: Window, table: str) -> float | int:
         value = window.query(f"SELECT COALESCE(SUM(amount), 0) FROM {quote_ident(table)}")[0][0]
     else:
         value = window.query(f"SELECT COUNT(*) FROM {quote_ident(table)}")[0][0]
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
     return value
 
 
 def emit_brief(window: Window) -> str:
-    if window.state not in QUERYABLE:
+    if window.state in {"Briefed", "FollowUp"} and window.brief_path.exists():
+        return window.brief_path.read_text()
+    if window.state != "Locked":
         raise LockRefused(f"brief refused in state {window.state}")
+    if window.brief_path.exists() or (window.root / "brief_facts.json").exists():
+        raise LockRefused("brief already emitted")
     questions = load_questions(window)
     if not questions:
         raise LockRefused("empty questions refuse brief")
@@ -69,7 +72,16 @@ def emit_brief(window: Window) -> str:
             lines.append(f"## {item['text']}")
             lines.append(f"结论: {NOT_IN_WINDOW}（缺 {', '.join(missing)}）。")
             lines.append("")
-            facts.append({"id": item["id"], "tag": NOT_IN_WINDOW, "missing": missing, "schedule_id": item["id"]})
+            facts.append(
+                {
+                    "id": item["id"],
+                    "tag": NOT_IN_WINDOW,
+                    "missing": missing,
+                    "schedule_id": item["id"],
+                    "required_table_ids": required,
+                    "text": item["text"],
+                }
+            )
             schedules.append(schedule_missing(item["id"], item["text"], missing))
             continue
         if "map" in required:
@@ -99,6 +111,7 @@ def emit_brief(window: Window) -> str:
                     "tag": RECOMPUTED,
                     "text": item["text"],
                     "schedule_id": item["id"],
+                    "required_table_ids": required,
                 }
             )
             schedules.append(
@@ -114,21 +127,20 @@ def emit_brief(window: Window) -> str:
             )
             continue
         source = next((table for table in required if table not in MASTER_TABLES), required[0])
-        claimed = _aggregate(window, source)
-        recomputed = _aggregate(window, source)
-        tag = AGREED if claimed == recomputed else RECOMPUTED
+        total = _aggregate(window, source)
         headers, rows = _table_rows(window, source)
         lines.append(f"## {item['text']}")
-        lines.append(f"结论: {source} 合计 {claimed}。{CLAIMED} {claimed}；{RECOMPUTED} {recomputed}；{tag}。")
+        lines.append(f"结论: {source} 锁库汇总 {total}。{RECOMPUTED} {total}。")
         lines.append("")
         facts.append(
             {
                 "id": item["id"],
                 "table": source,
-                "value": claimed,
-                "tag": tag,
+                "value": as_number(total),
+                "tag": RECOMPUTED,
                 "text": item["text"],
                 "schedule_id": item["id"],
+                "required_table_ids": required,
             }
         )
         schedules.append(
@@ -139,9 +151,9 @@ def emit_brief(window: Window) -> str:
                 lines=fact_schedule_lines(headers, rows),
                 names=account_names,
                 origin="brief",
-                tag=tag,
-                claimed=claimed,
-                recomputed=recomputed,
+                tag=RECOMPUTED,
+                claimed=None,
+                recomputed=total,
             )
         )
     text = "\n".join(lines).rstrip() + "\n"

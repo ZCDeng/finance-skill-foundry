@@ -10,7 +10,7 @@ v1 kit: native DeepSeek harness (TypeScript/JS Cordis tools that exec this CLI),
 var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,schedules.json,workpaper.md,followup.jsonl}
 var/current
 var/formulator/<window_id>/
-var/skills/<skill_id>/SKILL.md
+var/skills/<skill_id>/{SKILL.md,foundry.json}
 method/{financial-statements,reconciliation,variance-analysis,journal-entry}/SKILL.md
 ```
 
@@ -34,8 +34,14 @@ foundry --var VAR lock
 foundry --var VAR record-questions --questions QUESTIONS.json
 foundry --var VAR emit-brief
 foundry --var VAR workpaper
-foundry --var VAR query-locked --text "..." --tables gl --split-by unit_id --brief-window WINDOW
+foundry --var VAR query-locked --text "..." --tables gl --split-by unit_id --brief-window WINDOW --question-id QUESTION
+foundry --var VAR launch-formulator
+foundry --var VAR stop-formulator
+# use only after the process is stopped, to remove a stale per-window home
+foundry --var VAR purge-formulator
 ```
+
+CSV, XLSX/XLSM, and tabular JSON inputs are supported. A `NAMED.json` envelope may provide `coa`, `aux`, `map`, `units`, and `tables`; its referenced files are resolved relative to, and must remain inside, the envelope directory. Explicit CLI paths remain available for operator-selected files.
 
 ## Harness drop
 
@@ -57,6 +63,17 @@ foundry --var VAR method-skills
 ```
 
 Numbers still come from the locked window. See `method/FOUNDRY.md`.
+
+## Authoring done-gate
+
+`mark-done` requires both authored instructions and a machine-readable capability contract, then runs the bundled period fixture:
+
+```text
+SKILL.md
+foundry.json  # schema finance-skill-foundry/f2-skill@1
+```
+
+The contract must declare the ordered F2 tools (`import`, `lock`, `record-questions`, `emit-brief`, `query-locked`), the locked-window safety policies, and bindings to `FOUNDRY.md` and `CONNECTORS.md`. This keeps per-period questions out of the portable skill.
 
 ## Dev
 

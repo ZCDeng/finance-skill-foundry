@@ -138,7 +138,13 @@ def test_query_analysis_node_split_is_outside(tmp_path: Path) -> None:
     window = _locked_with_map(tmp_path)
     record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
     emit_brief(window)
-    answer = query_locked(window, "按分析节点拆 GL", required_table_ids=["gl"], split_by="analysis_node")
+    answer = query_locked(
+        window,
+        "按分析节点拆 GL",
+        required_table_ids=["gl", "map"],
+        split_by="analysis_node",
+        question_id="q1",
+    )
     assert answer.startswith("稿外追问")
     assert "我重算" in answer
     assert "north=70" in answer
@@ -152,7 +158,13 @@ def test_query_analysis_node_on_brief_is_recomputed_only(tmp_path: Path) -> None
         [{"id": "q1", "text": "按分析节点看贡献", "required_table_ids": ["gl", "map"]}],
     )
     emit_brief(window)
-    answer = query_locked(window, "按分析节点拆 GL", required_table_ids=["gl"], split_by="analysis_node")
+    answer = query_locked(
+        window,
+        "按分析节点拆 GL",
+        required_table_ids=["gl"],
+        split_by="analysis_node",
+        question_id="q1",
+    )
     assert answer.startswith("我重算")
     assert "稿外追问" not in answer
     assert "north=70" in answer
