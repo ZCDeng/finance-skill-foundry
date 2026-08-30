@@ -62,6 +62,18 @@ export function foundryBin(layout: Layout): string {
 }
 
 /**
+ * The frozen Data Formulator this app carries.
+ *
+ * Named to the kit through `FOUNDRY_FORMULATOR_BIN`, because there is nothing to
+ * find on PATH: a frozen bundle is a directory beside an application, not
+ * something installed. The kit's own resolver reads that variable first.
+ */
+export function formulatorBin(layout: Layout): string {
+  if (layout.packaged) return join(layout.resourcesPath, 'formulator', 'data_formulator');
+  return join(layout.appPath, 'extra', 'formulator', 'data_formulator');
+}
+
+/**
  * The bundle's copy inside the staged runtime, which must already exist.
  *
  * `scripts/fetch-harness.mjs` puts it there and `--check` refuses to package

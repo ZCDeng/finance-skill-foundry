@@ -78,7 +78,10 @@ const venv = join(BUILD, '.venv');
 const python = join(venv, 'bin', 'python');
 
 console.log('building a throwaway environment …');
-execFileSync('uv', ['venv', '--python', '3.14', venv], { stdio: 'inherit' });
+// `--clear`: the build environment is throwaway, and `uv venv` refuses to
+// reuse one. Without it a second build fails on the venv it made itself,
+// which is a script that works exactly once per checkout.
+execFileSync('uv', ['venv', '--clear', '--python', '3.14', venv], { stdio: 'inherit' });
 execFileSync('uv', ['pip', 'install', '--python', python, 'pyinstaller', KIT], { stdio: 'inherit' });
 
 /*

@@ -8,6 +8,7 @@ import { HarnessHost } from './harness/host.js';
 import {
   HARNESS_ENTRY,
   entryPath,
+  formulatorBin as packedFormulatorBin,
   foundryBin as packedFoundryBin,
   pluginDir,
   stagedBundleDir,
@@ -28,6 +29,22 @@ const isDev = !app.isPackaged;
  */
 function varRoot(): string {
   return process.env.FOUNDRY_VAR ?? path.join(app.getPath('userData'), 'var');
+}
+
+/**
+ * Tell the kit where the Formulator this app carries is.
+ *
+ * Set on this process rather than passed per call: `launch-formulator` reads it
+ * through the kit's own resolver, and every path that reaches the CLI -- the
+ * data screen, a wiring step, a future one -- then agrees about which binary is
+ * meant. An operator's own `FOUNDRY_FORMULATOR_BIN` still wins; a build with no
+ * staged Formulator sets nothing and the kit falls back to PATH, which is what
+ * keeps a checkout working before `npm run formulator` has ever been run.
+ */
+function nameFormulator(here: Layout): void {
+  if (process.env.FOUNDRY_FORMULATOR_BIN) return;
+  const packed = packedFormulatorBin(here);
+  if (existsSync(packed)) process.env.FOUNDRY_FORMULATOR_BIN = packed;
 }
 
 /**
@@ -109,6 +126,7 @@ void app.whenReady().then(() => {
     callback({ responseHeaders: applyCsp(details.responseHeaders ?? {}, isDev) });
   });
   const here = layout();
+  nameFormulator(here);
   const override = process.env.FOUNDRY_DSH_INSTALL;
   const entry = override ? path.join(override, HARNESS_ENTRY) : entryPath(here);
   const bundle = override
@@ -121,6 +139,9 @@ void app.whenReady().then(() => {
       home,
       varRoot: varRoot(),
       foundryBin: foundryBin(here),
+      // `nameFormulator` has already run, so this is the packed one unless the
+      // operator named their own.
+      formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
     });
     harness = host;
     const pane = new FormulatorHost();

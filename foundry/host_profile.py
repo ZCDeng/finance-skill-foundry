@@ -12,7 +12,7 @@ from foundry.brief import emit_brief
 from foundry.caliber import table_key
 from foundry.errors import FoundryError, QueryRefused
 from foundry.harness import LINE_LEAKS
-from foundry.launch_formulator import FORMULATOR_BINS, launch_formulator, stop_formulator
+from foundry.launch_formulator import formulator_bin, launch_formulator, stop_formulator
 from foundry.probe import run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
@@ -233,7 +233,9 @@ def _smoke_env(work: Path, var_root: Path) -> dict[str, str]:
     env["PYTHONPATH"] = os.pathsep.join(
         [str(Path(__file__).resolve().parents[1]), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
     )
-    if not any(shutil.which(candidate) for candidate in FORMULATOR_BINS):
+    # One resolver. Re-scanning PATH here would skip the real launch on exactly
+    # the machines that carry a frozen Formulator instead of an installed one.
+    if not Path(formulator_bin()).exists():
         env["FOUNDRY_SKIP_FORMULATOR_EXEC"] = "1"
         print(
             "host-smoke: Data Formulator 未安装, launch/stop 只走 spec 分支, 未起真实进程",

@@ -82,6 +82,18 @@ extraResources:
       - '**/*'
       - '!**/.DS_Store'
 
+  # The frozen Data Formulator. Same reasoning as the CLI: an interpreter, its
+  # own native extensions and a 30MB built frontend, all of it load-bearing.
+  #
+  # It carries `foundry` as well. `DF_PLUGIN_DIR` names a loose `.py` that Data
+  # Formulator imports by path, and a frozen app ignores PYTHONPATH -- so that
+  # file's own imports resolve only from inside this bundle.
+  - from: extra/formulator
+    to: formulator
+    filter:
+      - '**/*'
+      - '!**/.DS_Store'
+
   # The period bundle, as a directory the profile installer can hand to a package
   # manager and symlink to. Neither of those can be a path inside an archive.
   - from: ../dsh-plugin

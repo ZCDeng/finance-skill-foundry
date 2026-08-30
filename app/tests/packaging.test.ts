@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HARNESS_ENTRY,
   entryPath,
+  formulatorBin,
   foundryBin,
   harnessRoot,
   pluginDir,
@@ -70,6 +71,30 @@ describe('where the frozen CLI is', () => {
   });
 });
 
+describe('where the frozen Formulator is', () => {
+  it('rides beside the asar and is named to the kit, not put on PATH', () => {
+    // A frozen bundle is a directory beside an application. The kit's resolver
+    // reads `FOUNDRY_FORMULATOR_BIN` first for exactly that reason.
+    expect(formulatorBin(PACKED)).toBe('/A/Foundry.app/Contents/Resources/formulator/data_formulator');
+    expect(formulatorBin(PACKED)).not.toContain('.asar');
+    const main = read('../electron/main.ts');
+    expect(main).toContain('FOUNDRY_FORMULATOR_BIN');
+  });
+
+  it('leaves an operator override alone', () => {
+    const main = read('../electron/main.ts');
+    const fn = main.slice(main.indexOf('function nameFormulator('));
+    expect(fn.indexOf('process.env.FOUNDRY_FORMULATOR_BIN')).toBeLessThan(fn.indexOf('packedFormulatorBin'));
+  });
+
+  it('ships it whole, for the same reason as the CLI', () => {
+    const block = BUILDER.slice(BUILDER.indexOf('from: extra/formulator'));
+    const own = block.slice(0, block.indexOf('- from:', 1));
+    expect(own).toContain('to: formulator');
+    expect(own).not.toContain("'!**/*.ts'");
+  });
+});
+
 describe('what the build config ships', () => {
   it('names node_modules explicitly, because electron-builder skips it quietly', () => {
     // A directory called `node_modules` inside `extraResources` is skipped
@@ -112,6 +137,15 @@ describe('what the build config ships', () => {
     // every screen shows a refusal about a binary that is not there.
     expect(scripts.package).toContain('npm run foundry:check');
     expect(scripts.dist).toContain('npm run foundry:check');
+    // And without the frozen Formulator, whose absence the data screen would
+    // otherwise report as `Data Formulator binary is not installed`.
+    expect(scripts.package).toContain('npm run formulator:check');
+    expect(scripts.dist).toContain('npm run formulator:check');
+    // And the gate, because `check` only asks whether files are present. A
+    // bundle that serves pages and registers no locked-catalog connector passes
+    // every file check there is.
+    expect(scripts.package).toContain('npm run formulator:gate');
+    expect(scripts.dist).toContain('npm run formulator:gate');
   });
 });
 
@@ -140,6 +174,50 @@ describe('the freezing script', () => {
     const script = read('../scripts/build-foundry.mjs');
     expect(script).toContain("'probe'");
     expect(script).toContain("PATH: '/usr/bin:/bin'");
+  });
+});
+
+describe('the Formulator freeze', () => {
+  it('carries the kit, because a frozen app ignores PYTHONPATH', () => {
+    // `DF_PLUGIN_DIR` names a loose `.py` that Data Formulator imports by path.
+    // A frozen app can do that and still not satisfy the file's own `foundry`
+    // imports from outside itself -- which produces a bundle that serves pages
+    // and offers no locked-catalog connector, silently.
+    const script = read('../scripts/build-formulator.mjs');
+    const argv = script.slice(script.indexOf("'--noconfirm'"), script.indexOf('{ stdio:', script.indexOf("'--noconfirm'")));
+    expect(argv).toContain("'foundry'");
+    expect(argv).toContain("'duckdb'");
+    expect(argv).toContain("'openpyxl'");
+  });
+
+  it('collects what is reached from strings rather than imported', () => {
+    // The thirteen data loaders, litellm's provider configs, and tiktoken's
+    // encoding plugin. None is visible to static analysis; each fails in its own
+    // way and only one of them is loud.
+    const script = read('../scripts/build-formulator.mjs');
+    const argv = script.slice(script.indexOf("'--noconfirm'"), script.indexOf('{ stdio:', script.indexOf("'--noconfirm'")));
+    expect(argv).toContain("'--collect-submodules',\n    'data_formulator'");
+    expect(argv).toContain("'litellm'");
+    expect(argv).toContain("'tiktoken_ext'");
+  });
+
+  it('puts freeze_support before the import, not after', () => {
+    // The sandbox spawns worker processes and macOS re-executes this script in
+    // the child. An import at module scope runs again there before
+    // `freeze_support()` can say "you are the worker", and the app relaunches
+    // itself instead of starting one.
+    const script = read('../scripts/build-formulator.mjs');
+    const shim = script.slice(script.indexOf('const entry ='), script.indexOf("console.log('freezing"));
+    expect(shim.indexOf('freeze_support()')).toBeLessThan(shim.indexOf('from data_formulator.app import'));
+  });
+
+  it('has a gate that asks the server, not just the port', () => {
+    // A bundle without the kit starts, serves, answers a health check and passes
+    // the identity gate, and offers no locked-catalog connector at all.
+    const gate = read('../scripts/gate-formulator.mjs');
+    expect(gate).toContain('/api/data-loaders');
+    expect(gate).toContain('locked_catalog');
+    expect(gate).toContain("PATH: '/usr/bin:/bin'");
   });
 });
 

@@ -24,6 +24,8 @@ export interface HostOptions {
   home: string;
   varRoot: string;
   foundryBin: string;
+  /** Passed through to the child, so a model calling `launch-formulator` finds it. */
+  formulatorBin?: string;
 }
 
 export interface OpenedSession {
@@ -62,6 +64,7 @@ export class HarnessHost {
           home: this.opts.home,
           varRoot: this.opts.varRoot,
           foundryBin: this.opts.foundryBin,
+          formulatorBin: this.opts.formulatorBin,
         }) as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       });

@@ -68,9 +68,15 @@ const SECRET_NAME = /(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)($|_)/i;
  * tool modes, and an ambient one would silently change which composition boots
  * — including which agent preset is the default, which is this product's fence.
  *
- * `FOUNDRY_VAR` and `FOUNDRY_BIN` are put back deliberately: they are how the
- * bundle finds the store, and they are the same two the operator would export by
- * hand. `FOUNDRY_TASK` is NOT set, and that is a decision rather than an
+ * Three `FOUNDRY_*` are put back deliberately. `FOUNDRY_VAR` and `FOUNDRY_BIN`
+ * are how the bundle finds the store. `FOUNDRY_FORMULATOR_BIN` is how the CLI
+ * finds the Formulator this app carries, and it has to travel: the data screen
+ * reaches `launch-formulator` from main, which has it, but a model calling that
+ * same tool inside a session reaches it through this child -- and a packaged app
+ * whose model was told `Data Formulator binary is not installed` would be
+ * telling the truth about the only environment that mattered.
+ *
+ * `FOUNDRY_TASK` is NOT set, and that is a decision rather than an
  * omission — one harness process serves every session and every task, so a
  * process-wide task would bind them all to whichever one happened to be open.
  * The CLI's resolution chain covers it: a period step falls through to the
@@ -78,7 +84,7 @@ const SECRET_NAME = /(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)($|_)/i;
  */
 export function harnessEnv(
   parent: NodeJS.ProcessEnv,
-  own: { home: string; varRoot: string; foundryBin: string },
+  own: { home: string; varRoot: string; foundryBin: string; formulatorBin?: string },
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(parent)) {
@@ -91,6 +97,7 @@ export function harnessEnv(
   out.DSH_HOME = own.home;
   out.FOUNDRY_VAR = own.varRoot;
   out.FOUNDRY_BIN = own.foundryBin;
+  if (own.formulatorBin) out.FOUNDRY_FORMULATOR_BIN = own.formulatorBin;
   // Upstream spawns its own runtime this way, and Electron's binary is the only
   // Node on a machine that has not installed one.
   out.ELECTRON_RUN_AS_NODE = '1';

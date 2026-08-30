@@ -4,6 +4,7 @@ import contextlib
 import http.server
 import json
 import os
+import shutil
 import signal
 import socket
 import stat
@@ -616,7 +617,13 @@ def test_reimport_refuses_while_a_launch_is_still_coming_up(
     monkeypatch.setenv("FOUNDRY_FORMULATOR_PORT", str(_free_port()))
     monkeypatch.setattr("foundry.window.LIFECYCLE_LOCK_TIMEOUT", 0.2)
     home = window.formulator_home
-    monkeypatch.setattr(lf, "_pid_command", lambda pid: f"data_formulator --data-dir {home}")
+    # What `ps` would actually print: `_launch_locked` resolves argv[0] through
+    # `shutil.which` before spawning, so the command line carries the absolute
+    # path, not the bare name. The identity gate now checks the binary the launch
+    # recorded, and a stub that says only `data_formulator` is less realistic
+    # than the code it stands in for.
+    resolved = shutil.which("data_formulator")
+    monkeypatch.setattr(lf, "_pid_command", lambda pid: f"{resolved} --data-dir {home}")
     drop = tmp_path / "drop"
     outcome: list[str] = []
 

@@ -77,6 +77,20 @@ describe('the environment the child gets', () => {
     expect(scrubbed.DSH_HOME).toBe('/app/harness');
   });
 
+  it('carries the Formulator pointer to the child', () => {
+    // The data screen reaches `launch-formulator` from main, which has this. A
+    // model calling the same tool inside a session reaches it through the child,
+    // and a child stripped of it would report `Data Formulator binary is not
+    // installed` in a packaged app that ships one.
+    const withDf = harnessEnv(
+      {},
+      { home: '/h', varRoot: '/v', foundryBin: '/b', formulatorBin: '/A/Resources/formulator/data_formulator' },
+    );
+    expect(withDf.FOUNDRY_FORMULATOR_BIN).toBe('/A/Resources/formulator/data_formulator');
+    // A build with none staged names none, and the kit falls back to PATH.
+    expect(harnessEnv({}, { home: '/h', varRoot: '/v', foundryBin: '/b' }).FOUNDRY_FORMULATOR_BIN).toBeUndefined();
+  });
+
   it('sets the store from this app and refuses to inherit a task', () => {
     // One harness process serves every session and every task, so a process-wide
     // task would bind them all to whichever one happened to be open. The CLI's

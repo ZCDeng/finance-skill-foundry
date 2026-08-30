@@ -37,10 +37,43 @@ ENV_ALLOWLIST = (
 )
 
 FORCE_STOP_ENV = "FOUNDRY_FORMULATOR_FORCE_STOP"
+BIN_ENV = "FOUNDRY_FORMULATOR_BIN"
+TIMEOUT_ENV = "FOUNDRY_FORMULATOR_TIMEOUT"
+READY_TIMEOUT = 8.0
+"""How long an installed Data Formulator gets to answer."""
+
+FROZEN_READY_TIMEOUT = 120.0
+"""How long a frozen one gets, on the first launch after an install.
+
+A frozen bundle is hundreds of megabytes of shared libraries and data that the
+operating system has never paged in. Measured on this kit's own build: 43s to
+print `--help` cold, 2.4s once warm. Eight seconds is right for a process that is
+merely starting and wrong for one that is being read off disk for the first time.
+
+It costs nothing when a launch is genuinely broken: `_ready` returns as soon as
+the child exits, so this bound is only ever reached while a process is still
+coming up.
+"""
 
 
 def formulator_home(window: Window) -> Path:
     return window.formulator_home
+
+
+def failed_log_path(window: Window) -> Path:
+    """Where a failed launch leaves what the child said.
+
+    The home is purged when a launch fails, and `formulator.log` is inside it --
+    so the one artefact that explains the failure was being deleted by the
+    cleanup. That is affordable when Formulator is a familiar pip install and it
+    is not when it is a frozen bundle whose startup can die on a missing data
+    file: the refusal reads `did not become ready` and the traceback naming the
+    file is gone.
+
+    Kept beside the home rather than in it, so the purge still leaves nothing
+    behind that a later launch could mistake for live state.
+    """
+    return window.formulator_home.parent / f"{window.id}.failed.log"
 
 
 def no_browser_path(home: Path) -> Path:
@@ -100,11 +133,35 @@ def purge_formulator_home(window: Window) -> None:
 
 
 def formulator_bin() -> str:
+    """Which Data Formulator this kit launches.
+
+    ``FOUNDRY_FORMULATOR_BIN`` first, so a deployment that carries a frozen one
+    can name it. There is nothing to find on PATH in that case: a frozen bundle
+    is a directory beside an application, not something installed.
+
+    One resolver, and ``host_profile`` calls it rather than re-scanning PATH.
+    Two lookups that disagree would mean the smoke test skipping a real launch
+    on exactly the machines where the launch is the thing worth testing.
+    """
+    named = os.environ.get(BIN_ENV)
+    if named:
+        return named
     for name in FORMULATOR_BINS:
         found = shutil.which(name)
         if found:
             return found
     return FORMULATOR_BINS[0]
+
+
+def binary_path(window: Window) -> Path:
+    """Where the binary that won this window's lease is recorded.
+
+    Written at launch, read at stop. Without it the identity gate can only ask
+    whether the running command contains one of ``FORMULATOR_BINS``, which is a
+    convention about a file name rather than a fact about the process this
+    window started.
+    """
+    return formulator_home(window) / "binary"
 
 
 def launch_spec(window: Window) -> dict[str, str | list[str]]:
@@ -119,6 +176,13 @@ def launch_spec(window: Window) -> dict[str, str | list[str]]:
         "FOUNDRY_WINDOW_ID": window.id,
         "WORKSPACE_BACKEND": "local",
         "BROWSER": str(no_browser_path(home)),
+        # litellm fetches its model-cost map over the network at import unless
+        # this is set, which costs up to five seconds of dead startup on a slow
+        # link and fails outright on a captive portal. The local backup it falls
+        # back to is shipped inside litellm itself, so nothing is lost by never
+        # asking. A frozen build has no way to write the fetched copy anywhere
+        # useful either.
+        "LITELLM_LOCAL_MODEL_COST_MAP": "true",
     }
     argv = [
         formulator_bin(),
@@ -269,7 +333,25 @@ def _wait_for_pid_exit(pid: int, timeout: float = 2.0) -> bool:
 
 
 def _command_matches_window(command: str, home: Path) -> bool:
-    return bool(command) and any(name in command for name in FORMULATOR_BINS) and str(home) in command
+    """Whether a running command is the Formulator this window started.
+
+    The home path is the strong half and is always required: it is unique to the
+    window, and a process serving somebody else's catalog cannot carry it.
+
+    The other half asks about the binary. When the launch recorded which one it
+    resolved, that exact path is the test -- which is what lets a frozen bundle
+    under any name win its own lease. Falling back to the ``FORMULATOR_BINS``
+    name check keeps a home written by an older build stoppable; it is a weaker
+    claim, and it is only ever reached when the stronger one is unavailable.
+    """
+    if not command or str(home) not in command:
+        return False
+    recorded = home / "binary"
+    if recorded.is_file():
+        named = recorded.read_text().strip()
+        if named:
+            return named in command
+    return any(name in command for name in FORMULATOR_BINS)
 
 
 def _registered_handles(window: Window) -> list[str]:
@@ -340,8 +422,42 @@ def _claim_pid_file(window: Window) -> Path:
     return pid_path
 
 
-def _ready(url: str, proc: subprocess.Popen[bytes], timeout: float = 8.0) -> bool:
-    deadline = time.monotonic() + timeout
+def ready_timeout() -> float:
+    """The readiness bound for this deployment.
+
+    An explicit ``FOUNDRY_FORMULATOR_TIMEOUT`` wins. Otherwise a named binary --
+    which is how a frozen bundle is reached -- gets the cold-start bound, and a
+    Formulator found on PATH keeps the short one it has always had.
+    """
+    named = os.environ.get(TIMEOUT_ENV)
+    if named:
+        try:
+            value = float(named)
+        except ValueError:
+            raise LockRefused(f"{TIMEOUT_ENV} is not a number: {named}") from None
+        if value <= 0:
+            raise LockRefused(f"{TIMEOUT_ENV} must be positive: {named}")
+        return value
+    return FROZEN_READY_TIMEOUT if os.environ.get(BIN_ENV) else READY_TIMEOUT
+
+
+def _keep_failure_log(window: Window) -> None:
+    """Move the child's output out of the home the cleanup is about to delete.
+
+    Best effort on purpose: a launch that failed is already raising something
+    worth reading, and losing the log to a second error would replace it with a
+    worse one.
+    """
+    source = formulator_home(window) / "formulator.log"
+    try:
+        if source.is_file() and source.stat().st_size:
+            shutil.copyfile(source, failed_log_path(window))
+    except OSError:
+        pass
+
+
+def _ready(url: str, proc: subprocess.Popen[bytes], timeout: float | None = None) -> bool:
+    deadline = time.monotonic() + (ready_timeout() if timeout is None else timeout)
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             return False
@@ -386,6 +502,10 @@ def _launch_locked(window: Window, spec: dict[str, str | list[str]]) -> dict[str
     try:
         write_connectors(home)
         write_no_browser(home)
+        # Before the spawn: the stop path has to be able to identify a process
+        # this call is about to create, including one it never got to record
+        # because the CLI was killed during the readiness wait.
+        write_text_atomic(binary_path(window), argv[0] + "\n")
         handle = (home / "formulator.log").open("ab")
         proc = subprocess.Popen(
             argv,
@@ -434,6 +554,11 @@ def _launch_locked(window: Window, spec: dict[str, str | list[str]]) -> dict[str
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=2)
+        # Before the purge takes the home, and therefore the log, with it.
+        if handle is not None:
+            handle.close()
+            handle = None
+        _keep_failure_log(window)
         pid_path.unlink(missing_ok=True)
         stop_lease(window)
         raise

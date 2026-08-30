@@ -210,7 +210,8 @@ cd app
 npm install
 npm run harness      # ~280MB into app/extra/dsh, not in version control
 npm run foundry      # freezes the CLI into app/extra/foundry, ~65MB
-npm run package      # release/mac-arm64/Foundry.app, ~474MB
+npm run formulator   # freezes Data Formulator into app/extra/formulator, ~530MB
+npm run package      # release/mac-arm64/Foundry.app, ~1.1GB
 ```
 
 `npm run package` runs both checks first and stops if either is missing or its
@@ -248,12 +249,37 @@ period.
 It is a reader, not a peer engine. A figure read off one of its charts is
 稿外追问, and the screen says so beside the button.
 
-`data_formulator` is **not** in the bundle. Put it on PATH and the screen works;
-without it the button reports the kit's own sentence, `Data Formulator binary is
-not installed`. Freezing it is not the same job as freezing the CLI: it is 35MB
-of its own plus 33 direct dependencies including pandas, flask, litellm and
-azure-identity, and litellm's dynamic imports are exactly what a frozen bundle
-gets wrong quietly.
+Data Formulator ships with the app, frozen. `npm run formulator` builds it;
+`npm run formulator:gate` proves it works.
+
+The bundle carries `foundry` as well, and that is the part that is not obvious.
+`DF_PLUGIN_DIR` names a loose `.py` file that Data Formulator imports through
+`spec_from_file_location` — a frozen app can do that, but it ignores
+`PYTHONPATH`, so that file's own `foundry` imports resolve only from inside the
+bundle. A freeze without them starts, serves its frontend, passes a readiness
+probe and the identity gate, and offers no locked-catalog connector at all.
+
+Which is why `package` and `dist` run the gate, not just a file check. The gate
+locks a fixture window, launches the frozen Formulator with a bare environment
+and asks the running server for its connector list:
+
+```
+  http://127.0.0.1:5567 (identity confirmed)
+  connectors: mysql, postgresql, kusto, …, locked_catalog
+gate: the frozen Formulator serves this kit's locked catalog
+```
+
+`FOUNDRY_FORMULATOR_BIN` is how the kit is told where it is; there is nothing to
+find on PATH, because a frozen bundle is a directory beside an application. The
+app sets it, and passes it to the harness child too — otherwise a model calling
+`launch-formulator` inside a session would be told the binary is not installed
+while the app's own data screen worked fine.
+
+A frozen bundle also gets a longer readiness budget. Measured on this build: 43s
+to answer on the first launch after an install, 2.4s once the pages are warm.
+Eight seconds is right for a process that is merely starting and wrong for one
+being read off disk for the first time, and the long bound costs nothing when a
+launch is broken — readiness returns as soon as the child exits.
 
 `FOUNDRY_BIN` still wins when it is set, which is how a dev run points at a
 checkout's virtualenv. Worth knowing it shadows the bundled binary rather than
