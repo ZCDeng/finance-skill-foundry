@@ -15,11 +15,14 @@ import {
   rpcValue,
 } from './boot.js';
 import { followupDraft, handoffScript } from './handoff.js';
+import { noticePatch, readNotice } from './notice.js';
 import { Pane } from './pane.js';
 
 export interface HostOptions {
   /** The runtime entry, `<install>/node_modules/@deepseek-ai/dsh/lib/bin.js`. */
   entry: string;
+  /** The staged runtime's root, for reading what it ships. */
+  root?: string;
   /** This app's own harness home. Never the operator's, so a profile edit here is ours. */
   home: string;
   varRoot: string;
@@ -134,6 +137,25 @@ export class HarnessHost {
     if (!this.pane.attached()) return;
     await this.pane.run(handoffScript(sessionId, draft));
     await this.pane.load(origin);
+  }
+
+  /**
+   * Answer the runtime's developer-preview dialog before anyone sees it.
+   *
+   * Best effort, and deliberately so: the fallback is that an operator reads a
+   * notice meant for Harness developers and presses Continue, which costs a
+   * click. Failing the whole start over it would cost the workbench.
+   */
+  async dismissDeveloperNotice(): Promise<boolean> {
+    if (!this.opts.root) return false;
+    const notice = readNotice(this.opts.root);
+    if (!notice) return false;
+    try {
+      await this.rpc('settings.update', noticePatch(notice));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Put the page in the window. Called once, after the first start. */

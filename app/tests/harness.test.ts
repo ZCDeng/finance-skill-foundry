@@ -315,3 +315,77 @@ describe('the rectangle the page gets', () => {
     expect(head.slice(0, head.indexOf('}'))).toContain('height: var(--fnd-header-height);');
   });
 });
+
+describe('the runtime own developer notice', () => {
+  it('reads all three constants out of the shipped bundle', async () => {
+    // Read rather than restated, so a pinned runtime carrying a *different*
+    // notice gets that one's version written instead of a stale literal.
+    const { readNotice, noticePatch } = await import('../electron/harness/notice.js');
+    const notice = readNotice(new URL('../extra/dsh', import.meta.url).pathname);
+    if (!notice) return; // the staged runtime is not on this machine
+    expect(notice.namespace).toBe('ui-onboarding');
+    expect(notice.field).toBe('welcomeNoticeVersion');
+    expect(notice.version).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    expect(noticePatch(notice)).toEqual({
+      ns: 'ui-onboarding',
+      patch: { welcomeNoticeVersion: notice.version },
+    });
+  });
+
+  it('suppresses nothing when it cannot read the bundle', async () => {
+    // The fallback is that an operator reads a notice meant for Harness
+    // developers and presses Continue. That is visible and harmless; a guessed
+    // value written into somebody's settings is neither.
+    const { readNotice } = await import('../electron/harness/notice.js');
+    expect(readNotice('/nonexistent')).toBeNull();
+  });
+
+  it('refuses a bundle that defines a constant more than once', async () => {
+    // The whole method is reading a literal out of somebody else's build
+    // output. One definition is a fact; two is a bundle whose shape this does
+    // not understand, and picking either would be a guess written into an
+    // operator's settings.
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { readNotice } = await import('../electron/harness/notice.js');
+
+    const root = mkdtempSync(join(tmpdir(), 'fnd-notice-'));
+    const dir = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-settings-models', 'lib');
+    mkdirSync(dir, { recursive: true });
+    const one =
+      'SETTINGS_NAMESPACE = "ui-onboarding";\n' +
+      'WELCOME_NOTICE_ACK_FIELD = "welcomeNoticeVersion";\n' +
+      'WELCOME_NOTICE_VERSION = "2026-08-13.1";\n';
+    writeFileSync(join(dir, 'client.js'), one);
+    expect(readNotice(root)?.version).toBe('2026-08-13.1');
+
+    writeFileSync(join(dir, 'client.js'), `${one}WELCOME_NOTICE_VERSION = "2027-01-01.1";\n`);
+    expect(readNotice(root)).toBeNull();
+  });
+
+  it('answers it before the page is loaded, not after', () => {
+    // A write that lands after the first paint is a dialog the operator has
+    // already read.
+    //
+    // Presence asserted before order: `indexOf` returns -1 for a call that is
+    // not there at all, and -1 is less than every real index, so an
+    // order-only assertion passes most loudly when the line has been deleted.
+    const main = read('../electron/main.ts');
+    const block = main.slice(main.indexOf("step = 'attach'"), main.indexOf('createWindow();'));
+    const answered = block.indexOf('dismissDeveloperNotice()');
+    const attached = block.indexOf('host.attach(window)');
+    expect(answered).toBeGreaterThan(-1);
+    expect(attached).toBeGreaterThan(-1);
+    expect(answered).toBeLessThan(attached);
+  });
+
+  it('never fails the start over it', () => {
+    // Failing the whole wiring over a courtesy would cost the workbench.
+    const host = read('../electron/harness/host.ts');
+    const method = host.slice(host.indexOf('async dismissDeveloperNotice'));
+    const body = method.slice(0, method.indexOf('\n  /**', 1));
+    expect(body).toContain('catch');
+    expect(body).toContain('return false');
+  });
+});

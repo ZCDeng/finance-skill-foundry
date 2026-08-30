@@ -8,6 +8,7 @@ import { HarnessHost } from './harness/host.js';
 import {
   HARNESS_ENTRY,
   entryPath,
+  harnessRoot,
   formulatorBin as packedFormulatorBin,
   foundryBin as packedFoundryBin,
   pluginDir,
@@ -146,6 +147,7 @@ void app.whenReady().then(() => {
     const home = path.join(app.getPath('userData'), 'harness');
     const host = new HarnessHost({
       entry,
+      root: override ?? harnessRoot(here),
       home,
       varRoot: varRoot(),
       foundryBin: foundryBin(here),
@@ -186,6 +188,9 @@ void app.whenReady().then(() => {
         step = 'presets';
         await installPresets({ foundryBin: foundryBin(here), home, varRoot: varRoot() });
         step = 'attach';
+        // Before the page is loaded. A write that lands after the first paint is
+        // a dialog the operator has already read.
+        await host.dismissDeveloperNotice();
         const window = mainWindow;
         if (window) await host.attach(window);
         wiring = { state: 'ready' };
