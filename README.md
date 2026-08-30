@@ -203,8 +203,28 @@ against the task first, so the window carries the back-pointer before a model ca
 call anything — which is why one harness process can serve every task without an
 ambient `FOUNDRY_TASK`.
 
-Set `FOUNDRY_DSH_INSTALL` to a directory with `@deepseek-ai/dsh` installed. The
-runtime is not bundled yet; the workbench simply does not appear without it.
+The runtime ships with the app. Stage it once, then build:
+
+```bash
+cd app
+npm install
+npm run harness      # ~280MB into app/extra/dsh, not in version control
+npm run package      # release/mac-arm64/Foundry.app
+```
+
+`npm run package` runs `harness:check` first and stops if the tree is missing or
+its pin has moved. Packaging without it produces an app whose workbench never
+starts and says nothing about why.
+
+Two things are staged, not one. The runtime, and a copy of `dsh-plugin/` inside
+its `node_modules`: under `ELECTRON_RUN_AS_NODE` the loader does not resolve the
+bundle from the profile at all, and in a packed app nothing may write that copy
+at run time. `FOUNDRY_DSH_INSTALL` still overrides both, for pointing a dev run
+at a tree staged elsewhere.
+
+Still on the machine rather than in the bundle: `foundry` itself. The app calls
+it for every read and to install the presets, so a packed build needs
+`FOUNDRY_BIN` to name one.
 
 It is a caller, never a mutator (KTD2). The main process opens no catalog and
 reads no file under `var/`: every screen is a read-only CLI subcommand, and a

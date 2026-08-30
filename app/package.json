@@ -12,7 +12,12 @@
     "dev:electron": "tsc -p tsconfig.electron.json && electron .",
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json && vite build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "harness": "node scripts/fetch-harness.mjs",
+    "harness:check": "node scripts/fetch-harness.mjs --check",
+    "clean:electron": "rm -rf dist-electron dist-vite",
+    "package": "npm run harness:check && npm run clean:electron && npm run build && electron-builder --mac --dir",
+    "dist": "npm run harness:check && npm run clean:electron && npm run build && electron-builder --mac"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
@@ -29,6 +34,7 @@
     "react-dom": "19.2.8",
     "typescript": "5.9.3",
     "vite": "8.2.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "electron-builder": "26.15.3"
   }
 }

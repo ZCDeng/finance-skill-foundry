@@ -1,9 +1,11 @@
 import { app, BrowserWindow, session } from 'electron';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 
 import { applyCsp } from './csp.js';
 import { HarnessHost } from './harness/host.js';
-import { entryPath, installPlugin, installPresets } from './harness/wiring.js';
+import { HARNESS_ENTRY, entryPath, pluginDir, stagedBundleDir, type Layout } from './harness/resources.js';
+import { installPlugin, installPresets } from './harness/wiring.js';
 import { registerIpc } from './ipc/register.js';
 
 const isDev = !app.isPackaged;
@@ -21,24 +23,25 @@ function varRoot(): string {
 }
 
 /**
- * Where the packed runtime is.
+ * Where this app's own pieces are.
  *
- * Not bundled yet: U10 embeds a harness the operator already has, named by
- * `FOUNDRY_DSH_INSTALL`. Packing it is the next unit's problem, and pretending
- * otherwise would mean shipping an app whose workbench never starts.
+ * `FOUNDRY_DSH_INSTALL` still overrides, for pointing a dev run at a runtime
+ * staged somewhere else; without it the staged tree is used, packed or not.
  */
-function harnessInstall(): string | null {
-  return process.env.FOUNDRY_DSH_INSTALL ?? null;
+function layout(): Layout {
+  return {
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  };
 }
 
 function foundryBin(): string {
   return process.env.FOUNDRY_BIN ?? 'foundry';
 }
 
-/** The bundle this app installs into the harness profile. */
-function pluginDir(): string {
-  return process.env.FOUNDRY_PLUGIN_DIR ?? path.join(__dirname, '..', '..', 'dsh-plugin');
-}
+/** The bundle's package name, which is also its directory inside a node_modules. */
+const BUNDLE_NAME = 'finance-skill-foundry-dsh';
 
 let mainWindow: BrowserWindow | null = null;
 let harness: HarnessHost | null = null;
@@ -85,11 +88,16 @@ void app.whenReady().then(() => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: applyCsp(details.responseHeaders ?? {}, isDev) });
   });
-  const install = harnessInstall();
-  if (install) {
+  const here = layout();
+  const override = process.env.FOUNDRY_DSH_INSTALL;
+  const entry = override ? path.join(override, HARNESS_ENTRY) : entryPath(here);
+  const bundle = override
+    ? path.join(override, 'node_modules', BUNDLE_NAME)
+    : stagedBundleDir(here, BUNDLE_NAME);
+  if (existsSync(entry)) {
     const home = path.join(app.getPath('userData'), 'harness');
     const host = new HarnessHost({
-      entry: entryPath(install),
+      entry,
       home,
       varRoot: varRoot(),
       foundryBin: foundryBin(),
@@ -105,7 +113,12 @@ void app.whenReady().then(() => {
     // starts the child, so it waits.
     void (async () => {
       try {
-        await installPlugin({ entry: entryPath(install), home, pluginDir: pluginDir() });
+        await installPlugin({
+          entry,
+          home,
+          pluginDir: pluginDir(here),
+          stagedBundle: bundle,
+        });
         await installPresets({ foundryBin: foundryBin(), home, varRoot: varRoot() });
         const window = mainWindow;
         if (window) await host.attach(window);

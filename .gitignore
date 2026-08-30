@@ -8,3 +8,5 @@ var/
 app/node_modules/
 app/dist-vite/
 app/dist-electron/
+app/extra/
+app/release/
