@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -242,6 +243,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("method-skills")
     sub.add_parser("harness")
 
+    p_presets = sub.add_parser("install-presets")
+    p_presets.add_argument(
+        "--dsh-home",
+        default="",
+        help="the harness home; omit to take DSH_HOME from the environment",
+    )
+
     p_query = sub.add_parser("query-locked")
     p_query.add_argument("--text", required=True)
     p_query.add_argument("--tables", required=True)
@@ -384,6 +392,15 @@ def main(argv: list[str] | None = None) -> int:
             from foundry.harness import harness_text
 
             print(harness_text())
+            return 0
+        if args.cmd == "install-presets":
+            from foundry.harness import install_presets
+
+            home = args.dsh_home or os.environ.get("DSH_HOME") or ""
+            if not home:
+                raise FoundryError("install-presets needs --dsh-home or DSH_HOME")
+            for path in install_presets(Path(home)):
+                print(path)
             return 0
         if args.cmd == "workpaper" and args.window:
             # An explicit window id is the whole address. Resolving `current`

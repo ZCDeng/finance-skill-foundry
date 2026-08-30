@@ -1,0 +1,59 @@
+# The period fence for a profile that has no agent presets.
+#
+# Apply deliberately, not automatically:
+#
+#   dsh --profile headless --patch .../dsh-plugin/period.fence.yml
+#
+# It is NOT part of `cordis.patch.yml`, and that is the point. A profile patch
+# applies to the whole deployment, so a plugin that disabled the shell there
+# would take it away from every agent on that profile, not only from the one
+# reading locked books. On a profile that HAS presets, use `presets/period`
+# instead -- these rows are the wrong tool there anyway: a profile row cannot
+# take away a tool the agent's preset mounts, and believing otherwise is how
+# this fence was thought to exist for a while when it did not.
+#
+# Measured on a real boot of the pinned runtime. Without this patch the headless
+# agent is offered 35 tools including `bash`, `read`, `write`, `edit` and
+# `str_replace_editor` next to foundry's ten. With it, 27, and none of those.
+#
+# What each group is here for:
+#
+#   shells and the editor   a locked window the model can read around is not
+#                           locked, and the catalog file is right there on disk
+#   filesystem              the same, by a quieter route
+#   background jobs         a job runs a command; a shell by another name
+#   delegation and loops    a child joins its parent's composition, so this is
+#                           about the surface itself, not about what it inherits
+#   web                     tool results are an egress boundary (KTD2); nothing
+#                           in the period loop needs to fetch anything
+
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-jobs
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-ralph
+  disabled: true
+
+- id: tool-web
+  disabled: true

@@ -1,0 +1,50 @@
+# The agent a leader's follow-up runs on (F3).
+#
+# `period` minus everything but the recompute. KTD7 says v1's F3 is A1-operated
+# on a scoped agent whose allowlist is `query-locked`, so this preset drops the
+# skill catalogue, the todo list and the question tool as well: an agent that
+# can only recompute one number against one locked window has nothing to plan
+# and no catalogue to read.
+#
+# What this file cannot do on its own is narrow foundry's own roster. The
+# bundle's row is where that happens -- `config: { profile: f3 }` makes
+# `registerTools` hand back `query-locked` and nothing else -- and the row must
+# therefore be in a preset rather than in the profile, or every agent in the
+# deployment gets all ten.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你在替领导追问一份已经出好的结论稿, 跑在 {{model}} 上。你只有一个工具 query-locked, 它对该稿所属窗口的锁后表重算。窗外或未点名的表会被拒, 那就照实说这一期没有这张表, 不要换个算法凑一个数出来。每个重算结果都带 稿外追问 / 我重算 标记, 转述时保留它: 领导要能一眼看出哪一句在稿上, 哪一句是现算的。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# Foundry's ten tools are registered globally by the profile row, so this preset
+# cannot register a smaller roster of its own -- the names are taken and the
+# runtime refuses the second registration by name. This row masks them instead.
+- id: finance-skill-foundry-f3-scope
+  name: finance-skill-foundry-dsh/f3-scope

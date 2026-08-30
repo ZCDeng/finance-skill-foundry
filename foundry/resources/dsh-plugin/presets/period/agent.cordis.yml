@@ -1,0 +1,74 @@
+# The agent A1 runs a closing period on.
+#
+# Derived from the stock `standard` preset by deletion, so every surviving row
+# keeps the configuration upstream gives it. Deriving by deletion rather than
+# writing one from scratch is the lesson from `design-toolkit-app`: a
+# hand-written preset failed to mount there because `persona` requires a `text`
+# it was never given.
+#
+# Why a preset at all. `dsh.foundry.profiles.period.omit` names the tools this
+# product must not put next to a locked window, and `registerTools` refuses to
+# start when one appears -- but that check only ever sees the roster the bundle
+# itself is handed. An agent's tool set is decided HERE. Measured on a real boot
+# before this file existed: the model was offered foundry's ten tools and
+# `bash`, `write`, `edit`, `read` and `str_replace_editor` beside them. Locked
+# books a model can read around are not locked.
+#
+# Dropped from `standard`: tool-bash, tool-pwsh, tool-fs, tool-fs-search,
+# tool-jobs, tool-goal, the whole delegation group (subagent, subagent_fork,
+# workflow, ralph), tool-web, and plan mode.
+#
+# The four kept rows are each kept for a reason and none of them can reach a
+# file: `tool-skill` because the four close methods ship as skills and are part
+# of the product; `tool-todo` and `tool-ask-user` because a period is a
+# multi-step sequence with choices only A1 can make; compaction because a
+# period conversation outlives one context window.
+#
+# A service row here MUST sit inside a group carrying an `isolate` realm, or it
+# publishes into the root realm where another preset collides with it. The
+# compaction group below keeps upstream's realm exactly as it was.
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      你是本期结账分析的助手, 跑在 {{model}} 上。你只有 foundry 的期间工具, 没有 shell, 没有文件读写, 没有子 agent, 也不能上网。所有数字都来自 foundry 锁后的窗口: 先 create 开窗, import 导入本期账表, lock 锁口径, record-questions 登记本期要回答的问题, emit-brief 出稿, workpaper 读回底稿。锁后的表只读, 改口径要走 re-import 开后继窗口。窗外或未点名的表一律拒绝, 不要替它编数。工具回给你的是锁后的汇总、稿上引用过的数字, 和标了 我重算 的重算结果; 你可以把它们写成人话, 但不能自己添一个数。领导的追问用 query-locked 重算, 结果会自动带 稿外追问 标记, 照原样转述, 不要说得像稿子上本来就有。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: false
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024

@@ -119,13 +119,48 @@ Verified on the pinned runtime: after that one command, `--dump-config` shows ex
 one `id: finance-skill-foundry` row and all ten tools register. `tests/test_real_load.py`
 is that check, opt-in via `FOUNDRY_DSH_BIN`.
 
-**The period fence is not real yet.** `dsh.foundry.profiles.period.omit` names `bash`,
-`dsh-tool-fs` and `str-replace-editor`, and the bundle refuses to start if any of them
-are in the roster it is handed — but that check only ever sees its own list. An agent's
-tool set is decided by its *preset*, which a profile row cannot reach into. On the stock
-`headless` preset the model is offered foundry's ten tools and `bash`, `write`, `edit`,
-`read` and `str_replace_editor` beside them. Closing it needs a foundry-owned agent
-preset. Until then, do not treat the locked window as unreadable-around.
+### The fence
+
+Installing the bundle puts ten tools in front of a model. It does not take anything away,
+and `dsh.foundry.profiles.period.omit` cannot: that list is checked against the roster the
+bundle is handed, which never contained a shell in the first place. Closing the fence is a
+second, deliberate step, and **which step depends on the profile**.
+
+**A profile with agent presets** (`web`) — the preset decides the tool set, and a profile
+row cannot take away what a preset mounts.
+
+```bash
+foundry --var VAR install-presets --dsh-home "$DSH_HOME"
+```
+
+That copies `period` and `f3` into `<DSH_HOME>/.agent-presets/`. Point a session at
+`period` to run a close, at `f3` for a leader's follow-up. Both are derived from the stock
+`standard` preset by deletion.
+
+**A profile without them** (`headless`) — the tool rows *are* the tool set, so a patch
+takes them away.
+
+```bash
+dsh --profile headless --patch dsh-plugin/period.fence.yml
+```
+
+It is not part of `cordis.patch.yml` on purpose: a profile patch applies to the whole
+deployment, and a plugin that disabled the shell there would take it from every agent on
+that profile.
+
+Measured on the pinned runtime by `tests/test_real_load.py`:
+
+| | tools offered | shell / fs / editor / subagent / web |
+|---|---|---|
+| `headless`, unfenced | 35 | yes |
+| `headless` + `period.fence.yml` | 27 | no |
+| `web`, `standard` preset | 35 | yes |
+| `web`, `period` preset | 13 | no |
+| `web`, `f3` preset | 1 (`query-locked`) | no |
+
+`f3` gets to one because foundry registers its ten globally from the profile row, so a
+preset cannot register a smaller roster of its own — the names are taken. The
+`finance-skill-foundry-dsh/f3-scope` row masks them for that preset's agents instead.
 
 ## Harness drop
 

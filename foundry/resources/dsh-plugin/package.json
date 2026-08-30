@@ -62,7 +62,8 @@
             "dsh-tool-fs",
             "str-replace-editor",
             "read_document"
-          ]
+          ],
+          "scope": "finance-skill-foundry-dsh/f3-scope"
         }
       },
       "methodSkills": {
@@ -98,10 +99,19 @@
             "readLimit": 1
           }
         }
+      },
+      "presets": {
+        "dir": "./presets",
+        "ids": [
+          "period",
+          "f3"
+        ],
+        "fence": "./period.fence.yml"
       }
     }
   },
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./f3-scope": "./f3-scope.js"
   }
 }

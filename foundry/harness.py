@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,45 @@ def plugin_package() -> Path:
 
 def overlay_path() -> Path:
     return dsh_plugin_dir() / "file-upload.overlay.yml"
+
+
+def preset_dir() -> Path:
+    return dsh_plugin_dir() / "presets"
+
+
+def fence_path() -> Path:
+    return dsh_plugin_dir() / "period.fence.yml"
+
+
+def preset_ids() -> list[str]:
+    return list(load_foundry_dsh()["presets"]["ids"])
+
+
+def install_presets(dsh_home: Path) -> list[Path]:
+    """Copy the period and f3 agent presets where the runtime discovers them.
+
+    `<DSH_HOME>/.agent-presets/<id>/` is the harness-home root the preset roster
+    scans last, after every configured one. Discovery is unmemoized, so a preset
+    copied while the process runs is visible to the next session rather than to
+    the next restart.
+
+    Copied rather than linked, and copied on every call: a preset is read from
+    its file each time a generation starts, so an edit in the checkout has to be
+    carried over deliberately, and a half-updated preset in the home is worse
+    than a stale one.
+    """
+    root = Path(dsh_home) / ".agent-presets"
+    root.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for preset_id in preset_ids():
+        source = preset_dir() / preset_id
+        if not (source / "agent.cordis.yml").is_file():
+            raise FoundryError(f"preset {preset_id} has no agent.cordis.yml at {source}")
+        target = root / preset_id
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target)
+        written.append(target)
+    return written
 
 
 def load_foundry_dsh() -> dict[str, Any]:
@@ -177,6 +217,10 @@ def plugin_install_text(profile: str = "web") -> str:
             f"bundle\t{json.loads(plugin_package().read_text())['name']}",
             f"patch\t{dsh_plugin_dir() / 'cordis.patch.yml'} (contributed by the package; do not also pass --patch)",
             f"tools\t{','.join(load_foundry_dsh()['tools'])}",
+            "",
+            "# the fence. one of these, depending on whether the profile has agent presets.",
+            f"presets\t{preset_dir()} -> <DSH_HOME>/.agent-presets/  ({','.join(preset_ids())})",
+            f"fence\tdsh --profile {profile} --patch {fence_path()}   # only for a profile with no presets",
         ]
     )
 

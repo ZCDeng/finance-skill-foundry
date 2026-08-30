@@ -10,9 +10,15 @@ Opt in by pointing `FOUNDRY_DSH_BIN` at an installed harness entry, e.g.
     FOUNDRY_DSH_BIN=/path/to/node_modules/@deepseek-ai/dsh/lib/bin.js \\
       .venv/bin/python -m pytest tests/test_real_load.py
 
-Skipped otherwise, because a 282MB runtime is not a test dependency. The
-version it runs against is whatever that install is; the pin this repo declares
-is in the README, and these tests do not check the two agree.
+Skipped otherwise, because a 282MB runtime is not a test dependency. The version
+it runs against is whatever that install is; the pin this repo declares is in the
+README, and these tests do not check the two agree.
+
+Two profiles, two fences, and the difference is most of why this file is long.
+`headless` has no agent presets: its tool rows ARE the tool set, and a profile
+patch takes them away. `web` composes `agent-presets`, and there a profile row
+cannot take away a tool the preset mounts -- the preset decides. Getting that
+backwards is how the fence was believed to exist while it did not.
 """
 
 from __future__ import annotations
@@ -21,13 +27,17 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "dsh-plugin"
-ROSTER = json.loads((PLUGIN / "package.json").read_text())["dsh"]["foundry"]["tools"]
+FOUNDRY_DSH = json.loads((PLUGIN / "package.json").read_text())["dsh"]["foundry"]
+ROSTER = FOUNDRY_DSH["tools"]
+F3_ROSTER = FOUNDRY_DSH["profiles"]["f3"]["tools"]
+FENCE = PLUGIN / "period.fence.yml"
 
 DSH_BIN = os.environ.get("FOUNDRY_DSH_BIN")
 NODE = shutil.which("node")
@@ -37,19 +47,38 @@ needs_dsh = pytest.mark.skipif(
     reason="set FOUNDRY_DSH_BIN to an installed @deepseek-ai/dsh lib/bin.js",
 )
 
-# The boot pulls a profile together and links two packages into it.
 BOOT_TIMEOUT = 600
+WEB_SETTLE_SECONDS = 40
 
-PROBE_INDEX = """\
+# Anything that can reach a file, a shell, another agent, or the network. A
+# locked window the model can read around is not locked.
+REACH = {
+    "bash",
+    "read",
+    "write",
+    "edit",
+    "str_replace_editor",
+    "glob",
+    "grep",
+    "job_list",
+    "job_output",
+    "job_kill",
+    "subagent",
+    "subagent_fork",
+    "workflow",
+    "ralph",
+    "web_search",
+}
+
+REGISTER_PROBE = """\
 export const name = "foundry-tool-probe";
 export const inject = ["tools"];
 export function apply(ctx) {
   // Record at the moment of registration rather than reading the registry back
   // afterwards. `ctx.tools.schemas()` is empty during any plugin's own apply --
-  // tools arrive later, as the agent's preset mounts them -- and a timer set to
-  // read after that races the boot's own teardown: with no provider credential
-  // the context is already inactive when it fires, and the read returns
-  // "cannot get required service" instead of a roster.
+  // tools arrive later -- and a timer set to read after that races the boot's
+  // own teardown: with no provider credential the context is already inactive
+  // when it fires.
   //
   // Wrapping `register` needs this plugin to load BEFORE the one under test,
   // which is why the profile installs it first.
@@ -66,6 +95,28 @@ export function apply(ctx) {
 }
 """
 
+PRESET_PROBE = """\
+export const name = "foundry-tool-probe";
+export const inject = ["tools", "agentPresets"];
+export function apply(ctx) {
+  // `standingKeyFor` composes a preset without starting an agent, a session or a
+  // turn, which is the only way to measure one from outside a browser. The scope
+  // key it hands back is what `schemas` resolves the preset's own layer through,
+  // so this is the tool list an agent on that preset would actually be offered.
+  (async () => {
+    for (const id of ["period", "f3", "standard"]) {
+      try {
+        const key = await ctx.agentPresets.standingKeyFor(id);
+        const names = ctx.tools.schemas(key).map((s) => s.name).sort();
+        process.stdout.write(`FOUNDRY_PRESET ${id} ${JSON.stringify(names)}\\n`);
+      } catch (error) {
+        process.stdout.write(`FOUNDRY_PRESET ${id} ERR ${error.message}\\n`);
+      }
+    }
+  })();
+}
+"""
+
 PROBE_PATCH = """\
 - insert:
     - id: foundry-tool-probe
@@ -73,34 +124,39 @@ PROBE_PATCH = """\
 """
 
 
-def _dsh(home: Path, *args: str, env_extra: dict[str, str] | None = None):
+def _dsh_args(home: Path, *args: str) -> tuple[list[str], dict[str, str], str]:
     assert DSH_BIN is not None and NODE is not None
-    env = {**os.environ, "DSH_HOME": str(home), **(env_extra or {})}
+    env = {**os.environ, "DSH_HOME": str(home)}
+    # The package root that owns `node_modules`, not `node_modules` itself:
+    # `<root>/node_modules/@deepseek-ai/dsh/lib/bin.js` is four levels down.
+    cwd = str(Path(DSH_BIN).resolve().parents[4])
+    return [NODE, DSH_BIN, *args], env, cwd
+
+
+def _dsh(home: Path, *args: str, env_extra: dict[str, str] | None = None):
+    argv, env, cwd = _dsh_args(home, *args)
     return subprocess.run(
-        [NODE, DSH_BIN, *args],
+        argv,
         capture_output=True,
         text=True,
-        env=env,
-        # The package root that owns `node_modules`, not `node_modules` itself:
-        # `<root>/node_modules/@deepseek-ai/dsh/lib/bin.js` is four levels down.
-        cwd=str(Path(DSH_BIN).resolve().parents[4]),
+        env={**env, **(env_extra or {})},
+        cwd=cwd,
         timeout=BOOT_TIMEOUT,
     )
 
 
-def _probe_package(tmp_path: Path) -> Path:
-    """A second plugin whose only job is to say what the model would be offered.
+def _probe_package(where: Path, body: str) -> Path:
+    """A second plugin whose only job is to say what a model would be offered.
 
     It declares its own `dsh.bundle.patch`. Without one the runtime installs it
     as a plain dependency and warns that it is not a profile layer -- it loads
     nothing and reports nothing, which looks exactly like a registry that came
     back empty.
     """
-    probe = tmp_path / "probe"
-    probe.mkdir(parents=True, exist_ok=True)
-    (probe / "index.js").write_text(PROBE_INDEX, encoding="utf-8")
-    (probe / "cordis.patch.yml").write_text(PROBE_PATCH, encoding="utf-8")
-    (probe / "package.json").write_text(
+    where.mkdir(parents=True, exist_ok=True)
+    (where / "index.js").write_text(body, encoding="utf-8")
+    (where / "cordis.patch.yml").write_text(PROBE_PATCH, encoding="utf-8")
+    (where / "package.json").write_text(
         json.dumps(
             {
                 "name": "foundry-tool-probe",
@@ -115,82 +171,166 @@ def _probe_package(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    return probe
+    return where
+
+
+def _prepare(home: Path, probe: Path, profile: str) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    assert _dsh(home, "--profile", profile, "--dump-config").returncode == 0
+    # Probe first: it wraps `ctx.tools.register`, so it has to be applied before
+    # the bundle whose registrations it counts.
+    for source in (probe, PLUGIN):
+        added = _dsh(home, "plugin", "--profile", profile, "add", str(source))
+        assert added.returncode == 0, added.stderr
+
+
+# --- headless: the tool rows are the tool set ------------------------------
 
 
 @pytest.fixture(scope="module")
-def booted(tmp_path_factory) -> dict[str, object]:
-    """One boot, shared: materialise a profile, install both plugins, read the roster."""
+def headless(tmp_path_factory) -> dict[str, object]:
     if not DSH_BIN or not Path(DSH_BIN).is_file() or NODE is None:
         pytest.skip("no harness")
-    tmp_path = tmp_path_factory.mktemp("realload")
-    home = tmp_path / "dsh-home"
-    home.mkdir(parents=True, exist_ok=True)
-    materialise = _dsh(home, "--profile", "headless", "--dump-config")
-    assert materialise.returncode == 0, materialise.stderr
+    tmp = tmp_path_factory.mktemp("headless")
+    home = tmp / "dsh-home"
+    _prepare(home, _probe_package(tmp / "probe", REGISTER_PROBE), "headless")
 
-    # Probe first: it wraps `ctx.tools.register`, so it has to be applied before
-    # the bundle whose registrations it counts.
-    for source in (_probe_package(tmp_path), PLUGIN):
-        added = _dsh(home, "plugin", "--profile", "headless", "add", str(source))
-        assert added.returncode == 0, added.stderr
+    def boot(*extra: str) -> list[str]:
+        # No provider credential. The boot gets far enough to mount every tool
+        # and then stops for want of a key, which is all this measures.
+        run = _dsh(
+            home,
+            "--profile",
+            "headless",
+            *extra,
+            "hi",
+            env_extra={
+                "FOUNDRY_VAR": str(tmp / "var"),
+                "FOUNDRY_BIN": str(ROOT / ".venv" / "bin" / "foundry"),
+            },
+        )
+        lines = [line for line in run.stdout.splitlines() if line.startswith("FOUNDRY_PROBE ")]
+        assert lines, f"probe never reported; stdout={run.stdout[-2000:]} stderr={run.stderr[-2000:]}"
+        return json.loads(lines[-1].split(" ", 1)[1])
 
     dump = _dsh(home, "--profile", "headless", "--dump-config")
-    assert dump.returncode == 0, dump.stderr
-
-    boot = _dsh(
-        home,
-        "--profile",
-        "headless",
-        "hi",
-        env_extra={
-            # No provider credential. The boot gets far enough to mount every
-            # tool and then stops for want of a key, which is all this measures.
-            "FOUNDRY_VAR": str(tmp_path / "var"),
-            "FOUNDRY_BIN": str(ROOT / ".venv" / "bin" / "foundry"),
-        },
-    )
-    lines = [line for line in boot.stdout.splitlines() if line.startswith("FOUNDRY_PROBE ")]
-    assert lines, f"probe never reported; stdout={boot.stdout[-2000:]} stderr={boot.stderr[-2000:]}"
-    return {"dump": dump.stdout, "offered": json.loads(lines[-1].split(" ", 1)[1])}
+    return {"dump": dump.stdout, "open": boot(), "fenced": boot("--patch", str(FENCE))}
 
 
 @needs_dsh
-def test_installing_the_package_composes_exactly_one_row(booted) -> None:
+def test_installing_the_package_composes_exactly_one_row(headless) -> None:
     """`dsh plugin add` is the whole wiring, and passing --patch as well is the trap.
 
     The package carries its own `dsh.bundle.patch`, and `add` appends the package
     to the profile's `dsh.profile.bundles`, so the insert row arrives from there.
     Handing the same file to `--patch` composes it a second time.
     """
-    rows = [line for line in booted["dump"].splitlines() if line.strip() == "- id: finance-skill-foundry"]
-    assert len(rows) == 1, booted["dump"]
+    rows = [
+        line for line in headless["dump"].splitlines() if line.strip() == "- id: finance-skill-foundry"
+    ]
+    assert len(rows) == 1, headless["dump"]
 
 
 @needs_dsh
-def test_every_declared_tool_reaches_the_model(booted) -> None:
-    """The unit's done condition, and the first thing that ever measured it."""
-    offered = set(booted["offered"])
+def test_every_declared_tool_reaches_the_model(headless) -> None:
+    """The first thing that ever measured this."""
+    offered = set(headless["open"])
     missing = [tool for tool in ROSTER if tool not in offered]
     assert not missing, f"declared but never registered: {missing}; offered={sorted(offered)}"
 
 
 @needs_dsh
-def test_the_stock_preset_still_mounts_host_writers(booted) -> None:
-    """A finding, written down as a fact rather than as prose.
+def test_an_unfenced_profile_hands_the_model_a_shell(headless) -> None:
+    """Why `period.fence.yml` exists, kept as the contrast the next test is against."""
+    assert REACH & set(headless["open"]), "the stock headless profile used to leak; it no longer does"
 
-    The period profile is supposed to omit `bash`, the filesystem tools and
-    `str_replace_editor`, and the bundle refuses to start if any of them are in
-    the roster it is handed. That check only ever sees the bundle's own list.
-    The agent's tool set is decided by its PRESET, which a profile row cannot
-    reach into, so on the stock preset the model is offered foundry's ten tools
-    and a shell next to them.
 
-    Locked books the model can read around are not locked. Closing this needs a
-    foundry-owned agent preset, which is its own unit; until then this test
-    holds the gap still so it cannot be forgotten, and it is meant to fail --
-    loudly, here -- on the day the preset lands.
+@needs_dsh
+def test_the_fence_patch_closes_a_profile_that_has_no_presets(headless) -> None:
+    fenced = set(headless["fenced"])
+    assert not (REACH & fenced), f"still reachable: {sorted(REACH & fenced)}"
+    assert set(ROSTER) <= fenced, f"the fence took foundry's own tools: {sorted(set(ROSTER) - fenced)}"
+
+
+# --- web: the preset is the tool set ---------------------------------------
+
+
+@pytest.fixture(scope="module")
+def web_presets(tmp_path_factory) -> dict[str, list[str]]:
+    """Boot the web profile long enough for the probe to compose each preset.
+
+    The web app serves and never exits, so this one is spawned and stopped rather
+    than waited on, and the probe prints as it goes instead of on exit.
     """
-    offered = set(booted["offered"])
-    leaked = sorted({"bash", "write", "edit", "str_replace_editor", "read"} & offered)
-    assert leaked, "the preset appears to have been fenced; update this test and the plan"
+    if not DSH_BIN or not Path(DSH_BIN).is_file() or NODE is None:
+        pytest.skip("no harness")
+    tmp = tmp_path_factory.mktemp("web")
+    home = tmp / "dsh-home"
+    _prepare(home, _probe_package(tmp / "probe", PRESET_PROBE), "web")
+
+    from foundry.harness import install_presets
+
+    install_presets(home)
+
+    argv, env, cwd = _dsh_args(home, "--profile", "web")
+    log = tmp / "web.log"
+    with log.open("wb") as sink:
+        child = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=env, cwd=cwd)
+        try:
+            deadline = time.monotonic() + WEB_SETTLE_SECONDS
+            while time.monotonic() < deadline:
+                text = log.read_text(encoding="utf-8", errors="replace")
+                if len([l for l in text.splitlines() if l.startswith("FOUNDRY_PRESET ")]) >= 3:
+                    break
+                time.sleep(0.5)
+        finally:
+            child.terminate()
+            try:
+                child.wait(timeout=20)
+            except subprocess.TimeoutExpired:  # pragma: no cover - only on a wedged child
+                child.kill()
+
+    text = log.read_text(encoding="utf-8", errors="replace")
+    reported: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        if not line.startswith("FOUNDRY_PRESET "):
+            continue
+        _, preset_id, rest = line.split(" ", 2)
+        assert not rest.startswith("ERR"), f"{preset_id}: {rest}"
+        reported[preset_id] = json.loads(rest)
+    assert reported, f"no preset was measured; log tail={text[-2000:]}"
+    return reported
+
+
+@needs_dsh
+def test_the_period_preset_offers_the_roster_and_no_reach(web_presets) -> None:
+    period = set(web_presets["period"])
+    assert set(ROSTER) <= period, f"missing from period: {sorted(set(ROSTER) - period)}"
+    assert not (REACH & period), f"still reachable: {sorted(REACH & period)}"
+    # The three that survive the deletion, each for a stated reason in the preset:
+    # the close methods ship as skills, and a period has steps and choices.
+    assert period - set(ROSTER) == {"skill", "todo_write", "ask_user_question"}
+
+
+@needs_dsh
+def test_the_f3_preset_offers_exactly_the_follow_up_tool(web_presets) -> None:
+    """KTD7: a leader's follow-up agent can recompute and do nothing else.
+
+    Foundry registers its ten globally from the profile row, so the preset cannot
+    register a smaller roster of its own -- the names are taken. `f3-scope` masks
+    them for this preset's agents instead.
+    """
+    assert sorted(web_presets["f3"]) == sorted(F3_ROSTER) == ["query-locked"]
+
+
+@needs_dsh
+def test_the_stock_preset_is_still_the_wide_one(web_presets) -> None:
+    """The contrast, and the reason a foundry-owned preset had to exist.
+
+    Nothing here asks upstream to change: `standard` is a coding agent and a
+    coding agent should have a shell. What was wrong was pointing a locked period
+    at it.
+    """
+    standard = set(web_presets["standard"])
+    assert REACH & standard, "the stock preset narrowed; re-derive ours from it"
+    assert set(ROSTER) <= standard, "foundry's global registration stopped reaching a preset agent"
