@@ -45,6 +45,23 @@ export function pluginDir(layout: Layout): string {
 }
 
 /**
+ * The frozen `foundry` CLI this app carries.
+ *
+ * The app shells out to it for every read and for the wiring steps, so a packed
+ * build that expected one on the machine only worked where the kit was already
+ * installed. `scripts/build-foundry.mjs` freezes it; this is where it lands.
+ *
+ * `FOUNDRY_BIN` still wins when it is set. That is the operator saying which one
+ * to use -- pointing a dev run at a checkout's virtualenv is the everyday case --
+ * and it is worth knowing that a stale one in a shell profile shadows the
+ * bundled binary rather than being ignored.
+ */
+export function foundryBin(layout: Layout): string {
+  if (layout.packaged) return join(layout.resourcesPath, 'foundry', 'foundry');
+  return join(layout.appPath, 'extra', 'foundry', 'foundry');
+}
+
+/**
  * The bundle's copy inside the staged runtime, which must already exist.
  *
  * `scripts/fetch-harness.mjs` puts it there and `--check` refuses to package

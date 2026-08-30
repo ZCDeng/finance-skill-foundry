@@ -2,7 +2,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { HARNESS_ENTRY, entryPath, harnessRoot, pluginDir, stagedBundleDir } from '../electron/harness/resources.js';
+import {
+  HARNESS_ENTRY,
+  entryPath,
+  foundryBin,
+  harnessRoot,
+  pluginDir,
+  stagedBundleDir,
+} from '../electron/harness/resources.js';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const KIT = JSON.parse(read('../../dsh-plugin/package.json'));
@@ -44,6 +51,25 @@ describe('where the runtime is', () => {
   });
 });
 
+describe('where the frozen CLI is', () => {
+  it('rides beside the asar, like the runtime', () => {
+    // It is an interpreter and a native extension. Both need real files.
+    expect(foundryBin(PACKED)).toBe('/A/Foundry.app/Contents/Resources/foundry/foundry');
+    expect(foundryBin(PACKED)).not.toContain('.asar');
+    expect(foundryBin(DEV)).toBe('/repo/app/extra/foundry/foundry');
+  });
+
+  it('is preferred over PATH but not over an explicit override', () => {
+    // `FOUNDRY_BIN` is the operator saying which one to use, which is the
+    // everyday case for pointing a dev run at a checkout's virtualenv. Worth
+    // knowing it shadows the bundled binary rather than being ignored.
+    const main = read('../electron/main.ts');
+    const order = main.slice(main.indexOf('function foundryBin('));
+    expect(order.indexOf('process.env.FOUNDRY_BIN')).toBeLessThan(order.indexOf('packedFoundryBin'));
+    expect(order.indexOf('packedFoundryBin')).toBeLessThan(order.indexOf("'foundry'"));
+  });
+});
+
 describe('what the build config ships', () => {
   it('names node_modules explicitly, because electron-builder skips it quietly', () => {
     // A directory called `node_modules` inside `extraResources` is skipped
@@ -65,12 +91,55 @@ describe('what the build config ships', () => {
     }
   });
 
+  it('ships the frozen CLI whole, with no source-tree filters', () => {
+    // A PyInstaller one-dir bundle is an interpreter, a native DuckDB extension
+    // and the packaged resources. The `.ts`/`.map` trimming that suits the
+    // harness tree would take real files out of this one.
+    const block = BUILDER.slice(BUILDER.indexOf('from: extra/foundry'));
+    const own = block.slice(0, block.indexOf('- from:', 1));
+    expect(own).toContain('to: foundry');
+    expect(own).not.toContain("'!**/*.map'");
+    expect(own).not.toContain("'!**/*.ts'");
+  });
+
   it('refuses to package without a staged runtime', () => {
     // Packaging without it produces an app whose workbench never starts and says
     // nothing about why, so the check runs first and stops.
     const scripts = JSON.parse(read('../package.json')).scripts;
     expect(scripts.package.startsWith('npm run harness:check')).toBe(true);
     expect(scripts.dist.startsWith('npm run harness:check')).toBe(true);
+    // And without the frozen CLI, which fails differently: the window opens and
+    // every screen shows a refusal about a binary that is not there.
+    expect(scripts.package).toContain('npm run foundry:check');
+    expect(scripts.dist).toContain('npm run foundry:check');
+  });
+});
+
+describe('the freezing script', () => {
+  it('ships the whole resources tree, not a data collection', () => {
+    // PyInstaller's data collector skips `.py` files, and
+    // `resources/formulator-plugin` holds nothing else. A bundle built with
+    // `--collect-data foundry` comes out missing it, and then every command
+    // fails at import -- including ones that never touch Formulator, because
+    // `cli.py` resolves that path at module scope.
+    // Scoped to the argv the script actually passes: the prose above it names
+    // `--collect-data` in order to say why it is not used, and an assertion over
+    // the whole file would forbid explaining that.
+    const script = read('../scripts/build-foundry.mjs');
+    const argv = script.slice(script.indexOf("'--noconfirm'"), script.indexOf('{ stdio:', script.indexOf("'--noconfirm'")));
+    expect(argv).toContain("'--add-data'");
+    expect(argv).not.toContain("'--collect-data'");
+    expect(argv).toContain("'--collect-all'");
+    expect(argv).toContain("'duckdb'");
+  });
+
+  it('runs the kit\'s own done-gate before calling it built', () => {
+    // `probe` drives a whole fixture period through the library. A bundle that
+    // imports but cannot read a workbook, open DuckDB or find its own fixtures
+    // fails here rather than in front of an operator.
+    const script = read('../scripts/build-foundry.mjs');
+    expect(script).toContain("'probe'");
+    expect(script).toContain("PATH: '/usr/bin:/bin'");
   });
 });
 

@@ -4,7 +4,14 @@ import * as path from 'node:path';
 
 import { applyCsp } from './csp.js';
 import { HarnessHost } from './harness/host.js';
-import { HARNESS_ENTRY, entryPath, pluginDir, stagedBundleDir, type Layout } from './harness/resources.js';
+import {
+  HARNESS_ENTRY,
+  entryPath,
+  foundryBin as packedFoundryBin,
+  pluginDir,
+  stagedBundleDir,
+  type Layout,
+} from './harness/resources.js';
 import { installPlugin, installPresets } from './harness/wiring.js';
 import { registerIpc } from './ipc/register.js';
 
@@ -36,8 +43,17 @@ function layout(): Layout {
   };
 }
 
-function foundryBin(): string {
-  return process.env.FOUNDRY_BIN ?? 'foundry';
+/**
+ * Which `foundry` this run uses.
+ *
+ * An explicit `FOUNDRY_BIN` first, then the one this app carries, then whatever
+ * is on PATH. The last is not a fallback anyone should rely on -- it is what
+ * keeps a checkout usable before `npm run foundry` has ever been run.
+ */
+function foundryBin(here: Layout): string {
+  if (process.env.FOUNDRY_BIN) return process.env.FOUNDRY_BIN;
+  const packed = packedFoundryBin(here);
+  return existsSync(packed) ? packed : 'foundry';
 }
 
 /** The bundle's package name, which is also its directory inside a node_modules. */
@@ -100,7 +116,7 @@ void app.whenReady().then(() => {
       entry,
       home,
       varRoot: varRoot(),
-      foundryBin: foundryBin(),
+      foundryBin: foundryBin(here),
     });
     harness = host;
     registerIpc(
@@ -119,7 +135,7 @@ void app.whenReady().then(() => {
           pluginDir: pluginDir(here),
           stagedBundle: bundle,
         });
-        await installPresets({ foundryBin: foundryBin(), home, varRoot: varRoot() });
+        await installPresets({ foundryBin: foundryBin(here), home, varRoot: varRoot() });
         const window = mainWindow;
         if (window) await host.attach(window);
       } catch (error) {

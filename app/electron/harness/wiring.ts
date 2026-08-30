@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import * as path from 'node:path';
 
 /**
@@ -24,10 +33,18 @@ function run(bin: string, args: string[], env: NodeJS.ProcessEnv): Promise<strin
 /**
  * Install the period tools into the harness's `web` profile.
  *
- * One command and deliberately not two: `add` writes the package into the
- * profile's dependencies and appends it to `dsh.profile.bundles`, and the
- * package carries its own `dsh.bundle.patch`, so the insert row arrives from
- * there. Passing that same file as `--patch` composes the row twice.
+ * Not through `dsh plugin add`, and that is a decision the first clean-machine
+ * run forced. That command shells out to pnpm, and a machine without one gets
+ * `pnpm not found on PATH — install pnpm to manage profile plugins`. Every
+ * earlier run here passed only because the developer's own environment had
+ * corepack in it; under `env -i` the whole wiring step fails and the workbench
+ * never starts.
+ *
+ * What the command does is two things, and neither needs a package manager: add
+ * a name to the profile's manifest, and put the package where the loader can
+ * find it. The second was already being done by hand -- pnpm does not
+ * materialise the link under `ELECTRON_RUN_AS_NODE` either -- so this takes the
+ * first half too and stops depending on a tool this app does not ship.
  */
 export async function installPlugin(opts: {
   entry: string;
@@ -36,13 +53,57 @@ export async function installPlugin(opts: {
   /** The staged runtime's own copy of the bundle. Must already exist. */
   stagedBundle: string;
 }): Promise<void> {
-  await run(
-    process.execPath,
-    [opts.entry, 'plugin', '--profile', 'web', 'add', opts.pluginDir],
-    { ...process.env, DSH_HOME: opts.home, ELECTRON_RUN_AS_NODE: '1' },
-  );
+  await materialiseProfile(opts.entry, opts.home);
+  addToProfileManifest(opts);
   ensureProfileLink(opts);
   assertStagedBundle(opts.stagedBundle, opts.pluginDir);
+}
+
+/**
+ * Make the runtime write out the profile directory, if this home is new.
+ *
+ * `--dump-config` is the cheapest command that does it: it composes the tree,
+ * prints it, and exits without binding a port. The output is discarded; what is
+ * wanted is the directory it leaves behind.
+ */
+async function materialiseProfile(entry: string, home: string): Promise<void> {
+  await run(process.execPath, [entry, '--profile', 'web', '--dump-config'], {
+    ...process.env,
+    DSH_HOME: home,
+    ELECTRON_RUN_AS_NODE: '1',
+  });
+}
+
+/**
+ * Name the bundle in the profile's own manifest.
+ *
+ * Two keys, both of which the runtime reads: `dependencies`, which is what a
+ * package manager would have written, and `dsh.profile.bundles`, which is the
+ * ordered list of layers the loader composes. The bundle's own
+ * `dsh.bundle.patch` contributes its insert row from there, which is why the
+ * row does not have to be written anywhere else -- and why handing that same
+ * patch file to `--patch` as well would compose it twice.
+ *
+ * Idempotent, and it appends rather than replaces: another product's bundle in
+ * the same profile is not this app's to remove.
+ */
+export function addToProfileManifest(opts: {
+  home: string;
+  pluginDir: string;
+  profile?: string;
+}): string {
+  const name = JSON.parse(readFileSync(path.join(opts.pluginDir, 'package.json'), 'utf8')).name as string;
+  const manifestPath = path.join(opts.home, 'profiles', opts.profile ?? 'web', 'package.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    dependencies?: Record<string, string>;
+    dsh?: { profile?: { bundles?: string[] } };
+  };
+  manifest.dependencies = { ...manifest.dependencies, [name]: `link:${opts.pluginDir}` };
+  const bundles = manifest.dsh?.profile?.bundles ?? [];
+  if (!bundles.includes(name)) bundles.push(name);
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles } };
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return name;
 }
 
 /**

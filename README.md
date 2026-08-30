@@ -203,18 +203,26 @@ against the task first, so the window carries the back-pointer before a model ca
 call anything — which is why one harness process can serve every task without an
 ambient `FOUNDRY_TASK`.
 
-The runtime ships with the app. Stage it once, then build:
+The runtime and the CLI both ship with the app. Stage them once, then build:
 
 ```bash
 cd app
 npm install
 npm run harness      # ~280MB into app/extra/dsh, not in version control
-npm run package      # release/mac-arm64/Foundry.app
+npm run foundry      # freezes the CLI into app/extra/foundry, ~65MB
+npm run package      # release/mac-arm64/Foundry.app, ~474MB
 ```
 
-`npm run package` runs `harness:check` first and stops if the tree is missing or
-its pin has moved. Packaging without it produces an app whose workbench never
-starts and says nothing about why.
+`npm run package` runs both checks first and stops if either is missing or its
+pin has moved. Packaging without them produces an app that opens and then fails
+at everything, and says nothing about why.
+
+`npm run foundry` freezes the CLI with PyInstaller as a one-dir bundle — a
+one-file build unpacks itself to a temp directory on every launch, and this
+binary runs dozens of times in a session. The build ends by running the kit's
+own `probe` against the frozen bundle with a bare environment, so a build that
+cannot read a workbook or open DuckDB fails there rather than in front of an
+operator.
 
 Two things are staged, not one. The runtime, and a copy of `dsh-plugin/` inside
 its `node_modules`: under `ELECTRON_RUN_AS_NODE` the loader does not resolve the
@@ -222,9 +230,14 @@ bundle from the profile at all, and in a packed app nothing may write that copy
 at run time. `FOUNDRY_DSH_INSTALL` still overrides both, for pointing a dev run
 at a tree staged elsewhere.
 
-Still on the machine rather than in the bundle: `foundry` itself. The app calls
-it for every read and to install the presets, so a packed build needs
-`FOUNDRY_BIN` to name one.
+`FOUNDRY_BIN` still wins when it is set, which is how a dev run points at a
+checkout's virtualenv. Worth knowing it shadows the bundled binary rather than
+being ignored.
+
+The app does not shell out to `dsh plugin add`. That command needs `pnpm` on
+PATH, and a clean machine gets `pnpm not found on PATH`. What it does is add a
+name to the profile's manifest and place the package where the loader looks;
+both are done directly, and the second had to be anyway.
 
 It is a caller, never a mutator (KTD2). The main process opens no catalog and
 reads no file under `var/`: every screen is a read-only CLI subcommand, and a

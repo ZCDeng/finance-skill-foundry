@@ -68,6 +68,20 @@ extraResources:
     to: dsh
     filter:
       - 'PIN'
+  # The frozen `foundry` CLI. The app shells out to it for every read and for the
+  # wiring steps, so without it a packed build only works where the kit is
+  # already installed.
+  #
+  # No filters. This tree is a PyInstaller one-dir bundle: an interpreter, a
+  # native DuckDB extension and the packaged resources, and every part of it is
+  # load-bearing. The `.ts`/`.map` trimming that suits the harness tree would
+  # take real files out of this one.
+  - from: extra/foundry
+    to: foundry
+    filter:
+      - '**/*'
+      - '!**/.DS_Store'
+
   # The period bundle, as a directory the profile installer can hand to a package
   # manager and symlink to. Neither of those can be a path inside an archive.
   - from: ../dsh-plugin
