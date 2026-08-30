@@ -150,7 +150,17 @@ def _xlsx_with_cached_formula(path: Path) -> Path:
     sheet = "xl/worksheets/sheet1.xml"
     with zipfile.ZipFile(path) as archive:
         payload = {item.filename: archive.read(item.filename) for item in archive.infolist()}
-    cached = payload[sheet].replace(b"<f>50*2</f><v></v>", b"<f>50*2</f><v>200</v>")
+    # openpyxl writes the empty cached value as `<v></v>` under lxml and `<v />`
+    # without it, and which one you get depends on whether something else in the
+    # environment happened to pull lxml in. This test passed for years in a
+    # checkout where the optional `formulator` extra had, and failed the first
+    # time it ran against a clean `pip install -e .[dev]`.
+    empty = next(
+        (form for form in (b"<f>50*2</f><v></v>", b"<f>50*2</f><v />") if form in payload[sheet]),
+        None,
+    )
+    assert empty is not None, f"no empty cached value to replace in {payload[sheet][:400]!r}"
+    cached = payload[sheet].replace(empty, b"<f>50*2</f><v>200</v>")
     assert cached != payload[sheet]
     payload[sheet] = cached
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
