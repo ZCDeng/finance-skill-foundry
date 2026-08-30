@@ -7,6 +7,7 @@ import {
   type Answer,
   type DeliverableRow,
   type Intent,
+  type LaunchSpec,
   type TaskDetail as Detail,
   type TaskRow,
   bridge,
@@ -14,6 +15,7 @@ import {
 import { Deliverables } from './views/Deliverables.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
+import { DataBar, Formulator } from './views/Formulator.js';
 import { TaskBar, Workbench, type OpenSession } from './views/Workbench.js';
 
 /** A refusal is a sentence the store wrote. Show it, do not translate it. */
@@ -27,6 +29,8 @@ export function App() {
   const [open, setOpen] = useState<string | null>(null);
   const [session, setSession] = useState<OpenSession | null>(null);
   const [opening, setOpening] = useState(false);
+  const [formulator, setFormulator] = useState<LaunchSpec | null>(null);
+  const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [gallery, setGallery] = useState<{ task: TaskRow; row: DeliverableRow }[]>([]);
@@ -55,8 +59,38 @@ export function App() {
    * is the one place that says which screen is on top.
    */
   useEffect(() => {
-    void api?.workbenchVisible?.(screen === 'workbench' && session !== null);
-  }, [api, screen, session]);
+    // The workbench has no page until a session is open; the data screen has none
+    // until Formulator is running. Naming the screen and letting main decide
+    // keeps the two rectangles from ever both being real.
+    const shown =
+      (screen === 'workbench' && session !== null) || (screen === 'formulator' && formulator !== null)
+        ? screen
+        : '';
+    void api?.paneVisible?.(shown);
+  }, [api, screen, session, formulator]);
+
+  useEffect(() => {
+    if (!api?.formulatorStatus || screen !== 'formulator') return;
+    void api.formulatorStatus().then((a) => take(a, (value) => setFormulator(value.running)));
+  }, [api, screen, take]);
+
+  const launchFormulator = useCallback(() => {
+    if (!api?.formulatorLaunch) return;
+    setBusyData(true);
+    void api
+      .formulatorLaunch()
+      .then((a) => take(a, setFormulator))
+      .finally(() => setBusyData(false));
+  }, [api, take]);
+
+  const stopFormulator = useCallback(() => {
+    if (!api?.formulatorStop) return;
+    setBusyData(true);
+    void api
+      .formulatorStop()
+      .then((a) => take(a, () => setFormulator(null)))
+      .finally(() => setBusyData(false));
+  }, [api, take]);
 
   const openSession = useCallback(
     (intent: Intent) => {
@@ -118,6 +152,15 @@ export function App() {
       strip={
         screen === 'workbench' ? (
           <TaskBar task={current} detail={detail} session={session} />
+        ) : screen === 'formulator' ? (
+          <DataBar
+            task={current}
+            detail={detail}
+            running={formulator}
+            busy={busyData}
+            onLaunch={launchFormulator}
+            onStop={stopFormulator}
+          />
         ) : undefined
       }
     >
@@ -139,6 +182,7 @@ export function App() {
       {screen === 'tasks' && open !== null && detail ? (
         <TaskDetail detail={detail} onBack={() => setOpen(null)} onRead={read} reading={reading} />
       ) : null}
+      {screen === 'formulator' ? <Formulator running={formulator} /> : null}
       {screen === 'deliverables' ? <Deliverables rows={gallery} /> : null}
     </Shell>
   );

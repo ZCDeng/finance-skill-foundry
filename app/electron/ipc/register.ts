@@ -2,6 +2,7 @@ import { type BrowserWindow, ipcMain } from 'electron';
 
 import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
+import type { FormulatorHost } from '../formulator.js';
 import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
 import type { HarnessHost } from '../harness/host.js';
 import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
@@ -47,11 +48,12 @@ function intentOf(value: unknown): Intent {
 
 export function registerIpc(
   binding: Omit<Binding, 'task' | 'session'>,
-  harness?: {
+  panes?: {
     host: HarnessHost;
+    formulator: FormulatorHost;
     window: () => BrowserWindow | null;
-    /** Told on every change, so a resize can put the view back where it was. */
-    remember: (visible: boolean) => void;
+    /** Told on every change, so a resize can put the views back where they were. */
+    remember: (screen: string) => void;
   },
 ): void {
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
@@ -66,7 +68,8 @@ export function registerIpc(
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),
   );
 
-  if (!harness) return;
+  if (!panes) return;
+  const harness = panes;
 
   ipcMain.handle(CHANNELS.harnessStatus, () =>
     answer(async () => ({ origin: await harness.host.start() })),
@@ -109,13 +112,51 @@ export function registerIpc(
       }),
   );
 
-  ipcMain.handle(CHANNELS.workbenchVisible, (_event, visible: unknown) =>
+  /**
+   * Launch Formulator on the current window.
+   *
+   * No task argument: the lease is a window's, and `launch-formulator` takes the
+   * current one. Binding it to a task here would let a screen ask for a reader
+   * on a window that is not the one the operator is looking at.
+   */
+  ipcMain.handle(CHANNELS.formulatorLaunch, () =>
     answer(async () => {
-      const shown = Boolean(visible);
-      harness.remember(shown);
-      const window = harness.window();
-      if (window) harness.host.place(window, shown);
-      return { visible: shown };
+      const window = panes.window();
+      if (!window) throw new FoundryFailure('no window to show Formulator in', null);
+      return panes.formulator.launch(binding, window);
+    }),
+  );
+
+  ipcMain.handle(CHANNELS.formulatorStop, () =>
+    answer(async () => {
+      const window = panes.window();
+      if (window) await panes.formulator.stop(binding, window);
+      return { stopped: true };
+    }),
+  );
+
+  ipcMain.handle(CHANNELS.formulatorStatus, () =>
+    answer(async () => ({ running: panes.formulator.running() })),
+  );
+
+  /**
+   * Which screen is on top.
+   *
+   * Both embedded pages are native views in window coordinates, so React
+   * unmounting a component does not hide either of them. This is the one place
+   * that decides which rectangle is real, and it places both so a switch cannot
+   * leave two stacked.
+   */
+  ipcMain.handle(CHANNELS.paneVisible, (_event, screen: unknown) =>
+    answer(async () => {
+      const name = String(screen ?? '');
+      panes.remember(name);
+      const window = panes.window();
+      if (window) {
+        panes.host.place(window, name === 'workbench');
+        panes.formulator.place(window, name === 'formulator');
+      }
+      return { screen: name };
     }),
   );
 }

@@ -75,7 +75,19 @@ export interface Bridge {
     task: string,
     seed?: { windowId?: string; briefSha?: string | null; verbatim?: string },
   ): Promise<Answer<{ sessionId: string; preset: string }>>;
-  workbenchVisible?(visible: boolean): Promise<Answer<{ visible: boolean }>>;
+  paneVisible?(screen: string): Promise<Answer<{ screen: string }>>;
+  /** Absent when this build has no harness to embed Formulator beside. */
+  formulatorLaunch?(): Promise<Answer<LaunchSpec>>;
+  formulatorStop?(): Promise<Answer<{ stopped: boolean }>>;
+  formulatorStatus?(): Promise<Answer<{ running: LaunchSpec | null }>>;
+}
+
+/** What `launch-formulator` reports back. */
+export interface LaunchSpec {
+  url: string;
+  home: string;
+  /** Present only when the kit could not confirm the served process is this window's. */
+  identity?: string;
 }
 
 export function bridge(): Bridge | null {

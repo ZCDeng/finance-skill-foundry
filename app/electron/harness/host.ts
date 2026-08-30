@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
-import { BrowserWindow, WebContentsView } from 'electron';
+import type { BrowserWindow } from 'electron';
 
 import {
   type Intent,
@@ -14,8 +14,8 @@ import {
   rpcUrl,
   rpcValue,
 } from './boot.js';
-import { HIDDEN, type Rect, viewBounds } from './bounds.js';
 import { followupDraft, handoffScript } from './handoff.js';
+import { Pane } from './pane.js';
 
 export interface HostOptions {
   /** The runtime entry, `<install>/node_modules/@deepseek-ai/dsh/lib/bin.js`. */
@@ -41,7 +41,7 @@ export interface OpenedSession {
  */
 export class HarnessHost {
   private child: ChildProcess | null = null;
-  private view: WebContentsView | null = null;
+  private readonly pane = new Pane();
   private base: string | null = null;
   private starting: Promise<string> | null = null;
 
@@ -128,37 +128,19 @@ export class HarnessHost {
   /** Point the view at the new session and reload so the page reads the cell. */
   private async show(sessionId: string, draft: string): Promise<void> {
     const origin = await this.start();
-    const view = this.view;
-    if (!view) return;
-    await view.webContents.executeJavaScript(handoffScript(sessionId, draft), true);
-    await view.webContents.loadURL(origin);
+    if (!this.pane.attached()) return;
+    await this.pane.run(handoffScript(sessionId, draft));
+    await this.pane.load(origin);
   }
 
   /** Put the page in the window. Called once, after the first start. */
   async attach(window: BrowserWindow): Promise<void> {
-    const origin = await this.start();
-    if (this.view) return;
-    const view = new WebContentsView({
-      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
-    });
-    this.view = view;
-    window.contentView.addChildView(view);
-    view.setBounds(HIDDEN);
-    // Pinned to the origin this app started. A page that navigated anywhere else
-    // would be a page this window is vouching for and did not launch.
-    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    view.webContents.on('will-navigate', (event, url) => {
-      if (!url.startsWith(`${origin}/`) && url !== origin) event.preventDefault();
-    });
-    await view.webContents.loadURL(origin);
+    await this.pane.attach(window, await this.start());
   }
 
   /** Show or hide the page by giving it a rectangle or none. */
   place(window: BrowserWindow, visible: boolean): void {
-    if (!this.view) return;
-    const [width, height] = window.getContentSize();
-    const rect: Rect = visible ? viewBounds({ width, height }) : { ...HIDDEN };
-    this.view.setBounds(rect);
+    this.pane.place(window, visible);
   }
 
   stop(): void {

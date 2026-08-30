@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import './components.css';
 
-export type Screen = 'workbench' | 'tasks' | 'deliverables';
+export type Screen = 'workbench' | 'formulator' | 'tasks' | 'deliverables';
 
 export interface ShellProps {
   screen: Screen;
@@ -14,6 +14,7 @@ export interface ShellProps {
 
 const DESTINATIONS = [
   { id: 'workbench', label: '工作台' },
+  { id: 'formulator', label: '数据台' },
   { id: 'tasks', label: '任务' },
   { id: 'deliverables', label: '交付物' },
 ] as const;
@@ -27,8 +28,11 @@ const DESTINATIONS = [
  * from under a view that stays put.
  */
 export function Shell({ screen, onScreen, strip, children }: ShellProps) {
+  // Both embedded pages clip the column for the same reason; `data-screen`
+  // carries which one is on so the stylesheet can stop it scrolling.
+  const embedded = screen === 'workbench' || screen === 'formulator';
   return (
-    <div className="fnd-shell" data-screen={screen}>
+    <div className="fnd-shell" data-screen={screen} data-embedded={embedded ? 'yes' : 'no'}>
       <header className="fnd-head">
         <span className="fnd-head__mark">Foundry</span>
         <nav className="fnd-head__nav">

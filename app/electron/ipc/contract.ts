@@ -12,7 +12,11 @@ export const CHANNELS = {
   deliverableText: 'foundry:deliverable-text',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
-  workbenchVisible: 'harness:visible',
+  formulatorLaunch: 'formulator:launch',
+  formulatorStop: 'formulator:stop',
+  formulatorStatus: 'formulator:status',
+  /** Which screen is on top. Both embedded panes are placed from it. */
+  paneVisible: 'pane:visible',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

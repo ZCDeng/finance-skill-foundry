@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 
 import { applyCsp } from './csp.js';
+import { FormulatorHost } from './formulator.js';
 import { HarnessHost } from './harness/host.js';
 import {
   HARNESS_ENTRY,
@@ -61,8 +62,9 @@ const BUNDLE_NAME = 'finance-skill-foundry-dsh';
 
 let mainWindow: BrowserWindow | null = null;
 let harness: HarnessHost | null = null;
-/** Whether the workbench is the screen on top. The renderer is the only source. */
-let workbenchVisible = false;
+let formulator: FormulatorHost | null = null;
+/** Which screen is on top. The renderer is the only source. */
+let onTop = '';
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -90,7 +92,9 @@ function createWindow(): void {
   // follow a resize on its own.
   mainWindow.on('resize', () => {
     const window = mainWindow;
-    if (window && harness) harness.place(window, workbenchVisible);
+    if (!window) return;
+    harness?.place(window, onTop === 'workbench');
+    formulator?.place(window, onTop === 'formulator');
   });
 
   if (isDev) {
@@ -119,9 +123,18 @@ void app.whenReady().then(() => {
       foundryBin: foundryBin(here),
     });
     harness = host;
+    const pane = new FormulatorHost();
+    formulator = pane;
     registerIpc(
       { varRoot: varRoot() },
-      { host, window: () => mainWindow, remember: (visible) => { workbenchVisible = visible; } },
+      {
+        host,
+        formulator: pane,
+        window: () => mainWindow,
+        remember: (screen) => {
+          onTop = screen;
+        },
+      },
     );
     // Wiring first, then the view. The order is load-bearing: the runtime reads
     // its profile once at boot, so a plugin installed after the child has
@@ -151,9 +164,34 @@ void app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
+/**
+ * Put down what this process started.
+ *
+ * The harness is a child and dies with a kill. Formulator does not: it is
+ * spawned in its own session so a CLI killed mid-startup cannot orphan it, which
+ * also means it outlives this app unless it is stopped. A survivor holds the
+ * window's lease and the port, and the next launch refuses on the pre-flight --
+ * so the operator's next period is broken by the last one's exit.
+ */
+async function shutDown(): Promise<void> {
   harness?.stop();
-  if (process.platform !== 'darwin') app.quit();
+  const window = mainWindow;
+  if (formulator?.running() && window) {
+    try {
+      await formulator.stop({ varRoot: varRoot() }, window);
+    } catch {
+      // Already gone, or the kit would not kill what it could not confirm. Its
+      // own refusal has been shown; there is nothing further to do on the way out.
+    }
+  }
+}
+
+app.on('window-all-closed', () => {
+  void shutDown().then(() => {
+    if (process.platform !== 'darwin') app.quit();
+  });
 });
 
-app.on('before-quit', () => harness?.stop());
+app.on('before-quit', () => {
+  void shutDown();
+});

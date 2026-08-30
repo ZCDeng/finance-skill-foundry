@@ -301,14 +301,18 @@
 }
 
 /*
- * On the workbench the shell is exactly the window and clips. Everywhere else it
- * keeps the scrolling column.
+ * Where a page is embedded the shell is exactly the window and clips.
+ * Everywhere else it keeps the scrolling column.
+ *
+ * The embedded page is a native view in window coordinates, so it does not move
+ * when the document scrolls -- anything behind it that could scroll away would
+ * slide out from under a view that stays put.
  */
-.fnd-shell[data-screen='workbench'] {
+.fnd-shell[data-embedded='yes'] {
   height: 100vh;
   overflow: hidden;
 }
 
-.fnd-shell[data-screen='workbench'] .fnd-column {
+.fnd-shell[data-embedded='yes'] .fnd-column {
   padding-top: 0;
 }

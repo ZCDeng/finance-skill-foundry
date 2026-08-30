@@ -230,6 +230,31 @@ bundle from the profile at all, and in a packed app nothing may write that copy
 at run time. `FOUNDRY_DSH_INSTALL` still overrides both, for pointing a dev run
 at a tree staged elsewhere.
 
+## Data Formulator
+
+A fourth destination, 数据台. It launches Formulator on the current window's
+locked catalog, shows its page in the same rectangle the workbench uses, and
+stops it on the way out.
+
+The app owns almost none of that. `launch-formulator` claims the window's lease,
+spawns the process, waits for it to answer and confirms the served process is
+this window's; `stop-formulator` refuses to kill one whose identity it cannot
+prove. All of it stays in the kit because a re-import has to be able to take the
+lease back, and only the library knows when that happens. What the app adds is a
+URL, a rectangle, and stopping on quit — Formulator is spawned in its own
+session, so a survivor would hold the lease and the port and break the next
+period.
+
+It is a reader, not a peer engine. A figure read off one of its charts is
+稿外追问, and the screen says so beside the button.
+
+`data_formulator` is **not** in the bundle. Put it on PATH and the screen works;
+without it the button reports the kit's own sentence, `Data Formulator binary is
+not installed`. Freezing it is not the same job as freezing the CLI: it is 35MB
+of its own plus 33 direct dependencies including pandas, flask, litellm and
+azure-identity, and litellm's dynamic imports are exactly what a frozen bundle
+gets wrong quietly.
+
 `FOUNDRY_BIN` still wins when it is set, which is how a dev run points at a
 checkout's virtualenv. Worth knowing it shadows the bundled binary rather than
 being ignored.

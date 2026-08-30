@@ -215,6 +215,22 @@ describe('the hand-off', () => {
   });
 });
 
+describe('two embedded pages, one rectangle', () => {
+  it('places both from the screen name, so a switch cannot stack them', () => {
+    // Neither page is part of the document, so React unmounting a component
+    // hides nothing. One handler decides which rectangle is real, and it places
+    // both -- a handler that only showed the incoming one would leave the
+    // outgoing page on top of it.
+    const register = readFileSync(
+      fileURLToPath(new URL('../electron/ipc/register.ts', import.meta.url)),
+      'utf8',
+    );
+    const block = register.slice(register.indexOf('CHANNELS.paneVisible'));
+    expect(block).toContain("panes.host.place(window, name === 'workbench')");
+    expect(block).toContain("panes.formulator.place(window, name === 'formulator')");
+  });
+});
+
 describe('the rectangle the page gets', () => {
   it('leaves the header and the task bar visible', () => {
     expect(viewBounds({ width: 1280, height: 860 })).toEqual({

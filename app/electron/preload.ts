@@ -19,7 +19,10 @@ const api = {
   harnessStatus: () => ipcRenderer.invoke('harness:status'),
   harnessOpen: (intent: string, task: string, seed?: unknown) =>
     ipcRenderer.invoke('harness:open', intent, task, seed),
-  workbenchVisible: (visible: boolean) => ipcRenderer.invoke('harness:visible', visible),
+  formulatorLaunch: () => ipcRenderer.invoke('formulator:launch'),
+  formulatorStop: () => ipcRenderer.invoke('formulator:stop'),
+  formulatorStatus: () => ipcRenderer.invoke('formulator:status'),
+  paneVisible: (screen: string) => ipcRenderer.invoke('pane:visible', screen),
 };
 
 export type PreloadAPI = typeof api;

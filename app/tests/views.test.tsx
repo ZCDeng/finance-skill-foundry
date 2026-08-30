@@ -91,3 +91,33 @@ describe('the five words', () => {
     expect(container.querySelectorAll('.fnd-chip')).toHaveLength(0);
   });
 });
+
+describe('the data screen', () => {
+  it('does not read like a task is required', async () => {
+    // `launch-formulator` takes the current window, so this screen works with no
+    // task open. A flat "没有任务" would read like a blocker in front of a button
+    // that is about to work.
+    const { DataBar } = await import('../src/views/Formulator.js');
+    render(<DataBar task={null} detail={null} running={null} busy={false} onLaunch={() => {}} onStop={() => {}} />);
+    expect(screen.queryByText('没有任务')).toBeNull();
+    expect(screen.getByText(/租约跟着 current 走/)).toBeTruthy();
+  });
+
+  it('shows the kit’s own words when it could not confirm the process', async () => {
+    // The kit launches anyway with no `ps` rather than becoming unstartable, and
+    // says so on the record. This is where that reaches an operator.
+    const { DataBar } = await import('../src/views/Formulator.js');
+    render(
+      <DataBar
+        task={null}
+        detail={null}
+        running={{ url: 'http://127.0.0.1:5567', home: '/h', identity: 'unconfirmed: ps is not installed on this host' }}
+        busy={false}
+        onLaunch={() => {}}
+        onStop={() => {}}
+      />,
+    );
+    expect(screen.getByText(/unconfirmed: ps is not installed/)).toBeTruthy();
+    expect(screen.getByText('http://127.0.0.1:5567')).toBeTruthy();
+  });
+});
