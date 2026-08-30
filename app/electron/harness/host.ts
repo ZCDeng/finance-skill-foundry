@@ -1,0 +1,170 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+
+import { BrowserWindow, WebContentsView } from 'electron';
+
+import {
+  type Intent,
+  LineBuffer,
+  PRESET_BY_INTENT,
+  STARTUP_TIMEOUT_MS,
+  harnessArgs,
+  harnessEnv,
+  harnessUrlFrom,
+  rpcBody,
+  rpcUrl,
+  rpcValue,
+} from './boot.js';
+import { HIDDEN, type Rect, viewBounds } from './bounds.js';
+import { followupDraft, handoffScript } from './handoff.js';
+
+export interface HostOptions {
+  /** The runtime entry, `<install>/node_modules/@deepseek-ai/dsh/lib/bin.js`. */
+  entry: string;
+  /** This app's own harness home. Never the operator's, so a profile edit here is ours. */
+  home: string;
+  varRoot: string;
+  foundryBin: string;
+}
+
+export interface OpenedSession {
+  sessionId: string;
+  preset: string;
+}
+
+/**
+ * The runtime as a child process, and its page as a view in this window.
+ *
+ * What this app owns is the origin the page is pinned to, the directories the
+ * runtime may touch, and the rectangle the view occupies. It does not own the
+ * page: the conversation, the model picker and the session list are upstream's,
+ * which is the point of packing the runtime rather than reimplementing it.
+ */
+export class HarnessHost {
+  private child: ChildProcess | null = null;
+  private view: WebContentsView | null = null;
+  private base: string | null = null;
+  private starting: Promise<string> | null = null;
+
+  constructor(private readonly opts: HostOptions) {}
+
+  /** The loopback origin, once the banner has named it. */
+  origin(): string | null {
+    return this.base;
+  }
+
+  /** Spawn once; every later caller waits on the same start. */
+  start(): Promise<string> {
+    if (this.base) return Promise.resolve(this.base);
+    if (this.starting) return this.starting;
+    this.starting = new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, harnessArgs(this.opts.entry), {
+        env: harnessEnv(process.env, {
+          home: this.opts.home,
+          varRoot: this.opts.varRoot,
+          foundryBin: this.opts.foundryBin,
+        }) as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      this.child = child;
+      const lines = new LineBuffer();
+      const timer = setTimeout(() => {
+        reject(new Error(`the harness printed no URL in ${STARTUP_TIMEOUT_MS}ms`));
+      }, STARTUP_TIMEOUT_MS);
+      const settle = (chunk: Buffer) => {
+        for (const line of lines.push(chunk.toString('utf8'))) {
+          const found = harnessUrlFrom(line);
+          if (found) {
+            clearTimeout(timer);
+            this.base = found;
+            resolve(found);
+          }
+        }
+      };
+      child.stdout?.on('data', settle);
+      child.stderr?.on('data', (chunk: Buffer) => process.stderr.write(chunk));
+      child.on('exit', (code) => {
+        clearTimeout(timer);
+        this.child = null;
+        this.base = null;
+        this.starting = null;
+        reject(new Error(`the harness exited with ${code}`));
+      });
+    });
+    return this.starting;
+  }
+
+  /** One RPC against the running runtime. */
+  private async rpc(method: string, payload: Record<string, unknown>): Promise<unknown> {
+    const origin = await this.start();
+    const response = await fetch(rpcUrl(origin, method), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: rpcBody(method, payload),
+    });
+    if (!response.ok) throw new Error(`${method} answered ${response.status}`);
+    return rpcValue(method, await response.json());
+  }
+
+  /**
+   * Open a conversation on the preset the button chose.
+   *
+   * The preset is not a suggestion the operator can drift off: `session.create`
+   * takes it, records it on the session's creation header, and the runtime
+   * composes that agent from it. A follow-up opened here is offered
+   * `query-locked` and nothing else.
+   */
+  async open(intent: Intent, seed?: { windowId: string; briefSha?: string | null }): Promise<OpenedSession> {
+    const preset = PRESET_BY_INTENT[intent];
+    const created = (await this.rpc('session.create', { agentPreset: preset })) as {
+      sessionId?: string;
+    } | null;
+    const sessionId = created?.sessionId;
+    if (!sessionId) throw new Error('session.create returned no session id');
+    const draft = intent === 'followup' && seed ? followupDraft(seed) : '';
+    await this.show(sessionId, draft);
+    return { sessionId, preset };
+  }
+
+  /** Point the view at the new session and reload so the page reads the cell. */
+  private async show(sessionId: string, draft: string): Promise<void> {
+    const origin = await this.start();
+    const view = this.view;
+    if (!view) return;
+    await view.webContents.executeJavaScript(handoffScript(sessionId, draft), true);
+    await view.webContents.loadURL(origin);
+  }
+
+  /** Put the page in the window. Called once, after the first start. */
+  async attach(window: BrowserWindow): Promise<void> {
+    const origin = await this.start();
+    if (this.view) return;
+    const view = new WebContentsView({
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+    });
+    this.view = view;
+    window.contentView.addChildView(view);
+    view.setBounds(HIDDEN);
+    // Pinned to the origin this app started. A page that navigated anywhere else
+    // would be a page this window is vouching for and did not launch.
+    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    view.webContents.on('will-navigate', (event, url) => {
+      if (!url.startsWith(`${origin}/`) && url !== origin) event.preventDefault();
+    });
+    await view.webContents.loadURL(origin);
+  }
+
+  /** Show or hide the page by giving it a rectangle or none. */
+  place(window: BrowserWindow, visible: boolean): void {
+    if (!this.view) return;
+    const [width, height] = window.getContentSize();
+    const rect: Rect = visible ? viewBounds({ width, height }) : { ...HIDDEN };
+    this.view.setBounds(rect);
+  }
+
+  stop(): void {
+    this.child?.kill();
+    this.child = null;
+    this.base = null;
+    this.starting = null;
+  }
+}

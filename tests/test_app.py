@@ -67,12 +67,25 @@ def test_the_app_is_a_caller_not_a_mutator() -> None:
     # `var/`, and an assertion that matched the word would forbid saying so.
     imports = re.compile(r"""^\s*(?:import[^\n]*from\s*['"]([^'"]+)['"]|const[^\n]*=\s*require\(['"]([^'"]+)['"]\))""", re.M)
     banned = {"node:fs", "node:fs/promises", "fs", "duckdb"}
-    sources = [path for path in (APP / "electron").rglob("*.ts") if not path.name.endswith(".test.ts")]
-    assert sources, "no electron sources found"
-    for path in sources:
+
+    # Scoped to the files that face the store. `harness/wiring.ts` uses `fs` to
+    # place a link inside the harness home, which is this app's own directory and
+    # has nothing to do with the catalog -- a blanket ban there would be a rule
+    # about the wrong thing.
+    for name in ("foundry.ts", "reads.ts", "ipc/register.ts"):
+        path = APP / "electron" / name
         for match in imports.finditer(path.read_text(encoding="utf-8")):
             module = match.group(1) or match.group(2)
             assert module not in banned, f"{path} imports {module}"
+
+    # And the claim the ban was standing in for: nothing anywhere under
+    # `electron/` builds a path into the store. The var root is a string the CLI
+    # is handed, never a directory this process walks.
+    store = re.compile(r"""['"][^'"]*\bvar\b[^'"]*/(?:windows|tasks|current)""")
+    sources = [path for path in (APP / "electron").rglob("*.ts") if not path.name.endswith(".test.ts")]
+    assert sources, "no electron sources found"
+    for path in sources:
+        assert not store.search(path.read_text(encoding="utf-8")), f"{path} names a path inside the store"
 
 
 def test_every_command_the_app_calls_exists_on_the_cli(capsys: pytest.CaptureFixture[str]) -> None:

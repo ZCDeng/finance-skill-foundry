@@ -12,6 +12,8 @@ describe('every data path is a CLI call', () => {
     // KTD2: `foundry/` is the sole mutator, and this app is a caller. A read of
     // `var/` from this process would be a second thing that knows the store
     // layout, and the two would agree until the day they did not.
+    // The three that face the store. `harness/wiring.ts` uses `fs` to place a
+    // link inside this app's own harness home, which is not the catalog.
     const sources = ['../electron/foundry.ts', '../electron/reads.ts', '../electron/ipc/register.ts'];
     // Imports, not prose: these files talk about DuckDB and about not reading
     // `var/`, and an assertion that matched the word would forbid saying so.
@@ -26,13 +28,20 @@ describe('every data path is a CLI call', () => {
     expect(read('../electron/foundry.ts')).toMatch(/execFile/);
   });
 
-  it('answers every channel from the read surface', () => {
-    // A screen that wants something not in READS needs a new read-only
-    // subcommand, not a new way into the files.
+  it('gives every declared channel a handler', () => {
+    // By key rather than by transforming the wire name: `harness:status` and
+    // `harnessStatus` do not derive from each other, and a heuristic that
+    // happened to work for the first four channels quietly stopped checking
+    // anything when a fifth arrived.
     const register = read('../electron/ipc/register.ts');
-    for (const channel of Object.values(CHANNELS)) {
-      expect(register).toContain(channel.split(':')[1].replace(/-([a-z])/g, (_m, c) => c.toUpperCase()));
+    for (const key of Object.keys(CHANNELS)) {
+      expect(register, key).toContain(`CHANNELS.${key}`);
     }
+  });
+
+  it('keeps the read surface to the three views it answers', () => {
+    // A screen that wants something not in here needs a new read-only
+    // subcommand, not a new way into the files.
     expect(Object.values(READS)).toEqual(['task-list', 'task-show', 'deliverables']);
   });
 

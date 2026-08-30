@@ -188,6 +188,24 @@ npm install
 FOUNDRY_VAR=../var npm run dev
 ```
 
+The workbench embeds the pinned harness as a child process and its page as a view
+in the window. Three buttons, three agent presets, and the button decides:
+
+| 按钮 | preset | 工具 |
+|---|---|---|
+| 授技能 | `standard` | 上游的编码 agent |
+| 开始本期 | `period` | foundry 十个 + skill / todo / ask |
+| 追问 | `f3` | `query-locked`，仅此一个 |
+
+The preset rides `session.create`, is recorded on the session's creation header,
+and nothing later can widen it. Opening a period session creates the window
+against the task first, so the window carries the back-pointer before a model can
+call anything — which is why one harness process can serve every task without an
+ambient `FOUNDRY_TASK`.
+
+Set `FOUNDRY_DSH_INSTALL` to a directory with `@deepseek-ai/dsh` installed. The
+runtime is not bundled yet; the workbench simply does not appear without it.
+
 It is a caller, never a mutator (KTD2). The main process opens no catalog and
 reads no file under `var/`: every screen is a read-only CLI subcommand, and a
 view that wants something new needs a new subcommand rather than a second reader

@@ -1,7 +1,9 @@
-import { ipcMain } from 'electron';
+import { type BrowserWindow, ipcMain } from 'electron';
 
 import type { Binding } from '../foundry.js';
-import { FoundryFailure, FoundryRefusal } from '../foundry.js';
+import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
+import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
+import type { HarnessHost } from '../harness/host.js';
 import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
 import { CHANNELS } from './contract.js';
 
@@ -36,7 +38,22 @@ function taskId(value: unknown): string {
   return text;
 }
 
-export function registerIpc(binding: Omit<Binding, 'task' | 'session'>): void {
+/** An intent as it comes off the wire. One of three, or the call does not run. */
+function intentOf(value: unknown): Intent {
+  const text = String(value ?? '');
+  if (text === 'author' || text === 'period' || text === 'followup') return text;
+  throw new FoundryFailure(`not an intent: ${text}`, null);
+}
+
+export function registerIpc(
+  binding: Omit<Binding, 'task' | 'session'>,
+  harness?: {
+    host: HarnessHost;
+    window: () => BrowserWindow | null;
+    /** Told on every change, so a resize can put the view back where it was. */
+    remember: (visible: boolean) => void;
+  },
+): void {
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
 
   ipcMain.handle(CHANNELS.task, (_event, task: unknown) =>
@@ -47,5 +64,58 @@ export function registerIpc(binding: Omit<Binding, 'task' | 'session'>): void {
 
   ipcMain.handle(CHANNELS.deliverableText, (_event, task: unknown, sha: unknown) =>
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),
+  );
+
+  if (!harness) return;
+
+  ipcMain.handle(CHANNELS.harnessStatus, () =>
+    answer(async () => ({ origin: await harness.host.start() })),
+  );
+
+  /**
+   * Open a conversation, bound before it exists.
+   *
+   * The order is the point. A period session gets a window created against this
+   * task first, so the window carries the back-pointer before the model can call
+   * anything -- the CLI then resolves the task from the window rather than from
+   * an ambient value, which is what lets one harness process serve every task.
+   * The session is registered on the task with the role its button chose, and
+   * the leader's own wording is written here rather than inferred later from
+   * whatever a model passed to `query-locked`.
+   */
+  ipcMain.handle(
+    CHANNELS.harnessOpen,
+    (_event, rawIntent: unknown, rawTask: unknown, rawSeed: unknown) =>
+      answer(async () => {
+        const intent = intentOf(rawIntent);
+        const task = taskId(rawTask);
+        const seed = (rawSeed ?? {}) as { windowId?: string; briefSha?: string; verbatim?: string };
+
+        if (intent === 'period') {
+          await runFoundry({ ...binding, task }, 'create');
+        }
+        const opened = await harness.host.open(
+          intent,
+          intent === 'followup' && seed.windowId
+            ? { windowId: seed.windowId, briefSha: seed.briefSha ?? null }
+            : undefined,
+        );
+        await runFoundry({ ...binding, task, session: opened.sessionId }, 'record-session', [
+          '--role',
+          ROLE_BY_INTENT[intent],
+          ...(seed.verbatim ? ['--verbatim', seed.verbatim] : []),
+        ]);
+        return opened;
+      }),
+  );
+
+  ipcMain.handle(CHANNELS.workbenchVisible, (_event, visible: unknown) =>
+    answer(async () => {
+      const shown = Boolean(visible);
+      harness.remember(shown);
+      const window = harness.window();
+      if (window) harness.host.place(window, shown);
+      return { visible: shown };
+    }),
   );
 }

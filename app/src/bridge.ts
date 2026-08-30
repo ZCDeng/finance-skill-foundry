@@ -61,11 +61,21 @@ export interface TaskDetail {
   deliverables: DeliverableRow[];
 }
 
+export type Intent = 'author' | 'period' | 'followup';
+
 export interface Bridge {
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
+  /** Absent when this build has no harness install to embed. */
+  harnessStatus?(): Promise<Answer<{ origin: string }>>;
+  harnessOpen?(
+    intent: Intent,
+    task: string,
+    seed?: { windowId?: string; briefSha?: string | null; verbatim?: string },
+  ): Promise<Answer<{ sessionId: string; preset: string }>>;
+  workbenchVisible?(visible: boolean): Promise<Answer<{ visible: boolean }>>;
 }
 
 export function bridge(): Bridge | null {

@@ -16,6 +16,10 @@ const api = {
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
   deliverableText: (task: string, sha: string) =>
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
+  harnessStatus: () => ipcRenderer.invoke('harness:status'),
+  harnessOpen: (intent: string, task: string, seed?: unknown) =>
+    ipcRenderer.invoke('harness:open', intent, task, seed),
+  workbenchVisible: (visible: boolean) => ipcRenderer.invoke('harness:visible', visible),
 };
 
 export type PreloadAPI = typeof api;

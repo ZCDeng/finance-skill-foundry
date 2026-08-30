@@ -10,6 +10,9 @@ export const CHANNELS = {
   task: 'foundry:task',
   gallery: 'foundry:gallery',
   deliverableText: 'foundry:deliverable-text',
+  harnessStatus: 'harness:status',
+  harnessOpen: 'harness:open',
+  workbenchVisible: 'harness:visible',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
