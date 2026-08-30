@@ -14,7 +14,7 @@ import {
   stagedBundleDir,
   type Layout,
 } from './harness/resources.js';
-import { installPlugin, installPresets } from './harness/wiring.js';
+import { type Wiring, type WiringStep, installPlugin, installPresets } from './harness/wiring.js';
 import { registerIpc } from './ipc/register.js';
 
 const isDev = !app.isPackaged;
@@ -76,6 +76,16 @@ function foundryBin(here: Layout): string {
 
 /** The bundle's package name, which is also its directory inside a node_modules. */
 const BUNDLE_NAME = 'finance-skill-foundry-dsh';
+
+/**
+ * How the wiring went, for the screen rather than the console.
+ *
+ * It used to be a `console.error` and nothing else, so a run that could not
+ * install the period tools opened a window that looked fine and then failed
+ * somewhere unrelated -- the harness's own dialog reporting that it could not
+ * save an acknowledgement, which names nothing that is wrong.
+ */
+let wiring: Wiring = { state: 'pending' };
 
 let mainWindow: BrowserWindow | null = null;
 let harness: HarnessHost | null = null;
@@ -151,6 +161,7 @@ void app.whenReady().then(() => {
       {
         host,
         formulator: pane,
+        wiring: () => wiring,
         window: () => mainWindow,
         remember: (screen) => {
           onTop = screen;
@@ -162,6 +173,9 @@ void app.whenReady().then(() => {
     // started is a plugin that composition does not have. Attaching is what
     // starts the child, so it waits.
     void (async () => {
+      // Named per step, because which one stopped decides what is missing: the
+      // period tools, the fence presets, or the page itself.
+      let step: WiringStep = 'plugin';
       try {
         await installPlugin({
           entry,
@@ -169,11 +183,18 @@ void app.whenReady().then(() => {
           pluginDir: pluginDir(here),
           stagedBundle: bundle,
         });
+        step = 'presets';
         await installPresets({ foundryBin: foundryBin(here), home, varRoot: varRoot() });
+        step = 'attach';
         const window = mainWindow;
         if (window) await host.attach(window);
+        wiring = { state: 'ready' };
       } catch (error) {
-        console.error('[harness] wiring failed:', error instanceof Error ? error.message : error);
+        const message = error instanceof Error ? error.message : String(error);
+        wiring = { state: 'failed', step, message };
+        // Kept as well as surfaced: the screen gets one sentence, and a
+        // stack-carrying message still belongs where it can be read in full.
+        console.error(`[harness] wiring failed at ${step}:`, message);
       }
     })();
   } else {

@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
+import { WiringTrouble } from '../src/views/Workbench.js';
 import { Deliverables } from '../src/views/Deliverables.js';
 import { Tasks } from '../src/views/Tasks.js';
 import type { DeliverableRow, TaskRow } from '../src/bridge.js';
@@ -119,5 +120,44 @@ describe('the data screen', () => {
     );
     expect(screen.getByText(/unconfirmed: ps is not installed/)).toBeTruthy();
     expect(screen.getByText('http://127.0.0.1:5567')).toBeTruthy();
+  });
+});
+
+describe('a half-wired workbench', () => {
+  it('says nothing while the wiring is still running', () => {
+    // It runs after the window is already up, so a pending state is the normal
+    // first answer and must not draw an alarm.
+    const { container } = render(<WiringTrouble status={{ wiring: { state: 'pending' }, consequence: null, origin: null }} />);
+    expect(container.querySelector('.fnd-refusal')).toBeNull();
+    expect(render(<WiringTrouble status={null} />).container.textContent).toBe('');
+  });
+
+  it('says nothing once it worked', () => {
+    const { container } = render(
+      <WiringTrouble status={{ wiring: { state: 'ready' }, consequence: null, origin: 'http://127.0.0.1:1' }} />,
+    );
+    expect(container.querySelector('.fnd-refusal')).toBeNull();
+  });
+
+  it('names what is missing and which file, when it did not', () => {
+    // The harness reports its own troubles in its own page, and they are the
+    // wrong troubles: a bundle that never installed surfaces as its settings
+    // dialog failing to save an acknowledgement.
+    render(
+      <WiringTrouble
+        status={{
+          wiring: {
+            state: 'failed',
+            step: 'plugin',
+            message: "Cannot find package 'finance-skill-foundry-dsh'",
+          },
+          consequence: '期间工具没有装进 harness。',
+          origin: null,
+        }}
+      />,
+    );
+    expect(screen.getByText('工作台没有装好')).toBeTruthy();
+    expect(screen.getByText('期间工具没有装进 harness。')).toBeTruthy();
+    expect(screen.getByText(/Cannot find package/)).toBeTruthy();
   });
 });

@@ -4,6 +4,7 @@ import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
 import type { FormulatorHost } from '../formulator.js';
 import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
+import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
 import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
 import { CHANNELS } from './contract.js';
@@ -51,6 +52,8 @@ export function registerIpc(
   panes?: {
     host: HarnessHost;
     formulator: FormulatorHost;
+    /** How the wiring went. Read, never awaited: a failed run has no harness to wait on. */
+    wiring: () => Wiring;
     window: () => BrowserWindow | null;
     /** Told on every change, so a resize can put the views back where they were. */
     remember: (screen: string) => void;
@@ -71,8 +74,23 @@ export function registerIpc(
   if (!panes) return;
   const harness = panes;
 
+  /**
+   * What the workbench needs to know before it draws anything.
+   *
+   * Deliberately does not start the harness. The old version awaited
+   * `host.start()`, which meant the one call a screen would make to find out
+   * whether the wiring failed either hung on a start that was never going to
+   * happen or reported the timeout instead of the reason.
+   */
   ipcMain.handle(CHANNELS.harnessStatus, () =>
-    answer(async () => ({ origin: await harness.host.start() })),
+    answer(async () => {
+      const state = harness.wiring();
+      return {
+        wiring: state,
+        consequence: state.state === 'failed' ? WIRING_CONSEQUENCE[state.step] : null,
+        origin: harness.host.origin(),
+      };
+    }),
   );
 
   /**

@@ -245,6 +245,49 @@ describe('two embedded pages, one rectangle', () => {
   });
 });
 
+describe('wiring failures reach the screen', () => {
+  it('names a consequence for every step, in the operator\'s terms', async () => {
+    const { WIRING_CONSEQUENCE } = await import('../electron/harness/wiring.js');
+    expect(Object.keys(WIRING_CONSEQUENCE).sort()).toEqual(['attach', 'plugin', 'presets']);
+    // The step names are the code's. What an operator needs is which capability
+    // is missing, so each one has to say that rather than repeat the step.
+    for (const [step, text] of Object.entries(WIRING_CONSEQUENCE)) {
+      expect(text.length, step).toBeGreaterThan(20);
+      expect(text, step).not.toContain(step);
+    }
+  });
+
+  it('reports the state without starting the harness', () => {
+    // The old handler awaited `host.start()`, so the one call a screen makes to
+    // find out whether the wiring failed either hung on a start that was never
+    // going to happen or reported that timeout instead of the reason.
+    const register = read('../electron/ipc/register.ts');
+    const handler = register.slice(register.indexOf('CHANNELS.harnessStatus'));
+    const body = handler.slice(0, handler.indexOf('ipcMain.handle', 1));
+    expect(body).toContain('harness.host.origin()');
+    expect(body).not.toContain('host.start()');
+  });
+
+  it('carries the step out of the catch rather than only logging it', () => {
+    const main = read('../electron/main.ts');
+    const block = main.slice(main.indexOf('let step: WiringStep'), main.indexOf('createWindow();'));
+    expect(block).toContain("wiring = { state: 'failed', step, message }");
+    // Kept as well as surfaced: one sentence on screen, the full message where
+    // it can be read.
+    expect(block).toContain('console.error');
+  });
+
+  it('draws the runtime own message under the consequence, not instead of it', () => {
+    // The consequence says what is missing; the message says which file. Only
+    // the second makes it fixable.
+    const view = read('../src/views/Workbench.tsx');
+    const panel = view.slice(view.indexOf('export function WiringTrouble'));
+    const body = panel.slice(0, panel.indexOf('\n}'));
+    expect(body.indexOf('status.consequence')).toBeLessThan(body.indexOf('status.wiring.message'));
+    expect(body).toContain("status.wiring.state !== 'failed'");
+  });
+});
+
 describe('the rectangle the page gets', () => {
   it('leaves the header and the task bar visible', () => {
     expect(viewBounds({ width: 1280, height: 860 })).toEqual({

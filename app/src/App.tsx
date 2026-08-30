@@ -9,6 +9,7 @@ import {
   type Intent,
   type LaunchSpec,
   type TaskDetail as Detail,
+  type HarnessStatus,
   type TaskRow,
   bridge,
 } from './bridge.js';
@@ -16,7 +17,7 @@ import { Deliverables } from './views/Deliverables.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
-import { TaskBar, Workbench, type OpenSession } from './views/Workbench.js';
+import { TaskBar, Workbench, WiringTrouble, type OpenSession } from './views/Workbench.js';
 
 /** A refusal is a sentence the store wrote. Show it, do not translate it. */
 function Refusal({ message }: { message: string }) {
@@ -29,6 +30,7 @@ export function App() {
   const [open, setOpen] = useState<string | null>(null);
   const [session, setSession] = useState<OpenSession | null>(null);
   const [opening, setOpening] = useState(false);
+  const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [formulator, setFormulator] = useState<LaunchSpec | null>(null);
   const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -68,6 +70,30 @@ export function App() {
         : '';
     void api?.paneVisible?.(shown);
   }, [api, screen, session, formulator]);
+
+  /*
+   * Polled while the workbench is open rather than read once: the wiring runs
+   * after the window is already up, so a screen that asked once would report
+   * `pending` forever and a failure that arrived a second later would never be
+   * drawn. It stops on its own as soon as the answer is not `pending`.
+   */
+  useEffect(() => {
+    if (!api?.harnessStatus || screen !== 'workbench') return;
+    let live = true;
+    const ask = () => {
+      void api.harnessStatus?.().then((a) =>
+        take(a, (value) => {
+          if (!live) return;
+          setStatus(value);
+          if (value.wiring.state === 'pending') window.setTimeout(ask, 1000);
+        }),
+      );
+    };
+    ask();
+    return () => {
+      live = false;
+    };
+  }, [api, screen, take]);
 
   useEffect(() => {
     if (!api?.formulatorStatus || screen !== 'formulator') return;
@@ -165,6 +191,12 @@ export function App() {
       }
     >
       {problem ? <Refusal message={problem} /> : null}
+      {/*
+        * Above the buttons, not beside them. A session opened on a half-wired
+        * app runs on the wrong preset or with no period tools at all, and the
+        * operator should read why before pressing anything.
+        */}
+      {screen === 'workbench' ? <WiringTrouble status={status} /> : null}
       {screen === 'workbench' ? (
         open === null ? (
           <Tasks tasks={tasks} onOpen={setOpen} />

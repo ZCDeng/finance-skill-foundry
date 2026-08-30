@@ -63,13 +63,30 @@ export interface TaskDetail {
 
 export type Intent = 'author' | 'period' | 'followup';
 
+/**
+ * How the app's own wiring went, and what a stopped step costs.
+ *
+ * `consequence` is written for the person looking at the window. The step names
+ * are the code's; what an operator needs is which capability is missing.
+ */
+export type Wiring =
+  | { state: 'pending' }
+  | { state: 'ready' }
+  | { state: 'failed'; step: 'plugin' | 'presets' | 'attach'; message: string };
+
+export interface HarnessStatus {
+  wiring: Wiring;
+  consequence: string | null;
+  origin: string | null;
+}
+
 export interface Bridge {
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
   /** Absent when this build has no harness install to embed. */
-  harnessStatus?(): Promise<Answer<{ origin: string }>>;
+  harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(
     intent: Intent,
     task: string,

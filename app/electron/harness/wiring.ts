@@ -31,6 +31,29 @@ function run(bin: string, args: string[], env: NodeJS.ProcessEnv): Promise<strin
 }
 
 /**
+ * Which wiring step a run is on, and what it would mean if it stopped there.
+ *
+ * The steps fail in different ways and the operator cannot tell them apart from
+ * the symptom. A dangling plugin link makes the runtime's whole tree fail to
+ * load, and what reaches the screen is the harness's own settings dialog saying
+ * an acknowledgement could not be saved -- which names nothing that is actually
+ * wrong. So the step is carried out to the surface rather than logged.
+ */
+export type WiringStep = 'plugin' | 'presets' | 'attach';
+
+export type Wiring =
+  | { state: 'pending' }
+  | { state: 'ready' }
+  | { state: 'failed'; step: WiringStep; message: string };
+
+/** What a stopped step costs, in the operator's terms rather than the code's. */
+export const WIRING_CONSEQUENCE: Record<WiringStep, string> = {
+  plugin: '期间工具没有装进 harness。会话里调不到 create / import / lock, 模型也看不见它们。',
+  presets: '期间和追问的 agent preset 没有装上。开出来的会话会跑在上游的 standard 上, 那道围栏不在。',
+  attach: 'harness 没有起来, 工作台是空的。',
+};
+
+/**
  * Install the period tools into the harness's `web` profile.
  *
  * Not through `dsh plugin add`, and that is a decision the first clean-machine
