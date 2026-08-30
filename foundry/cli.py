@@ -283,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("task-show")
     sub.add_parser("deliverables")
 
+    p_text = sub.add_parser("deliverable-text")
+    p_text.add_argument("--sha", required=True, help="sha256 of an archived version")
+
     p_session = sub.add_parser("record-session")
     p_session.add_argument("--role", default="", help=f"one of {SESSION_ROLES}; omit to derive")
     p_session.add_argument(
@@ -328,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        if args.cmd in {"task-show", "deliverables", "record-session"}:
+        if args.cmd in {"task-show", "deliverables", "record-session", "deliverable-text"}:
             task = resolve_task(tasks, explicit=args.task or None)
             if task is None:
                 task = tasks.current()
@@ -336,6 +339,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise FoundryError("no task; pass --task or run task-new")
             if args.cmd == "deliverables":
                 print(json.dumps(task.deliverables(), ensure_ascii=False))
+                return 0
+            if args.cmd == "deliverable-text":
+                # Addressed by digest, never by path. A caller naming a file
+                # could name any file; a caller naming a sha can only reach a
+                # version this task actually filed.
+                print(task.artifact_text(args.sha), end="")
                 return 0
             if args.cmd == "record-session":
                 session = str(args.session or "").strip()

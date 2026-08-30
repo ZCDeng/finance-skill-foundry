@@ -306,6 +306,8 @@ class Task:
             return row
 
     def artifact_text(self, sha256: str, *, ext: str = ".md") -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", str(sha256)):
+            raise FoundryError(f"not a sha256: {sha256}")
         path = self.artifacts_dir / f"{sha256}{ext}"
         if not path.is_file():
             raise FoundryError(f"no archived deliverable {sha256} on task {self.id}")

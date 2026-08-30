@@ -177,6 +177,37 @@ A drop is an untrusted upload, so `--drop-dir` refuses every symlink inside the 
 
 If `stop-formulator` cannot confirm the pid's identity (no `ps`, or the pid belongs to another user) it refuses rather than killing an unverified process. `FOUNDRY_FORMULATOR_FORCE_STOP=1` releases the lease anyway so the window stays re-importable; it does **not** stop the server, and the payload says so. Kill that process yourself, or the next launch on this window will refuse on the port pre-flight.
 
+## App
+
+A desktop window over the same store, in `app/`. It shows the tasks, what each
+window was built from, and every version each one produced.
+
+```bash
+cd app
+npm install
+FOUNDRY_VAR=../var npm run dev
+```
+
+It is a caller, never a mutator (KTD2). The main process opens no catalog and
+reads no file under `var/`: every screen is a read-only CLI subcommand, and a
+view that wants something new needs a new subcommand rather than a second reader
+that can drift. `tests/test_app.py` asserts that from the Python side and
+`app/tests/reads.test.ts` from the other.
+
+The renderer names a task id and a sha256 and nothing else — never a path — and
+both are shape-checked in main before a call runs.
+
+Design tokens and the two bundled faces come from `design-toolkit-app`, renamed
+from `--dtk-` to `--fnd-`. Departure Mono draws on a 50-unit grid over a
+550-unit em, so a column of figures lines up without being asked to; the
+document sets `tabular-nums` globally for the same reason.
+
+The five claim words render as one chip shape, and only two of them carry
+colour: 稿外追问 and not-in-this-window, the two that say something other than
+where a number came from. Five colours would out-shout the numbers beside them.
+`app/tests/tokens.test.ts` measures every mark against the surface it sits on —
+4.5:1 for text, 3:1 for the one colour that is only an edge.
+
 ## Method skills
 
 Four close methods ship in `method/`. They are kit files, not `var/skills/`.

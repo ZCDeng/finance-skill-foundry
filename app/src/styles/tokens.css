@@ -1,0 +1,251 @@
+@import './fonts.css';
+
+/*
+ * The token table, taken whole from `design-toolkit-app/src/styles/tokens.css`
+ * with the `--dtk-` prefix renamed to `--fnd-`. Those values are that app's
+ * measured :root, originally from a YouMind clone; nothing here re-derives them,
+ * and a change there is worth carrying over rather than diverging from.
+ *
+ * Renamed rather than shared because the two products ship separately and
+ * `--dtk-` reads as "design toolkit" in a finance window. Dropped on the way
+ * over: the tokens that describe a picture gallery -- card and cover heights,
+ * grid minimums, the carousel gutter, the selection strip. This product has no
+ * gallery of images; it has tables of numbers.
+ *
+ * Theme follows the system only. There is no toggle. Bare :root is the light
+ * table; [data-theme] and the media query keep a dark mapping so the packaged
+ * app cannot render one theme's text on the other theme's ground.
+ */
+
+:root {
+  /* -- surface and text ------------------------------------------------ */
+  --fnd-bg: #ffffff;
+  --fnd-surface: #ffffff;
+  --fnd-surface-strong: #f7f7f7;
+  --fnd-ink: #000000e0;
+  --fnd-muted: #00000099;
+  --fnd-line: #1f1f1f24;
+
+  /* Primary fill is near-black. Green is outline-only on the clone. */
+  --fnd-accent: #1f1f1f;
+  --fnd-accent-text: #1f1f1f;
+  --fnd-on-accent: #f9fafb;
+  --fnd-outline: #54d460;
+
+  /* -- geometry (clone: radius .5rem, card 16px, chip 30px) ------------ */
+  --fnd-radius-control: 8px;
+  --fnd-radius-container: 16px;
+  --fnd-radius-chip: 30px;
+  --fnd-radius-pill: 9999px;
+  --fnd-radius-mark: 6px;
+  --fnd-radius-menu: 10px;
+  --fnd-radius-menu-item: 7px;
+  /* The composer card, measured off youmind.com/overview. */
+  --fnd-radius-composer: 24px;
+
+  --fnd-pad-button-y: 0px;
+  --fnd-pad-button-x: 14px;
+  --fnd-button-height: 32px;
+  --fnd-header-height: 56px;
+  /*
+   * The selection strip. Mirrors `BASKET_HEIGHT` in
+   * `electron/harness/bounds.ts`, where main computes the rectangle the
+   * harness view gets when the strip is up. `tokens.test.ts` pins the two
+   * together, the same way it already pins the header height.
+   */
+  /*
+   * The tool library's own floor. Wider than the picture gallery's, because
+   * the entry there sets a paragraph in a face that advances every glyph
+   * 0.6364em: 258px is 25 Latin characters to a line at body size and 320px is
+   * 31. A gallery of covers has no paragraph and wants the narrower column.
+   */
+  --fnd-grid-gap: 16px;
+  --fnd-container: 1200px;
+  /* Reference: 60px between sections, 24px between carousel cards. */
+  --fnd-section-gap: 60px;
+
+  /*
+   * -- type -------------------------------------------------------------
+   *
+   * Two families, and the split between them is the design.
+   *
+   * Latin is Departure Mono (Helena Zhang, OFL 1.1, no Reserved Font Name,
+   * bundled unmodified in `src/assets/fonts/` with its licence). Chinese is
+   * Chocolate Classical Sans (OFL 1.1, no Reserved Font Name, converted from
+   * the shipped `.ttf` to `woff2`, not subsetted, licence beside it). Both
+   * replaced Clash Grotesk, which did the Latin and left the Chinese to
+   * whatever the platform owned.
+   *
+   * The order in these stacks is load-bearing and it is not alphabetical.
+   * Chocolate Classical Sans carries a complete Latin of its own -- 95 of 95
+   * printable ASCII, 96 of 96 Latin-1, 128 of 128 Latin Extended-A, checked
+   * against its `cmap`. Name it first and it wins every English word in the
+   * product and Departure Mono never draws once. Departure Mono therefore goes
+   * first: it takes the Latin because it has the Latin, and Chinese falls past
+   * it because it has none -- 1,079 codepoints and not one CJK ideograph. The
+   * fall-through is the whole mechanism and it only runs in that order. Swap
+   * these two names and the product silently changes typeface.
+   *
+   * The system faces after them are the safety net, not the plan. Chocolate
+   * covers all 6,763 GB2312 hanzi, all 20,902 GBK hanzi, and the complete
+   * U+4E00-9FFF and Extension A blocks, so PingFang SC and Songti SC should
+   * never be reached for Chinese. They stay named because a stack that ran
+   * straight to `sans-serif` would still render, in whatever the platform
+   * picked, which is how a bundled Chinese face was once deleted without a
+   * single test failing. `tokens.test.ts` names them.
+   *
+   * Both faces are Regular only. No `fvar` in either file, `usWeightClass` 400
+   * in both. So the weight tokens below are both 400, and `base.css` sets
+   * `font-synthesis-weight: none` to stop the engine faking the difference.
+   * Chromium synthesises bold at requested weight >= 600, which is exactly
+   * where `--fnd-weight-heavy` used to sit; on a pixel face that smears the
+   * orthogonal stems, and on a CJK face it fills in the counters. Hierarchy is
+   * carried by size, case and colour instead. The two tokens stay in the file,
+   * at 400, so the call sites keep compiling and so the next person finds this
+   * paragraph instead of re-adding a 600.
+   */
+  --fnd-font-sans: 'Departure Mono', 'Chocolate Classical Sans', ui-sans-serif,
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC',
+    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --fnd-font-display: 'Departure Mono', 'Chocolate Classical Sans', ui-sans-serif,
+    system-ui, -apple-system, 'PingFang SC', 'Songti SC', 'Noto Sans SC',
+    sans-serif;
+  --fnd-size-label: 12px;
+  --fnd-size-small: 12px;
+  --fnd-size-body: 16px;
+  --fnd-size-h3: 14px;
+  --fnd-size-h2: 36px;
+  --fnd-weight-strong: 400;
+  --fnd-weight-heavy: 400;
+  --fnd-leading-body: 24px;
+  /*
+   * The step every solved type size in the tool library snaps to.
+   *
+   * Departure Mono's outline coordinates are all multiples of 50 units on a
+   * 550 unit em, so one em is exactly eleven design pixels. A size that is a
+   * multiple of 11 puts every vertical stem on a whole pixel at 1x, and a
+   * multiple of 5.5 does it at 2x. This app is packaged for macOS, where 2x is
+   * the normal case, so 5.5 is the step. `SkillCard` carries the same number
+   * as `NAME_STEP`, and `Browse.test.tsx` pins the two together.
+   */
+  --fnd-mono-step: 5.5px;
+
+  /*
+   * -- the mark ---------------------------------------------------------
+   *
+   * The product's own colours, measured off the operator's artwork rather than
+   * picked: a brightness plane fitted over the 8,455 gold pixels in that file
+   * rises toward (0.861, -0.509), and the two ends of that axis average
+   * #b28a45 and #e2c180. The gradient geometry that uses them is in `Mark.tsx`,
+   * with the frame it is drawn in.
+   *
+   * They sit outside the palette on purpose and do not flip with the theme:
+   * the mark carries its own ground, and a logo that recolours itself in dark
+   * mode is a different logo.
+   */
+  --fnd-mark-from: #b28a45;
+  --fnd-mark-to: #e2c180;
+
+  /*
+   * The gold, borrowed back out of the mark for one job: the line that appears
+   * under a pointer in the two galleries.
+   *
+   * It is a separate token from the two above rather than a reference to them,
+   * and this one does flip with the theme, because a border has to be seen
+   * against the surface behind it while the mark carries its own ground. The
+   * two values are the two ends of the mark's own gradient, adjusted only far
+   * enough to clear the 3:1 that WCAG 1.4.11 asks of a non-text control edge:
+   *
+   *   light  #a67e3c  3.70:1 on #ffffff, 3.46:1 on #f7f7f7
+   *   dark   #e2c180  9.55:1 on #1f1f1f, 10.49:1 on #161616
+   *
+   * The mark's own dark end, #b28a45, was tried first and measures 2.96:1 on
+   * the hovered tile's #f7f7f7 ground, which is under the floor. #a67e3c is
+   * the same hue two steps down.
+   */
+  --fnd-line-hover: #a67e3c;
+
+  /*
+   * -- the five words ----------------------------------------------------
+   *
+   * 报表声称 / 我重算 / 两者一致 / 稿外追问 / not-in-this-window is the whole
+   * claim vocabulary (KTD6), and five colours would out-shout the numbers they
+   * sit beside. So only two carry any, and they are the two that are not about
+   * arithmetic:
+   *
+   *   稿外追问          this answer is not on the brief the leader is holding
+   *   not-in-window     this window cannot answer it, and nothing was invented
+   *
+   * The first three say where a number came from and differ by their own label,
+   * drawn in ink on the surface. That follows the borrowed system's own rule,
+   * where the primary fill is near-black and colour is an outline.
+   *
+   * The outside mark takes the gold this table already uses for a hovered
+   * border, so the window carries one accent rather than two. Its text and its
+   * border are separate tokens in the light table, because they answer to
+   * different floors: WCAG asks 4.5:1 of text and 3:1 of a non-text edge, and
+   * the border gold does not clear the first. Measured against the surface a
+   * chip sits on, not against the page:
+   *
+   *   light  text #8a6729  5.18:1 on #ffffff, 4.84:1 on #f7f7f7
+   *          line #a67e3c  3.70:1 / 3.46:1  -- an edge, so 3:1 is its floor
+   *   dark   both #e2c180  9.55:1 on #1f1f1f, 10.49:1 on #161616
+   *
+   * `--fnd-muted` was tried for the absent mark and measures 2.85:1 on white,
+   * under the floor. A struck-through, dashed chip is meant to be quiet, and
+   * quiet is not the same as hard to read: it still says a question this window
+   * could not answer, which is the one an operator most needs to notice.
+   *
+   *   light  #6b6b6b  5.33:1 / 4.97:1
+   *   dark   #9a9a9a  5.86:1 / 6.43:1
+   */
+  --fnd-mark-outside: #8a6729;
+  --fnd-mark-outside-line: #a67e3c;
+  --fnd-mark-outside-fill: #a67e3c1f;
+  --fnd-mark-absent: #6b6b6b;
+
+  /* -- motion ---------------------------------------------------------- */
+  --fnd-transition: 180ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --fnd-bg: #111111;
+    --fnd-surface: #1f1f1f;
+    --fnd-surface-strong: #161616;
+    --fnd-ink: #f9fafb;
+    --fnd-muted: #a6a6a6;
+    --fnd-line: #ffffff24;
+    --fnd-line-hover: #e2c180;
+    --fnd-accent: #f9fafb;
+    --fnd-accent-text: #f9fafb;
+    --fnd-on-accent: #1f1f1f;
+    --fnd-mark-outside: #e2c180;
+    --fnd-mark-outside-line: #e2c180;
+    --fnd-mark-outside-fill: #e2c1801f;
+    --fnd-mark-absent: #9a9a9a;
+  }
+}
+
+:root[data-theme='dark'] {
+  --fnd-bg: #111111;
+  --fnd-surface: #1f1f1f;
+  --fnd-surface-strong: #161616;
+  --fnd-ink: #f9fafb;
+  --fnd-muted: #a6a6a6;
+  --fnd-line: #ffffff24;
+  --fnd-line-hover: #e2c180;
+  --fnd-accent: #f9fafb;
+  --fnd-accent-text: #f9fafb;
+  --fnd-on-accent: #1f1f1f;
+  --fnd-mark-outside: #e2c180;
+  --fnd-mark-outside-line: #e2c180;
+  --fnd-mark-outside-fill: #e2c1801f;
+  --fnd-mark-absent: #9a9a9a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fnd-transition: 0ms;
+  }
+}

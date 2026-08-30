@@ -1,0 +1,92 @@
+/*
+ * Two faces, bundled, copied byte for byte from `design-toolkit-app` along with
+ * their licences. The reasoning below is that repo's and it carries over whole;
+ * one line of it is worth more here than there.
+ *
+ * Departure Mono draws every glyph on a 50-unit grid over a 550-unit em, which
+ * makes it tabular by construction. A design tool wanted it for its look. A
+ * finance window wants it because a column of figures lines up without being
+ * asked to.
+ *
+ * Two faces, bundled. Latin and Chinese are separate files on purpose.
+ *
+ * This replaces Clash Grotesk, which was one variable file doing the Latin and
+ * leaving every Chinese glyph to whatever the platform happened to own. That
+ * arrangement was never a design; it was a gap the system face fell into. The
+ * product is mostly Chinese, so the Chinese was being drawn by PingFang SC on
+ * the operator's machine and by something else everywhere else, and no test
+ * could see the difference.
+ *
+ * Both files here are SIL Open Font License 1.1. Neither declares a Reserved
+ * Font Name -- the copyright line in each licence stops at the holder, with no
+ * "with Reserved Font Name" clause after it -- so the OFL permits us to convert
+ * format, subset, and keep the family names as they are. That matters for the
+ * Chinese face, which we convert. Both licences travel beside the files.
+ *
+ * Departure Mono is Helena Zhang's, 2022-2024, OFL 1.1. The archive already
+ * shipped a `.woff2`, so the file here is that one copied byte for byte, no
+ * re-encode. It carries 1,079 codepoints across 1,186 glyphs and not a single
+ * CJK ideograph -- checked against its own `cmap`, not against the specimen.
+ * What it does carry is the whole of printable ASCII (95 of 95), the whole of
+ * Latin-1 Supplement (96 of 96), 127 of Latin Extended-A, 206 Cyrillic, 72
+ * Greek, and -- because it is a terminal face -- all 128 Box Drawing glyphs and
+ * all 32 Block Elements. That is more than a UI needs.
+ *
+ * Chocolate Classical Sans is The Chocolate Classical Sans Project Authors',
+ * 2024, OFL 1.1. It arrived as a 12,160,588-byte `.ttf`; the file here is that
+ * one converted to `woff2`, which brings it to 5,350,932 bytes, a 56% cut for
+ * no glyph loss. Nothing is subsetted. It maps 35,979 codepoints, 32,031 of
+ * them CJK ideographs: the complete U+4E00-9FFF block (20,992 of 20,992), the
+ * complete Extension A block (6,592 of 6,592), 3,602 of Extension B, and every
+ * one of GB2312's 6,763 hanzi and GBK's 20,902. Nothing common can tofu.
+ *
+ * We keep the full font rather than a subset, deliberately. A subset cut to the
+ * 981 ideographs the current source strings use, padded out to GB2312, comes to
+ * 1,102,868 bytes and saves about 4 MB. It is not worth it. The Creator Harness
+ * renders model output, which is arbitrary Chinese we did not write and cannot
+ * enumerate at build time, and the first word outside the subset draws a tofu
+ * box in front of the operator. Four megabytes inside an Electron bundle that
+ * already ships a Chromium is not a number anyone will notice; a tofu box is.
+ *
+ * Neither face has a weight axis. No `fvar` in either file, and both report
+ * `usWeightClass` 400, so `font-weight` is declared as the single `400` each
+ * one actually has. Claiming a range would tell the browser to synthesise the
+ * ends, and a synthesised bold on a pixel face smears the very orthogonal stems
+ * that are the point of it. The hierarchy that used to come from Clash Grotesk's
+ * 200-700 axis has to come from size, spacing, case and colour instead; see the
+ * weight tokens in `tokens.css`, which are now both 400, and `base.css`, which
+ * turns weight synthesis off globally.
+ *
+ * Order matters in the stacks, and it is not cosmetic. Chocolate Classical Sans
+ * carries a full Latin of its own -- all 95 printable ASCII, all 96 of Latin-1,
+ * all 128 of Latin Extended-A. If it were named first, it would win every
+ * English word in the product and Departure Mono would never draw anything. So
+ * Departure Mono is named first in both stacks: it takes the Latin because it
+ * has the Latin, and Chinese falls past it to Chocolate because it has no
+ * Chinese to offer. The fall-through is the mechanism, and it only works in
+ * that order. `tokens.css` carries the stacks and the same warning.
+ *
+ * font-display: block on both, unchanged in spirit from the Clash Grotesk note
+ * it replaces, so the first line does not reflow after a fallback swap. The
+ * Chinese file is 5 MB, which is the one place that reasoning was worth
+ * re-checking: decoding it costs tens of milliseconds from local disk, not
+ * hundreds, and there is no network in it. The renderer CSP is
+ * default-src 'none' with font-src 'self'; nothing here is fetched.
+ */
+@font-face {
+  font-family: 'Departure Mono';
+  src: url('../assets/fonts/DepartureMono-Regular.woff2') format('woff2');
+  /* Regular only. The file has no `fvar` and reports `usWeightClass` 400. */
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Chocolate Classical Sans';
+  src: url('../assets/fonts/ChocolateClassicalSans-Regular.woff2') format('woff2');
+  /* Regular only, same as above. The full face, not a subset. */
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}

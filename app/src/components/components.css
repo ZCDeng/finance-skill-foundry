@@ -1,0 +1,262 @@
+@import '../styles/tokens.css';
+
+/* -- shell ---------------------------------------------------------------- */
+
+.fnd-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--fnd-bg);
+}
+
+.fnd-head {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  height: var(--fnd-header-height);
+  padding: 0 24px;
+  border-bottom: 1px solid var(--fnd-line);
+  background: var(--fnd-surface);
+}
+
+.fnd-head__mark {
+  font-family: var(--fnd-font-display);
+  font-size: var(--fnd-size-body);
+  color: var(--fnd-ink);
+}
+
+.fnd-head__nav {
+  display: flex;
+  gap: 4px;
+}
+
+.fnd-head__tab {
+  border: 0;
+  background: transparent;
+  border-radius: var(--fnd-radius-pill);
+  padding: 0 var(--fnd-pad-button-x);
+  height: var(--fnd-button-height);
+  font-size: var(--fnd-size-small);
+  color: var(--fnd-muted);
+  cursor: pointer;
+  transition: color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-head__tab:hover {
+  color: var(--fnd-ink);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-head__tab[aria-current='page'] {
+  color: var(--fnd-on-accent);
+  background: var(--fnd-accent);
+}
+
+.fnd-column {
+  width: 100%;
+  max-width: var(--fnd-container);
+  margin: 0 auto;
+  padding: 32px 24px 96px;
+}
+
+/* -- the five words ------------------------------------------------------- */
+
+.fnd-marks {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/*
+ * One shape for all five. Only `data-coloured="yes"` takes any hue, and which
+ * marks those are is decided in `marks.ts`, not here -- so the rule that says
+ * "three of these are ink" lives in one place a test can read.
+ */
+.fnd-chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  font-family: var(--fnd-font-sans);
+  font-size: var(--fnd-size-label);
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: var(--fnd-radius-chip);
+  border: 1px solid var(--fnd-ink);
+  color: var(--fnd-ink);
+  background: transparent;
+}
+
+.fnd-chip[data-coloured='yes'][data-mark='outside'] {
+  color: var(--fnd-mark-outside);
+  border-color: var(--fnd-mark-outside-line);
+  background: var(--fnd-mark-outside-fill);
+}
+
+.fnd-chip[data-coloured='yes'][data-mark='absent'] {
+  color: var(--fnd-mark-absent);
+  border-color: var(--fnd-mark-absent);
+  border-style: dashed;
+  text-decoration: line-through;
+}
+
+/* -- cards and rows ------------------------------------------------------- */
+
+.fnd-panel {
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface);
+  padding: 20px 22px;
+}
+
+.fnd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fnd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fnd-muted {
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-small);
+}
+
+.fnd-title {
+  font-size: var(--fnd-size-body);
+  color: var(--fnd-ink);
+}
+
+.fnd-lede {
+  font-size: var(--fnd-size-h2);
+  font-family: var(--fnd-font-display);
+  line-height: 44px;
+  margin-bottom: 6px;
+}
+
+.fnd-eyebrow {
+  font-size: var(--fnd-size-label);
+  color: var(--fnd-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.fnd-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface);
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: border-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-card:hover {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+/* -- tables --------------------------------------------------------------- */
+
+.fnd-tablewrap {
+  overflow-x: auto;
+}
+
+.fnd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fnd-size-small);
+  min-width: 560px;
+}
+
+.fnd-table th,
+.fnd-table td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--fnd-line);
+  vertical-align: top;
+}
+
+.fnd-table th {
+  color: var(--fnd-muted);
+  font-weight: var(--fnd-weight-strong);
+  border-bottom-color: var(--fnd-ink);
+}
+
+.fnd-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.fnd-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fnd-sha {
+  color: var(--fnd-muted);
+}
+
+/* -- timeline ------------------------------------------------------------- */
+
+/*
+ * A rail with a node per event. The line is what makes a re-import read as a
+ * continuation of one task rather than as a second, unrelated directory.
+ */
+.fnd-time {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 22px;
+  border-left: 1px solid var(--fnd-line);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fnd-time__item {
+  position: relative;
+}
+
+.fnd-time__item::before {
+  content: '';
+  position: absolute;
+  left: -27px;
+  top: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--fnd-radius-pill);
+  border: 1px solid var(--fnd-ink);
+  background: var(--fnd-bg);
+}
+
+.fnd-empty {
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-small);
+  padding: 40px 0;
+}
+
+.fnd-refusal {
+  border: 1px solid var(--fnd-mark-outside);
+  background: var(--fnd-mark-outside-fill);
+  color: var(--fnd-ink);
+  border-radius: var(--fnd-radius-control);
+  padding: 14px 16px;
+  font-size: var(--fnd-size-small);
+}
+
+.fnd-reader {
+  white-space: pre-wrap;
+  font-family: var(--fnd-font-sans);
+  font-size: var(--fnd-size-small);
+  line-height: 22px;
+  max-height: 420px;
+  overflow: auto;
+  border-top: 1px solid var(--fnd-line);
+  margin-top: 14px;
+  padding-top: 14px;
+}

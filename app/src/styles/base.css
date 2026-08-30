@@ -1,0 +1,88 @@
+@import './tokens.css';
+
+/*
+ * Base layer. Everything below reads tokens.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+html {
+  font-family: var(--fnd-font-sans);
+  line-height: var(--fnd-leading-body);
+  /*
+   * Both bundled faces are Regular only. Without this, Chromium fakes a bold at
+   * any requested weight of 600 or more by smearing the outline sideways, which
+   * is the one thing a pixel face must not have done to it, and it fills the
+   * counters on the Chinese face. Hierarchy comes from size, case and colour.
+   */
+  font-synthesis-weight: none;
+}
+
+body {
+  background: var(--fnd-bg);
+  color: var(--fnd-ink);
+  font-family: var(--fnd-font-sans);
+  font-size: var(--fnd-size-body);
+  line-height: var(--fnd-leading-body);
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Every figure in this product sits in a column with other figures -- a
+ * deliverable's byte count, a window's row count, an amount. Proportional digits
+ * would make those columns ragged, so the whole document opts in and nothing has
+ * to remember to.
+ */
+body {
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+  margin: 0;
+  font-weight: var(--fnd-weight-strong);
+}
+
+h2 {
+  font-family: var(--fnd-font-display);
+  font-size: var(--fnd-size-h2);
+  line-height: 48px;
+}
+
+h3 {
+  font-size: var(--fnd-size-h3);
+  line-height: 20px;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--fnd-ink);
+  text-decoration-color: var(--fnd-accent-text);
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--fnd-accent-text);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
