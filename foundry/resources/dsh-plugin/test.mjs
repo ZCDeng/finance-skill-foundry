@@ -3,19 +3,33 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { REFUSED, apply, f3Denied, registerTools } from "./index.js";
+import { REFUSED, apply, definitions, f3Denied, inject, registerTools } from "./index.js";
 
 const ROSTER = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).dsh.foundry.tools;
 
-assert.deepEqual(
-  apply({ profile: "f3" }).map((tool) => tool.name),
-  ["query-locked"],
-);
+// The runtime's own registration contract. `inject` names the service the
+// bundle needs mounted before `apply` runs, and `apply` registers on the context
+// it is handed rather than returning a list -- Cordis discards a plugin's return
+// value, so the previous shape put nothing in front of a model and said nothing.
+assert.deepEqual(inject, ["tools"]);
+
+function fakeCtx() {
+  const registered = [];
+  return { registered, tools: { register: (definition) => registered.push(definition) } };
+}
+
+const period = fakeCtx();
+apply(period, {});
+assert.deepEqual(period.registered.map((tool) => tool.name), ROSTER);
+
+const f3 = fakeCtx();
+apply(f3, { profile: "f3" });
+assert.deepEqual(f3.registered.map((tool) => tool.name), ["query-locked"]);
+
+assert.deepEqual(definitions("f3").map((tool) => tool.name), ["query-locked"]);
 assert.equal(f3Denied("re-import"), true);
 assert.equal(f3Denied("query-locked"), false);
 assert.deepEqual(registerTools().map((tool) => tool.name), ROSTER);
-assert.deepEqual(apply({}).map((tool) => tool.name), ROSTER);
-assert.equal(apply({ phase: "f3" }).length, 1);
 
 for (const tool of registerTools()) {
   assert.equal(typeof tool.description, "string", `${tool.name} needs a description`);
@@ -26,6 +40,22 @@ for (const tool of registerTools()) {
   for (const key of tool.parameters.required) {
     assert.ok(key in tool.parameters.properties, `${tool.name} requires undeclared ${key}`);
   }
+  // `output` is mandatory on a ToolDefinition and the registry validates the
+  // value `execute` resolves against it, so a tool without one registers and
+  // then fails on its first call.
+  assert.equal(typeof tool.output, "object", `${tool.name} needs an output declaration`);
+  assert.equal(tool.output.schema.type, "object", `${tool.name} needs an output schema`);
+  assert.deepEqual(
+    tool.output.render({}, { tool: tool.name, stdout: "ok" }),
+    [{ type: "text", text: "ok" }],
+    `${tool.name} must render its stdout as one text block`,
+  );
+  assert.equal(typeof tool.execute, "function", `${tool.name} needs an execute`);
+  const view = tool.presentCall({});
+  assert.equal(view.card, "generic", `${tool.name} needs a generic call card`);
+  // No `locations`: a presenter must be pure and replayable from args alone, and
+  // no foundry tool's arguments name a file. See the note in index.js.
+  assert.equal(view.locations, undefined, `${tool.name} must not guess a file path`);
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "foundry-dsh-"));
@@ -70,15 +100,19 @@ delete process.env.FOUNDRY_HANG_COMMAND;
 delete process.env.FOUNDRY_TIMEOUT_MS;
 
 const tools = Object.fromEntries(registerTools().map((tool) => [tool.name, tool]));
+
+/** One call, with no agent behind it. The registry hands `execute` two arguments. */
+const call = (toolName, input = {}, exec = {}) => tools[toolName].execute(input, exec);
+
 const named = '[{"id":"gl","path":"gl.xlsx"}]';
-tools.create.run({});
-tools.import.run({ dropDir: "drop", coa: "coa.xlsx", named, units: "units.xlsx", aux: "aux.xlsx", map: "map.xlsx" });
-tools["record-questions"].run({ questions: "questions.json" });
-tools.workpaper.run({});
-tools.workpaper.run({ window: "abc123" });
-tools["query-locked"].run({ text: "GL", tables: "gl", splitBy: "unit_id", briefWindow: "abc", questionId: "q1" });
-tools["stop-formulator"].run({});
-tools["re-import"].run({ named: "named.json" });
+await call("create");
+await call("import", { dropDir: "drop", coa: "coa.xlsx", named, units: "units.xlsx", aux: "aux.xlsx", map: "map.xlsx" });
+await call("record-questions", { questions: "questions.json" });
+await call("workpaper");
+await call("workpaper", { window: "abc123" });
+await call("query-locked", { text: "GL", tables: "gl", splitBy: "unit_id", briefWindow: "abc", questionId: "q1" });
+await call("stop-formulator");
+await call("re-import", { named: "named.json" });
 
 const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 assert.deepEqual(calls[0], ["--var", process.env.FOUNDRY_VAR, "create"]);
@@ -116,34 +150,79 @@ assert.deepEqual(calls[5], [
   "abc",
   "--question-id",
   "q1",
+  "--brief-sha",
+  "",
 ]);
 assert.deepEqual(calls[6], ["--var", process.env.FOUNDRY_VAR, "stop-formulator"]);
 assert.deepEqual(calls[7], ["--var", process.env.FOUNDRY_VAR, "re-import", "--named", "named.json"]);
 assert.equal(calls.length, 8);
 
-assert.deepEqual(JSON.parse(tools.lock.run({})), { ok: true, tool: "lock", stdout: "ok stdout" });
-assert.deepEqual(JSON.parse(tools["emit-brief"].run({})), { ok: true, tool: "emit-brief", stdout: "ok stdout" });
+// `execute` resolves the canonical value the output schema declares. It is no
+// longer a JSON string: the registry validates the value and `output.render`
+// turns it into the model-facing block.
+assert.deepEqual(await call("lock"), { tool: "lock", stdout: "ok stdout" });
+assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok stdout" });
+
+// -- binding --------------------------------------------------------------
+//
+// The task rides the environment the host set when it opened the session. The
+// session cannot: one dsh process hosts many conversations, so it is read per
+// call off the agent the loop attached to this execution. Both are top-level
+// flags and must land in front of the subcommand, or argparse rejects them.
+{
+  const mark = readFileSync(log, "utf8").trim().split("\n").length;
+  process.env.FOUNDRY_TASK = "task-abc";
+  await call("emit-brief", {}, { agent: { id: "sess-42" } });
+  const line = JSON.parse(readFileSync(log, "utf8").trim().split("\n")[mark]);
+  assert.deepEqual(line, [
+    "--var",
+    process.env.FOUNDRY_VAR,
+    "--task",
+    "task-abc",
+    "--session",
+    "sess-42",
+    "emit-brief",
+  ]);
+}
+
+{
+  // No agent behind the call: no session recorded, and the call still runs.
+  const mark = readFileSync(log, "utf8").trim().split("\n").length;
+  await call("emit-brief", {}, {});
+  const line = JSON.parse(readFileSync(log, "utf8").trim().split("\n")[mark]);
+  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--task", "task-abc", "emit-brief"]);
+}
+
+{
+  // No task in the environment either: the CLI falls through to the addressed
+  // window's own back-pointer, so the bundle passes neither flag.
+  const mark = readFileSync(log, "utf8").trim().split("\n").length;
+  delete process.env.FOUNDRY_TASK;
+  await call("emit-brief", {}, { agent: { id: "sess-9" } });
+  const line = JSON.parse(readFileSync(log, "utf8").trim().split("\n")[mark]);
+  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--session", "sess-9", "emit-brief"]);
+}
 
 // Host metadata rides under a reserved prefix: the arg check ignores those
 // keys and the call still reaches the CLI instead of failing every tool call.
 const beforeMeta = readFileSync(log, "utf8").trim().split("\n").length;
-assert.doesNotThrow(() => tools.workpaper.run({ _callId: "abc", $trace: "x" }));
+await assert.doesNotReject(() => call("workpaper", { _callId: "abc", $trace: "x" }));
 assert.equal(readFileSync(log, "utf8").trim().split("\n").length, beforeMeta + 1);
 
 const before = readFileSync(log, "utf8").trim().split("\n").length;
-assert.throws(() => tools["query-locked"].run({ tables: "gl" }), /缺少必填参数 text/);
-assert.throws(() => tools["query-locked"].run({ text: "GL" }), /缺少必填参数 tables/);
-assert.throws(() => tools["query-locked"].run({}), /缺少必填参数 text,tables/);
-assert.throws(() => tools["record-questions"].run({}), /缺少必填参数 questions/);
-assert.throws(() => tools["record-questions"].run(), /缺少必填参数 questions/);
-assert.throws(() => tools["query-locked"].run({ text: "GL", tables: "gl", table: "gl" }), /未声明参数 table/);
-assert.throws(() => tools.import.run({ drop_dir: "drop" }), /未声明参数 drop_dir/);
+await assert.rejects(() => call("query-locked", { tables: "gl" }), /缺少必填参数 text/);
+await assert.rejects(() => call("query-locked", { text: "GL" }), /缺少必填参数 tables/);
+await assert.rejects(() => call("query-locked", {}), /缺少必填参数 text,tables/);
+await assert.rejects(() => call("record-questions", {}), /缺少必填参数 questions/);
+await assert.rejects(() => tools["record-questions"].execute(undefined, {}), /缺少必填参数 questions/);
+await assert.rejects(() => call("query-locked", { text: "GL", tables: "gl", table: "gl" }), /未声明参数 table/);
+await assert.rejects(() => call("import", { drop_dir: "drop" }), /未声明参数 drop_dir/);
 assert.equal(readFileSync(log, "utf8").trim().split("\n").length, before, "bad arguments must not reach the CLI");
 
 // A non-refusal failure and a domain refusal must be separable by code, not
 // by string-matching stderr: exit 9 is an error, exit 3 is 稿外/state refusal.
 process.env.FOUNDRY_FAIL_COMMAND = "lock";
-assert.throws(() => tools.lock.run({}), (error) => {
+await assert.rejects(() => call("lock"), (error) => {
   assert.match(error.message, /boom stderr/);
   assert.equal(error.name, "FoundryError");
   assert.equal(error.refused, false);
@@ -154,7 +233,7 @@ delete process.env.FOUNDRY_FAIL_COMMAND;
 
 process.env.FOUNDRY_FAIL_COMMAND = "emit-brief";
 process.env.FOUNDRY_FAIL_STATUS = String(REFUSED);
-assert.throws(() => tools["emit-brief"].run({}), (error) => {
+await assert.rejects(() => call("emit-brief"), (error) => {
   assert.equal(error.name, "FoundryRefusal");
   assert.equal(error.refused, true);
   assert.equal(error.status, REFUSED);
@@ -165,16 +244,16 @@ delete process.env.FOUNDRY_FAIL_STATUS;
 
 process.env.FOUNDRY_HANG_COMMAND = "emit-brief";
 process.env.FOUNDRY_TIMEOUT_MS = "400";
-assert.throws(() => tools["emit-brief"].run({}), /ETIMEDOUT/);
+await assert.rejects(() => call("emit-brief"), /ETIMEDOUT/);
 delete process.env.FOUNDRY_HANG_COMMAND;
 delete process.env.FOUNDRY_TIMEOUT_MS;
 
 process.env.FOUNDRY_BIN = join(tmp, "no-such-foundry");
-assert.throws(() => tools.lock.run({}), /ENOENT/);
+await assert.rejects(() => call("lock"), /ENOENT/);
 process.env.FOUNDRY_BIN = bin;
 
 delete process.env.FOUNDRY_VAR;
-assert.throws(() => tools.lock.run({}), /FOUNDRY_VAR is required/);
+await assert.rejects(() => call("lock"), /FOUNDRY_VAR is required/);
 process.env.FOUNDRY_VAR = join(tmp, "var");
 
 for (const [key, value] of Object.entries(oldEnv)) {

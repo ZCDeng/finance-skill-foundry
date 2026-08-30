@@ -157,6 +157,30 @@ def merge_import_sources(
     )
 
 
+def plugin_install_text(profile: str = "web") -> str:
+    """How the period tools get in front of a model.
+
+    One command, and deliberately not two. `dsh plugin add` writes the package
+    into the profile's dependencies *and* appends it to `dsh.profile.bundles`,
+    and a package carrying a `dsh.bundle.patch` block contributes its own insert
+    row from there. Passing that same file again as `--patch` composes the row a
+    second time, which is the double-apply the file-upload companion already
+    warns about.
+
+    Verified against a real boot on the pinned runtime: after this one command
+    and nothing else, `--dump-config` shows exactly one
+    `id: finance-skill-foundry` row and all ten tools reach the agent.
+    """
+    return "\n".join(
+        [
+            f"dsh plugin --profile {profile} add {dsh_plugin_dir()}",
+            f"bundle\t{json.loads(plugin_package().read_text())['name']}",
+            f"patch\t{dsh_plugin_dir() / 'cordis.patch.yml'} (contributed by the package; do not also pass --patch)",
+            f"tools\t{','.join(load_foundry_dsh()['tools'])}",
+        ]
+    )
+
+
 def harness_text() -> str:
     companion = file_upload_companion()
     add = companion["add"]
@@ -165,6 +189,8 @@ def harness_text() -> str:
     exts = ",".join(companion["config"]["allowedExtensions"])
     return "\n".join(
         [
+            plugin_install_text(),
+            "",
             add,
             f"pin\t{pin}",
             f"role\t{companion['role']}",

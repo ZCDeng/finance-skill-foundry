@@ -153,24 +153,37 @@ SMOKE_SEQUENCE = (
 )
 
 _BUNDLE_DRIVER = """
-import { apply } from "%(bundle)s";
+import { apply, definitions } from "%(bundle)s";
 
 const steps = JSON.parse(process.argv[2]);
-const registered = apply({ profile: "period" });
+
+// Enumerate through `definitions`, not through `apply`. `apply` registers on
+// the context the runtime hands it and returns nothing, so a driver that read
+// its return value would be reading a value the runtime itself discards -- the
+// exact confusion this smoke used to encode. Registering onto a stand-in
+// context here still proves `apply` reaches `ctx.tools.register` for every tool.
+const registered = [];
+apply({ tools: { register: (definition) => registered.push(definition) } }, { profile: "period" });
+const enumerated = definitions("period");
+if (registered.length !== enumerated.length) {
+  throw new Error(
+    `host-smoke: apply registered ${registered.length} tools, definitions listed ${enumerated.length}`,
+  );
+}
 const tools = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
 for (const step of steps) {
   const tool = tools[step.tool];
   if (!tool) {
     throw new Error(`host-smoke: bundle did not register ${step.tool}`);
   }
-  if (!tool.description || !tool.parameters) {
-    throw new Error(`host-smoke: ${step.tool} registered without description/parameters`);
+  if (!tool.description || !tool.parameters || !tool.output) {
+    throw new Error(`host-smoke: ${step.tool} registered without description/parameters/output`);
   }
-  const parsed = JSON.parse(tool.run(step.input));
-  if (parsed.ok !== true || parsed.tool !== step.tool) {
+  const value = await tool.execute(step.input, {});
+  if (value?.tool !== step.tool || typeof value.stdout !== "string") {
     throw new Error(`host-smoke: ${step.tool} returned an unnormalised result`);
   }
-  process.stdout.write(JSON.stringify(parsed) + "\\n");
+  process.stdout.write(JSON.stringify(value) + "\\n");
 }
 """
 

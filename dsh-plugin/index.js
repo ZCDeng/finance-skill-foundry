@@ -24,13 +24,50 @@ const REQUIRED = readRoster();
 export const HOST_WRITERS = ["bash", "dsh-tool-fs", "str-replace-editor"];
 export const LINE_LEAKS = ["read_document"];
 
-function foundry(args) {
+/**
+ * The conversation this call happened in.
+ *
+ * `exec.agent` is set by the agent loop and `exec.agent.id` is that agent's
+ * session. It has to be read here, per call, and cannot come from the process
+ * environment the way `FOUNDRY_VAR` does: one dsh process hosts many
+ * conversations at once, so an ambient value would collapse every follow-up a
+ * leader ever asked into a single id.
+ *
+ * A call with no agent behind it -- a direct registry dispatch, a probe -- is
+ * not refused. It records no session, which is the truth about it.
+ */
+function sessionOf(exec) {
+  const id = exec?.agent?.id;
+  return id ? String(id) : null;
+}
+
+/**
+ * Which task and which conversation this call writes to.
+ *
+ * Both are decided here rather than asked of the model. The task comes from the
+ * environment the host set when it opened the session; the CLI falls through to
+ * the addressed window's own back-pointer when it is absent, so an operator who
+ * never set one still gets their window adopted.
+ *
+ * These are top-level flags, so they go in front of the subcommand: argparse
+ * stops accepting parser-level optionals once a subparser has been chosen.
+ */
+function bindingArgs(exec) {
+  const out = [];
+  const task = String(process.env.FOUNDRY_TASK ?? "").trim();
+  if (task) out.push("--task", task);
+  const session = sessionOf(exec);
+  if (session) out.push("--session", session);
+  return out;
+}
+
+function foundry(args, exec) {
   const bin = process.env.FOUNDRY_BIN ?? "foundry";
   const varRoot = process.env.FOUNDRY_VAR;
   if (!varRoot) {
     throw new Error("FOUNDRY_VAR is required");
   }
-  const result = spawnSync(bin, ["--var", varRoot, ...args], {
+  const result = spawnSync(bin, ["--var", varRoot, ...bindingArgs(exec), ...args], {
     encoding: "utf8",
     timeout: Number(process.env.FOUNDRY_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
     killSignal: "SIGKILL",
@@ -142,6 +179,7 @@ const TOOL_SPECS = {
         splitBy: { type: "string", description: "拆分维度: unit_id 或 analysis_node; 省略则不拆" },
         briefWindow: { type: "string", description: "结论稿窗口 id; 把重算挂回那一稿" },
         questionId: { type: "string", description: "追问清单里的 question id; 把重算挂回那一条" },
+        briefSha: { type: "string", description: "领导手上那一版结论稿的 sha256; 把重算锚到他读的那一份" },
       },
       required: ["text", "tables"],
     },
@@ -157,6 +195,8 @@ const TOOL_SPECS = {
       input.briefWindow ?? "",
       "--question-id",
       input.questionId ?? "",
+      "--brief-sha",
+      input.briefSha ?? "",
     ],
   },
   "re-import": {
@@ -167,6 +207,7 @@ const TOOL_SPECS = {
 };
 
 export const name = "finance-skill-foundry";
+export const inject = ["tools"];
 
 function specFor(toolName) {
   const spec = TOOL_SPECS[toolName];
@@ -195,19 +236,73 @@ function checkArgs(toolName, spec, input) {
   }
 }
 
-function toolResult(toolName, stdout) {
-  return JSON.stringify({ ok: true, tool: toolName, stdout: stdout ?? "" });
+/**
+ * What every foundry tool returns to the model.
+ *
+ * `output.schema` is mandatory on a `ToolDefinition` and the registry enforces
+ * it against the value `execute` resolves, so the shape is declared once here
+ * rather than restated per tool.
+ */
+const OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    tool: { type: "string" },
+    stdout: { type: "string" },
+  },
+  required: ["tool", "stdout"],
+  additionalProperties: false,
+};
+
+/**
+ * How a pending call is drawn before it runs.
+ *
+ * Deliberately without `locations`. The runtime's produced-files row reads
+ * `locations` off this view, and it would be the natural place to make a brief
+ * clickable in the chat -- but a presenter is required to be pure and replayable
+ * from `args` alone, and no foundry tool's arguments name a file. The path is
+ * `<FOUNDRY_VAR>/windows/<id>/brief.md`, and neither half is in `args`: the var
+ * root is ambient, and the window is `var/current`, which moves on every
+ * re-import. Reading either here would draw a card that resolves to a different
+ * file every time an old session is replayed.
+ *
+ * So the card says what the call does and stops there. Which documents a period
+ * produced, and in what order, is a question the task store answers durably --
+ * `foundry --task T deliverables` -- rather than one this row guesses at.
+ */
+function presentCall(toolName, kind) {
+  return () => ({ card: "generic", kind, title: `foundry ${toolName}` });
 }
 
-export function defineTool(toolName) {
+const CALL_KINDS = {
+  create: "edit",
+  import: "edit",
+  lock: "edit",
+  "record-questions": "edit",
+  "emit-brief": "edit",
+  workpaper: "read",
+  "launch-formulator": "execute",
+  "stop-formulator": "execute",
+  "query-locked": "edit",
+  "re-import": "edit",
+};
+
+export function toolDefinition(toolName) {
   const spec = specFor(toolName);
   return {
     name: toolName,
     description: spec.description,
     parameters: spec.parameters,
-    run: (input = {}) => {
+    output: {
+      schema: OUTPUT_SCHEMA,
+      render: (_args, value) => [
+        { type: "text", text: value?.stdout || `${value?.tool ?? toolName} 完成` },
+      ],
+    },
+    presentCall: presentCall(toolName, CALL_KINDS[toolName] ?? "other"),
+    execute: async (args, exec) => {
+      const input = args ?? {};
       checkArgs(toolName, spec, input);
-      return toolResult(toolName, foundry(spec.argv(input)));
+      return { tool: toolName, stdout: foundry(spec.argv(input), exec) };
     },
   };
 }
@@ -238,7 +333,19 @@ export function registerTools(available = REQUIRED, options = {}) {
     throw new Error(`period profile must omit ${leaks.join(",")}`);
   }
   const enabled = toolsForProfile(options.profile ?? options.phase);
-  return enabled.map((toolName) => defineTool(toolName));
+  return enabled.map((toolName) => toolDefinition(toolName));
+}
+
+/**
+ * The tools this profile would register, without a runtime to register them on.
+ *
+ * `apply` cannot answer this any more: the Cordis contract is that it registers
+ * on the context it is handed and returns nothing, and a caller that read its
+ * return value was reading a value the runtime itself discards. The headless
+ * smoke and the bundle test enumerate through here instead.
+ */
+export function definitions(profile) {
+  return registerTools(REQUIRED, { profile });
 }
 
 export function f3Allowlist() {
@@ -249,6 +356,22 @@ export function f3Denied(toolName) {
   return toolName !== "query-locked";
 }
 
-export function apply(context = {}) {
-  return registerTools(REQUIRED, { profile: context.profile ?? context.phase });
+/**
+ * Register this bundle's tools on a live runtime.
+ *
+ * The shape is the runtime's own, and it is not what this file used to do. The
+ * previous `apply` built the tool list and *returned* it; Cordis discards a
+ * plugin's return value, so under a real `dsh` boot nothing was ever registered
+ * and nothing said so. `inject` names the service this needs before it runs, and
+ * `ctx.tools.register` is the only thing that puts a tool in front of a model.
+ *
+ * The profile arrives as the patch row's own `config`, so which roster a
+ * composition gets is a deployment decision in the patch file rather than
+ * something a caller passes at runtime.
+ */
+export function apply(ctx, config = {}) {
+  const profile = config.profile ?? process.env.FOUNDRY_PROFILE ?? undefined;
+  for (const definition of definitions(profile)) {
+    ctx.tools.register(definition);
+  }
 }

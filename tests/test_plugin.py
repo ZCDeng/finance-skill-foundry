@@ -109,13 +109,30 @@ def _parity_facts(path: Path) -> dict[str, object]:
     }
 
 
+def _prelude(index_js: Path | None = None) -> str:
+    """Register the bundle the way the runtime does, then expose the roster.
+
+    Every driver below goes through `apply(ctx)` with a stand-in context rather
+    than reading a return value. That is the contract: Cordis discards what a
+    plugin returns, so a driver that inspected it would pass while the real
+    runtime registered nothing -- which is exactly what this suite used to do.
+    """
+    target = INDEX_JS if index_js is None else index_js
+    return (
+        f'import {{ apply }} from "{target.as_uri()}";\n'
+        "const registered = [];\n"
+        "apply({ tools: { register: (d) => registered.push(d) } }, {});\n"
+        "const tools = Object.fromEntries(registered.map((t) => [t.name, t]));\n"
+        "const call = (name, input = {}, exec = {}) => tools[name].execute(input, exec);\n"
+    )
+
+
 def _tool_specs() -> dict[str, dict]:
     """The registered metadata, read back out of the shipped bundle."""
     if NODE is None:
         pytest.skip("node is not on PATH")
-    script = (
-        f'import {{ apply }} from "{INDEX_JS.as_uri()}";\n'
-        "process.stdout.write(JSON.stringify(apply({}).map"
+    script = _prelude() + (
+        "process.stdout.write(JSON.stringify(registered.map"
         "((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))));\n"
     )
     result = _run_node(script)
@@ -267,7 +284,8 @@ def test_bundle_refuses_to_start_when_metadata_drifts(tmp_path: Path) -> None:
     (copy / "package.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     script = (
         f'import {{ apply }} from "{(copy / "index.js").as_uri()}";\n'
-        "try { apply({}); } catch (error) { process.stdout.write(error.message); process.exit(0); }\n"
+        "const ctx = { tools: { register: () => {} } };\n"
+        "try { apply(ctx, {}); } catch (error) { process.stdout.write(error.message); process.exit(0); }\n"
         'throw new Error("startup accepted an undocumented tool");\n'
     )
     assert "ninth-tool" in _run_node(script).stdout
@@ -293,8 +311,13 @@ def test_the_bundle_has_exactly_one_source_of_truth() -> None:
     assert not (PLUGIN / "tsconfig.json").exists()
     assert sorted(path.name for path in PLUGIN.glob("*.ts")) == []
     facts = _parity_facts(INDEX_JS)
-    assert "defineTool" in facts["exports"]
+    assert "toolDefinition" in facts["exports"]
     assert "name" in facts["exports"]
+    # The two names the runtime itself reads. `inject` says which service must be
+    # mounted before `apply` runs, and `apply` is where registration happens; a
+    # bundle missing either loads, registers nothing, and reports no error.
+    assert "inject" in facts["exports"]
+    assert "apply" in facts["exports"]
 
 
 # --- #4 spawnSync is bounded and reports real spawn failures ----------------
@@ -337,12 +360,10 @@ def test_declared_parameters_match_the_cli_flags() -> None:
 
 @needs_node
 def test_a_misnamed_argument_is_refused_instead_of_reaching_the_cli(tmp_path: Path) -> None:
-    script = (
-        f'import {{ apply }} from "{INDEX_JS.as_uri()}";\n'
-        "const tools = Object.fromEntries(apply({}).map((t) => [t.name, t]));\n"
+    script = _prelude() + (
         "const seen = [];\n"
         'for (const input of [{ tables: "gl" }, { text: "GL", tables: "gl", table: "gl" }]) {\n'
-        '  try { tools["query-locked"].run(input); seen.push("accepted"); }\n'
+        '  try { await call("query-locked", input); seen.push("accepted"); }\n'
         "  catch (error) { seen.push(error.message); }\n"
         "}\n"
         "process.stdout.write(JSON.stringify(seen));\n"
@@ -359,19 +380,17 @@ def test_a_misnamed_argument_is_refused_instead_of_reaching_the_cli(tmp_path: Pa
 
 @needs_node
 def test_bundle_bootstraps_an_empty_var_root_and_reads_its_workpaper(tmp_path: Path) -> None:
-    script = (
-        f'import {{ apply }} from "{INDEX_JS.as_uri()}";\n'
-        "const tools = Object.fromEntries(apply({}).map((t) => [t.name, t]));\n"
+    script = _prelude() + (
         "const [named, questions] = process.argv.slice(2);\n"
         "const out = {};\n"
-        "try { tools.import.run({ named }); out.beforeCreate = null; }\n"
+        "try { await call('import', { named }); out.beforeCreate = null; }\n"
         "catch (error) { out.beforeCreate = error.message; }\n"
-        "out.create = JSON.parse(tools.create.run({})).stdout.trim();\n"
-        "tools.import.run({ named });\n"
-        "tools.lock.run({});\n"
-        'tools["record-questions"].run({ questions });\n'
-        'tools["emit-brief"].run({});\n'
-        "out.workpaper = JSON.parse(tools.workpaper.run({})).stdout;\n"
+        "out.create = (await call('create')).stdout.trim();\n"
+        "await call('import', { named });\n"
+        "await call('lock');\n"
+        "await call('record-questions', { questions });\n"
+        "await call('emit-brief');\n"
+        "out.workpaper = (await call('workpaper')).stdout;\n"
         "process.stdout.write(JSON.stringify(out));\n"
     )
     questions = json.dumps(
@@ -409,18 +428,16 @@ def test_period_profile_creates_and_reads_back_the_workpaper(tmp_path: Path) -> 
 
 @needs_node
 def test_silent_commands_still_answer_the_model(tmp_path: Path) -> None:
-    script = (
-        f'import {{ apply }} from "{INDEX_JS.as_uri()}";\n'
-        "const tools = Object.fromEntries(apply({}).map((t) => [t.name, t]));\n"
+    script = _prelude() + (
         "const [named] = process.argv.slice(2);\n"
-        "tools.create.run({});\n"
-        "const results = [tools.import.run({ named }), tools.lock.run({})];\n"
-        "process.stdout.write(JSON.stringify(results.map((raw) => JSON.parse(raw))));\n"
+        "await call('create');\n"
+        "const results = [await call('import', { named }), await call('lock')];\n"
+        "process.stdout.write(JSON.stringify(results));\n"
     )
     env = {"FOUNDRY_BIN": str(_cli_shim(tmp_path)), "FOUNDRY_VAR": str(tmp_path / "var")}
     imported, locked = json.loads(_run_node(script, env_extra=env, argv=[str(FIXTURES / "named.json")]).stdout)
-    assert imported == {"ok": True, "tool": "import", "stdout": ""}
-    assert locked == {"ok": True, "tool": "lock", "stdout": ""}
+    assert imported == {"tool": "import", "stdout": ""}
+    assert locked == {"tool": "lock", "stdout": ""}
 
 
 # --- #29/#30 the node suite runs in the documented pytest loop ---------------

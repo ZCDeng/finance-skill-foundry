@@ -248,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
     p_query.add_argument("--split-by", default="")
     p_query.add_argument("--brief-window", default="")
     p_query.add_argument("--question-id", default="")
+    p_query.add_argument(
+        "--brief-sha",
+        default="",
+        help="sha256 of the exported brief the leader read; anchors the answer to that version",
+    )
 
     sub.add_parser("launch-formulator")
     sub.add_parser("stop-formulator")
@@ -455,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
                     brief_window_id=args.brief_window or None,
                     question_id=args.question_id or None,
                     session_id=args.session or None,
+                    brief_sha=args.brief_sha or None,
                 )
             )
             return 0

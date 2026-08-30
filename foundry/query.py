@@ -66,6 +66,7 @@ def _record_followup(
     build_schedule: Callable[..., dict[str, Any]] | None = None,
     *,
     session_id: str | None = None,
+    brief_sha: str | None = None,
 ) -> None:
     """Record one follow-up as a single locked unit.
 
@@ -76,7 +77,20 @@ def _record_followup(
     and the tickable workpaper then disagree about what was asked.
     """
     task = task_for(window.store.var_root, window.task_id)
-    payload = {**payload, "task_id": None if task is None else task.id, "session_id": session_id}
+    # `brief_sha` is the deliverable version the leader was actually holding when
+    # they asked. The window id alone does not say that: a window has one brief
+    # but several exports of it, and an answer has to be traceable to the sheet
+    # of paper the question was asked against.
+    #
+    # There is no separate pointer to the leader's own wording. `session_id` is
+    # that pointer -- the verbatim lives once on the task's session row, and a
+    # second copy per follow-up would be a second thing to keep true.
+    payload = {
+        **payload,
+        "task_id": None if task is None else task.id,
+        "session_id": session_id,
+        "brief_sha": brief_sha,
+    }
     workpaper = None
     schedule_id = None
     with exclusive(window.root / ".lock"):
@@ -128,6 +142,7 @@ def query_locked(
     brief_window_id: str | None = None,
     question_id: str | None = None,
     session_id: str | None = None,
+    brief_sha: str | None = None,
 ) -> str:
     if not required_table_ids:
         raise QueryRefused("required_table_ids is required")
@@ -186,6 +201,7 @@ def query_locked(
                 tag=f"{OUTSIDE} / {RECOMPUTED}",
             ),
             session_id=session_id,
+            brief_sha=brief_sha,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
     table = _source_table(required_table_ids)
@@ -217,6 +233,7 @@ def query_locked(
                 split_by=split_by,
             ),
             session_id=session_id,
+            brief_sha=brief_sha,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
     value = _aggregate(target, table)
@@ -251,5 +268,6 @@ def query_locked(
             recomputed=value,
         ),
         session_id=session_id,
+        brief_sha=brief_sha,
     )
     return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}{_window_note(target)}"

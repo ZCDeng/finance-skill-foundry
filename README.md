@@ -98,6 +98,35 @@ Exit codes: `0` done, `2` argparse usage error, `3` domain refusal. `python -m f
 
 A table id becomes a SQL identifier, so `ar-2024-08.xlsx` is the table `ar_2024_08`. Questions and `query-locked --tables` accept either spelling.
 
+## Harness
+
+The period tools reach a model through one command:
+
+```bash
+dsh plugin --profile PROFILE add /path/to/finance-skill-foundry/dsh-plugin
+foundry --var VAR harness   # prints this line with the paths filled in
+```
+
+That is the whole wiring. `add` writes the package into the profile's dependencies
+*and* appends it to `dsh.profile.bundles`, and the package carries its own
+`dsh.bundle.patch`, so the insert row arrives from there. Handing
+`dsh-plugin/cordis.patch.yml` to `--patch` as well composes the row a second time.
+
+`dsh plugin add` on a local directory links rather than copies, so an edit in the
+checkout is live in the profile.
+
+Verified on the pinned runtime: after that one command, `--dump-config` shows exactly
+one `id: finance-skill-foundry` row and all ten tools register. `tests/test_real_load.py`
+is that check, opt-in via `FOUNDRY_DSH_BIN`.
+
+**The period fence is not real yet.** `dsh.foundry.profiles.period.omit` names `bash`,
+`dsh-tool-fs` and `str-replace-editor`, and the bundle refuses to start if any of them
+are in the roster it is handed — but that check only ever sees its own list. An agent's
+tool set is decided by its *preset*, which a profile row cannot reach into. On the stock
+`headless` preset the model is offered foundry's ten tools and `bash`, `write`, `edit`,
+`read` and `str_replace_editor` beside them. Closing it needs a foundry-owned agent
+preset. Until then, do not treat the locked window as unreadable-around.
+
 ## Harness drop
 
 Paperclip / drag-drop is an input drop for import, not a second books surface.

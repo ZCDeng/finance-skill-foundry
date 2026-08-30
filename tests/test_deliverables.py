@@ -359,3 +359,50 @@ def test_task_commands_refuse_by_name_with_no_task(tmp_path: Path, capsys: pytes
     var = tmp_path / "var"
     assert main(["--var", str(var), "task-show"]) == 3
     assert "no task" in capsys.readouterr().err
+
+
+def test_the_follow_up_is_anchored_to_the_exported_version(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Which sheet of paper the leader was holding.
+
+    A window has one brief but can be exported more than once, so the window id
+    alone does not say which version a question was asked against.
+    """
+    var = tmp_path / "var"
+    fixtures = fixture_root(None)
+    task_id = _new_task(var, capsys)
+    window_id = _period(var, fixtures, capsys, task=task_id, session="sess-period")
+    assert main(["--var", str(var), "--task", task_id, "export", "--kind", "brief"]) == 0
+    exported = json.loads(_out(capsys))
+
+    assert (
+        main(
+            [
+                "--var",
+                str(var),
+                "--session",
+                "sess-leader",
+                "query-locked",
+                "--text",
+                "按核算单元拆收入",
+                "--tables",
+                "gl",
+                "--split-by",
+                "unit_id",
+                "--brief-window",
+                window_id,
+                "--brief-sha",
+                exported["sha256"],
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    window = WindowStore(var).get(window_id)
+    row = [json.loads(line) for line in window.followup_path.read_text().splitlines() if line.strip()][-1]
+    assert row["brief_sha"] == exported["sha256"]
+    # No second copy of the leader's wording: the session row holds it once, and
+    # `session_id` is the pointer.
+    assert row["session_id"] == "sess-leader"
+    assert "leader_verbatim" not in row
