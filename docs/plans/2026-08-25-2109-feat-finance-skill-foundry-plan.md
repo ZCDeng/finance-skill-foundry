@@ -18,7 +18,7 @@ deepened: 2026-08-25
 - **Means:** Native DeepSeek harness hosting foundry tools, a foundry-owned DuckDB lock catalog, Data Formulator live-attached read-only to that catalog, and a Skill creator that cannot mark done until a fixture period loop passes (KTD1, KTD2, KTD3, KTD4).
 - **Product authority:** Product Contract R/A/F/AE IDs win on behavior. KTDs win on mechanism. `outlet-member-pack/` is method lab only.
 - **Product Contract preservation:** changed: R9 (2026-08-25) — brief may ship with not-in-window items marked. changed: R3 (2026-08-26) — window locks CoA plus optional aux and analysis map; units is a shortcut dim of aux. R1–R2 and R4–R8 meaning unchanged.
-- **Execution profile:** code. New package ``.
+- **Execution profile:** code. This repository.
 - **Stop conditions:** Do not replace the ERP. Do not drop harness, DuckDB, Data Formulator, or Skill creator. Do not copy lab `questions.md` or the lab DuckDB ban into the product.
 - **Tail ownership:** `ce-work` executes U1–U6. Abandoned probe, Formulator, or harness experiments must not remain in the tree.
 - **Open blockers:** None. U3 host file shape settled 2026-08-26: a Cordis bundle that execs the foundry CLI. changed: language (2026-08-30) -- the bundle is JavaScript (`dsh-plugin/index.js`), not TypeScript. What that decision resolved (a Cordis bundle over a Python stdio MCP host) is unchanged.
