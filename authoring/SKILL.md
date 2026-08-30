@@ -22,6 +22,8 @@ You are helping a finance manager author a portable analysis skill on the **pinn
 
 Foundry `mark_done` is the only done signal. It first validates a machine-readable `foundry.json` capability contract beside `SKILL.md`, then runs the model-free fixture probe (`foundry.probe`). Chat satisfaction is ignored. Cursor "validate then proceed" is the pattern, not the host.
 
+`python -m foundry.probe --var VAR --fixtures FIXTURES` and `foundry --var VAR probe --fixtures FIXTURES` are the same gate and report the same thing: `0` passed, `3` refused with the reason on stderr, `2` for an argparse usage error.
+
 Required `foundry.json`:
 
 ```json
@@ -42,7 +44,7 @@ Required `foundry.json`:
 
 1. Import chart of accounts, optional auxiliary dimensions, analysis map, and named statements. A units file may still be imported as a shortcut dim of aux. She may paperclip-drop those files; pass the `@` paths (or the upload folder) to `import`. Do not `read_document` a GL or map — that dumps rows into the model. Uploads are not books.
 2. Lock. Empty CoA or a zero-row named table refuse lock. Missing aux or map still locks; a provided empty aux/map refuses.
-3. She writes this-window questions on the window.
+3. She writes this-window questions on the window. One question answers from one named table; a question naming two named tables is refused.
 4. Emit a conclusion brief. A map-cut question aggregates by analysis node and tags `我重算`. Some items may be `not-in-this-window`. The same lock write writes a calculation workpaper (`workpaper.md`) she can tick: account + aux + amount, plus unmapped and conflicts. The model does not draft that file.
 5. Leader follow-up recomputes from the brief's window id and tags `稿外追问` / `我重算`. `split_by=analysis_node` reads the locked map; a window without map refuses.
 

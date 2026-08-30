@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from foundry.caliber import source_table_id
 from foundry.errors import LockRefused
+from foundry.fsutil import write_text_atomic
 from foundry.window import Window
 
 def record_questions(window: Window, questions: list[dict[str, Any]]) -> None:
@@ -32,6 +34,10 @@ def record_questions(window: Window, questions: list[dict[str, Any]]) -> None:
             raise LockRefused(f"question {item_id} text is required")
         if not required:
             raise LockRefused(f"question {item_id} required_table_ids is required")
+        try:
+            source_table_id(required)
+        except LockRefused as exc:
+            raise LockRefused(f"question {item_id} {exc}") from exc
         seen.add(item_id)
         cleaned.append(
             {
@@ -40,7 +46,7 @@ def record_questions(window: Window, questions: list[dict[str, Any]]) -> None:
                 "required_table_ids": required,
             }
         )
-    window.questions_path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n")
+    write_text_atomic(window.questions_path, json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n")
 
 
 def load_questions(window: Window) -> list[dict[str, Any]]:

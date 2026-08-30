@@ -4,16 +4,29 @@ import csv
 import hashlib
 import io
 import json
+import posixpath
+import zipfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+from xml.etree import ElementTree
 
 import duckdb
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from foundry.errors import LockRefused
 
 MAX_SAFE_XLSX_INTEGER = 9_007_199_254_740_991
+
+_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+_DOC_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_ROW_TAG = f"{_MAIN_NS}row"
+_CELL_TAG = f"{_MAIN_NS}c"
+_FORMULA_TAG = f"{_MAIN_NS}f"
+_VALUE_TAG = f"{_MAIN_NS}v"
+_CACHED_STRING_TYPE = "str"
 
 
 def file_hash(path: Path) -> str:
@@ -55,6 +68,8 @@ def _normalize_rows(path: Path, headers: list[str], rows: list[tuple[Any, ...]])
     width = len(headers)
     normalized: list[tuple[Any, ...]] = []
     for row_number, row in enumerate(rows, start=2):
+        if not row or all(cell in (None, "") for cell in row):
+            continue
         if len(row) != width:
             raise LockRefused(
                 f"ragged row in {path}: row {row_number} has {len(row)} cells, expected {width}"
@@ -76,6 +91,103 @@ def _refuse_unsafe_xlsx_numbers(path: Path, headers: list[str], rows: list[tuple
                 raise LockRefused(
                     f"unsafe xlsx numeric precision in {path}: row {row_number} column {headers[index]}"
                 )
+
+
+def _part_name(base_dir: str, target: str) -> str:
+    if target.startswith("/"):
+        return target[1:]
+    return posixpath.normpath(posixpath.join(base_dir, target) if base_dir else target)
+
+
+def _active_sheet_part(archive: zipfile.ZipFile, path: Path, title: str) -> str:
+    """The zip entry holding the active worksheet's XML.
+
+    openpyxl does not expose the part it loaded, so walk the same OPC chain it
+    walks: package rels -> workbook part -> workbook rels -> the sheet whose
+    name is the one openpyxl called active.
+    """
+    package = ElementTree.fromstring(archive.read("_rels/.rels"))
+    workbook_part = next(
+        (
+            _part_name("", str(rel.get("Target") or ""))
+            for rel in package.iter(f"{_PKG_REL_NS}Relationship")
+            if str(rel.get("Type") or "").endswith("/officeDocument")
+        ),
+        None,
+    )
+    if workbook_part is None:
+        raise LockRefused(f"workbook has no workbook part: {path}")
+    book_dir = posixpath.dirname(workbook_part)
+    rels_part = _part_name(book_dir, f"_rels/{posixpath.basename(workbook_part)}.rels")
+    rels = ElementTree.fromstring(archive.read(rels_part))
+    targets = {
+        str(rel.get("Id")): _part_name(book_dir, str(rel.get("Target") or ""))
+        for rel in rels.iter(f"{_PKG_REL_NS}Relationship")
+    }
+    book = ElementTree.fromstring(archive.read(workbook_part))
+    for sheet in book.iter(f"{_MAIN_NS}sheet"):
+        if str(sheet.get("name") or "") != title:
+            continue
+        part = targets.get(str(sheet.get(f"{_DOC_REL_NS}id")))
+        if part:
+            return part
+    raise LockRefused(f"workbook has no part for sheet {title}: {path}")
+
+
+def _first_uncached_formula(stream: IO[bytes]) -> str | None:
+    """The first formula cell in this sheet that carries no cached result.
+
+    A cell is cached when it has a ``<v>`` holding text, or when it is
+    ``t="str"`` with a ``<v>`` at all -- that is how Excel writes a formula
+    that evaluated to an empty string (``=IF(A2=1001,"","x")``), which openpyxl
+    hands back as ``None``, exactly like a formula nothing ever evaluated.
+    Reading the sheet XML is the only way to tell those two apart.
+    """
+    row_number = 0
+    column = 0
+    for event, element in ElementTree.iterparse(stream, events=("start", "end")):
+        if event == "start":
+            if element.tag == _ROW_TAG:
+                given = element.get("r")
+                row_number = int(given) if given and given.isdigit() else row_number + 1
+                column = 0
+            elif element.tag == _CELL_TAG:
+                column += 1
+            continue
+        if element.tag == _CELL_TAG:
+            if element.find(_FORMULA_TAG) is not None:
+                value = element.find(_VALUE_TAG)
+                cached = value is not None and (
+                    bool(value.text) or element.get("t") == _CACHED_STRING_TYPE
+                )
+                if not cached:
+                    return element.get("r") or f"{get_column_letter(column)}{row_number}"
+            element.clear()
+        elif element.tag == _ROW_TAG:
+            element.clear()
+    return None
+
+
+def _refuse_uncached_xlsx_formulas(path: Path, sheet_title: str) -> None:
+    """Refuse a workbook whose formula cells carry no computed result.
+
+    ``data_only=True`` hands back ``None`` for a formula that no spreadsheet
+    application has ever evaluated, which would otherwise import as a blank
+    cell and understate the locked total with nothing on the record saying a
+    number went missing. A formula Excel evaluated to a blank string is a
+    different thing and must still import -- blank-out formulas are ordinary in
+    note columns -- so the two are separated on the sheet XML, not on the
+    ``None`` openpyxl reports for both.
+    """
+    with zipfile.ZipFile(path) as archive:
+        part = _active_sheet_part(archive, path, sheet_title)
+        with archive.open(part) as stream:
+            cell = _first_uncached_formula(stream)
+    if cell is not None:
+        raise LockRefused(
+            f"uncached xlsx formula in {path}: cell {cell} "
+            "公式没有缓存值，请在 Excel 中打开并保存后重新导入"
+        )
 
 
 def _load_json(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
@@ -151,15 +263,15 @@ def _load_tabular(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
             ws = wb.active
             if ws is None:
                 raise LockRefused(f"empty named file: {path}")
-            iterator = ws.iter_rows(values_only=True)
-            try:
-                raw_headers = next(iterator)
-            except StopIteration as exc:
-                raise LockRefused(f"empty named file: {path}") from exc
-            headers = _normalize_headers(list(raw_headers), path)
-            rows = [tuple(cell if cell is not None else "" for cell in row) for row in iterator]
+            sheet_title = str(ws.title)
+            cached = [tuple(row) for row in ws.iter_rows(values_only=True)]
         finally:
             wb.close()
+        if not cached:
+            raise LockRefused(f"empty named file: {path}")
+        _refuse_uncached_xlsx_formulas(path, sheet_title)
+        headers = _normalize_headers(list(cached[0]), path)
+        rows = [tuple(cell if cell is not None else "" for cell in row) for row in cached[1:]]
         _refuse_unsafe_xlsx_numbers(path, headers, rows)
         return headers, _normalize_rows(path, headers, rows)
     raise LockRefused(f"unsupported import format: {path.suffix}")

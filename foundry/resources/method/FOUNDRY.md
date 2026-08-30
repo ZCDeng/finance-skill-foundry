@@ -6,8 +6,35 @@ These four close methods ship with the foundry kit. They are not the authored po
 - `~~erp` / `~~data warehouse` stay placeholders unless this window has named those tables.
 - Do not write `questions.md` or `questions.json` into `authoring/` or `var/skills/`.
 - Do not post journal entries. Foundry does not own the ERP.
-- A map-cut or recompute is tagged `我重算`. A follow-up not on the brief is tagged `稿外追问`.
+- A map-cut or recompute is tagged `我重算`. A follow-up not on the brief is tagged `稿外追问`. The full tag vocabulary is below.
 - The tickable schedule is `workpaper.md` on the window, not a second workbook.
+- One question answers from one named table. `coa` / `aux` / `map` / `units` only shape the cut. A question naming two named tables is refused at `record-questions` and at `query-locked`; split it into one question per table.
+
+## Exit codes
+
+Every foundry entry point (`foundry`, `python -m foundry.probe`) uses the same three.
+
+| Code | Means |
+| --- | --- |
+| `0` | Done |
+| `2` | Usage error from argparse: an unknown flag or a missing required one. A caller bug |
+| `3` | Domain refusal: the window is not locked, the table is not in this window, the drop escaped its directory. Advance the period loop, do not retry the same call |
+
+The dsh plugin turns `3` into an `Error` named `FoundryRefusal` with `refused: true`; anything else keeps `FoundryError`. Branch on that, not on the stderr text.
+
+## Output tags
+
+Every tag the foundry emits into a brief is one of these five. A reader parsing a brief may rely on this list and on nothing else.
+
+| Tag | Means |
+| --- | --- |
+| `报表声称` | The total the source table claims for itself, copied through unchanged |
+| `我重算` | The total recomputed from the locked window catalog |
+| `两者一致` | The claimed total and the recomputed total agree |
+| `稿外追问` | A follow-up that is not on the brief |
+| `not-in-this-window` | A required table is absent from this window, so the answer is refused |
+
+## Bundled skills
 
 | Skill | Use when |
 | --- | --- |

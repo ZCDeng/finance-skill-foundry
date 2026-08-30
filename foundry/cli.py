@@ -4,9 +4,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from foundry.brief import emit_brief
-from foundry.errors import FoundryError
+from foundry.errors import REFUSED, FoundryError
+from foundry.harness import assert_no_escaping_symlink
 from foundry.launch_formulator import launch_formulator, purge_formulator_home, stop_formulator
 from foundry.host_profile import host_smoke
 from foundry.probe import mark_done, run_probe
@@ -17,7 +19,17 @@ from foundry.window import WindowStore
 
 
 def _store(ns: argparse.Namespace) -> WindowStore:
-    return WindowStore(Path(ns.var))
+    """Open the store, turning an unusable ``--var`` into a refusal.
+
+    ``--var`` is operator input like any other flag, and ``WindowStore`` creates
+    directories on construction. Left unguarded it hands a caller a raw
+    traceback with absolute paths on stderr and exit 1, which the dsh plugin
+    then rethrows verbatim into the model's context.
+    """
+    try:
+        return WindowStore(Path(ns.var))
+    except OSError as exc:
+        raise FoundryError(f"--var is not a usable directory: {ns.var} ({exc.strerror})") from exc
 
 
 
@@ -34,35 +46,62 @@ def _resolve_payload_path(base: Path | None, value: str) -> Path:
     return candidate
 
 
+NAMED_SHAPES = (
+    "named payload must be a list of {id,path}, an {id: path} map, "
+    "or an envelope with a tables key"
+)
+
+DEFAULT_KEYS = ("coa", "aux", "map", "units")
+
+
+def _named_entry(base: Path | None, item: Any) -> dict:
+    if not isinstance(item, dict) or not item.get("id") or not item.get("path"):
+        raise FoundryError("named table requires id and path")
+    return {**item, "path": str(_resolve_payload_path(base, str(item["path"])))}
+
+
 def _named_arg(raw: str) -> tuple[list[dict] | None, dict[str, Path]]:
     if not raw:
         return None, {}
     payload = Path(raw)
-    payload_file = payload.resolve() if payload.is_file() else None
+    payload_file = payload if payload.is_file() else None
+    if payload_file is not None:
+        # Two boundary moves, both of which make the descriptor's directory
+        # something other than what the operator pointed at: the descriptor
+        # itself being a link out, and a linked directory on the way down to it.
+        assert_no_escaping_symlink(payload_file, "named descriptor")
+        if payload_file.is_symlink():
+            raise FoundryError(f"named descriptor must not be a symlink: {raw}")
     base = payload_file.parent if payload_file else None
     try:
         data = json.loads(payload_file.read_text() if payload_file else raw)
     except json.JSONDecodeError as exc:
         raise FoundryError("named argument is not valid JSON") from exc
+    except OSError as exc:
+        raise FoundryError(f"named descriptor is unreadable: {raw}") from exc
     if isinstance(data, list):
-        return [
-            {**item, "path": str(_resolve_payload_path(base, str(item["path"])))}
-            for item in data
-        ], {}
+        return [_named_entry(base, item) for item in data], {}
     if isinstance(data, dict) and "tables" in data:
         defaults = {
             key: _resolve_payload_path(base, str(data[key]))
-            for key in ("coa", "aux", "map", "units")
+            for key in DEFAULT_KEYS
             if data.get(key)
         }
-        tables = [
-            {**item, "path": str(_resolve_payload_path(base, str(item["path"])))}
-            for item in data["tables"]
-        ]
-        return tables, defaults
+        tables = data["tables"]
+        if not isinstance(tables, list):
+            raise FoundryError("named envelope tables must be a list of {id,path}")
+        return [_named_entry(base, item) for item in tables], defaults
     if isinstance(data, dict):
-        return [{"id": key, "path": str(_resolve_payload_path(base, str(value)))} for key, value in data.items()], {}
-    return data, {}
+        stray = [key for key in DEFAULT_KEYS if key in data]
+        if stray:
+            raise FoundryError(
+                f"named envelope is missing the tables key (saw {', '.join(stray)})"
+            )
+        return [
+            {"id": key, "path": str(_resolve_payload_path(base, str(value)))}
+            for key, value in data.items()
+        ], {}
+    raise FoundryError(NAMED_SHAPES)
 
 
 def _import_kwargs(args: argparse.Namespace) -> dict:
@@ -89,7 +128,15 @@ def main(argv: list[str] | None = None) -> int:
     p_import.add_argument("--aux", default="")
     p_import.add_argument("--map", default="")
     p_import.add_argument("--units", default="", help="optional shortcut dim of aux")
-    p_import.add_argument("--named", default="", help="JSON list of {id,path}; omit to map drop-dir stems")
+    p_import.add_argument(
+        "--named",
+        default="",
+        help=(
+            "JSON (or a path to a JSON file): a list of {id,path}, an {id: path} map, "
+            "or an envelope with tables plus optional coa/aux/map/units; "
+            "omit to map drop-dir stems"
+        ),
+    )
     p_import.add_argument("--drop-dir", default="")
 
     sub.add_parser("lock")
@@ -98,7 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     p_q.add_argument("--questions", required=True)
 
     sub.add_parser("emit-brief")
-    sub.add_parser("workpaper")
+
+    p_wp = sub.add_parser("workpaper")
+    p_wp.add_argument("--window", default="", help="window id; omit for the current window")
+
     sub.add_parser("method-skills")
     sub.add_parser("harness")
 
@@ -132,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     p_smoke.add_argument("--fixtures", default="")
 
     args = parser.parse_args(argv)
-    store = _store(args)
     try:
+        store = _store(args)
         if args.cmd == "create":
             print(store.create().id)
             return 0
@@ -156,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
 
             print(harness_text())
             return 0
+        if args.cmd == "workpaper" and args.window:
+            # An explicit window id is the whole address. Resolving `current`
+            # first would refuse a workpaper that is on disk just because a
+            # re-import (or a fresh var) left no current window behind.
+            target = store.get(args.window)
+            if not target.workpaper_path.exists():
+                raise FoundryError("workpaper not written")
+            print(target.workpaper_path.read_text(), end="")
+            return 0
         window = store.current()
         if args.cmd == "import":
             window.import_tables(**_import_kwargs(args))
@@ -165,7 +224,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "record-questions":
             raw = Path(args.questions)
-            questions = json.loads(raw.read_text() if raw.is_file() else args.questions)
+            try:
+                questions = json.loads(raw.read_text() if raw.is_file() else args.questions)
+            except json.JSONDecodeError as exc:
+                raise FoundryError("questions argument is not valid JSON") from exc
+            except OSError as exc:
+                raise FoundryError(f"questions file is unreadable: {args.questions}") from exc
             record_questions(window, questions)
             return 0
         if args.cmd == "emit-brief":
@@ -203,8 +267,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     except FoundryError as exc:
         print(str(exc), file=sys.stderr)
-        return 2
-    return 2
+        return REFUSED
+    return REFUSED
 
 
 if __name__ == "__main__":

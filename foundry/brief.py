@@ -5,15 +5,18 @@ from decimal import Decimal
 from typing import Any
 
 from foundry.caliber import (
-    MASTER_TABLES,
     as_number,
     cut_fact_by_map,
     fact_schedule_lines,
     fact_table_id,
     format_cut,
+    source_table_id,
+    table_key,
 )
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused
+from foundry.fsutil import write_text_atomic
+from foundry.locking import exclusive
 from foundry.questions import load_questions
 from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
@@ -45,12 +48,19 @@ def _aggregate(window: Window, table: str) -> Decimal | int:
 
 
 def emit_brief(window: Window) -> str:
+    """Write this window's conclusion brief, once.
+
+    The one-shot latch is the state transition to ``Briefed``, not the presence
+    of ``brief.md``. Every period output is written atomically inside the window
+    lock, in dependency order -- facts, schedules, workpaper, brief, state -- so
+    a window interrupted mid-emit still holds a consistent set and the next
+    ``emit-brief`` recomputes it from the same locked catalog instead of
+    refusing forever.
+    """
     if window.state in {"Briefed", "FollowUp"} and window.brief_path.exists():
         return window.brief_path.read_text()
     if window.state != "Locked":
         raise LockRefused(f"brief refused in state {window.state}")
-    if window.brief_path.exists() or (window.root / "brief_facts.json").exists():
-        raise LockRefused("brief already emitted")
     questions = load_questions(window)
     if not questions:
         raise LockRefused("empty questions refuse brief")
@@ -58,11 +68,15 @@ def emit_brief(window: Window) -> str:
     account_names = coa_names(window)
     facts: list[dict[str, Any]] = []
     schedules: list[dict[str, Any]] = []
-    lines = ["# 本期结论稿", ""]
+    lines = ["# 本期结论稿", "", f"窗口: {window.id}", ""]
     for item in questions:
         required = item["required_table_ids"]
-        missing = [table for table in required if table not in names]
-        if "map" in required:
+        # Report the operator's spelling, but decide on the catalog's id: a
+        # hyphenated file name lands in DuckDB normalized, and comparing the
+        # two raw would declare a table absent that is right there.
+        keys = {table_key(table) for table in required}
+        missing = [table for table in required if table_key(table) not in names]
+        if "map" in keys:
             fact = fact_table_id(required)
             if fact is None or fact not in names:
                 missing = missing or (["map"] if "map" not in names else [fact or "named"])
@@ -84,7 +98,7 @@ def emit_brief(window: Window) -> str:
             )
             schedules.append(schedule_missing(item["id"], item["text"], missing))
             continue
-        if "map" in required:
+        if "map" in keys:
             fact = fact_table_id(required)
             assert fact is not None
             fact_headers, fact_rows = _table_rows(window, fact)
@@ -126,7 +140,7 @@ def emit_brief(window: Window) -> str:
                 )
             )
             continue
-        source = next((table for table in required if table not in MASTER_TABLES), required[0])
+        source = source_table_id(required)
         total = _aggregate(window, source)
         headers, rows = _table_rows(window, source)
         lines.append(f"## {item['text']}")
@@ -158,9 +172,15 @@ def emit_brief(window: Window) -> str:
         )
     text = "\n".join(lines).rstrip() + "\n"
     if OUTSIDE in text:
-        raise LockRefused("brief must not carry 稿外追问 on in-window facts")
-    window.brief_path.write_text(text)
-    (window.root / "brief_facts.json").write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n")
-    persist_schedules(window, schedules, replace=True)
-    window._set_state("Briefed")
+        raise LockRefused(f"brief must not carry {OUTSIDE} on in-window facts")
+    with exclusive(window.root / ".lock"):
+        if window.state != "Locked":
+            raise LockRefused(f"brief refused in state {window.state}")
+        write_text_atomic(
+            window.root / "brief_facts.json",
+            json.dumps(facts, ensure_ascii=False, indent=2) + "\n",
+        )
+        persist_schedules(window, schedules, replace=True)
+        write_text_atomic(window.brief_path, text)
+        window._set_state("Briefed")
     return text

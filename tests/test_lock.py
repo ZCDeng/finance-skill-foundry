@@ -333,3 +333,81 @@ def test_reader_blocks_new_writer(tmp_path: Path) -> None:
     assert store.current().id == next_window.id
     assert window.query("SELECT amount FROM gl")[0][0] == 100
     assert next_window.query("SELECT amount FROM gl")[0][0] == 3
+
+
+def test_import_after_brief_is_refused_and_leaves_the_window_untouched(tmp_path: Path) -> None:
+    from foundry.brief import emit_brief
+    from foundry.questions import record_questions
+
+    drop = tmp_path / "drop"
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(
+        coa=_coa(drop),
+        units=_units(drop),
+        named=[{"id": "gl", "path": _gl(drop, amount=100)}],
+        drop_dir=drop,
+    )
+    window.lock()
+    record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
+    brief_before = emit_brief(window)
+    manifest_before = json.loads(window.lock_path.read_text())
+    facts_before = (window.root / "brief_facts.json").read_text()
+
+    with pytest.raises(LockRefused, match="import only before lock"):
+        window.import_tables(
+            coa=_coa(drop),
+            units=_units(drop),
+            named=[{"id": "gl", "path": _gl(drop, amount=999)}],
+            drop_dir=drop,
+        )
+
+    assert window.state == "Briefed"
+    assert json.loads(window.lock_path.read_text()) == manifest_before
+    assert json.loads(window.lock_path.read_text())["locked"] is True
+    assert window.brief_path.read_text() == brief_before
+    assert (window.root / "brief_facts.json").read_text() == facts_before
+    assert window.query("SELECT amount FROM gl")[0][0] == 100
+
+
+def test_hyphenated_named_id_locks_because_manifest_matches_duckdb(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    period = _xlsx(drop / "ar-2024-08.xlsx", ["account_code", "amount"], [["1001", 40]])
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(
+        coa=_coa(drop),
+        units=_units(drop),
+        named=[{"id": "ar-2024-08", "path": period}],
+        drop_dir=drop,
+    )
+    manifest = json.loads(window.lock_path.read_text())
+    assert list(manifest["named"]) == ["ar_2024_08"]
+
+    window.lock()
+    assert "ar_2024_08" in window.table_names()
+    assert window.query("SELECT amount FROM ar_2024_08")[0][0] == 40
+
+
+def test_source_replaced_mid_parse_refuses_the_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import foundry.window as window_module
+
+    drop = tmp_path / "drop"
+    gl = _gl(drop, amount=100)
+    real_load_tabular = window_module.load_tabular
+
+    def swap_after_parse(path: Path):  # type: ignore[no-untyped-def]
+        headers, rows = real_load_tabular(path)
+        if Path(path) == gl:
+            _xlsx(gl, ["account_code", "amount"], [["1001", 999]])
+        return headers, rows
+
+    monkeypatch.setattr(window_module, "load_tabular", swap_after_parse)
+    window = WindowStore(tmp_path / "var").create()
+    with pytest.raises(LockRefused, match="source changed during import"):
+        window.import_tables(
+            coa=_coa(drop),
+            units=_units(drop),
+            named=[{"id": "gl", "path": gl}],
+            drop_dir=drop,
+        )
+    assert window.state == "Open"
+    assert not window.catalog_path().exists()

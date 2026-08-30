@@ -1,15 +1,25 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
-const REQUIRED = [
-  "import",
-  "lock",
-  "record-questions",
-  "emit-brief",
-  "launch-formulator",
-  "stop-formulator",
-  "query-locked",
-  "re-import",
-];
+const PACKAGE_URL = new URL("./package.json", import.meta.url);
+const DEFAULT_TIMEOUT_MS = 120000;
+const MAX_BUFFER = 32 * 1024 * 1024;
+// foundry exits 3 for a domain refusal ("the window is not locked") and leaves 2
+// to argparse for a usage error ("no such flag"). The first is a state the model
+// reacts to by advancing the period loop; the second is a caller bug. Branch on
+// the code so they are separable without string-matching stderr.
+export const REFUSED = 3;
+
+function readRoster() {
+  const pkg = JSON.parse(readFileSync(PACKAGE_URL, "utf8"));
+  const tools = pkg?.dsh?.foundry?.tools;
+  if (!Array.isArray(tools) || tools.length === 0) {
+    throw new Error("dsh.foundry.tools is missing from package.json");
+  }
+  return tools;
+}
+
+const REQUIRED = readRoster();
 
 export const HOST_WRITERS = ["bash", "dsh-tool-fs", "str-replace-editor"];
 export const LINE_LEAKS = ["read_document"];
@@ -20,9 +30,21 @@ function foundry(args) {
   if (!varRoot) {
     throw new Error("FOUNDRY_VAR is required");
   }
-  const result = spawnSync(bin, ["--var", varRoot, ...args], { encoding: "utf8" });
+  const result = spawnSync(bin, ["--var", varRoot, ...args], {
+    encoding: "utf8",
+    timeout: Number(process.env.FOUNDRY_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
+    killSignal: "SIGKILL",
+    maxBuffer: MAX_BUFFER,
+  });
+  if (result.error) {
+    throw result.error;
+  }
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `foundry ${args[0]} failed`);
+    const error = new Error(result.stderr || result.stdout || `foundry ${args[0]} failed`);
+    error.name = result.status === REFUSED ? "FoundryRefusal" : "FoundryError";
+    error.status = result.status;
+    error.refused = result.status === REFUSED;
+    throw error;
   }
   return result.stdout;
 }
@@ -38,7 +60,157 @@ function importArgs(cmd, input) {
   return args;
 }
 
+const IMPORT_PARAMETERS = {
+  type: "object",
+  properties: {
+    dropDir: { type: "string", description: "落盘目录; foundry 按文件名 stem 认表, coa/aux/map/units 是保留名" },
+    coa: { type: "string", description: "科目表路径 (xlsx/csv/json)" },
+    named: {
+      type: "string",
+      description: "命名表描述: [{id,path}] 的 JSON, {id: path} 映射, 带 tables 键的信封, 或指向该 JSON 的文件路径; 省略则按 dropDir 的文件名认表",
+    },
+    units: { type: "string", description: "核算单元维表路径; aux 的快捷写法" },
+    aux: { type: "string", description: "辅助核算维表路径" },
+    map: { type: "string", description: "分析节点映射表路径" },
+  },
+  required: [],
+};
+
+const TOOL_SPECS = {
+  create: {
+    description: "新建期间窗口并置为 current。期间循环的第一步; 没有窗口时其余工具全部拒绝。已出稿的窗口不会被删, 但 current 会指向新窗口, 之后要读旧稿得用 query-locked 的 briefWindow 或 workpaper 的 window。stdout 是新窗口 id。",
+    parameters: { type: "object", properties: {}, required: [] },
+    argv: () => ["create"],
+  },
+  import: {
+    description: "把本期账表导入当前窗口 (Open/Imported 可用)。给 dropDir 让 foundry 按文件名认表, 或用 named 逐张点名。",
+    parameters: IMPORT_PARAMETERS,
+    argv: (input) => importArgs("import", input),
+  },
+  lock: {
+    description: "锁口径: 冻结已导入的表与哈希, 之后只读。锁后才能记录追问、出稿和重算。",
+    parameters: { type: "object", properties: {}, required: [] },
+    argv: () => ["lock"],
+  },
+  "record-questions": {
+    description: "登记本期追问清单 (Locked 状态, 只能记一次)。每条要有 id / text / required_table_ids。",
+    parameters: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "string",
+          description: "追问数组的 JSON [{id,text,required_table_ids}], 或指向该 JSON 的文件路径",
+        },
+      },
+      required: ["questions"],
+    },
+    argv: (input) => ["record-questions", "--questions", input.questions],
+  },
+  "emit-brief": {
+    description: "出本期结论稿: 窗内问题给结论, 窗外问题标 稿外追问 并落到底稿排期。同时写出可勾选底稿。stdout 是稿件 markdown。",
+    parameters: { type: "object", properties: {}, required: [] },
+    argv: () => ["emit-brief"],
+  },
+  workpaper: {
+    description: "读回底稿 (emit-brief / query-locked 写出)。省略 window 读当前窗口; 追问挂回旧窗口时给 window 读那一份。还没写出时拒绝并说明 workpaper not written。stdout 是底稿 markdown。",
+    parameters: {
+      type: "object",
+      properties: {
+        window: { type: "string", description: "窗口 id; 省略则读 current。补数据后旧稿的底稿要用它读" },
+      },
+      required: [],
+    },
+    argv: (input) => (input.window ? ["workpaper", "--window", input.window] : ["workpaper"]),
+  },
+  "launch-formulator": {
+    description: "在本窗口起 Data Formulator, 只挂锁后的只读 catalog。stdout 是 JSON {argv, env, home, url}。",
+    parameters: { type: "object", properties: {}, required: [] },
+    argv: () => ["launch-formulator"],
+  },
+  "stop-formulator": {
+    description: "停掉本窗口的 Data Formulator 并释放租约。stdout 是 JSON {stopped, window_id}。",
+    parameters: { type: "object", properties: {}, required: [] },
+    argv: () => ["stop-formulator"],
+  },
+  "query-locked": {
+    description: "对锁后的表重算一问。窗外或未点名的表一律拒绝; 结果带 稿外追问 标记。stdout 是重算结论文本。",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "要重算的问题原话" },
+        tables: { type: "string", description: "本问依赖的表 id, 逗号分隔, 例如 gl,map; 必须是已点名的锁后表" },
+        splitBy: { type: "string", description: "拆分维度: unit_id 或 analysis_node; 省略则不拆" },
+        briefWindow: { type: "string", description: "结论稿窗口 id; 把重算挂回那一稿" },
+        questionId: { type: "string", description: "追问清单里的 question id; 把重算挂回那一条" },
+      },
+      required: ["text", "tables"],
+    },
+    argv: (input) => [
+      "query-locked",
+      "--text",
+      input.text,
+      "--tables",
+      input.tables,
+      "--split-by",
+      input.splitBy ?? "",
+      "--brief-window",
+      input.briefWindow ?? "",
+      "--question-id",
+      input.questionId ?? "",
+    ],
+  },
+  "re-import": {
+    description: "补数据: 开一个继承本期口径的后继窗口并重导。stdout 是后继窗口 id。",
+    parameters: IMPORT_PARAMETERS,
+    argv: (input) => importArgs("re-import", input),
+  },
+};
+
 export const name = "finance-skill-foundry";
+
+function specFor(toolName) {
+  const spec = TOOL_SPECS[toolName];
+  if (!spec) {
+    throw new Error(`unknown tool ${toolName}`);
+  }
+  return spec;
+}
+
+// Host metadata travels under a reserved prefix; a model's own arguments never
+// do. Ignoring those keys keeps the typo guard (tables vs table) without a host
+// that annotates a call breaking every foundry tool.
+const METADATA_PREFIX = /^[_$]/;
+
+function checkArgs(toolName, spec, input) {
+  const declared = spec.parameters.properties;
+  const missing = spec.parameters.required.filter((key) => String(input[key] ?? "").trim() === "");
+  const undeclared = Object.keys(input).filter(
+    (key) => !Object.hasOwn(declared, key) && !METADATA_PREFIX.test(key),
+  );
+  const problems = [];
+  if (missing.length) problems.push(`缺少必填参数 ${missing.join(",")}`);
+  if (undeclared.length) problems.push(`未声明参数 ${undeclared.join(",")}`);
+  if (problems.length) {
+    throw new Error(`foundry ${toolName} 参数错误: ${problems.join("; ")}; 可用参数 ${Object.keys(declared).join(",") || "(无)"}`);
+  }
+}
+
+function toolResult(toolName, stdout) {
+  return JSON.stringify({ ok: true, tool: toolName, stdout: stdout ?? "" });
+}
+
+export function defineTool(toolName) {
+  const spec = specFor(toolName);
+  return {
+    name: toolName,
+    description: spec.description,
+    parameters: spec.parameters,
+    run: (input = {}) => {
+      checkArgs(toolName, spec, input);
+      return toolResult(toolName, foundry(spec.argv(input)));
+    },
+  };
+}
 
 export function periodDenied(toolName) {
   return HOST_WRITERS.includes(toolName) || LINE_LEAKS.includes(toolName);
@@ -54,39 +226,19 @@ export function registerTools(available = REQUIRED, options = {}) {
   if (missing.length) {
     throw new Error(`foundry plugin startup failed; missing tools: ${missing.join(",")}`);
   }
+  const undocumented = REQUIRED.filter((toolName) => !Object.hasOwn(TOOL_SPECS, toolName));
+  const orphaned = Object.keys(TOOL_SPECS).filter((toolName) => !REQUIRED.includes(toolName));
+  if (undocumented.length || orphaned.length) {
+    throw new Error(
+      `foundry plugin startup failed; tool metadata drifted from package.json: missing ${undocumented.join(",") || "(none)"}, extra ${orphaned.join(",") || "(none)"}`,
+    );
+  }
   const leaks = available.filter((toolName) => periodDenied(toolName));
   if (leaks.length) {
     throw new Error(`period profile must omit ${leaks.join(",")}`);
   }
   const enabled = toolsForProfile(options.profile ?? options.phase);
-  return enabled.map((toolName) => ({
-    name: toolName,
-    run: (input) => {
-      if (toolName === "import") return foundry(importArgs("import", input));
-      if (toolName === "lock") return foundry(["lock"]);
-      if (toolName === "record-questions") return foundry(["record-questions", "--questions", input.questions]);
-      if (toolName === "emit-brief") return foundry(["emit-brief"]);
-      if (toolName === "launch-formulator") return foundry(["launch-formulator"]);
-      if (toolName === "stop-formulator") return foundry(["stop-formulator"]);
-      if (toolName === "query-locked") {
-        return foundry([
-          "query-locked",
-          "--text",
-          input.text,
-          "--tables",
-          input.tables,
-          "--split-by",
-          input.splitBy ?? "",
-          "--brief-window",
-          input.briefWindow ?? "",
-          "--question-id",
-          input.questionId ?? "",
-        ]);
-      }
-      if (toolName === "re-import") return foundry(importArgs("re-import", input));
-      throw new Error(`unknown tool ${toolName}`);
-    },
-  }));
+  return enabled.map((toolName) => defineTool(toolName));
 }
 
 export function f3Allowlist() {

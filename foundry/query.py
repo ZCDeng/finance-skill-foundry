@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from functools import partial
+from typing import Any, Callable
 
 from foundry.brief import _aggregate, _table_rows
 from foundry.caliber import (
@@ -9,12 +10,14 @@ from foundry.caliber import (
     cut_fact_by_map,
     fact_schedule_lines,
     fact_split_lines,
-    fact_table_id,
     format_cut,
+    source_table_id,
+    table_key,
     as_number,
 )
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused, QueryRefused
+from foundry.locking import exclusive
 from foundry.tags import CLAIMED, OUTSIDE, RECOMPUTED
 from foundry.window import QUERYABLE, Window, WindowStore
 from foundry.workpaper import (
@@ -31,6 +34,17 @@ def _question_key(text: str) -> str:
     return " ".join(text.strip().lower().split())
 
 
+def _window_note(window: Window) -> str:
+    """Name the window an answer came from.
+
+    A follow-up may resolve to the brief's window or to the store's current one,
+    and a re-import moves `current` to a brand-new window. Without the id in the
+    answer a leader cannot tell which period they were just quoted. It closes the
+    line, after the value, so a reader parses the tag and the number as before.
+    """
+    return f"（窗口: {window.id}）"
+
+
 def _json_default(value: Any) -> Any:
     try:
         return as_number(value)
@@ -45,17 +59,44 @@ def _facts(window: Window) -> list[dict[str, Any]]:
     return json.loads(path.read_text())
 
 
-def _append_followup(window: Window, payload: dict[str, Any], schedule: dict[str, Any] | None = None) -> None:
-    window.followup_path.parent.mkdir(parents=True, exist_ok=True)
-    with window.followup_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, default=_json_default) + "\n")
-    if schedule is not None:
-        persist_schedules(window, [schedule], replace=False)
-    window._set_state("FollowUp")
+def _record_followup(
+    window: Window,
+    payload: dict[str, Any],
+    build_schedule: Callable[..., dict[str, Any]] | None = None,
+) -> None:
+    """Record one follow-up as a single locked unit.
+
+    Allocating the follow-up id, appending the audit line, adding the schedule
+    item and re-rendering the workpaper are one transaction. Run unlocked, two
+    simultaneous follow-ups both read the same schedule list, both derive
+    ``followup-1`` and the second write drops the first item -- the audit log
+    and the tickable workpaper then disagree about what was asked.
+    """
+    with exclusive(window.root / ".lock"):
+        schedule = None
+        if build_schedule is not None:
+            schedule = build_schedule(item_id=next_followup_id(load_schedules(window)))
+        window.followup_path.parent.mkdir(parents=True, exist_ok=True)
+        with window.followup_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=_json_default) + "\n")
+        if schedule is not None:
+            persist_schedules(window, [schedule], replace=False)
+        window._set_state("FollowUp")
 
 
 def _same_required(fact: dict[str, Any], required_table_ids: list[str]) -> bool:
-    return set(str(item) for item in fact.get("required_table_ids") or []) == set(required_table_ids)
+    # Both sides are spelled by hand -- one in questions.json, one on the
+    # command line -- so compare the ids the catalog actually holds, not the
+    # two spellings.
+    recorded = {table_key(str(item)) for item in fact.get("required_table_ids") or []}
+    return recorded == {table_key(table) for table in required_table_ids}
+
+
+def _source_table(required_table_ids: list[str]) -> str:
+    try:
+        return source_table_id(required_table_ids)
+    except LockRefused as exc:
+        raise QueryRefused(str(exc)) from exc
 
 
 def query_locked(
@@ -81,14 +122,14 @@ def query_locked(
     if target.state not in QUERYABLE:
         raise QueryRefused(f"query refused in state {target.state}")
     names = set(target.table_names())
-    missing = [table for table in required_table_ids if table not in names]
+    missing = [table for table in required_table_ids if table_key(table) not in names]
     if missing:
         raise QueryRefused(f"table not in this window: {missing}")
     account_names = coa_names(target)
     if split_by in MAP_SPLITS:
         if "map" not in names:
             raise QueryRefused("table not in this window: ['map']")
-        fact = fact_table_id(required_table_ids) or required_table_ids[0]
+        fact = _source_table(required_table_ids)
         if fact not in names:
             raise QueryRefused(f"table not in this window: ['{fact}']")
         try:
@@ -110,19 +151,22 @@ def query_locked(
             None,
         )
         if cited:
-            return f"{RECOMPUTED}: {text} → {parts}"
-        schedule = schedule_from_cut(
-            item_id=next_followup_id(load_schedules(target)),
-            text=text,
-            table=fact,
-            cut=cut,
-            names=account_names,
-            origin="followup",
-            tag=f"{OUTSIDE} / {RECOMPUTED}",
+            return f"{RECOMPUTED}: {text} → {parts}{_window_note(target)}"
+        _record_followup(
+            target,
+            {"text": text, "tag": OUTSIDE, "cut": "map", "parts": parts},
+            partial(
+                schedule_from_cut,
+                text=text,
+                table=fact,
+                cut=cut,
+                names=account_names,
+                origin="followup",
+                tag=f"{OUTSIDE} / {RECOMPUTED}",
+            ),
         )
-        _append_followup(target, {"text": text, "tag": OUTSIDE, "cut": "map", "parts": parts}, schedule)
-        return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}"
-    table = required_table_ids[0]
+        return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
+    table = _source_table(required_table_ids)
     if split_by:
         cols = [row[0] for row in target.query(f"DESCRIBE {quote_ident(table)}")]
         if "amount" not in cols:
@@ -135,20 +179,23 @@ def query_locked(
         parts = ", ".join(f"{row[0]}={row[1]}" for row in rows)
         headers, fact_rows = _table_rows(target, table)
         claimed = _aggregate(target, table)
-        schedule = schedule_from_lines(
-            item_id=next_followup_id(load_schedules(target)),
-            text=text,
-            table=table,
-            lines=fact_split_lines(headers, fact_rows, split_by),
-            names=account_names,
-            origin="followup",
-            tag=f"{OUTSIDE} / {RECOMPUTED}",
-            claimed=None,
-            recomputed=claimed,
-            split_by=split_by,
+        _record_followup(
+            target,
+            {"text": text, "tag": OUTSIDE},
+            partial(
+                schedule_from_lines,
+                text=text,
+                table=table,
+                lines=fact_split_lines(headers, fact_rows, split_by),
+                names=account_names,
+                origin="followup",
+                tag=f"{OUTSIDE} / {RECOMPUTED}",
+                claimed=None,
+                recomputed=claimed,
+                split_by=split_by,
+            ),
         )
-        _append_followup(target, {"text": text, "tag": OUTSIDE}, schedule)
-        return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}"
+        return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
     value = _aggregate(target, table)
     cited = next(
         (
@@ -164,18 +211,21 @@ def query_locked(
         None,
     )
     if cited:
-        return f"{CLAIMED}: {text} → {value}"
+        return f"{CLAIMED}: {text} → {value}{_window_note(target)}"
     headers, fact_rows = _table_rows(target, table)
-    schedule = schedule_from_lines(
-        item_id=next_followup_id(load_schedules(target)),
-        text=text,
-        table=table,
-        lines=fact_schedule_lines(headers, fact_rows),
-        names=account_names,
-        origin="followup",
-        tag=f"{OUTSIDE} / {RECOMPUTED}",
-        claimed=None,
-        recomputed=value,
+    _record_followup(
+        target,
+        {"text": text, "tag": OUTSIDE, "value": as_number(value)},
+        partial(
+            schedule_from_lines,
+            text=text,
+            table=table,
+            lines=fact_schedule_lines(headers, fact_rows),
+            names=account_names,
+            origin="followup",
+            tag=f"{OUTSIDE} / {RECOMPUTED}",
+            claimed=None,
+            recomputed=value,
+        ),
     )
-    _append_followup(target, {"text": text, "tag": OUTSIDE, "value": as_number(value)}, schedule)
-    return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}"
+    return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}{_window_note(target)}"

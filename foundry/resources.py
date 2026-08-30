@@ -3,6 +3,8 @@ from __future__ import annotations
 from importlib import resources
 from pathlib import Path
 
+from foundry.errors import FoundryError
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -12,8 +14,10 @@ def resource_dir(name: str) -> Path:
     repo_dir = _repo_root() / name
     if repo_dir.exists():
         return repo_dir
-    candidate = resources.files("foundry").joinpath("resources", name)
-    return Path(str(candidate))
+    candidate = Path(str(resources.files("foundry").joinpath("resources", name)))
+    if not candidate.exists():
+        raise FoundryError(f"packaged resource missing: {name} ({candidate})")
+    return candidate
 
 
 def fixture_root(base: Path | None = None) -> Path:

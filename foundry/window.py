@@ -4,8 +4,10 @@ import json
 import re
 import shutil
 import uuid
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import duckdb
@@ -28,31 +30,21 @@ from foundry.catalog import (
     write_table,
 )
 from foundry.errors import LockRefused, WindowBusy
+from foundry.fsutil import write_json_atomic as _write_json
+from foundry.fsutil import write_text_atomic as _write_text_atomic
 from foundry.harness import merge_import_sources
+from foundry.locking import exclusive
 
 STATES = ("Open", "Imported", "Locked", "Briefed", "FollowUp")
 QUERYABLE = {"Locked", "Briefed", "FollowUp"}
 WINDOW_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+LIFECYCLE_LOCK_TIMEOUT = 10.0
 
 
 def _read_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
     return json.loads(path.read_text())
-
-
-def _write_json(path: Path, payload: Any) -> None:
-    _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp_path.write_text(text)
-        tmp_path.replace(path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 @dataclass
@@ -151,6 +143,63 @@ class Window:
         return self.root / "workpaper.md"
 
     @property
+    def lifecycle_lock_path(self) -> Path:
+        return self.root / ".lock"
+
+    @property
+    def formulator_home(self) -> Path:
+        return self.store.formulator_dir / self.id
+
+    @property
+    def formulator_pid_path(self) -> Path:
+        """The single-instance Formulator lease for this window.
+
+        ``launch-formulator`` claims this file with ``O_EXCL`` before it spawns
+        anything and only registers the ``formulator`` handle once the server
+        answered, so between those two points the handle list is empty while a
+        Formulator is coming up. Re-import reads the lease, not just the
+        handles, or it would cross the fence during that window.
+        """
+        return self.formulator_home / "pid"
+
+    def lifecycle_lock(self, *, timeout: float | None = None) -> AbstractContextManager[None]:
+        """Serialize one whole lifecycle step of this window across processes.
+
+        Import, lock and re-import each read state, rewrite the catalog and then
+        write state back. Without mutual exclusion two processes can both pass
+        the state check and leave state, manifest and catalog disagreeing, so
+        every one of those steps runs inside this lock. Held by the window that
+        is being mutated, keyed on ``<window>/.lock``.
+        """
+        wait = LIFECYCLE_LOCK_TIMEOUT if timeout is None else timeout
+        return exclusive(self.lifecycle_lock_path, timeout=wait)
+
+    def close(self) -> None:
+        """Release the DuckDB connections this window opened.
+
+        A window is a cheap identity object that callers construct freely, but
+        it owns lazily opened connections. Long-lived callers close them here
+        instead of accumulating one connection per read.
+        """
+        if self._write_con is not None:
+            checkpoint_and_close(self._write_con)
+            self._write_con = None
+        if self._ro_con is not None:
+            self._ro_con.close()
+            self._ro_con = None
+
+    def __enter__(self) -> Window:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    @property
     def state(self) -> str:
         data = _read_json(self.state_path, {"state": "Open"})
         return str(data["state"])
@@ -167,6 +216,26 @@ class Window:
         map: Path | None = None,
         units: Path | None = None,
         drop_dir: Path | None = None,
+    ) -> dict[str, Any]:
+        with self.lifecycle_lock():
+            return self._import_tables_locked(
+                coa=coa,
+                named=named,
+                aux=aux,
+                map=map,
+                units=units,
+                drop_dir=drop_dir,
+            )
+
+    def _import_tables_locked(
+        self,
+        *,
+        coa: Path | None,
+        named: list[dict[str, Any]] | None,
+        aux: Path | None,
+        map: Path | None,
+        units: Path | None,
+        drop_dir: Path | None,
     ) -> dict[str, Any]:
         if self.state not in {"Open", "Imported"}:
             raise LockRefused("import only before lock")
@@ -227,22 +296,37 @@ class Window:
         return manifest
 
     def _normalize_named(self, named: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize each id the way the catalog writer will.
+
+        ``write_table`` routes the CREATE through ``sql_identifier``, so an id
+        such as ``ar-2024-08`` lands in DuckDB as ``ar_2024_08``. Normalizing
+        here keeps the manifest key, the created table and ``SHOW TABLES`` in
+        agreement; otherwise the window imports and can then never lock.
+        ``given_id`` keeps the operator's spelling for error messages.
+        """
         cleaned: list[dict[str, Any]] = []
         for item in named:
             if not isinstance(item, dict) or not item.get("id") or not item.get("path"):
                 raise LockRefused("named table requires id and path")
-            cleaned.append({"id": str(item["id"]).strip().lower().replace(" ", "_"), "path": str(item["path"])})
+            given = str(item["id"]).strip()
+            cleaned.append({"id": sql_identifier(given), "given_id": given, "path": str(item["path"])})
         return cleaned
 
     def _assert_table_identifiers(self, named: list[dict[str, Any]]) -> None:
-        tables = ["coa", "aux", "map", "units", *(str(item["id"]) for item in named)]
+        tables = [
+            ("coa", "coa"),
+            ("aux", "aux"),
+            ("map", "map"),
+            ("units", "units"),
+            *((str(item["id"]), str(item.get("given_id") or item["id"])) for item in named),
+        ]
         seen: dict[str, str] = {}
-        for table in tables:
+        for table, given in tables:
             ident = sql_identifier(table)
             prior = seen.get(ident)
             if prior is not None:
-                raise LockRefused(f"table identifier collision: {prior} and {table}")
-            seen[ident] = table
+                raise LockRefused(f"table identifier collision: {prior} and {given}")
+            seen[ident] = given
 
     def _load_into(
         self,
@@ -254,43 +338,50 @@ class Window:
         map: Path | None,
         units: Path | None,
     ) -> dict[str, Any]:
-        coa_headers, coa_rows = load_tabular(coa)
+        coa_hash, coa_headers, coa_rows = self._read_source(coa)
         require_columns(coa_headers, ["account_code", "account_name"], "CoA")
         if not coa_rows:
             raise LockRefused("CoA is empty")
         write_table(con, "coa", coa_headers, coa_rows)
         manifest: dict[str, Any] = {
             "window_id": self.id,
-            "coa": self._file_meta(con, coa, "coa"),
+            "coa": self._file_meta(con, coa, "coa", coa_hash),
             "named": {},
         }
         aux_headers = list(AUX_COLUMNS)
         aux_rows: list[tuple[Any, ...]] = []
         if aux is not None:
-            aux_headers, loaded_aux = load_tabular(aux)
+            aux_hash, aux_headers, loaded_aux = self._read_source(aux)
             require_columns(aux_headers, AUX_COLUMNS, "aux")
             if not loaded_aux:
                 raise LockRefused("aux is empty")
             aux_rows.extend(loaded_aux)
-            manifest["aux"] = {"path": str(aux), "source_hash": file_hash(aux)}
+            manifest["aux"] = {"path": str(aux), "source_hash": aux_hash}
         if units is not None:
-            units_headers, units_rows = load_tabular(units)
+            units_hash, units_headers, units_rows = self._read_source(units)
             require_columns(units_headers, UNITS_COLUMNS, "units")
             if not units_rows:
                 raise LockRefused("units are empty")
             write_table(con, "units", units_headers, units_rows)
             if aux is None:
                 aux_rows.extend(units_as_aux_rows(units_headers, units_rows))
-            manifest["units"] = self._file_meta(con, units, "units")
+            manifest["units"] = self._file_meta(con, units, "units", units_hash)
         if aux_rows:
             write_table(con, "aux", aux_headers if aux is not None else AUX_COLUMNS, aux_rows)
             loaded = self._live_hash(con, "aux")
             if "aux" in manifest:
                 manifest["aux"]["loaded_hash"] = loaded
             else:
-                manifest["aux"] = {"path": str(units), "loaded_hash": loaded}
+                # Derived from the units file, not supplied as an aux source.
+                # The discriminator keeps consumers from reading this table
+                # digest as if it were the digest of a file the manager handed in.
+                manifest["aux"] = {
+                    "derived_from": "units",
+                    "path": str(units),
+                    "loaded_hash": loaded,
+                }
         if map is not None:
-            map_headers, map_rows = load_tabular(map)
+            map_hash, map_headers, map_rows = self._read_source(map)
             require_columns(map_headers, MAP_COLUMNS, "map")
             if not map_rows:
                 raise LockRefused("map is empty")
@@ -299,28 +390,52 @@ class Window:
             if not kept:
                 raise LockRefused("map has no in-window rows")
             write_table(con, "map", map_headers, kept)
-            manifest["map"] = self._file_meta(con, map, "map")
+            manifest["map"] = self._file_meta(con, map, "map", map_hash)
             manifest["map_orphans"] = orphans
         named_meta: dict[str, Any] = {}
         for item in named:
             table_id = str(item["id"])
             path = Path(item["path"])
-            headers, rows = load_tabular(path)
+            source_hash, headers, rows = self._read_source(path)
             if not rows:
                 raise LockRefused(f"named table {table_id} has zero rows")
             write_table(con, table_id, headers, rows)
-            named_meta[table_id] = self._file_meta(con, path, table_id)
+            named_meta[table_id] = self._file_meta(con, path, table_id, source_hash)
         manifest["named"] = named_meta
         return manifest
 
-    def _file_meta(self, con: duckdb.DuckDBPyConnection, path: Path, table: str) -> dict[str, str]:
+    def _read_source(self, path: Path) -> tuple[str, list[str], list[tuple[Any, ...]]]:
+        """Parse a source file and pin its digest to the bytes that were parsed.
+
+        Hash, parse, hash again. If the file is replaced mid-import the digest
+        recorded in the manifest would otherwise describe bytes that never
+        reached the catalog, and ``lock()`` -- which checks the file digest and
+        the table digest independently -- would accept the mismatched pair.
+        """
+        digest = file_hash(path)
+        headers, rows = load_tabular(path)
+        if file_hash(path) != digest:
+            raise LockRefused(f"source changed during import: {path}")
+        return digest, headers, rows
+
+    def _file_meta(
+        self,
+        con: duckdb.DuckDBPyConnection,
+        path: Path,
+        table: str,
+        source_hash: str,
+    ) -> dict[str, str]:
         return {
             "path": str(path),
-            "source_hash": file_hash(path),
+            "source_hash": source_hash,
             "loaded_hash": self._live_hash(con, table),
         }
 
     def lock(self) -> dict[str, Any]:
+        with self.lifecycle_lock():
+            return self._lock_locked()
+
+    def _lock_locked(self) -> dict[str, Any]:
         if self.state == "Locked" or self.lock_path.exists() and _read_json(self.lock_path, {}).get("locked"):
             raise LockRefused("already locked; re-import to take a source edit")
         if self.state != "Imported" or not self.catalog_path().exists():
@@ -382,9 +497,20 @@ class Window:
 
     def hashes(self) -> dict[str, Any]:
         manifest = _read_json(self.lock_path, {})
+        aux_meta = manifest.get("aux", {}) or {}
+        aux_source = aux_meta.get("source_hash")
+        aux_digest = aux_source or aux_meta.get("loaded_hash")
+        # aux carries either a source-file digest or, when the table was derived
+        # from units, a loaded-table digest. The kind travels with the digest so
+        # a reviewer can tell a source change from a different import route.
+        aux_kind: str | None = None
+        if aux_digest:
+            aux_kind = "source" if aux_source else "derived"
         return {
             "coa": manifest.get("coa", {}).get("source_hash"),
-            "aux": manifest.get("aux", {}).get("source_hash") or manifest.get("aux", {}).get("loaded_hash"),
+            "aux": aux_digest,
+            "aux_kind": aux_kind,
+            "aux_derived_from": aux_meta.get("derived_from"),
             "map": manifest.get("map", {}).get("source_hash"),
             "units": manifest.get("units", {}).get("source_hash"),
             "named": {k: v.get("source_hash") for k, v in manifest.get("named", {}).items()},
@@ -431,20 +557,30 @@ class Window:
         units: Path | None = None,
         drop_dir: Path | None = None,
     ) -> Window:
-        handles = _read_json(self.handles_path, [])
-        if handles:
-            raise WindowBusy(f"read handles remain: {handles}")
-        if self._ro_con is not None:
-            self._ro_con.close()
-            self._ro_con = None
-        nxt = self.store.create(make_current=False)
-        try:
-            nxt.import_tables(coa=coa, named=named, aux=aux, map=map, units=units, drop_dir=drop_dir)
-        except Exception:
-            shutil.rmtree(nxt.root, ignore_errors=True)
-            raise
-        self.store._set_current(nxt.id)
-        return nxt
+        # The lease check, the successor import and the current-window flip are
+        # one step: a lease registered between the check and the flip would
+        # otherwise keep serving the old catalog after the fence was crossed.
+        # launch-formulator takes this same lock for its whole startup, so a
+        # launch is either wholly before this block or wholly after it.
+        with self.lifecycle_lock():
+            handles = _read_json(self.handles_path, [])
+            if handles:
+                raise WindowBusy(f"read handles remain: {handles}")
+            if self.formulator_pid_path.exists():
+                raise WindowBusy(
+                    "a Formulator lease is still held for this window; run stop-formulator first"
+                )
+            if self._ro_con is not None:
+                self._ro_con.close()
+                self._ro_con = None
+            nxt = self.store.create(make_current=False)
+            try:
+                nxt.import_tables(coa=coa, named=named, aux=aux, map=map, units=units, drop_dir=drop_dir)
+            except Exception:
+                shutil.rmtree(nxt.root, ignore_errors=True)
+                raise
+            self.store._set_current(nxt.id)
+            return nxt
 
     def _reader(self) -> duckdb.DuckDBPyConnection:
         if self.state not in QUERYABLE:

@@ -13,10 +13,12 @@
     },
     "foundry": {
       "tools": [
+        "create",
         "import",
         "lock",
         "record-questions",
         "emit-brief",
+        "workpaper",
         "launch-formulator",
         "stop-formulator",
         "query-locked",
@@ -33,10 +35,12 @@
             "read_document"
           ],
           "tools": [
+            "create",
             "import",
             "lock",
             "record-questions",
             "emit-brief",
+            "workpaper",
             "launch-formulator",
             "stop-formulator",
             "query-locked",

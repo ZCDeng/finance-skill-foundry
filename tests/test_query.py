@@ -86,18 +86,34 @@ def test_same_table_same_value_different_question_is_followup(tmp_path: Path) ->
 
 
 def test_question_id_does_not_bypass_required_table_match(tmp_path: Path) -> None:
+    """A question_id must never make a mismatched table list cite the brief."""
     _, window, _ = _locked(tmp_path)
     record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
     emit_brief(window)
 
-    answer = query_locked(
-        window,
-        "GL 合计",
-        required_table_ids=["gl", "ar"],
-        question_id="q1",
-    )
+    with pytest.raises(QueryRefused) as caught:
+        query_locked(window, "GL 合计", required_table_ids=["gl", "ar"], question_id="q1")
 
-    assert answer.startswith("稿外追问")
+    assert "报表声称" not in str(caught.value)
+    assert not window.followup_path.exists()
+
+
+# --- #18 a two-table follow-up must not answer from the first table ---------
+
+
+def test_two_named_tables_refuse_instead_of_answering_from_one(tmp_path: Path) -> None:
+    """gl is 100 and ar is 40; 'GL+AR 合计' has no defined caliber, so refuse."""
+    _, window, _ = _locked(tmp_path)
+    record_questions(window, [{"id": "q1", "text": "GL 合计", "required_table_ids": ["gl"]}])
+    emit_brief(window)
+
+    with pytest.raises(QueryRefused, match="一问一表"):
+        query_locked(window, "GL+AR 合计", required_table_ids=["gl", "ar"])
+    with pytest.raises(QueryRefused, match="一问一表"):
+        query_locked(window, "GL+AR 按经营单元", required_table_ids=["gl", "ar"], split_by="unit_id")
+
+    assert not window.followup_path.exists()
+    assert window.state == "Briefed"
 
 
 def test_query_refuses_before_lock(tmp_path: Path) -> None:
@@ -166,3 +182,47 @@ def test_split_by_requires_amount_column(tmp_path: Path) -> None:
     emit_brief(window)
     with pytest.raises(QueryRefused, match="no amount"):
         query_locked(window, "notes by unit", required_table_ids=["notes"], split_by="unit_id")
+
+
+# --- #13 follow-up: the operator's spelling must reach the catalog id -------
+
+
+def _locked_hyphenated(tmp_path: Path):
+    """A drop whose file name is an ordinary period name: ar-2024-08.xlsx."""
+    drop = tmp_path / "drop"
+    store = WindowStore(tmp_path / "var")
+    window = store.create()
+    window.import_tables(
+        coa=_xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1001", "Cash"]]),
+        named=[
+            {
+                "id": "ar-2024-08",
+                "path": _xlsx(drop / "ar-2024-08.xlsx", ["account_code", "amount"], [["1001", 40]]),
+            }
+        ],
+        drop_dir=drop,
+    )
+    window.lock()
+    return store, window
+
+
+def test_a_hyphenated_table_answers_under_the_operators_spelling(tmp_path: Path) -> None:
+    _, window = _locked_hyphenated(tmp_path)
+    assert "ar_2024_08" in window.table_names()
+
+    answer = query_locked(window, "AR 合计", required_table_ids=["ar-2024-08"])
+    assert "40" in answer
+    assert "稿外追问" in answer
+
+
+def test_a_hyphenated_table_is_not_reported_missing_by_the_brief(tmp_path: Path) -> None:
+    _, window = _locked_hyphenated(tmp_path)
+    record_questions(
+        window, [{"id": "q1", "text": "AR 合计是多少?", "required_table_ids": ["ar-2024-08"]}]
+    )
+    brief = emit_brief(window)
+
+    assert "not-in-this-window" not in brief
+    assert "40" in brief
+    cited = query_locked(window, "AR 合计是多少?", required_table_ids=["ar-2024-08"], question_id="q1")
+    assert cited.startswith("报表声称")

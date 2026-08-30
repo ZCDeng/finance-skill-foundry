@@ -101,6 +101,16 @@ def test_map_drop_refuses_symlinks(tmp_path: Path) -> None:
         map_drop(drop)
 
 
+def test_map_drop_refuses_a_symlinked_drop_root(tmp_path: Path) -> None:
+    outside = tmp_path / "elsewhere"
+    _xlsx(outside / "gl.xlsx", ["account_code", "amount"], [["1001", 1]])
+    drop = tmp_path / "uploads"
+    drop.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(LockRefused, match="symlink"):
+        map_drop(drop)
+
+
 def test_import_from_upload_drop_only(tmp_path: Path) -> None:
     drop = tmp_path / "uploads"
     _xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1001", "Cash"]])

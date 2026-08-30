@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from foundry.caliber import CutLine, MapCut, as_number, format_aux
+from foundry.fsutil import write_text_atomic
 from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
 
@@ -144,6 +145,15 @@ def next_followup_id(payload: dict[str, Any]) -> str:
 
 
 def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: bool) -> None:
+    """Write schedules.json and re-render workpaper.md from it.
+
+    The caller must already hold ``exclusive(window.root / ".lock")``: a
+    read-modify-write of the item list is not safe on its own, and the follow-up
+    id this appends under was allocated from the same read. ``schedules.json``
+    is the dependency and goes first, so an interrupted pair leaves a workpaper
+    that is behind rather than a workpaper claiming an item the schedule list
+    never recorded.
+    """
     if replace:
         payload = {"window_id": window.id, "hashes": window.hashes(), "items": items}
     else:
@@ -151,15 +161,44 @@ def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: b
         payload["window_id"] = window.id
         payload["hashes"] = payload.get("hashes") or window.hashes()
         payload["items"] = list(payload.get("items") or []) + items
-    window.schedules_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    window.workpaper_path.write_text(render_workpaper(payload))
+    write_text_atomic(window.schedules_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    write_text_atomic(window.workpaper_path, render_workpaper(payload))
+
+
+def _aux_part(hashes: dict[str, Any]) -> str | None:
+    """Render the aux digest, saying so when aux was derived from units.
+
+    A units-derived aux has no aux file behind it, so the only digest available
+    is the loaded table's. Printing that as plain ``aux=`` sends an auditor
+    looking for a file that does not exist and reads exactly like the aux-file
+    case. Two markers can say so: ``aux_derived_from``, which only a manifest
+    written after that fix carries, and ``aux_kind``, which ``Window.hashes()``
+    derives from the absence of a source digest and so is right for a window
+    locked by an older build too. Read both, and fall back to the plain label
+    only when neither is there.
+    """
+    value: Any = hashes.get("aux")
+    derived: Any = hashes.get("aux_derived_from") or hashes.get("aux_kind") == "derived"
+    if isinstance(value, dict):
+        derived = value.get("derived_from") or (not value.get("source_hash")) or derived
+        value = value.get("source_hash") or value.get("loaded_hash") or value.get("hash")
+    if not value:
+        value = hashes.get("aux_loaded")
+        if value:
+            derived = derived or "units"
+    if not value:
+        return None
+    return f"aux(derived)={value}" if derived else f"aux={value}"
 
 
 def _hash_line(hashes: dict[str, Any]) -> str:
     named = hashes.get("named") or {}
     parts = [f"coa={hashes.get('coa') or '—'}", f"map={hashes.get('map') or '—'}"]
-    if hashes.get("aux"):
-        parts.append(f"aux={hashes['aux']}")
+    if hashes.get("units"):
+        parts.append(f"units={hashes['units']}")
+    aux_part = _aux_part(hashes)
+    if aux_part:
+        parts.append(aux_part)
     for table, digest in named.items():
         parts.append(f"{table}={digest or '—'}")
     return " ".join(parts)
@@ -193,7 +232,7 @@ def render_workpaper(payload: dict[str, Any]) -> str:
     for item in payload.get("items") or []:
         lines.append(f"## {item.get('id')} · {item.get('text')}")
         lines.append("")
-        origin = "稿外追问" if item.get("origin") == "followup" else "brief"
+        origin = OUTSIDE if item.get("origin") == "followup" else "brief"
         lines.append(f"来源: {origin}")
         tag = item.get("tag") or ""
         if item.get("origin") == "followup" and OUTSIDE not in tag:

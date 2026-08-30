@@ -14,7 +14,15 @@ LOADER_NAME = "locked_catalog"
 
 try:
     from data_formulator.data_loader.external_data_loader import ExternalDataLoader as _DFLoader
-except Exception:  # pragma: no cover - tests run without Formulator
+except ModuleNotFoundError as exc:  # pragma: no cover - tests run without Formulator
+    # Only "Data Formulator is not installed" may fall back to the stub base
+    # class. A moved module or a renamed ExternalDataLoader must raise: a
+    # silent fallback would leave LockedCatalogLoader subclassing object, so
+    # Formulator would come up with the locked-catalog connector unregistered
+    # and nothing in the foundry would say so.
+    if exc.name != "data_formulator":
+        raise
+
     class _DFLoader:  # type: ignore[no-redef]
         pass
 
@@ -49,6 +57,7 @@ class LockedCatalogLoader(_DFLoader):
         ).strip()
         if not self.window_id:
             raise LockRefused("FOUNDRY_WINDOW_ID is required for the locked-catalog loader")
+        self._bound: Window | None = None
 
     @staticmethod
     def list_params() -> list[dict[str, Any]]:
@@ -63,10 +72,26 @@ class LockedCatalogLoader(_DFLoader):
         return "none"
 
     def _window(self) -> Window:
-        window = self.store.get(self.window_id)
-        if window.state not in {"Locked", "Briefed", "FollowUp"}:
+        """The one window this loader reads, opened once for its whole life.
+
+        ``Window`` owns a lazily opened read-only DuckDB connection, so
+        re-resolving it per call -- ``list_tables`` alone calls it once and
+        every ``fetch_table`` twice more -- accumulated one connection per read
+        for as long as a Formulator session stayed open. Bind once; re-read the
+        state from disk on every call so a window that left the queryable
+        states still fails closed.
+        """
+        if self._bound is None:
+            self._bound = self.store.get(self.window_id)
+        if self._bound.state not in {"Locked", "Briefed", "FollowUp"}:
             raise LockRefused("loader opens the catalog read-only after lock")
-        return window
+        return self._bound
+
+    def close(self) -> None:
+        """Release the read connection this loader opened."""
+        if self._bound is not None:
+            self._bound.close()
+            self._bound = None
 
     def list_tables(self, table_filter: str | None = None) -> list[dict[str, Any]]:
         window = self._window()

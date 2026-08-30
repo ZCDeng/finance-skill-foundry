@@ -150,3 +150,77 @@ def test_json_named_table_imports_object_rows(tmp_path: Path) -> None:
     window.import_tables(coa=coa, named=[{"id": "gl", "path": gl}], drop_dir=drop)
     window.lock()
     assert window.query("SELECT SUM(amount) FROM gl")[0][0] == Decimal("1.25")
+
+
+def test_units_derived_aux_is_tagged_apart_from_a_supplied_aux_file(tmp_path: Path) -> None:
+    import json
+
+    from foundry.catalog import file_hash
+
+    drop = tmp_path / "drop"
+    units = _xlsx(drop / "units.xlsx", ["unit_id", "unit_name"], [["OU1", "North"]])
+    derived = WindowStore(tmp_path / "var-derived").create()
+    derived.import_tables(
+        coa=_coa(drop),
+        units=units,
+        named=[{"id": "gl", "path": _gl(drop)}],
+        drop_dir=drop,
+    )
+    derived.lock()
+    derived_aux = json.loads(derived.lock_path.read_text())["aux"]
+    assert derived_aux["derived_from"] == "units"
+    assert "source_hash" not in derived_aux
+    derived_hashes = derived.hashes()
+    assert derived_hashes["aux_kind"] == "derived"
+    assert derived_hashes["aux_derived_from"] == "units"
+    assert derived_hashes["aux"] == derived_aux["loaded_hash"]
+
+    aux_file = _xlsx(
+        drop / "aux.xlsx",
+        ["dim_id", "dim_name", "member_id", "member_name"],
+        [["unit", "Unit", "OU1", "North"]],
+    )
+    supplied = WindowStore(tmp_path / "var-supplied").create()
+    supplied.import_tables(
+        coa=_coa(drop),
+        aux=aux_file,
+        named=[{"id": "gl", "path": _gl(drop)}],
+        drop_dir=drop,
+    )
+    supplied.lock()
+    supplied_aux = json.loads(supplied.lock_path.read_text())["aux"]
+    assert "derived_from" not in supplied_aux
+    supplied_hashes = supplied.hashes()
+    assert supplied_hashes["aux_kind"] == "source"
+    assert supplied_hashes["aux_derived_from"] is None
+    assert supplied_hashes["aux"] == file_hash(aux_file)
+
+
+def test_a_pre_migration_manifest_still_labels_its_aux_as_derived(tmp_path: Path) -> None:
+    """#35 -- windows locked before derived_from existed carry no marker.
+
+    hashes() classifies from the absent source digest, and the workpaper must
+    read that classification instead of only the newer explicit key.
+    """
+    import json
+
+    from foundry.workpaper import render_workpaper
+
+    drop = tmp_path / "drop"
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(
+        coa=_coa(drop),
+        units=_xlsx(drop / "units.xlsx", ["unit_id", "unit_name"], [["OU1", "North"]]),
+        named=[{"id": "gl", "path": _gl(drop)}],
+        drop_dir=drop,
+    )
+    window.lock()
+    manifest = json.loads(window.lock_path.read_text())
+    del manifest["aux"]["derived_from"]
+    window.lock_path.write_text(json.dumps(manifest))
+
+    hashes = window.hashes()
+    assert hashes["aux_derived_from"] is None
+    assert hashes["aux_kind"] == "derived"
+    paper = render_workpaper({"window_id": window.id, "hashes": hashes, "items": []})
+    assert f"aux(derived)={hashes['aux']}" in paper

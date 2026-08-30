@@ -11,6 +11,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pyyaml>=6"]
+# The locked-catalog loader subclasses data_formulator's ExternalDataLoader, so
+# the binding is version-bound, not just documented in the README.
+formulator = ["data-formulator==0.7.0"]
 
 [project.scripts]
 foundry = "foundry.cli:main"
@@ -23,14 +26,7 @@ build-backend = "setuptools.build_meta"
 include = ["foundry*", "formulator-plugin*"]
 
 [tool.setuptools.package-data]
-foundry = [
-  "resources/fixtures/period-smoke/*",
-  "resources/method/*",
-  "resources/method/*/*",
-  "resources/dsh-plugin/*",
-  "resources/dsh-plugin/src/*",
-  "resources/formulator-plugin/*",
-]
+foundry = ["resources/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

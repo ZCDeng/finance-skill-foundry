@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from foundry.catalog import sql_identifier
 from foundry.errors import LockRefused
 
 AUX_COLUMNS = ["dim_id", "dim_name", "member_id", "member_name"]
@@ -301,11 +302,51 @@ def fact_split_lines(headers: list[str], rows: list[tuple[Any, ...]], split_by: 
     ]
 
 
+def table_key(name: str) -> str:
+    """The identifier a table id actually lands under in the catalog.
+
+    ``write_table`` routes every CREATE through ``sql_identifier``, so the
+    operator's ``ar-2024-08`` is the catalog's ``ar_2024_08``. Comparisons
+    between what a question or a follow-up names and what the window holds go
+    through this, or a table that IS in the window reads as absent and the
+    brief asserts not-in-this-window about data it is sitting on.
+    """
+    return sql_identifier(name)
+
+
+def fact_table_ids(required_table_ids: list[str]) -> list[str]:
+    """Every named (non-master) table a question declares, as catalog ids.
+
+    A question answers from one named table; ``coa``/``aux``/``map``/``units``
+    only shape the cut. More than one entry here means the question has no
+    defined calculation, so callers refuse it instead of picking one.
+    """
+    return [table_key(table) for table in required_table_ids if table_key(table) not in MASTER_TABLES]
+
+
 def fact_table_id(required_table_ids: list[str]) -> str | None:
-    for table in required_table_ids:
-        if table not in MASTER_TABLES:
-            return table
-    return None
+    tables = fact_table_ids(required_table_ids)
+    return tables[0] if tables else None
+
+
+def source_table_id(required_table_ids: list[str]) -> str:
+    """The single table a conclusion or a follow-up computes from.
+
+    ``emit_brief`` and ``query_locked`` must agree on this table or a leader
+    re-asking a question that IS in the brief gets a number the brief never
+    claimed, stamped 稿外追问. One selector, both callers -- including the
+    refusal when a caller names two fact tables, so a two-table follow-up can
+    never answer from the first one and archive that as the whole story.
+    """
+    if not required_table_ids:
+        raise LockRefused("required_table_ids is required")
+    facts = fact_table_ids(required_table_ids)
+    if len(facts) > 1:
+        raise LockRefused(
+            f"names more than one named table: {', '.join(facts)}; "
+            "一问一表，没有定义跨表口径，拆成每表一问再报"
+        )
+    return facts[0] if facts else table_key(required_table_ids[0])
 
 
 def format_cut(cut: MapCut) -> str:
