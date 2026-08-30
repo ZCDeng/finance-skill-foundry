@@ -5,7 +5,10 @@ description = "Finance manager skill foundry: lock a period catalog, emit a tagg
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "duckdb>=1.5,<1.6",
+  # 1.5.5 is the current stable line; 1.6 exists only as .dev prereleases on
+  # PyPI. The floor is the exact release the READ_ONLY attach path is verified
+  # against, so a fresh install cannot land on an older 1.5.x.
+  "duckdb>=1.5.5,<1.6",
   "openpyxl>=3.1",
 ]
 

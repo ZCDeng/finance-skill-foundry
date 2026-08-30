@@ -20,6 +20,7 @@ from foundry.caliber import (
     units_as_aux_rows,
 )
 from foundry.catalog import (
+    TABULAR_EXTS,
     checkpoint_and_close,
     file_hash,
     load_tabular,
@@ -143,6 +144,51 @@ class Window:
         return self.root / "workpaper.md"
 
     @property
+    def inputs_dir(self) -> Path:
+        """Where the bytes this window was built from live.
+
+        Import copies every source file in here and then parses the copy, so
+        the window holds its own inputs rather than a path into whatever
+        directory the operator happened to export into. Delete the original and
+        the window still answers for itself; hand the directory to an auditor
+        and they get the workbooks, not a list of file names.
+        """
+        return self.root / "inputs"
+
+    @property
+    def task_path(self) -> Path:
+        return self.root / "task"
+
+    @property
+    def task_id(self) -> str | None:
+        """Which task owns this window, if one has adopted it.
+
+        A back-pointer rather than a lookup through every task's chain: the
+        window is what a period step already has in hand, and reading one line
+        beats scanning the task store to find out where it belongs.
+        """
+        if not self.task_path.exists():
+            return None
+        value = self.task_path.read_text(encoding="utf-8").strip()
+        return value or None
+
+    def bind_task(self, task_id: str) -> None:
+        """Adopt this window into a task, once.
+
+        Re-binding to the same task is a no-op so adoption-on-touch can call it
+        freely. Re-binding to a different one is refused: a window's follow-ups,
+        deliverable versions and successor chain are already recorded against
+        the first task, and moving the pointer would leave those pointing at a
+        timeline that no longer claims them.
+        """
+        current = self.task_id
+        if current == task_id:
+            return
+        if current is not None:
+            raise LockRefused(f"window {self.id} already belongs to task {current}")
+        _write_text_atomic(self.task_path, f"{task_id}\n")
+
+    @property
     def lifecycle_lock_path(self) -> Path:
         return self.root / ".lock"
 
@@ -262,6 +308,12 @@ class Window:
         staging.unlink(missing_ok=True)
         wal = Path(str(staging) + ".wal")
         wal.unlink(missing_ok=True)
+        # The archive is staged for the same reason the catalog is. A second
+        # import must not delete the bytes behind the window that is currently
+        # importable until the new set has been read whole; a failure halfway
+        # would otherwise leave a catalog whose inputs are gone.
+        staging_inputs = self.root / "inputs.staging"
+        shutil.rmtree(staging_inputs, ignore_errors=True)
         con = duckdb.connect(str(staging))
         try:
             manifest = self._load_into(
@@ -271,16 +323,23 @@ class Window:
                 aux=Path(aux) if aux else None,
                 map=Path(map) if map else None,
                 units=Path(units) if units else None,
+                dest_dir=staging_inputs,
             )
         except Exception:
             con.close()
             staging.unlink(missing_ok=True)
             wal.unlink(missing_ok=True)
+            shutil.rmtree(staging_inputs, ignore_errors=True)
             raise
         checkpoint_and_close(con)
         wal.unlink(missing_ok=True)
         target = self.catalog_path()
         staging.replace(target)
+        # Catalog first, then the archive it was parsed from. An interruption
+        # between the two leaves the previous archive beside the new catalog,
+        # which lock() catches on the source digest rather than accepting.
+        shutil.rmtree(self.inputs_dir, ignore_errors=True)
+        staging_inputs.replace(self.inputs_dir)
         _write_json(self.lock_path, {**manifest, "locked": False})
         extras = self._list_extras(
             drop_dir,
@@ -337,35 +396,46 @@ class Window:
         aux: Path | None,
         map: Path | None,
         units: Path | None,
+        dest_dir: Path,
     ) -> dict[str, Any]:
-        coa_hash, coa_headers, coa_rows = self._read_source(coa)
+        coa_file, coa_hash, coa_headers, coa_rows = self._read_source(coa, "coa", dest_dir)
         require_columns(coa_headers, ["account_code", "account_name"], "CoA")
         if not coa_rows:
             raise LockRefused("CoA is empty")
         write_table(con, "coa", coa_headers, coa_rows)
         manifest: dict[str, Any] = {
             "window_id": self.id,
-            "coa": self._file_meta(con, coa, "coa", coa_hash),
+            "coa": self._file_meta(
+                con, coa, self._archived_ref(coa_file, dest_dir), "coa", coa_hash
+            ),
             "named": {},
         }
         aux_headers = list(AUX_COLUMNS)
         aux_rows: list[tuple[Any, ...]] = []
+        units_ref: str | None = None
         if aux is not None:
-            aux_hash, aux_headers, loaded_aux = self._read_source(aux)
+            aux_file, aux_hash, aux_headers, loaded_aux = self._read_source(aux, "aux", dest_dir)
             require_columns(aux_headers, AUX_COLUMNS, "aux")
             if not loaded_aux:
                 raise LockRefused("aux is empty")
             aux_rows.extend(loaded_aux)
-            manifest["aux"] = {"path": str(aux), "source_hash": aux_hash}
+            manifest["aux"] = {
+                "path": str(aux),
+                "archived": self._archived_ref(aux_file, dest_dir),
+                "source_hash": aux_hash,
+            }
         if units is not None:
-            units_hash, units_headers, units_rows = self._read_source(units)
+            units_file, units_hash, units_headers, units_rows = self._read_source(
+                units, "units", dest_dir
+            )
             require_columns(units_headers, UNITS_COLUMNS, "units")
             if not units_rows:
                 raise LockRefused("units are empty")
             write_table(con, "units", units_headers, units_rows)
             if aux is None:
                 aux_rows.extend(units_as_aux_rows(units_headers, units_rows))
-            manifest["units"] = self._file_meta(con, units, "units", units_hash)
+            units_ref = self._archived_ref(units_file, dest_dir)
+            manifest["units"] = self._file_meta(con, units, units_ref, "units", units_hash)
         if aux_rows:
             write_table(con, "aux", aux_headers if aux is not None else AUX_COLUMNS, aux_rows)
             loaded = self._live_hash(con, "aux")
@@ -375,13 +445,16 @@ class Window:
                 # Derived from the units file, not supplied as an aux source.
                 # The discriminator keeps consumers from reading this table
                 # digest as if it were the digest of a file the manager handed in.
+                # It points at the units archive for the same reason: there is
+                # no aux file to point at, and naming one would invent a source.
                 manifest["aux"] = {
                     "derived_from": "units",
                     "path": str(units),
+                    "archived": units_ref,
                     "loaded_hash": loaded,
                 }
         if map is not None:
-            map_hash, map_headers, map_rows = self._read_source(map)
+            map_file, map_hash, map_headers, map_rows = self._read_source(map, "map", dest_dir)
             require_columns(map_headers, MAP_COLUMNS, "map")
             if not map_rows:
                 raise LockRefused("map is empty")
@@ -390,43 +463,88 @@ class Window:
             if not kept:
                 raise LockRefused("map has no in-window rows")
             write_table(con, "map", map_headers, kept)
-            manifest["map"] = self._file_meta(con, map, "map", map_hash)
+            manifest["map"] = self._file_meta(
+                con, map, self._archived_ref(map_file, dest_dir), "map", map_hash
+            )
             manifest["map_orphans"] = orphans
         named_meta: dict[str, Any] = {}
         for item in named:
             table_id = str(item["id"])
             path = Path(item["path"])
-            source_hash, headers, rows = self._read_source(path)
+            archived, source_hash, headers, rows = self._read_source(path, table_id, dest_dir)
             if not rows:
                 raise LockRefused(f"named table {table_id} has zero rows")
             write_table(con, table_id, headers, rows)
-            named_meta[table_id] = self._file_meta(con, path, table_id, source_hash)
+            named_meta[table_id] = self._file_meta(
+                con, path, self._archived_ref(archived, dest_dir), table_id, source_hash
+            )
         manifest["named"] = named_meta
         return manifest
 
-    def _read_source(self, path: Path) -> tuple[str, list[str], list[tuple[Any, ...]]]:
-        """Parse a source file and pin its digest to the bytes that were parsed.
+    def _archive_source(self, path: Path, role: str, dest_dir: Path) -> tuple[Path, str]:
+        """Copy the operator's file into the window before anything reads it.
 
-        Hash, parse, hash again. If the file is replaced mid-import the digest
-        recorded in the manifest would otherwise describe bytes that never
-        reached the catalog, and ``lock()`` -- which checks the file digest and
-        the table digest independently -- would accept the mismatched pair.
+        Everything downstream -- the parse, the manifest digest, ``lock()``'s
+        verification -- then works from bytes this window owns. The previous
+        shape read the operator's disk at import and again at lock, which made
+        a window that could stop being lockable because a file moved, and left
+        no way to show an auditor what the numbers were built from.
+
+        The old hash-parse-hash guard narrows to one job here. Copying is not
+        atomic against a writer, so a torn copy is possible; hashing the source
+        before and after and the copy in between catches both a file that
+        changed under the copy and a copy that did not land whole.
         """
+        suffix = path.suffix.lower()
+        if suffix not in TABULAR_EXTS:
+            raise LockRefused(f"unsupported import format: {path.suffix}")
         digest = file_hash(path)
-        headers, rows = load_tabular(path)
-        if file_hash(path) != digest:
-            raise LockRefused(f"source changed during import: {path}")
-        return digest, headers, rows
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{role}{suffix}"
+        tmp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(path, tmp)
+            if file_hash(tmp) != digest or file_hash(path) != digest:
+                raise LockRefused(f"source changed while it was being copied: {path}")
+            tmp.replace(dest)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return dest, digest
+
+    def _read_source(
+        self, path: Path, role: str, dest_dir: Path
+    ) -> tuple[Path, str, list[str], list[tuple[Any, ...]]]:
+        """Archive a source file, then parse the archived copy.
+
+        Parsing the copy rather than the original is what makes the manifest
+        digest and the catalog rows describe the same bytes by construction,
+        instead of by a race the import has to keep re-checking.
+        """
+        archived, digest = self._archive_source(path, role, dest_dir)
+        headers, rows = load_tabular(archived)
+        return archived, digest, headers, rows
+
+    def _archived_ref(self, archived: Path, dest_dir: Path) -> str:
+        """The archive path as the window will hold it once the import lands.
+
+        Recorded relative to the window root and pointing at ``inputs/``, not
+        at the staging directory the import is currently filling: the manifest
+        is written after the swap, and a reader resolving it must not be handed
+        a name that only existed mid-import.
+        """
+        return str(Path("inputs") / archived.relative_to(dest_dir))
 
     def _file_meta(
         self,
         con: duckdb.DuckDBPyConnection,
         path: Path,
+        archived_ref: str,
         table: str,
         source_hash: str,
     ) -> dict[str, str]:
         return {
             "path": str(path),
+            "archived": archived_ref,
             "source_hash": source_hash,
             "loaded_hash": self._live_hash(con, table),
         }
@@ -458,9 +576,8 @@ class Window:
                 count = con.execute(f"SELECT COUNT(*) FROM {quote_ident(table_id)}").fetchone()
                 if not count or count[0] == 0:
                     raise LockRefused(f"table {table_id} has zero rows")
-                if meta.get("source_hash") and meta.get("path"):
-                    if file_hash(Path(meta["path"])) != meta["source_hash"]:
-                        raise LockRefused(f"source hash changed for {table_id}")
+                if meta.get("source_hash"):
+                    self._verify_source(table_id, meta)
                 live = self._live_hash(con, table_id)
                 if live != meta["loaded_hash"]:
                     raise LockRefused(f"loaded hash does not match source for {table_id}")
@@ -472,6 +589,43 @@ class Window:
         _write_json(self.lock_path, manifest)
         self._set_state("Locked")
         return manifest
+
+    def _verify_source(self, table_id: str, meta: dict[str, Any]) -> None:
+        """Re-hash one table's bytes before the window locks.
+
+        Two different questions, and the split is the point.
+
+        The archived copy answers "is this window still intact". It is the copy
+        the catalog was parsed from, so a locked window no longer depends on the
+        operator's disk: moving or deleting the export after import cannot make
+        the window unlockable, and the digest on the manifest describes bytes
+        the window can still produce on demand.
+
+        The original answers "has she changed her mind since importing". A file
+        that is still on disk and no longer matches means she edited a master
+        table after importing it, and locking the imported bytes anyway would
+        silently ship the version she just replaced. Caliber changes travel
+        through a re-import, so this refuses and says so.
+
+        A source that is simply gone is not an error. Keeping its bytes is what
+        the archive is for.
+
+        A window imported before the archive existed has no ``archived`` key. It
+        falls back to the original alone, and refuses when that is missing too,
+        because then nothing at all can be verified.
+        """
+        expected = str(meta["source_hash"])
+        archived = meta.get("archived")
+        if archived:
+            if file_hash(self.root / str(archived)) != expected:
+                raise LockRefused(f"archived input changed for {table_id}")
+        origin = Path(str(meta["path"]))
+        if not origin.is_file():
+            if not archived:
+                raise LockRefused(f"source is gone and was never archived for {table_id}")
+            return
+        if file_hash(origin) != expected:
+            raise LockRefused(f"source hash changed for {table_id}; re-import to take the edit")
 
     def _manifest_tables(self, manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
         tables: dict[str, dict[str, Any]] = {}

@@ -18,6 +18,7 @@ from foundry.caliber import (
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused, QueryRefused
 from foundry.locking import exclusive
+from foundry.task import register_window_deliverable, task_for
 from foundry.tags import CLAIMED, OUTSIDE, RECOMPUTED
 from foundry.window import QUERYABLE, Window, WindowStore
 from foundry.workpaper import (
@@ -63,6 +64,8 @@ def _record_followup(
     window: Window,
     payload: dict[str, Any],
     build_schedule: Callable[..., dict[str, Any]] | None = None,
+    *,
+    session_id: str | None = None,
 ) -> None:
     """Record one follow-up as a single locked unit.
 
@@ -72,16 +75,33 @@ def _record_followup(
     ``followup-1`` and the second write drops the first item -- the audit log
     and the tickable workpaper then disagree about what was asked.
     """
+    task = task_for(window.store.var_root, window.task_id)
+    payload = {**payload, "task_id": None if task is None else task.id, "session_id": session_id}
+    workpaper = None
+    schedule_id = None
     with exclusive(window.root / ".lock"):
         schedule = None
         if build_schedule is not None:
             schedule = build_schedule(item_id=next_followup_id(load_schedules(window)))
+            schedule_id = schedule.get("id")
         window.followup_path.parent.mkdir(parents=True, exist_ok=True)
         with window.followup_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False, default=_json_default) + "\n")
         if schedule is not None:
-            persist_schedules(window, [schedule], replace=False)
+            workpaper = persist_schedules(window, [schedule], replace=False)
         window._set_state("FollowUp")
+    if workpaper is not None:
+        # The cause names the schedule this answer added, so a workpaper version
+        # traces back to the one follow-up that grew it. Without it the timeline
+        # says the file changed and never says what changed it.
+        register_window_deliverable(
+            task,
+            window_id=window.id,
+            kind="workpaper",
+            text=workpaper,
+            cause=f"query-locked:{schedule_id}" if schedule_id else "query-locked",
+            session_id=session_id,
+        )
 
 
 def _same_required(fact: dict[str, Any], required_table_ids: list[str]) -> bool:
@@ -107,6 +127,7 @@ def query_locked(
     split_by: str | None = None,
     brief_window_id: str | None = None,
     question_id: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     if not required_table_ids:
         raise QueryRefused("required_table_ids is required")
@@ -164,6 +185,7 @@ def query_locked(
                 origin="followup",
                 tag=f"{OUTSIDE} / {RECOMPUTED}",
             ),
+            session_id=session_id,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
     table = _source_table(required_table_ids)
@@ -194,6 +216,7 @@ def query_locked(
                 recomputed=claimed,
                 split_by=split_by,
             ),
+            session_id=session_id,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
     value = _aggregate(target, table)
@@ -227,5 +250,6 @@ def query_locked(
             claimed=None,
             recomputed=value,
         ),
+        session_id=session_id,
     )
     return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}{_window_note(target)}"

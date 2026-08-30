@@ -7,23 +7,59 @@ v1 kit: native DeepSeek harness (`dsh-plugin/index.js`, the single Cordis module
 ## Store
 
 ```text
+var/tasks/<task_id>/{task.json,windows.jsonl,sessions.jsonl,deliverables.jsonl,artifacts/<sha256>.md}
+var/current-task
 var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,schedules.json,workpaper.md,followup.jsonl}
+var/windows/<window_id>/{task,inputs/<role>.<ext>}
 var/current
 var/formulator/<window_id>/
 var/skills/<skill_id>/{SKILL.md,foundry.json}
 method/{financial-statements,reconciliation,variance-analysis,journal-entry}/SKILL.md
 ```
 
+A task is one period's work. It owns an ordered chain of windows -- the first import
+plus every successor a re-import opened -- the conversations that touched them, and every
+version of every document they produced. A window still owns the caliber lock.
+
+Import copies each source file into `<window>/inputs/` and parses the copy, so the
+window holds the bytes it was built from. Delete the export afterwards and the window
+still locks, still emits, and still shows an auditor the workbook. Editing a master file
+between import and lock is still refused: caliber changes travel through a re-import.
+
+`deliverables.jsonl` is append-only and content-addressed. A brief is one version per
+window; the workpaper grows one every time a follow-up appends a schedule, and each
+version names what caused it (`emit-brief`, `query-locked:followup-3`, `export:brief`).
+
 ## Pin
 
-- DuckDB 1.5.x
-- DeepSeek Harness: `@deepseek-ai/dsh@0.1.0-rc.7` (bundled CLI used at install). Upgrades are breaking. Period tools are the Cordis bundle in `dsh-plugin/`. Headless smoke is `foundry --var VAR host-smoke`.
+- DuckDB 1.5.5 (current stable; 1.6 is prerelease only)
+- DeepSeek Harness: `@deepseek-ai/dsh@0.1.1-rc.2` (bundled CLI used at install). Upgrades are breaking. Period tools are the Cordis bundle in `dsh-plugin/`. Headless smoke is `foundry --var VAR host-smoke`.
 - File drop: `dsh-file-upload@0.4.3` ([HongMing-Huang/dsh-file-upload](https://github.com/HongMing-Huang/dsh-file-upload)). Companion only. Period and F3 omit `read_document`.
 - Data Formulator: `data-formulator==0.7.0` (`data_formulator` binary, `pip install -e ".[formulator]"`). Do not pass `--disable-database` or `--disable-data-connectors`.
 - `node` on PATH for `host-smoke`, which loads the shipped dsh bundle. Nothing else in the period loop needs it.
 - `ps` on PATH lets `launch-formulator` confirm the served process is this window's Formulator. Without it the launch still runs and says `identity: unconfirmed` in its payload and on stderr.
 
 Provider keys stay in the process environment. Never write a key into the window, skill, or Formulator home. Data Formulator writes its own `credentials.db` into `DATA_FORMULATOR_HOME` unconditionally; the foundry gives each window a `0700` home for it and `purge-formulator` removes it. Set `CREDENTIAL_VAULT_KEY` and the cleartext `.vault_key` stays out of that home too.
+
+## Task
+
+```bash
+foundry --var VAR task-new --title "2026-08 月度经营分析" --period 2026-08
+foundry --var VAR task-list
+foundry --var VAR --task TASK task-show
+foundry --var VAR --task TASK deliverables
+# what the leader actually asked, in their own words, kept apart from the
+# question a model later executes
+foundry --var VAR --task TASK --session SESSION record-session --role followup --verbatim "华东这个月怎么回事？"
+# file the version the leader is handed, so a later follow-up can cite it
+foundry --var VAR --task TASK export --kind brief
+```
+
+`--task` and `--session` are global. The task is resolved by the first of: `--task`,
+`FOUNDRY_TASK`, the addressed window's own back-pointer. A window with no task keeps
+working and is adopted by the first task that touches it. The session id is never taken
+from the environment -- one harness process hosts many conversations, so it arrives per
+call.
 
 ## Period loop
 

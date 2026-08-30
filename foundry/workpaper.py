@@ -144,7 +144,7 @@ def next_followup_id(payload: dict[str, Any]) -> str:
     return f"followup-{count + 1}"
 
 
-def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: bool) -> None:
+def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: bool) -> str:
     """Write schedules.json and re-render workpaper.md from it.
 
     The caller must already hold ``exclusive(window.root / ".lock")``: a
@@ -162,7 +162,11 @@ def persist_schedules(window: Window, items: list[dict[str, Any]], *, replace: b
         payload["hashes"] = payload.get("hashes") or window.hashes()
         payload["items"] = list(payload.get("items") or []) + items
     write_text_atomic(window.schedules_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    write_text_atomic(window.workpaper_path, render_workpaper(payload))
+    rendered = render_workpaper(payload)
+    write_text_atomic(window.workpaper_path, rendered)
+    # Returned so the caller can register this exact text as a deliverable
+    # version without re-reading the file it just wrote.
+    return rendered
 
 
 def _aux_part(hashes: dict[str, Any]) -> str | None:

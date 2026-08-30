@@ -18,6 +18,7 @@ from foundry.errors import LockRefused
 from foundry.fsutil import write_text_atomic
 from foundry.locking import exclusive
 from foundry.questions import load_questions
+from foundry.task import register_window_deliverable, task_for
 from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
 from foundry.workpaper import (
@@ -47,7 +48,33 @@ def _aggregate(window: Window, table: str) -> Decimal | int:
     return value
 
 
-def emit_brief(window: Window) -> str:
+def _register_period_outputs(window: Window, text: str, session_id: str | None) -> None:
+    """File the brief and the workpaper as deliverable versions.
+
+    Runs outside the window lock and after the writes, so a task store that
+    cannot be written does not leave a Briefed window with no brief on disk.
+    Registration is keyed on the bytes, so the re-entrant call below re-files a
+    version that an interrupted run never got to record, and files nothing when
+    it already did.
+    """
+    task = task_for(window.store.var_root, window.task_id)
+    if task is None:
+        return
+    register_window_deliverable(
+        task, window_id=window.id, kind="brief", text=text, cause="emit-brief", session_id=session_id
+    )
+    if window.workpaper_path.exists():
+        register_window_deliverable(
+            task,
+            window_id=window.id,
+            kind="workpaper",
+            text=window.workpaper_path.read_text(encoding="utf-8"),
+            cause="emit-brief",
+            session_id=session_id,
+        )
+
+
+def emit_brief(window: Window, *, session_id: str | None = None) -> str:
     """Write this window's conclusion brief, once.
 
     The one-shot latch is the state transition to ``Briefed``, not the presence
@@ -58,7 +85,9 @@ def emit_brief(window: Window) -> str:
     refusing forever.
     """
     if window.state in {"Briefed", "FollowUp"} and window.brief_path.exists():
-        return window.brief_path.read_text()
+        text = window.brief_path.read_text()
+        _register_period_outputs(window, text, session_id)
+        return text
     if window.state != "Locked":
         raise LockRefused(f"brief refused in state {window.state}")
     questions = load_questions(window)
@@ -183,4 +212,5 @@ def emit_brief(window: Window) -> str:
         persist_schedules(window, schedules, replace=True)
         write_text_atomic(window.brief_path, text)
         window._set_state("Briefed")
+    _register_period_outputs(window, text, session_id)
     return text

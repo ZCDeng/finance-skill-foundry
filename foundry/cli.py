@@ -15,7 +15,8 @@ from foundry.probe import mark_done, run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
 from foundry.resources import fixture_root
-from foundry.window import WindowStore
+from foundry.task import SESSION_ROLES, Task, TaskStore, resolve_task
+from foundry.window import Window, WindowStore
 
 
 def _store(ns: argparse.Namespace) -> WindowStore:
@@ -31,6 +32,85 @@ def _store(ns: argparse.Namespace) -> WindowStore:
     except OSError as exc:
         raise FoundryError(f"--var is not a usable directory: {ns.var} ({exc.strerror})") from exc
 
+
+
+SESSION_ROLE_BY_CMD = {
+    "query-locked": "followup",
+    "mark-done": "author",
+}
+"""Which kind of conversation a command belongs to.
+
+The role is decided by which command ran, not asked of the caller and never of
+a model. Everything not named here is a period step.
+"""
+
+
+def _session_role(cmd: str) -> str:
+    return SESSION_ROLE_BY_CMD.get(cmd, "period")
+
+
+def _adopt(
+    tasks: TaskStore,
+    window: Window,
+    ns: argparse.Namespace,
+    *,
+    reason: str = "initial",
+    extra_task_ids: tuple[str | None, ...] = (),
+) -> Task | None:
+    """Bind this window to a task, and record the conversation it happened in.
+
+    Adoption is on touch. A window created before the task store existed, or one
+    an operator drove straight through the CLI, joins the first task that
+    reaches it and keeps producing documents in the meantime. Both calls below
+    are idempotent, so every later step on the same window is a no-op.
+    """
+    task = resolve_task(
+        tasks,
+        explicit=getattr(ns, "task", "") or None,
+        window_task_ids=(*extra_task_ids, window.task_id),
+    )
+    if task is None:
+        return None
+    if window.task_id is None:
+        window.bind_task(task.id)
+    task.bind_window(window.id, reason=reason)
+    session = str(getattr(ns, "session", "") or "").strip()
+    if session:
+        task.record_session(session, role=_session_role(ns.cmd))
+    return task
+
+
+def _window_inputs(window: Window) -> list[dict[str, Any]]:
+    """What this window was built from, read off its own manifest.
+
+    There is no second index file. The manifest already names every role, the
+    operator's original path, the archived copy and its digest, so deriving the
+    view keeps one source of truth for what came in.
+    """
+    if not window.lock_path.exists():
+        return []
+    manifest = json.loads(window.lock_path.read_text())
+    rows: list[dict[str, Any]] = []
+    entries: list[tuple[str, Any]] = [
+        *((role, manifest.get(role)) for role in ("coa", "aux", "map", "units")),
+        *sorted((manifest.get("named") or {}).items()),
+    ]
+    for role, meta in entries:
+        if not isinstance(meta, dict) or not meta.get("archived"):
+            continue
+        archived = window.root / str(meta["archived"])
+        rows.append(
+            {
+                "role": role,
+                "origin_path": meta.get("path"),
+                "archived": meta.get("archived"),
+                "sha256": meta.get("source_hash"),
+                "bytes": archived.stat().st_size if archived.is_file() else None,
+                "present": archived.is_file(),
+                "derived_from": meta.get("derived_from"),
+            }
+        )
+    return rows
 
 
 def _resolve_payload_path(base: Path | None, value: str) -> Path:
@@ -119,6 +199,16 @@ def _import_kwargs(args: argparse.Namespace) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="foundry")
     parser.add_argument("--var", required=True)
+    parser.add_argument(
+        "--task",
+        default="",
+        help="task id; omit to take FOUNDRY_TASK, then the addressed window's own task",
+    )
+    parser.add_argument(
+        "--session",
+        default="",
+        help="conversation id this call happened in; the harness supplies it per call",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("create")
@@ -171,6 +261,27 @@ def main(argv: list[str] | None = None) -> int:
     p_re.add_argument("--named", default="")
     p_re.add_argument("--drop-dir", default="")
 
+    p_task_new = sub.add_parser("task-new")
+    p_task_new.add_argument("--title", required=True)
+    p_task_new.add_argument("--period", default="", help="the period this task closes, e.g. 2026-08")
+    p_task_new.add_argument("--skill", default="", help="authored skill id, when there is one")
+
+    sub.add_parser("task-list")
+    sub.add_parser("task-show")
+    sub.add_parser("deliverables")
+
+    p_session = sub.add_parser("record-session")
+    p_session.add_argument("--role", default="", help=f"one of {SESSION_ROLES}; omit to derive")
+    p_session.add_argument(
+        "--verbatim",
+        default="",
+        help="what the leader actually asked, in their own words, not the executed query",
+    )
+
+    p_export = sub.add_parser("export")
+    p_export.add_argument("--window", default="", help="window id; omit for the current window")
+    p_export.add_argument("--kind", default="brief", choices=("brief", "workpaper"))
+
     p_probe = sub.add_parser("probe")
     p_probe.add_argument("--fixtures", default="")
 
@@ -184,8 +295,71 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         store = _store(args)
+        tasks = TaskStore(Path(args.var))
+        if args.cmd == "task-new":
+            task = tasks.create(
+                title=args.title,
+                period=args.period or None,
+                skill_id=args.skill or None,
+            )
+            print(task.id)
+            return 0
+        if args.cmd == "task-list":
+            print(
+                json.dumps(
+                    [
+                        {**task.meta(), "windows": len(task.windows())}
+                        for task in tasks.list()
+                    ],
+                    ensure_ascii=False,
+                )
+            )
+            return 0
+        if args.cmd in {"task-show", "deliverables", "record-session"}:
+            task = resolve_task(tasks, explicit=args.task or None)
+            if task is None:
+                task = tasks.current()
+            if task is None:
+                raise FoundryError("no task; pass --task or run task-new")
+            if args.cmd == "deliverables":
+                print(json.dumps(task.deliverables(), ensure_ascii=False))
+                return 0
+            if args.cmd == "record-session":
+                session = str(args.session or "").strip()
+                if not session:
+                    raise FoundryError("record-session needs --session")
+                role = args.role or "followup"
+                if role not in SESSION_ROLES:
+                    raise FoundryError(f"session role must be one of {SESSION_ROLES}: {role}")
+                print(
+                    json.dumps(
+                        task.record_session(
+                            session, role=role, leader_verbatim=args.verbatim or None
+                        ),
+                        ensure_ascii=False,
+                    )
+                )
+                return 0
+            windows = []
+            for row in task.windows():
+                target = store.get(str(row["window_id"]))
+                windows.append({**row, "state": target.state, "inputs": _window_inputs(target)})
+            print(
+                json.dumps(
+                    {
+                        "task": task.meta(),
+                        "windows": windows,
+                        "sessions": task.sessions(),
+                        "deliverables": task.deliverables(),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 0
         if args.cmd == "create":
-            print(store.create().id)
+            created = store.create()
+            _adopt(tasks, created, args)
+            print(created.id)
             return 0
         if args.cmd == "probe":
             return run_probe(Path(args.var), fixture_root(Path(args.fixtures) if args.fixtures else None))
@@ -216,10 +390,33 @@ def main(argv: list[str] | None = None) -> int:
             print(target.workpaper_path.read_text(), end="")
             return 0
         window = store.current()
+        if args.cmd == "export":
+            target = store.get(args.window) if args.window else window
+            task = _adopt(tasks, target, args)
+            if task is None:
+                raise FoundryError("export needs a task; pass --task or run task-new")
+            path = target.brief_path if args.kind == "brief" else target.workpaper_path
+            if not path.exists():
+                raise FoundryError(f"{args.kind} not written")
+            print(
+                json.dumps(
+                    task.register_deliverable(
+                        window_id=target.id,
+                        kind="export",
+                        text=path.read_text(),
+                        cause=f"export:{args.kind}",
+                        session_id=args.session or None,
+                    ),
+                    ensure_ascii=False,
+                )
+            )
+            return 0
         if args.cmd == "import":
+            _adopt(tasks, window, args)
             window.import_tables(**_import_kwargs(args))
             return 0
         if args.cmd == "lock":
+            _adopt(tasks, window, args)
             window.lock()
             return 0
         if args.cmd == "record-questions":
@@ -230,10 +427,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise FoundryError("questions argument is not valid JSON") from exc
             except OSError as exc:
                 raise FoundryError(f"questions file is unreadable: {args.questions}") from exc
+            _adopt(tasks, window, args)
             record_questions(window, questions)
             return 0
         if args.cmd == "emit-brief":
-            print(emit_brief(window), end="")
+            _adopt(tasks, window, args)
+            print(emit_brief(window, session_id=args.session or None), end="")
             return 0
         if args.cmd == "workpaper":
             if not window.workpaper_path.exists():
@@ -241,6 +440,12 @@ def main(argv: list[str] | None = None) -> int:
             print(window.workpaper_path.read_text(), end="")
             return 0
         if args.cmd == "query-locked":
+            # The follow-up belongs to the task that owns the brief under
+            # discussion, not to whatever window happens to be current: a
+            # re-import since that brief moved current on, and the answer still
+            # has to land on the timeline the leader is reading.
+            addressed = store.get(args.brief_window) if args.brief_window else window
+            _adopt(tasks, addressed, args, extra_task_ids=(addressed.task_id,))
             print(
                 query_locked(
                     window,
@@ -249,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
                     split_by=args.split_by or None,
                     brief_window_id=args.brief_window or None,
                     question_id=args.question_id or None,
+                    session_id=args.session or None,
                 )
             )
             return 0
@@ -262,7 +468,14 @@ def main(argv: list[str] | None = None) -> int:
             purge_formulator_home(window)
             return 0
         if args.cmd == "re-import":
+            task = _adopt(tasks, window, args)
             nxt = window.reimport(**_import_kwargs(args))
+            if task is not None:
+                # The successor joins the same task, marked as the re-import it
+                # is. The old window keeps its brief and its follow-ups; the
+                # chain is what makes them one period rather than two.
+                nxt.bind_task(task.id)
+                task.bind_window(nxt.id, reason="reimport")
             print(nxt.id)
             return 0
     except FoundryError as exc:

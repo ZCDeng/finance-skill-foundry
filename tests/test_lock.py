@@ -387,22 +387,29 @@ def test_hyphenated_named_id_locks_because_manifest_matches_duckdb(tmp_path: Pat
     assert window.query("SELECT amount FROM ar_2024_08")[0][0] == 40
 
 
-def test_source_replaced_mid_parse_refuses_the_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_source_replaced_while_copied_refuses_the_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A source rewritten while the import is reading it must leave nothing.
+
+    The guard used to sit around the parse, because the parse read the
+    operator's file. Import now copies first and parses the copy, so the only
+    moment a source can still move under the import is the copy itself. Same
+    claim, at the one place that can still break it.
+    """
     import foundry.window as window_module
 
     drop = tmp_path / "drop"
     gl = _gl(drop, amount=100)
-    real_load_tabular = window_module.load_tabular
+    real_copyfile = window_module.shutil.copyfile
 
-    def swap_after_parse(path: Path):  # type: ignore[no-untyped-def]
-        headers, rows = real_load_tabular(path)
-        if Path(path) == gl:
+    def swap_after_copy(src, dst, **kwargs):  # type: ignore[no-untyped-def]
+        result = real_copyfile(src, dst, **kwargs)
+        if Path(src) == gl:
             _xlsx(gl, ["account_code", "amount"], [["1001", 999]])
-        return headers, rows
+        return result
 
-    monkeypatch.setattr(window_module, "load_tabular", swap_after_parse)
+    monkeypatch.setattr(window_module.shutil, "copyfile", swap_after_copy)
     window = WindowStore(tmp_path / "var").create()
-    with pytest.raises(LockRefused, match="source changed during import"):
+    with pytest.raises(LockRefused, match="source changed while it was being copied"):
         window.import_tables(
             coa=_coa(drop),
             units=_units(drop),
@@ -411,3 +418,5 @@ def test_source_replaced_mid_parse_refuses_the_import(tmp_path: Path, monkeypatc
         )
     assert window.state == "Open"
     assert not window.catalog_path().exists()
+    assert not window.inputs_dir.exists()
+    assert not (window.root / "inputs.staging").exists()

@@ -232,6 +232,16 @@ def _load_json(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
     raise LockRefused(f"unsupported JSON table shape: {path}")
 
 
+TABULAR_EXTS = frozenset({".csv", ".json", ".xlsx", ".xlsm"})
+"""Extensions ``_load_tabular`` branches on.
+
+Named so the import path can refuse an unreadable format while it still
+holds the operator's own file name, before it copies anything into the
+window. The loader keeps its own branches; this is the one list both agree
+on.
+"""
+
+
 def load_tabular(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
     try:
         return _load_tabular(path)
@@ -245,6 +255,8 @@ def _load_tabular(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
     if not path.is_file():
         raise LockRefused(f"named file is unreadable: {path}")
     suffix = path.suffix.lower()
+    if suffix not in TABULAR_EXTS:
+        raise LockRefused(f"unsupported import format: {path.suffix}")
     if suffix == ".csv":
         text = path.read_text(encoding="utf-8-sig")
         reader = csv.reader(io.StringIO(text), strict=True)
@@ -274,6 +286,9 @@ def _load_tabular(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
         rows = [tuple(cell if cell is not None else "" for cell in row) for row in cached[1:]]
         _refuse_unsafe_xlsx_numbers(path, headers, rows)
         return headers, _normalize_rows(path, headers, rows)
+    # Unreachable while the guard above and TABULAR_EXTS agree. Kept so this
+    # function can never fall off its end and return None to a caller that
+    # is about to unpack two values.
     raise LockRefused(f"unsupported import format: {path.suffix}")
 
 
