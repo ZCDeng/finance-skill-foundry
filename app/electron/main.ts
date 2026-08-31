@@ -15,7 +15,9 @@ import {
   stagedBundleDir,
   type Layout,
 } from './harness/resources.js';
+import { FENCE_REASON, installFence } from './harness/fence.js';
 import { type Wiring, type WiringStep, installPlugin, installPresets } from './harness/wiring.js';
+import { CHANNELS } from './ipc/contract.js';
 import { registerIpc } from './ipc/register.js';
 
 const isDev = !app.isPackaged;
@@ -224,6 +226,20 @@ void app.whenReady().then(() => {
       formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
     });
     harness = host;
+    /*
+     * The fence goes up before the page is ever loaded.
+     *
+     * Installed on the default session, which is the one both embedded views
+     * use. It is keyed on the harness's own origin, so Formulator's loopback
+     * server and this app's own `file://` documents fall through untouched.
+     */
+    installFence(session.defaultSession, {
+      origin: () => host.origin(),
+      onRefused: (method) => {
+        console.warn(`[fence] refused ${method} from the embedded page`);
+        mainWindow?.webContents.send(CHANNELS.harnessRefused, FENCE_REASON[method]);
+      },
+    });
     const pane = new FormulatorHost();
     formulator = pane;
     registerIpc(

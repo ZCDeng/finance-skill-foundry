@@ -24,6 +24,15 @@ export const CHANNELS = {
   formulatorStatus: 'formulator:status',
   /** Which screen is on top. Both embedded panes are placed from it. */
   paneVisible: 'pane:visible',
+  /**
+   * Main to renderer, and the only channel that travels that way.
+   *
+   * The fence cancels a request the embedded page made; the page then shows
+   * whatever it shows for a call that did not arrive, which says nothing about
+   * why. This carries the reason to the window, which is the surface that knows
+   * about tasks.
+   */
+  harnessRefused: 'harness:refused',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

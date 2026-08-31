@@ -596,3 +596,15 @@
 .fnd-quiet:hover {
   color: var(--fnd-ink);
 }
+
+/*
+ * A refusal that took an embedded page's rectangle.
+ *
+ * Same column as the guide, for the same reason: it is standing in for the
+ * whole area now, and a sentence ruled across 1200px under a strip reads as a
+ * banner rather than as the thing the window is currently saying.
+ */
+.fnd-refusal--panel {
+  max-width: 720px;
+  margin: 40px auto 0;
+}

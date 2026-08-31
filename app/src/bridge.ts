@@ -95,6 +95,13 @@ export interface Bridge {
     seed?: { windowId?: string; briefSha?: string | null; verbatim?: string },
   ): Promise<Answer<{ sessionId: string; preset: string }>>;
   paneVisible?(screen: string): Promise<Answer<{ screen: string }>>;
+  /**
+   * Main pushes here when the fence cancelled a call the embedded page made.
+   *
+   * The only channel that travels that way, and the only one that does not
+   * answer with `Answer<T>`: nothing asked for it. Returns its unsubscribe.
+   */
+  onHarnessRefused?(cb: (reason: string) => void): () => void;
   /** Absent when this build has no harness to embed Formulator beside. */
   formulatorLaunch?(): Promise<Answer<LaunchSpec>>;
   formulatorStop?(): Promise<Answer<{ stopped: boolean }>>;

@@ -29,8 +29,11 @@ import { Booting, Guide, TaskBar, WiringTrouble, type OpenSession } from './view
  * error with no way back to it.
  */
 function Refusal({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
+  // `onDismiss` is only passed where this is standing in for a page it displaced,
+  // so it is also the signal to draw as a panel rather than as a stripe across
+  // the column.
   return (
-    <div className="fnd-refusal">
+    <div className={onDismiss ? 'fnd-refusal fnd-refusal--panel' : 'fnd-refusal'}>
       <p>{message}</p>
       {onDismiss ? (
         <button type="button" className="fnd-quiet" style={{ marginTop: 12 }} onClick={onDismiss}>
@@ -159,6 +162,23 @@ export function App() {
       live = false;
     };
   }, [api, screen, take]);
+
+  /*
+   * What the fence stopped, said in this window rather than in the page.
+   *
+   * A cancelled request surfaces inside the runtime's own UI as a call that did
+   * not arrive, which names nothing an operator can act on. Subscribed once for
+   * the life of the window and on every screen: the page keeps running when the
+   * operator is on 任务, and a refusal that arrived while they were there would
+   * otherwise be lost.
+   */
+  useEffect(() => {
+    if (!api?.onHarnessRefused) return;
+    return api.onHarnessRefused((reason) => {
+      setScreen('workbench');
+      setProblem(reason);
+    });
+  }, [api]);
 
   useEffect(() => {
     if (!api?.formulatorStatus || screen !== 'formulator') return;

@@ -28,6 +28,14 @@ describe('every data path is a CLI call', () => {
     expect(read('../electron/foundry.ts')).toMatch(/execFile/);
   });
 
+  /**
+   * The one channel main pushes on. Everything else is the renderer asking.
+   *
+   * Named here rather than inferred, so adding a second push channel has to be
+   * a decision someone writes down instead of a handler quietly going missing.
+   */
+  const PUSHED = new Set(['harnessRefused']);
+
   it('gives every declared channel a handler', () => {
     // By key rather than by transforming the wire name: `harness:status` and
     // `harnessStatus` do not derive from each other, and a heuristic that
@@ -35,7 +43,17 @@ describe('every data path is a CLI call', () => {
     // anything when a fifth arrived.
     const register = read('../electron/ipc/register.ts');
     for (const key of Object.keys(CHANNELS)) {
+      if (PUSHED.has(key)) continue;
       expect(register, key).toContain(`CHANNELS.${key}`);
+    }
+  });
+
+  it('sends the pushed channel from main, where the fence lives', () => {
+    // It has no `ipcMain.handle`, so the check above cannot see it. Without
+    // this, a channel declared and never sent would pass the suite.
+    const main = read('../electron/main.ts');
+    for (const key of PUSHED) {
+      expect(main, key).toContain(`CHANNELS.${key}`);
     }
   });
 

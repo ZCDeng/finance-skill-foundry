@@ -25,6 +25,18 @@ const api = {
   formulatorStop: () => ipcRenderer.invoke('formulator:stop'),
   formulatorStatus: () => ipcRenderer.invoke('formulator:status'),
   paneVisible: (screen: string) => ipcRenderer.invoke('pane:visible', screen),
+  /**
+   * The one channel main pushes on. Returns its own unsubscribe, because a
+   * renderer that re-subscribed on every effect run would stack listeners and
+   * report one refusal several times.
+   */
+  onHarnessRefused: (cb: (reason: string) => void) => {
+    const relay = (_event: unknown, reason: string) => cb(reason);
+    ipcRenderer.on('harness:refused', relay);
+    return () => {
+      ipcRenderer.off('harness:refused', relay);
+    };
+  },
 };
 
 export type PreloadAPI = typeof api;
