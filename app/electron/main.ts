@@ -1,5 +1,5 @@
 import { app, BrowserWindow, session } from 'electron';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
 
 import { applyCsp, ownDocument } from './csp.js';
@@ -19,6 +19,46 @@ import { type Wiring, type WiringStep, installPlugin, installPresets } from './h
 import { registerIpc } from './ipc/register.js';
 
 const isDev = !app.isPackaged;
+
+/**
+ * The name this product had before it was called FA Foundry.
+ *
+ * Electron derives `userData` from the product name, so the rename moved the
+ * directory out from under a store that was already there.
+ */
+const FORMER_PRODUCT = 'Foundry';
+
+/**
+ * Carry an existing operator's state across the rename.
+ *
+ * Two directories and not the whole `userData`: `var` is the store and
+ * `harness` is the runtime's home, which is where an operator's provider
+ * credentials live. Everything else under there is Chromium's cache, and
+ * Chromium writes some of it before this runs -- so moving the parent would
+ * either race that or refuse once it existed, and the store would be the thing
+ * left behind.
+ *
+ * Idempotent, and it never overwrites: a destination that already exists is a
+ * newer state than the one being carried, and is left alone. A rename that
+ * fails leaves the old copy where it is rather than a half-moved one.
+ */
+function adoptFormerState(): void {
+  const dir = app.getPath('userData');
+  const former = path.join(path.dirname(dir), FORMER_PRODUCT);
+  if (former === dir || !existsSync(former)) return;
+  for (const name of ['var', 'harness']) {
+    const from = path.join(former, name);
+    const to = path.join(dir, name);
+    if (!existsSync(from) || existsSync(to)) continue;
+    try {
+      mkdirSync(dir, { recursive: true });
+      renameSync(from, to);
+      console.log(`[state] carried ${name} over from ${FORMER_PRODUCT}`);
+    } catch (error) {
+      console.error(`[state] left ${name} in ${FORMER_PRODUCT}:`, error);
+    }
+  }
+}
 
 /**
  * Where the store is.
@@ -162,6 +202,7 @@ void app.whenReady().then(() => {
     if (!ownDocument(details.url, isDev)) return callback({});
     callback({ responseHeaders: applyCsp(details.responseHeaders ?? {}, isDev) });
   });
+  adoptFormerState();
   const here = layout();
   nameFoundry(here);
   nameFormulator(here);

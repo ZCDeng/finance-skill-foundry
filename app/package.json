@@ -1,6 +1,6 @@
 {
   "name": "finance-skill-foundry-app",
-  "productName": "Foundry",
+  "productName": "FA Foundry",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop surface for the finance skill foundry: tasks, their inputs, and every version of what they produced",

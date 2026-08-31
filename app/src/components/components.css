@@ -395,3 +395,204 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* -- the header's own help ------------------------------------------------ */
+
+/*
+ * Pushed to the right edge rather than sitting in the tab row. It is not a
+ * fifth destination: it brings back a panel over whichever screen is on, and a
+ * control that reads as a tab would be a tab that never stays selected.
+ */
+.fnd-head__help {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--fnd-line);
+  background: transparent;
+  border-radius: var(--fnd-radius-pill);
+  padding: 0 var(--fnd-pad-button-x);
+  height: var(--fnd-button-height);
+  font-size: var(--fnd-size-small);
+  color: var(--fnd-muted);
+  cursor: pointer;
+  transition: color var(--fnd-transition), border-color var(--fnd-transition);
+}
+
+.fnd-head__help:hover {
+  color: var(--fnd-ink);
+  border-color: var(--fnd-line-hover);
+}
+
+/* -- the task bar's own controls ------------------------------------------ */
+
+/*
+ * A native `select`, and that is the whole reason it is one.
+ *
+ * The page under this strip is a `WebContentsView` in window coordinates, so
+ * any menu this app drew in its own document would open behind it. A native
+ * select's menu is drawn by the platform, above every view in the window.
+ */
+.fnd-picker {
+  flex: 0 1 auto;
+  max-width: 280px;
+  height: var(--fnd-button-height);
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface);
+  color: var(--fnd-ink);
+  font: inherit;
+  font-size: var(--fnd-size-small);
+  padding: 0 8px;
+  cursor: pointer;
+  transition: border-color var(--fnd-transition);
+}
+
+.fnd-picker:hover {
+  border-color: var(--fnd-line-hover);
+}
+
+.fnd-picker:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Holds the three ways in against the right edge, whatever the status says. */
+.fnd-taskbar__spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
+}
+
+.fnd-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid var(--fnd-line);
+  background: var(--fnd-surface);
+  border-radius: var(--fnd-radius-pill);
+  padding: 0 var(--fnd-pad-button-x);
+  height: var(--fnd-button-height);
+  font-size: var(--fnd-size-small);
+  color: var(--fnd-ink);
+  cursor: pointer;
+  transition: border-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-start:hover:not(:disabled) {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+/*
+ * The way in this conversation came through.
+ *
+ * An attribute rather than `aria-pressed`, which is what this was: that makes
+ * a button a toggle, and the accessibility tree reported these three actions
+ * as checkboxes. They open a session; they do not stay pressed.
+ */
+.fnd-start[data-current='yes'] {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-start:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* -- what is behind the embedded page ------------------------------------- */
+
+/*
+ * The column scrolls on the embedded screens too.
+ *
+ * It is capped at the window there, and the guide is taller than a short
+ * window. Without this the bottom of it -- which is the form that gets a cold
+ * install moving -- is simply not reachable.
+ */
+.fnd-shell[data-embedded='yes'] .fnd-column {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.fnd-booting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 96px 0;
+}
+
+.fnd-spin {
+  animation: fnd-turn 1.1s linear infinite;
+}
+
+@keyframes fnd-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fnd-spin {
+    animation: none;
+  }
+}
+
+/* -- the guide ------------------------------------------------------------ */
+
+.fnd-guide {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 0 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.fnd-guide__lede {
+  font-size: var(--fnd-size-body);
+  line-height: 26px;
+  color: var(--fnd-ink);
+}
+
+.fnd-guide__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fnd-guide__step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface);
+  padding: 14px 16px;
+}
+
+.fnd-guide__note {
+  font-size: var(--fnd-size-small);
+  line-height: 20px;
+}
+
+/* Leaves without doing anything. Quiet on purpose: it is not the way in. */
+.fnd-quiet {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: var(--fnd-size-small);
+  color: var(--fnd-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--fnd-line);
+  cursor: pointer;
+}
+
+.fnd-quiet:hover {
+  color: var(--fnd-ink);
+}

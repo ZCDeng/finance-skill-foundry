@@ -202,3 +202,215 @@ describe('a half-wired workbench', () => {
     expect(screen.getByText(/Cannot find package/)).toBeTruthy();
   });
 });
+
+describe('the shell', () => {
+  it('says the product name, once, in the header', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    render(
+      <Shell screen="workbench" onScreen={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    expect(screen.getByText('FA Foundry')).toBeTruthy();
+  });
+
+  /*
+   * The order is the product's answer to "what is this". Opening on 任务 put a
+   * form for naming a period in front of the runtime that explains why anyone
+   * would name one.
+   */
+  it('puts the workbench first among the destinations', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    const { container } = render(
+      <Shell screen="workbench" onScreen={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    const tabs = [...container.querySelectorAll('.fnd-head__tab')].map((n) => n.textContent);
+    expect(tabs).toEqual(['工作台', '数据台', '任务', '交付物']);
+    expect(container.querySelector('.fnd-head__tab[aria-current="page"]')?.textContent).toBe('工作台');
+  });
+
+  it('offers the guide back only where it can be drawn', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    const { container, rerender } = render(
+      <Shell screen="workbench" onScreen={() => {}} onGuide={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    expect(container.querySelector('.fnd-head__help')).toBeTruthy();
+    rerender(
+      <Shell screen="tasks" onScreen={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    expect(container.querySelector('.fnd-head__help')).toBeNull();
+  });
+});
+
+describe('the task bar', () => {
+  const noop = () => {};
+  const bar = async () => (await import('../src/views/Workbench.js')).TaskBar;
+
+  it('carries the three ways in, so the runtime is not behind a screen', async () => {
+    // They used to be cards on a panel the harness view covered, reachable only
+    // after a task had been made on another screen and opened on a third.
+    const TaskBar = await bar();
+    render(
+      <TaskBar
+        tasks={[TASK]}
+        task={TASK}
+        detail={null}
+        session={null}
+        busy={false}
+        onPick={noop}
+        onNew={noop}
+        onOpen={noop}
+      />,
+    );
+    for (const label of ['授技能', '开始本期', '追问']) {
+      expect(screen.getByRole('button', { name: new RegExp(label) })).toBeTruthy();
+    }
+  });
+
+  it('will not open a session with nothing to bind it to', async () => {
+    const TaskBar = await bar();
+    render(
+      <TaskBar
+        tasks={[]}
+        task={null}
+        detail={null}
+        session={null}
+        busy={false}
+        onPick={noop}
+        onNew={noop}
+        onOpen={noop}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /开始本期/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('还没有选任务')).toBeTruthy();
+  });
+
+  /*
+   * The page below is upstream's, and a conversation started inside it runs on
+   * whatever preset that page defaults to. The period tools it can still reach
+   * resolve their task from the current window rather than from the row this
+   * strip names, and an operator has no other way to learn that.
+   */
+  it('says so when the conversation did not come through these buttons', async () => {
+    const TaskBar = await bar();
+    render(
+      <TaskBar
+        tasks={[TASK]}
+        task={TASK}
+        detail={null}
+        session={null}
+        busy={false}
+        onPick={noop}
+        onNew={noop}
+        onOpen={noop}
+      />,
+    );
+    expect(screen.getByText(/会话不是从这里开的/)).toBeTruthy();
+  });
+
+  it('names the role, the round and the preset once one did', async () => {
+    const TaskBar = await bar();
+    render(
+      <TaskBar
+        tasks={[TASK]}
+        task={TASK}
+        detail={{
+          task: { ...TASK },
+          windows: [],
+          sessions: [{ session_id: 's1', role: 'period', opened_at: '2026-08-30T02:00:00Z' }],
+          deliverables: [],
+        }}
+        session={{ sessionId: 's1', preset: 'period', intent: 'period' }}
+        busy={false}
+        onPick={noop}
+        onNew={noop}
+        onOpen={noop}
+      />,
+    );
+    expect(screen.getByText(/本会话 期间 · 第 1 轮 · period/)).toBeTruthy();
+  });
+
+  it('switches the binding, and asks for a new task through the same control', async () => {
+    const TaskBar = await bar();
+    const picked: string[] = [];
+    let asked = 0;
+    const other: TaskRow = { ...TASK, id: 'd'.repeat(32), title: '九月' };
+    render(
+      <TaskBar
+        tasks={[TASK, other]}
+        task={TASK}
+        detail={null}
+        session={null}
+        busy={false}
+        onPick={(id) => picked.push(id)}
+        onNew={() => {
+          asked += 1;
+        }}
+        onOpen={noop}
+      />,
+    );
+    const picker = screen.getByLabelText('任务');
+    fireEvent.change(picker, { target: { value: other.id } });
+    expect(picked).toEqual([other.id]);
+    fireEvent.change(picker, { target: { value: '__new__' } });
+    expect(asked).toBe(1);
+  });
+});
+
+describe('the guide', () => {
+  const guide = async () => (await import('../src/views/Workbench.js')).Guide;
+
+  /*
+   * The one press that gets a cold install moving. Before this, starting meant
+   * naming a task on one screen, finding it on another, and choosing a way in
+   * on a third -- with nothing on any of them saying that was the sequence.
+   */
+  it('names a task and starts a period in one press', async () => {
+    const Guide = await guide();
+    const started: [string, string][] = [];
+    render(<Guide busy={false} canStart onStart={(t, p) => started.push([t, p])} onDismiss={() => {}} />);
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '  华东区 8 月回款 ' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: /建任务并开始本期/ }));
+    expect(started).toEqual([['华东区 8 月回款', '2026-08']]);
+  });
+
+  it('will not start on a title that is only whitespace', async () => {
+    const Guide = await guide();
+    const started: string[] = [];
+    render(<Guide busy={false} canStart onStart={(t) => started.push(t)} onDismiss={() => {}} />);
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: /建任务并开始本期/ }));
+    expect(started).toEqual([]);
+  });
+
+  it('does not offer a start a build with no harness cannot honour', async () => {
+    const Guide = await guide();
+    render(<Guide busy={false} canStart={false} onStart={() => {}} onDismiss={() => {}} />);
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '八月' } });
+    expect(screen.getByRole('button', { name: /建任务并开始本期/ }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('lists the three ways in, with the preset each one opens on', async () => {
+    const Guide = await guide();
+    render(<Guide busy={false} canStart onStart={() => {}} onDismiss={() => {}} />);
+    expect(screen.getByText(/period · 开窗 导入 锁 出稿/)).toBeTruthy();
+    expect(screen.getByText(/f3 · 只有 query-locked/)).toBeTruthy();
+  });
+});
+
+describe('a workbench whose runtime has not answered', () => {
+  it('says the product is starting rather than drawing nothing', async () => {
+    // The view that covers this area is not there yet, and a window that draws
+    // nothing for the seconds a cold start takes reads as one that did not open.
+    const { Booting } = await import('../src/views/Workbench.js');
+    render(<Booting />);
+    expect(screen.getByText('FA Foundry 正在启动')).toBeTruthy();
+  });
+});

@@ -1,5 +1,5 @@
 appId: com.foundry.finance-skill-foundry
-productName: Foundry
+productName: FA Foundry
 directories:
   output: release
   buildResources: build

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { LifeBuoy } from 'lucide-react';
 
 import './components.css';
 
@@ -9,9 +10,27 @@ export interface ShellProps {
   onScreen(screen: Screen): void;
   /** Drawn between the header and the column. The workbench puts its task bar here. */
   strip?: ReactNode;
+  /** Brings the first-run guide back. Absent on screens that cannot show it. */
+  onGuide?(): void;
   children: ReactNode;
 }
 
+/**
+ * What the product is called, in the one place it is said.
+ *
+ * Not in the window title, which `main.ts` keeps blank, and not in the bundle
+ * name, which is the identifier macOS filed the app under.
+ */
+export const APP_NAME = 'FA Foundry';
+
+/**
+ * The four destinations, workbench first.
+ *
+ * The order is the product's answer to "what is this": the first thing on
+ * screen is the conversation, and the three record-keeping screens are behind
+ * it. It used to open on 任务, which is a form for naming something an
+ * operator has no reason to name yet.
+ */
 const DESTINATIONS = [
   { id: 'workbench', label: '工作台' },
   { id: 'formulator', label: '数据台' },
@@ -27,14 +46,14 @@ const DESTINATIONS = [
  * document does -- anything behind it that could scroll away would slide out
  * from under a view that stays put.
  */
-export function Shell({ screen, onScreen, strip, children }: ShellProps) {
+export function Shell({ screen, onScreen, strip, onGuide, children }: ShellProps) {
   // Both embedded pages clip the column for the same reason; `data-screen`
   // carries which one is on so the stylesheet can stop it scrolling.
   const embedded = screen === 'workbench' || screen === 'formulator';
   return (
     <div className="fnd-shell" data-screen={screen} data-embedded={embedded ? 'yes' : 'no'}>
       <header className="fnd-head">
-        <span className="fnd-head__mark">Foundry</span>
+        <span className="fnd-head__mark">{APP_NAME}</span>
         <nav className="fnd-head__nav">
           {DESTINATIONS.map((item) => (
             <button
@@ -48,6 +67,12 @@ export function Shell({ screen, onScreen, strip, children }: ShellProps) {
             </button>
           ))}
         </nav>
+        {onGuide ? (
+          <button type="button" className="fnd-head__help" onClick={onGuide}>
+            <LifeBuoy size={14} strokeWidth={1.5} aria-hidden />
+            怎么用
+          </button>
+        ) : null}
       </header>
       {strip}
       <main className="fnd-column">{children}</main>
