@@ -153,6 +153,31 @@
   --fnd-line-hover: #a67e3c;
 
   /*
+   * The destination the operator is on.
+   *
+   * A filled pill, and it used to be filled in `--fnd-accent`, which is
+   * near-black in the light table and near-white in the dark one -- the same
+   * fill every primary control in the borrowed system uses. That made the row
+   * of destinations look like four buttons with one pressed. Gold says which
+   * one is the way in, and it is the window's own colour rather than a fifth
+   * one: the same hue the hovered edges and the outside mark already carry.
+   *
+   * A fill takes text, so this pair answers to 4.5:1 rather than to the 3:1 an
+   * edge gets. Measured, and `tokens.test.ts` holds them there:
+   *
+   *   light  #f9fafb on #8a6729   4.96:1
+   *   dark   #1f1f1f on #e2c180   9.55:1
+   *
+   * `--fnd-line-hover`'s own light value, #a67e3c, was tried first and carries
+   * this label at 3.54:1 -- right for the border it was picked for, under the
+   * floor for a label sitting on it. This is the same hue two steps down, and
+   * it lands on the value the outside mark already uses, for the same reason:
+   * both are gold text against the same two grounds.
+   */
+  --fnd-selected: #8a6729;
+  --fnd-on-selected: #f9fafb;
+
+  /*
    * -- the five words ----------------------------------------------------
    *
    * 报表声称 / 我重算 / 两者一致 / 稿外追问 / not-in-this-window is the whole
@@ -204,6 +229,8 @@
     --fnd-muted: #a6a6a6;
     --fnd-line: #ffffff24;
     --fnd-line-hover: #e2c180;
+    --fnd-selected: #e2c180;
+    --fnd-on-selected: #1f1f1f;
     --fnd-accent: #f9fafb;
     --fnd-accent-text: #f9fafb;
     --fnd-on-accent: #1f1f1f;
@@ -222,6 +249,8 @@
   --fnd-muted: #a6a6a6;
   --fnd-line: #ffffff24;
   --fnd-line-hover: #e2c180;
+  --fnd-selected: #e2c180;
+  --fnd-on-selected: #1f1f1f;
   --fnd-accent: #f9fafb;
   --fnd-accent-text: #f9fafb;
   --fnd-on-accent: #1f1f1f;

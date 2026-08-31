@@ -128,6 +128,18 @@ describe('the brand this product puts in the page', () => {
     expect(CLIENT).toMatch(/const SHADOW = -\d+;/);
   });
 
+  /*
+   * One artwork, two appearances. The coloured mark is the product's identity
+   * and the window's header says it; drawing the same gradients again in the
+   * rail and on the hero put them on screen three times within one glance. A
+   * filter rather than a second embed, so replacing the artwork recolours this
+   * with it.
+   */
+  it('draws the embedded mark in one colour, derived from the same bytes', () => {
+    expect(CLIENT).toContain("filter: 'brightness(0) invert(1)'");
+    expect((CLIENT.match(/data:image\/png;base64,/g) ?? []).length).toBe(1);
+  });
+
   it('carries the mark with it rather than fetching one', () => {
     // The page is served by a child process on a port this bundle cannot know
     // the shape of. A data URI is the one form that needs no path.

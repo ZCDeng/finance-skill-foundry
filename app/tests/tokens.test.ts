@@ -139,6 +139,25 @@ describe('the five words are legible in both themes', () => {
     }
   });
 
+  /*
+   * A fill takes text, so this pair answers to the text floor rather than to
+   * the 3:1 an edge gets. `--fnd-line-hover`'s own light gold was tried for it
+   * first and measures 3.70:1 under white -- right for the border it was
+   * picked for, under the floor for a label sitting on it.
+   */
+  it('clears 4.5:1 for the label on the selected destination', () => {
+    for (const [theme, table] of [
+      ['light', light],
+      ['dark', dark],
+    ] as const) {
+      const ratio = contrast(table['--fnd-on-selected'], table['--fnd-selected']);
+      expect(
+        ratio,
+        `${theme} --fnd-on-selected on --fnd-selected is ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it('clears 3:1 for the one mark colour that is only an edge', () => {
     // The border gold measures 3.70:1, under the text floor and over the
     // non-text one. That is exactly why the outside chip's text and its border

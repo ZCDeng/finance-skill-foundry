@@ -109,8 +109,8 @@
 }
 
 .fnd-head__tab[aria-current='page'] {
-  color: var(--fnd-on-accent);
-  background: var(--fnd-accent);
+  color: var(--fnd-on-selected);
+  background: var(--fnd-selected);
 }
 
 .fnd-column {
