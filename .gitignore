@@ -10,3 +10,4 @@ app/dist-vite/
 app/dist-electron/
 app/extra/
 app/release/
+build/

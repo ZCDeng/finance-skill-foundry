@@ -1,0 +1,14 @@
+# What the runtime's own preset picker shows for this one.
+#
+# `preset.yml` beside `agent.cordis.yml` is upstream's slot for display text
+# (`readPresetMetadata`), and `install_presets` copies the whole directory, so
+# nothing else has to carry it. Without this the picker lists the bare id and
+# "No description", which is the least useful thing to say about the one preset
+# that decides whether a model can read around a locked window.
+#
+# Written in Chinese, beside four English built-ins, because the operator this
+# is for reads the window's own buttons -- 授技能 / 开始本期 / 追问 -- and this
+# is the same choice under another name.
+name: 开始本期
+description: 本期结账。只有 foundry 的期间工具，开窗、导入、锁口径、登记问题、出稿、读底稿；没有 shell、没有文件读写、没有子 agent、不能联网。锁后的表只读，改口径要走 re-import 开后继窗口。
+order: 10

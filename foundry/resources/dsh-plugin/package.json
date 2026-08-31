@@ -113,10 +113,20 @@
           }
         }
       }
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
   "exports": {
     ".": "./index.js",
-    "./f3-scope": "./f3-scope.js"
+    "./f3-scope": "./f3-scope.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
   }
 }

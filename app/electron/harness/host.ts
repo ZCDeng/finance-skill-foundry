@@ -17,6 +17,7 @@ import {
 import { followupDraft, handoffScript } from './handoff.js';
 import { noticePatch, readNotice } from './notice.js';
 import { Pane } from './pane.js';
+import { HARNESS_SKIN } from './skin.js';
 
 export interface HostOptions {
   /** The runtime entry, `<install>/node_modules/@deepseek-ai/dsh/lib/bin.js`. */
@@ -160,6 +161,8 @@ export class HarnessHost {
 
   /** Put the page in the window. Called once, after the first start. */
   async attach(window: BrowserWindow): Promise<void> {
+    // Before the load, so the first paint already carries it.
+    this.pane.skin(HARNESS_SKIN);
     await this.pane.attach(window, await this.start());
   }
 

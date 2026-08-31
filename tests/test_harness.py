@@ -175,3 +175,34 @@ def test_import_json_from_upload_drop(tmp_path: Path) -> None:
     window.import_tables(drop_dir=drop)
     window.lock()
     assert window.query("SELECT SUM(amount) FROM gl")[0][0].to_eng_string() == "12.50"
+
+
+def test_every_preset_tells_the_picker_what_it_is():
+    """A preset with no `preset.yml` lists as its bare id and "No description".
+
+    The runtime's picker reads display text from `preset.yml` beside
+    `agent.cordis.yml` and renders the id when there is none. That is the least
+    useful thing to say about `period`, which is the preset deciding whether a
+    model can read around a locked window, and about `f3`, which offers one
+    verb. `install_presets` copies the whole directory, so the file only has to
+    exist here.
+    """
+    import yaml
+
+    from foundry.harness import preset_dir, preset_ids
+
+    for preset_id in preset_ids():
+        path = preset_dir() / preset_id / "preset.yml"
+        assert path.is_file(), f"{preset_id} has no preset.yml"
+        meta = yaml.safe_load(path.read_text())
+        assert meta.get("name"), f"{preset_id} preset.yml has no name"
+        assert meta.get("description"), f"{preset_id} preset.yml has no description"
+
+
+def test_preset_display_text_travels_with_the_preset(tmp_path):
+    """The copy the runtime reads has to carry it, not just the checkout."""
+    from foundry.harness import install_presets, preset_ids
+
+    install_presets(tmp_path)
+    for preset_id in preset_ids():
+        assert (tmp_path / ".agent-presets" / preset_id / "preset.yml").is_file()

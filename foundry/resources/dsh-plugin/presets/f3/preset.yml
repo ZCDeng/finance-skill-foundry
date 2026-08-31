@@ -1,0 +1,7 @@
+# See the note in `../period/preset.yml`.
+#
+# The description says the tool count out loud on purpose. This preset is the
+# product's narrowest fence (KTD7) and the whole of what it offers is one verb.
+name: 追问
+description: 领导追问。只有 query-locked 一个工具，对着锁后的窗口重算，答案自动带 稿外追问 标记。读不到目录、底稿目录和上传区。
+order: 20

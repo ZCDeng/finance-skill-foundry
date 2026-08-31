@@ -17,9 +17,25 @@ import { HIDDEN, type Rect, viewBounds } from './bounds.js';
 export class Pane {
   private view: WebContentsView | null = null;
   private origin: string | null = null;
+  /**
+   * A stylesheet re-applied after every load.
+   *
+   * `insertCSS` is scoped to the document that was current when it ran, so a
+   * reload -- which is how a session hand-off takes effect -- drops it. Held
+   * here and re-inserted on `did-finish-load` rather than at each call site,
+   * because the call site that forgets is the one that leaves the pane looking
+   * like a different product.
+   */
+  private css: string | null = null;
 
   attached(): boolean {
     return this.view !== null;
+  }
+
+  /** Draw this stylesheet over the page, now and after every later load. */
+  skin(css: string): void {
+    this.css = css;
+    if (this.view) void this.view.webContents.insertCSS(css);
   }
 
   /** Put the page in the window, once, and load it. */
@@ -36,6 +52,9 @@ export class Pane {
     window.contentView.addChildView(view);
     view.setBounds(HIDDEN);
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    view.webContents.on('did-finish-load', () => {
+      if (this.css) void view.webContents.insertCSS(this.css);
+    });
     view.webContents.on('will-navigate', (event, url) => {
       const pinned = this.origin;
       if (!pinned) return;
