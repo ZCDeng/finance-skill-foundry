@@ -30,6 +30,7 @@ export function App() {
   const [open, setOpen] = useState<string | null>(null);
   const [session, setSession] = useState<OpenSession | null>(null);
   const [opening, setOpening] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<HarnessStatus | null>(null);
   const [formulator, setFormulator] = useState<LaunchSpec | null>(null);
   const [busyData, setBusyData] = useState(false);
@@ -118,6 +119,31 @@ export function App() {
       .finally(() => setBusyData(false));
   }, [api, take]);
 
+  /*
+   * Create a task, then open it.
+   *
+   * Opening it is not a convenience. An operator who just named a period wants
+   * to start working in it, and the alternative is a list that grew by one row
+   * they now have to find. The list is refreshed either way, because the row has
+   * to exist for the workbench's task bar to have a name to draw.
+   */
+  const createTask = useCallback(
+    (title: string, period: string) => {
+      if (!api) return;
+      setCreating(true);
+      void api
+        .taskNew(title, period)
+        .then((a) =>
+          take(a, ({ id }) => {
+            void api.tasks().then((rows) => take(rows, setTasks));
+            setOpen(id);
+          }),
+        )
+        .finally(() => setCreating(false));
+    },
+    [api, take],
+  );
+
   const openSession = useCallback(
     (intent: Intent) => {
       if (!api?.harnessOpen || !open) return;
@@ -132,7 +158,16 @@ export function App() {
           : undefined;
       void api
         .harnessOpen(intent, open, seed)
-        .then((a) => take(a, (value) => setSession({ ...value, intent })))
+        .then((a) =>
+          take(a, (value) => {
+            setSession({ ...value, intent });
+            // A period session creates a window on the way in, and the task bar
+            // above is drawn from `detail`. Without this it keeps saying the
+            // task has no window while the operator is typing into the one the
+            // button just opened.
+            void api.task(open).then((fresh) => take(fresh, setDetail));
+          }),
+        )
         .finally(() => setOpening(false));
     },
     [api, open, detail, take],
@@ -199,7 +234,7 @@ export function App() {
       {screen === 'workbench' ? <WiringTrouble status={status} /> : null}
       {screen === 'workbench' ? (
         open === null ? (
-          <Tasks tasks={tasks} onOpen={setOpen} />
+          <Tasks tasks={tasks} busy={creating} onOpen={setOpen} onCreate={createTask} />
         ) : (
           <Workbench
             task={current}
@@ -210,7 +245,9 @@ export function App() {
           />
         )
       ) : null}
-      {screen === 'tasks' && open === null ? <Tasks tasks={tasks} onOpen={setOpen} /> : null}
+      {screen === 'tasks' && open === null ? (
+        <Tasks tasks={tasks} busy={creating} onOpen={setOpen} onCreate={createTask} />
+      ) : null}
       {screen === 'tasks' && open !== null && detail ? (
         <TaskDetail detail={detail} onBack={() => setOpen(null)} onRead={read} reading={reading} />
       ) : null}

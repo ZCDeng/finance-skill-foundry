@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
@@ -31,17 +31,58 @@ const ROW: DeliverableRow = {
 };
 
 describe('the task list', () => {
+  const noop = () => {};
+
   it('says how many windows a task owns', () => {
     // Two windows means a re-import happened, and that is the task whose older
     // brief still has follow-ups hanging off it.
-    render(<Tasks tasks={[TASK]} onOpen={() => {}} />);
+    render(<Tasks tasks={[TASK]} busy={false} onOpen={noop} onCreate={noop} />);
     expect(screen.getByText('2026-08 月度经营分析')).toBeTruthy();
     expect(screen.getByText(/2 个窗口/)).toBeTruthy();
   });
 
-  it('says what to do when there is nothing yet, rather than showing a blank', () => {
-    render(<Tasks tasks={[]} onOpen={() => {}} />);
-    expect(screen.getByText(/task-new/)).toBeTruthy();
+  /*
+   * The empty state used to read "用 foundry task-new 建一个". That CLI lives
+   * inside the application bundle and is on nobody's PATH, so on a machine that
+   * had only installed the app it was an instruction that could not be carried
+   * out -- and with no task there is no session, and with no session the harness
+   * view never gets a rectangle. The whole window was unusable from a cold
+   * install. What the empty state must have is a control, not a sentence.
+   */
+  it('offers a way to make the first task, on a store with none', () => {
+    render(<Tasks tasks={[]} busy={false} onOpen={noop} onCreate={noop} />);
+    expect(screen.getByLabelText('任务名')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /新建任务/ })).toBeTruthy();
+    expect(screen.queryByText(/task-new/)).toBeNull();
+  });
+
+  it('hands up the title and the period an operator typed', () => {
+    const made: [string, string][] = [];
+    render(
+      <Tasks tasks={[]} busy={false} onOpen={noop} onCreate={(t, p) => made.push([t, p])} />,
+    );
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '  华东区 8 月回款  ' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: /新建任务/ }));
+    expect(made).toEqual([['华东区 8 月回款', '2026-08']]);
+  });
+
+  it('will not create a task with no title', () => {
+    const made: string[] = [];
+    render(<Tasks tasks={[]} busy={false} onOpen={noop} onCreate={(t) => made.push(t)} />);
+    // Whitespace is not a name. A store full of tasks called " " is a list an
+    // operator cannot read, and the title is the only thing telling two apart.
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: /新建任务/ }));
+    expect(made).toEqual([]);
+  });
+
+  it('does not fire twice while a create is still in flight', () => {
+    const made: string[] = [];
+    render(<Tasks tasks={[]} busy onOpen={noop} onCreate={(t) => made.push(t)} />);
+    fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '八月' } });
+    fireEvent.click(screen.getByRole('button', { name: /新建任务/ }));
+    expect(made).toEqual([]);
   });
 });
 

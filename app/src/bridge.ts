@@ -85,6 +85,8 @@ export interface Bridge {
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
+  /** The one call that changes the store. Always present; the reads are useless without it. */
+  taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

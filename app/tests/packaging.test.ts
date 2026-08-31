@@ -69,6 +69,29 @@ describe('where the frozen CLI is', () => {
     expect(order.indexOf('process.env.FOUNDRY_BIN')).toBeLessThan(order.indexOf('packedFoundryBin'));
     expect(order.indexOf('packedFoundryBin')).toBeLessThan(order.indexOf("'foundry'"));
   });
+
+  it('names it on this process, so the window itself can reach the store', () => {
+    /*
+     * The binary was resolved correctly and handed to two of its three callers.
+     * The harness child got it through `boot.ts`, `install-presets` got it as an
+     * argument, and the store binding this window reads through got a `varRoot`
+     * and nothing else -- so `runFoundry` fell through to its last resort and
+     * exec'd a bare `foundry` off PATH, which a packaged machine does not have.
+     * Every screen in the window rendered `spawn foundry ENOENT`.
+     *
+     * `toBeGreaterThan(-1)` before the ordering, not after. `indexOf` returns -1
+     * for a call that is not there, and -1 is less than every real index: without
+     * these two lines, deleting the call is what makes the ordering assertion
+     * pass, and the test would be most confident exactly when the bug was back.
+     */
+    const main = read('../electron/main.ts');
+    const call = main.indexOf('nameFoundry(here)');
+    const wire = main.indexOf('registerIpc(');
+    expect(call, 'main.ts never calls nameFoundry').toBeGreaterThan(-1);
+    expect(wire, 'main.ts never calls registerIpc').toBeGreaterThan(-1);
+    expect(call, 'the binary must be named before the store binding is built').toBeLessThan(wire);
+    expect(main.slice(main.indexOf('function nameFoundry('))).toContain('process.env.FOUNDRY_BIN =');
+  });
 });
 
 describe('where the frozen Formulator is', () => {

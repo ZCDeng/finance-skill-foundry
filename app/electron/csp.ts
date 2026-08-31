@@ -48,6 +48,34 @@ export const DEV_CSP_HEADER_VALUE = DEV_CSP_DIRECTIVES.join('; ');
 
 export const CSP_HEADER_NAME = 'Content-Security-Policy';
 
+/** Where the dev server serves this app's own page from. */
+export const DEV_ORIGIN = 'http://localhost:5273';
+
+/**
+ * Whether this policy is ours to write.
+ *
+ * It is installed on `session.defaultSession`, which is every response the
+ * application receives -- and two of the pages in this window are not this
+ * application. The harness page and Formulator are served by processes this app
+ * spawns, over loopback, and each ships its own headers.
+ *
+ * Replacing theirs strangled them. `default-src 'none'` leaves no `connect-src`,
+ * so every call the harness UI makes to its own server was blocked; `script-src
+ * 'self'` blocked the inline boot script that mounts it, and `font-src 'self'`
+ * blocked the `data:` faces it inlines. The page arrived, its root stayed empty,
+ * and the window showed a blank rectangle where the workbench should be.
+ *
+ * So the rule is by document, not by session: this app's own page gets this
+ * app's policy, and an embedded page keeps whatever its own server sent. That is
+ * not a hole opened in this app -- those two servers are as constrained inside
+ * this window as they are when run from a terminal, which is where the decision
+ * about their policy belongs.
+ */
+export function ownDocument(url: string, isDev = false): boolean {
+  if (url.startsWith('file://')) return true;
+  return isDev && url.startsWith(DEV_ORIGIN);
+}
+
 export type IncomingHeaders = Record<string, string | string[] | undefined>;
 export type HeaderBag = Record<string, string | string[]>;
 

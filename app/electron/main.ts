@@ -2,7 +2,7 @@ import { app, BrowserWindow, session } from 'electron';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 
-import { applyCsp } from './csp.js';
+import { applyCsp, ownDocument } from './csp.js';
 import { FormulatorHost } from './formulator.js';
 import { HarnessHost } from './harness/host.js';
 import {
@@ -75,6 +75,28 @@ function foundryBin(here: Layout): string {
   return existsSync(packed) ? packed : 'foundry';
 }
 
+/**
+ * Tell this process where the `foundry` it carries is.
+ *
+ * The same shape as `nameFormulator`, and for the same reason: the binary was
+ * being resolved at three call sites and handed to two of them. The harness
+ * child got it through `boot.ts` and `install-presets` got it as an argument,
+ * while the store binding this window reads through got a `varRoot` and nothing
+ * else -- so `runFoundry` fell through to its last resort and exec'd a bare
+ * `foundry` off PATH. On a packaged machine there is no such program, and every
+ * screen in the window rendered `spawn foundry ENOENT`: no task list, therefore
+ * no task, therefore no session, therefore a harness view that was attached and
+ * running and never once given a rectangle.
+ *
+ * Naming it on the process rather than threading it through `Binding` keeps the
+ * resolution in one place and means a call site added later cannot forget it.
+ */
+function nameFoundry(here: Layout): void {
+  if (process.env.FOUNDRY_BIN) return;
+  const packed = packedFoundryBin(here);
+  if (existsSync(packed)) process.env.FOUNDRY_BIN = packed;
+}
+
 /** The bundle's package name, which is also its directory inside a node_modules. */
 const BUNDLE_NAME = 'finance-skill-foundry-dsh';
 
@@ -134,9 +156,14 @@ function createWindow(): void {
 
 void app.whenReady().then(() => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    // Only this app's own documents. The harness page and Formulator are served
+    // by child processes over loopback and carry their own headers; rewriting
+    // theirs left both with `default-src 'none'` and neither could boot.
+    if (!ownDocument(details.url, isDev)) return callback({});
     callback({ responseHeaders: applyCsp(details.responseHeaders ?? {}, isDev) });
   });
   const here = layout();
+  nameFoundry(here);
   nameFormulator(here);
   const override = process.env.FOUNDRY_DSH_INSTALL;
   const entry = override ? path.join(override, HARNESS_ENTRY) : entryPath(here);

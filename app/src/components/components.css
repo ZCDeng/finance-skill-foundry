@@ -316,3 +316,82 @@
 .fnd-shell[data-embedded='yes'] .fnd-column {
   padding-top: 0;
 }
+
+/* -- naming a task -------------------------------------------------------- */
+
+/*
+ * The one form in the product.
+ *
+ * It sits on the task list rather than behind a dialog because it is the first
+ * thing a new install needs and the last thing an operator should have to go
+ * looking for. Wraps rather than scrolls: at the narrow end the period field
+ * and the button drop to their own line instead of squeezing the title, which
+ * is the field that carries the meaning.
+ */
+.fnd-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.fnd-field {
+  flex: 1 1 240px;
+  min-width: 0;
+  height: var(--fnd-button-height);
+  padding: 0 12px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface);
+  color: var(--fnd-ink);
+  font-family: inherit;
+  font-size: var(--fnd-size-small);
+  transition: border-color var(--fnd-transition);
+}
+
+.fnd-field--short {
+  flex: 0 1 150px;
+}
+
+.fnd-field::placeholder {
+  color: var(--fnd-muted);
+}
+
+.fnd-field:hover {
+  border-color: var(--fnd-line-hover);
+}
+
+/*
+ * The focus ring is the gold, not the platform's blue: the window draws one
+ * accent and a system ring would be the second. `--fnd-line-hover` is the token
+ * that already clears WCAG 1.4.11's 3:1 against both surfaces, which is the
+ * floor a focus indicator answers to.
+ */
+.fnd-field:focus-visible,
+.fnd-go:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
+.fnd-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--fnd-button-height);
+  padding: 0 var(--fnd-pad-button-x);
+  border: 0;
+  border-radius: var(--fnd-radius-pill);
+  background: var(--fnd-accent);
+  color: var(--fnd-on-accent);
+  font-family: inherit;
+  font-size: var(--fnd-size-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--fnd-transition);
+}
+
+.fnd-go:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

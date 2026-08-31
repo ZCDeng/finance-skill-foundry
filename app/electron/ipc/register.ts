@@ -7,6 +7,7 @@ import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
 import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
 import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
+import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
 
 /**
@@ -47,6 +48,26 @@ function intentOf(value: unknown): Intent {
   throw new FoundryFailure(`not an intent: ${text}`, null);
 }
 
+/**
+ * A line an operator typed, as it comes off the wire.
+ *
+ * Trimmed, bounded, and refused if it carries a control character. Not a
+ * quoting defence -- these reach `execFile` as an argument array, so a quote or
+ * a semicolon is one more character in a title. It is a defence against a
+ * newline or a NUL landing in a stored title and then in every screen and every
+ * log line that ever prints it back.
+ *
+ * Exported only so the refusals have a test. Nothing outside this file calls it.
+ */
+export function lineOf(value: unknown, what: string, max: number): string {
+  const text = String(value ?? '').trim();
+  if (!text) throw new FoundryFailure(`${what} is empty`, null);
+  if (text.length > max) throw new FoundryFailure(`${what} is longer than ${max} characters`, null);
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw new FoundryFailure(`${what} has a control character`, null);
+  return text;
+}
+
 export function registerIpc(
   binding: Omit<Binding, 'task' | 'session'>,
   panes?: {
@@ -69,6 +90,23 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.deliverableText, (_event, task: unknown, sha: unknown) =>
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),
+  );
+
+  /**
+   * Create a task.
+   *
+   * Registered beside the reads rather than behind `panes`, because a build with
+   * no harness staged still has a store and an operator who needs somewhere to
+   * put a period. It is also the only channel here that changes anything, which
+   * is why it is the only one whose arguments are free text.
+   */
+  ipcMain.handle(CHANNELS.taskNew, (_event, title: unknown, period: unknown) =>
+    answer(() =>
+      newTask(binding, {
+        title: lineOf(title, 'title', 120),
+        period: String(period ?? '').trim() ? lineOf(period, 'period', 32) : undefined,
+      }),
+    ),
   );
 
   if (!panes) return;

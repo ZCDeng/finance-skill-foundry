@@ -16,6 +16,8 @@ const api = {
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
   deliverableText: (task: string, sha: string) =>
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
+  taskNew: (title: string, period: string) =>
+    ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),
   harnessOpen: (intent: string, task: string, seed?: unknown) =>
     ipcRenderer.invoke('harness:open', intent, task, seed),
