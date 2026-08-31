@@ -224,3 +224,95 @@ def test_a_pre_migration_manifest_still_labels_its_aux_as_derived(tmp_path: Path
     assert hashes["aux_kind"] == "derived"
     paper = render_workpaper({"window_id": window.id, "hashes": hashes, "items": []})
     assert f"aux(derived)={hashes['aux']}" in paper
+
+
+# --- what a whole-table total is allowed to mean ---------------------------
+#
+# The rule these pin came out of a real close: a `city_pl` carrying nine
+# measures for 50 city companies answered three different questions with the
+# same number, and that number had square metres and project counts added into
+# yuan. See `undefined_total`.
+
+
+def test_one_measure_has_a_total() -> None:
+    from foundry.caliber import undefined_total
+
+    headers = ["account_code", "unit_id", "amount"]
+    rows = [("1122", "C01", 10), ("1122", "C02", 20)]
+    assert undefined_total("ar", headers, rows) is None
+
+
+def test_several_measures_have_no_total() -> None:
+    from foundry.caliber import undefined_total
+
+    headers = ["account_code", "unit_id", "amount"]
+    rows = [("6001", "C01", 10), ("1122", "C01", 20), ("9001", "C01", 30)]
+    problem = undefined_total("city_pl", headers, rows)
+    assert problem is not None
+    # Names the table, how many measures, and the two ways out.
+    assert "city_pl" in problem
+    assert "3 account codes" in problem
+    assert "6001" in problem and "1122" in problem
+    assert "one account per table" in problem
+    assert "map" in problem
+
+
+def test_the_account_cut_puts_each_measure_in_its_own_part() -> None:
+    from foundry.caliber import undefined_total
+
+    headers = ["account_code", "amount"]
+    rows = [("6001", 10), ("1122", 20)]
+    assert undefined_total("t", headers, rows, split_by="account_code") is None
+
+
+def test_any_other_cut_still_mixes_them_inside_each_part() -> None:
+    from foundry.caliber import undefined_total
+
+    headers = ["account_code", "region", "amount"]
+    rows = [("6001", "east", 10), ("1122", "east", 20)]
+    problem = undefined_total("t", headers, rows, split_by="region")
+    assert problem is not None
+    assert "split by region" in problem
+
+
+def test_a_count_is_a_count_whatever_the_accounts_are() -> None:
+    from foundry.caliber import undefined_total
+
+    # No `amount`, so the aggregate is COUNT(*), and rows are rows.
+    headers = ["account_code", "note"]
+    rows = [("6001", "a"), ("1122", "b")]
+    assert undefined_total("t", headers, rows) is None
+
+
+def test_a_table_with_no_account_column_carries_one_measure() -> None:
+    from foundry.caliber import undefined_total
+
+    assert undefined_total("t", ["amount"], [(10,), (20,)]) is None
+
+
+def test_a_blank_account_beside_a_real_one_is_two_things() -> None:
+    from foundry.caliber import undefined_total
+
+    # Half the rows attributed and half not is not one measure either, and the
+    # blank is named rather than dropped so the message says what was found.
+    problem = undefined_total("t", ["account_code", "amount"], [("6001", 10), ("", 20)])
+    assert problem is not None
+    assert "(blank)" in problem
+
+
+def test_the_message_does_not_list_every_account_in_a_wide_table() -> None:
+    from foundry.caliber import undefined_total
+
+    rows = [(f"{6000 + i}", 1) for i in range(9)]
+    problem = undefined_total("t", ["account_code", "amount"], rows)
+    assert problem is not None
+    assert "9 account codes" in problem
+    assert "+3 more" in problem
+
+
+def test_accounts_are_reported_in_the_order_the_table_holds_them() -> None:
+    from foundry.caliber import accounts_in
+
+    headers = ["account_code", "amount"]
+    rows = [("6001", 1), ("1122", 2), ("6001", 3)]
+    assert accounts_in(headers, rows) == ["6001", "1122"]

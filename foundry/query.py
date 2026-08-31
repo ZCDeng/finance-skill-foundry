@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from foundry.brief import _aggregate, _table_rows
 from foundry.caliber import (
+    undefined_total,
     MAP_SPLITS,
     cut_fact_by_map,
     fact_schedule_lines,
@@ -211,11 +212,17 @@ def query_locked(
             raise QueryRefused(f"{table} has no amount")
         if split_by not in cols:
             raise QueryRefused(f"{split_by} not in {table}")
+        headers, fact_rows = _table_rows(target, table)
+        # A cut by something other than the account still adds unlike measures
+        # inside each part. `undefined_total` lets `account_code` through,
+        # because that cut is what separates them.
+        problem = undefined_total(table, headers, fact_rows, split_by=split_by)
+        if problem:
+            raise QueryRefused(problem)
         rows = target.query(
             f"SELECT {quote_ident(split_by)}, COALESCE(SUM(amount), 0) FROM {quote_ident(table)} GROUP BY 1 ORDER BY 1"
         )
         parts = ", ".join(f"{row[0]}={row[1]}" for row in rows)
-        headers, fact_rows = _table_rows(target, table)
         claimed = _aggregate(target, table)
         _record_followup(
             target,
@@ -236,6 +243,10 @@ def query_locked(
             brief_sha=brief_sha,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
+    headers, fact_rows = _table_rows(target, table)
+    problem = undefined_total(table, headers, fact_rows)
+    if problem:
+        raise QueryRefused(problem)
     value = _aggregate(target, table)
     cited = next(
         (
@@ -252,7 +263,6 @@ def query_locked(
     )
     if cited:
         return f"{CLAIMED}: {text} → {value}{_window_note(target)}"
-    headers, fact_rows = _table_rows(target, table)
     _record_followup(
         target,
         {"text": text, "tag": OUTSIDE, "value": as_number(value)},

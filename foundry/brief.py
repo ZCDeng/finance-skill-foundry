@@ -12,6 +12,7 @@ from foundry.caliber import (
     format_cut,
     source_table_id,
     table_key,
+    undefined_total,
 )
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused
@@ -170,8 +171,14 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
             )
             continue
         source = source_table_id(required)
-        total = _aggregate(window, source)
         headers, rows = _table_rows(window, source)
+        # Read before summing. A table holding several measures has no
+        # whole-table total, and answering with one anyway is how a brief comes
+        # to carry a figure nobody can derive.
+        problem = undefined_total(source, headers, rows)
+        if problem:
+            raise LockRefused(f"question {item['id']}: {problem}")
+        total = _aggregate(window, source)
         lines.append(f"## {item['text']}")
         lines.append(f"结论: {source} 锁库汇总 {total}。{RECOMPUTED} {total}。")
         lines.append("")

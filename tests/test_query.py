@@ -226,3 +226,85 @@ def test_a_hyphenated_table_is_not_reported_missing_by_the_brief(tmp_path: Path)
     assert "40" in brief
     cited = query_locked(window, "AR 合计是多少?", required_table_ids=["ar-2024-08"], question_id="q1")
     assert cited.startswith("报表声称")
+
+
+# --- a follow-up will not carry one either ---------------------------------
+#
+# `query-locked` is the only tool the `f3` preset offers, so this is the path a
+# leader's question actually travels. Closing the brief and leaving this open
+# would put the fence on the door nobody uses.
+
+
+def _two_measure_locked(tmp_path: Path):
+    drop = tmp_path / "drop"
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(
+        coa=_xlsx(
+            drop / "coa.xlsx",
+            ["account_code", "account_name"],
+            [["6001", "营业收入"], ["1122", "应收账款"]],
+        ),
+        named=[
+            {
+                "id": "city_pl",
+                "path": _xlsx(
+                    drop / "city_pl.xlsx",
+                    ["account_code", "region", "amount"],
+                    [["6001", "east", 100], ["1122", "east", 30], ["6001", "west", 50]],
+                ),
+            }
+        ],
+        drop_dir=drop,
+    )
+    window.lock()
+    return window
+
+
+def test_followup_refuses_a_whole_table_total_over_several_measures(tmp_path: Path) -> None:
+    window = _two_measure_locked(tmp_path)
+    with pytest.raises(QueryRefused) as caught:
+        query_locked(window, "合计多少", required_table_ids=["city_pl"])
+    assert "city_pl" in str(caught.value)
+    assert "2 account codes" in str(caught.value)
+
+
+def test_followup_refuses_a_cut_that_still_mixes_them(tmp_path: Path) -> None:
+    # `east=130` is revenue plus receivables. Splitting moved the mixing inside
+    # each part rather than removing it.
+    window = _two_measure_locked(tmp_path)
+    with pytest.raises(QueryRefused) as caught:
+        query_locked(window, "分区域", required_table_ids=["city_pl"], split_by="region")
+    assert "split by region" in str(caught.value)
+
+
+def test_followup_allows_the_cut_that_separates_them(tmp_path: Path) -> None:
+    window = _two_measure_locked(tmp_path)
+    answer = query_locked(
+        window, "按科目", required_table_ids=["city_pl"], split_by="account_code"
+    )
+    assert "6001=150" in answer
+    assert "1122=30" in answer
+
+
+def test_followup_still_answers_a_single_measure_table(tmp_path: Path) -> None:
+    drop = tmp_path / "drop"
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(
+        coa=_xlsx(drop / "coa.xlsx", ["account_code", "account_name"], [["1122", "应收账款"]]),
+        named=[
+            {
+                "id": "ar",
+                "path": _xlsx(
+                    drop / "ar.xlsx",
+                    ["account_code", "region", "amount"],
+                    [["1122", "east", 40], ["1122", "west", 60]],
+                ),
+            }
+        ],
+        drop_dir=drop,
+    )
+    window.lock()
+    assert "100" in query_locked(window, "应收合计", required_table_ids=["ar"])
+    assert "east=40" in query_locked(
+        window, "分区域应收", required_table_ids=["ar"], split_by="region"
+    )

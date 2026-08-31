@@ -119,6 +119,68 @@ def parse_map_entries(headers: list[str], rows: list[tuple[Any, ...]]) -> list[M
     ]
 
 
+def accounts_in(headers: list[str], rows: list[tuple[Any, ...]]) -> list[str]:
+    """Every distinct account code a fact table carries, first seen first."""
+    if "account_code" not in headers:
+        return []
+    index = headers.index("account_code")
+    seen: list[str] = []
+    for row in rows:
+        code = _cell(row, index)
+        if code not in seen:
+            seen.append(code)
+    return seen
+
+
+def undefined_total(
+    table: str,
+    headers: list[str],
+    rows: list[tuple[Any, ...]],
+    *,
+    split_by: str | None = None,
+) -> str | None:
+    """Why a whole-table total is not a measure, or None when it is one.
+
+    Both places that answer a question without a map do it by summing the named
+    table: ``emit_brief`` for a brief line, ``query_locked`` for a follow-up.
+    That is right for a table holding one measure, which is the shape the kit's
+    own fixtures use -- one account, any number of units, one number out.
+
+    It is wrong, and silently so, for a table holding several. Measured on a
+    real close: a ``city_pl`` carrying revenue, cost, gross, opex, impairment,
+    operating profit, receivables, floor area and project count for 50 city
+    companies answered three different questions with the same figure --
+    889,003.9147 -- which is square metres and project counts added into yuan,
+    and the line carried 我重算 beside it. Nothing refused, because nothing
+    looked. A number nobody can define is worse than a refusal, and this
+    product's whole claim is that a figure on a brief has a derivation.
+
+    Two things make a total defined again and both are checked here. Splitting
+    by ``account_code`` puts each measure in its own part, so the parts are
+    measures even though their sum is not. And a ``map`` gives every account a
+    declared analysis node, which is why the map path never reaches this: there
+    the operator has already said what each account rolls into.
+
+    A table with no ``amount`` is counted rather than summed, and a count of
+    rows is a count of rows whatever the accounts are.
+    """
+    if "amount" not in headers:
+        return None
+    if split_by == "account_code":
+        return None
+    accounts = accounts_in(headers, rows)
+    if len(accounts) <= 1:
+        return None
+    shown = ", ".join(code or "(blank)" for code in accounts[:6])
+    more = "" if len(accounts) <= 6 else f", +{len(accounts) - 6} more"
+    cut = f" split by {split_by}" if split_by else ""
+    return (
+        f"{table} carries {len(accounts)} account codes ({shown}{more}); "
+        f"a total{cut} adds unlike measures. "
+        "Give the question one account per table, or add map so every account has a declared node."
+    )
+
+
 def fact_dims(headers: list[str], row: tuple[Any, ...]) -> list[tuple[str, str]]:
     index = {name: i for i, name in enumerate(headers)}
     dims: list[tuple[str, str]] = []
