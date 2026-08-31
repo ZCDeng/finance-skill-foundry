@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   GraduationCap,
   Loader,
@@ -199,89 +198,6 @@ export function Booting() {
     <div className="fnd-booting">
       <Loader size={20} strokeWidth={1.25} className="fnd-spin" aria-hidden />
       <p className="fnd-muted">{APP_NAME} 正在启动</p>
-    </div>
-  );
-}
-
-/**
- * What this window is, for someone opening it for the first time.
- *
- * Shown when the store has no task, which is the one moment it is certainly
- * true that nobody here has done this before, and reachable afterwards from the
- * header. It carries the one form that gets a cold install moving: naming a
- * period and opening a session on it in a single press, because the alternative
- * -- name a task on one screen, find it on another, then choose a way in --
- * is three screens of guessing before anything happens.
- */
-export function Guide({
-  busy,
-  canStart,
-  onStart,
-  onDismiss,
-}: {
-  busy: boolean;
-  /** False when this build has no harness to open a session in. */
-  canStart: boolean;
-  onStart(title: string, period: string): void;
-  onDismiss(): void;
-}) {
-  const [title, setTitle] = useState('');
-  const [period, setPeriod] = useState('');
-  const ready = title.trim().length > 0 && canStart && !busy;
-  return (
-    <div className="fnd-guide">
-      <p className="fnd-eyebrow">这是什么</p>
-      <h3 className="fnd-guide__lede">
-        一个把结账期间当成任务来管的工作台。上面是对话, 下面这三条是进去的路。
-      </h3>
-
-      <ol className="fnd-guide__steps">
-        {INTENTS.map(({ id, label, hint, Icon }) => (
-          <li key={id} className="fnd-guide__step">
-            <Icon size={15} strokeWidth={1.5} aria-hidden />
-            <span className="fnd-title">{label}</span>
-            <span className="fnd-muted">{hint}</span>
-          </li>
-        ))}
-      </ol>
-
-      <p className="fnd-muted fnd-guide__note">
-        会话开在哪个任务上, 顶上那条一直写着。任务、每一版交付物和它们的来路, 在「任务」和「交付物」两屏。
-      </p>
-
-      <form
-        className="fnd-new"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!ready) return;
-          onStart(title.trim(), period.trim());
-        }}
-      >
-        <input
-          className="fnd-field"
-          value={title}
-          maxLength={120}
-          placeholder="任务名, 比如 华东区 8 月回款"
-          aria-label="任务名"
-          onChange={(event) => setTitle(event.target.value)}
-        />
-        <input
-          className="fnd-field fnd-field--short"
-          value={period}
-          maxLength={32}
-          placeholder="期间 2026-08"
-          aria-label="期间"
-          onChange={(event) => setPeriod(event.target.value)}
-        />
-        <button type="submit" className="fnd-go" disabled={!ready}>
-          <PlayCircle size={14} strokeWidth={1.5} aria-hidden />
-          建任务并开始本期
-        </button>
-      </form>
-
-      <button type="button" className="fnd-quiet" onClick={onDismiss}>
-        先看看再说
-      </button>
     </div>
   );
 }

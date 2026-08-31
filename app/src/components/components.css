@@ -474,13 +474,13 @@
 .fnd-head__help {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   border: 1px solid var(--fnd-line);
   background: transparent;
   border-radius: var(--fnd-radius-pill);
-  padding: 0 var(--fnd-pad-button-x);
+  padding: 0;
+  width: var(--fnd-button-height);
   height: var(--fnd-button-height);
-  font-size: var(--fnd-size-small);
   color: var(--fnd-muted);
   cursor: pointer;
   transition: color var(--fnd-transition), border-color var(--fnd-transition);
@@ -608,10 +608,32 @@
 
 /* -- the guide ------------------------------------------------------------ */
 
+/*
+ * A layer, not another screen.
+ *
+ * The runtime's page is a native view over this area and `App` takes its
+ * rectangle away while the guide is up, so there is nothing behind this to dim.
+ * The wash is what makes the card read as sitting on top of the window rather
+ * than as a fifth destination inside it.
+ */
+.fnd-scrim {
+  min-height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 36px 24px 56px;
+  background: radial-gradient(130% 90% at 50% 0%, var(--fnd-surface-strong), transparent 70%);
+}
+
 .fnd-guide {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 40px 0 48px;
+  width: 100%;
+  max-width: 780px;
+  box-sizing: border-box;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface);
+  box-shadow: 0 24px 60px -30px rgb(0 0 0 / 45%);
+  padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -628,18 +650,80 @@
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: stretch;
+  gap: 4px;
 }
 
-.fnd-guide__step {
+/*
+ * Stretched, so the three cards are one height whatever their hints wrap to.
+ * Left centred, the card whose sentence ran to two lines stood taller than the
+ * two beside it and the row read as three unrelated boxes.
+ */
+.fnd-step {
   display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.fnd-step__body {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  text-align: center;
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
-  padding: 14px 16px;
+  padding: 18px 12px 16px;
+}
+
+/*
+ * The drawings take the accent rather than the ink.
+ *
+ * They are graphics, not text, so 3:1 is their floor and the gold clears it in
+ * both themes -- and drawing them in ink would make three pictures compete with
+ * the sentence above them for the same weight.
+ */
+.fnd-step__art {
+  width: 100%;
+  max-width: 128px;
+  height: auto;
+  color: var(--fnd-line-hover);
+}
+
+.fnd-step__label {
+  color: var(--fnd-ink);
+}
+
+.fnd-step__hint {
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-small);
+  line-height: 18px;
+}
+
+/* Same pen as the sketches, quieter, because it is the order and not a step. */
+.fnd-arrow {
+  width: 26px;
+  height: auto;
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--fnd-muted);
+}
+
+/* Narrow enough that three across would squeeze the drawings out of shape. */
+@media (max-width: 760px) {
+  .fnd-guide__steps,
+  .fnd-step {
+    flex-direction: column;
+  }
+
+  .fnd-arrow {
+    transform: rotate(90deg);
+  }
 }
 
 .fnd-guide__note {
@@ -647,7 +731,6 @@
   line-height: 20px;
 }
 
-/* Leaves without doing anything. Quiet on purpose: it is not the way in. */
 .fnd-quiet {
   align-self: flex-start;
   border: 0;

@@ -17,7 +17,8 @@ import { Deliverables } from './views/Deliverables.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
-import { Booting, Guide, TaskBar, WiringTrouble, type OpenSession } from './views/Workbench.js';
+import { Guide } from './views/Guide.js';
+import { Booting, TaskBar, WiringTrouble, type OpenSession } from './views/Workbench.js';
 
 /**
  * A refusal is a sentence the store wrote. Show it, do not translate it.

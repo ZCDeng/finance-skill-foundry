@@ -231,6 +231,22 @@ describe('the shell', () => {
     expect(container.querySelector('.fnd-head__tab[aria-current="page"]')?.textContent).toBe('工作台');
   });
 
+  /*
+   * An icon with no visible text, so the accessible name is the only name it
+   * has. Dropping the label and the `aria-label` together would leave a
+   * control announced as "button".
+   */
+  it('keeps a name on the help control after it lost its label', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    render(
+      <Shell screen="workbench" onScreen={() => {}} onGuide={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    const help = screen.getByRole('button', { name: '怎么用' });
+    expect(help.textContent).toBe('');
+  });
+
   it('offers the guide back only where it can be drawn', async () => {
     const { Shell } = await import('../src/components/Shell.js');
     const { container, rerender } = render(
@@ -364,7 +380,7 @@ describe('the task bar', () => {
 });
 
 describe('the guide', () => {
-  const guide = async () => (await import('../src/views/Workbench.js')).Guide;
+  const guide = async () => (await import('../src/views/Guide.js')).Guide;
 
   /*
    * The one press that gets a cold install moving. Before this, starting meant
@@ -395,6 +411,39 @@ describe('the guide', () => {
     render(<Guide busy={false} canStart={false} onStart={() => {}} onDismiss={() => {}} />);
     fireEvent.change(screen.getByLabelText('任务名'), { target: { value: '八月' } });
     expect(screen.getByRole('button', { name: /建任务并开始本期/ }).hasAttribute('disabled')).toBe(true);
+  });
+
+  /*
+   * The three ways in are a sequence -- a method is written once, a period runs
+   * against it, a question comes back to the window that period locked -- and
+   * three nouns in a list say none of that. Each step carries a drawing of what
+   * it produces, and the arrows between them are the product's own order.
+   */
+  it('draws each step rather than only naming it', async () => {
+    const Guide = await guide();
+    const { container } = render(
+      <Guide busy={false} canStart onStart={() => {}} onDismiss={() => {}} />,
+    );
+    expect(container.querySelectorAll('svg.fnd-step__art')).toHaveLength(3);
+    // Two arrows for three steps: they carry the order, so one fewer than the
+    // things being ordered.
+    expect(container.querySelectorAll('svg.fnd-arrow')).toHaveLength(2);
+  });
+
+  it('draws them with one pen', async () => {
+    // Monoline: one weight, no fill, round ends. A sketch that mixed weights
+    // would read as an icon set rather than as one drawing.
+    const Guide = await guide();
+    const { container } = render(
+      <Guide busy={false} canStart onStart={() => {}} onDismiss={() => {}} />,
+    );
+    const pens = [...container.querySelectorAll('svg g')];
+    expect(pens.length).toBeGreaterThan(0);
+    for (const pen of pens) {
+      expect(pen.getAttribute('stroke-width')).toBe('1.4');
+      expect(pen.getAttribute('fill')).toBe('none');
+      expect(pen.getAttribute('stroke-linecap')).toBe('round');
+    }
   });
 
   it('lists the three ways in, with the preset each one opens on', async () => {

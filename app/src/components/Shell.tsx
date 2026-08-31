@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { LifeBuoy } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
 
 import './components.css';
 
@@ -90,9 +90,21 @@ export function Shell({ screen, onScreen, strip, onGuide, children }: ShellProps
           */}
         <span className="fnd-head__end">
           {onGuide ? (
-            <button type="button" className="fnd-head__help" onClick={onGuide}>
-              <LifeBuoy size={14} strokeWidth={1.5} aria-hidden />
-              怎么用
+            /*
+              * A mark rather than a word. It brings back a panel that names
+              * itself in its own first line, and spending a labelled control
+              * on saying that twice put the second-longest string in the
+              * header on the thing an operator needs least often. The name
+              * stays where a pointer and a screen reader can both reach it.
+              */
+            <button
+              type="button"
+              className="fnd-head__help"
+              onClick={onGuide}
+              aria-label="怎么用"
+              title="怎么用"
+            >
+              <BookOpen size={16} strokeWidth={1.5} aria-hidden />
             </button>
           ) : null}
         </span>
