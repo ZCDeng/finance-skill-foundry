@@ -1,4 +1,4 @@
-"""What the bundle does inside a real DeepSeek Harness, not inside our own driver.
+"""What the bundle does inside a real FA Foundry harness, not inside our own driver.
 
 Every other plugin test calls `apply` with a stand-in context. That proves the
 bundle's own convention and nothing about the runtime's, which is how the

@@ -62,6 +62,19 @@ function contrast(hex: string, ground: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/**
+ * Tokens this product deliberately no longer shares with its source table.
+ *
+ * The rule above exists so a value cannot drift apart silently. A value that is
+ * *meant* to be different has to be named here, which keeps the check sharp on
+ * everything else rather than being weakened into uselessness.
+ *
+ * The two stacks: this product was given its own faces -- Asap Sharp for Latin,
+ * LXGW WenKai Mono TC for Chinese -- where `design-toolkit-app` still names
+ * Departure Mono and Chocolate Classical Sans. See `fonts.css`.
+ */
+const DIVERGED = new Set(['--fnd-font-sans', '--fnd-font-display']);
+
 describe('the token table', () => {
   it('carries its source values, renamed and not re-derived', () => {
     // Copied from `design-toolkit-app` on purpose: a change there is worth
@@ -78,6 +91,7 @@ describe('the token table', () => {
     for (const [name, value] of Object.entries(theirs)) {
       const renamed = name.replace('--dtk-', '--fnd-');
       if (!(renamed in ours)) continue; // dropped on the way over, by design
+      if (DIVERGED.has(renamed)) continue;
       expect(ours[renamed], renamed).toBe(value);
     }
   });

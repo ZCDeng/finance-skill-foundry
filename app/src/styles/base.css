@@ -1,3 +1,13 @@
+/*
+ * The faces are imported here and only here.
+ *
+ * They used to be pulled in from `tokens.css`, which both this file and
+ * `components.css` import -- so the 118 `@font-face` rules were emitted into
+ * the bundle twice, and the built stylesheet was 236 KB where half of it was a
+ * second copy of the same table. Tokens are custom properties and cost nothing
+ * to repeat; a font table is not.
+ */
+@import './fonts.css';
 @import './tokens.css';
 
 /*

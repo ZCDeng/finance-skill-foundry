@@ -1,5 +1,3 @@
-@import './fonts.css';
-
 /*
  * The token table, taken whole from `design-toolkit-app/src/styles/tokens.css`
  * with the `--dtk-` prefix renamed to `--fnd-`. Those values are that app's
@@ -69,45 +67,41 @@
    *
    * Two families, and the split between them is the design.
    *
-   * Latin is Departure Mono (Helena Zhang, OFL 1.1, no Reserved Font Name,
-   * bundled unmodified in `src/assets/fonts/` with its licence). Chinese is
-   * Chocolate Classical Sans (OFL 1.1, no Reserved Font Name, converted from
-   * the shipped `.ttf` to `woff2`, not subsetted, licence beside it). Both
-   * replaced Clash Grotesk, which did the Latin and left the Chinese to
-   * whatever the platform owned.
+   * Latin is Asap Sharp (Omnibus-Type, OFL 1.1). Chinese is LXGW WenKai Mono TC
+   * (The LXGW WenKai Project Authors, OFL 1.1). Both are bundled whole and
+   * sliced by unicode-range; `fonts.css` carries the rules, the measurements
+   * and the licences, and nothing here is fetched.
    *
-   * The order in these stacks is load-bearing and it is not alphabetical.
-   * Chocolate Classical Sans carries a complete Latin of its own -- 95 of 95
-   * printable ASCII, 96 of 96 Latin-1, 128 of 128 Latin Extended-A, checked
-   * against its `cmap`. Name it first and it wins every English word in the
-   * product and Departure Mono never draws once. Departure Mono therefore goes
-   * first: it takes the Latin because it has the Latin, and Chinese falls past
-   * it because it has none -- 1,079 codepoints and not one CJK ideograph. The
-   * fall-through is the whole mechanism and it only runs in that order. Swap
-   * these two names and the product silently changes typeface.
+   * The order in these stacks is load-bearing and it is not alphabetical. LXGW
+   * WenKai Mono TC carries a Latin of its own -- 304 printable ASCII across its
+   * slices -- so naming it first would win every English word in the product
+   * and Asap Sharp would never draw once. Asap Sharp therefore goes first: it
+   * takes the Latin because it has the Latin (95 of 95 printable ASCII), and
+   * Chinese falls past it because it has none, not one ideograph in U+4E00-9FFF,
+   * checked against its `cmap`. The fall-through is the whole mechanism and it
+   * only runs in that order. Swap these two names and the product silently
+   * changes typeface.
    *
-   * The system faces after them are the safety net, not the plan. Chocolate
-   * covers all 6,763 GB2312 hanzi, all 20,902 GBK hanzi, and the complete
-   * U+4E00-9FFF and Extension A blocks, so PingFang SC and Songti SC should
-   * never be reached for Chinese. They stay named because a stack that ran
-   * straight to `sans-serif` would still render, in whatever the platform
-   * picked, which is how a bundled Chinese face was once deleted without a
-   * single test failing. `tokens.test.ts` names them.
+   * The system faces after them are the safety net, not the plan. LXGW WenKai
+   * Mono TC is the Traditional Chinese cut and this interface is Simplified, so
+   * that is the pairing worth doubting -- and it was measured rather than
+   * trusted: its ranges cover all 197 non-ASCII characters the renderer uses,
+   * with none missing, and `fonts.test.ts` re-checks it every run. PingFang and
+   * Noto stay named because a stack that ran straight to `sans-serif` would
+   * still render, in whatever the platform picked, which is how a bundled
+   * Chinese face was once deleted without a single test failing.
    *
-   * Both faces are Regular only. No `fvar` in either file, `usWeightClass` 400
-   * in both. So the weight tokens below are both 400, and `base.css` sets
-   * `font-synthesis-weight: none` to stop the engine faking the difference.
-   * Chromium synthesises bold at requested weight >= 600, which is exactly
-   * where `--fnd-weight-heavy` used to sit; on a pixel face that smears the
-   * orthogonal stems, and on a CJK face it fills in the counters. Hierarchy is
-   * carried by size, case and colour instead. The two tokens stay in the file,
-   * at 400, so the call sites keep compiling and so the next person finds this
-   * paragraph instead of re-adding a 600.
+   * Asap Sharp is variable with a `wght` axis of 100-900. LXGW WenKai Mono TC
+   * has one instance at 400. A bold would therefore apply to the Latin half of
+   * a sentence and not the Chinese half, which is a seam rather than a
+   * hierarchy -- so both weight tokens below stay at 400, and `base.css` sets
+   * `font-synthesis-weight: none` so the engine cannot fake the difference on
+   * the Chinese either. Hierarchy is carried by size, case and colour.
    */
-  --fnd-font-sans: 'Departure Mono', 'Chocolate Classical Sans', ui-sans-serif,
+  --fnd-font-sans: 'Asap Sharp', 'LXGW WenKai Mono TC', ui-sans-serif,
     system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC',
     'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  --fnd-font-display: 'Departure Mono', 'Chocolate Classical Sans', ui-sans-serif,
+  --fnd-font-display: 'Asap Sharp', 'LXGW WenKai Mono TC', ui-sans-serif,
     system-ui, -apple-system, 'PingFang SC', 'Songti SC', 'Noto Sans SC',
     sans-serif;
   --fnd-size-label: 12px;
@@ -118,43 +112,29 @@
   --fnd-weight-strong: 400;
   --fnd-weight-heavy: 400;
   --fnd-leading-body: 24px;
-  /*
-   * The step every solved type size in the tool library snaps to.
-   *
-   * Departure Mono's outline coordinates are all multiples of 50 units on a
-   * 550 unit em, so one em is exactly eleven design pixels. A size that is a
-   * multiple of 11 puts every vertical stem on a whole pixel at 1x, and a
-   * multiple of 5.5 does it at 2x. This app is packaged for macOS, where 2x is
-   * the normal case, so 5.5 is the step. `SkillCard` carries the same number
-   * as `NAME_STEP`, and `Browse.test.tsx` pins the two together.
-   */
-  --fnd-mono-step: 5.5px;
 
   /*
    * -- the mark ---------------------------------------------------------
    *
-   * The product's own colours, measured off the operator's artwork rather than
-   * picked: a brightness plane fitted over the 8,455 gold pixels in that file
-   * rises toward (0.861, -0.509), and the two ends of that axis average
-   * #b28a45 and #e2c180. The gradient geometry that uses them is in `Mark.tsx`,
-   * with the frame it is drawn in.
+   * The product's mark is artwork, not a token: `src/assets/mark.png`, drawn
+   * in the header beside the name. It carries its own three gradients and does
+   * not recolour with the theme, because a logo that changes colour in the dark
+   * is a different logo.
    *
-   * They sit outside the palette on purpose and do not flip with the theme:
-   * the mark carries its own ground, and a logo that recolours itself in dark
-   * mode is a different logo.
+   * Two tokens used to sit here, `--fnd-mark-from` and `--fnd-mark-to`, a gold
+   * pair measured off `design-toolkit-app`'s own artwork and inherited with the
+   * rest of this table. Nothing in this product ever drew with them, and this
+   * product's mark is not gold. They are gone; what survives them is the one
+   * value below, which earned its place on a different job.
    */
-  --fnd-mark-from: #b28a45;
-  --fnd-mark-to: #e2c180;
 
   /*
-   * The gold, borrowed back out of the mark for one job: the line that appears
-   * under a pointer in the two galleries.
+   * The line that appears under a pointer, and the focus ring.
    *
-   * It is a separate token from the two above rather than a reference to them,
-   * and this one does flip with the theme, because a border has to be seen
-   * against the surface behind it while the mark carries its own ground. The
-   * two values are the two ends of the mark's own gradient, adjusted only far
-   * enough to clear the 3:1 that WCAG 1.4.11 asks of a non-text control edge:
+   * A gold, and the last of the inherited mark pair to still do any work. It
+   * flips with the theme because a border has to be seen against the surface
+   * behind it. Both values clear the 3:1 that WCAG 1.4.11 asks of a non-text
+   * control edge, which is the floor `tokens.test.ts` holds it to:
    *
    *   light  #a67e3c  3.70:1 on #ffffff, 3.46:1 on #f7f7f7
    *   dark   #e2c180  9.55:1 on #1f1f1f, 10.49:1 on #161616

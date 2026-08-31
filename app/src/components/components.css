@@ -19,9 +19,42 @@
   background: var(--fnd-surface);
 }
 
+.fnd-head__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
+ * The mark, at the name's own size.
+ *
+ * The artwork is 197x256, so a 32px height gives it 24.6px of width; the box is
+ * declared at both rather than at one and `auto`, because a background image
+ * has no intrinsic size to lay out from.
+ */
+.fnd-head__logo {
+  width: 24.6px;
+  height: 32px;
+  flex: 0 0 auto;
+  background: url('../assets/mark.png') center / contain no-repeat;
+}
+
+/*
+ * The product's name.
+ *
+ * 32px against a 56px header, the same pair `design-toolkit-app` settled on.
+ * Asap Sharp's cap height is 0.700em, so the name stands 22.4px in a strip that
+ * leaves about 17px of air above and below it. It asks for the weight token,
+ * which is 400: the Chinese face has one instance and a bold that applied to
+ * half of a sentence would be a seam rather than a hierarchy.
+ */
 .fnd-head__mark {
   font-family: var(--fnd-font-display);
-  font-size: var(--fnd-size-body);
+  font-size: 32px;
+  line-height: 1;
+  font-weight: var(--fnd-weight-heavy);
+  letter-spacing: 0;
+  white-space: nowrap;
   color: var(--fnd-ink);
 }
 

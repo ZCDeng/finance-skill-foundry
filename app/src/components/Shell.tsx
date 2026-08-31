@@ -53,7 +53,21 @@ export function Shell({ screen, onScreen, strip, onGuide, children }: ShellProps
   return (
     <div className="fnd-shell" data-screen={screen} data-embedded={embedded ? 'yes' : 'no'}>
       <header className="fnd-head">
-        <span className="fnd-head__mark">{APP_NAME}</span>
+        {/*
+          * The mark and the name, and this is the only place either appears.
+          * The window's title bar is deliberately blank -- see `main.ts` -- so
+          * this strip carries the whole of the product's identity, on a screen
+          * that is otherwise entirely someone else's page.
+          *
+          * The mark is a background rather than an `img` for the same reason
+          * the faces are `@font-face` urls: a relative url out of this
+          * stylesheet resolves under `file://` in the packaged app, and it is
+          * decorative here anyway -- the product's name is the text beside it.
+          */}
+        <span className="fnd-head__brand">
+          <span className="fnd-head__logo" aria-hidden />
+          <span className="fnd-head__mark">{APP_NAME}</span>
+        </span>
         <nav className="fnd-head__nav">
           {DESTINATIONS.map((item) => (
             <button

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stage the pinned DeepSeek Harness into `extra/dsh/`.
+ * Stage the runtime the FA Foundry harness runs on into `extra/dsh/`.
  *
  * The tree is not in version control: it is ~280MB across tens of thousands of
  * files, and what is reproducible is the version in the pin, not the bytes. Run

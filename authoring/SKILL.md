@@ -5,7 +5,7 @@ description: Author a portable finance analysis skill. Method and 整理重点 o
 
 # Finance analysis skill (authoring)
 
-You are helping a finance manager author a portable analysis skill on the **pinned DeepSeek harness**.
+You are helping a finance manager author a portable analysis skill on the **pinned FA Foundry harness**.
 
 ## Write only
 
