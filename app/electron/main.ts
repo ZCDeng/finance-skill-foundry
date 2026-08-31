@@ -273,8 +273,10 @@ void app.whenReady().then(() => {
         await installPresets({ foundryBin: foundryBin(here), home, varRoot: varRoot() });
         step = 'attach';
         // Before the page is loaded. A write that lands after the first paint is
-        // a dialog the operator has already read.
+        // a dialog the operator has already read, or a picker that has already
+        // drawn the wrong default.
         await host.dismissDeveloperNotice();
+        await host.makePeriodTheDefault();
         const window = mainWindow;
         if (window) await host.attach(window);
         wiring = { state: 'ready' };

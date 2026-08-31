@@ -39,10 +39,16 @@ export const HERO_HEADLINE = 'FA Foundry harness';
 /**
  * The composer's edge, and the hero's line.
  *
- * The dashed ring is drawn by an `::after` whose background is masked into a
- * dashed rectangle, so the colour to change is a background rather than a
- * border. Upstream turns that background blue on hover; this keeps the change
- * of state and takes the hue.
+ * The edge is solid rather than dashed, and that took two rules because the
+ * dashed one is not a border. Upstream draws it as an `::after` inset by a
+ * pixel whose background is masked into a dashed rectangle, while the card's
+ * own border sits underneath at `transparent`. So the ring's background goes
+ * away and the real border underneath is given the colour -- one line, 1px,
+ * following the card's own 22px radius, and the hover still changes.
+ *
+ * Nothing is hidden to do it. The `::after` keeps its box, its mask and its
+ * transition; it just stops painting, which is what a transparent background
+ * means everywhere else in CSS too.
  *
  * The headline is text, and CSS cannot set text -- so the original is collapsed
  * to nothing and the replacement is drawn as generated content. That is the
@@ -53,11 +59,15 @@ export const HERO_HEADLINE = 'FA Foundry harness';
  */
 export const HARNESS_SKIN = `
 [class*="_cardWorkspaceTrigger"]::after {
-  background: ${EDGE} !important;
+  background: transparent !important;
 }
 
-[class*="_cardWorkspaceTrigger"]:hover::after {
-  background: ${EDGE_HOVER} !important;
+[class*="_cardWorkspaceTrigger"] {
+  border-color: ${EDGE} !important;
+}
+
+[class*="_cardWorkspaceTrigger"]:hover {
+  border-color: ${EDGE_HOVER} !important;
 }
 
 [class*="_card"]:not([class*="_cardWorkspaceTrigger"]) {

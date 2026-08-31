@@ -16,8 +16,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,53 @@ const STAGE = join(APP, 'extra', 'foundry');
 const BUILD = join(APP, 'extra', 'foundry-build');
 const BIN = join(STAGE, 'foundry');
 const STAMP = join(STAGE, 'BUILT');
+
+/**
+ * A fingerprint of everything this freeze embeds.
+ *
+ * The freeze takes the whole `foundry` package -- its Python and the resources
+ * tree it carries in `--add-data` -- and copies it inside the bundle. Nothing
+ * afterwards ever looks at the checkout again, so a bundle can be arbitrarily
+ * older than the source it was made from and behave perfectly while doing the
+ * wrong thing.
+ *
+ * That is not hypothetical. Two agent presets grew a `preset.yml` naming what
+ * they are; the file was written, the packaged mirror was synced, both suites
+ * were green, and the packaged app still installed presets with no display text
+ * at all -- because the frozen CLI carried the resources tree from an earlier
+ * freeze and `--check` only asked whether the binary existed.
+ *
+ * Path and content, both: a renamed file with identical bytes is a different
+ * tree, and `install_presets` walks directories by name.
+ */
+function sourceHash() {
+  const root = join(KIT, 'foundry');
+  const hash = createHash('sha256');
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+      a.name < b.name ? -1 : 1,
+    )) {
+      if (entry.name === '__pycache__' || entry.name.endsWith('.pyc')) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else {
+        hash.update(relative(root, path).split('/').join('/'));
+        hash.update(readFileSync(path));
+      }
+    }
+  };
+  walk(root);
+  return hash.digest('hex');
+}
+
+/** The fingerprint the stamp recorded, or null when it predates them. */
+function stampedHash() {
+  if (!existsSync(STAMP)) return null;
+  const line = readFileSync(STAMP, 'utf8')
+    .split('\n')
+    .find((row) => row.startsWith('source: '));
+  return line ? line.slice(8).trim() : null;
+}
 
 /**
  * What the frozen bundle must be able to do before it counts as built.
@@ -58,6 +106,17 @@ function check() {
     // out missing it and every command fails at import, including ones that
     // never touch Formulator.
     problems.push('the packaged resources tree is incomplete (formulator-plugin)');
+  }
+  if (problems.length === 0) {
+    const stamped = stampedHash();
+    const current = sourceHash();
+    if (stamped === null) {
+      problems.push('the frozen CLI carries no source fingerprint (it predates this check)');
+    } else if (stamped !== current) {
+      problems.push(
+        `the frozen CLI is not this checkout: it carries ${stamped.slice(0, 12)}, the source is ${current.slice(0, 12)}`,
+      );
+    }
   }
   return problems;
 }
@@ -133,6 +192,9 @@ writeFileSync(
   [
     `${version.name} ${version.version}`,
     'frozen-by: scripts/build-foundry.mjs (PyInstaller, one-dir)',
+    // The tree this bundle embedded. `--check` recomputes it, so a freeze older
+    // than the checkout is a refusal rather than a surprise in the packaged app.
+    `source: ${sourceHash()}`,
     '',
     'Not in version control. Regenerate with `npm run foundry`.',
     '',

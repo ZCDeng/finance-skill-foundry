@@ -40,7 +40,7 @@ export type FencedMethod = (typeof FENCED_METHODS)[number];
  */
 export const FENCE_REASON: Record<FencedMethod, string> = {
   'session.create':
-    '新会话只能从上面那三个入口开。这里开出来的会话不绑任务, 期间工具会落到别人的窗口上, 出的稿也没有来路。挑一个任务, 再按「授技能」「开始本期」或者「追问」。',
+    '新会话只能从上面那三个入口开。这里开出来的会话不绑任务, 期间工具会落到别人的窗口上, 出的稿也没有来路。挑一个任务, 再按「写方法」「开始本期」或者「追问」。',
   'session.fork':
     '分叉出来的会话和新开一个是一回事, 一样不绑任务。要接着上一轮往下问, 用上面的「追问」, 它会把窗口和领导手上那一版一起带过去。',
   'agentPreset.select':

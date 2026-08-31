@@ -24,11 +24,23 @@ describe('the edge this window draws on the embedded page', () => {
   });
 
   it('keeps upstream’s change of state, and only takes the hue', () => {
-    // The composer's ring changes colour on hover. Flattening that to one
+    // The composer's edge changes colour on hover. Flattening that to one
     // colour would be this app quietly removing a piece of feedback rather
     // than restyling it.
     expect(EDGE_HOVER).not.toBe(EDGE);
-    expect(HARNESS_SKIN).toContain(':hover::after');
+    expect(HARNESS_SKIN).toContain('[class*="_cardWorkspaceTrigger"]:hover');
+  });
+
+  /*
+   * The dashed ring is an `::after` with a mask, not a border, and the card's
+   * real border sits under it at `transparent`. Colouring the ring would give
+   * a gold dashed line; the solid one asks for both halves.
+   */
+  it('draws one solid line rather than colouring the dashed one', () => {
+    expect(HARNESS_SKIN).toContain('background: transparent !important');
+    expect(HARNESS_SKIN).toMatch(
+      /\[class\*="_cardWorkspaceTrigger"\]\s*\{\s*border-color/,
+    );
   });
 });
 
@@ -96,6 +108,10 @@ describe('the brand this product puts in the page', () => {
     ]);
   });
 
+  it('takes the layout service it needs to close the rail', () => {
+    expect(CLIENT).toContain("const inject = ['slots', 'layout'];");
+  });
+
   /*
    * These are single-occupant slots and upstream is already in all three at
    * priority 0. Registering beside it is refused in so many words, and the
@@ -118,8 +134,34 @@ describe('the brand this product puts in the page', () => {
     expect(CLIENT).toContain("const MARK = 'data:image/png;base64,");
   });
 
-  it('names this product where the page used to name the vendor', () => {
-    expect(CLIENT).toContain("children: 'FA Foundry'");
-    expect(CLIENT).toContain("children: 'HARNESS'");
+  /*
+   * Occupying the name slot with nothing is the point, not an oversight.
+   * Leaving it unoccupied puts the vendor's wordmark back, and filling it puts
+   * this product's name on screen a third time within 40px of the second.
+   */
+  it('occupies the sidebar name slot and draws nothing in it', () => {
+    expect(CLIENT).toContain('function BrandName() {\n      return null;\n    }');
+  });
+
+  it('starts the rail closed without firing a blind toggle', () => {
+    // `toggleSidebar` is the only verb and it toggles, so something has to say
+    // which way the sidebar currently is before it fires.
+    expect(CLIENT).toContain('ctx.layout.toggleSidebar()');
+    expect(CLIENT).toContain('RAIL_EDGE');
+  });
+
+  /*
+   * The bug this pins is the one that cost two rounds. Both states worth
+   * reading -- the frame's own `data-sidebar-collapsed` and the toggle's
+   * position -- are transiently wrong in the first frames after mount, so a
+   * single measurement decides on a layout that is about to change. Two runs
+   * shipped a no-op that way.
+   */
+  it('waits for the measurement to stop moving before it decides', () => {
+    expect(CLIENT).toContain('SETTLED_TICKS');
+    expect(CLIENT).toMatch(/agreed\s*<\s*SETTLED_TICKS/);
+    expect(CLIENT, 'reads a state that lies on the first frame').not.toContain(
+      "querySelector('[data-sidebar-collapsed]')",
+    );
   });
 });

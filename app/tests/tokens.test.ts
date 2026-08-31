@@ -72,8 +72,13 @@ function contrast(hex: string, ground: string): number {
  * The two stacks: this product was given its own faces -- Asap Sharp for Latin,
  * LXGW WenKai Mono TC for Chinese -- where `design-toolkit-app` still names
  * Departure Mono and Chocolate Classical Sans. See `fonts.css`.
+ *
+ * The heavy weight: 700 here and 400 there, and that is a property of the
+ * faces rather than a preference. Both of this product's carry a real bold;
+ * neither of that one's does, which is the whole of why its own table sets a
+ * heavy that is not heavy.
  */
-const DIVERGED = new Set(['--fnd-font-sans', '--fnd-font-display']);
+const DIVERGED = new Set(['--fnd-font-sans', '--fnd-font-display', '--fnd-weight-heavy']);
 
 describe('the token table', () => {
   it('carries its source values, renamed and not re-derived', () => {

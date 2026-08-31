@@ -13,6 +13,7 @@ const CJK = 'LXGW WenKai Mono TC';
 
 interface Face {
   family: string;
+  weight: string;
   url: string;
   ranges: number[][];
 }
@@ -23,7 +24,8 @@ function faces(): Face[] {
   for (const [, body] of FONTS_CSS.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
     const family = /font-family:\s*'([^']+)'/.exec(body)?.[1];
     const url = /url\('([^']+)'\)/.exec(body)?.[1];
-    if (!family || !url) continue;
+    const weight = /font-weight:\s*([^;]+);/.exec(body)?.[1]?.trim();
+    if (!family || !url || !weight) continue;
     const declared = /unicode-range:\s*([^;]+);/.exec(body)?.[1] ?? '';
     const ranges: number[][] = [];
     for (const part of declared.split(',')) {
@@ -32,7 +34,7 @@ function faces(): Face[] {
       const [lo, hi] = text.split('-');
       ranges.push([parseInt(lo, 16), parseInt(hi ?? lo, 16)]);
     }
-    out.push({ family, url, ranges });
+    out.push({ family, weight, url, ranges });
   }
   return out;
 }
@@ -44,12 +46,26 @@ describe('the bundled faces', () => {
     const counts = new Map<string, number>();
     for (const face of FACES) counts.set(face.family, (counts.get(face.family) ?? 0) + 1);
     expect([...counts.keys()].sort()).toEqual([LATIN, CJK].sort());
-    // Three Latin subsets and 115 CJK slices, which is what the two Google
-    // Fonts queries in `fonts.css` answer with. A number that moved means the
+    // Three Latin subsets carrying the whole 400-700 axis between them, and
+    // 115 CJK slices per weight in two cuts. A number that moved means the
     // table was regenerated, and the coverage check below is the one that says
     // whether that was safe.
     expect(counts.get(LATIN)).toBe(3);
-    expect(counts.get(CJK)).toBe(115);
+    expect(counts.get(CJK)).toBe(230);
+  });
+
+  /*
+   * The bold is why this table doubled, and it is the half that is easy to
+   * ship broken: Asap Sharp carries its own bold on a variable axis, so Latin
+   * looks right whether or not the Chinese 700 was ever staged. A missing
+   * Chinese cut shows up only in Chinese, only in bold, and only as a slightly
+   * lighter word than the one beside it.
+   */
+  it('carries a real bold in both scripts, not a synthesised one', () => {
+    const latin = FACES.filter((f) => f.family === LATIN).map((f) => f.weight);
+    expect(new Set(latin)).toEqual(new Set(['400 700']));
+    const cjk = new Set(FACES.filter((f) => f.family === CJK).map((f) => f.weight));
+    expect(cjk).toEqual(new Set(['400', '700']));
   });
 
   /*
@@ -118,11 +134,11 @@ describe('the fall-through between them', () => {
 });
 
 describe('what the Chinese face can actually draw', () => {
-  /** Every codepoint the CJK family declares, across all its slices. */
-  function covered(): Set<number> {
+  /** Every codepoint one cut of the CJK family declares, across its slices. */
+  function covered(weight: string): Set<number> {
     const out = new Set<number>();
     for (const face of FACES) {
-      if (face.family !== CJK) continue;
+      if (face.family !== CJK || face.weight !== weight) continue;
       for (const [lo, hi] of face.ranges) {
         for (let c = lo; c <= hi; c += 1) out.add(c);
       }
@@ -158,19 +174,24 @@ describe('what the Chinese face can actually draw', () => {
    * next sentence written with a character it cannot draw into a red test
    * rather than into a tofu box in front of an operator.
    */
-  it('covers every character the interface is written in', () => {
-    const table = covered();
-    const missing = [...used()].filter((ch) => !table.has(ch.codePointAt(0)!));
-    expect(
-      missing,
-      `not in ${CJK}: ${missing.map((c) => `${c} U+${c.codePointAt(0)!.toString(16)}`).join(', ')}`,
-    ).toEqual([]);
+  it('covers every character the interface is written in, at every weight', () => {
+    for (const weight of ['400', '700']) {
+      const table = covered(weight);
+      const missing = [...used()].filter((ch) => !table.has(ch.codePointAt(0)!));
+      expect(
+        missing,
+        `not in ${CJK} ${weight}: ${missing
+          .map((c) => `${c} U+${c.codePointAt(0)!.toString(16)}`)
+          .join(', ')}`,
+      ).toEqual([]);
+    }
   });
 
   it('is a wide enough face that this is a real check', () => {
     // A table that had lost its ranges would pass the check above by covering
     // nothing and being asked about nothing. This is the floor under it.
-    expect(covered().size).toBeGreaterThan(15000);
+    expect(covered('400').size).toBeGreaterThan(15000);
+    expect(covered('700').size).toBeGreaterThan(15000);
     expect(used().size).toBeGreaterThan(100);
   });
 });

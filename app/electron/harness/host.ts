@@ -6,6 +6,7 @@ import {
   type Intent,
   LineBuffer,
   PRESET_BY_INTENT,
+  defaultPresetPatch,
   STARTUP_TIMEOUT_MS,
   harnessArgs,
   harnessEnv,
@@ -153,6 +154,22 @@ export class HarnessHost {
     if (!notice) return false;
     try {
       await this.rpc('settings.update', noticePatch(notice));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Point the runtime's own default at this product's period preset.
+   *
+   * Best effort, like the notice: the fallback is a picker that opens on
+   * `standard`, which is a label an operator can change and not a fence they
+   * can cross -- the page cannot create a session on any preset at all.
+   */
+  async makePeriodTheDefault(): Promise<boolean> {
+    try {
+      await this.rpc('settings.update', defaultPresetPatch());
       return true;
     } catch {
       return false;

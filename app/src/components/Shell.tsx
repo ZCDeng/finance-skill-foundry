@@ -81,12 +81,21 @@ export function Shell({ screen, onScreen, strip, onGuide, children }: ShellProps
             </button>
           ))}
         </nav>
-        {onGuide ? (
-          <button type="button" className="fnd-head__help" onClick={onGuide}>
-            <LifeBuoy size={14} strokeWidth={1.5} aria-hidden />
-            怎么用
-          </button>
-        ) : null}
+        {/*
+          * Always rendered, even with nothing in it. It is the right-hand half
+          * of what centres the destinations: two outer parts taking equal
+          * shares of the free space. A slot that disappeared with the help
+          * control would move the row off centre on the screens that have no
+          * guide to offer.
+          */}
+        <span className="fnd-head__end">
+          {onGuide ? (
+            <button type="button" className="fnd-head__help" onClick={onGuide}>
+              <LifeBuoy size={14} strokeWidth={1.5} aria-hidden />
+              怎么用
+            </button>
+          ) : null}
+        </span>
       </header>
       {strip}
       <main className="fnd-column">{children}</main>

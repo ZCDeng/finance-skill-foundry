@@ -84,6 +84,7 @@ describe('what the embedded page may not do', () => {
       expect(reason.length).toBeGreaterThan(20);
     }
     expect(FENCE_REASON['session.create']).toContain('开始本期');
+    expect(FENCE_REASON['session.create']).toContain('写方法');
     expect(FENCE_REASON['session.fork']).toContain('追问');
     expect(FENCE_REASON['agentPreset.select']).toContain('query-locked');
   });

@@ -17,7 +17,7 @@ const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
 };
 
 const ROLE_LABEL: Record<Detail['sessions'][number]['role'], string> = {
-  author: '授技能',
+  author: '写方法',
   period: '期间',
   followup: '追问',
 };

@@ -9,6 +9,16 @@
   background: var(--fnd-bg);
 }
 
+/*
+ * Three parts, and the middle one is centred on the window rather than on
+ * what is left over.
+ *
+ * The two outer parts take equal shares of the free space, so the row of
+ * destinations lands on the window's centre line whatever the brand and the
+ * help control happen to measure. Centring it with `margin: auto` instead
+ * would put it in the middle of the gap between them, which moves every time
+ * either side changes.
+ */
 .fnd-head {
   display: flex;
   align-items: center;
@@ -20,9 +30,18 @@
 }
 
 .fnd-head__brand {
+  flex: 1 0 0;
+}
+
+.fnd-head__nav {
+  flex: 0 0 auto;
+}
+
+.fnd-head__brand {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 /*
@@ -63,13 +82,22 @@
   gap: 4px;
 }
 
+/*
+ * 14.4px is `--fnd-size-small` a fifth larger, written out rather than
+ * calculated so the value in the file is the value on screen.
+ *
+ * Bold, and both scripts can answer it: Asap Sharp on the axis, LXGW WenKai
+ * Mono TC out of the 700 cut that `fonts.css` now carries. This row and the
+ * product's name are the only two places in the window that ask for weight.
+ */
 .fnd-head__tab {
   border: 0;
   background: transparent;
   border-radius: var(--fnd-radius-pill);
   padding: 0 var(--fnd-pad-button-x);
   height: var(--fnd-button-height);
-  font-size: var(--fnd-size-small);
+  font-size: 14.4px;
+  font-weight: var(--fnd-weight-heavy);
   color: var(--fnd-muted);
   cursor: pointer;
   transition: color var(--fnd-transition), background var(--fnd-transition);
@@ -436,8 +464,14 @@
  * fifth destination: it brings back a panel over whichever screen is on, and a
  * control that reads as a tab would be a tab that never stays selected.
  */
+.fnd-head__end {
+  flex: 1 0 0;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .fnd-head__help {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;

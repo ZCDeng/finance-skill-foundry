@@ -268,7 +268,7 @@ describe('the task bar', () => {
         onOpen={noop}
       />,
     );
-    for (const label of ['授技能', '开始本期', '追问']) {
+    for (const label of ['写方法', '开始本期', '追问']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeTruthy();
     }
   });

@@ -18,13 +18,27 @@ export interface OpenSession {
   intent: Intent;
 }
 
+/*
+ * The three ways in, in the operator's words.
+ *
+ * The first used to read 授技能, which named neither what an operator does nor
+ * what comes out of it -- a finance manager teaching a skill to something is
+ * not a sentence about closing a period. What it produces is a method: the
+ * store calls them method skills, `method/` holds four of them, and each period
+ * runs against one. So the button says 写方法 and the hint says what it is for.
+ */
 const INTENTS: { id: Intent; label: string; hint: string; Icon: typeof PlayCircle }[] = [
-  { id: 'author', label: '授技能', hint: 'standard · 写一个可交接的分析技能', Icon: GraduationCap },
+  {
+    id: 'author',
+    label: '写方法',
+    hint: 'standard · 把这类分析怎么做定下来, 以后每期照着跑',
+    Icon: GraduationCap,
+  },
   { id: 'period', label: '开始本期', hint: 'period · 开窗 导入 锁 出稿', Icon: PlayCircle },
   { id: 'followup', label: '追问', hint: 'f3 · 只有 query-locked', Icon: MessagesSquare },
 ];
 
-const ROLE_LABEL: Record<Intent, string> = { author: '授技能', period: '期间', followup: '追问' };
+const ROLE_LABEL: Record<Intent, string> = { author: '写方法', period: '期间', followup: '追问' };
 
 /** The value the picker uses for its one entry that is not a task. */
 const NEW_TASK = '__new__';

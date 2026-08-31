@@ -91,12 +91,19 @@
    * still render, in whatever the platform picked, which is how a bundled
    * Chinese face was once deleted without a single test failing.
    *
-   * Asap Sharp is variable with a `wght` axis of 100-900. LXGW WenKai Mono TC
-   * has one instance at 400. A bold would therefore apply to the Latin half of
-   * a sentence and not the Chinese half, which is a seam rather than a
-   * hierarchy -- so both weight tokens below stay at 400, and `base.css` sets
-   * `font-synthesis-weight: none` so the engine cannot fake the difference on
-   * the Chinese either. Hierarchy is carried by size, case and colour.
+   * Two weights, and both are real in both scripts. Asap Sharp is variable with
+   * a `wght` axis of 100-900, so its bold costs no extra file. LXGW WenKai Mono
+   * TC is not variable, so its 700 is 115 more slices and 4.6 MB more on disk
+   * -- paid deliberately, because the alternative is `font-synthesis`, which
+   * fakes a bold by smearing the stems, and on a kai face that fills the
+   * counters. `base.css` still sets `font-synthesis-weight: none`, which now
+   * guards rather than restricts: a weight that ever goes missing draws at 400
+   * instead of drawing a smear.
+   *
+   * `strong` stays at 400 and `heavy` is the bold. Body text and every table of
+   * figures is regular; the two places that carry weight are the product's name
+   * and the destination row, which are the two things an operator looks for
+   * before they look at anything else.
    */
   --fnd-font-sans: 'Asap Sharp', 'LXGW WenKai Mono TC', ui-sans-serif,
     system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC',
@@ -110,7 +117,7 @@
   --fnd-size-h3: 14px;
   --fnd-size-h2: 36px;
   --fnd-weight-strong: 400;
-  --fnd-weight-heavy: 400;
+  --fnd-weight-heavy: 700;
   --fnd-leading-body: 24px;
 
   /*

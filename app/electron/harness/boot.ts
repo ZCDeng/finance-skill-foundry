@@ -192,6 +192,34 @@ export const PRESET_BY_INTENT = {
 
 export type Intent = keyof typeof PRESET_BY_INTENT;
 
+/**
+ * The preset the runtime mounts when nobody names one.
+ *
+ * Upstream's own default is `standard`, which is a full coding agent -- the
+ * right answer for the product the runtime ships with and the wrong one here.
+ * The picker above the composer is the first thing an operator reads about what
+ * kind of work this window does, and this product's answer to that is a closing
+ * period, not a shell.
+ *
+ * It is a display default and not a fence. What a session actually runs on is
+ * decided by the button that opened it (`PRESET_BY_INTENT`), and the page
+ * cannot open one at all -- `fence.ts` refuses `session.create`. So this moves
+ * a label rather than a permission.
+ */
+export const DEFAULT_PRESET = PRESET_BY_INTENT.period;
+
+/**
+ * The `settings.update` payload that names it.
+ *
+ * `agent-presets` is the runtime's own settings namespace for this, and its
+ * schema is one field. The service reads the value per call rather than caching
+ * it, so this takes effect on the next session created without disturbing any
+ * that are running.
+ */
+export function defaultPresetPatch(preset: string = DEFAULT_PRESET): Record<string, unknown> {
+  return { ns: 'agent-presets', patch: { default: preset } };
+}
+
 /** The session role each intent records on the task. Same word the store uses. */
 export const ROLE_BY_INTENT = {
   author: 'author',

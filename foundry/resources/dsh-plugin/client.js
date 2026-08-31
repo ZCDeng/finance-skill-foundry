@@ -52,32 +52,83 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The name, composed the way upstream composes its own: a wordmark and a
-     * small caps badge saying which surface this is. The mark is slotted
-     * separately, so this half never draws one.
+     * The sidebar's name slot, deliberately empty.
+     *
+     * Occupied rather than left to upstream, because leaving it would put the
+     * vendor's wordmark back. What it renders is nothing: opening the window
+     * used to show this product's mark and name three times over -- the
+     * window's own header, this sidebar, and the conversation hero -- and two
+     * of those are within 40px of each other. The mark alone still says whose
+     * sidebar this is.
      */
     function BrandName() {
-      return jsx.jsxs('span', {
-        style: { display: 'inline-flex', alignItems: 'baseline', gap: '6px', whiteSpace: 'nowrap' },
-        children: [
-          jsx.jsx('span', { style: { fontSize: '17px', letterSpacing: '0.01em' }, children: 'FA Foundry' }),
-          jsx.jsx('span', {
-            style: {
-              fontSize: '10px',
-              letterSpacing: '0.08em',
-              padding: '1px 5px',
-              borderRadius: '4px',
-              border: '1px solid currentColor',
-              opacity: 0.7,
-            },
-            children: 'HARNESS',
-          }),
-        ],
-      });
+      return null;
     }
 
-    /** Required service: the UI slot registry. */
-    const inject = ['slots'];
+    /** The slot registry, and the panel actions that open and close the rail. */
+    const inject = ['slots', 'layout'];
+
+    /**
+     * Start with the sidebar closed.
+     *
+     * This window is not a session browser. It has its own task strip directly
+     * above, and the rail's own list is a second navigation for the same
+     * conversations -- so the operator opens onto the conversation, and the
+     * rail is one click away when they want it.
+     *
+     * Decided on rendered geometry, and that is the second thing this got
+     * wrong. `toggleSidebar` is the only public verb and it toggles, so
+     * something has to say which way the sidebar currently is. The frame
+     * publishes `data-sidebar-collapsed`, and reading it is a trap: on the
+     * first tick after mount it is present, because the panel store has not
+     * been hydrated and a width of zero reads as collapsed. A run that trusted
+     * it concluded there was nothing to do and stopped, on a sidebar that was
+     * about to open. Measuring where the toggle button actually sits cannot be
+     * fooled that way -- an unlaid-out element has no box at all, and a rail
+     * puts that button near the window's left edge while an open sidebar puts
+     * it 280px in.
+     *
+     * `apply` runs as soon as the `layout` service is provided, which is well
+     * before the React root mounts and wires the panel actions to it; until
+     * then the verb throws `layout: panel actions not wired (root entry not
+     * mounted)`. Hence a poll rather than a single call, bounded so a build
+     * that never mounts does not leave a timer running for the life of the
+     * page.
+     */
+    /** Where the toggle sits once the rail is closed, with room either side. */
+    const RAIL_EDGE = 150;
+
+    /** Consecutive agreeing measurements before the layout counts as settled. */
+    const SETTLED_TICKS = 4;
+
+    function collapseOnce(ctx) {
+      if (window.__fndRailArmed) return;
+      window.__fndRailArmed = true;
+      const started = Date.now();
+      let last = null;
+      let agreed = 0;
+      const timer = setInterval(() => {
+        if (Date.now() - started > 15000) return clearInterval(timer);
+        const toggle = document.querySelector('[class*="_toggle"]');
+        if (!toggle) return;
+        const left = toggle.getBoundingClientRect().left;
+        // Mounted but not laid out: an element with no box has nothing to say.
+        if (toggle.getBoundingClientRect().width === 0) return;
+        // Wait for the reading to stop moving before believing it. Both of the
+        // states this could act on are transiently wrong in the first frames.
+        agreed = last !== null && Math.abs(left - last) < 1 ? agreed + 1 : 0;
+        last = left;
+        if (agreed < SETTLED_TICKS) return;
+        // Settled, and already a rail. Toggling would open it.
+        if (left < RAIL_EDGE) return clearInterval(timer);
+        try {
+          ctx.layout.toggleSidebar();
+          clearInterval(timer);
+        } catch {
+          // The actions are not wired yet. The next tick asks again.
+        }
+      }, 80);
+    }
 
     /**
      * Shadow the official brand, rather than replace it.
@@ -114,6 +165,7 @@ window.__ModuleLoader__.load({
           }),
         ),
       );
+      collapseOnce(ctx);
     }
 
     exports.apply = apply;
