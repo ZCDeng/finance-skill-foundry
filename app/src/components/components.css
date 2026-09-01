@@ -435,6 +435,49 @@
  * floor a focus indicator answers to.
  */
 .fnd-field:focus-visible,
+/*
+ * A secondary action: outlined, not filled.
+ *
+ * This class was used by two screens before it existed anywhere in this file,
+ * so both buttons fell through to the user agent's own -- a light box whose
+ * text took the inherited ink and vanished into it. `.fnd-go` is the filled
+ * primary and would have been wrong here anyway; writing out of the window is
+ * something an operator chooses, not the thing the screen is for.
+ *
+ * Every value comes from the token set, so it is legible in both themes by
+ * construction rather than by a second definition under a media query.
+ */
+.fnd-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--fnd-button-height);
+  padding: 0 var(--fnd-pad-button-x);
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-pill);
+  background: transparent;
+  color: var(--fnd-ink);
+  font-family: inherit;
+  font-size: var(--fnd-size-small);
+  cursor: pointer;
+  transition: border-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-button:hover:not(:disabled) {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-button:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
+.fnd-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .fnd-go:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;

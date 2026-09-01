@@ -1,5 +1,15 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+/*
+ * Read off disk, resolved from the working directory rather than from
+ * `import.meta.url`. This file runs under jsdom, where that is not a file:
+ * URL and `fileURLToPath` throws; and a `?raw` import comes back empty,
+ * because the CSS pipeline is stubbed for these tests.
+ */
+const css = readFileSync(resolve(process.cwd(), 'src/components/components.css'), 'utf8');
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
@@ -821,5 +831,30 @@ describe('finding the export at all', () => {
     expect(archive).toBeTruthy();
     // DOCUMENT_POSITION_FOLLOWING === 4: the archive comes after the button.
     expect(action.compareDocumentPosition(archive!) & 4).toBe(4);
+  });
+});
+
+describe('the export button can be read', () => {
+  /*
+   * It could not. `.fnd-button` was used by two screens and defined nowhere,
+   * so both fell through to the user agent's own button: a light box whose
+   * label took the inherited ink and disappeared into it. The operator
+   * reported seeing a button with no readable text.
+   */
+  it('is a class this stylesheet actually defines', () => {
+    expect(css).toMatch(/^\.fnd-button \{/m);
+  });
+
+  it('takes its colour and its ground from the same token set', () => {
+    const block = css.slice(css.indexOf('.fnd-button {'));
+    const body = block.slice(0, block.indexOf('}'));
+    // A literal colour here is how a button ends up legible in one theme only.
+    expect(body).toContain('color: var(--fnd-ink)');
+    expect(body).toContain('background: transparent');
+    expect(body).not.toMatch(/#[0-9a-f]{3,8}/i);
+  });
+
+  it('says it is disabled while the workbook is being written', () => {
+    expect(css).toMatch(/\.fnd-button:disabled \{[^}]*opacity/);
   });
 });
