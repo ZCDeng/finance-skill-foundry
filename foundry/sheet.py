@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import re
+import zipfile
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -306,6 +309,63 @@ def _references(book: Workbook, window: Window) -> None:
         sheet.cell(row=row, column=5, value=str(entry.get("note") or ""))
 
 
+# openpyxl writes `dcterms:created` and `dcterms:modified` into
+# `docProps/core.xml` from the clock, which makes two renders of one unchanged
+# window different files. That is not cosmetic here: a deliverable version is
+# keyed on its bytes, so every export past the first would file a new version
+# of an identical workbook and the timeline would fill with versions that are
+# not versions -- the exact thing `register_bytes` dedupes to prevent.
+#
+# So the properties describe the window instead of the moment. The epoch is a
+# sentinel and is meant to read as one; the honest timestamp is on the
+# deliverable row, where the store stamps it, and the honest provenance is the
+# window id and the lock hashes on the cover.
+STAMP = datetime(1970, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None)
+
+
+def _stamp(book: Workbook, window: Window) -> None:
+    """Say what this file is, in the file's own properties."""
+    book.properties.creator = "foundry"
+    book.properties.lastModifiedBy = "foundry"
+    book.properties.title = f"本期结账 {window.id}"
+    book.properties.created = STAMP
+    book.properties.modified = STAMP
+
+
+STAMP_TEXT = "1970-01-01T00:00:00Z"
+MODIFIED = re.compile(rb"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)")
+# Any fixed pair works; this one is the DOS epoch a zip can actually store.
+ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _settle(data: bytes) -> bytes:
+    """Take the clock back out of a saved workbook.
+
+    Two writers put it in. `openpyxl.writer.excel.save_workbook` assigns
+    `properties.modified = now` immediately before writing, so setting that
+    property beforehand is overwritten every time; and `ZipFile` stamps each
+    member from the clock, at two-second resolution, which is why a pair of
+    renders sometimes matched and sometimes did not.
+
+    Rebuilt rather than patched in place because both live in different parts
+    of the archive. Entry order and compression are preserved -- this is the
+    same workbook, with the two fields that describe *when it was written*
+    replaced by the sentinel that says the question is answered elsewhere.
+    """
+    source = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
+        for entry in source.infolist():
+            payload = source.read(entry.filename)
+            if entry.filename == "docProps/core.xml":
+                payload = MODIFIED.sub(rb"\g<1>" + STAMP_TEXT.encode() + rb"\g<2>", payload)
+            settled = zipfile.ZipInfo(entry.filename, date_time=ZIP_EPOCH)
+            settled.compress_type = entry.compress_type
+            settled.external_attr = entry.external_attr
+            target.writestr(settled, payload)
+    return out.getvalue()
+
+
 def workbook_bytes(window: Window, *, task: dict[str, Any] | None = None) -> bytes:
     """The whole close as one file, rendered from the window's own two records.
 
@@ -323,6 +383,7 @@ def workbook_bytes(window: Window, *, task: dict[str, Any] | None = None) -> byt
     schedules = load_schedules(window).get("items") or []
 
     book = Workbook()
+    _stamp(book, window)
     _cover(book, window, task)
     _conclusions(book, window, facts)
     _paper(book, schedules)
@@ -330,4 +391,4 @@ def workbook_bytes(window: Window, *, task: dict[str, Any] | None = None) -> byt
 
     buffer = io.BytesIO()
     book.save(buffer)
-    return buffer.getvalue()
+    return _settle(buffer.getvalue())

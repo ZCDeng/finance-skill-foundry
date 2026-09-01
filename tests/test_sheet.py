@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -256,21 +257,40 @@ def test_the_export_files_a_version_and_the_bytes_are_a_workbook(
     assert _book(var, row["sha256"]).sheetnames[:3] == ["本期", "结论", "底稿"]
 
 
+def test_a_workbook_is_the_same_bytes_whenever_it_is_rendered(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The clock must not reach the file.
+
+    openpyxl stamps `docProps/core.xml` from the clock, and a deliverable
+    version is keyed on its bytes -- so an unrepaired workbook files a new
+    version of an unchanged window every time the second ticks over. It cost a
+    day to find, because two renders in the same instant match and the suite
+    only failed when the pair straddled a boundary.
+
+    Renders across a real tick rather than back to back, which is the only
+    version of this test that would have caught it.
+    """
+    var = tmp_path / "var"
+    _closed(var, capsys)
+    window = WindowStore(var).current()
+
+    first = workbook_bytes(window)
+    time.sleep(1.1)
+    second = workbook_bytes(window)
+    assert first == second
+
+
 def test_re_exporting_unchanged_files_no_second_version(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The same rule the markdown deliverables already have.
-
-    A workbook is bytes and openpyxl writes a zip, so this is a real question
-    rather than an obvious one: if the archive carried a timestamp the digest
-    would change on every export and the timeline would show versions that are
-    not versions.
-    """
+    """The same rule the markdown deliverables already have."""
     var = tmp_path / "var"
     task_id, _ = _closed(var, capsys)
     base = ["--var", str(var), "--task", task_id, "export", "--format", "xlsx"]
     assert main(base) == 0
     first = json.loads(_out(capsys))
+    time.sleep(1.1)
     assert main(base) == 0
     second = json.loads(_out(capsys))
 

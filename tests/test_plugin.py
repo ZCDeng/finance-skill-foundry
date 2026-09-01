@@ -436,8 +436,11 @@ def test_silent_commands_still_answer_the_model(tmp_path: Path) -> None:
     )
     env = {"FOUNDRY_BIN": str(_cli_shim(tmp_path)), "FOUNDRY_VAR": str(tmp_path / "var")}
     imported, locked = json.loads(_run_node(script, env_extra=env, argv=[str(FIXTURES / "named.json")]).stdout)
-    assert imported == {"tool": "import", "stdout": ""}
-    assert locked == {"tool": "lock", "stdout": ""}
+    # `filed` rides on every value because the output schema declares it once
+    # for every tool. A verb that files nothing carries an empty list, which is
+    # the truth about it, and `render` never shows it to the model either way.
+    assert imported == {"tool": "import", "stdout": "", "filed": []}
+    assert locked == {"tool": "lock", "stdout": "", "filed": []}
 
 
 # --- #29/#30 the node suite runs in the documented pytest loop ---------------
@@ -513,3 +516,88 @@ def test_host_smoke_fails_when_the_bundle_cannot_bootstrap(
 @needs_node
 def test_host_smoke_invokes_probe(tmp_path: Path) -> None:
     assert host_smoke(tmp_path / "var", FIXTURES) == 0
+
+
+@needs_node
+def test_the_receipt_survives_the_real_cli(tmp_path: Path) -> None:
+    """The two halves agree about the envelope, measured rather than asserted.
+
+    `--receipt` is a shape the CLI writes and the bundle parses, and the two
+    are edited in different languages on different days. This drives a real
+    close through the real `foundry` and reads what `execute` resolved.
+    """
+    script = _prelude() + (
+        "const [coa, named, questions] = process.argv.slice(2);\n"
+        "await call('create');\n"
+        "await call('import', { coa, named });\n"
+        "await call('lock');\n"
+        "await call('record-questions', { questions });\n"
+        "const first = await call('emit-brief');\n"
+        "const again = await call('emit-brief');\n"
+        "process.stdout.write(JSON.stringify({ first, again }));\n"
+    )
+    env = {"FOUNDRY_BIN": str(_cli_shim(tmp_path)), "FOUNDRY_VAR": str(tmp_path / "var")}
+    out = _run_node(
+        script,
+        env_extra=env,
+        argv=[
+            str(FIXTURES / "coa.xlsx"),
+            str(FIXTURES / "named.json"),
+            str(FIXTURES / "questions.json"),
+        ],
+    ).stdout
+    first, again = (json.loads(out)[key] for key in ("first", "again"))
+
+    # The window this driver built has no task, so there is no timeline to file
+    # against. An empty receipt is the truth about that, and the brief is still
+    # written either way.
+    assert first["filed"] == []
+    assert first["stdout"].startswith("# 本期结论稿")
+    # And the text is the document, not the envelope it travelled in.
+    assert not first["stdout"].lstrip().startswith("{")
+    assert again["stdout"] == first["stdout"]
+
+
+@needs_node
+def test_a_receipt_names_the_versions_when_there_is_a_task(tmp_path: Path) -> None:
+    """With a timeline, both versions come back, and a re-emit files neither."""
+    var = tmp_path / "var"
+    shim = _cli_shim(tmp_path)
+    made = subprocess.run(
+        [str(shim), "--var", str(var), "task-new", "--title", "2026-08", "--period", "2026-08"],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    assert made.returncode == 0, made.stderr
+    task_id = made.stdout.strip()
+
+    script = _prelude() + (
+        "const [coa, named, questions] = process.argv.slice(2);\n"
+        "await call('create');\n"
+        "await call('import', { coa, named });\n"
+        "await call('lock');\n"
+        "await call('record-questions', { questions });\n"
+        "const first = await call('emit-brief', {}, { agent: { id: 'sess-period' } });\n"
+        "const again = await call('emit-brief', {}, { agent: { id: 'sess-period' } });\n"
+        "process.stdout.write(JSON.stringify({ first, again }));\n"
+    )
+    out = _run_node(
+        script,
+        env_extra={"FOUNDRY_BIN": str(shim), "FOUNDRY_VAR": str(var), "FOUNDRY_TASK": task_id},
+        argv=[
+            str(FIXTURES / "coa.xlsx"),
+            str(FIXTURES / "named.json"),
+            str(FIXTURES / "questions.json"),
+        ],
+    ).stdout
+    first, again = (json.loads(out)[key] for key in ("first", "again"))
+
+    assert [(row["kind"], row["appended"]) for row in first["filed"]] == [
+        ("brief", True),
+        ("workpaper", True),
+    ]
+    # The session the agent loop carried reaches the row, which is what makes a
+    # version traceable to the conversation that caused it.
+    assert {row["session_id"] for row in first["filed"]} == {"sess-period"}
+    assert [row["appended"] for row in again["filed"]] == [False, False]

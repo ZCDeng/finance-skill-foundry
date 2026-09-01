@@ -83,6 +83,156 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+
+    /*
+     * What a call archived, drawn where the call is.
+     *
+     * The versions were always there -- `deliverables.jsonl` has held them
+     * since the task chain existed -- and reading them meant leaving the
+     * conversation for the 交付物 screen. What that screen cannot do is stand a
+     * version next to the question that produced it: `cause` is
+     * `query-locked:followup-3`, which in a table is a foreign key an operator
+     * resolves in their head, and on this row is the sentence directly above.
+     *
+     * `tool.call.toolview` is keyed on the wire tool name, and our three names
+     * are not in the shipped composition, so this is additive: an unclaimed key
+     * falls back to the generic row and registering ours takes over nothing.
+     *
+     * The payload rides `block.meta`, which is what `output.presentationMeta`
+     * projected on the host. It is computed only for top-level calls, so a
+     * nested one draws the text and no strip -- correct, rather than a strip
+     * claiming the call filed nothing.
+     */
+    const RECEIPT_TOOLS = {
+      'emit-brief': '本期结论稿',
+      'query-locked': '追问重算',
+      'record-reference': '外部引用',
+    };
+
+    const KIND_LABEL = { brief: '结论稿', workpaper: '底稿', export: '导出件' };
+
+    /** Twelve characters is identity enough, and the row has no width to spare. */
+    function shortSha(sha) {
+      const text = String(sha || '');
+      return text.length > 12 ? text.slice(0, 12) + '\u2026' : text;
+    }
+
+    /** Every text block the tool returned, which is what the model read. */
+    function resultText(block) {
+      const content = (block && block.content) || [];
+      return content
+        .filter((part) => part && part.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('\n')
+        .trim();
+    }
+
+    /**
+     * The receipt, read defensively off a node this bundle does not own.
+     *
+     * Every branch is a real state rather than paranoia: a running call has no
+     * `meta`, a nested call is never projected, and an older `foundry` on the
+     * PATH comes through `index.js`'s degrade path with no receipt at all.
+     */
+    function receiptOf(block) {
+      const meta = block && block.meta;
+      if (!meta || typeof meta !== 'object') return null;
+      return Array.isArray(meta.filed) ? meta.filed : null;
+    }
+
+    const STRIP = {
+      marginTop: 6,
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      alignItems: 'center',
+      fontSize: 11,
+      lineHeight: 1.4,
+    };
+    const CHIP = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: '1px 7px',
+      borderRadius: 999,
+      border: '1px solid currentColor',
+      whiteSpace: 'nowrap',
+    };
+    /* The window's own accent, so a receipt reads as this product's. */
+    const GOLD = { color: '#b08a3e' };
+    const QUIET = { opacity: 0.6 };
+    /* A refusal is a designed output here, not a crash, but it is not a result. */
+    const REFUSED = { color: '#a8442e' };
+
+    function FiledChip(props) {
+      const row = props.row || {};
+      const label = KIND_LABEL[row.kind] || row.kind || '版本';
+      const sha = shortSha(row.sha256);
+      return jsx.jsxs('span', {
+        style: Object.assign({}, CHIP, row.appended === false ? QUIET : GOLD),
+        children: [
+          row.appended === false ? label + ' · 已在册' : label,
+          sha ? jsx.jsx('span', { style: QUIET, children: sha }) : null,
+        ],
+      });
+    }
+
+    /**
+     * One foundry call, as a turn row.
+     *
+     * A settled call with an empty receipt is not the same as one that filed
+     * nothing worth mentioning. It means the window had no task to file
+     * against, and saying so is the only honest thing to draw; silence there
+     * would read as success.
+     */
+    function FoundryRow(props) {
+      const block = (props && props.block) || null;
+      const settled = Boolean(block) && 'kind' in block;
+      const title = RECEIPT_TOOLS[props && props.toolName] || (props && props.toolName) || 'foundry';
+      const text = settled ? resultText(block) : '';
+      const filed = settled && !block.isError ? receiptOf(block) : null;
+
+      let strip = null;
+      if (settled && block.isError) {
+        /*
+         * Registering this key takes the whole row, including the failures the
+         * shipped generic row used to draw. A refusal is the fence working --
+         * `not-in-this-window`, a window that is not locked -- and it must not
+         * read as an answer just because this bundle owns the row now.
+         */
+        strip = jsx.jsx('span', {
+          style: REFUSED,
+          children: '拒绝 · ' + (String((block.error && block.error.code) || '') || '见上'),
+        });
+      } else if (!settled) {
+        strip = jsx.jsx('span', { style: QUIET, children: '正在从锁库算…' });
+      } else if (filed && filed.length === 0) {
+        strip = jsx.jsx('span', { style: QUIET, children: '未登记 · 这个窗口还没有绑到任务' });
+      } else if (filed && filed.length > 0) {
+        strip = jsx.jsxs('span', {
+          style: { display: 'contents' },
+          children: [
+            jsx.jsx('span', { style: QUIET, children: '归档' }),
+            filed.map((row, index) =>
+              jsx.jsx(FiledChip, { row: row }, String((row && row.sha256) || index)),
+            ),
+          ],
+        });
+      }
+
+      return jsx.jsxs('div', {
+        style: { fontSize: 13, lineHeight: 1.6 },
+        children: [
+          jsx.jsx('div', {
+            style: Object.assign({ fontSize: 11, letterSpacing: '0.04em' }, QUIET),
+            children: title,
+          }),
+          text ? jsx.jsx('div', { style: { whiteSpace: 'pre-wrap' }, children: text }) : null,
+          strip ? jsx.jsx('div', { style: STRIP, children: strip }) : null,
+        ],
+      });
+    }
+
     /** The slot registry, and the panel actions that open and close the rail. */
     const inject = ['slots', 'layout'];
 
@@ -183,6 +333,17 @@ window.__ModuleLoader__.load({
           }),
         ),
       );
+      /*
+       * Its own `inject`, not nested in the brand chain above. That chain hangs
+       * off slots the shell declares; this one is declared by an entry in
+       * `conversation.chat.node`, so it arrives on a different schedule, and
+       * nesting it would tie a receipt row to whether a sidebar mark exists.
+       */
+      ctx.slots.inject('tool.call.toolview', function* () {
+        for (const toolName of Object.keys(RECEIPT_TOOLS)) {
+          yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FoundryRow);
+        }
+      });
       collapseOnce(ctx);
     }
 

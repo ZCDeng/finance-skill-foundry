@@ -212,6 +212,47 @@ takes.
   An empty `filed` means there was no timeline to file against, which is not the same claim
   as nothing having been produced — the brief is on disk either way.
 
+- **KTD16. The receipt is drawn where the call is, and the model never reads it**
+  `(session-settled: user-directed — 开吧，动 dsh-plugin)`. `output.presentationMeta` projects
+  `{filed}` off the value `execute` already returned, and a keyed `tool.call.toolview`
+  occupant draws it on the three tools that file versions. `output.render` still emits
+  `stdout` alone, so the context these tools produce is byte-for-byte what it was.
+
+  Four upstream facts hold it up, each read from the staged tree and each pinned by a test,
+  because every one of them fails by drawing nothing:
+
+  | Fact | Where |
+  | --- | --- |
+  | `presentationMeta?(args, value): JsonValue` on `ToolOutputDefinition` | `dsh-tools/lib/types/index.d.ts` |
+  | called only when `exec.parent === void 0`, and a throw becomes `projectionError` | `dsh-tools/lib/index.js` |
+  | the payload lands on the settled node as `meta?: unknown` | `dsh-client-runtime/.../conversation.d.ts` |
+  | `tool.call.toolview` is `kind: 'keyed'`, dispatched on the wire tool name | `dsh-client-ui-tool/.../contract/slots.d.ts` |
+
+  The projector is total by construction. The runtime calls it after `execute` has resolved
+  and turns a throw into a failed call — so a projector bug would report a failure for a
+  close that completed, which is the worst thing this product could say. Every tool declares
+  it, including the eight that file nothing; they project an empty list, which is true of
+  them, and a roster where only three carried the field would be a second rule to keep in
+  step. `readReceipt` degrades the same way: an unparsable stdout is far likelier to be an
+  older `foundry` on the PATH than a corrupted document, and the honest report is the text
+  with no receipt attached.
+
+  Taking a key takes the whole row, refusals included. A refusal is the fence working, and
+  the row marks it as one rather than letting it read as an answer.
+
+- **KTD17. A deliverable's bytes may not contain the clock.** `openpyxl` writes
+  `dcterms:modified` from `datetime.now()` inside `save_workbook`, and `ZipFile` stamps every
+  member from the clock at two-second resolution. A version is keyed on its bytes, so an
+  unchanged window filed a new version whenever a render straddled a tick — the timeline
+  filling with versions that are not versions, which is the exact thing `register_bytes`
+  dedupes to prevent.
+
+  Found as an intermittent test failure, twice, and the first time wrongly written off as a
+  mid-edit import. The test that would have caught it renders across a real tick; the one
+  that existed rendered twice in the same instant and passed. `_settle` rebuilds the archive
+  with a sentinel date, and the honest timestamp stays where the store stamps it, on the
+  deliverable row.
+
 ## Scope Boundaries
 
 **Not in this work**

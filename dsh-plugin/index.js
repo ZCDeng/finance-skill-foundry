@@ -86,6 +86,39 @@ function foundry(args, exec) {
   return result.stdout;
 }
 
+/**
+ * The three verbs that file deliverable versions.
+ *
+ * `--receipt` wraps their stdout as `{text, filed}` so this half can say what
+ * reached the timeline. Every other verb prints what it always printed, and
+ * asking for a receipt from one would only add a shape to parse.
+ */
+const RECEIPT_VERBS = new Set(["emit-brief", "query-locked", "record-reference"]);
+
+/**
+ * One call's stdout, split into what the model reads and what the card draws.
+ *
+ * Degrading rather than throwing, deliberately. By the time this runs the brief
+ * is written, the workpaper is rendered and the versions are filed; a parse
+ * error here would turn a completed close into a failed tool call, and the
+ * operator would be told nothing happened when everything did. An unparsable
+ * stdout is far more likely to mean an older `foundry` on the PATH than a
+ * corrupted document, and the honest report for that is the text itself with
+ * no receipt attached.
+ */
+export function readReceipt(toolName, raw) {
+  if (!RECEIPT_VERBS.has(toolName)) return { stdout: raw, filed: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || typeof parsed.text !== "string") {
+      return { stdout: raw, filed: [] };
+    }
+    return { stdout: parsed.text, filed: Array.isArray(parsed.filed) ? parsed.filed : [] };
+  } catch {
+    return { stdout: raw, filed: [] };
+  }
+}
+
 function importArgs(cmd, input) {
   const args = [cmd];
   if (input.dropDir) args.push("--drop-dir", input.dropDir);
@@ -157,12 +190,12 @@ const TOOL_SPECS = {
       },
       required: ["references"],
     },
-    argv: (input) => ["record-reference", "--references", input.references],
+    argv: (input) => ["record-reference", "--references", input.references, "--receipt"],
   },
   "emit-brief": {
     description: "出本期结论稿: 窗内问题给结论, 窗外问题标 稿外追问 并落到底稿排期。同时写出可勾选底稿。stdout 是稿件 markdown。",
     parameters: { type: "object", properties: {}, required: [] },
-    argv: () => ["emit-brief"],
+    argv: () => ["emit-brief", "--receipt"],
   },
   workpaper: {
     description: "读回底稿 (emit-brief / query-locked 写出)。省略 window 读当前窗口; 追问挂回旧窗口时给 window 读那一份。还没写出时拒绝并说明 workpaper not written。stdout 是底稿 markdown。",
@@ -213,6 +246,7 @@ const TOOL_SPECS = {
       input.questionId ?? "",
       "--brief-sha",
       input.briefSha ?? "",
+      "--receipt",
     ],
   },
   "re-import": {
@@ -264,6 +298,17 @@ const OUTPUT_SCHEMA = {
   properties: {
     tool: { type: "string" },
     stdout: { type: "string" },
+    /*
+     * The deliverable versions this call archived, as `foundry --receipt`
+     * reported them. Declared because `additionalProperties` is false and the
+     * registry validates what `execute` resolves.
+     *
+     * It is not something the model reads. `output.render` emits `stdout` and
+     * nothing else, so the context this tool produces is byte-for-byte what it
+     * was before receipts existed; this field exists for `presentationMeta`,
+     * which draws the row in the conversation.
+     */
+    filed: { type: "array", items: { type: "object" } },
   },
   required: ["tool", "stdout"],
   additionalProperties: false,
@@ -314,12 +359,35 @@ export function toolDefinition(toolName) {
       render: (_args, value) => [
         { type: "text", text: value?.stdout || `${value?.tool ?? toolName} 完成` },
       ],
+      /*
+       * The receipt, projected for the conversation and not for the model.
+       *
+       * Total by construction, and that is the requirement rather than a
+       * style: the runtime calls this after `execute` has already resolved and
+       * turns a throw into `projectionError`, which fails the whole call. By
+       * then the brief is written, the workpaper is rendered and the versions
+       * are filed -- so a projector that threw would report a failure for a
+       * close that completed, which is the worst lie this product could tell.
+       *
+       * Every tool declares it, including the eight that never file anything.
+       * They project an empty list, which is what is true about them, and a
+       * roster where only three tools carried the field would be a second rule
+       * to keep in step with `RECEIPT_VERBS`.
+       *
+       * Only top-level calls reach here -- the runtime checks `exec.parent` --
+       * so a nested call draws its text and no strip. Correct, rather than a
+       * strip claiming it filed nothing.
+       */
+      presentationMeta: (_args, value) => ({
+        filed: Array.isArray(value?.filed) ? value.filed : [],
+      }),
     },
     presentCall: presentCall(toolName, CALL_KINDS[toolName] ?? "other"),
     execute: async (args, exec) => {
       const input = args ?? {};
       checkArgs(toolName, spec, input);
-      return { tool: toolName, stdout: foundry(spec.argv(input), exec) };
+      const { stdout, filed } = readReceipt(toolName, foundry(spec.argv(input), exec));
+      return { tool: toolName, stdout, filed };
     },
   };
 }

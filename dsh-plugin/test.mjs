@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { REFUSED, apply, definitions, f3Denied, inject, registerTools } from "./index.js";
+import { REFUSED, apply, definitions, f3Denied, inject, readReceipt, registerTools } from "./index.js";
 
 const ROSTER = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).dsh.foundry.tools;
 
@@ -152,6 +152,7 @@ assert.deepEqual(calls[5], [
   "q1",
   "--brief-sha",
   "",
+  "--receipt",
 ]);
 assert.deepEqual(calls[6], ["--var", process.env.FOUNDRY_VAR, "stop-formulator"]);
 assert.deepEqual(calls[7], ["--var", process.env.FOUNDRY_VAR, "re-import", "--named", "named.json"]);
@@ -160,8 +161,50 @@ assert.equal(calls.length, 8);
 // `execute` resolves the canonical value the output schema declares. It is no
 // longer a JSON string: the registry validates the value and `output.render`
 // turns it into the model-facing block.
-assert.deepEqual(await call("lock"), { tool: "lock", stdout: "ok stdout" });
-assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok stdout" });
+assert.deepEqual(await call("lock"), { tool: "lock", stdout: "ok stdout", filed: [] });
+
+// -- the receipt ----------------------------------------------------------
+//
+// The three verbs that file deliverable versions ask for `--receipt`, and the
+// stub prints `ok stdout`, which is not an envelope. That is the degrade path
+// and it is the one that matters most: by the time this runs the brief is
+// written, the workpaper is rendered and the versions are filed, so a parse
+// error must not turn a completed close into a failed tool call. An older
+// `foundry` on the PATH is a far likelier cause than a broken document.
+assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok stdout", filed: [] });
+assert.deepEqual(
+  readReceipt("emit-brief", "ok stdout"),
+  { stdout: "ok stdout", filed: [] },
+  "unparsable stdout keeps the text and drops the receipt",
+);
+assert.deepEqual(
+  readReceipt("emit-brief", JSON.stringify({ text: "# 本期结论稿\n", filed: [{ seq: 1, appended: true }] })),
+  { stdout: "# 本期结论稿\n", filed: [{ seq: 1, appended: true }] },
+  "an envelope splits into what the model reads and what the card draws",
+);
+assert.deepEqual(
+  readReceipt("emit-brief", JSON.stringify({ text: "x" })),
+  { stdout: "x", filed: [] },
+  "an envelope with no filed list is a receipt with nothing in it",
+);
+assert.deepEqual(
+  readReceipt("emit-brief", JSON.stringify({ filed: [] })),
+  { stdout: JSON.stringify({ filed: [] }), filed: [] },
+  "an envelope with no text is not an envelope",
+);
+assert.deepEqual(
+  readReceipt("lock", JSON.stringify({ text: "x", filed: [{ seq: 1 }] })),
+  { stdout: JSON.stringify({ text: "x", filed: [{ seq: 1 }] }), filed: [] },
+  "a verb that files nothing is never parsed, so its stdout is never reshaped",
+);
+
+// What the model reads is unchanged by any of this: `render` emits `stdout`
+// and never `filed`.
+for (const toolName of ["emit-brief", "query-locked", "record-reference"]) {
+  const tool = tools[toolName];
+  const blocks = tool.output.render({}, { tool: toolName, stdout: "文字", filed: [{ seq: 9 }] });
+  assert.deepEqual(blocks, [{ type: "text", text: "文字" }], `${toolName} leaked its receipt to the model`);
+}
 
 // -- binding --------------------------------------------------------------
 //
@@ -182,6 +225,7 @@ assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok std
     "--session",
     "sess-42",
     "emit-brief",
+    "--receipt",
   ]);
 }
 
@@ -190,7 +234,7 @@ assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok std
   const mark = readFileSync(log, "utf8").trim().split("\n").length;
   await call("emit-brief", {}, {});
   const line = JSON.parse(readFileSync(log, "utf8").trim().split("\n")[mark]);
-  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--task", "task-abc", "emit-brief"]);
+  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--task", "task-abc", "emit-brief", "--receipt"]);
 }
 
 {
@@ -200,7 +244,7 @@ assert.deepEqual(await call("emit-brief"), { tool: "emit-brief", stdout: "ok std
   delete process.env.FOUNDRY_TASK;
   await call("emit-brief", {}, { agent: { id: "sess-9" } });
   const line = JSON.parse(readFileSync(log, "utf8").trim().split("\n")[mark]);
-  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--session", "sess-9", "emit-brief"]);
+  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--session", "sess-9", "emit-brief", "--receipt"]);
 }
 
 // Host metadata rides under a reserved prefix: the arg check ignores those
@@ -259,4 +303,190 @@ process.env.FOUNDRY_VAR = join(tmp, "var");
 for (const [key, value] of Object.entries(oldEnv)) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
+}
+
+// -- the presentation projection ------------------------------------------
+//
+// The runtime calls this after `execute` resolved and turns a throw into
+// `projectionError`, which fails the whole call. By then the documents are
+// written and the versions are filed, so every shape a value could arrive in
+// has to come back as a list rather than as an exception.
+for (const toolName of ROSTER) {
+  const project = tools[toolName].output.presentationMeta;
+  assert.equal(typeof project, "function", `${toolName} needs a presentation projection`);
+  assert.deepEqual(project({}, { tool: toolName, stdout: "x", filed: [{ seq: 1 }] }), {
+    filed: [{ seq: 1 }],
+  });
+  for (const value of [undefined, null, {}, { filed: null }, { filed: "no" }, { filed: 7 }, "text", 0]) {
+    assert.deepEqual(
+      project({}, value),
+      { filed: [] },
+      `${toolName} projection threw or leaked on ${JSON.stringify(value) ?? "undefined"}`,
+    );
+  }
+}
+
+// The projection is the only path the receipt takes to the browser, and it
+// carries nothing the model did not already have -- it is a view of the value
+// `execute` returned, not a second read of the store.
+{
+  const value = { tool: "emit-brief", stdout: "# 本期结论稿\n", filed: [{ seq: 1, kind: "brief" }] };
+  const meta = tools["emit-brief"].output.presentationMeta({}, value);
+  assert.deepEqual(meta.filed, value.filed);
+  assert.equal(Object.keys(meta).length, 1, "the projection carries only the receipt");
+}
+
+// -- the row itself, actually rendered ------------------------------------
+//
+// Everything above checks that the receipt reaches the browser. This checks
+// what the browser does with it. `client.js` is a module-loader envelope that
+// only runs inside the page, so it is executed here against stand-ins: a fake
+// jsx runtime that returns plain objects, and a slot registry that captures
+// what was registered instead of mounting it.
+//
+// The failure this exists for is a row that throws while drawing. Upstream
+// catches nothing on our behalf, and a turn that renders an exception is worse
+// than one with no strip at all.
+{
+  const clientSource = readFileSync(new URL("./client.js", import.meta.url), "utf8");
+  const registered = new Map();
+  const injected = [];
+  const jsxRuntime = {
+    jsx: (type, props, key) => ({ type, props, key }),
+    jsxs: (type, props, key) => ({ type, props, key }),
+    Fragment: Symbol.for("Fragment"),
+  };
+  const loader = {
+    load: (bundle) => {
+      const factory = bundle.factory((id) => {
+        if (id === "react/jsx-runtime") return jsxRuntime;
+        throw new Error(`unexpected require(${id})`);
+      });
+      factory.apply({
+        slots: {
+          inject: (name, run) => {
+            injected.push(name);
+            const produced = run();
+            // A generator yields its registrations; a plain thunk returns.
+            if (produced && typeof produced[Symbol.iterator] === "function") {
+              for (const _ of produced) { /* drain */ }
+            }
+          },
+          register: (descriptor, component) => {
+            if (descriptor.key) registered.set(descriptor.key, component);
+            return descriptor;
+          },
+        },
+        layout: { toggleSidebar: () => {} },
+      });
+    },
+  };
+
+  const priorWindow = globalThis.window;
+  const priorDocument = globalThis.document;
+  globalThis.window = { __ModuleLoader__: loader };
+  globalThis.document = { querySelector: () => null };
+  try {
+    new Function("window", "document", "globalThis", clientSource)(
+      globalThis.window,
+      globalThis.document,
+      globalThis,
+    );
+  } finally {
+    if (priorWindow === undefined) delete globalThis.window;
+    else globalThis.window = priorWindow;
+    if (priorDocument === undefined) delete globalThis.document;
+    else globalThis.document = priorDocument;
+  }
+
+  assert.ok(injected.includes("tool.call.toolview"), "the tool view slot was never injected");
+  assert.deepEqual(
+    [...registered.keys()].sort(),
+    ["emit-brief", "query-locked", "record-reference"],
+    "the row is registered for exactly the verbs that file versions",
+  );
+
+  const Row = registered.get("emit-brief");
+  const flatten = (node) => {
+    if (node === null || node === undefined || node === false) return "";
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    if (Array.isArray(node)) return node.map(flatten).join("");
+    if (typeof node.type === "function") return flatten(node.type(node.props ?? {}));
+    return flatten(node.props?.children);
+  };
+
+  const settled = (meta, extra = {}) => ({
+    callId: "call-1",
+    toolName: "emit-brief",
+    block: {
+      kind: "tool-result",
+      isError: false,
+      content: [{ type: "text", text: "# 本期结论稿" }],
+      ...(meta === undefined ? {} : { meta }),
+      ...extra,
+    },
+  });
+
+  // The whole point: two archived versions, named where the call is.
+  const withReceipt = flatten(
+    Row(
+      settled({
+        filed: [
+          { kind: "brief", appended: true, sha256: "c".repeat(64) },
+          { kind: "workpaper", appended: false, sha256: "d".repeat(64) },
+        ],
+      }),
+    ),
+  );
+  assert.match(withReceipt, /本期结论稿/);
+  assert.match(withReceipt, /归档/);
+  assert.match(withReceipt, /结论稿/);
+  assert.match(withReceipt, /底稿 · 已在册/, "a version that was already on file must say so");
+  assert.match(withReceipt, /cccccccccccc…/);
+
+  // No task behind the window: say so rather than drawing nothing.
+  assert.match(flatten(Row(settled({ filed: [] }))), /未登记/);
+
+  // Every shape that is not a receipt draws the text and no strip, and none of
+  // them may throw: a running call, a nested call the runtime never projected,
+  // an older `foundry` whose stdout was not an envelope, a refusal.
+  for (const props of [
+    { callId: "c", toolName: "emit-brief", block: { argsRaw: "{}" } },
+    settled(undefined),
+    settled(null),
+    settled({}),
+    settled({ filed: "no" }),
+    settled({ filed: null }),
+    settled({ filed: [] }, { isError: true, error: { name: "FoundryRefusal", code: "refused" } }),
+    { callId: "c", toolName: "emit-brief" },
+    {},
+  ]) {
+    const drawn = flatten(Row(props));
+    assert.equal(typeof drawn, "string");
+    assert.ok(!drawn.includes("归档"), "a call with no receipt must not claim one");
+  }
+
+  // Taking the key takes the whole row, refusals included. A refusal is the
+  // fence working, and it must not read as an answer just because this bundle
+  // owns the row now.
+  {
+    const refused = flatten(
+      Row(
+        settled(undefined, {
+          isError: true,
+          error: { name: "FoundryRefusal", code: "refused" },
+          content: [{ type: "text", text: "table not in this window: ['cash_flow']" }],
+        }),
+      ),
+    );
+    assert.match(refused, /拒绝/);
+    assert.match(refused, /cash_flow/, "the refusal's own message has to survive");
+    assert.ok(!refused.includes("归档"));
+  }
+
+  // A running call says it is working rather than showing an empty strip.
+  assert.match(
+    flatten(Row({ callId: "c", toolName: "emit-brief", block: { argsRaw: "{}" } })),
+    /正在从锁库算/,
+  );
 }

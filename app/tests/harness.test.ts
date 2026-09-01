@@ -475,3 +475,107 @@ describe('a bundled companion cannot opt itself back in', () => {
     expect(declared.UNIVER_TELEMETRY_ENDPOINT).toBe('');
   });
 });
+
+describe('the receipt row upstream depends on', () => {
+  /*
+   * Four upstream facts hold the receipt row up, and each of them fails
+   * silently: the strip simply does not draw. A pinned runtime is a dependency
+   * like any other, and these read the staged tree rather than restating what
+   * it said on the day this was written.
+   *
+   * Unconditional on purpose. The gated pattern above (`FOUNDRY_DSH_INSTALL`)
+   * goes green when its variable is absent, which is the failure mode this is
+   * meant to catch. When the tree is genuinely not staged there is nothing to
+   * check and the assertion says so rather than passing quietly.
+   */
+  const dsh = fileURLToPath(new URL('../extra/dsh/node_modules/@deepseek-ai', import.meta.url));
+  const staged = existsSync(dsh);
+  const vendored = (rel: string) => readFileSync(join(dsh, rel), 'utf8');
+
+  it.runIf(staged)('still lets a tool project a presentation payload', () => {
+    // Our `output.presentationMeta` is the only path the receipt takes to the
+    // browser. Renamed or dropped upstream, `register` would refuse the
+    // definition outright -- which is loud -- but a silent relaxation of the
+    // type is not, so the declaration is what gets read.
+    const types = vendored('dsh-tools/lib/types/index.d.ts');
+    expect(types).toContain('presentationMeta?(args: unknown, value: JsonValue): JsonValue');
+    expect(types).toContain('Pure replayable presentation projection, computed only for top-level calls');
+  });
+
+  it.runIf(staged)('still calls it for top-level calls only, and fails the call if it throws', () => {
+    // Both halves of why the projector must be total. If the guard or the
+    // rethrow changed, ours could start throwing into a completed close.
+    const tools = vendored('dsh-tools/lib/index.js');
+    expect(tools).toContain('exec.parent === void 0 && tool.output.presentationMeta !== void 0');
+    expect(tools).toContain('throw projectionError(tool.name, "presentationMeta", error)');
+  });
+
+  it.runIf(staged)('still lands the payload on the settled node as meta', () => {
+    // `block.meta` is what the row reads. The node type is where it is
+    // declared, and a rename there is exactly the silent break.
+    const node = vendored('dsh-client-runtime/lib/types/client/sessions/conversation.d.ts');
+    expect(node).toContain("kind: 'tool-result'");
+    expect(node).toContain('meta?: unknown;');
+  });
+
+  it.runIf(staged)('still offers a keyed tool view dispatched on the wire tool name', () => {
+    // The typed contract rather than the runner's serialized doc blob: the blob
+    // is generated prose and reflows, the declaration is the thing a bump would
+    // actually have to change.
+    //
+    // `keyed` matters as much as the name. A single-occupant slot takes a
+    // priority where this one takes a key, so a change of kind would make our
+    // registration refused rather than merely ignored.
+    const slots = vendored('dsh-client-ui-tool/lib/types/client/contract/slots.d.ts');
+    expect(slots).toContain("'tool.call.toolview': {");
+    expect(slots).toContain("kind: 'keyed';");
+    expect(slots).toContain('owner: ToolCallOwnerProps;');
+    // The two props the row is built out of.
+    expect(slots).toContain('toolName: string;');
+    expect(slots).toContain('block: ToolCallBlock;');
+
+    // And our three keys are still unclaimed, so registering stays additive
+    // rather than shadowing a shipped row.
+    const runner = vendored('dsh-cordis-client-runner/lib/client.js');
+    const taken = runner.slice(runner.indexOf('key: "tool.call.toolview"'));
+    const domain = taken.slice(0, taken.indexOf('replaceRisk'));
+    for (const name of ['emit-brief', 'query-locked', 'record-reference']) {
+      expect(domain).not.toContain(`key '${name}'`);
+    }
+  });
+
+  it('says so rather than passing quietly when the runtime is not staged', () => {
+    // The whole point of the four above. If this ever fails, the staged tree
+    // moved and those tests have been green without reading anything.
+    expect(staged || !existsSync(fileURLToPath(new URL('../extra/dsh', import.meta.url)))).toBe(true);
+  });
+});
+
+describe('our own half of the receipt row', () => {
+  /*
+   * The upstream contract holding and our side still matching it are two
+   * different claims. These read the bundle rather than importing it, because
+   * `client.js` is a module-loader envelope that only runs inside the page.
+   */
+  const client = read('../../dsh-plugin/client.js');
+
+  it('registers a keyed occupant for exactly the three verbs that file versions', () => {
+    expect(client).toContain("ctx.slots.inject('tool.call.toolview'");
+    expect(client).toContain("ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FoundryRow)");
+    for (const name of ['emit-brief', 'query-locked', 'record-reference']) {
+      expect(client).toContain(`'${name}':`);
+    }
+  });
+
+  it('reads the payload off block.meta and never assumes it is there', () => {
+    // A running call has no `meta`, and a nested one is never projected.
+    expect(client).toContain('const meta = block && block.meta;');
+    expect(client).toContain('Array.isArray(meta.filed) ? meta.filed : null');
+  });
+
+  it('draws the no-task case rather than drawing nothing', () => {
+    // An empty receipt means the window had no timeline to file against.
+    // Silence there would read as success.
+    expect(client).toContain('未登记');
+  });
+});

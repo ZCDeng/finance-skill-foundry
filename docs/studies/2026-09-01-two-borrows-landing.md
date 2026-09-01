@@ -47,6 +47,8 @@ verification: 决定结论的断言由主线程复核，标注在文内
 
 第二个 commit 才动 `dsh-plugin`，那时 `presentationMeta` 只是把已经拿到手的 `filed` 原样投影。
 
+**已做（2026-09-02，KTD16）。** 四条上游事实各自读了源码、各自钉了测试。判官说的两条 UI 事实也落进去了：没绑任务时画「未登记」而不是不画，字节没变时画「已在册」。另外补了一条判官没提的：占了 key 就等于接管整行，包括拒绝——拒绝是围栏在起作用，不能因为这行归我们画了就读起来像答案。
+
 ### 明确不做
 
 - **不给 harness pane 装 preload。** `pane.ts` 用 `contextIsolation: true` 加 `sandbox: true`，整个 `harness/` 下没有 preload。`ipcMain.handle` 的通道是全 app 的，装上之后嵌入页面就够得到 `foundry:task-new` 和 `harness:open`——fence 的核心性质会从「页面根本没有桥」退化成「页面有一份 sender 白名单」。这条要以 KTD 形式进 plan，不要留在落败提案的脚注里等下一轮重新发现。
