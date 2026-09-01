@@ -160,6 +160,11 @@
   text-decoration: line-through;
 }
 
+.fnd-chip[data-coloured='yes'][data-mark='external'] {
+  color: var(--fnd-mark-external);
+  border-color: var(--fnd-mark-external);
+}
+
 /* -- cards and rows ------------------------------------------------------- */
 
 .fnd-panel {

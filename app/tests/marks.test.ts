@@ -7,7 +7,7 @@ import { COLOURED, MARKS, markOf, marksOf } from '../src/components/marks.js';
 const TAGS = readFileSync(fileURLToPath(new URL('../../foundry/tags.py', import.meta.url)), 'utf8');
 
 describe('the claim vocabulary', () => {
-  it('is the same five strings the store writes', () => {
+  it('is the same six strings the store writes', () => {
     // The tag on a brief, the tag in `followup.jsonl` and the chip on screen are
     // meant to be the same characters, so an operator can match what they see to
     // what was written down. Two copies of a vocabulary drift; this is what
@@ -17,19 +17,21 @@ describe('the claim vocabulary', () => {
       const match = /^([A-Z_]+) = "(.+)"$/.exec(line.trim());
       if (match) declared.set(match[1], match[2]);
     }
-    expect(declared.size).toBe(5);
+    expect(declared.size).toBe(6);
     expect(new Set(declared.values())).toEqual(new Set(Object.values(MARKS)));
     expect(MARKS.claimed).toBe(declared.get('CLAIMED'));
     expect(MARKS.recomputed).toBe(declared.get('RECOMPUTED'));
     expect(MARKS.agreed).toBe(declared.get('AGREED'));
     expect(MARKS.outside).toBe(declared.get('OUTSIDE'));
     expect(MARKS.absent).toBe(declared.get('NOT_IN_WINDOW'));
+    expect(MARKS.external).toBe(declared.get('EXTERNAL'));
   });
 
-  it('colours the two marks that are not about arithmetic', () => {
-    // Five colours would out-shout the numbers they sit beside. The three that
-    // say where a figure came from stay ink and differ by their own label.
-    expect([...COLOURED].sort()).toEqual(['absent', 'outside']);
+  it('colours the three marks that are not this window\'s arithmetic', () => {
+    // Six colours would out-shout the numbers they sit beside. The three that
+    // say where a figure came from within the window stay ink and differ by
+    // their own label.
+    expect([...COLOURED].sort()).toEqual(['absent', 'external', 'outside']);
   });
 });
 

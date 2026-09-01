@@ -15,6 +15,7 @@ from foundry.host_profile import host_smoke
 from foundry.probe import mark_done, run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
+from foundry.references import record_reference
 from foundry.resources import fixture_root
 from foundry.task import SESSION_ROLES, Task, TaskStore, resolve_task
 from foundry.window import Window, WindowStore
@@ -234,6 +235,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_q = sub.add_parser("record-questions")
     p_q.add_argument("--questions", required=True)
+
+    p_ref = sub.add_parser("record-reference")
+    p_ref.add_argument("--references", required=True)
 
     sub.add_parser("emit-brief")
 
@@ -460,6 +464,19 @@ def main(argv: list[str] | None = None) -> int:
                 raise FoundryError(f"questions file is unreadable: {args.questions}") from exc
             _adopt(tasks, window, args)
             record_questions(window, questions)
+            return 0
+        if args.cmd == "record-reference":
+            raw = Path(args.references)
+            try:
+                references = json.loads(raw.read_text() if raw.is_file() else args.references)
+            except json.JSONDecodeError as exc:
+                raise FoundryError("references argument is not valid JSON") from exc
+            except OSError as exc:
+                raise FoundryError(f"references file is unreadable: {args.references}") from exc
+            if isinstance(references, dict):
+                references = [references]
+            _adopt(tasks, window, args)
+            record_reference(window, references, session_id=args.session or None)
             return 0
         if args.cmd == "emit-brief":
             _adopt(tasks, window, args)

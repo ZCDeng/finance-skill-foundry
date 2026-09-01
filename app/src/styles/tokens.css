@@ -210,11 +210,22 @@
    *
    *   light  #6b6b6b  5.33:1 / 4.97:1
    *   dark   #9a9a9a  5.86:1 / 6.43:1
+   *
+   * The external mark is cool where the other accent is warm, and that is the
+   * whole of its job: a figure someone else published sits in a row beside
+   * figures this window computed, and the two have to be told apart at a
+   * glance rather than by reading. It carries no fill -- the filled chip is
+   * the one that says "off the brief", and an attribution is not an alarm.
+   * One token for text and edge, since it clears the stricter floor:
+   *
+   *   light  #3a6b8a  5.75:1 / 5.37:1
+   *   dark   #96bcd2  8.18:1 / 8.98:1
    */
   --fnd-mark-outside: #8a6729;
   --fnd-mark-outside-line: #a67e3c;
   --fnd-mark-outside-fill: #a67e3c1f;
   --fnd-mark-absent: #6b6b6b;
+  --fnd-mark-external: #3a6b8a;
 
   /* -- motion ---------------------------------------------------------- */
   --fnd-transition: 180ms ease;
@@ -238,6 +249,7 @@
     --fnd-mark-outside-line: #e2c180;
     --fnd-mark-outside-fill: #e2c1801f;
     --fnd-mark-absent: #9a9a9a;
+    --fnd-mark-external: #96bcd2;
   }
 }
 
@@ -258,6 +270,7 @@
   --fnd-mark-outside-line: #e2c180;
   --fnd-mark-outside-fill: #e2c1801f;
   --fnd-mark-absent: #9a9a9a;
+  --fnd-mark-external: #96bcd2;
 }
 
 @media (prefers-reduced-motion: reduce) {

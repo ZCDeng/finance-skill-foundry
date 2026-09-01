@@ -406,3 +406,50 @@ def test_the_follow_up_is_anchored_to_the_exported_version(
     # `session_id` is the pointer.
     assert row["session_id"] == "sess-leader"
     assert "leader_verbatim" not in row
+
+
+def test_a_reference_filed_after_the_brief_versions_the_workpaper(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A cited benchmark is a change to the working paper, so it gets a version.
+
+    Same rule as a follow-up: the file is rewritten in place, and the version's
+    cause has to name what rewrote it. `record-reference:ref-1` says a figure
+    from outside the window was added; nothing else in the trail would.
+    """
+    var = tmp_path / "var"
+    fixtures = fixture_root(None)
+    task_id = _new_task(var, capsys)
+    _period(var, fixtures, capsys, task=task_id, session="sess-period")
+
+    assert (
+        main(
+            [
+                "--var",
+                str(var),
+                "--session",
+                "sess-leader",
+                "record-reference",
+                "--references",
+                json.dumps(
+                    [
+                        {
+                            "id": "ref-1",
+                            "text": "行业物业费收缴率中位数 92.4%",
+                            "source": "中指研究院《2026 中国物业服务百强企业研究报告》",
+                            "at": "2026-08-30",
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    rows = TaskStore(var).get(task_id).deliverables()
+    assert [row["kind"] for row in rows] == ["brief", "workpaper", "workpaper"]
+    latest = rows[-1]
+    assert latest["cause"] == "record-reference:ref-1"
+    assert latest["session_id"] == "sess-leader"

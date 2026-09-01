@@ -19,8 +19,9 @@ from foundry.errors import LockRefused
 from foundry.fsutil import write_text_atomic
 from foundry.locking import exclusive
 from foundry.questions import load_questions
+from foundry.references import load_references
 from foundry.task import register_window_deliverable, task_for
-from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
+from foundry.tags import AGREED, CLAIMED, EXTERNAL, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
 from foundry.workpaper import (
     coa_names,
@@ -28,6 +29,7 @@ from foundry.workpaper import (
     schedule_from_cut,
     schedule_from_lines,
     schedule_missing,
+    schedule_reference,
 )
 
 
@@ -119,6 +121,7 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
             facts.append(
                 {
                     "id": item["id"],
+                    "basis": "lock",
                     "tag": NOT_IN_WINDOW,
                     "missing": missing,
                     "schedule_id": item["id"],
@@ -148,6 +151,7 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
                     "table": fact,
                     "value": recomputed,
                     "claimed": claimed,
+                    "basis": "lock",
                     "cut": "map",
                     "nodes": [{"id": node, "name": name, "amount": as_number(amount)} for node, name, amount in cut.nodes],
                     "unmapped": as_number(cut.unmapped),
@@ -185,6 +189,7 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
         facts.append(
             {
                 "id": item["id"],
+                "basis": "lock",
                 "table": source,
                 "value": as_number(total),
                 "tag": RECOMPUTED,
@@ -206,6 +211,39 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
                 recomputed=total,
             )
         )
+    """
+    What the analyst found outside the window, kept apart from what the window
+    computed.
+
+    Its own section, after the questions, so the reader never has to work out
+    which half of a paragraph came from the lock. Every line carries its source
+    and the date it was found, and `record_reference` has already refused any
+    that tried to wear one of the lock's words.
+    """
+    references = load_references(window)
+    if references:
+        lines.append(f"## {EXTERNAL}")
+        lines.append("")
+        lines.append("以下不出自本窗口的锁库，是查到的外部材料，各自带出处与查到日期。")
+        lines.append("")
+        for entry in references:
+            lines.append(f"- {entry['text']}（{entry['source']} · {entry['at']}）")
+            facts.append(
+                {
+                    "id": entry["id"],
+                    "basis": "external",
+                    "tag": EXTERNAL,
+                    "text": entry["text"],
+                    "source": entry["source"],
+                    "at": entry["at"],
+                    "schedule_id": entry["id"],
+                }
+            )
+            schedules.append(
+                schedule_reference(entry["id"], entry["text"], entry["source"], entry["at"])
+            )
+        lines.append("")
+
     text = "\n".join(lines).rstrip() + "\n"
     if OUTSIDE in text:
         raise LockRefused(f"brief must not carry {OUTSIDE} on in-window facts")

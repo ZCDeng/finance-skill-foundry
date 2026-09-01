@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
+import { Reader } from '../src/components/Reader.js';
 import { WiringTrouble } from '../src/views/Workbench.js';
 import { Deliverables } from '../src/views/Deliverables.js';
 import { Tasks } from '../src/views/Tasks.js';
@@ -106,8 +107,8 @@ describe('the deliverable gallery', () => {
   });
 });
 
-describe('the five words', () => {
-  it('draws only the two that are not about arithmetic in colour', () => {
+describe('the six words', () => {
+  it('draws only the three that are not this window\'s arithmetic in colour', () => {
     const { container } = render(
       <>
         <Chip mark="claimed" />
@@ -115,13 +116,14 @@ describe('the five words', () => {
         <Chip mark="agreed" />
         <Chip mark="outside" />
         <Chip mark="absent" />
+        <Chip mark="external" />
       </>,
     );
     const coloured = [...container.querySelectorAll('[data-coloured="yes"]')].map(
       (node) => node.getAttribute('data-mark'),
     );
-    expect(coloured.sort()).toEqual(['absent', 'outside']);
-    expect(container.querySelectorAll('.fnd-chip')).toHaveLength(5);
+    expect(coloured.sort()).toEqual(['absent', 'external', 'outside']);
+    expect(container.querySelectorAll('.fnd-chip')).toHaveLength(6);
   });
 
   it('draws both halves of a follow-up tag', () => {
@@ -577,5 +579,33 @@ describe('reading a deliverable', () => {
     );
     expect(screen.getByText(/正在从锁库读出/)).toBeTruthy();
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
+  });
+});
+
+describe('reading a workpaper', () => {
+  it('draws the tag row as marks, so the cited line is not the same ink as the computed one', () => {
+    const { container } = render(
+      <Reader
+        source={[
+          '## q1 · 本期应收账款合计',
+          '',
+          '标签: 我重算',
+          '我重算: 5000',
+          '',
+          '## ref-1 · 行业收缴率中位数 92.4%',
+          '',
+          '标签: 外部引用',
+          '来源出处: 中指研究院',
+          '查到于: 2026-08-30',
+        ].join('\n')}
+      />,
+    );
+    const marks = [...container.querySelectorAll('.fnd-chip')].map(
+      (node) => node.getAttribute('data-mark'),
+    );
+    expect(marks).toEqual(['recomputed', 'external']);
+    // The figure itself stays prose -- only the tag row becomes chips.
+    expect(screen.getByText('5000')).toBeTruthy();
+    expect(screen.getByText('中指研究院')).toBeTruthy();
   });
 });

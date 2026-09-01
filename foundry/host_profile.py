@@ -25,6 +25,7 @@ REQUIRED_TOOLS = (
     "import",
     "lock",
     "record-questions",
+    "record-reference",
     "emit-brief",
     "workpaper",
     "launch-formulator",
@@ -38,13 +39,41 @@ STATE_TOOLS = {
     "Open": frozenset({"create", "import", "lock"}),
     "Imported": frozenset({"create", "import", "lock"}),
     "Locked": frozenset(
-        {"create", "record-questions", "emit-brief", "launch-formulator", "stop-formulator", "re-import"}
+        {
+            "create",
+            "record-questions",
+            # Same state as the questions, and for the same reason: after the
+            # caliber is fixed and before the brief is written.
+            "record-reference",
+            "emit-brief",
+            "launch-formulator",
+            "stop-formulator",
+            "re-import",
+        }
     ),
+    # `record-reference` survives the brief because the question it answers
+    # ("how does this compare?") is one a leader asks while reading the brief.
     "Briefed": frozenset(
-        {"create", "query-locked", "workpaper", "launch-formulator", "stop-formulator", "re-import"}
+        {
+            "create",
+            "query-locked",
+            "record-reference",
+            "workpaper",
+            "launch-formulator",
+            "stop-formulator",
+            "re-import",
+        }
     ),
     "FollowUp": frozenset(
-        {"create", "query-locked", "workpaper", "launch-formulator", "stop-formulator", "re-import"}
+        {
+            "create",
+            "query-locked",
+            "record-reference",
+            "workpaper",
+            "launch-formulator",
+            "stop-formulator",
+            "re-import",
+        }
     ),
 }
 

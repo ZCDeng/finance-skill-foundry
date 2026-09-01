@@ -143,6 +143,22 @@ const TOOL_SPECS = {
     },
     argv: (input) => ["record-questions", "--questions", input.questions],
   },
+  "record-reference": {
+    description:
+      "登记一条外部引用 (锁后到追问期间都可以, 可多次追加)。用于行业基准、政策口径这类查到的材料: 它们能进稿帮读者判断, 但不出自本窗口的锁库。每条要有 id / text / source / at, 缺 source 或 at 会被拒。text 里不能出现 报表声称 / 我重算 / 两者一致 / 稿外追问 / not-in-this-window —— 那几个词是稿子自己的标记。出稿前登记的进结论稿的「外部引用」一节; 出稿后登记的落到底稿, 并记一版交付物。",
+    parameters: {
+      type: "object",
+      properties: {
+        references: {
+          type: "string",
+          description:
+            "引用数组的 JSON [{id,text,source,at,note?}] (单条对象也可), 或指向该 JSON 的文件路径。at 是查到的日期。",
+        },
+      },
+      required: ["references"],
+    },
+    argv: (input) => ["record-reference", "--references", input.references],
+  },
   "emit-brief": {
     description: "出本期结论稿: 窗内问题给结论, 窗外问题标 稿外追问 并落到底稿排期。同时写出可勾选底稿。stdout 是稿件 markdown。",
     parameters: { type: "object", properties: {}, required: [] },
@@ -278,6 +294,7 @@ const CALL_KINDS = {
   import: "edit",
   lock: "edit",
   "record-questions": "edit",
+  "record-reference": "edit",
   "emit-brief": "edit",
   workpaper: "read",
   "launch-formulator": "execute",

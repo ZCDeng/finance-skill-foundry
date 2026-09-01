@@ -6,7 +6,7 @@ from typing import Any
 
 from foundry.caliber import CutLine, MapCut, as_number, format_aux
 from foundry.fsutil import write_text_atomic
-from foundry.tags import AGREED, CLAIMED, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
+from foundry.tags import AGREED, CLAIMED, EXTERNAL, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
 
 
@@ -53,11 +53,13 @@ def _item(
     nodes: list[dict[str, Any]] | None = None,
     lines: list[dict[str, Any]] | None = None,
     missing: list[str] | None = None,
+    reference: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     tie = AGREED if claimed is not None and recomputed is not None and claimed == recomputed else None
     return {
         "id": item_id,
         "schedule_id": item_id,
+        **({"reference": reference} if reference else {}),
         "text": text,
         "tag": tag,
         "origin": origin,
@@ -77,6 +79,33 @@ def _item(
 
 def schedule_missing(item_id: str, text: str, missing: list[str]) -> dict[str, Any]:
     return _item(item_id=item_id, text=text, tag=NOT_IN_WINDOW, origin="brief", missing=missing)
+
+
+LATE_REFERENCE = "late-reference"
+
+
+def schedule_reference(
+    item_id: str, text: str, source: str, at: str, *, origin: str = "brief"
+) -> dict[str, Any]:
+    """A reference on the workpaper, carrying the two things that place it.
+
+    It has no lines, because there is no arithmetic to show. What it has is a
+    source and a date, and those are exactly what a figure copied out of a
+    spreadsheet was missing.
+
+    ``origin`` separates the two moments it can arrive. Filed before the brief
+    it is part of the brief; filed after, it is not, and a workpaper that said
+    ``来源: brief`` about it would be claiming the leader read it when they did
+    not. It is still not a follow-up -- nothing was recomputed -- so it takes
+    neither label.
+    """
+    return _item(
+        item_id=item_id,
+        text=text,
+        tag=EXTERNAL,
+        origin=origin,
+        reference={"source": source, "at": at},
+    )
 
 
 def schedule_from_cut(
@@ -236,12 +265,22 @@ def render_workpaper(payload: dict[str, Any]) -> str:
     for item in payload.get("items") or []:
         lines.append(f"## {item.get('id')} · {item.get('text')}")
         lines.append("")
-        origin = OUTSIDE if item.get("origin") == "followup" else "brief"
+        origin = {"followup": OUTSIDE, LATE_REFERENCE: "稿外补录"}.get(
+            str(item.get("origin")), "brief"
+        )
         lines.append(f"来源: {origin}")
         tag = item.get("tag") or ""
         if item.get("origin") == "followup" and OUTSIDE not in tag:
             tag = f"{OUTSIDE} / {tag}" if tag else OUTSIDE
         lines.append(f"标签: {tag}")
+        if item.get("reference"):
+            # No arithmetic to show, so the source and the date are the whole
+            # of what makes this line checkable.
+            lines.append(f"来源出处: {item['reference'].get('source') or '—'}")
+            lines.append(f"查到于: {item['reference'].get('at') or '—'}")
+            lines.append(f"{EXTERNAL}，不出自本窗口的锁库，无附表行。")
+            lines.append("")
+            continue
         if item.get("missing"):
             lines.append(f"缺: {', '.join(item['missing'])}")
             lines.append("无附表行。")

@@ -1,5 +1,7 @@
 import './components.css';
 
+import { Marks } from './Chip.js';
+
 /**
  * A deliverable, read as the document it is.
  *
@@ -135,6 +137,9 @@ export function readDocument(source: string): Block[] {
   return out;
 }
 
+/** The label `workpaper.py` writes above a claim's marks. */
+const TAG_LABEL = '标签';
+
 /** Digests are identity, not numbers to read. Twelve characters is plenty. */
 const short = (sha: string) => (sha.length > 12 ? `${sha.slice(0, 12)}…` : sha);
 
@@ -164,7 +169,13 @@ export function Reader({ source }: { source: string }) {
               {block.rows.map(([label, value]) => (
                 <div key={label} className="fnd-doc__pair">
                   <dt>{label}</dt>
-                  <dd>{value}</dd>
+                  {/*
+                    * The tag row is the one an operator reads down a workpaper
+                    * looking for. `外部引用` beside `我重算` in the same ink is a
+                    * distinction that only exists if you read every line; as
+                    * chips it is the thing you see first.
+                    */}
+                  <dd>{label === TAG_LABEL ? <Marks tag={value} /> : value}</dd>
                 </div>
               ))}
             </dl>

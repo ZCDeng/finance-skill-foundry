@@ -307,3 +307,26 @@ def test_the_persona_does_not_claim_a_fence_that_moved():
     assert "不能上网" not in text
     # And it has to say what the new capability may not become.
     assert "我重算" in text
+
+
+def test_period_deletes_exactly_the_procedural_rows():
+    """KTD11, as a test rather than a paragraph.
+
+    A preset is derived from `standard` by deletion, and which rows go is the
+    whole of the period fence. Named here so that adding one back is a visible
+    decision rather than a copy-paste: a shell, a file tool, a background job or
+    a subagent lets a session reach the archived workbook directly, and a figure
+    obtained that way is indistinguishable in the brief from one the catalog
+    produced. `tool-web` is not on this list -- what it returns can only enter a
+    document through `record-reference`, which demands a source.
+    """
+    import yaml
+
+    from foundry.harness import preset_dir
+
+    rows = yaml.safe_load((preset_dir() / "period" / "agent.cordis.yml").read_text())
+    ids = {row["id"] for row in rows}
+    assert ids.isdisjoint(
+        {"tool-bash", "tool-pwsh", "tool-fs", "tool-fs-search", "tool-jobs", "delegation"}
+    )
+    assert {"tool-web", "planning", "tool-todo", "tool-skill"} <= ids

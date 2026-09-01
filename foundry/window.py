@@ -128,6 +128,10 @@ class Window:
         return self.root / "questions.json"
 
     @property
+    def references_path(self) -> Path:
+        return self.root / "references.json"
+
+    @property
     def brief_path(self) -> Path:
         return self.root / "brief.md"
 

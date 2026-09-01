@@ -55,10 +55,29 @@ def _json_default(value: Any) -> Any:
 
 
 def _facts(window: Window) -> list[dict[str, Any]]:
+    """The figures on this window's brief that the locked catalog produced.
+
+    ``brief_facts.json`` now holds two kinds of record, and this is where that
+    stops being true: everything past this line is a figure this window derived.
+    Both lookups below decide whether a follow-up is quoting the brief (报表声称)
+    or going outside it (稿外追问), and a reference can answer neither -- it was
+    never derived here, so it can neither be quoted as this window's arithmetic
+    nor be the thing a recomputation matches.
+
+    Today both lookups would also miss a reference by structure, since neither a
+    ``required_table_ids`` match nor a map-cut match can succeed against a
+    record that carries no tables. That is an accident of what a reference
+    happens not to have, not a rule, and it is not what the next lookup written
+    against this list will be able to rely on. The rule is here.
+
+    Facts written before this field existed have no ``basis`` and are treated as
+    what they were: lock figures.
+    """
     path = window.root / "brief_facts.json"
     if not path.exists():
         return []
-    return json.loads(path.read_text())
+    loaded = json.loads(path.read_text())
+    return [fact for fact in loaded if fact.get("basis", "lock") == "lock"]
 
 
 def _record_followup(
