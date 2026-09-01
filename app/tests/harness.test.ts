@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -577,5 +577,80 @@ describe('our own half of the receipt row', () => {
     // An empty receipt means the window had no timeline to file against.
     // Silence there would read as success.
     expect(client).toContain('未登记');
+  });
+});
+
+describe('the profile manifest is written carefully', () => {
+  /*
+   * The failure this closes: an operator saw an unstyled upstream page reading
+   * `failed to import loader entry (@deepseek-ai/dsh-session-log-export)`,
+   * naming a bundle that was fine. `installPlugin` rewrites the profile
+   * manifest on every start, and the harness home comes from `userData`, which
+   * is one path for every copy of this app -- so a second launch rewrote that
+   * file underneath the first one's runtime.
+   */
+  const scratch = () => mkdtempSync(join(tmpdir(), 'fnd-manifest-'));
+
+  it('does not touch the file when the bytes already match', async () => {
+    const { writeIfChanged } = await import('../electron/harness/wiring.js');
+    const dir = scratch();
+    try {
+      const target = join(dir, 'package.json');
+      expect(writeIfChanged(target, '{"a":1}\n')).toBe(true);
+      const first = statSync(target).mtimeMs;
+      // The ordinary case: every start after the first says exactly this.
+      expect(writeIfChanged(target, '{"a":1}\n')).toBe(false);
+      expect(statSync(target).mtimeMs).toBe(first);
+      expect(writeIfChanged(target, '{"a":2}\n')).toBe(true);
+      expect(readFileSync(target, 'utf8')).toBe('{"a":2}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no temporary file behind, on success or on failure', async () => {
+    const { writeIfChanged } = await import('../electron/harness/wiring.js');
+    const dir = scratch();
+    try {
+      writeIfChanged(join(dir, 'package.json'), '{"a":1}\n');
+      expect(readdirSync(dir)).toEqual(['package.json']);
+      // A path that cannot be written: the temp must not survive the throw.
+      expect(() => writeIfChanged(join(dir, 'nope', 'package.json'), 'x')).toThrow();
+      expect(readdirSync(dir)).toEqual(['package.json']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes through a rename, so a reader never sees half a manifest', () => {
+    // The property that matters is atomicity, and the way it is obtained is
+    // the rename. Asserted on the source because a race cannot be provoked
+    // reliably in a unit test, and a future edit that drops the rename would
+    // otherwise pass everything above.
+    const source = read('../electron/harness/wiring.ts');
+    expect(source).toContain('renameSync(temp, target)');
+    expect(source).not.toMatch(/writeFileSync\(manifestPath/);
+  });
+});
+
+describe('only one instance may touch the store', () => {
+  it('takes the lock before anything reads or writes, and quits if it loses', () => {
+    // Read from the source: `app.requestSingleInstanceLock()` cannot be
+    // exercised without a real Electron app object, and what has to stay true
+    // is the ordering -- the lock is taken at module scope, above
+    // `whenReady`, so the losing process never reaches `adoptFormerState` or
+    // `installPlugin`.
+    const source = read('../electron/main.ts');
+    const lock = source.indexOf('requestSingleInstanceLock');
+    const ready = source.indexOf('app.whenReady()');
+    const adopt = source.indexOf('adoptFormerState();');
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(ready);
+    expect(ready).toBeLessThan(adopt);
+    expect(source).toContain('app.quit()');
+    // And the winner surfaces itself rather than ignoring the second launch.
+    expect(source).toContain("app.on('second-instance'");
+    // `whenReady` still fires for the loser, so it checks again.
+    expect(source).toContain('if (!app.hasSingleInstanceLock()) return;');
   });
 });

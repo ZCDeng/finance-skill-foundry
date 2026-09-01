@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -151,6 +152,18 @@ async function materialiseProfile(entry: string, home: string): Promise<void> {
  *
  * Idempotent, and it appends rather than replaces: another product's bundle in
  * the same profile is not this app's to remove.
+ *
+ * Written only when the bytes actually change, and then through a temporary
+ * file. Both halves answer the same failure. This runs on every start, so the
+ * ordinary case is a file that already says exactly this -- and rewriting it
+ * anyway handed a concurrent reader a window in which the manifest was
+ * truncated. A runtime that reads it then fails to compose its whole plugin
+ * tree, and what reaches the operator is an unstyled upstream page saying
+ * `failed to import loader entry`, naming a bundle that is perfectly fine.
+ *
+ * The single-instance lock in `main.ts` is the other half of that fix. This is
+ * the half that also covers an operator editing the file, or a backup tool
+ * reading it while this writes.
  */
 export function addToProfileManifest(opts: {
   home: string;
@@ -167,8 +180,31 @@ export function addToProfileManifest(opts: {
   const bundles = manifest.dsh?.profile?.bundles ?? [];
   if (!bundles.includes(name)) bundles.push(name);
   manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles } };
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeIfChanged(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return name;
+}
+
+/**
+ * Put `text` at `target`, writing only when it differs from what is there.
+ *
+ * The rename is atomic within one filesystem, so a reader sees the old file or
+ * the new one and never half of either. The temporary name carries this pid so
+ * two writers cannot collide on it.
+ */
+export function writeIfChanged(target: string, text: string): boolean {
+  try {
+    if (readFileSync(target, 'utf8') === text) return false;
+  } catch {
+    // No file yet, or unreadable. Either way the write below settles it.
+  }
+  const temp = `${target}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, text);
+    renameSync(temp, target);
+  } finally {
+    rmSync(temp, { force: true });
+  }
+  return true;
 }
 
 /**

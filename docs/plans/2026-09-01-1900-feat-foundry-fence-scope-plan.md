@@ -253,6 +253,30 @@ takes.
   with a sentinel date, and the honest timestamp stays where the store stamps it, on the
   deliverable row.
 
+- **KTD18. One instance owns the store, and the profile manifest is written only when it
+  changes** `(session-settled: user-directed — 加单实例锁 + 清单只在变了才写)`. An operator saw
+  an unstyled upstream page reading `failed to import loader entry
+  (@deepseek-ai/dsh-session-log-export)`, naming a bundle that served `200` before and after.
+
+  Two facts made that reachable, and neither is upstream's. `main.ts` took no single-instance
+  lock, and the harness home is derived from `userData`, which is one path for every copy of
+  this app — so a second launch composed its own runtime against the first one's profile
+  directory. And `installPlugin` rewrote `harness/profiles/web/package.json` unconditionally
+  on every start, which in the ordinary case rewrites a file that already says exactly this.
+  A reader catching that mid-write fails to compose the whole plugin tree.
+
+  The lock is taken at module scope, above `whenReady`, so the losing process quits without
+  reading or writing anything; the winner surfaces its window, which is what a second launch
+  was asking for. The manifest write now compares first and goes through a rename, so a
+  reader sees the old file or the new one and never half of either — that half also covers an
+  operator editing the file or a backup tool reading it.
+
+  Measured on the packaged app: first launch leaves the manifest's mtime untouched, a second
+  launch neither writes nor starts a runtime, and one harness server is listening.
+
+  A different `--user-data-dir` takes its own lock, so a scratch instance still runs beside a
+  real one — which is how this app gets driven under test.
+
 ## Scope Boundaries
 
 **Not in this work**

@@ -197,7 +197,38 @@ function createWindow(): void {
   }
 }
 
+/**
+ * One instance, because two of them share one profile directory.
+ *
+ * `installPlugin` rewrites `harness/profiles/web/package.json` on every start,
+ * and the harness home is derived from `userData`, which is the same path for
+ * every copy of this app. A second launch therefore rewrites that manifest
+ * underneath the first one's runtime -- and a reader that catches it mid-write
+ * fails to compose the whole plugin tree, which reaches the operator as an
+ * unstyled upstream page saying `failed to import loader entry`, naming a
+ * bundle that is perfectly fine.
+ *
+ * The lock is taken before anything is read or written, so the losing process
+ * quits without touching the store. The winner is asked to surface itself
+ * instead, which is what a second launch was asking for anyway.
+ *
+ * A different `--user-data-dir` gets its own lock, so a scratch instance still
+ * runs beside a real one.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const [window] = BrowserWindow.getAllWindows();
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  });
+}
+
 void app.whenReady().then(() => {
+  // The losing process is on its way out; `whenReady` still fires for it.
+  if (!app.hasSingleInstanceLock()) return;
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     // Only this app's own documents. The harness page and Formulator are served
     // by child processes over loopback and carry their own headers; rewriting
