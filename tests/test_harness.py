@@ -206,3 +206,104 @@ def test_preset_display_text_travels_with_the_preset(tmp_path):
     install_presets(tmp_path)
     for preset_id in preset_ids():
         assert (tmp_path / ".agent-presets" / preset_id / "preset.yml").is_file()
+
+
+# --- what the period preset may carry, and the rule that decides it --------
+
+def _period_rows():
+    """Every row id the period preset composes, groups flattened."""
+    import yaml
+
+    from foundry.harness import preset_dir
+
+    def ids(rows, out):
+        for row in rows:
+            out.append(row["id"])
+            if isinstance(row.get("config"), list):
+                ids(row["config"], out)
+        return out
+
+    text = (preset_dir() / "period" / "agent.cordis.yml").read_text()
+    return ids(yaml.safe_load(text), [])
+
+
+def test_period_omits_exactly_what_can_reach_the_books():
+    """Reachability is the rule, not tidiness.
+
+    The fence exists so a figure on the brief can be traced to the locked
+    catalog. A row earns removal by being a path to the archived workbooks, and
+    the earlier list was broader than that -- it removed the model's ability to
+    look anything up at all, which protected nothing and meant an industry
+    benchmark had to be copied out of a spreadsheet with no source on it.
+    """
+    rows = _period_rows()
+    for reaches_files in [
+        "tool-bash",
+        "tool-pwsh",
+        "tool-fs",
+        "tool-fs-search",
+        "tool-subagent",
+        "tool-subagent-fork",
+        "tool-workflow",
+        "tool-ralph",
+    ]:
+        assert reaches_files not in rows, f"{reaches_files} can reach the books"
+
+
+def test_period_keeps_what_cannot():
+    # None of these can read a file. `tool-web` ships from upstream with
+    # `fetch: false`, so it is search and its snippets.
+    rows = _period_rows()
+    for harmless in ["tool-goal", "plan-mode", "tool-web", "tool-skill", "tool-ask-user"]:
+        assert harmless in rows, f"{harmless} was dropped without reaching anything"
+
+
+def test_web_stays_search_only():
+    """`fetch: true` would turn a snippet into an arbitrary URL read.
+
+    Still not a path to the books, but a different decision from the one made
+    here, and one that should be made deliberately rather than inherited.
+    """
+    import yaml
+
+    from foundry.harness import preset_dir
+
+    rows = yaml.safe_load((preset_dir() / "period" / "agent.cordis.yml").read_text())
+    web = next(row for row in rows if row["id"] == "tool-web")
+    assert web["config"]["fetch"] is False
+
+
+def test_every_copied_row_keeps_the_config_upstream_requires():
+    """The mount failure this pins was real, and immediate.
+
+    `plan-mode` was copied across without its `section`, and the runtime
+    refused the whole preset: `PlanModeConfig needs a non-empty section`. A
+    preset is derived from `standard` by deletion, so a surviving row keeps the
+    configuration upstream gives it -- trimming one is how a preset stops
+    mounting.
+    """
+    import yaml
+
+    from foundry.harness import preset_dir
+
+    rows = yaml.safe_load((preset_dir() / "period" / "agent.cordis.yml").read_text())
+    planning = next(row for row in rows if row["id"] == "planning")
+    plan_mode = next(row for row in planning["config"] if row["id"] == "plan-mode")
+    assert plan_mode["config"]["section"].strip()
+
+
+def test_the_persona_does_not_claim_a_fence_that_moved():
+    """The persona is what the model reads about its own limits.
+
+    It said 不能上网 while the preset now carries search, and a persona that
+    describes the wrong fence is worse than no persona: the model believes it.
+    """
+    import yaml
+
+    from foundry.harness import preset_dir
+
+    rows = yaml.safe_load((preset_dir() / "period" / "agent.cordis.yml").read_text())
+    text = next(row for row in rows if row["id"] == "persona")["config"]["text"]
+    assert "不能上网" not in text
+    # And it has to say what the new capability may not become.
+    assert "我重算" in text

@@ -14,15 +14,33 @@
 # `bash`, `write`, `edit`, `read` and `str_replace_editor` beside them. Locked
 # books a model can read around are not locked.
 #
-# Dropped from `standard`: tool-bash, tool-pwsh, tool-fs, tool-fs-search,
-# tool-jobs, tool-goal, the whole delegation group (subagent, subagent_fork,
-# workflow, ralph), tool-web, and plan mode.
+# What is dropped, and the rule that decides it.
 #
-# The four kept rows are each kept for a reason and none of them can reach a
-# file: `tool-skill` because the four close methods ship as skills and are part
-# of the product; `tool-todo` and `tool-ask-user` because a period is a
-# multi-step sequence with choices only A1 can make; compaction because a
-# period conversation outlives one context window.
+# The rule is reachability, not tidiness: a row is dropped when it can reach the
+# books, and kept otherwise. So out go tool-bash, tool-pwsh, tool-fs,
+# tool-fs-search and the delegation group -- every one of them a path to the
+# archived workbooks that `lock` exists to close.
+#
+# tool-jobs stays out for a different reason: a background job outlives the turn
+# that started it, and a period's guarantee is about what a figure on the brief
+# was derived from at the moment it was written.
+#
+# tool-goal, plan mode and tool-web are back, and their earlier removal was the
+# fence over-reaching. None of them can read a file: goal and plan mode are the
+# model thinking out loud, and tool-web ships from upstream with `fetch: false`,
+# which is search and its snippets rather than a fetch of an arbitrary URL.
+# Refusing them did not protect the books; it only meant an industry benchmark
+# had to be copied out of a spreadsheet with no source and no date on it.
+#
+# What keeps the guarantee is not that these are absent. It is that
+# `emit-brief` will not render anything it did not derive from the locked
+# catalog as 我重算 -- the fence is on the deliverable, not on the conversation.
+#
+# The rest are kept for their own reasons and none of them can reach a file:
+# `tool-skill` because the four close methods ship as skills and are part of the
+# product; `tool-todo` and `tool-ask-user` because a period is a multi-step
+# sequence with choices only A1 can make; compaction because a period
+# conversation outlives one context window.
 #
 # A service row here MUST sit inside a group carrying an `isolate` realm, or it
 # publishes into the root realm where another preset collides with it. The
@@ -32,7 +50,7 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      你是本期结账分析的助手, 跑在 {{model}} 上。你只有 foundry 的期间工具, 没有 shell, 没有文件读写, 没有子 agent, 也不能上网。所有数字都来自 foundry 锁后的窗口: 先 create 开窗, import 导入本期账表, lock 锁口径, record-questions 登记本期要回答的问题, emit-brief 出稿, workpaper 读回底稿。锁后的表只读, 改口径要走 re-import 开后继窗口。窗外或未点名的表一律拒绝, 不要替它编数。工具回给你的是锁后的汇总、稿上引用过的数字, 和标了 我重算 的重算结果; 你可以把它们写成人话, 但不能自己添一个数。领导的追问用 query-locked 重算, 结果会自动带 稿外追问 标记, 照原样转述, 不要说得像稿子上本来就有。
+      你是本期结账分析的助手, 跑在 {{model}} 上。你没有 shell, 没有文件读写, 也没有子 agent。你可以联网检索、可以用计划模式想清楚再动, 但那些查到的东西不是本期的数。所有进稿的数字都来自 foundry 锁后的窗口: 先 create 开窗, import 导入本期账表, lock 锁口径, record-questions 登记本期要回答的问题, emit-brief 出稿, workpaper 读回底稿。锁后的表只读, 改口径要走 re-import 开后继窗口。窗外或未点名的表一律拒绝, 不要替它编数。工具回给你的是锁后的汇总、稿上引用过的数字, 和标了 我重算 的重算结果; 你可以把它们写成人话, 但不能自己添一个数。领导的追问用 query-locked 重算, 结果会自动带 稿外追问 标记, 照原样转述, 不要说得像稿子上本来就有。从外部检索来的行业基准、政策口径这类东西, 可以写进分析里帮读者判断, 但必须带上来源和查到的日期, 而且永远不能说成 我重算 —— 那个词只属于锁库算出来的数。
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -44,6 +62,42 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# Plan state is per-agent by nature, so the entry-local realm is upstream's own
+# and is kept as it stands.
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# `fetch: false` is upstream's default and it is kept: this is search and the
+# snippets it returns, not a fetch of an arbitrary URL. Whatever comes back is
+# context for the analyst, never a figure on the brief.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
 
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
