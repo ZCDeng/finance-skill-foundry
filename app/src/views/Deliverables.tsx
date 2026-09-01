@@ -1,7 +1,14 @@
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
 
 import { Reader } from '../components/Reader.js';
-import { type DeliverableRow, type TaskRow, bytes, shortSha, when } from '../bridge.js';
+import {
+  type DeliverableRow,
+  type TaskRow,
+  bytes,
+  isWorkbook,
+  shortSha,
+  when,
+} from '../bridge.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -32,11 +39,13 @@ export function Deliverables({
   rows,
   open,
   onOpen,
+  onOpenWorkbook,
   onBack,
 }: {
   rows: { task: TaskRow; row: DeliverableRow }[];
   open: OpenDeliverable | null;
   onOpen(task: TaskRow, row: DeliverableRow): void;
+  onOpenWorkbook(): void;
   onBack(): void;
 }) {
   if (open) {
@@ -85,7 +94,26 @@ export function Deliverables({
             </dd>
           </div>
         </dl>
-        {open.text === null ? (
+        {/*
+          * A workbook is handed over rather than rendered. It was written as a
+          * spreadsheet so it could be sorted and pivoted in the software the
+          * operator already uses; drawing it again in this window would be a
+          * worse copy of that software.
+          */}
+        {isWorkbook(open.row) ? (
+          <div className="fnd-stack" style={{ gap: 10 }}>
+            <p className="fnd-muted">
+              这一版是表格。四页：本期（窗口、锁哈希、标签怎么读）、结论、底稿、外部引用。
+            </p>
+            <div>
+              <button type="button" className="fnd-button" onClick={onOpenWorkbook}>
+                <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
+                {' 在表格软件里打开'}
+                <ExternalLink size={12} strokeWidth={1.5} aria-hidden />
+              </button>
+            </div>
+          </div>
+        ) : open.text === null ? (
           <p className="fnd-muted">正在从锁库读出这一版…</p>
         ) : (
           <Reader source={open.text} />
@@ -127,12 +155,16 @@ export function Deliverables({
                   onClick={() => onOpen(task, row)}
                   aria-label={`打开 ${task.title} 的${KIND_LABEL[row.kind]} ${shortSha(row.sha256)}`}
                 >
-                  <FileText size={13} strokeWidth={1.5} aria-hidden />
+                  {isWorkbook(row) ? (
+                    <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
+                  ) : (
+                    <FileText size={13} strokeWidth={1.5} aria-hidden />
+                  )}
                   {when(row.at)}
                 </button>
               </td>
               <td>{task.title}</td>
-              <td>{KIND_LABEL[row.kind]}</td>
+              <td>{isWorkbook(row) ? '表格' : KIND_LABEL[row.kind]}</td>
               <td>{row.cause}</td>
               <td className="fnd-muted">{row.session_id ?? '无会话'}</td>
               <td className="fnd-num">{bytes(row.bytes)}</td>

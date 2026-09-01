@@ -128,3 +128,30 @@ export function readDeliverable(
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`not a sha256: ${sha256}`);
   return runFoundry(binding, 'deliverable-text', ['--sha', sha256], env);
 }
+
+/**
+ * Where a version was filed, for the one kind this app does not render itself.
+ *
+ * A workbook opens in the operator's own spreadsheet software, which means
+ * something has to name a file. It is still the CLI that names it, and still
+ * from a digest: a renderer string reaches an archived version of this task or
+ * it reaches nothing.
+ *
+ * The extension is checked here rather than passed through. `--ext` reaches
+ * argv, and a renderer that could put anything in it could ask for a
+ * neighbouring file that happened to share a digest stem.
+ */
+export async function deliverablePath(
+  binding: Binding,
+  sha256: string,
+  ext: string,
+  env?: FoundryEnv,
+): Promise<string> {
+  if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`not a sha256: ${sha256}`);
+  if (!ARCHIVED_EXTS.has(ext)) throw new Error(`not an archived extension: ${ext}`);
+  const found = await runFoundry(binding, 'deliverable-path', ['--sha', sha256, '--ext', ext], env);
+  return found.trim();
+}
+
+/** Every extension the store files a deliverable under. */
+const ARCHIVED_EXTS = new Set(['.md', '.xlsx']);

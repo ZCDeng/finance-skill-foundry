@@ -36,6 +36,10 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -273,13 +277,49 @@ class Task:
         a new version, and a timeline showing it as one would be lying about
         what changed.
         """
+        return self.register_bytes(
+            window_id=window_id,
+            kind=kind,
+            data=text.encode("utf-8"),
+            cause=cause,
+            session_id=session_id,
+            ext=ext,
+        )
+
+    def register_bytes(
+        self,
+        *,
+        window_id: str,
+        kind: str,
+        data: bytes,
+        cause: str,
+        session_id: str | None = None,
+        ext: str = ".md",
+    ) -> dict[str, Any]:
+        """The same version row, for a document that is not text.
+
+        A workbook is bytes and a brief is characters, and only one of those
+        two facts should reach the versioning rules. Everything above this line
+        -- the digest, the dedupe, the append under the task lock -- was already
+        about bytes; it was just spelled in `str` because until now every
+        deliverable was markdown.
+
+        The row records `ext`. A reader has to know whether it may decode the
+        artifact before it opens it, and a row that did not say would make the
+        deliverables screen guess. Rows written before this field default to
+        `.md`, which is what they are.
+        """
         if kind not in DELIVERABLE_KINDS:
             raise FoundryError(f"deliverable kind must be one of {DELIVERABLE_KINDS}: {kind}")
-        digest = sha256_text(text)
+        digest = sha256_bytes(data)
         with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
             rows = _read_jsonl(self.deliverables_path)
             prior = [
-                row for row in rows if row.get("kind") == kind and row.get("window_id") == window_id
+                row
+                for row in rows
+                if row.get("kind") == kind
+                and row.get("window_id") == window_id
+                and row.get("ext", ".md") == ext
             ]
             if prior and prior[-1].get("sha256") == digest:
                 return prior[-1]
@@ -288,7 +328,7 @@ class Task:
                 artifact.parent.mkdir(parents=True, exist_ok=True)
                 tmp = artifact.with_name(f".{artifact.name}.{uuid.uuid4().hex}.tmp")
                 try:
-                    tmp.write_text(text, encoding="utf-8")
+                    tmp.write_bytes(data)
                     tmp.replace(artifact)
                 finally:
                     tmp.unlink(missing_ok=True)
@@ -297,7 +337,8 @@ class Task:
                 "kind": kind,
                 "window_id": window_id,
                 "sha256": digest,
-                "bytes": len(text.encode("utf-8")),
+                "bytes": len(data),
+                "ext": ext,
                 "cause": cause,
                 "session_id": session_id,
                 "at": now_iso(),
@@ -305,12 +346,25 @@ class Task:
             _append_jsonl(self.deliverables_path, row)
             return row
 
-    def artifact_text(self, sha256: str, *, ext: str = ".md") -> str:
+    def artifact_path(self, sha256: str, *, ext: str = ".md") -> Path:
         if not re.fullmatch(r"[0-9a-f]{64}", str(sha256)):
             raise FoundryError(f"not a sha256: {sha256}")
         path = self.artifacts_dir / f"{sha256}{ext}"
         if not path.is_file():
             raise FoundryError(f"no archived deliverable {sha256} on task {self.id}")
+        return path
+
+    def artifact_text(self, sha256: str, *, ext: str = ".md") -> str:
+        """One archived version, decoded.
+
+        Text only. A workbook is bytes and asking for it here would either
+        raise deep in a decoder or hand back mojibake, so the caller is told to
+        ask for the path instead -- which is what the app does with it anyway,
+        since a spreadsheet opens in the operator's own spreadsheet software.
+        """
+        path = self.artifact_path(sha256, ext=ext)
+        if ext != ".md":
+            raise FoundryError(f"deliverable {sha256}{ext} is not text; ask for its path")
         return path.read_text(encoding="utf-8")
 
 

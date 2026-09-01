@@ -49,9 +49,20 @@ export interface DeliverableRow {
   window_id: string;
   sha256: string;
   bytes: number;
+  /**
+   * The archived file's extension. Absent on rows written before workbooks
+   * existed, which are all markdown -- so read it through `isWorkbook` rather
+   * than comparing it directly.
+   */
+  ext?: string;
   cause: string;
   session_id: string | null;
   at: string;
+}
+
+/** Whether this version is a spreadsheet rather than a document to read here. */
+export function isWorkbook(row: DeliverableRow): boolean {
+  return (row.ext ?? '.md') === '.xlsx';
 }
 
 export interface TaskDetail {
@@ -85,6 +96,19 @@ export interface Bridge {
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
+  /**
+   * Hand one archived version to whatever this machine opens it with.
+   *
+   * Only for the kinds this app does not render. A workbook belongs in the
+   * spreadsheet software the operator already has, which is the whole reason
+   * it is written as a workbook.
+   */
+  deliverableOpen(task: string, sha: string, ext: string): Promise<Answer<{ opened: string }>>;
+  /** Render one window as a workbook and file it as a version. */
+  exportWorkbook(
+    task: string,
+    window: string,
+  ): Promise<Answer<{ sha256: string; seq: number; ext: string }>>;
   /** The one call that changes the store. Always present; the reads are useless without it. */
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** Absent when this build has no harness install to embed. */

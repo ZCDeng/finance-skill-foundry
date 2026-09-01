@@ -1,12 +1,19 @@
 import { useState } from 'react';
 import { Reader } from '../components/Reader.js';
-import { ArrowLeft, FileText, HardDriveDownload, MessageSquareQuote } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileSpreadsheet,
+  FileText,
+  HardDriveDownload,
+  MessageSquareQuote,
+} from 'lucide-react';
 
 import {
   type DeliverableRow,
   type TaskDetail as Detail,
   type WindowRow,
   bytes,
+  isWorkbook,
   shortSha,
   when,
 } from '../bridge.js';
@@ -75,11 +82,20 @@ export function TaskDetail({
   detail,
   onBack,
   onRead,
+  onExport,
+  onOpenWorkbook,
+  busy,
   reading,
 }: {
   detail: Detail;
   onBack(): void;
   onRead(sha: string): void;
+  /** Render this window as a workbook and file it as a version. */
+  onExport(windowId: string): void;
+  /** Hand an already-filed workbook to the operator's spreadsheet software. */
+  onOpenWorkbook(sha: string, ext: string): void;
+  /** The window id currently being rendered, if any. */
+  busy: string | null;
   reading: { sha: string; text: string } | null;
 }) {
   const [openWindow, setOpenWindow] = useState<string | null>(detail.windows[0]?.window_id ?? null);
@@ -131,6 +147,23 @@ export function TaskDetail({
                     <FileText size={12} strokeWidth={1.5} aria-hidden />
                     {' 交付物版本'}
                   </p>
+                  {/*
+                    * The whole window as one workbook, for the person who is
+                    * going to sort and pivot it. Written by `foundry` from the
+                    * lock, not by a model in a spreadsheet, which is the only
+                    * reason a figure in it still means what its mark says.
+                    */}
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      type="button"
+                      className="fnd-button"
+                      onClick={() => onExport(row.window_id)}
+                      disabled={busy === row.window_id}
+                    >
+                      <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
+                      {busy === row.window_id ? ' 正在从锁库写…' : ' 出一份表格'}
+                    </button>
+                  </div>
                   <div className="fnd-tablewrap" style={{ marginTop: 10 }}>
                     <table className="fnd-table">
                       <thead>
@@ -148,7 +181,7 @@ export function TaskDetail({
                         {versionsFor(row.window_id).map((version) => (
                           <tr key={version.seq}>
                             <td className="fnd-num">{version.seq}</td>
-                            <td>{KIND_LABEL[version.kind]}</td>
+                            <td>{isWorkbook(version) ? '表格' : KIND_LABEL[version.kind]}</td>
                             <td>{version.cause}</td>
                             <td className="fnd-muted">{version.session_id ?? '无会话'}</td>
                             <td>{when(version.at)}</td>
@@ -157,7 +190,19 @@ export function TaskDetail({
                               <button
                                 type="button"
                                 className="fnd-head__tab"
-                                onClick={() => onRead(version.sha256)}
+                                onClick={() =>
+                                  isWorkbook(version)
+                                    ? onOpenWorkbook(version.sha256, version.ext ?? '.xlsx')
+                                    : onRead(version.sha256)
+                                }
+                                // Twelve hex characters is an identity, not a
+                                // label. The same pattern as the gallery: say
+                                // which version, and say where it opens.
+                                aria-label={
+                                  isWorkbook(version)
+                                    ? `在表格软件里打开 ${shortSha(version.sha256)}`
+                                    : `打开 ${shortSha(version.sha256)}`
+                                }
                               >
                                 {shortSha(version.sha256)}
                               </button>

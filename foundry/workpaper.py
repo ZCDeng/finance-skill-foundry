@@ -224,17 +224,51 @@ def _aux_part(hashes: dict[str, Any]) -> str | None:
     return f"aux(derived)={value}" if derived else f"aux={value}"
 
 
-def _hash_line(hashes: dict[str, Any]) -> str:
-    named = hashes.get("named") or {}
-    parts = [f"coa={hashes.get('coa') or '—'}", f"map={hashes.get('map') or '—'}"]
+def hash_pairs(hashes: dict[str, Any]) -> list[tuple[str, str]]:
+    """Every locked table and its digest, in the order the workpaper prints them.
+
+    `lock.json` keeps the four shaping tables as top-level keys and the named
+    fact tables under `named`, and `aux` carries a second key saying whether it
+    was derived. Two documents render this now -- the workpaper line and the
+    workbook's cover -- and neither should have to know that shape twice.
+    """
+    pairs: list[tuple[str, str]] = [
+        ("coa", str(hashes.get("coa") or "—")),
+        ("map", str(hashes.get("map") or "—")),
+    ]
     if hashes.get("units"):
-        parts.append(f"units={hashes['units']}")
+        pairs.append(("units", str(hashes["units"])))
     aux_part = _aux_part(hashes)
     if aux_part:
-        parts.append(aux_part)
-    for table, digest in named.items():
-        parts.append(f"{table}={digest or '—'}")
-    return " ".join(parts)
+        name, _, value = aux_part.partition("=")
+        pairs.append((name, value))
+    for table, digest in (hashes.get("named") or {}).items():
+        pairs.append((str(table), str(digest or "—")))
+    return pairs
+
+
+def _hash_line(hashes: dict[str, Any]) -> str:
+    return " ".join(f"{name}={digest}" for name, digest in hash_pairs(hashes))
+
+
+def display_tag(item: dict[str, Any]) -> str:
+    """The tag a schedule item wears once rendered.
+
+    A follow-up's item is stored with whatever the recompute called it and gets
+    `稿外追问` put in front at render time, because the mark is about where the
+    question came from rather than about the arithmetic. Two documents render
+    this now; both have to prefix it the same way or the same schedule reads as
+    two different claims depending on which file you opened.
+    """
+    tag = str(item.get("tag") or "")
+    if item.get("origin") == "followup" and OUTSIDE not in tag:
+        return f"{OUTSIDE} / {tag}" if tag else OUTSIDE
+    return tag
+
+
+def display_origin(item: dict[str, Any]) -> str:
+    """Why this item is on the workpaper, in the words the operator reads."""
+    return {"followup": OUTSIDE, LATE_REFERENCE: "稿外补录"}.get(str(item.get("origin")), "brief")
 
 
 def _account_cell(line: dict[str, Any]) -> str:
@@ -265,14 +299,8 @@ def render_workpaper(payload: dict[str, Any]) -> str:
     for item in payload.get("items") or []:
         lines.append(f"## {item.get('id')} · {item.get('text')}")
         lines.append("")
-        origin = {"followup": OUTSIDE, LATE_REFERENCE: "稿外补录"}.get(
-            str(item.get("origin")), "brief"
-        )
-        lines.append(f"来源: {origin}")
-        tag = item.get("tag") or ""
-        if item.get("origin") == "followup" and OUTSIDE not in tag:
-            tag = f"{OUTSIDE} / {tag}" if tag else OUTSIDE
-        lines.append(f"标签: {tag}")
+        lines.append(f"来源: {display_origin(item)}")
+        lines.append(f"标签: {display_tag(item)}")
         if item.get("reference"):
             # No arithmetic to show, so the source and the date are the whole
             # of what makes this line checkable.

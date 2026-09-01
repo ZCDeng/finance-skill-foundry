@@ -1,4 +1,4 @@
-import { type BrowserWindow, ipcMain } from 'electron';
+import { type BrowserWindow, ipcMain, shell } from 'electron';
 
 import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
@@ -7,7 +7,13 @@ import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
 import { ensureTaskWorkspace } from '../harness/workspace.js';
 import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
-import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
+import {
+  deliverableGallery,
+  deliverablePath,
+  listTasks,
+  readDeliverable,
+  showTask,
+} from '../reads.js';
 import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
 
@@ -93,6 +99,55 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.deliverableText, (_event, task: unknown, sha: unknown) =>
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),
+  );
+
+  /**
+   * Open an archived workbook in whatever this machine uses for spreadsheets.
+   *
+   * `shell.openPath` rather than an embedded viewer, and that is the decision
+   * rather than a stopgap. The point of writing the close as xlsx was that a
+   * finance manager reads it in the software they already sort and pivot in;
+   * rendering it back inside this window would be handing them a worse Excel.
+   *
+   * The path never crosses the boundary. The renderer passes a digest, the CLI
+   * resolves it under this task's own artifacts, and the operator's opener gets
+   * a file this store filed.
+   */
+  ipcMain.handle(
+    CHANNELS.deliverableOpen,
+    (_event, task: unknown, sha: unknown, ext: unknown) =>
+      answer(async () => {
+        const path = await deliverablePath(
+          { ...binding, task: taskId(task) },
+          String(sha ?? ''),
+          String(ext ?? ''),
+        );
+        const trouble = await shell.openPath(path);
+        if (trouble) throw new Error(`打不开 ${path}: ${trouble}`);
+        return { opened: path };
+      }),
+  );
+
+  /**
+   * Write one window as a workbook and file it as a version.
+   *
+   * A write, and it is here rather than in a session tool on purpose. The
+   * close seat has no reason to own this: rendering a locked window computes
+   * nothing, so a model calling it would only be doing what the operator can
+   * ask for the moment they want the file. Keeping it on a button also keeps
+   * `export:xlsx` an operator's cause in the timeline rather than a model's.
+   */
+  ipcMain.handle(CHANNELS.exportWorkbook, (_event, task: unknown, window: unknown) =>
+    answer(async () => {
+      const id = String(window ?? '');
+      if (id && !/^[0-9a-f]{32}$/.test(id)) throw new Error(`not a window id: ${id}`);
+      const out = await runFoundry(
+        { ...binding, task: taskId(task) },
+        'export',
+        ['--format', 'xlsx', ...(id ? ['--window', id] : [])],
+      );
+      return JSON.parse(out.trim()) as { sha256: string; seq: number; ext: string };
+    }),
   );
 
   /**

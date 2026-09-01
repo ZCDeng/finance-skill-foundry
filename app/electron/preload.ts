@@ -16,6 +16,10 @@ const api = {
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
   deliverableText: (task: string, sha: string) =>
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
+  deliverableOpen: (task: string, sha: string, ext: string) =>
+    ipcRenderer.invoke('foundry:deliverable-open', task, sha, ext),
+  exportWorkbook: (task: string, window: string) =>
+    ipcRenderer.invoke('foundry:export-workbook', task, window),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

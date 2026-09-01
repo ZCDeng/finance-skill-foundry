@@ -7,7 +7,8 @@ import { Reader } from '../src/components/Reader.js';
 import { WiringTrouble } from '../src/views/Workbench.js';
 import { Deliverables } from '../src/views/Deliverables.js';
 import { Tasks } from '../src/views/Tasks.js';
-import type { DeliverableRow, TaskRow } from '../src/bridge.js';
+import { TaskDetail } from '../src/views/TaskDetail.js';
+import { type DeliverableRow, type TaskRow, isWorkbook } from '../src/bridge.js';
 
 afterEach(cleanup);
 
@@ -88,7 +89,7 @@ describe('the task list', () => {
 });
 
 /** The gallery's own props, for the cases that only look at the list. */
-const GALLERY = { open: null, onOpen: () => {}, onBack: () => {} };
+const GALLERY = { open: null, onOpen: () => {}, onOpenWorkbook: () => {}, onBack: () => {} };
 
 describe('the deliverable gallery', () => {
   it('shows the cause, which is the column that earns the screen', () => {
@@ -545,6 +546,7 @@ describe('reading a deliverable', () => {
         rows={[{ task: TASK, row: ROW }]}
         open={null}
         onOpen={(task, row) => opened.push(`${task.id}:${row.sha256}`)}
+        onOpenWorkbook={() => {}}
         onBack={() => {}}
       />,
     );
@@ -560,6 +562,7 @@ describe('reading a deliverable', () => {
         rows={[{ task: TASK, row: ROW }]}
         open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
         onOpen={() => {}}
+        onOpenWorkbook={() => {}}
         onBack={() => {}}
       />,
     );
@@ -574,6 +577,7 @@ describe('reading a deliverable', () => {
         rows={[{ task: TASK, row: ROW }]}
         open={{ task: TASK, row: ROW, text: null }}
         onOpen={() => {}}
+        onOpenWorkbook={() => {}}
         onBack={() => {}}
       />,
     );
@@ -607,5 +611,117 @@ describe('reading a workpaper', () => {
     // The figure itself stays prose -- only the tag row becomes chips.
     expect(screen.getByText('5000')).toBeTruthy();
     expect(screen.getByText('中指研究院')).toBeTruthy();
+  });
+});
+
+describe('a workbook version', () => {
+  const BOOK: DeliverableRow = {
+    ...ROW,
+    kind: 'export',
+    ext: '.xlsx',
+    cause: 'export:xlsx',
+    sha256: 'd'.repeat(64),
+  };
+
+  it('is listed as a spreadsheet rather than as a document', () => {
+    render(<Deliverables rows={[{ task: TASK, row: BOOK }]} {...GALLERY} />);
+    expect(screen.getByText('表格')).toBeTruthy();
+  });
+
+  it('offers the handoff instead of pushing it through the reader', () => {
+    // It was written as a spreadsheet so it could be sorted and pivoted in the
+    // software the operator already has. Drawing it again here would be a
+    // worse copy of that software.
+    const opened: number[] = [];
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: BOOK }]}
+        open={{ task: TASK, row: BOOK, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => opened.push(1)}
+        onBack={() => {}}
+      />,
+    );
+    // Not the loading line: nothing is being read, and saying so would be a lie
+    // that never resolves.
+    expect(screen.queryByText(/正在从锁库读出/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /在表格软件里打开/ }));
+    expect(opened).toEqual([1]);
+  });
+
+  it('still names the version above it', () => {
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: BOOK }]}
+        open={{ task: TASK, row: BOOK, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText('export:xlsx')).toBeTruthy();
+    expect(screen.getByText('dddddddddddd')).toBeTruthy();
+  });
+
+  it('reads a row with no ext as the markdown it is', () => {
+    // Every version filed before workbooks existed.
+    expect(isWorkbook(ROW)).toBe(false);
+    expect(isWorkbook(BOOK)).toBe(true);
+  });
+});
+
+describe('the task screen', () => {
+  const WINDOW = {
+    window_id: 'b'.repeat(32),
+    reason: 'initial' as const,
+    at: '2026-08-30T03:00:00Z',
+    state: 'Briefed',
+    inputs: [],
+  };
+  const DETAIL = {
+    task: { ...TASK },
+    windows: [WINDOW],
+    sessions: [],
+    deliverables: [ROW],
+  };
+  const PROPS = {
+    onBack: () => {},
+    onRead: () => {},
+    onExport: () => {},
+    onOpenWorkbook: () => {},
+    busy: null,
+    reading: null,
+  };
+
+  it('offers to write the window as a workbook, and says which window', () => {
+    const asked: string[] = [];
+    render(<TaskDetail detail={DETAIL} {...PROPS} onExport={(id) => asked.push(id)} />);
+    fireEvent.click(screen.getByRole('button', { name: /出一份表格/ }));
+    expect(asked).toEqual([WINDOW.window_id]);
+  });
+
+  it('says it is working, on that window only', () => {
+    // Writing a real close is not instant, and a button that looked idle would
+    // be clicked again.
+    render(<TaskDetail detail={DETAIL} {...PROPS} busy={WINDOW.window_id} />);
+    const button = screen.getByRole('button', { name: /正在从锁库写/ });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('hands a filed workbook over instead of reading it', () => {
+    const book = { ...ROW, kind: 'export' as const, ext: '.xlsx', sha256: 'e'.repeat(64) };
+    const read: string[] = [];
+    const handed: string[] = [];
+    render(
+      <TaskDetail
+        detail={{ ...DETAIL, deliverables: [book] }}
+        {...PROPS}
+        onRead={(sha) => read.push(sha)}
+        onOpenWorkbook={(sha, ext) => handed.push(`${sha}${ext}`)}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /在表格软件里打开/ }));
+    expect(read).toEqual([]);
+    expect(handed).toEqual([`${book.sha256}.xlsx`]);
   });
 });

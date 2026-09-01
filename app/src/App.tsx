@@ -12,6 +12,7 @@ import {
   type HarnessStatus,
   type TaskRow,
   bridge,
+  isWorkbook,
 } from './bridge.js';
 import { Deliverables, type OpenDeliverable } from './views/Deliverables.js';
 import { TaskDetail } from './views/TaskDetail.js';
@@ -72,6 +73,8 @@ export function App() {
   const [gallery, setGallery] = useState<{ task: TaskRow; row: DeliverableRow }[]>([]);
   /** The version the gallery is showing, and its text once the store answers. */
   const [opened, setOpened] = useState<OpenDeliverable | null>(null);
+  /** The window whose workbook is being written, so its button can say so. */
+  const [exporting, setExporting] = useState<string | null>(null);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -337,6 +340,10 @@ export function App() {
     (task: TaskRow, row: DeliverableRow) => {
       if (!api) return;
       setOpened({ task, row, text: null });
+      // A workbook is not read here. The header still opens -- an operator has
+      // to be able to place the version they are about to hand to Excel -- and
+      // the body offers the handoff instead of a document.
+      if (isWorkbook(row)) return;
       void api.deliverableText(task.id, row.sha256).then((a) =>
         take(a, (text) =>
           setOpened((held) =>
@@ -346,6 +353,48 @@ export function App() {
       );
     },
     [api, take],
+  );
+
+  /** Hand the open workbook to whatever this machine opens spreadsheets with. */
+  const openWorkbook = useCallback(() => {
+    if (!api || !opened) return;
+    void api
+      .deliverableOpen(opened.task.id, opened.row.sha256, opened.row.ext ?? '.xlsx')
+      .then((a) => take(a, () => undefined));
+  }, [api, opened, take]);
+
+  /** The same handoff from the task screen, where the version is a row. */
+  const openWorkbookOnTask = useCallback(
+    (sha: string, ext: string) => {
+      if (!api || open === null) return;
+      void api.deliverableOpen(open, sha, ext).then((a) => take(a, () => undefined));
+    },
+    [api, open, take],
+  );
+
+  /**
+   * Render a window as a workbook, then open it.
+   *
+   * Opening it is the point of asking, and a button that filed a version and
+   * said nothing would leave the operator hunting a row they cannot tell from
+   * the last one. The list is refreshed either way, so the new version is on
+   * screen behind whatever their spreadsheet software did.
+   */
+  const exportWorkbook = useCallback(
+    (windowId: string) => {
+      if (!api || open === null) return;
+      setExporting(windowId);
+      void api
+        .exportWorkbook(open, windowId)
+        .then((a) =>
+          take(a, (filed) => {
+            void refreshDetail(open);
+            void api.deliverableOpen(open, filed.sha256, filed.ext).then((b) => take(b, () => undefined));
+          }),
+        )
+        .finally(() => setExporting(null));
+    },
+    [api, open, take, refreshDetail],
   );
 
   const read = useCallback(
@@ -437,6 +486,9 @@ export function App() {
           detail={openDetail}
           onBack={() => setOpen(null)}
           onRead={read}
+          onExport={exportWorkbook}
+          onOpenWorkbook={openWorkbookOnTask}
+          busy={exporting}
           reading={reading}
         />
       ) : null}
@@ -446,6 +498,7 @@ export function App() {
           rows={gallery}
           open={opened}
           onOpen={openDeliverable}
+          onOpenWorkbook={openWorkbook}
           onBack={() => setOpened(null)}
         />
       ) : null}

@@ -16,6 +16,7 @@ from foundry.probe import mark_done, run_probe
 from foundry.query import query_locked
 from foundry.questions import record_questions
 from foundry.references import record_reference
+from foundry.sheet import workbook_bytes
 from foundry.resources import fixture_root
 from foundry.task import SESSION_ROLES, Task, TaskStore, resolve_task
 from foundry.window import Window, WindowStore
@@ -290,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     p_text = sub.add_parser("deliverable-text")
     p_text.add_argument("--sha", required=True, help="sha256 of an archived version")
 
+    p_file = sub.add_parser("deliverable-path")
+    p_file.add_argument("--sha", required=True, help="sha256 of an archived version")
+    p_file.add_argument("--ext", default=".md", help="the row's ext; .xlsx for a workbook")
+
     p_session = sub.add_parser("record-session")
     p_session.add_argument("--role", default="", help=f"one of {SESSION_ROLES}; omit to derive")
     p_session.add_argument(
@@ -301,6 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     p_export = sub.add_parser("export")
     p_export.add_argument("--window", default="", help="window id; omit for the current window")
     p_export.add_argument("--kind", default="brief", choices=("brief", "workpaper"))
+    p_export.add_argument(
+        "--format",
+        dest="fmt",
+        default="md",
+        choices=("md", "xlsx"),
+        help="md files the rendered document as it stands; xlsx writes the whole window as a workbook",
+    )
 
     p_probe = sub.add_parser("probe")
     p_probe.add_argument("--fixtures", default="")
@@ -335,7 +347,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        if args.cmd in {"task-show", "deliverables", "record-session", "deliverable-text"}:
+        if args.cmd in {
+            "task-show",
+            "deliverables",
+            "record-session",
+            "deliverable-text",
+            "deliverable-path",
+        }:
             task = resolve_task(tasks, explicit=args.task or None)
             if task is None:
                 task = tasks.current()
@@ -349,6 +367,13 @@ def main(argv: list[str] | None = None) -> int:
                 # could name any file; a caller naming a sha can only reach a
                 # version this task actually filed.
                 print(task.artifact_text(args.sha), end="")
+                return 0
+            if args.cmd == "deliverable-path":
+                # The same rule, for a version that is not text. The caller
+                # still names a digest; what comes back is where this task
+                # filed it, so the app can hand it to the operator's own
+                # spreadsheet software without ever choosing a path itself.
+                print(str(task.artifact_path(args.sha, ext=args.ext)))
                 return 0
             if args.cmd == "record-session":
                 session = str(args.session or "").strip()
@@ -430,6 +455,27 @@ def main(argv: list[str] | None = None) -> int:
             task = _adopt(tasks, target, args)
             if task is None:
                 raise FoundryError("export needs a task; pass --task or run task-new")
+            if args.fmt == "xlsx":
+                # One workbook for the whole window rather than one per kind:
+                # the conclusions and the schedules behind them are the same
+                # document to the person reading it, and they are two files
+                # only because markdown cannot hold a tab.
+                if not target.brief_path.exists():
+                    raise FoundryError("brief not written")
+                print(
+                    json.dumps(
+                        task.register_bytes(
+                            window_id=target.id,
+                            kind="export",
+                            data=workbook_bytes(target, task=task.meta()),
+                            cause="export:xlsx",
+                            session_id=args.session or None,
+                            ext=".xlsx",
+                        ),
+                        ensure_ascii=False,
+                    )
+                )
+                return 0
             path = target.brief_path if args.kind == "brief" else target.workpaper_path
             if not path.exists():
                 raise FoundryError(f"{args.kind} not written")

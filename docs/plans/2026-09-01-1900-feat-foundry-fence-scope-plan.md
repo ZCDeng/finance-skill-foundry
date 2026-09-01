@@ -148,16 +148,38 @@ takes.
   `DO_NOT_TRACK=1` and an empty `UNIVER_TELEMETRY_ENDPOINT`. This build already ships an empty
   endpoint; a later one could bake one in.
 
+- **KTD13. The workbook is written by `foundry`, from the two files the documents are
+  written from** `(session-settled: user-directed — 做吧，从锁库写 xlsx)`. `foundry/sheet.py`
+  renders `brief_facts.json` and `schedules.json`; so do `brief.md` and `workpaper.md`.
+  Three renderings of one set of facts cannot disagree, three computations of them could.
+  Nothing in `sheet.py` computes.
+
+  Two rules the format forces. An xlsx number is binary64, so a figure that does not
+  survive a `Decimal -> float -> Decimal` round trip goes in as text, exact, rather than as
+  a number a spreadsheet would round — the symmetric answer to `catalog.py` refusing to
+  import such a value. And an account code is written as text, because it is an identifier
+  that happens to be digits and 0501 is not 501.
+
+  The `条目 / 标签 / 依据` columns repeat on every row. A heading above a block is a markdown
+  idea; filtering a 400-row schedule for `我重算` has to hand back rows that still say what
+  they belong to.
+
+  It is a button, not a tool. Rendering a locked window computes nothing, so a model could
+  hold it without touching the fence — but it would only be doing what the operator can ask
+  for the moment they want the file, and `export:xlsx` stays an operator's cause in the
+  timeline rather than a model's.
+
 ## Scope Boundaries
 
 **Not in this work**
 
 - Letting the model author a spreadsheet. The Office bundle is installed for the authoring
   seat and for a rendering path we have not built yet; the close seat cannot see it.
-- Rendering a brief or a workpaper as xlsx. That is the thing the plugin was installed for
-  and it is the next piece of work, not this one. It has to be written by `foundry` from the
-  locked catalog, not by a model in a worktree, or the provenance the fence exists for is
-  lost on the way to the file the leader actually opens.
+- Rendering the close in a viewer we host. `foundry export --format xlsx` now writes the
+  window as a workbook and the app hands it to the operator's own spreadsheet software.
+  Drawing it again inside this window would be a worse copy of the software they already
+  sort and pivot in, and it would put the Univer licence expiry on the path of a document
+  they need every month.
 - A leader-operated session. KTD7 stands.
 - Re-emitting a brief after a late reference. The brief is what was known when it was written;
   the workpaper is what was learned since. Conflating them would make the version trail lie.

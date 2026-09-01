@@ -15,6 +15,8 @@ export const CHANNELS = {
   task: 'foundry:task',
   gallery: 'foundry:gallery',
   deliverableText: 'foundry:deliverable-text',
+  deliverableOpen: 'foundry:deliverable-open',
+  exportWorkbook: 'foundry:export-workbook',
   /** The one channel that changes the store. See `writes.ts`. */
   taskNew: 'foundry:task-new',
   harnessStatus: 'harness:status',
