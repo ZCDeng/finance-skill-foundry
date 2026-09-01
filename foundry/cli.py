@@ -18,8 +18,41 @@ from foundry.questions import record_questions
 from foundry.references import record_reference
 from foundry.sheet import workbook_bytes
 from foundry.resources import fixture_root
-from foundry.task import SESSION_ROLES, Task, TaskStore, resolve_task
+from foundry.task import SESSION_ROLES, Filed, Task, TaskStore, resolve_task
 from foundry.window import Window, WindowStore
+
+
+RECEIPT_HELP = (
+    "wrap stdout as {text, filed}, where filed names the deliverable versions "
+    "this call archived and whether each was newly appended"
+)
+
+
+def _say(ns: argparse.Namespace, text: str, filed: list[Filed], *, end: str = "") -> None:
+    """One call's output, with or without its receipt.
+
+    Without ``--receipt`` this is byte-for-byte what the command printed
+    before, because the plain CLI is a surface an operator reads and a great
+    many tests assert on. With it, the same text arrives inside an envelope
+    naming what reached the timeline.
+
+    ``filed`` is reported by the writers rather than derived from the store
+    afterwards. Diffing ``seq`` around the call would look equivalent and is
+    not: ``seq`` is allocated under the task lock across every window, so a
+    concurrent follow-up on the same task lands in the gap, and the read side
+    resolves its own task, which is not always the one that was written.
+    """
+    if not getattr(ns, "receipt", False):
+        print(text, end=end)
+        return
+    # `end` is how the plain surface terminates a line, not part of the answer,
+    # so the envelope carries the text without it.
+    print(
+        json.dumps(
+            {"text": text, "filed": [record.as_receipt() for record in filed]},
+            ensure_ascii=False,
+        )
+    )
 
 
 def _store(ns: argparse.Namespace) -> WindowStore:
@@ -66,6 +99,16 @@ def _adopt(
     an operator drove straight through the CLI, joins the first task that
     reaches it and keeps producing documents in the meantime. Both calls below
     are idempotent, so every later step on the same window is a no-op.
+
+    Adoption only ever claims an unowned window. ``Window.bind_task`` has always
+    refused to move a back-pointer that is already set -- "moving the pointer
+    would leave those pointing at a timeline that no longer claims them" -- but
+    that guard sat on one direction of a two-way binding. Reaching a window that
+    another task owns skipped it entirely and went straight to
+    ``task.bind_window``, so the chain gained a window whose own pointer still
+    named someone else. Measured: ``--task A query-locked --brief-window <B's>``
+    put B's window in A's chain while B kept the back-pointer. The two
+    directions now refuse on the same rule.
     """
     task = resolve_task(
         tasks,
@@ -76,6 +119,11 @@ def _adopt(
         return None
     if window.task_id is None:
         window.bind_task(task.id)
+    elif window.task_id != task.id:
+        raise FoundryError(
+            f"window {window.id} belongs to task {window.task_id}, not {task.id}; "
+            "a follow-up answers on the timeline that owns the brief"
+        )
     task.bind_window(window.id, reason=reason)
     session = str(getattr(ns, "session", "") or "").strip()
     if session:
@@ -239,8 +287,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_ref = sub.add_parser("record-reference")
     p_ref.add_argument("--references", required=True)
+    p_ref.add_argument("--receipt", action="store_true", help=RECEIPT_HELP)
 
-    sub.add_parser("emit-brief")
+    p_brief = sub.add_parser("emit-brief")
+    p_brief.add_argument("--receipt", action="store_true", help=RECEIPT_HELP)
 
     p_wp = sub.add_parser("workpaper")
     p_wp.add_argument("--window", default="", help="window id; omit for the current window")
@@ -266,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="sha256 of the exported brief the leader read; anchors the answer to that version",
     )
+    p_query.add_argument("--receipt", action="store_true", help=RECEIPT_HELP)
 
     sub.add_parser("launch-formulator")
     sub.add_parser("stop-formulator")
@@ -471,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
                             cause="export:xlsx",
                             session_id=args.session or None,
                             ext=".xlsx",
-                        ),
+                        ).row,
                         ensure_ascii=False,
                     )
                 )
@@ -522,11 +573,20 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(references, dict):
                 references = [references]
             _adopt(tasks, window, args)
-            record_reference(window, references, session_id=args.session or None)
+            filed = []
+            record_reference(
+                window, references, session_id=args.session or None, filed=filed
+            )
+            # Silent without the flag, as it has always been: this verb answers
+            # by refusing or by saying nothing.
+            if args.receipt:
+                _say(args, "", filed)
             return 0
         if args.cmd == "emit-brief":
             _adopt(tasks, window, args)
-            print(emit_brief(window, session_id=args.session or None), end="")
+            filed: list[Filed] = []
+            text = emit_brief(window, session_id=args.session or None, filed=filed)
+            _say(args, text, filed)
             return 0
         if args.cmd == "workpaper":
             if not window.workpaper_path.exists():
@@ -540,18 +600,19 @@ def main(argv: list[str] | None = None) -> int:
             # has to land on the timeline the leader is reading.
             addressed = store.get(args.brief_window) if args.brief_window else window
             _adopt(tasks, addressed, args, extra_task_ids=(addressed.task_id,))
-            print(
-                query_locked(
-                    window,
-                    args.text,
-                    required_table_ids=args.tables.split(","),
-                    split_by=args.split_by or None,
-                    brief_window_id=args.brief_window or None,
-                    question_id=args.question_id or None,
-                    session_id=args.session or None,
-                    brief_sha=args.brief_sha or None,
-                )
+            filed = []
+            answer = query_locked(
+                window,
+                args.text,
+                required_table_ids=args.tables.split(","),
+                split_by=args.split_by or None,
+                brief_window_id=args.brief_window or None,
+                question_id=args.question_id or None,
+                session_id=args.session or None,
+                brief_sha=args.brief_sha or None,
+                filed=filed,
             )
+            _say(args, answer, filed, end="\n")
             return 0
         if args.cmd == "launch-formulator":
             print(json.dumps(launch_formulator(window)))

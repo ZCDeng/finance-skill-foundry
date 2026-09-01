@@ -7,7 +7,7 @@ from foundry.errors import LockRefused
 from foundry.fsutil import write_text_atomic
 from foundry.locking import exclusive
 from foundry.tags import RESERVED_WORDS
-from foundry.task import register_window_deliverable, task_for
+from foundry.task import Filed, register_window_deliverable, task_for
 from foundry.window import QUERYABLE, Window
 from foundry.workpaper import LATE_REFERENCE, persist_schedules, schedule_reference
 
@@ -42,7 +42,11 @@ def _field(entry: dict[str, Any], name: str) -> str:
 
 
 def record_reference(
-    window: Window, entries: list[dict[str, Any]], *, session_id: str | None = None
+    window: Window,
+    entries: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+    filed: list[Filed] | None = None,
 ) -> None:
     """File one or more external references against this window.
 
@@ -96,7 +100,8 @@ def record_reference(
                 **({"note": _field(entry, "note")} if _field(entry, "note") else {}),
             }
         )
-    filed = [entry for entry in kept if entry["id"] in {_field(item, "id") for item in entries}]
+    # Renamed off `filed`, which is now the caller's collector.
+    kept_now = [entry for entry in kept if entry["id"] in {_field(item, "id") for item in entries}]
     if window.state == "Locked":
         # The brief has not been written yet, so `emit_brief` will pick these up
         # and render them itself. Nothing else to do.
@@ -123,19 +128,21 @@ def record_reference(
                     entry["at"],
                     origin=LATE_REFERENCE,
                 )
-                for entry in filed
+                for entry in kept_now
             ],
             replace=False,
         )
         window._set_state("FollowUp")
-    register_window_deliverable(
+    record = register_window_deliverable(
         task,
         window_id=window.id,
         kind="workpaper",
         text=workpaper,
-        cause=f"record-reference:{','.join(entry['id'] for entry in filed)}",
+        cause=f"record-reference:{','.join(entry['id'] for entry in kept_now)}",
         session_id=session_id,
     )
+    if filed is not None and record is not None:
+        filed.append(record)
 
 
 def load_references(window: Window) -> list[dict[str, Any]]:

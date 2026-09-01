@@ -20,7 +20,7 @@ from foundry.fsutil import write_text_atomic
 from foundry.locking import exclusive
 from foundry.questions import load_questions
 from foundry.references import load_references
-from foundry.task import register_window_deliverable, task_for
+from foundry.task import Filed, register_window_deliverable, task_for
 from foundry.tags import AGREED, CLAIMED, EXTERNAL, NOT_IN_WINDOW, OUTSIDE, RECOMPUTED
 from foundry.window import Window
 from foundry.workpaper import (
@@ -51,7 +51,9 @@ def _aggregate(window: Window, table: str) -> Decimal | int:
     return value
 
 
-def _register_period_outputs(window: Window, text: str, session_id: str | None) -> None:
+def _register_period_outputs(
+    window: Window, text: str, session_id: str | None, filed: list[Filed] | None = None
+) -> None:
     """File the brief and the workpaper as deliverable versions.
 
     Runs outside the window lock and after the writes, so a task store that
@@ -62,22 +64,38 @@ def _register_period_outputs(window: Window, text: str, session_id: str | None) 
     """
     task = task_for(window.store.var_root, window.task_id)
     if task is None:
+        # No timeline to hang them on, so nothing was filed. The receipt says
+        # so by staying empty, which is not the same claim as "nothing was
+        # produced" -- the brief is on disk either way.
         return
-    register_window_deliverable(
-        task, window_id=window.id, kind="brief", text=text, cause="emit-brief", session_id=session_id
-    )
-    if window.workpaper_path.exists():
+    written = [
         register_window_deliverable(
             task,
             window_id=window.id,
-            kind="workpaper",
-            text=window.workpaper_path.read_text(encoding="utf-8"),
+            kind="brief",
+            text=text,
             cause="emit-brief",
             session_id=session_id,
         )
+    ]
+    if window.workpaper_path.exists():
+        written.append(
+            register_window_deliverable(
+                task,
+                window_id=window.id,
+                kind="workpaper",
+                text=window.workpaper_path.read_text(encoding="utf-8"),
+                cause="emit-brief",
+                session_id=session_id,
+            )
+        )
+    if filed is not None:
+        filed.extend(record for record in written if record is not None)
 
 
-def emit_brief(window: Window, *, session_id: str | None = None) -> str:
+def emit_brief(
+    window: Window, *, session_id: str | None = None, filed: list[Filed] | None = None
+) -> str:
     """Write this window's conclusion brief, once.
 
     The one-shot latch is the state transition to ``Briefed``, not the presence
@@ -86,10 +104,16 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
     a window interrupted mid-emit still holds a consistent set and the next
     ``emit-brief`` recomputes it from the same locked catalog instead of
     refusing forever.
+
+    ``filed`` is a collector, not a return value, and that is a deliberate
+    shape. The text is what every one of this function's callers wants; the
+    deliverable versions are what one of them wants, and turning the return
+    into a pair to serve it would have rewritten ninety-odd call sites to reach
+    through a tuple for the thing they already had.
     """
     if window.state in {"Briefed", "FollowUp"} and window.brief_path.exists():
         text = window.brief_path.read_text()
-        _register_period_outputs(window, text, session_id)
+        _register_period_outputs(window, text, session_id, filed)
         return text
     if window.state != "Locked":
         raise LockRefused(f"brief refused in state {window.state}")
@@ -257,5 +281,5 @@ def emit_brief(window: Window, *, session_id: str | None = None) -> str:
         persist_schedules(window, schedules, replace=True)
         write_text_atomic(window.brief_path, text)
         window._set_state("Briefed")
-    _register_period_outputs(window, text, session_id)
+    _register_period_outputs(window, text, session_id, filed)
     return text

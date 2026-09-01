@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic as _write_json
@@ -19,6 +19,24 @@ SESSION_ROLES = ("author", "period", "followup")
 DELIVERABLE_KINDS = ("brief", "workpaper", "export")
 WINDOW_REASONS = ("initial", "reimport")
 TASK_LOCK_TIMEOUT = 10.0
+
+
+class Filed(NamedTuple):
+    """One archived version, and whether this call is what archived it.
+
+    ``register_bytes`` returns the prior row when the bytes are identical, so
+    the row alone cannot say which of two things happened: a document was just
+    written, or a re-render produced what was already on file. Both are normal
+    -- `_register_period_outputs` runs on every `emit-brief` -- and a receipt
+    that reported the second as the first would tell an operator a version
+    exists that they have already seen, every time.
+    """
+
+    row: dict[str, Any]
+    appended: bool
+
+    def as_receipt(self) -> dict[str, Any]:
+        return {**self.row, "appended": self.appended}
 
 
 def now_iso() -> str:
@@ -226,6 +244,18 @@ class Task:
         cleaned = str(session_id).strip()
         if not cleaned:
             raise FoundryError("session id is required")
+        # One conversation belongs to one task. The app opens a session for a
+        # named task and the fence stops the page opening any other kind, so a
+        # session id arriving at a second task means the call reached across --
+        # a follow-up addressing a window this conversation has no business in.
+        # Refused here rather than at the caller because this is the one writer,
+        # and the rule is about the row it is about to append.
+        owner = session_owner(self.store, cleaned)
+        if owner is not None and owner.id != self.id:
+            raise FoundryError(
+                f"session {cleaned} already belongs to task {owner.id}; "
+                f"it cannot also be recorded on {self.id}"
+            )
         with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
             existing = _read_jsonl(self.sessions_path)
             for row in existing:
@@ -284,7 +314,7 @@ class Task:
             cause=cause,
             session_id=session_id,
             ext=ext,
-        )
+        ).row
 
     def register_bytes(
         self,
@@ -295,7 +325,7 @@ class Task:
         cause: str,
         session_id: str | None = None,
         ext: str = ".md",
-    ) -> dict[str, Any]:
+    ) -> Filed:
         """The same version row, for a document that is not text.
 
         A workbook is bytes and a brief is characters, and only one of those
@@ -322,7 +352,7 @@ class Task:
                 and row.get("ext", ".md") == ext
             ]
             if prior and prior[-1].get("sha256") == digest:
-                return prior[-1]
+                return Filed(prior[-1], appended=False)
             artifact = self.artifacts_dir / f"{digest}{ext}"
             if not artifact.exists():
                 artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -344,7 +374,7 @@ class Task:
                 "at": now_iso(),
             }
             _append_jsonl(self.deliverables_path, row)
-            return row
+            return Filed(row, appended=True)
 
     def artifact_path(self, sha256: str, *, ext: str = ".md") -> Path:
         if not re.fullmatch(r"[0-9a-f]{64}", str(sha256)):
@@ -376,7 +406,7 @@ def register_window_deliverable(
     text: str,
     cause: str,
     session_id: str | None = None,
-) -> dict[str, Any] | None:
+) -> Filed | None:
     """Register when the window has a task, do nothing when it does not.
 
     Every write site calls this rather than branching on its own. A window
@@ -386,13 +416,31 @@ def register_window_deliverable(
     """
     if task is None:
         return None
-    return task.register_deliverable(
+    return task.register_bytes(
         window_id=window_id,
         kind=kind,
-        text=text,
+        data=text.encode("utf-8"),
         cause=cause,
         session_id=session_id,
     )
+
+
+def session_owner(store: TaskStore, session_id: str) -> Task | None:
+    """The task that already holds this conversation, if one does.
+
+    A scan rather than an index, and that is a size judgement rather than a
+    principle: a store holds one task per closing period, so this reads a few
+    dozen small files on the calls that carry a session, and an index would be
+    a second thing to keep true for no measured gain.
+    """
+    cleaned = str(session_id).strip()
+    if not cleaned:
+        return None
+    for task in store.list():
+        for row in task.sessions():
+            if row.get("session_id") == cleaned:
+                return task
+    return None
 
 
 def task_for(var_root: Path, task_id: str | None) -> Task | None:

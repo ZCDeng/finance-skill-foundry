@@ -169,6 +169,49 @@ takes.
   for the moment they want the file, and `export:xlsx` stays an operator's cause in the
   timeline rather than a model's.
 
+- **KTD14. A window and a conversation each belong to exactly one task**
+  `(session-settled: user-directed — 修跨任务洞)`. Two calls could reach across the task
+  chain, and both reproduced on a real store before the guards existed:
+
+  | Door | What happened |
+  | --- | --- |
+  | session | a session recorded on task A recomputed against B's catalog, landed on both session lists, and B grew a workpaper version caused by a conversation held about A |
+  | window | `--task A query-locked --brief-window <B's>` put B's window in A's chain while that window's back-pointer still said B |
+
+  Neither broke provenance — both figures were derivable from the lock they named and both
+  wore `稿外追问`. What broke was the timeline: a version on a task, from a conversation that
+  task never had.
+
+  The window door was an asymmetry, not an oversight in principle. `Window.bind_task` has
+  always refused to move a back-pointer that is set; `Task.bind_window` had no such guard,
+  and adoption skipped the first check entirely when the window was already owned. The two
+  directions of one binding now refuse on the same rule. The session door is `record_session`
+  refusing a conversation another task already holds — on the writer, because that is the one
+  place the row is appended.
+
+  Adoption on touch is unchanged: a window nobody owns still joins the first task that
+  reaches it. The rule only fires when a second claimant appears.
+
+- **KTD15. What a call archived is reported by the side that archived it**
+  `(session-settled: user-directed — 做题一 foundry 那一半)`. `emit-brief`, `query-locked`
+  and `record-reference` take `--receipt`, which wraps stdout as `{text, filed}`. Without the
+  flag stdout is byte-for-byte what it was, verified against the stashed tree.
+
+  Derived would have been wrong twice over. `seq` is allocated under the task lock across
+  every window, so a concurrent follow-up on the same task lands in the gap; and the read
+  side resolves its own task, which is not always the one that was written. So `register_bytes`
+  returns `Filed(row, appended)` — the row alone cannot say whether a re-render archived
+  anything, and `_register_period_outputs` runs on every emit, so a receipt that called the
+  second run an archive would announce a version the operator had already seen, every time.
+
+  `filed` is a collector parameter rather than a return value. The text is what all ninety-odd
+  callers of these three functions want; the versions are what one of them wants, and turning
+  the return into a pair would have rewritten every one of them to reach through a tuple for
+  what they already had.
+
+  An empty `filed` means there was no timeline to file against, which is not the same claim
+  as nothing having been produced — the brief is on disk either way.
+
 ## Scope Boundaries
 
 **Not in this work**

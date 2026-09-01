@@ -19,7 +19,7 @@ from foundry.caliber import (
 from foundry.catalog import quote_ident
 from foundry.errors import LockRefused, QueryRefused
 from foundry.locking import exclusive
-from foundry.task import register_window_deliverable, task_for
+from foundry.task import Filed, register_window_deliverable, task_for
 from foundry.tags import CLAIMED, OUTSIDE, RECOMPUTED
 from foundry.window import QUERYABLE, Window, WindowStore
 from foundry.workpaper import (
@@ -87,6 +87,7 @@ def _record_followup(
     *,
     session_id: str | None = None,
     brief_sha: str | None = None,
+    filed: list[Filed] | None = None,
 ) -> None:
     """Record one follow-up as a single locked unit.
 
@@ -128,7 +129,7 @@ def _record_followup(
         # The cause names the schedule this answer added, so a workpaper version
         # traces back to the one follow-up that grew it. Without it the timeline
         # says the file changed and never says what changed it.
-        register_window_deliverable(
+        record = register_window_deliverable(
             task,
             window_id=window.id,
             kind="workpaper",
@@ -136,6 +137,8 @@ def _record_followup(
             cause=f"query-locked:{schedule_id}" if schedule_id else "query-locked",
             session_id=session_id,
         )
+        if filed is not None and record is not None:
+            filed.append(record)
 
 
 def _same_required(fact: dict[str, Any], required_table_ids: list[str]) -> bool:
@@ -163,6 +166,7 @@ def query_locked(
     question_id: str | None = None,
     session_id: str | None = None,
     brief_sha: str | None = None,
+    filed: list[Filed] | None = None,
 ) -> str:
     if not required_table_ids:
         raise QueryRefused("required_table_ids is required")
@@ -221,6 +225,7 @@ def query_locked(
                 tag=f"{OUTSIDE} / {RECOMPUTED}",
             ),
             session_id=session_id,
+            filed=filed,
             brief_sha=brief_sha,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
@@ -259,6 +264,7 @@ def query_locked(
                 split_by=split_by,
             ),
             session_id=session_id,
+            filed=filed,
             brief_sha=brief_sha,
         )
         return f"{OUTSIDE} / {RECOMPUTED}: {text} → {parts}{_window_note(target)}"
@@ -297,6 +303,7 @@ def query_locked(
             recomputed=value,
         ),
         session_id=session_id,
+        filed=filed,
         brief_sha=brief_sha,
     )
     return f"{OUTSIDE} / {RECOMPUTED}: {text} → {value}{_window_note(target)}"
