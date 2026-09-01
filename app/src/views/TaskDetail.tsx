@@ -136,24 +136,15 @@ export function TaskDetail({
               </button>
               {openWindow === row.window_id ? (
                 <div className="fnd-panel" style={{ marginTop: 10 }}>
-                  <p className="fnd-eyebrow">
-                    <HardDriveDownload size={12} strokeWidth={1.5} aria-hidden />
-                    {' 输入归档'}
-                  </p>
-                  <div style={{ marginTop: 10 }}>
-                    <Inputs window={row} />
-                  </div>
-                  <p className="fnd-eyebrow" style={{ marginTop: 20 }}>
-                    <FileText size={12} strokeWidth={1.5} aria-hidden />
-                    {' 交付物版本'}
-                  </p>
                   {/*
-                    * The whole window as one workbook, for the person who is
-                    * going to sort and pivot it. Written by `foundry` from the
-                    * lock, not by a model in a spreadsheet, which is the only
-                    * reason a figure in it still means what its mark says.
+                    * First inside the panel, and that placement is the fix for
+                    * a measured problem rather than a preference. It used to
+                    * sit under 输入归档, which on a real close is twenty-odd
+                    * rows each carrying a full source path -- 1344px below the
+                    * fold on the task this was found on. An action nobody
+                    * scrolls to is an action that does not exist.
                     */}
-                  <div style={{ marginTop: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
                       type="button"
                       className="fnd-button"
@@ -164,6 +155,17 @@ export function TaskDetail({
                       {busy === row.window_id ? ' 正在从锁库写…' : ' 出一份表格'}
                     </button>
                   </div>
+                  <p className="fnd-eyebrow" style={{ marginTop: 14 }}>
+                    <HardDriveDownload size={12} strokeWidth={1.5} aria-hidden />
+                    {' 输入归档'}
+                  </p>
+                  <div style={{ marginTop: 10 }}>
+                    <Inputs window={row} />
+                  </div>
+                  <p className="fnd-eyebrow" style={{ marginTop: 20 }}>
+                    <FileText size={12} strokeWidth={1.5} aria-hidden />
+                    {' 交付物版本'}
+                  </p>
                   <div className="fnd-tablewrap" style={{ marginTop: 10 }}>
                     <table className="fnd-table">
                       <thead>

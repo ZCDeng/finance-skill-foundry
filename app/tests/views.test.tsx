@@ -89,7 +89,14 @@ describe('the task list', () => {
 });
 
 /** The gallery's own props, for the cases that only look at the list. */
-const GALLERY = { open: null, onOpen: () => {}, onOpenWorkbook: () => {}, onBack: () => {} };
+const GALLERY = {
+  open: null,
+  onOpen: () => {},
+  onOpenWorkbook: () => {},
+  onExport: () => {},
+  busy: null,
+  onBack: () => {},
+};
 
 describe('the deliverable gallery', () => {
   it('shows the cause, which is the column that earns the screen', () => {
@@ -547,6 +554,8 @@ describe('reading a deliverable', () => {
         open={null}
         onOpen={(task, row) => opened.push(`${task.id}:${row.sha256}`)}
         onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
         onBack={() => {}}
       />,
     );
@@ -563,6 +572,8 @@ describe('reading a deliverable', () => {
         open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
         onBack={() => {}}
       />,
     );
@@ -578,6 +589,8 @@ describe('reading a deliverable', () => {
         open={{ task: TASK, row: ROW, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
         onBack={() => {}}
       />,
     );
@@ -639,6 +652,8 @@ describe('a workbook version', () => {
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => opened.push(1)}
+        onExport={() => {}}
+        busy={null}
         onBack={() => {}}
       />,
     );
@@ -656,6 +671,8 @@ describe('a workbook version', () => {
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
         onBack={() => {}}
       />,
     );
@@ -723,5 +740,86 @@ describe('the task screen', () => {
     fireEvent.click(screen.getByRole('button', { name: /在表格软件里打开/ }));
     expect(read).toEqual([]);
     expect(handed).toEqual([`${book.sha256}.xlsx`]);
+  });
+});
+
+describe('finding the export at all', () => {
+  /*
+   * The defect this pins was measured in the packaged app, not imagined. The
+   * only export action lived on the task screen, below 输入归档 -- which on a
+   * real close is twenty-odd rows each carrying a full source path. Its button
+   * sat 1344px below the fold of an 828px viewport, and the screen actually
+   * named 交付物 had no export at all. An action nobody can scroll to is an
+   * action that does not exist.
+   */
+  it('offers it on the screen named 交付物, while reading a document', () => {
+    const asked: string[] = [];
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: ROW }]}
+        open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onExport={(task, windowId) => asked.push(`${task.id}:${windowId}`)}
+        busy={null}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /出成表格/ }));
+    expect(asked).toEqual([`${TASK.id}:${ROW.window_id}`]);
+  });
+
+  it('does not offer to export a workbook into a workbook', () => {
+    const book: DeliverableRow = { ...ROW, kind: 'export', ext: '.xlsx' };
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: book }]}
+        open={{ task: TASK, row: book, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /出成表格/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /在表格软件里打开/ })).toBeTruthy();
+  });
+
+  it('sits above the input archive on the task screen, not below it', () => {
+    // Order is the whole fix, so order is what is asserted -- on the rendered
+    // DOM rather than the source, because what went wrong was a position on
+    // screen and not a position in a file.
+    const { container } = render(
+      <TaskDetail
+        detail={{
+          task: { ...TASK },
+          windows: [
+            {
+              window_id: 'b'.repeat(32),
+              reason: 'initial' as const,
+              at: '2026-08-30T03:00:00Z',
+              state: 'Briefed',
+              inputs: [],
+            },
+          ],
+          sessions: [],
+          deliverables: [],
+        }}
+        onBack={() => {}}
+        onRead={() => {}}
+        onExport={() => {}}
+        onOpenWorkbook={() => {}}
+        busy={null}
+        reading={null}
+      />,
+    );
+    const action = screen.getByRole('button', { name: /出一份表格/ });
+    const archive = [...container.querySelectorAll('p')].find((p) =>
+      p.textContent?.includes('输入归档'),
+    );
+    expect(archive).toBeTruthy();
+    // DOCUMENT_POSITION_FOLLOWING === 4: the archive comes after the button.
+    expect(action.compareDocumentPosition(archive!) & 4).toBe(4);
   });
 });

@@ -115,10 +115,16 @@ export function App() {
     refreshTasks();
   }, [refreshTasks]);
 
-  useEffect(() => {
-    if (!api || screen !== 'deliverables') return;
+  /** Every version this machine has produced, newest first, across all tasks. */
+  const refreshGallery = useCallback(() => {
+    if (!api) return;
     void api.gallery().then((a) => take(a, setGallery));
-  }, [api, screen, take]);
+  }, [api, take]);
+
+  useEffect(() => {
+    if (screen !== 'deliverables') return;
+    refreshGallery();
+  }, [screen, refreshGallery]);
 
   /** The bound task's own record, which is what the strip reads. */
   const refreshDetail = useCallback(
@@ -363,6 +369,30 @@ export function App() {
       .then((a) => take(a, () => undefined));
   }, [api, opened, take]);
 
+  /**
+   * Export from the deliverables screen, where the task is the row's own.
+   *
+   * `exportWorkbook` reads `open`, which is the task screen's selection and is
+   * null here. This one is told which task, and refreshes the gallery rather
+   * than a task detail.
+   */
+  const exportFromGallery = useCallback(
+    (task: TaskRow, windowId: string) => {
+      if (!api) return;
+      setExporting(windowId);
+      void api
+        .exportWorkbook(task.id, windowId)
+        .then((a) =>
+          take(a, (filed) => {
+            void refreshGallery();
+            void api.deliverableOpen(task.id, filed.sha256, filed.ext).then((b) => take(b, () => undefined));
+          }),
+        )
+        .finally(() => setExporting(null));
+    },
+    [api, take, refreshGallery],
+  );
+
   /** The same handoff from the task screen, where the version is a row. */
   const openWorkbookOnTask = useCallback(
     (sha: string, ext: string) => {
@@ -499,6 +529,8 @@ export function App() {
           open={opened}
           onOpen={openDeliverable}
           onOpenWorkbook={openWorkbook}
+          onExport={exportFromGallery}
+          busy={exporting}
           onBack={() => setOpened(null)}
         />
       ) : null}

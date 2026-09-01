@@ -277,6 +277,23 @@ takes.
   A different `--user-data-dir` takes its own lock, so a scratch instance still runs beside a
   real one — which is how this app gets driven under test.
 
+- **KTD19. An action nobody can scroll to is an action that does not exist**
+  `(session-settled: user-directed — 依然没有找到导出的入口)`. The workbook export shipped with
+  one entry point, on the task screen, below the input archive. Measured in the packaged app:
+  on a real close that archive is twenty-odd rows each carrying a full source path, and the
+  button sat 1344px below the fold of an 828px viewport. The screen actually named 交付物 had
+  no export at all — which is where an operator goes to look for one, and did.
+
+  Two placements now. The task screen's button moved to the top of the window panel, above the
+  archive; measured again, it lands at 367px in the same 828px viewport. And reading any
+  document on the 交付物 screen offers `把这个窗口出成表格` for that document's own window,
+  because that is the moment someone wants one.
+
+  It was found by driving the packaged app over CDP and asking the button for its
+  `getBoundingClientRect`, after twice telling the operator where it was. Reading the source
+  and believing the feature exists is how it went unnoticed; a rendered-order assertion is
+  what pins it now.
+
 ## Scope Boundaries
 
 **Not in this work**

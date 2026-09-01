@@ -40,12 +40,18 @@ export function Deliverables({
   open,
   onOpen,
   onOpenWorkbook,
+  onExport,
+  busy,
   onBack,
 }: {
   rows: { task: TaskRow; row: DeliverableRow }[];
   open: OpenDeliverable | null;
   onOpen(task: TaskRow, row: DeliverableRow): void;
   onOpenWorkbook(): void;
+  /** Render the open document's window as a workbook, and open that. */
+  onExport(task: TaskRow, windowId: string): void;
+  /** The window currently being written, if any. */
+  busy: string | null;
   onBack(): void;
 }) {
   if (open) {
@@ -94,6 +100,25 @@ export function Deliverables({
             </dd>
           </div>
         </dl>
+        {/*
+          * The export lives here because this is the screen named 交付物 and
+          * this is where an operator looking for one arrives. It was only on
+          * the task screen before, below the input archive, which is where it
+          * went unfound.
+          */}
+        {isWorkbook(open.row) ? null : (
+          <div>
+            <button
+              type="button"
+              className="fnd-button"
+              onClick={() => onExport(open.task, open.row.window_id)}
+              disabled={busy === open.row.window_id}
+            >
+              <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
+              {busy === open.row.window_id ? ' 正在从锁库写…' : ' 把这个窗口出成表格'}
+            </button>
+          </div>
+        )}
         {/*
           * A workbook is handed over rather than rendered. It was written as a
           * spreadsheet so it could be sorted and pivoted in the software the
