@@ -13,7 +13,7 @@ import {
   type TaskRow,
   bridge,
 } from './bridge.js';
-import { Deliverables } from './views/Deliverables.js';
+import { Deliverables, type OpenDeliverable } from './views/Deliverables.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
@@ -70,6 +70,8 @@ export function App() {
   /** Until this is true, an empty list is "not asked yet", not "no tasks". */
   const [listed, setListed] = useState(false);
   const [gallery, setGallery] = useState<{ task: TaskRow; row: DeliverableRow }[]>([]);
+  /** The version the gallery is showing, and its text once the store answers. */
+  const [opened, setOpened] = useState<OpenDeliverable | null>(null);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -323,6 +325,29 @@ export function App() {
     [api, take, refreshTasks],
   );
 
+  /*
+   * Open one version from the gallery.
+   *
+   * The row is shown before its text arrives, so the header an operator needs
+   * to place the document -- task, cause, digest -- is on screen while the
+   * store is still being read. A refusal clears it rather than leaving a
+   * header over an empty page.
+   */
+  const openDeliverable = useCallback(
+    (task: TaskRow, row: DeliverableRow) => {
+      if (!api) return;
+      setOpened({ task, row, text: null });
+      void api.deliverableText(task.id, row.sha256).then((a) =>
+        take(a, (text) =>
+          setOpened((held) =>
+            held && held.row.sha256 === row.sha256 ? { ...held, text } : held,
+          ),
+        ),
+      );
+    },
+    [api, take],
+  );
+
   const read = useCallback(
     (sha: string) => {
       if (!api || open === null) return;
@@ -346,7 +371,10 @@ export function App() {
   return (
     <Shell
       screen={screen}
-      onScreen={setScreen}
+      onScreen={(next) => {
+        if (next !== 'deliverables') setOpened(null);
+        setScreen(next);
+      }}
       onGuide={screen === 'workbench' ? () => setAsked(true) : undefined}
       strip={
         screen === 'workbench' ? (
@@ -413,7 +441,14 @@ export function App() {
         />
       ) : null}
       {screen === 'formulator' ? <Formulator running={formulator} /> : null}
-      {screen === 'deliverables' ? <Deliverables rows={gallery} /> : null}
+      {screen === 'deliverables' ? (
+        <Deliverables
+          rows={gallery}
+          open={opened}
+          onOpen={openDeliverable}
+          onBack={() => setOpened(null)}
+        />
+      ) : null}
     </Shell>
   );
 }

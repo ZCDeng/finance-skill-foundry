@@ -758,3 +758,127 @@
   max-width: 720px;
   margin: 40px auto 0;
 }
+
+/* -- a deliverable, read as a document ------------------------------------ */
+
+/*
+ * The two things this product writes have a shape, and this is it drawn: a
+ * title, a heading per question, named facts under each, and the table of
+ * lines the figure came from. It replaced a `<pre>`, which showed an operator
+ * the same thing a log would.
+ */
+.fnd-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 100%;
+}
+
+.fnd-doc__title {
+  font-family: var(--fnd-font-display);
+  font-size: 22px;
+  line-height: 1.4;
+  font-weight: var(--fnd-weight-heavy);
+  margin: 0;
+}
+
+.fnd-doc__section {
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: var(--fnd-weight-heavy);
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--fnd-line);
+}
+
+.fnd-doc__text {
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-small);
+  line-height: 20px;
+}
+
+/*
+ * Named facts. A grid rather than a list, so the labels line up down the page
+ * and the values start at one column -- which is what makes 我重算 and 表 read
+ * as the same kind of thing on every section.
+ */
+.fnd-doc__meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fnd-size-small);
+}
+
+.fnd-doc__pair {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.fnd-doc__pair dt {
+  color: var(--fnd-muted);
+}
+
+.fnd-doc__pair dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The version's own identity, above the version. */
+.fnd-doc__stamp {
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-container);
+  background: var(--fnd-surface-strong);
+  padding: 16px 18px;
+}
+
+/*
+ * The lock digests, folded away.
+ *
+ * One sha per table in the window -- twenty-five of them in a real close. It is
+ * the line that makes every figure reproducible, so it is kept whole and put
+ * behind a disclosure rather than truncated.
+ */
+.fnd-doc__locks > summary {
+  cursor: pointer;
+  font-size: var(--fnd-size-small);
+  color: var(--fnd-ink);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.fnd-doc__locks[open] > summary {
+  margin-bottom: 10px;
+}
+
+.fnd-doc__locks > summary::marker {
+  color: var(--fnd-line-hover);
+}
+
+/* A row that opens something says so before it is clicked. */
+.fnd-table__open:hover {
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-linkish {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: var(--fnd-ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--fnd-line-hover);
+  text-underline-offset: 3px;
+}
+
+.fnd-linkish:hover {
+  color: var(--fnd-line-hover);
+}

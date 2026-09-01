@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Reader } from '../components/Reader.js';
 import { ArrowLeft, FileText, HardDriveDownload, MessageSquareQuote } from 'lucide-react';
 
 import {
@@ -167,7 +168,7 @@ export function TaskDetail({
                     </table>
                   </div>
                   {reading && versionsFor(row.window_id).some((v) => v.sha256 === reading.sha) ? (
-                    <pre className="fnd-reader">{reading.text}</pre>
+                    <Reader source={reading.text} />
                   ) : null}
                 </div>
               ) : null}

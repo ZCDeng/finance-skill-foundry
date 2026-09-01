@@ -86,11 +86,14 @@ describe('the task list', () => {
   });
 });
 
+/** The gallery's own props, for the cases that only look at the list. */
+const GALLERY = { open: null, onOpen: () => {}, onBack: () => {} };
+
 describe('the deliverable gallery', () => {
   it('shows the cause, which is the column that earns the screen', () => {
     // A file name says a document changed. `query-locked:followup-1` says which
     // question changed it.
-    render(<Deliverables rows={[{ task: TASK, row: ROW }]} />);
+    render(<Deliverables rows={[{ task: TASK, row: ROW }]} {...GALLERY} />);
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
     expect(screen.getByText('底稿')).toBeTruthy();
     expect(screen.getByText('8.2 KB')).toBeTruthy();
@@ -98,7 +101,7 @@ describe('the deliverable gallery', () => {
   });
 
   it('names a version with no conversation behind it', () => {
-    render(<Deliverables rows={[{ task: TASK, row: { ...ROW, session_id: null } }]} />);
+    render(<Deliverables rows={[{ task: TASK, row: { ...ROW, session_id: null } }]} {...GALLERY} />);
     expect(screen.getByText('无会话')).toBeTruthy();
   });
 });
@@ -461,5 +464,118 @@ describe('a workbench whose runtime has not answered', () => {
     const { Booting } = await import('../src/views/Workbench.js');
     render(<Booting />);
     expect(screen.getByText('FA Foundry 正在启动')).toBeTruthy();
+  });
+});
+
+/*
+ * The complaint this answers: the gallery listed time, task, kind, cause, size
+ * and digest, and opened nothing. That is a log with better column headings.
+ */
+describe('reading a deliverable', () => {
+  const DOC = [
+    '# 本期计算底稿',
+    '',
+    '窗口: 96fa6c11c74e4eeb9c5748927ad18be6',
+    '锁哈希: coa=04485de8 proj_ar=4725627a proj_billed=59f3b710',
+    '本文件由锁库算出，不是模型起草。',
+    '',
+    '## q-billed · 本年账单合计多少？',
+    '',
+    '来源: brief',
+    '标签: 我重算',
+    '我重算: 282670.7525',
+    '',
+    '| 科目 | 辅助 | 金额 | 对照 |',
+    '| --- | --- | --- | --- |',
+    '| 9101 本年账单含税 | unit/上海城市公司 | 10212.6518 | 源表行 |',
+    '| 9101 本年账单含税 | unit/杭州城市公司 | 8172.7051 | 源表行 |',
+  ].join('\n');
+
+  it('reads the grammar this product actually writes', async () => {
+    const { readDocument } = await import('../src/components/Reader.js');
+    const kinds = readDocument(DOC).map((block) => block.kind);
+    expect(kinds).toEqual(['title', 'meta', 'locks', 'text', 'section', 'meta', 'table']);
+  });
+
+  it('pulls the lock digests apart instead of printing the wall', async () => {
+    // One sha per table in the window, twenty-five of them in a real close. It
+    // is what makes the figures reproducible, so it is kept whole.
+    const { readDocument } = await import('../src/components/Reader.js');
+    const locks = readDocument(DOC).find((block) => block.kind === 'locks');
+    expect(locks).toBeTruthy();
+    if (locks?.kind !== 'locks') throw new Error('no locks block');
+    expect(locks.entries).toEqual([
+      ['coa', '04485de8'],
+      ['proj_ar', '4725627a'],
+      ['proj_billed', '59f3b710'],
+    ]);
+  });
+
+  it('drops the separator row rather than drawing it as data', async () => {
+    const { readDocument } = await import('../src/components/Reader.js');
+    const table = readDocument(DOC).find((block) => block.kind === 'table');
+    if (table?.kind !== 'table') throw new Error('no table block');
+    expect(table.head).toEqual(['科目', '辅助', '金额', '对照']);
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0][2]).toBe('10212.6518');
+  });
+
+  it('keeps a line it does not recognise rather than dropping it', async () => {
+    // A line added upstream should surface as text, not disappear.
+    const { readDocument } = await import('../src/components/Reader.js');
+    const blocks = readDocument('# t\n> 一句新加的话');
+    expect(blocks[1]).toEqual({ kind: 'text', text: '> 一句新加的话' });
+  });
+
+  it('draws the table as a table', async () => {
+    const { Reader } = await import('../src/components/Reader.js');
+    const { container } = render(<Reader source={DOC} />);
+    expect(container.querySelectorAll('table')).toHaveLength(1);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(container.querySelectorAll('.fnd-doc__section')).toHaveLength(1);
+    expect(container.querySelector('pre')).toBeNull();
+  });
+
+  it('opens the version the operator clicked', () => {
+    const opened: string[] = [];
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: ROW }]}
+        open={null}
+        onOpen={(task, row) => opened.push(`${task.id}:${row.sha256}`)}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /打开/ }));
+    expect(opened).toEqual([`${TASK.id}:${ROW.sha256}`]);
+  });
+
+  it('names the version above it, so it can be placed', () => {
+    // A brief read without its cause and its digest is a document an operator
+    // cannot place, and placing it is why every version is kept.
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: ROW }]}
+        open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
+        onOpen={() => {}}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
+    expect(screen.getByText('cccccccccccc')).toBeTruthy();
+    expect(screen.getByText('本期结论稿')).toBeTruthy();
+  });
+
+  it('shows the header while the store is still being read', () => {
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: ROW }]}
+        open={{ task: TASK, row: ROW, text: null }}
+        onOpen={() => {}}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText(/正在从锁库读出/)).toBeTruthy();
+    expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
   });
 });
