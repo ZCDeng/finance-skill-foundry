@@ -252,6 +252,7 @@ void app.whenReady().then(() => {
         remember: (screen) => {
           onTop = screen;
         },
+        userData: () => app.getPath('userData'),
       },
     );
     // Wiring first, then the view. The order is load-bearing: the runtime reads

@@ -120,10 +120,22 @@ export class HarnessHost {
    * takes it, records it on the session's creation header, and the runtime
    * composes that agent from it. A follow-up opened here is offered
    * `query-locked` and nothing else.
+   *
+   * The conversation is also given somewhere to stand, which is the other half
+   * of the same fence: a preset says which tools exist, `cwd` says how far the
+   * ones that take a path can reach.
    */
-  async open(intent: Intent, seed?: { windowId: string; briefSha?: string | null }): Promise<OpenedSession> {
+  async open(
+    intent: Intent,
+    cwd: string,
+    seed?: { windowId: string; briefSha?: string | null },
+  ): Promise<OpenedSession> {
     const preset = PRESET_BY_INTENT[intent];
-    const created = (await this.rpc('session.create', { agentPreset: preset })) as {
+    // `cwd` is not a convenience. Every tool that takes a path resolves it
+    // against the session's own directory, and a session created without one
+    // stands in the host's -- measured as `/` on a Finder launch. See
+    // `workspace.ts`.
+    const created = (await this.rpc('session.create', { agentPreset: preset, cwd })) as {
       sessionId?: string;
     } | null;
     const sessionId = created?.sessionId;

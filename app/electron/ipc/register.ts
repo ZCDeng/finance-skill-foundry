@@ -4,6 +4,7 @@ import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
 import type { FormulatorHost } from '../formulator.js';
 import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
+import { ensureTaskWorkspace } from '../harness/workspace.js';
 import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
 import { deliverableGallery, listTasks, readDeliverable, showTask } from '../reads.js';
@@ -78,6 +79,8 @@ export function registerIpc(
     window: () => BrowserWindow | null;
     /** Told on every change, so a resize can put the views back where they were. */
     remember: (screen: string) => void;
+    /** This app's own state root; a session's workspace is made under it. */
+    userData: () => string;
   },
 ): void {
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
@@ -155,6 +158,9 @@ export function registerIpc(
         }
         const opened = await harness.host.open(
           intent,
+          // Made real before the session names it: the runtime resolves a cwd
+          // through `realpath` and refuses one that is not there.
+          ensureTaskWorkspace(harness.userData(), task),
           intent === 'followup' && seed.windowId
             ? { windowId: seed.windowId, briefSha: seed.briefSha ?? null }
             : undefined,

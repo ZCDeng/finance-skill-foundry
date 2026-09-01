@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -387,5 +389,55 @@ describe('the runtime own developer notice', () => {
     const body = method.slice(0, method.indexOf('\n  /**', 1));
     expect(body).toContain('catch');
     expect(body).toContain('return false');
+  });
+});
+
+/*
+ * Where a conversation stands.
+ *
+ * The defect this closes was measured, not theorised: launched from the Finder,
+ * this app's own cwd is `/`, the runtime child inherits it, and a
+ * `session.create` that names no cwd falls through to `process.cwd()`
+ * (`dsh-host-apiproxy`: `workspace?.path ?? payload.cwd ?? defaults.cwd`). So
+ * every session on every preset stood at the root of the disk -- including the
+ * authoring preset, which carries the stock shell and editor.
+ */
+describe('the ground a session stands on', () => {
+  it('gives each task its own directory under this app, not the operator’s', async () => {
+    const { taskWorkspace } = await import('../electron/harness/workspace.js');
+    const dir = taskWorkspace('/Users/x/Library/Application Support/FA Foundry', 'abc123');
+    expect(dir).toBe('/Users/x/Library/Application Support/FA Foundry/workspace/abc123');
+  });
+
+  it('makes it real, because a cwd that is not there refuses every path tool', async () => {
+    // The runtime resolves a cwd through `realpath`, and plugins resolve every
+    // tool path against the result.
+    const { ensureTaskWorkspace } = await import('../electron/harness/workspace.js');
+    const root = mkdtempSync(join(tmpdir(), 'fnd-ws-'));
+    const dir = ensureTaskWorkspace(root, 'task-1');
+    expect(existsSync(dir)).toBe(true);
+    // Idempotent: a second session on the same task must not throw.
+    expect(ensureTaskWorkspace(root, 'task-1')).toBe(dir);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /*
+   * The window is the one directory it must not be. A window holds `inputs/` --
+   * the archived books themselves -- so standing a session in it would hand the
+   * model the ledger the period fence exists to keep it out of.
+   */
+  it('is not the window directory', async () => {
+    const { taskWorkspace } = await import('../electron/harness/workspace.js');
+    expect(taskWorkspace('/var/root', 'abc')).not.toContain('windows');
+    expect(taskWorkspace('/var/root', 'abc')).not.toContain('inputs');
+  });
+
+  it('is named on every session the app opens', () => {
+    // A preset says which tools exist; the cwd says how far the ones that take
+    // a path can reach. Dropping it here reopens the whole disk silently.
+    const host = read('../electron/harness/host.ts');
+    expect(host).toContain("this.rpc('session.create', { agentPreset: preset, cwd })");
+    const register = read('../electron/ipc/register.ts');
+    expect(register).toContain('ensureTaskWorkspace(harness.userData(), task)');
   });
 });
