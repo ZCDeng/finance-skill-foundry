@@ -32,6 +32,23 @@ const kit = JSON.parse(readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf8'));
 const harness = kit.dsh.foundry.harness;
 const PIN = `${harness.package}@${harness.version}`;
 
+/*
+ * Companions that ride in the same tree.
+ *
+ * A companion is a third-party bundle this product ships rather than asks the
+ * operator to add, and it goes into the runtime's own `node_modules` for the
+ * same reason the period bundle does: under `ELECTRON_RUN_AS_NODE` the loader
+ * resolves a bundle from the install tree, not from the profile.
+ *
+ * `file-upload` is not here. It carries an `add` command because it is added by
+ * hand against a real dsh CLI; only a companion whose `add` says it is staged
+ * belongs in this list.
+ */
+const COMPANIONS = Object.values(kit.dsh.foundry.companions ?? {}).filter((companion) =>
+  String(companion.add ?? '').startsWith('staged'),
+);
+const COMPANION_PINS = COMPANIONS.map((companion) => `${companion.package}@${companion.version}`);
+
 function pinOnDisk() {
   if (!existsSync(PIN_FILE)) return null;
   const line = readFileSync(PIN_FILE, 'utf8').split('\n').find((row) => row.startsWith('pin:'));
@@ -56,6 +73,22 @@ function check() {
   if (!existsSync(join(STAGE, 'node_modules', kit.name, 'package.json'))) {
     problems.push(`the period bundle is not staged at extra/dsh/node_modules/${kit.name}`);
   }
+  /*
+   * A companion at the wrong version is worse than an absent one: the profile
+   * manifest names a version, the loader resolves whatever is on disk, and the
+   * mismatch shows up as a tool that is registered but behaves differently.
+   */
+  for (const companion of COMPANIONS) {
+    const manifest = join(STAGE, 'node_modules', companion.package, 'package.json');
+    if (!existsSync(manifest)) {
+      problems.push(`companion ${companion.package} is not staged at extra/dsh/node_modules`);
+      continue;
+    }
+    const staged = JSON.parse(readFileSync(manifest, 'utf8')).version;
+    if (staged !== companion.version) {
+      problems.push(`companion ${companion.package} is staged at ${staged}, the kit declares ${companion.version}`);
+    }
+  }
   return problems;
 }
 
@@ -76,8 +109,15 @@ writeFileSync(
   `${JSON.stringify({ name: 'foundry-harness-stage', private: true, type: 'module' }, null, 2)}\n`,
 );
 
-console.log(`staging ${PIN} into extra/dsh …`);
-execFileSync('npm', ['install', PIN, '--no-audit', '--no-fund', '--omit=dev'], {
+console.log([`staging ${PIN}`, ...COMPANION_PINS].join(' + ') + ' into extra/dsh …');
+/*
+ * `--ignore-scripts` because nothing in this tree needs one and a bundle that
+ * did would be running third-party code on a build machine. Measured on
+ * dsh-univer-office 0.2.12 and its 55 transitive packages: no preinstall,
+ * install or postinstall anywhere; the only lifecycle hooks are `prepare`,
+ * which npm does not run for a registry tarball.
+ */
+execFileSync('npm', ['install', PIN, ...COMPANION_PINS, '--no-audit', '--no-fund', '--omit=dev', '--ignore-scripts'], {
   cwd: STAGE,
   stdio: 'inherit',
 });
@@ -100,6 +140,7 @@ writeFileSync(
     `pin: ${PIN}`,
     `entry: ${harness.entry}`,
     `bundle: node_modules/${kit.name} (copied from ../../dsh-plugin)`,
+    ...COMPANION_PINS.map((pin) => `companion: ${pin}`),
     'staged-by: scripts/fetch-harness.mjs',
     '',
     'Not in version control. Regenerate with `npm run harness`.',

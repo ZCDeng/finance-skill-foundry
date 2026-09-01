@@ -24,8 +24,14 @@
 #   background jobs         a job runs a command; a shell by another name
 #   delegation and loops    a child joins its parent's composition, so this is
 #                           about the surface itself, not about what it inherits
-#   web                     tool results are an egress boundary (KTD2); nothing
-#                           in the period loop needs to fetch anything
+#
+# `tool-web` is NOT here, and it used to be. KTD11 draws the line at
+# reachability: a row goes when it is a path to the archived books, and a search
+# result is not one. What comes back can only enter a document through
+# `record-reference`, which demands a source and a date and refuses the lock's
+# own words. The preset made that call first; this patch is the same fence for a
+# profile with no presets, and two fences that disagree about the same rule are
+# a fence nobody can reason about.
 
 - id: tool-bash
   disabled: true
@@ -53,7 +59,4 @@
 - id: tool-workflow
   disabled: true
 - id: tool-ralph
-  disabled: true
-
-- id: tool-web
   disabled: true

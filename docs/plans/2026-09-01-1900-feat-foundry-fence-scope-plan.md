@@ -126,21 +126,52 @@ takes.
 
 ---
 
+- **KTD12. A companion's tools are global, so the close seat needs a scope of its own**
+  `(session-settled: user-directed — she asked for the Office plugin so that reading a
+  deliverable feels like the spreadsheet software a finance manager actually uses)`.
+  `dsh-univer-office@0.2.12` is staged into `extra/dsh` and named in the profile. It
+  registers thirteen `univer_*` tools at profile level, and a preset built by deleting rows
+  cannot delete a row it never had — so `period` gets `period-scope`, which calls
+  `ctx.tools.restrict({deny})` with all thirteen, the same seam `f3-scope` uses.
+
+  Measured on a real boot (`test_the_office_tools_reach_the_authoring_seat_and_not_the_close_seat`):
+  `standard` is offered all thirteen, `period` and `f3` none.
+
+  All thirteen rather than a careful subset, for two different reasons. `univer_execute` runs
+  arbitrary Facade JavaScript and takes an absolute `codeFile`, and `univer_import` reads an
+  xlsx off disk into a unit — both are reach in the plain sense. The other eleven fail the
+  provenance test instead: a figure typed into a cell and exported is neither `我重算`, since
+  no catalog produced it, nor `外部引用`, since nobody published it. The bundle's own skills
+  teach exactly that, including editing a percentage by string replacement.
+
+  Two switches are set on the operator's behalf because they cannot set them themselves:
+  `DO_NOT_TRACK=1` and an empty `UNIVER_TELEMETRY_ENDPOINT`. This build already ships an empty
+  endpoint; a later one could bake one in.
+
 ## Scope Boundaries
 
 **Not in this work**
 
-- Office / spreadsheet plugins in the harness (`dsh-univer-office`). Read and assessed, not
-  installed. Third-party plugin code runs with the operator's full privileges, and the
-  decision to accept that is the user's, not a packaging change. If it is ever bundled,
-  `DO_NOT_TRACK=1` goes in `harnessEnv` explicitly — our operators do not get to make that
-  choice for themselves.
+- Letting the model author a spreadsheet. The Office bundle is installed for the authoring
+  seat and for a rendering path we have not built yet; the close seat cannot see it.
+- Rendering a brief or a workpaper as xlsx. That is the thing the plugin was installed for
+  and it is the next piece of work, not this one. It has to be written by `foundry` from the
+  locked catalog, not by a model in a worktree, or the provenance the fence exists for is
+  lost on the way to the file the leader actually opens.
 - A leader-operated session. KTD7 stands.
 - Re-emitting a brief after a late reference. The brief is what was known when it was written;
   the workpaper is what was learned since. Conflating them would make the version trail lie.
 
 **Risks**
 
+- The Univer Pro licence embedded in the bundle expires 2026-11-15, and after that the
+  rendering path draws a watermark. Decoded from the JWT in `lib/index.js`: `et` 1794758400,
+  domain-bound to `localhost`. Seventy-five days from the install. Whatever we build on this
+  has to survive a bundle upgrade, or an expiry, or both.
+- The bundle's own audit was run by seven independent readers and its cross-checking pass
+  died on an infrastructure error, so the findings behind KTD12 are one-pass rather than
+  adversarially verified. The two that decide anything — the licence expiry and the egress
+  hosts — were re-measured by hand.
 - `外部引用` is a mark an operator has to learn. It is documented in `method/FOUNDRY.md`, drawn
   as its own chip in the reader, and named in the period persona; nothing else teaches it.
 - The reference text is free prose. `RESERVED_WORDS` stops it borrowing the brief's marks, but

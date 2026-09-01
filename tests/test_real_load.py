@@ -50,8 +50,14 @@ needs_dsh = pytest.mark.skipif(
 BOOT_TIMEOUT = 600
 WEB_SETTLE_SECONDS = 40
 
-# Anything that can reach a file, a shell, another agent, or the network. A
-# locked window the model can read around is not locked.
+# Anything that can reach a file, a shell, or another agent. A locked window the
+# model can read around is not locked.
+#
+# `web_search` is deliberately not in here. It was, and KTD11 took it out: the
+# test is whether a row is a path to the archived books, and a search result is
+# not one. What it returns reaches a document only through `record-reference`,
+# which demands a source and a date. Both fences agree on this -- the preset and
+# `period.fence.yml` -- which is why one set can check both.
 REACH = {
     "bash",
     "read",
@@ -67,7 +73,6 @@ REACH = {
     "subagent_fork",
     "workflow",
     "ralph",
-    "web_search",
 }
 
 REGISTER_PROBE = """\
@@ -174,12 +179,29 @@ def _probe_package(where: Path, body: str) -> Path:
     return where
 
 
+def _staged_office() -> Path | None:
+    """The Univer bundle, if this checkout has staged it.
+
+    Measured from the staged tree rather than installed here: it is 150MB with
+    native bindings, and a test that fetched it would be a test that needed the
+    network. Absent, the office assertions skip and the rest still runs.
+    """
+    from foundry.harness import office_companion
+
+    if not DSH_BIN:
+        return None
+    root = Path(DSH_BIN).parents[3]
+    staged = root / office_companion()["package"]
+    return staged if (staged / "package.json").is_file() else None
+
+
 def _prepare(home: Path, probe: Path, profile: str) -> None:
     home.mkdir(parents=True, exist_ok=True)
     assert _dsh(home, "--profile", profile, "--dump-config").returncode == 0
     # Probe first: it wraps `ctx.tools.register`, so it has to be applied before
     # the bundle whose registrations it counts.
-    for source in (probe, PLUGIN):
+    office = _staged_office()
+    for source in (probe, PLUGIN, *( [office] if office else [] )):
         added = _dsh(home, "plugin", "--profile", profile, "add", str(source))
         assert added.returncode == 0, added.stderr
 
@@ -307,9 +329,27 @@ def test_the_period_preset_offers_the_roster_and_no_reach(web_presets) -> None:
     period = set(web_presets["period"])
     assert set(ROSTER) <= period, f"missing from period: {sorted(set(ROSTER) - period)}"
     assert not (REACH & period), f"still reachable: {sorted(REACH & period)}"
-    # The three that survive the deletion, each for a stated reason in the preset:
-    # the close methods ship as skills, and a period has steps and choices.
-    assert period - set(ROSTER) == {"skill", "todo_write", "ask_user_question"}
+    # Everything that survives the deletion, and the row it comes from. Written
+    # out rather than bounded, because the interesting failure is a tool that
+    # appears without anyone deciding it should.
+    #
+    #   skill                                   the close methods ship as skills
+    #   todo_write                              a period has steps
+    #   ask_user_question                       and choices
+    #   create_goal / update_goal / get_goal    the model stating what it is doing
+    #   exit_plan_mode                          thinking before acting
+    #   web_search                              KTD11; what it returns reaches a
+    #                                           document only via record-reference
+    assert period - set(ROSTER) == {
+        "skill",
+        "todo_write",
+        "ask_user_question",
+        "create_goal",
+        "update_goal",
+        "get_goal",
+        "exit_plan_mode",
+        "web_search",
+    }
 
 
 @needs_dsh
@@ -321,6 +361,38 @@ def test_the_f3_preset_offers_exactly_the_follow_up_tool(web_presets) -> None:
     them for this preset's agents instead.
     """
     assert sorted(web_presets["f3"]) == sorted(F3_ROSTER) == ["query-locked"]
+
+
+@needs_dsh
+def test_the_office_tools_reach_the_authoring_seat_and_not_the_close_seat(web_presets) -> None:
+    """The thing a preset row could not do on its own.
+
+    `dsh-univer-office` registers thirteen tools globally, at profile level. The
+    period preset is built by deleting upstream rows, and deleting a row cannot
+    take away a tool the preset never mounted -- so before `period-scope` existed
+    these stood next to a locked window. Two of them are reach in the plain
+    sense: `univer_execute` runs arbitrary Facade JavaScript against an absolute
+    path, and `univer_import` reads an xlsx off disk into a unit.
+
+    The other eleven fail a different test. A figure typed into a cell and
+    exported is a figure with no basis -- not 我重算, because no catalog produced
+    it, and not 外部引用, because nobody published it.
+
+    `standard` is the contrast and the point: an authoring session keeps all
+    thirteen. This is a fence around the close, not a ban on the plugin.
+    """
+    from foundry.harness import office_companion
+
+    if _staged_office() is None:
+        pytest.skip("office companion is not staged; run `npm run harness` in app/")
+
+    declared = set(office_companion()["omitTools"])
+    standard = set(web_presets["standard"])
+    assert declared <= standard, f"the bundle did not register: {sorted(declared - standard)}"
+
+    for seat in ("period", "f3"):
+        offered = set(web_presets[seat])
+        assert not (declared & offered), f"{seat} still sees: {sorted(declared & offered)}"
 
 
 @needs_dsh

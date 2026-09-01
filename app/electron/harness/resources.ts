@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -42,6 +43,30 @@ export function entryPath(layout: Layout): string {
 export function pluginDir(layout: Layout): string {
   if (layout.packaged) return join(layout.resourcesPath, 'dsh-plugin');
   return join(layout.appPath, '..', 'dsh-plugin');
+}
+
+/**
+ * The environment a bundled companion is not allowed to run without.
+ *
+ * Read from the kit's own manifest, which already declares the tool roster, the
+ * profiles and the presets. Today it carries one thing: the Univer bundle's
+ * telemetry switches. An operator who installed that plugin themselves would
+ * get to make that call; ours did not choose it, they got it inside a product,
+ * so the product makes it for them.
+ *
+ * An empty value is meaningful and is kept. The bundle reads
+ * `UNIVER_TELEMETRY_ENDPOINT` as an override and treats an empty string as "no
+ * endpoint", which is not the same as leaving the name unset.
+ */
+export function companionEnv(layout: Layout): Record<string, string> {
+  const manifest = JSON.parse(readFileSync(join(pluginDir(layout), 'package.json'), 'utf8')) as {
+    dsh?: { foundry?: { companions?: Record<string, { env?: Record<string, string> }> } };
+  };
+  const out: Record<string, string> = {};
+  for (const companion of Object.values(manifest.dsh?.foundry?.companions ?? {})) {
+    for (const [name, value] of Object.entries(companion.env ?? {})) out[name] = String(value);
+  }
+  return out;
 }
 
 /**

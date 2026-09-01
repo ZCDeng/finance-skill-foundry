@@ -75,11 +75,53 @@ export async function installPlugin(opts: {
   pluginDir: string;
   /** The staged runtime's own copy of the bundle. Must already exist. */
   stagedBundle: string;
+  /** The staged runtime's root, for finding the companions npm put there. */
+  harnessRoot: string;
 }): Promise<void> {
   await materialiseProfile(opts.entry, opts.home);
   addToProfileManifest(opts);
   ensureProfileLink(opts);
   assertStagedBundle(opts.stagedBundle, opts.pluginDir);
+  installCompanions(opts);
+}
+
+/**
+ * Name the staged companions in the profile too.
+ *
+ * A companion is a third-party bundle this product ships rather than asks the
+ * operator to add, and the runtime will not load one it has not been told
+ * about. The same two keys as the period bundle, for the same two reasons.
+ *
+ * The directory is the one `npm install` already made inside the staged
+ * runtime, not a copy: it carries native bindings and 150MB of vendor output,
+ * and a second copy under the profile would be that again for no gain.
+ *
+ * A companion the kit declares but the tree does not hold is a refusal rather
+ * than a silent skip. `scripts/fetch-harness.mjs --check` says the same thing
+ * before a build; this is the claim at run time, where a stale checkout is the
+ * likely cause and the message can say so.
+ */
+export function installCompanions(opts: {
+  home: string;
+  pluginDir: string;
+  harnessRoot: string;
+  profile?: string;
+}): string[] {
+  const kit = JSON.parse(readFileSync(path.join(opts.pluginDir, 'package.json'), 'utf8')) as {
+    dsh?: { foundry?: { companions?: Record<string, { package?: string; add?: string }> } };
+  };
+  const installed: string[] = [];
+  for (const companion of Object.values(kit.dsh?.foundry?.companions ?? {})) {
+    if (!companion.package || !String(companion.add ?? '').startsWith('staged')) continue;
+    const dir = path.join(opts.harnessRoot, 'node_modules', companion.package);
+    if (!existsSync(path.join(dir, 'package.json'))) {
+      throw new Error(`companion ${companion.package} is not staged at ${dir}; run \`npm run harness\` in app/`);
+    }
+    addToProfileManifest({ home: opts.home, pluginDir: dir, profile: opts.profile });
+    ensureProfileLink({ home: opts.home, pluginDir: dir, profile: opts.profile });
+    installed.push(companion.package);
+  }
+  return installed;
 }
 
 /**

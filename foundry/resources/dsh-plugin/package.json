@@ -52,7 +52,8 @@
             "stop-formulator",
             "query-locked",
             "re-import"
-          ]
+          ],
+          "scope": "finance-skill-foundry-dsh/period-scope"
         },
         "f3": {
           "sandbox": "read-only",
@@ -113,6 +114,38 @@
             "maxSheets": 1,
             "readLimit": 1
           }
+        },
+        "office": {
+          "id": "office",
+          "package": "dsh-univer-office",
+          "version": "0.2.12",
+          "add": "staged into extra/dsh by scripts/fetch-harness.mjs; not added by hand",
+          "source": "https://github.com/dream-num/dsh-univer-office",
+          "role": "deliverable-surface",
+          "env": {
+            "DO_NOT_TRACK": "1",
+            "UNIVER_TELEMETRY_ENDPOINT": ""
+          },
+          "omitTools": [
+            "univer_new",
+            "univer_status",
+            "univer_worktree",
+            "univer_unit",
+            "univer_import",
+            "univer_inspect",
+            "univer_execute",
+            "univer_export",
+            "univer_lint",
+            "univer_compile_svg",
+            "univer_screenshot",
+            "univer_api",
+            "univer_resources"
+          ],
+          "egress": [
+            "cdn.jsdelivr.net",
+            "cdn.undraw.co"
+          ],
+          "licenseExpires": "2026-11-15"
         }
       }
     },
@@ -128,6 +161,7 @@
   "exports": {
     ".": "./index.js",
     "./f3-scope": "./f3-scope.js",
+    "./period-scope": "./period-scope.js",
     "./client": "./client.js",
     "./package.json": "./package.json"
   }

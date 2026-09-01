@@ -110,6 +110,41 @@ def file_upload_companion() -> dict[str, Any]:
     return companion
 
 
+def office_companion() -> dict[str, Any]:
+    """The Univer bundle, and the two switches it is not allowed to ship without.
+
+    Third-party plugin code runs with the operator's full privileges, which is
+    the operator's decision to make -- but our operators do not get to make the
+    telemetry one for themselves, so it is made here and refused if it goes
+    missing. ``DO_NOT_TRACK`` is what the plugin's own capture path checks
+    first; the empty endpoint is the second belt, and it is what this published
+    build already carries in ``lib/build-info.json``. A later version could bake
+    one in, and this is the line that would catch it.
+    """
+    companion = load_foundry_dsh()["companions"]["office"]
+    if companion.get("role") != "deliverable-surface":
+        raise FoundryError("office companion is a deliverable surface, not a books surface")
+    env = companion.get("env") or {}
+    if not str(env.get("DO_NOT_TRACK") or "").strip():
+        raise FoundryError("office companion must set DO_NOT_TRACK; our operators cannot")
+    if env.get("UNIVER_TELEMETRY_ENDPOINT") != "":
+        raise FoundryError("office companion must blank UNIVER_TELEMETRY_ENDPOINT")
+    return companion
+
+
+def companion_env() -> dict[str, str]:
+    """Every environment variable this app sets on behalf of a companion.
+
+    Read by the Electron side through `foundry harness`, so the values live in
+    the kit's own manifest and not in two languages.
+    """
+    out: dict[str, str] = {}
+    for companion in load_foundry_dsh()["companions"].values():
+        for name, value in (companion.get("env") or {}).items():
+            out[str(name)] = str(value)
+    return out
+
+
 def assert_no_escaping_symlink(path: Path, label: str) -> None:
     """Refuse a path reached through a symlink that leaves its own directory.
 
@@ -231,6 +266,7 @@ def harness_text() -> str:
     pin = companion["version"]
     omit = ",".join(companion["omitTools"])
     exts = ",".join(companion["config"]["allowedExtensions"])
+    office = office_companion()
     return "\n".join(
         [
             plugin_install_text(),
@@ -241,5 +277,12 @@ def harness_text() -> str:
             f"omit\t{omit}",
             f"allowedExtensions\t{exts}",
             f"overlay\t{overlay_path()}",
+            "",
+            f"# {office['package']}@{office['version']} -- {office['role']}",
+            f"add\t{office['add']}",
+            f"env\t{' '.join(f'{k}={v or chr(39) * 2}' for k, v in office['env'].items())}",
+            f"scope\t{load_foundry_dsh()['profiles']['period']['scope']} masks {len(office['omitTools'])} tools on period",
+            f"egress\t{','.join(office['egress'])} (univer_resources, denied on period)",
+            f"license\texpires {office['licenseExpires']}; rendered output is watermarked after that",
         ]
     )

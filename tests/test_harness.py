@@ -330,3 +330,78 @@ def test_period_deletes_exactly_the_procedural_rows():
         {"tool-bash", "tool-pwsh", "tool-fs", "tool-fs-search", "tool-jobs", "delegation"}
     )
     assert {"tool-web", "planning", "tool-todo", "tool-skill"} <= ids
+
+
+def test_the_office_companion_cannot_ship_without_its_telemetry_switches():
+    """Third-party plugin code runs with the operator's full privileges.
+
+    Choosing that is the operator's call, and ours did not get to make it --
+    they got the bundle inside a product. So the two switches are set on their
+    behalf, and this is what notices if either goes missing. The published
+    0.2.12 build already carries an empty endpoint in `lib/build-info.json`; a
+    later version could bake one in, which is exactly the case this covers.
+    """
+    from foundry.harness import companion_env, office_companion
+
+    companion = office_companion()
+    assert companion["package"] == "dsh-univer-office"
+    assert companion["role"] == "deliverable-surface"
+    env = companion_env()
+    assert env["DO_NOT_TRACK"] == "1"
+    # Empty is not absent. The bundle reads this name as an override and treats
+    # an empty string as "no endpoint"; leaving it unset falls back to whatever
+    # the build baked in.
+    assert env["UNIVER_TELEMETRY_ENDPOINT"] == ""
+
+
+def test_a_companion_that_dropped_do_not_track_is_refused(monkeypatch):
+    """The switch above is only worth having if losing it is loud."""
+    import json
+
+    import foundry.harness as harness_module
+    from foundry.errors import FoundryError
+
+    weakened = json.loads(json.dumps(harness_module.load_foundry_dsh()))
+    weakened["companions"]["office"]["env"]["DO_NOT_TRACK"] = ""
+    monkeypatch.setattr(harness_module, "load_foundry_dsh", lambda: weakened)
+    with pytest.raises(FoundryError, match="DO_NOT_TRACK"):
+        harness_module.office_companion()
+
+
+def test_the_period_preset_masks_the_office_tools():
+    """A companion's tools are global; a preset row cannot take away what it never mounted.
+
+    The period fence is built by deleting rows from upstream's `standard`, and
+    that only ever reached upstream's own tools. `dsh-univer-office` registers
+    thirteen `univer_*` tools at profile level, so without a scope row they
+    stand next to a locked window. `restrict` is the same seam `f3` uses, and
+    restrictions intersect, so this narrows the close seat and leaves an
+    authoring session on `standard` with all thirteen.
+    """
+    import yaml
+
+    from foundry.harness import office_companion, preset_dir
+
+    rows = yaml.safe_load((preset_dir() / "period" / "agent.cordis.yml").read_text())
+    scope = next(row for row in rows if row["id"] == "finance-skill-foundry-period-scope")
+    assert scope["name"] == "finance-skill-foundry-dsh/period-scope"
+
+    declared = office_companion()["omitTools"]
+    assert len(declared) == 13
+    assert all(name.startswith("univer_") for name in declared)
+    # The two that are reachability in the plain sense have to be in there.
+    assert {"univer_execute", "univer_import"} <= set(declared)
+
+
+def test_the_office_companion_names_where_it_can_reach():
+    """A tool that fetches has to say what it fetches from.
+
+    `univer_resources` downloads SVGs whose URLs come from
+    `@univerjs-pro/cli-assets/manifest.json`, not from the plugin. Reading that
+    manifest is the only way to know; these are the two hosts it holds, and
+    naming them here is what makes the omission of that tool a decision rather
+    than a guess.
+    """
+    from foundry.harness import office_companion
+
+    assert office_companion()["egress"] == ["cdn.jsdelivr.net", "cdn.undraw.co"]

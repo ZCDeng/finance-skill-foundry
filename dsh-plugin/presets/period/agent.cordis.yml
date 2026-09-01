@@ -126,3 +126,12 @@
         thresholdChars: 8192
         headChars: 4096
         tailChars: 1024
+
+# A companion registers its tools globally, at profile level, and a preset row
+# cannot take away a tool the preset never mounted. Without this row the thirteen
+# `univer_*` tools stand next to a locked window: `univer_execute` runs arbitrary
+# Facade JavaScript against an absolute path, and the other twelve let a model
+# type a figure into a cell and export it -- a number that is neither 我重算 nor
+# 外部引用, because no catalog produced it and nobody published it.
+- id: finance-skill-foundry-period-scope
+  name: finance-skill-foundry-dsh/period-scope

@@ -7,6 +7,7 @@ import { FormulatorHost } from './formulator.js';
 import { HarnessHost } from './harness/host.js';
 import {
   HARNESS_ENTRY,
+  companionEnv,
   entryPath,
   harnessRoot,
   formulatorBin as packedFormulatorBin,
@@ -224,6 +225,7 @@ void app.whenReady().then(() => {
       // `nameFormulator` has already run, so this is the packed one unless the
       // operator named their own.
       formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
+      companionEnv: companionEnv(here),
     });
     harness = host;
     /*
@@ -269,6 +271,7 @@ void app.whenReady().then(() => {
           home,
           pluginDir: pluginDir(here),
           stagedBundle: bundle,
+          harnessRoot: override ?? harnessRoot(here),
         });
         step = 'presets';
         await installPresets({ foundryBin: foundryBin(here), home, varRoot: varRoot() });

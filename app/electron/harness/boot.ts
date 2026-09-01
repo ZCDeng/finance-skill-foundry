@@ -81,10 +81,23 @@ const SECRET_NAME = /(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)($|_)/i;
  * process-wide task would bind them all to whichever one happened to be open.
  * The CLI's resolution chain covers it: a period step falls through to the
  * current window's own back-pointer, and a follow-up to the brief window's.
+ *
+ * `companionEnv` is last, and it wins over the inherited environment on
+ * purpose. It carries the switches a third-party bundle is not allowed to ship
+ * without — today `DO_NOT_TRACK` for the Univer bundle. An operator who chose
+ * that plugin themselves would get to make that call; ours did not choose it,
+ * they got it inside a product, so the product makes it for them. Declared in
+ * the kit's own manifest so it is one value in one language, not two.
  */
 export function harnessEnv(
   parent: NodeJS.ProcessEnv,
-  own: { home: string; varRoot: string; foundryBin: string; formulatorBin?: string },
+  own: {
+    home: string;
+    varRoot: string;
+    foundryBin: string;
+    formulatorBin?: string;
+    companionEnv?: Record<string, string>;
+  },
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(parent)) {
@@ -101,8 +114,10 @@ export function harnessEnv(
   // Upstream spawns its own runtime this way, and Electron's binary is the only
   // Node on a machine that has not installed one.
   out.ELECTRON_RUN_AS_NODE = '1';
+  for (const [name, value] of Object.entries(own.companionEnv ?? {})) out[name] = value;
   return out;
 }
+
 
 /**
  * Argv for the runtime.

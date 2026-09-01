@@ -16,6 +16,7 @@ import {
   rpcValue,
 } from '../electron/harness/boot.js';
 import { HEADER_HEIGHT, TASK_BAR_HEIGHT, viewBounds } from '../electron/harness/bounds.js';
+import { companionEnv } from '../electron/harness/resources.js';
 import { CHAT_STORE_PREFIX, SESSION_SELECTION_KEY, chatStoreKey, followupDraft, handoffScript } from '../electron/harness/handoff.js';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
@@ -439,5 +440,38 @@ describe('the ground a session stands on', () => {
     expect(host).toContain("this.rpc('session.create', { agentPreset: preset, cwd })");
     const register = read('../electron/ipc/register.ts');
     expect(register).toContain('ensureTaskWorkspace(harness.userData(), task)');
+  });
+});
+
+describe('a bundled companion cannot opt itself back in', () => {
+  it('sets the switches last, over anything the machine already had', () => {
+    // An operator who chose the Univer plugin themselves would get to decide
+    // this. Ours did not choose it; they got it inside a product, so the
+    // product decides. Setting it last is what makes an ambient DO_NOT_TRACK=0
+    // in a developer's shell lose rather than win.
+    const env = harnessEnv(
+      { DO_NOT_TRACK: '0', UNIVER_TELEMETRY_ENDPOINT: 'https://example.invalid/capture' },
+      {
+        home: '/h',
+        varRoot: '/v',
+        foundryBin: '/b',
+        companionEnv: { DO_NOT_TRACK: '1', UNIVER_TELEMETRY_ENDPOINT: '' },
+      },
+    );
+    expect(env.DO_NOT_TRACK).toBe('1');
+    // Empty is not absent: the bundle reads this name as an override and an
+    // empty string is how it is told there is no endpoint.
+    expect(env.UNIVER_TELEMETRY_ENDPOINT).toBe('');
+    expect('UNIVER_TELEMETRY_ENDPOINT' in env).toBe(true);
+  });
+
+  it('reads them from the kit manifest rather than a second copy in TypeScript', () => {
+    const declared = companionEnv({
+      packaged: false,
+      appPath: fileURLToPath(new URL('..', import.meta.url)),
+      resourcesPath: '',
+    });
+    expect(declared.DO_NOT_TRACK).toBe('1');
+    expect(declared.UNIVER_TELEMETRY_ENDPOINT).toBe('');
   });
 });

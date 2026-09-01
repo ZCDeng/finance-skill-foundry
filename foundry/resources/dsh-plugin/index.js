@@ -365,6 +365,22 @@ export function definitions(profile) {
   return registerTools(REQUIRED, { profile });
 }
 
+/**
+ * The companion tools the close seat must not see.
+ *
+ * Read from the manifest rather than restated, so the roster that scopes the
+ * preset and the roster that documents the companion are one list. An empty
+ * list would be a scope that quietly allows everything, so it refuses.
+ */
+export function officeDenied() {
+  const pkg = JSON.parse(readFileSync(PACKAGE_URL, "utf8"));
+  const denied = pkg?.dsh?.foundry?.companions?.office?.omitTools ?? [];
+  if (!denied.length) {
+    throw new Error("office companion declares no omitTools; the period scope would allow all of them");
+  }
+  return denied;
+}
+
 export function f3Allowlist() {
   return ["query-locked"];
 }
