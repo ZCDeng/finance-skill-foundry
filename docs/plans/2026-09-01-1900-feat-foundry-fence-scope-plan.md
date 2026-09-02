@@ -338,9 +338,17 @@ takes.
   That plumbing is removed, the test now asserts its absence, and the plugin's gateway is kept
   from the close seat by preset rather than by a boundary it cannot be given.
 
-  Not yet measured, and said so: whether `libsql`, the formula engine and the Office exchange
-  bindings load under Electron-as-Node. The host reports an early exit as the exit, with
-  stderr, rather than as a timeout, so the first open on a real machine answers that.
+  Measured on the packaged app, driven over CDP against a scratch store: the first open answered
+  `running` within three seconds, the viewer drew the four sheets, and the gateway child's
+  environment was exactly the allowlist plus the three names -- `UNIVER_ALLOWED_ROOT` the task's
+  artifacts directory, no key-shaped name, no `DSH_*`. So `libsql`, the formula engine and the
+  Office exchange bindings do load under Electron-as-Node. Closing from the strip took the
+  gateway off its port and removed the container within a second. The same run found that
+  `Pane.detach` left the viewer's renderer alive after the view was gone -- harmless for the two
+  panes that detach once at quit, a leak for one that opens and closes per version -- so detach
+  now closes the page's process too. Not measured: a second task's preview while the first is
+  open (the second replaces the first by design), and a machine whose natives are a different
+  architecture from the staged ones.
 
 ## Scope Boundaries
 

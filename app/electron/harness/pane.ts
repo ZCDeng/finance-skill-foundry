@@ -84,11 +84,22 @@ export class Pane {
     this.view.setBounds(rect);
   }
 
-  /** Take it out of the window. The page goes with it. */
+  /**
+   * Take it out of the window. The page goes with it.
+   *
+   * Removing the view does not end the page: the renderer behind it lives on
+   * until the object is collected, still pointed at whatever it was showing.
+   * For the two panes that detach once at quit that was invisible; for a
+   * preview that opens and closes per version it was one renderer process
+   * left behind each time, measured as a lingering page target after the
+   * gateway it talked to had already exited. So the page is closed here.
+   */
   detach(window: BrowserWindow): void {
     if (!this.view) return;
-    window.contentView.removeChildView(this.view);
+    const view = this.view;
     this.view = null;
     this.origin = null;
+    window.contentView.removeChildView(view);
+    if (!view.webContents.isDestroyed()) view.webContents.close();
   }
 }

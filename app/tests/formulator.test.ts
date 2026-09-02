@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 // `Pane` reaches for Electron. Nothing here needs a real window: what is worth
 // pinning is which CLI calls happen, in what order, and what survives a refusal.
+/** How many pages a detach has closed. A view taken out of the window is not a page ended. */
+let pagesClosed = 0;
+
 vi.mock('electron', () => ({
   WebContentsView: class {
     webContents = {
@@ -9,6 +12,10 @@ vi.mock('electron', () => ({
       on() {},
       loadURL: async () => {},
       executeJavaScript: async () => {},
+      isDestroyed: () => false,
+      close() {
+        pagesClosed += 1;
+      },
     };
     setBounds() {}
   },
@@ -77,8 +84,12 @@ describe('the Formulator lease', () => {
     expect(host.running()).not.toBeNull();
 
     refuseStop = true;
+    const before = pagesClosed;
     await expect(host.stop({ varRoot: '/v' }, window)).rejects.toThrow(/unconfirmed/);
     expect(host.running()).toBeNull();
+    // Taken out of the window *and* ended. A detached view whose page lives on
+    // is a renderer with nothing to talk to, measured on the workbook preview.
+    expect(pagesClosed).toBe(before + 1);
     refuseStop = false;
   });
 

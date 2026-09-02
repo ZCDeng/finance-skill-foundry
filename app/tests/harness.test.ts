@@ -219,6 +219,16 @@ describe('the environment the Univer gateway and its worker get', () => {
     expect(univerStaged({ bundleDir: '/nonexistent' })).toBe(false);
   });
 
+  it('closes the page when a pane is detached, not only the view', () => {
+    // Measured: after 关闭预览 the gateway was gone and its port free, and
+    // the viewer's page target was still listed -- a renderer with nothing to
+    // talk to. Asserted on the source because a WebContentsView needs a real
+    // Electron to construct.
+    const source = read('../electron/harness/pane.ts');
+    expect(source).toContain('view.webContents.close()');
+    expect(source.indexOf('removeChildView(view)')).toBeLessThan(source.indexOf('view.webContents.close()'));
+  });
+
   it('agrees with the installed gateway about its banner, its exit code, its fence and its routes', () => {
     // Every wire shape in `univer.ts` is read from the bundle's bytes. This
     // pins the ones a release could move: the banner the host waits for, the

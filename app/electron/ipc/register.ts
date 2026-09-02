@@ -276,12 +276,19 @@ export function registerIpc(
         const window = panes.window();
         if (!window) throw new FoundryFailure('no window to show the preview in', null);
         const id = taskId(task);
-        const file = await deliverablePath({ ...binding, task: id }, String(sha ?? ''), String(ext ?? ''));
+        const digest = String(sha ?? '');
+        const [file, detail] = await Promise.all([
+          deliverablePath({ ...binding, task: id }, digest, String(ext ?? '')),
+          showTask({ ...binding, task: id }),
+        ]);
         return panes.preview.open(window, {
           task: id,
-          sha256: String(sha ?? ''),
+          sha256: digest,
           file,
           allowedRoot: path.dirname(file),
+          // The tab the operator reads: the task and the version, not the
+          // sixty-four hex characters the worker would name it after.
+          label: `${detail.task.title} · ${digest.slice(0, 12)}`,
         });
       }),
   );

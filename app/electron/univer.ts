@@ -433,7 +433,19 @@ export class UniverPreviewHost {
    */
   async open(
     window: BrowserWindow,
-    target: { task: string; sha256: string; file: string; allowedRoot: string },
+    target: {
+      task: string;
+      sha256: string;
+      file: string;
+      allowedRoot: string;
+      /**
+       * What the viewer calls the sheet. The worker names an imported
+       * workbook after its source file, which here is sixty-four hex
+       * characters; the tab the operator reads should say the task and
+       * the version instead. Absent, the digest stands.
+       */
+      label?: string;
+    },
   ): Promise<PreviewSpec> {
     if (!target.file.startsWith(`${target.allowedRoot}${path.sep}`)) {
       throw new FoundryFailure('a preview may only open a file under its own fence', null);
@@ -467,8 +479,16 @@ export class UniverPreviewHost {
       const worktreeId = String(worktree.worktreeId ?? '');
       if (!worktreeId) throw new FoundryFailure('the Univer gateway made a worktree without an id', null);
       const wt = encodeURIComponent(worktreeId);
-      const name = typeof snapshot.name === 'string' && snapshot.name ? snapshot.name : path.basename(target.file);
-      await call(origin, 'POST', `/uf/${key}/worktrees/${wt}/units`, { type: SHEET, name, snapshot }, MUTATION_TIMEOUT_MS);
+      const name = target.label ?? `${target.sha256.slice(0, 12)}`;
+      // Both the unit's name and the workbook's own: the viewer's tab reads
+      // one, its sidebar the other, and a version should be called one thing.
+      await call(
+        origin,
+        'POST',
+        `/uf/${key}/worktrees/${wt}/units`,
+        { type: SHEET, name, snapshot: { ...snapshot, name } },
+        MUTATION_TIMEOUT_MS,
+      );
       const merged = await call(origin, 'POST', `/uf/${key}/worktrees/${wt}/merge`, {}, MUTATION_TIMEOUT_MS);
       if (merged.ok !== true) {
         throw new FoundryFailure(
