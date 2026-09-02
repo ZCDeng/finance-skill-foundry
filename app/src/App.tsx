@@ -8,6 +8,7 @@ import {
   type DeliverableRow,
   type Intent,
   type LaunchSpec,
+  type PreviewSpec,
   type TaskDetail as Detail,
   type HarnessStatus,
   type TaskRow,
@@ -15,6 +16,7 @@ import {
   isWorkbook,
 } from './bridge.js';
 import { Deliverables, type OpenDeliverable } from './views/Deliverables.js';
+import { PreviewBar } from './views/Preview.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
@@ -75,6 +77,9 @@ export function App() {
   const [opened, setOpened] = useState<OpenDeliverable | null>(null);
   /** The window whose workbook is being written, so its button can say so. */
   const [exporting, setExporting] = useState<string | null>(null);
+  /** The workbook on screen in the Univer viewer, and the digest being put up. */
+  const [preview, setPreview] = useState<PreviewSpec | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -231,9 +236,63 @@ export function App() {
         ? 'workbench'
         : screen === 'formulator' && formulator !== null && !blocked
           ? 'formulator'
-          : '';
+          : (screen === 'deliverables' || screen === 'tasks') && preview !== null && !blocked
+            ? 'preview'
+            : '';
     void api?.paneVisible?.(shown);
-  }, [api, screen, ready, guide, problem, formulator]);
+  }, [api, screen, ready, guide, problem, formulator, preview]);
+
+  /**
+   * Take the preview down, gateway and all.
+   *
+   * The renderer's own state is cleared only once main confirms: the strip
+   * says a server is running, and it must not stop saying so before the
+   * server has stopped.
+   */
+  const closePreview = useCallback(() => {
+    if (!api?.previewClose) {
+      setPreview(null);
+      return;
+    }
+    void api.previewClose().then((a) => take(a, () => setPreview(null)));
+  }, [api, take]);
+
+  /**
+   * Put one archived workbook up in the viewer.
+   *
+   * Main resolves the digest to a path, fences the gateway to that path's own
+   * directory, and starts it; the renderer only ever names the task and the
+   * digest, which it already has. The import can take seconds, so the button
+   * that asked says so until the answer comes.
+   */
+  const openPreview = useCallback(
+    (taskId: string, sha: string, ext: string) => {
+      if (!api?.previewOpen) return;
+      setPreviewing(sha);
+      void api
+        .previewOpen(taskId, sha, ext)
+        .then((a) => take(a, setPreview))
+        .finally(() => setPreviewing(null));
+    },
+    [api, take],
+  );
+
+  /*
+   * The preview lives only while the version it shows is the one on screen.
+   *
+   * That is the operator's second condition (KTD20): the gateway runs while a
+   * preview is open, and "open" means the strip above the viewer is naming
+   * this version on this screen. Leaving the screen, going back to the list,
+   * or opening a different version takes it down rather than leaving a server
+   * up behind a page that no longer mentions it.
+   */
+  useEffect(() => {
+    if (!preview) return;
+    const still =
+      (screen === 'deliverables' && opened?.row.sha256 === preview.sha256) ||
+      (screen === 'tasks' && open === preview.task);
+    if (!still) closePreview();
+  }, [preview, screen, opened, open, closePreview]);
 
   const launchFormulator = useCallback(() => {
     if (!api?.formulatorLaunch) return;
@@ -455,6 +514,7 @@ export function App() {
         setScreen(next);
       }}
       onGuide={screen === 'workbench' ? () => setAsked(true) : undefined}
+      covered={preview !== null && (screen === 'deliverables' || screen === 'tasks')}
       strip={
         screen === 'workbench' ? (
           <TaskBar
@@ -484,6 +544,12 @@ export function App() {
             busy={busyData}
             onLaunch={launchFormulator}
             onStop={stopFormulator}
+          />
+        ) : preview && (screen === 'deliverables' || screen === 'tasks') ? (
+          <PreviewBar
+            preview={preview}
+            task={tasks.find((row) => row.id === preview.task) ?? null}
+            onClose={closePreview}
           />
         ) : undefined
       }
@@ -518,6 +584,8 @@ export function App() {
           onRead={read}
           onExport={exportWorkbook}
           onOpenWorkbook={openWorkbookOnTask}
+          onPreview={api.previewOpen ? (sha, ext) => openPreview(open, sha, ext) : undefined}
+          previewing={previewing}
           busy={exporting}
           reading={reading}
         />
@@ -529,6 +597,10 @@ export function App() {
           open={opened}
           onOpen={openDeliverable}
           onOpenWorkbook={openWorkbook}
+          onPreview={
+            api.previewOpen ? (task, row) => openPreview(task.id, row.sha256, row.ext ?? '.xlsx') : undefined
+          }
+          previewing={previewing}
           onExport={exportFromGallery}
           busy={exporting}
           onBack={() => setOpened(null)}

@@ -111,6 +111,13 @@ export function harnessEnv(
   out.FOUNDRY_VAR = own.varRoot;
   out.FOUNDRY_BIN = own.foundryBin;
   if (own.formulatorBin) out.FOUNDRY_FORMULATOR_BIN = own.formulatorBin;
+  // Not set here, and it would not matter if it were: the Univer bundle's
+  // `gatewayLaunch` builds its gateway's environment from an explicit list
+  // (`HOME LANG LC_ALL PATH TMPDIR` plus its own three names), read from
+  // `lib/index.js`. `UNIVER_ALLOWED_ROOT` placed on this child never reaches
+  // that gateway. The one this app fences is the one it spawns itself, in
+  // `univer.ts`; the plugin's own stays unfenced and is denied to the close
+  // seat by preset instead (KTD12, KTD20).
   // Upstream spawns its own runtime this way, and Electron's binary is the only
   // Node on a machine that has not installed one.
   out.ELECTRON_RUN_AS_NODE = '1';

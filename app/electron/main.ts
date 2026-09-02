@@ -20,6 +20,7 @@ import { FENCE_REASON, installFence } from './harness/fence.js';
 import { type Wiring, type WiringStep, installPlugin, installPresets } from './harness/wiring.js';
 import { CHANNELS } from './ipc/contract.js';
 import { registerIpc } from './ipc/register.js';
+import { UniverPreviewHost } from './univer.js';
 
 const isDev = !app.isPackaged;
 
@@ -158,6 +159,8 @@ let harness: HarnessHost | null = null;
 let formulator: FormulatorHost | null = null;
 /** Which screen is on top. The renderer is the only source. */
 let onTop = '';
+/** The read-only workbook look, present only when this build carries the Univer bundle. */
+let preview: UniverPreviewHost | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -188,6 +191,7 @@ function createWindow(): void {
     if (!window) return;
     harness?.place(window, onTop === 'workbench');
     formulator?.place(window, onTop === 'formulator');
+    preview?.place(window, onTop === 'preview');
   });
 
   if (isDev) {
@@ -275,11 +279,22 @@ void app.whenReady().then(() => {
     });
     const pane = new FormulatorHost();
     formulator = pane;
+    // The Univer bundle rides in the staged runtime beside the period bundle,
+    // so its artifacts are found the same way. Absent, the host says so on
+    // the first open rather than at boot -- a build without it is a build
+    // with one fewer button, not a broken one.
+    const look = new UniverPreviewHost({
+      bundleDir: override
+        ? path.join(override, 'node_modules', 'dsh-univer-office')
+        : stagedBundleDir(here, 'dsh-univer-office'),
+    });
+    preview = look;
     registerIpc(
       { varRoot: varRoot() },
       {
         host,
         formulator: pane,
+        preview: look,
         wiring: () => wiring,
         window: () => mainWindow,
         remember: (screen) => {
@@ -344,6 +359,9 @@ void app.whenReady().then(() => {
 async function shutDown(): Promise<void> {
   harness?.stop();
   const window = mainWindow;
+  // The gateway is a child and dies with a kill, but its page has to go first
+  // so a view is never left pointed at a server this process no longer runs.
+  if (window) preview?.close(window);
   if (formulator?.running() && window) {
     try {
       await formulator.stop({ varRoot: varRoot() }, window);

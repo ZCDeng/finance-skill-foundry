@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Reader } from '../components/Reader.js';
 import {
   ArrowLeft,
+  Eye,
   FileSpreadsheet,
   FileText,
   HardDriveDownload,
@@ -84,6 +85,8 @@ export function TaskDetail({
   onRead,
   onExport,
   onOpenWorkbook,
+  onPreview,
+  previewing,
   busy,
   reading,
 }: {
@@ -94,6 +97,10 @@ export function TaskDetail({
   onExport(windowId: string): void;
   /** Hand an already-filed workbook to the operator's spreadsheet software. */
   onOpenWorkbook(sha: string, ext: string): void;
+  /** Look at an already-filed workbook in this window. Absent in a build with no viewer. */
+  onPreview?(sha: string, ext: string): void;
+  /** The digest whose preview is being put up, if any. */
+  previewing?: string | null;
   /** The window id currently being rendered, if any. */
   busy: string | null;
   reading: { sha: string; text: string } | null;
@@ -208,6 +215,23 @@ export function TaskDetail({
                               >
                                 {shortSha(version.sha256)}
                               </button>
+                              {/*
+                                * The look, beside the handoff. A workbook row
+                                * with one control that leaves the window read
+                                * as a workbook this app could not show.
+                                */}
+                              {isWorkbook(version) && onPreview ? (
+                                <button
+                                  type="button"
+                                  className="fnd-head__tab"
+                                  onClick={() => onPreview(version.sha256, version.ext ?? '.xlsx')}
+                                  disabled={previewing === version.sha256}
+                                  aria-label={`预览 ${shortSha(version.sha256)}`}
+                                >
+                                  <Eye size={12} strokeWidth={1.5} aria-hidden />
+                                  {previewing === version.sha256 ? ' 装进预览…' : ' 预览'}
+                                </button>
+                              ) : null}
                             </td>
                           </tr>
                         ))}

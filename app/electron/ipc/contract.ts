@@ -24,6 +24,17 @@ export const CHANNELS = {
   formulatorLaunch: 'formulator:launch',
   formulatorStop: 'formulator:stop',
   formulatorStatus: 'formulator:status',
+  /**
+   * A read-only look at one archived workbook, in the Univer viewer.
+   *
+   * The renderer names a task and a digest, as it does for every other
+   * deliverable call. Main resolves the file, starts the gateway for as long
+   * as the preview is open, and takes it down on close. No model is anywhere
+   * near this path and no `univer_*` tool is reachable from it.
+   */
+  previewOpen: 'preview:open',
+  previewClose: 'preview:close',
+  previewStatus: 'preview:status',
   /** Which screen is on top. Both embedded panes are placed from it. */
   paneVisible: 'pane:visible',
   /**

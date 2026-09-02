@@ -1,4 +1,4 @@
-import { ArrowLeft, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Eye, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
 
 import { Reader } from '../components/Reader.js';
 import {
@@ -40,6 +40,8 @@ export function Deliverables({
   open,
   onOpen,
   onOpenWorkbook,
+  onPreview,
+  previewing,
   onExport,
   busy,
   onBack,
@@ -48,6 +50,10 @@ export function Deliverables({
   open: OpenDeliverable | null;
   onOpen(task: TaskRow, row: DeliverableRow): void;
   onOpenWorkbook(): void;
+  /** Look at the open workbook in this window. Absent in a build with no viewer. */
+  onPreview?(task: TaskRow, row: DeliverableRow): void;
+  /** The digest whose preview is being put up, if any. */
+  previewing?: string | null;
   /** Render the open document's window as a workbook, and open that. */
   onExport(task: TaskRow, windowId: string): void;
   /** The window currently being written, if any. */
@@ -120,17 +126,31 @@ export function Deliverables({
           </div>
         )}
         {/*
-          * A workbook is handed over rather than rendered. It was written as a
-          * spreadsheet so it could be sorted and pivoted in the software the
-          * operator already uses; drawing it again in this window would be a
-          * worse copy of that software.
+          * A workbook is looked at or handed over, not rendered by this app.
+          * The look is the Univer viewer over a scratch copy, for the question
+          * "what is in this version" without leaving the window; the handoff
+          * is for sorting and pivoting, which belongs in the software the
+          * operator already uses. Both are here because this is the screen an
+          * operator looking for either one arrives at -- and it used to offer
+          * only the handoff, which read as "there is no viewer".
           */}
         {isWorkbook(open.row) ? (
           <div className="fnd-stack" style={{ gap: 10 }}>
             <p className="fnd-muted">
               这一版是表格。四页：本期（窗口、锁哈希、标签怎么读）、结论、底稿、外部引用。
             </p>
-            <div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {onPreview ? (
+                <button
+                  type="button"
+                  className="fnd-button"
+                  onClick={() => onPreview(open.task, open.row)}
+                  disabled={previewing === open.row.sha256}
+                >
+                  <Eye size={14} strokeWidth={1.5} aria-hidden />
+                  {previewing === open.row.sha256 ? ' 正在装进预览…' : ' 在这里预览'}
+                </button>
+              ) : null}
               <button type="button" className="fnd-button" onClick={onOpenWorkbook}>
                 <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
                 {' 在表格软件里打开'}

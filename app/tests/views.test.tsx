@@ -858,3 +858,137 @@ describe('the export button can be read', () => {
     expect(css).toMatch(/\.fnd-button:disabled \{[^}]*opacity/);
   });
 });
+
+/*
+ * The complaint this answers: 依然没有找到 univers 和文档展现的入口. The bundle
+ * was staged and fenced and nothing in the window used it; a workbook row
+ * offered one control, and that control left the window.
+ */
+describe('looking at a workbook without leaving the window', () => {
+  const BOOK: DeliverableRow = {
+    ...ROW,
+    kind: 'export',
+    ext: '.xlsx',
+    cause: 'export:xlsx',
+    sha256: 'd'.repeat(64),
+  };
+
+  it('offers the look beside the handoff on the screen named 交付物', () => {
+    const asked: string[] = [];
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: BOOK }]}
+        open={{ task: TASK, row: BOOK, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onPreview={(task, row) => asked.push(`${task.id}:${row.sha256}`)}
+        onExport={() => {}}
+        busy={null}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /在这里预览/ }));
+    expect(asked).toEqual([`${TASK.id}:${BOOK.sha256}`]);
+    expect(screen.getByRole('button', { name: /在表格软件里打开/ })).toBeTruthy();
+  });
+
+  it('says it is working on that version, and only that one', () => {
+    // An import is a headless Univer coming up; seconds, not milliseconds.
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: BOOK }]}
+        open={{ task: TASK, row: BOOK, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onPreview={() => {}}
+        previewing={BOOK.sha256}
+        onExport={() => {}}
+        busy={null}
+        onBack={() => {}}
+      />,
+    );
+    expect((screen.getByRole('button', { name: /正在装进预览/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('does not offer a look a build with no viewer cannot give', () => {
+    render(
+      <Deliverables
+        rows={[{ task: TASK, row: BOOK }]}
+        open={{ task: TASK, row: BOOK, text: null }}
+        onOpen={() => {}}
+        onOpenWorkbook={() => {}}
+        onExport={() => {}}
+        busy={null}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /在这里预览/ })).toBeNull();
+  });
+
+  it('offers it on the task screen too, on each filed workbook', () => {
+    const asked: string[] = [];
+    render(
+      <TaskDetail
+        detail={{
+          task: { ...TASK },
+          windows: [
+            {
+              window_id: 'b'.repeat(32),
+              reason: 'initial' as const,
+              at: '2026-08-30T03:00:00Z',
+              state: 'Briefed',
+              inputs: [],
+            },
+          ],
+          sessions: [],
+          deliverables: [BOOK, ROW],
+        }}
+        onBack={() => {}}
+        onRead={() => {}}
+        onExport={() => {}}
+        onOpenWorkbook={() => {}}
+        onPreview={(sha, ext) => asked.push(`${sha}${ext}`)}
+        busy={null}
+        reading={null}
+      />,
+    );
+    // One look per workbook; the markdown row beside it gets none.
+    const looks = screen.getAllByRole('button', { name: /^预览 / });
+    expect(looks).toHaveLength(1);
+    fireEvent.click(looks[0]);
+    expect(asked).toEqual([`${BOOK.sha256}.xlsx`]);
+  });
+
+  it('names the task, the version and the server in the strip, and closes from there', async () => {
+    // The viewer under the strip is a native view, so a control drawn in the
+    // column would be under it. The strip names the origin because the
+    // operator accepted a server that lives only while the strip does.
+    const { PreviewBar } = await import('../src/views/Preview.js');
+    let closed = 0;
+    render(
+      <PreviewBar
+        preview={{ task: TASK.id, sha256: BOOK.sha256, origin: 'http://127.0.0.1:9081' }}
+        task={TASK}
+        onClose={() => {
+          closed += 1;
+        }}
+      />,
+    );
+    expect(screen.getByText('2026-08 月度经营分析')).toBeTruthy();
+    expect(screen.getByText('dddddddddddd')).toBeTruthy();
+    expect(screen.getByText(/http:\/\/127\.0\.0\.1:9081/)).toBeTruthy();
+    expect(screen.getByText(/不落盘/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /关闭预览/ }));
+    expect(closed).toBe(1);
+  });
+
+  it('stops the column scrolling under the viewer, as it does under the workbench', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    const { container } = render(
+      <Shell screen="deliverables" onScreen={() => {}} covered>
+        <p>x</p>
+      </Shell>,
+    );
+    expect(container.querySelector('.fnd-shell')?.getAttribute('data-embedded')).toBe('yes');
+  });
+});

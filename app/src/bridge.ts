@@ -130,6 +130,25 @@ export interface Bridge {
   formulatorLaunch?(): Promise<Answer<LaunchSpec>>;
   formulatorStop?(): Promise<Answer<{ stopped: boolean }>>;
   formulatorStatus?(): Promise<Answer<{ running: LaunchSpec | null }>>;
+  /**
+   * A read-only look at one archived workbook, in the Univer viewer.
+   *
+   * Absent when this build carries no Univer bundle. Main starts the gateway
+   * for as long as the preview is open and takes it down on close; the
+   * renderer never sees a path, only the task and the digest it already has.
+   */
+  previewOpen?(task: string, sha: string, ext: string): Promise<Answer<PreviewSpec>>;
+  previewClose?(): Promise<Answer<{ stopped: boolean }>>;
+  previewStatus?(): Promise<Answer<{ running: PreviewSpec | null }>>;
+}
+
+/** What a preview reports back once the viewer is up. */
+export interface PreviewSpec {
+  /** The task the workbook belongs to, and the digest that names the version. */
+  task: string;
+  sha256: string;
+  /** The viewer origin, so the strip can say where it is looking. */
+  origin: string;
 }
 
 /** What `launch-formulator` reports back. */

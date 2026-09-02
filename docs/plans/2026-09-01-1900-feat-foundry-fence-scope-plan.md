@@ -294,17 +294,66 @@ takes.
   and believing the feature exists is how it went unnoticed; a rendered-order assertion is
   what pins it now.
 
+- **KTD20. A workbook can be looked at in this window, in a gateway this app fences,
+  starts and stops itself, with no model in the loop** `(session-settled: user-directed —
+  做只读预览，模型碰不到 univer 工具; 接受：我按上面三条做)`. The operator asked why the Univer
+  bundle was installed and nothing showed a workbook. The bundle's viewer is not a file
+  renderer: it opens a *unit* inside a `.univer` container that its collaboration gateway
+  serves over HTTP and a WebSocket. So a look at a filed `.xlsx` is a gateway process, a
+  scratch container, the bundle's one-shot worker turning the bytes into a snapshot, and a
+  page — and `univer.ts` owns all four.
+
+  Three conditions were put to the operator before the gateway was ever run, because it is
+  third-party server code and the audit of its bytes found it binds loopback only, has no
+  authentication, reflects any `Origin` in its CORS headers, and reads one environment name as
+  its only filesystem boundary. The operator accepted all three, and each is now a fact with a
+  test rather than a promise:
+
+  1. `UNIVER_ALLOWED_ROOT` is the task's own artifacts directory, set on the gateway this app
+     spawns. Read from `gateway.cjs`: `UniverfileManager._assertWithinAllowedRoot` refuses a
+     container outside the root *and one at it*, which is why the container is
+     `<artifacts>/preview/<sha256>.univer` and not `<artifacts>/<sha256>.univer`.
+  2. The gateway runs while a preview is open and not otherwise. The renderer takes it down
+     when the strip above the viewer stops naming this version on this screen; main kills the
+     child and removes the container; `shutDown` does the same on quit.
+  3. No tool is registered anywhere on this path. Main calls the gateway over HTTP itself; the
+     thirteen `univer_*` tools stay denied on the close seat (KTD12).
+
+  Every wire shape is read from the bundle's bytes and pinned by a test that reads them again:
+  the banner and the port-in-use exit from `gateway-entry.ts`; the worker protocol (`{operation:
+  "import", sourcePath, unitType}` on stdin, `{ok, result}` on stdout) from
+  `adapters/unit-content/worker.ts`; the container key (`base64url` of the absolute path) from
+  `file-api.ts`; the viewer URL (`/?file=<key>`) from `gateway-univer-service.ts`. A trunk unit
+  cannot be created with content — the route takes a name and nothing else — so the snapshot
+  goes into a draft worktree and is merged, which is the plugin's own `univer_import` sequence
+  minus the model.
+
+  Two things this is not. It is not read-only at the page: the trunk viewer can be typed into.
+  What it types into is a container derived from the archived bytes, made fresh on every open
+  and deleted on close, and the filed `.xlsx` is never opened by the gateway at all — the
+  worker reads it once. And it is not a fence on the plugin's own gateway. An earlier version
+  of this session set `UNIVER_ALLOWED_ROOT` on the harness child and asserted it, which
+  measured as present and did nothing: `gatewayLaunch` in `lib/index.js` builds that gateway's
+  environment from an explicit list (`HOME LANG LC_ALL PATH TMPDIR` plus its own three names).
+  That plumbing is removed, the test now asserts its absence, and the plugin's gateway is kept
+  from the close seat by preset rather than by a boundary it cannot be given.
+
+  Not yet measured, and said so: whether `libsql`, the formula engine and the Office exchange
+  bindings load under Electron-as-Node. The host reports an early exit as the exit, with
+  stderr, rather than as a timeout, so the first open on a real machine answers that.
+
 ## Scope Boundaries
 
 **Not in this work**
 
 - Letting the model author a spreadsheet. The Office bundle is installed for the authoring
   seat and for a rendering path we have not built yet; the close seat cannot see it.
-- Rendering the close in a viewer we host. `foundry export --format xlsx` now writes the
-  window as a workbook and the app hands it to the operator's own spreadsheet software.
-  Drawing it again inside this window would be a worse copy of the software they already
-  sort and pivot in, and it would put the Univer licence expiry on the path of a document
-  they need every month.
+- Rendering the close in a viewer we host, as the way the close is delivered. `foundry export
+  --format xlsx` writes the window as a workbook and the app hands it to the operator's own
+  spreadsheet software; that stays the deliverable. KTD20 adds a look at it in this window, on
+  a scratch copy, for the question "what is in this version" — not a second Excel, and not on
+  the path of the document they need every month, which is why the licence expiry below is a
+  risk to the look and not to the close.
 - A leader-operated session. KTD7 stands.
 - Re-emitting a brief after a late reference. The brief is what was known when it was written;
   the workpaper is what was learned since. Conflating them would make the version trail lie.

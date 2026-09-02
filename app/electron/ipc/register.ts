@@ -14,8 +14,10 @@ import {
   readDeliverable,
   showTask,
 } from '../reads.js';
+import type { UniverPreviewHost } from '../univer.js';
 import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
+import * as path from 'node:path';
 
 /**
  * What a handler hands back.
@@ -80,6 +82,8 @@ export function registerIpc(
   panes?: {
     host: HarnessHost;
     formulator: FormulatorHost;
+    /** The read-only workbook look. Refuses by name in a build with no Univer bundle. */
+    preview: UniverPreviewHost;
     /** How the wiring went. Read, never awaited: a failed run has no harness to wait on. */
     wiring: () => Wiring;
     window: () => BrowserWindow | null;
@@ -257,6 +261,44 @@ export function registerIpc(
   );
 
   /**
+   * Open one archived workbook read-only in the Univer viewer.
+   *
+   * The renderer names a task and a digest, exactly as it does to read a brief.
+   * The path comes back from the CLI, never from the wire, and the gateway is
+   * fenced to that path's own directory -- the task's artifacts -- for as long
+   * as the preview is up. That directory is chosen here and not by the host so
+   * the rule is next to the only call that can widen it.
+   */
+  ipcMain.handle(
+    CHANNELS.previewOpen,
+    (_event, task: unknown, sha: unknown, ext: unknown) =>
+      answer(async () => {
+        const window = panes.window();
+        if (!window) throw new FoundryFailure('no window to show the preview in', null);
+        const id = taskId(task);
+        const file = await deliverablePath({ ...binding, task: id }, String(sha ?? ''), String(ext ?? ''));
+        return panes.preview.open(window, {
+          task: id,
+          sha256: String(sha ?? ''),
+          file,
+          allowedRoot: path.dirname(file),
+        });
+      }),
+  );
+
+  ipcMain.handle(CHANNELS.previewClose, () =>
+    answer(async () => {
+      const window = panes.window();
+      if (window) panes.preview.close(window);
+      return { stopped: true };
+    }),
+  );
+
+  ipcMain.handle(CHANNELS.previewStatus, () =>
+    answer(async () => ({ running: panes.preview.running() })),
+  );
+
+  /**
    * Which screen is on top.
    *
    * Both embedded pages are native views in window coordinates, so React
@@ -272,6 +314,7 @@ export function registerIpc(
       if (window) {
         panes.host.place(window, name === 'workbench');
         panes.formulator.place(window, name === 'formulator');
+        panes.preview.place(window, name === 'preview');
       }
       return { screen: name };
     }),

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -101,6 +101,141 @@ describe('the environment the child gets', () => {
     expect(scrubbed.FOUNDRY_VAR).toBe('/app/var');
     expect(scrubbed.FOUNDRY_BIN).toBe('/app/foundry');
     expect(scrubbed.FOUNDRY_TASK).toBeUndefined();
+  });
+
+  it("does not pretend to fence the plugin's own Univer gateway", () => {
+    // The plugin builds that gateway's environment from an explicit list --
+    // `HOME LANG LC_ALL PATH TMPDIR` plus its own three names, read from
+    // `lib/index.js` (`gatewayLaunch`) -- so a `UNIVER_ALLOWED_ROOT` set on
+    // this child never reaches it. An earlier version set one here and
+    // asserted it, which was a fence that measured as present and did nothing.
+    // The gateway this app does fence is the one it spawns itself, in
+    // `univer.ts`; the plugin's own is denied to the close seat by preset.
+    expect(harnessEnv({}, { home: '/h', varRoot: '/v', foundryBin: '/b' }).UNIVER_ALLOWED_ROOT).toBeUndefined();
+    expect(read('../electron/harness/boot.ts')).not.toContain('out.UNIVER_ALLOWED_ROOT');
+  });
+
+  it('agrees with the installed plugin about what its gateway is allowed to inherit', () => {
+    // Coupling to the plugin's launcher, so a release that starts forwarding
+    // the whole environment -- and with it a fence this app could set -- turns
+    // the sentence above into a red test rather than a stale comment.
+    const install = process.env.FOUNDRY_DSH_INSTALL;
+    if (!install) return;
+    const host = readFileSync(`${install}/node_modules/dsh-univer-office/lib/index.js`, 'utf8');
+    expect(host).toContain('["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"]');
+    expect(host).toContain('UNIVER_COLLAB_GATEWAY_PORT: String(port)');
+    expect(host).not.toContain('UNIVER_ALLOWED_ROOT');
+  });
+});
+
+describe('the environment the Univer gateway and its worker get', () => {
+  /*
+   * A third-party server and a third-party worker this app starts on the
+   * operator's behalf, and the three things it enforces are the three the
+   * operator accepted (KTD20): the filesystem fence, the process living only
+   * while a preview is open, and no model anywhere near it. This file covers
+   * the first; the other two are the host's own lifecycle and the preset
+   * scopes that already exist.
+   */
+  it('inherits five names and nothing else, the same five the plugin forwards', async () => {
+    // The plugin's own launcher forwards exactly these to the same program.
+    // This app's shell has keys, `DSH_*` and `FOUNDRY_*` in it, and none of
+    // them is the gateway's business.
+    const { gatewayEnv } = await import('../electron/univer.js');
+    const env = gatewayEnv(
+      {
+        PATH: '/usr/bin',
+        HOME: '/Users/x',
+        LANG: 'zh_CN.UTF-8',
+        DEEPSEEK_API_KEY: 'sk-live',
+        GITHUB_TOKEN: 'ghp',
+        FOUNDRY_VAR: '/v',
+        DSH_HOME: '/d',
+        UNIVER_ALLOWED_ROOT: '/',
+        UNIVER_COLLAB_GATEWAY_PORT: '1',
+        UNIVER_RENDER_BROWSER: '/x',
+      },
+      { port: 9081, viewerRoot: '/b/artifacts/viewer', allowedRoot: '/app/var/tasks/t/artifacts', nodePath: '/stage/node_modules' },
+    );
+    expect(Object.keys(env).sort()).toEqual([
+      'DO_NOT_TRACK',
+      'ELECTRON_RUN_AS_NODE',
+      'HOME',
+      'LANG',
+      'NODE_PATH',
+      'PATH',
+      'UNIVER_ALLOWED_ROOT',
+      'UNIVER_COLLAB_GATEWAY_PORT',
+      'UNIVER_VIEW_ASSETS_ROOT',
+    ]);
+    // An inherited `UNIVER_ALLOWED_ROOT=/` would have widened the one boundary
+    // the gateway enforces; an inherited port would collide with whatever set it.
+    expect(env.UNIVER_ALLOWED_ROOT).toBe('/app/var/tasks/t/artifacts');
+    expect(env.UNIVER_COLLAB_GATEWAY_PORT).toBe('9081');
+    expect(env.UNIVER_VIEW_ASSETS_ROOT).toBe('/b/artifacts/viewer');
+    expect(env.NODE_PATH).toBe('/stage/node_modules');
+    expect(env.DO_NOT_TRACK).toBe('1');
+    expect(env.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+
+  it("keeps an operator's NODE_PATH behind the bundle's own, for the gateway and the worker alike", async () => {
+    // `libsql` and the two native bindings are resolved from the staged
+    // `node_modules` the bundle sits in; the plugin sets the same thing for
+    // the same reason. The worker reads no `UNIVER_` name at all.
+    const { gatewayEnv, workerEnv } = await import('../electron/univer.js');
+    const env = gatewayEnv(
+      { NODE_PATH: '/theirs' },
+      { port: 9080, viewerRoot: '/v', allowedRoot: '/f', nodePath: '/stage/node_modules' },
+    );
+    expect(env.NODE_PATH).toBe(`/stage/node_modules${delimiter}/theirs`);
+    const worker = workerEnv({ PATH: '/usr/bin', UNIVER_ALLOWED_ROOT: '/' }, { nodePath: '/stage/node_modules' });
+    expect(Object.keys(worker).sort()).toEqual(['DO_NOT_TRACK', 'ELECTRON_RUN_AS_NODE', 'NODE_PATH', 'PATH']);
+  });
+
+  it('names the container by its digest, strictly inside the fence, and the viewer by the container', async () => {
+    const { containerPath, fileKey, viewerUrl } = await import('../electron/univer.js');
+    const root = '/app/var/tasks/t/artifacts';
+    const file = containerPath(root, 'c'.repeat(64));
+    // Under a subdirectory, not at the root: the gateway refuses a container
+    // whose path *is* the allowed root as well as one outside it.
+    expect(file).toBe(join(root, 'preview', `${'c'.repeat(64)}.univer`));
+    // `base64url` of the absolute path: what the plugin's `file-api.ts` sends
+    // and the gateway's `univerfile-manager.ts` decodes.
+    expect(fileKey('/a/b.univer')).toBe(Buffer.from('/a/b.univer', 'utf8').toString('base64url'));
+    // The trunk page, the same URL the plugin's `computeFileState` calls `viewerUrl`.
+    expect(viewerUrl('http://127.0.0.1:9080', '/a/b.univer')).toBe(
+      `http://127.0.0.1:9080/?file=${encodeURIComponent(fileKey('/a/b.univer'))}`,
+    );
+  });
+
+  it('finds the three artifacts where the bundle keeps them, and says when they are absent', async () => {
+    const { gatewayEntry, nodePath, univerStaged, viewerRoot, workerEntry } = await import('../electron/univer.js');
+    const layout = { bundleDir: '/stage/node_modules/dsh-univer-office' };
+    expect(gatewayEntry(layout)).toBe('/stage/node_modules/dsh-univer-office/artifacts/gateway.cjs');
+    expect(viewerRoot(layout)).toBe('/stage/node_modules/dsh-univer-office/artifacts/viewer');
+    expect(workerEntry(layout)).toBe('/stage/node_modules/dsh-univer-office/artifacts/unit-content-worker.mjs');
+    expect(nodePath(layout)).toBe('/stage/node_modules');
+    // A build without the bundle is a build with one fewer button, not a broken one.
+    expect(univerStaged({ bundleDir: '/nonexistent' })).toBe(false);
+  });
+
+  it('agrees with the installed gateway about its banner, its exit code, its fence and its routes', () => {
+    // Every wire shape in `univer.ts` is read from the bundle's bytes. This
+    // pins the ones a release could move: the banner the host waits for, the
+    // port-in-use exit, the one environment name that is the fence, and the
+    // worktree route the snapshot goes through.
+    const install = process.env.FOUNDRY_DSH_INSTALL;
+    if (!install) return;
+    const gateway = readFileSync(`${install}/node_modules/dsh-univer-office/artifacts/gateway.cjs`, 'utf8');
+    expect(gateway).toContain('[dsh-univer-gateway] listening on http://127.0.0.1:');
+    expect(gateway).toContain('var GATEWAY_PORT_IN_USE_EXIT_CODE = 98;');
+    expect(gateway).toContain('env.UNIVER_ALLOWED_ROOT');
+    expect(gateway).toContain('univerfile is outside the allowed root');
+    expect(gateway).toContain('viewUrl: `/?file=${encodeURIComponent(key)}`');
+    expect(gateway).toContain("sub2[0] === \"units\" && method2 === \"POST\"");
+    const host = readFileSync(`${install}/node_modules/dsh-univer-office/lib/index.js`, 'utf8');
+    expect(host).toContain('operation: "import", sourcePath, unitType: unitType3(kind)');
+    expect(host).toContain('`${gateway}/?file=${encodeURIComponent(fileKeyOf(file))}`');
   });
 });
 

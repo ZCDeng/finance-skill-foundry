@@ -12,6 +12,13 @@ export interface ShellProps {
   strip?: ReactNode;
   /** Brings the first-run guide back. Absent on screens that cannot show it. */
   onGuide?(): void;
+  /**
+   * A native view is over the column right now, on a screen that does not
+   * always have one. The workbook preview is the case: it is opened from the
+   * record-keeping screens, and while it is up the column under it must not
+   * scroll for the same reason the workbench's never does.
+   */
+  covered?: boolean;
   children: ReactNode;
 }
 
@@ -46,10 +53,10 @@ const DESTINATIONS = [
  * document does -- anything behind it that could scroll away would slide out
  * from under a view that stays put.
  */
-export function Shell({ screen, onScreen, strip, onGuide, children }: ShellProps) {
-  // Both embedded pages clip the column for the same reason; `data-screen`
+export function Shell({ screen, onScreen, strip, onGuide, covered, children }: ShellProps) {
+  // Every embedded page clips the column for the same reason; `data-screen`
   // carries which one is on so the stylesheet can stop it scrolling.
-  const embedded = screen === 'workbench' || screen === 'formulator';
+  const embedded = covered === true || screen === 'workbench' || screen === 'formulator';
   return (
     <div className="fnd-shell" data-screen={screen} data-embedded={embedded ? 'yes' : 'no'}>
       <header className="fnd-head">

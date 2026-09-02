@@ -28,6 +28,10 @@ const api = {
   formulatorLaunch: () => ipcRenderer.invoke('formulator:launch'),
   formulatorStop: () => ipcRenderer.invoke('formulator:stop'),
   formulatorStatus: () => ipcRenderer.invoke('formulator:status'),
+  previewOpen: (task: string, sha: string, ext: string) =>
+    ipcRenderer.invoke('preview:open', task, sha, ext),
+  previewClose: () => ipcRenderer.invoke('preview:close'),
+  previewStatus: () => ipcRenderer.invoke('preview:status'),
   paneVisible: (screen: string) => ipcRenderer.invoke('pane:visible', screen),
   /**
    * The one channel main pushes on. Returns its own unsubscribe, because a
