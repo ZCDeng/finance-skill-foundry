@@ -190,9 +190,49 @@ export function containerPath(allowedRoot: string, sha256: string): string {
   return path.join(allowedRoot, 'preview', `${sha256}.univer`);
 }
 
-/** The viewer page for a container's trunk. */
+/**
+ * The viewer page for a container's trunk, view only, in this app's language.
+ *
+ * Four switches, all the viewer's own, read from its bundle and measured on
+ * the packaged app:
+ *
+ *   - `mode=embedded` is the layout the plugin's own cards use: no file
+ *     sidebar (which showed the container's base64 key as its name) and no
+ *     header. The strip above the pane already says which workbook this is.
+ *   - `editable=false` is honoured only in that mode -- the URL reader
+ *     returns `null` for it in standalone mode, and a trunk unit then loads
+ *     editable. Measured: 39 of 42 toolbar controls disabled with it, 27 of
+ *     43 without. Without it the trunk page can be typed into -- harmless to
+ *     the archive, since what it edits is the scratch container, but a
+ *     workbook that says 只读 on its strip should not offer a cell to type in.
+ *   - `scope=trunk` names what the embedded layout shows.
+ *   - `lang=zh-CN` overrides the viewer's fallback to `navigator.language`,
+ *     which inside this app resolved to English.
+ */
 export function viewerUrl(origin: string, file: string): string {
-  return `${origin}/?file=${encodeURIComponent(fileKey(file))}`;
+  return `${origin}/?file=${encodeURIComponent(fileKey(file))}&mode=embedded&scope=trunk&editable=false&lang=zh-CN`;
+}
+
+/**
+ * The viewer's own appearance switch, read from its bundle.
+ *
+ * One localStorage key on the viewer's origin, holding `light` or `dark`,
+ * default `light`, and no `system`: the viewer never consults
+ * `prefers-color-scheme`, which is why `nativeTheme` alone left it white
+ * inside a dark window while the harness page went dark beside it.
+ */
+export const APPEARANCE_KEY = 'univer-collab-client-appearance';
+
+/**
+ * A path the gateway answers with a plain-text 404: a document on the
+ * viewer's origin that costs no bundle, which is where the key is written
+ * before the viewer is loaded. Any non-API path would do; this one says why.
+ */
+export const APPEARANCE_SEED_PATH = 'appearance';
+
+/** The script that writes the switch. Idempotent; a refused storage is a light viewer, not a failure. */
+export function seedAppearance(value: 'light' | 'dark'): string {
+  return `(() => { try { localStorage.setItem(${JSON.stringify(APPEARANCE_KEY)}, ${JSON.stringify(value)}); } catch {} })()`;
 }
 
 /** Everything sqlite may have left beside a container. */
@@ -496,7 +536,15 @@ export class UniverPreviewHost {
           null,
         );
       }
-      await this.pane.attach(window, viewerUrl(origin, file));
+      // Dark before the viewer boots. The key is written on the viewer's
+      // origin from the gateway's 404 text, then the viewer is loaded; done
+      // the other way round the viewer would have to be reloaded, which is a
+      // second boot of a 47MB bundle. localStorage is per origin in the
+      // default session, so this also holds for every later preview on the
+      // same port.
+      await this.pane.attach(window, `${origin}/${APPEARANCE_SEED_PATH}`);
+      await this.pane.run(seedAppearance('dark'));
+      await this.pane.load(viewerUrl(origin, file));
       const spec = { task: target.task, sha256: target.sha256, origin };
       this.spec = spec;
       this.pane.place(window, true);

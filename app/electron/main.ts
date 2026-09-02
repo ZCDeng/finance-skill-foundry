@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, nativeTheme, session } from 'electron';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
 
@@ -233,6 +233,12 @@ if (!app.requestSingleInstanceLock()) {
 void app.whenReady().then(() => {
   // The losing process is on its way out; `whenReady` still fires for it.
   if (!app.hasSingleInstanceLock()) return;
+  // Every page this window embeds is told the scheme is dark. This app's own
+  // document is dark by construction; the harness page and the Univer viewer
+  // follow `prefers-color-scheme`, and left to the OS they came up light inside
+  // a dark frame. The viewer's own appearance setting defaults to `system`, so
+  // this is the one switch that reaches it without a click in its settings.
+  nativeTheme.themeSource = 'dark';
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     // Only this app's own documents. The harness page and Formulator are served
     // by child processes over loopback and carry their own headers; rewriting

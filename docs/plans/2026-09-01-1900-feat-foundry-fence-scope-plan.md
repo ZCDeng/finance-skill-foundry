@@ -328,10 +328,17 @@ takes.
   goes into a draft worktree and is merged, which is the plugin's own `univer_import` sequence
   minus the model.
 
-  Two things this is not. It is not read-only at the page: the trunk viewer can be typed into.
-  What it types into is a container derived from the archived bytes, made fresh on every open
-  and deleted on close, and the filed `.xlsx` is never opened by the gateway at all — the
-  worker reads it once. And it is not a fence on the plugin's own gateway. An earlier version
+  Two things this is not. It was not read-only at the page on the first build: the trunk viewer
+  could be typed into. What it typed into was a container derived from the archived bytes,
+  made fresh on every open and deleted on close, and the filed `.xlsx` is never opened by the
+  gateway at all — the worker reads it once. The viewer's own switches closed that: its URL
+  reader honours `editable=false` only under `mode=embedded`, and in that layout 39 of 42
+  toolbar controls are disabled against 27 of 43 without it; the same layout drops the file
+  sidebar that showed the container's base64 key, and `lang=zh-CN` puts the ribbon in the
+  app's language. Its appearance is one localStorage key, `light` or `dark`, default `light`,
+  never `prefers-color-scheme` — `nativeTheme` turned the harness page dark and left the
+  viewer white — so the key is written on the viewer's origin from the gateway's own 404 page
+  before the viewer loads. And it is not a fence on the plugin's own gateway. An earlier version
   of this session set `UNIVER_ALLOWED_ROOT` on the harness child and asserted it, which
   measured as present and did nothing: `gatewayLaunch` in `lib/index.js` builds that gateway's
   environment from an explicit list (`HOME LANG LC_ALL PATH TMPDIR` plus its own three names).

@@ -202,10 +202,41 @@ describe('the environment the Univer gateway and its worker get', () => {
     // `base64url` of the absolute path: what the plugin's `file-api.ts` sends
     // and the gateway's `univerfile-manager.ts` decodes.
     expect(fileKey('/a/b.univer')).toBe(Buffer.from('/a/b.univer', 'utf8').toString('base64url'));
-    // The trunk page, the same URL the plugin's `computeFileState` calls `viewerUrl`.
+    // The trunk page the plugin's `computeFileState` calls `viewerUrl`, in
+    // the embedded layout with the viewer's own view-only switch and this
+    // app's language. `editable` is read only under `mode=embedded`;
+    // measured: 39 of 42 toolbar controls disabled, against 27 of 43 editable.
     expect(viewerUrl('http://127.0.0.1:9080', '/a/b.univer')).toBe(
-      `http://127.0.0.1:9080/?file=${encodeURIComponent(fileKey('/a/b.univer'))}`,
+      `http://127.0.0.1:9080/?file=${encodeURIComponent(fileKey('/a/b.univer'))}&mode=embedded&scope=trunk&editable=false&lang=zh-CN`,
     );
+  });
+
+  it('writes the viewer its own dark switch, on its own origin, before it boots', async () => {
+    // The viewer's appearance is one localStorage key, `light` or `dark`,
+    // default `light`, and it never reads `prefers-color-scheme` -- measured:
+    // `nativeTheme` turned the harness page dark and left the viewer white.
+    const { APPEARANCE_KEY, APPEARANCE_SEED_PATH, seedAppearance } = await import('../electron/univer.js');
+    expect(APPEARANCE_KEY).toBe('univer-collab-client-appearance');
+    expect(seedAppearance('dark')).toContain(`localStorage.setItem("${APPEARANCE_KEY}", "dark")`);
+    // Seeded from a page that costs no bundle, then the viewer is loaded.
+    const source = read('../electron/univer.ts');
+    expect(source.indexOf(`\${origin}/\${APPEARANCE_SEED_PATH}`)).toBeLessThan(source.indexOf('this.pane.load(viewerUrl(origin, file))'));
+    expect(APPEARANCE_SEED_PATH).not.toMatch(/^uf(\/|$)/);
+    // And the key is the one the staged viewer reads.
+    const install = process.env.FOUNDRY_DSH_INSTALL;
+    if (!install) return;
+    const dir = `${install}/node_modules/dsh-univer-office/artifacts/viewer/assets`;
+    const entry = readdirSync(dir).find((name) => /^index-.*\.js$/.test(name));
+    expect(entry).toBeTruthy();
+    const viewer = readFileSync(`${dir}/${entry}`, 'utf8');
+    expect(viewer).toContain('`univer-collab-client-appearance`');
+    expect(viewer).toContain('if(e===`light`||e===`dark`)return e}catch{}return`light`');
+    // And the view-only switch is still read the way `viewerUrl` relies on:
+    // `false` parsed as false, and only under the embedded layout.
+    expect(viewer).toContain('e.get(`editable`);return t===`true`||t!==`false`&&null');
+    expect(viewer).toContain('editable:t===`embedded`?YD(e):null');
+    // The language comes off the URL before storage or `navigator.language`.
+    expect(viewer).toContain('new URLSearchParams(location.search).get(`lang`)');
   });
 
   it('finds the three artifacts where the bundle keeps them, and says when they are absent', async () => {
@@ -217,6 +248,16 @@ describe('the environment the Univer gateway and its worker get', () => {
     expect(nodePath(layout)).toBe('/stage/node_modules');
     // A build without the bundle is a build with one fewer button, not a broken one.
     expect(univerStaged({ bundleDir: '/nonexistent' })).toBe(false);
+  });
+
+  it('tells every embedded page the scheme is dark, so the viewer comes up in it', () => {
+    // The viewer's appearance defaults to `system` and follows
+    // `prefers-color-scheme`; on a light OS it drew a light sheet inside this
+    // dark window. `nativeTheme.themeSource` is the one switch that reaches a
+    // page this app does not own, and it is set before any page is loaded.
+    const source = read('../electron/main.ts');
+    expect(source).toContain("nativeTheme.themeSource = 'dark'");
+    expect(source.indexOf("nativeTheme.themeSource = 'dark'")).toBeLessThan(source.indexOf('createWindow();'));
   });
 
   it('closes the page when a pane is detached, not only the view', () => {

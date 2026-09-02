@@ -108,10 +108,11 @@ export function registerIpc(
   /**
    * Open an archived workbook in whatever this machine uses for spreadsheets.
    *
-   * `shell.openPath` rather than an embedded viewer, and that is the decision
-   * rather than a stopgap. The point of writing the close as xlsx was that a
-   * finance manager reads it in the software they already sort and pivot in;
-   * rendering it back inside this window would be handing them a worse Excel.
+   * `shell.openPath` is the delivery. The point of writing the close as xlsx
+   * was that a finance manager reads it in the software they already sort and
+   * pivot in. The in-window look (`previewOpen`, below) answers a different
+   * question, "what is in this version", on a scratch copy; it is not a
+   * second Excel, and this handoff is not a stopgap for it.
    *
    * The path never crosses the boundary. The renderer passes a digest, the CLI
    * resolves it under this task's own artifacts, and the operator's opener gets

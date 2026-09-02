@@ -52,7 +52,7 @@ Shipped as commit 9f12b77 / 3a4e3ea on main.
 
 ## Guidance
 
-Pin the contract from the bytes before running anything. Every wire shape in `app/electron/univer.ts` was read from the bundle, and `app/tests/harness.test.ts:232-250` pins the banner, the exit code, the fence name and the unit route against the staged files, so a release that moves them fails a test rather than a preview.
+Pin the contract from the bytes before running anything. Every wire shape in `app/electron/univer.ts` was read from the bundle, and `app/tests/harness.test.ts:273-290` pins the banner, the exit code, the fence name and the unit route against the staged files, so a release that moves them fails a test rather than a preview.
 
 1. Fence with `UNIVER_ALLOWED_ROOT`, container in a subdirectory. `_assertWithinAllowedRoot` rejects when the relative path is empty or starts with `..` (`gateway.cjs:450628-450636`), so a container *at* the root is refused too.
 
@@ -62,17 +62,17 @@ export function containerPath(allowedRoot: string, sha256: string): string {
 }
 ```
 
-(`app/electron/univer.ts:189-191`.) The root is chosen next to the only call that could widen it: `allowedRoot: path.dirname(file)`, where `file` came back from the CLI by digest, never from the wire (`app/electron/ipc/register.ts:280-288`). This is the task's `artifacts/` directory, not the per-task session workspace that G9 made under `userData` for harness sessions; the two are different trees and only the first holds filed deliverables.
+(`app/electron/univer.ts:189-191`.) The root is chosen next to the only call that could widen it: `allowedRoot: path.dirname(file)`, where `file` came back from the CLI by digest, never from the wire (`app/electron/ipc/register.ts:281-289`). This is the task's `artifacts/` directory, not the per-task session workspace that G9 made under `userData` for harness sessions; the two are different trees and only the first holds filed deliverables.
 
-2. Import in the worker before starting a server. The worker reads `{operation:"import", sourcePath, unitType}` from stdin and writes `{ok:true,result}` or `{ok:false,error:{code,message}}` (`artifacts/unit-content-worker.mjs:311713-311731`; `sourcePath` must be absolute, `:311958`). An import needs no gateway, so a workbook the worker cannot read costs no port and no process (`app/electron/univer.ts:368-418`).
+2. Import in the worker before starting a server. The worker reads `{operation:"import", sourcePath, unitType}` from stdin and writes `{ok:true,result}` or `{ok:false,error:{code,message}}` (`artifacts/unit-content-worker.mjs:311713-311731`; `sourcePath` must be absolute, `:311958`). An import needs no gateway, so a workbook the worker cannot read costs no port and no process (`app/electron/univer.ts:408-456`).
 
 3. Content goes in through a worktree and a merge. The trunk create route takes a name and nothing else; the plugin's client sends `{ name }` (`lib/index.js:427-431`). Only a draft-worktree unit accepts a `snapshot` (`lib/index.js:464-468`; handler at `gateway.cjs:450948-450952`), and `POST .../merge` lands it (`gateway.cjs:451022-451024`). This is the plugin's own `univer_import` (`lib/index.js:6614-6632`) without the model.
 
-4. Ephemeral container. Removed before every open together with `-wal`, `-shm` and `-journal`, and removed again on close (`app/electron/univer.ts:199-203`, `:464`, `:518-521`).
+4. Ephemeral container. Removed before every open together with `-wal`, `-shm` and `-journal`, and removed again on close (`app/electron/univer.ts:239-243`, `:504`, `:566-570`).
 
-5. Gateway lifetime equals strip lifetime. `close()` detaches the page, kills the child, removes the container (`:514-522`). The renderer closes the preview whenever the version it shows is no longer the one on screen (`app/src/App.tsx:289-295`).
+5. Gateway lifetime equals strip lifetime. `close()` detaches the page, kills the child, removes the container (`:562-571`). The renderer closes the preview whenever the version it shows is no longer the one on screen (`app/src/App.tsx:289-295`).
 
-6. No tool registration. The host talks to the gateway with `fetch` (`:213-252`). Nothing here is exposed to a model.
+6. No tool registration. The host talks to the gateway with `fetch` (`:253-292`). Nothing here is exposed to a model.
 
 7. Allowlist environment plus `NODE_PATH`.
 
@@ -86,7 +86,7 @@ out.DO_NOT_TRACK = '1';
 out.ELECTRON_RUN_AS_NODE = '1';
 ```
 
-(`:157-164`; `INHERITED` at `:92` is the plugin's own five names.) `NODE_PATH` is the staged `node_modules`, so libsql and the two native bindings resolve (`:123-125`). Ports are tried upward only on exit 98, `GATEWAY_PORT_IN_USE_EXIT_CODE` (`gateway.cjs:319908`); any other early exit is reported with its stderr rather than as a timeout (`:343-351`).
+(`:157-164`; `INHERITED` at `:92` is the plugin's own five names.) `NODE_PATH` is the staged `node_modules`, so libsql and the two native bindings resolve (`:123-125`). Ports are tried upward only on exit 98, `GATEWAY_PORT_IN_USE_EXIT_CODE` (`gateway.cjs:319908`); any other early exit is reported with its stderr rather than as a timeout (`:385-394`).
 
 8. Close the page on detach.
 
@@ -97,7 +97,9 @@ if (!view.webContents.isDestroyed()) view.webContents.close();
 
 (`app/electron/harness/pane.ts:102-103`; stub and assertion in `app/tests/formulator.test.ts:15-18`, `:87-92`.)
 
-9. Label the unit. The worker names an import after its source file, which is sixty-four hex characters. The host passes `label` as both the unit name and the workbook's own name (`:482-489`); the IPC layer builds it as `${task title} · ${digest.slice(0,12)}` from `showTask` (`register.ts:291`).
+9. Label the unit. The worker names an import after its source file, which is sixty-four hex characters. The host passes `label` as both the unit name and the workbook's own name (`:522-529`); the IPC layer builds it as `${task title} · ${digest.slice(0,12)}` from `showTask` (`register.ts:292`).
+
+10. Dark, view only and in the app's language are the viewer's own switches, and none of them is `prefers-color-scheme`. Its appearance is one localStorage key, `light` or `dark`, default `light` (`HD()` in the staged viewer bundle); `nativeTheme.themeSource = 'dark'` in `app/electron/main.ts` turned the harness page dark and left the viewer white. So the key is written on the viewer's origin from the gateway's plain-text 404 page, then the viewer is loaded (`:224-236`, `:545-547`); done the other way round the viewer would boot twice. `editable=false` is read only under `mode=embedded` (the viewer's URL reader returns null for it in standalone mode); measured, that layout disables 39 of 42 toolbar controls against 27 of 43 with `editable=true`, and drops the file sidebar that showed the container's base64 key. `lang=zh-CN` is read off the URL before storage and `navigator.language` (`:212-214`).
 
 ## Why This Matters
 
@@ -118,17 +120,17 @@ Detach must close the page because `removeChildView` takes the view out of the w
 
 ## Examples
 
-The open sequence (`app/electron/univer.ts:434-511`):
+The open sequence (`app/electron/univer.ts:474-557`):
 
-1. Fence check: `file` must start with `${allowedRoot}${path.sep}` (`:450`); the digest must be 64 hex (`:453`). A second open closes the first, gateway and all (`:456-458`).
-2. Worker import: `{operation:'import', sourcePath, unitType: 2}` on stdin (`:416`). No gateway yet.
-3. Remove any old container and its sqlite side files; create the `preview/` subdirectory (`:464-465`).
-4. Start the gateway on 9080, upward only on exit 98, waiting for `[dsh-univer-gateway] listening on http://127.0.0.1:<port>` (`:60`, `:280-293`; banner printed at `gateway.cjs:451624`).
-5. `POST /uf/<key>` with `{}` creates the container (`:471`); `<key>` is base64url of the absolute container path (`:178-180`).
-6. `POST /uf/<key>/worktrees` `{agentId:'fa-foundry', name:'preview'}` returns `{worktreeId}` (`:472-480`).
-7. `POST /uf/<key>/worktrees/<id>/units` `{type:2, name, snapshot:{...snapshot, name}}` (`:485-491`).
-8. `POST /uf/<key>/worktrees/<id>/merge`; refused unless `ok === true` (`:492-498`).
-9. `Pane.attach(window, viewerUrl)` where `viewerUrl` is `${origin}/?file=${encodeURIComponent(key)}` (`:194-196`, `:499`).
+1. Fence check: `file` must start with `${allowedRoot}${path.sep}` (`:490`); the digest must be 64 hex (`:493`). A second open closes the first, gateway and all (`:496-498`).
+2. Worker import: `{operation:'import', sourcePath, unitType: 2}` on stdin (`:456`). No gateway yet.
+3. Remove any old container and its sqlite side files; create the `preview/` subdirectory (`:504-505`).
+4. Start the gateway on 9080, upward only on exit 98, waiting for `[dsh-univer-gateway] listening on http://127.0.0.1:<port>` (`:60`, `:320-333`; banner printed at `gateway.cjs:451624`).
+5. `POST /uf/<key>` with `{}` creates the container (`:511`); `<key>` is base64url of the absolute container path (`:178-180`).
+6. `POST /uf/<key>/worktrees` `{agentId:'fa-foundry', name:'preview'}` returns `{worktreeId}` (`:512-520`).
+7. `POST /uf/<key>/worktrees/<id>/units` `{type:2, name, snapshot:{...snapshot, name}}` (`:525-531`).
+8. `POST /uf/<key>/worktrees/<id>/merge`; refused unless `ok === true` (`:532-538`).
+9. `Pane.attach` on the gateway's 404 page, the appearance key written there, then `Pane.load(viewerUrl)` where `viewerUrl` is `${origin}/?file=${encodeURIComponent(key)}&mode=embedded&scope=trunk&editable=false&lang=zh-CN` (`:212-214`, `:545-547`).
 
 Entry points in the renderer: 在这里预览 beside 在表格软件里打开 (`app/src/views/Deliverables.tsx:151-156`), 预览 per filed workbook (`app/src/views/TaskDetail.tsx:229-232`), and the 表格预览 strip with 关闭预览 (`app/src/views/Preview.tsx:17-45`).
 
@@ -136,18 +138,19 @@ Measured on the packaged app (`npm run package`, scratch `--user-data-dir`, `FOU
 
 | Step | Observed |
 |---|---|
-| Click 在这里预览 | `previewStatus` returned `running` in 2 to 3 s; four sheets drawn (本期 / 结论 / 底稿 / 外部引用); tab read `2026-08 月度经营分析 · 2d195b9877fa` (the deliverable's digest, not a commit) |
+| Click 在这里预览 | `previewStatus` returned `running` in 2 to 3 s; four sheets drawn (本期 / 结论 / 底稿 / 外部引用); the unit named `2026-08 月度经营分析 · 2d195b9877fa` (the deliverable's digest, not a commit) |
+| Viewer page | `mode=embedded`, `lang=zh-CN` on the ribbon, appearance key `dark` with `html.class=gateway-dark univer-dark` and a `rgb(10, 10, 10)` ground; 39 of 42 toolbar controls disabled under `editable=false` |
 | Gateway env (`ps -E`) | HOME, PATH, UNIVER_COLLAB_GATEWAY_PORT=9080, UNIVER_VIEW_ASSETS_ROOT, UNIVER_ALLOWED_ROOT=<task artifacts dir>, NODE_PATH, DO_NOT_TRACK=1, ELECTRON_RUN_AS_NODE=1 (LANG, LC_ALL, TMPDIR absent in the parent); no key-shaped name, no `DSH_*`, no `FOUNDRY_*` |
 | Natives | libsql, the formula engine and the Office exchange bindings load under Electron-as-Node |
 | Click 关闭预览 | status null in 1 s; no gateway process; port 9080 free; `artifacts/preview/` empty; viewer page targets 0 after commit 3a4e3ea |
 
-What is deliberately not true, said plainly. The page is not read-only: the trunk viewer can be typed into, and what it edits is the scratch container, fresh per open and deleted on close. The filed `.xlsx` is never opened by the gateway; the worker reads it once. The viewer's sidebar still shows the base64url container key, the viewer's own choice. The plugin's own gateway on the authoring seat stays unfenced by `UNIVER_ALLOWED_ROOT` and is kept off the close seat by preset. Not measured: two tasks' previews at once (the second replaces the first by design), and a machine whose natives are another architecture. Per `docs/plans/2026-09-01-1900-feat-foundry-fence-scope-plan.md:371`, the Univer Pro licence in the bundle expires 2026-11-15; a risk to the look, not to the close.
+What is deliberately not true, said plainly. "Read-only" is enforced by the viewer's own `editable=false`, which is a toolbar and cell-editor switch, not a permission the gateway checks: what a page could still write to is the scratch container, fresh per open and deleted on close. The filed `.xlsx` is never opened by the gateway; the worker reads it once. The first build showed the viewer in standalone mode, editable, with a sidebar naming the container by its base64url key; the embedded layout removed all three. The plugin's own gateway on the authoring seat stays unfenced by `UNIVER_ALLOWED_ROOT` and is kept off the close seat by preset. Not measured: two tasks' previews at once (the second replaces the first by design), and a machine whose natives are another architecture. Per `docs/plans/2026-09-01-1900-feat-foundry-fence-scope-plan.md:371`, the Univer Pro licence in the bundle expires 2026-11-15; a risk to the look, not to the close.
 
 ### Evidence
 
-![Univer viewer showing the 本期 sheet with the labelled tab](assets/univer-preview-viewer.png)
+![Univer viewer showing the 本期 sheet, dark, embedded, view only, Chinese ribbon](assets/univer-preview-viewer.png)
 
-The viewer inside the app after 在这里预览, with the tab named for the task and the version rather than the digest.
+The viewer inside the app after 在这里预览: the embedded layout with no sidebar, the dark appearance seeded before it booted, the Chinese ribbon, and the editing controls disabled by `editable=false`.
 
 ![交付物 screen with the 表格预览 strip](assets/univer-preview-strip.png)
 

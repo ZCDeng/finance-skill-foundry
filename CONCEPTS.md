@@ -36,7 +36,7 @@ An embedded page shown as a native view in window coordinates under this app's o
 The app's own bar between the header and a Pane, saying what the Pane is: which Task a conversation writes to, which data lease is held, which Workbook is being looked at. A Strip is the only place a control can be drawn over a Pane, and what it names is what is running.
 
 ### Workbook Preview
-A look at one Workbook inside the window, in the Office companion's viewer, without leaving the app or opening the filed copy. The viewer needs a server and a container of its own, so a preview is a Gateway, a Scratch Container, and a Pane, all of which exist only while the Strip names that version; leaving the version takes all three down. Nothing typed into it reaches the filed Workbook, and no model can reach the Gateway.
+A look at one Workbook inside the window, in the Office companion's viewer, without leaving the app or opening the filed copy. The viewer needs a server and a container of its own, so a preview is a Gateway, a Scratch Container, and a Pane, all of which exist only while the Strip names that version; leaving the version takes all three down. The viewer is opened view only, in the app's own appearance and language; nothing reaches the filed Workbook, and no model can reach the Gateway.
 
 ### Scratch Container
 The companion viewer's own file format holding a copy of one Workbook, derived from the filed bytes on each open and deleted on close. It lives inside the Task's own artifacts, in a directory of its own, because the Gateway refuses to serve a container outside or at the root it is fenced to.
