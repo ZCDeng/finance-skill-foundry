@@ -35,6 +35,7 @@ version names what caused it (`emit-brief`, `query-locked:followup-3`, `export:b
 - DuckDB 1.5.5 (current stable; 1.6 is prerelease only)
 - FA Foundry harness runtime: `@deepseek-ai/dsh@0.1.1-rc.2` (bundled CLI used at install). Upgrades are breaking. Period tools are the Cordis bundle in `dsh-plugin/`. Headless smoke is `foundry --var VAR host-smoke`.
 - File drop: `dsh-file-upload@0.4.3` ([HongMing-Huang/dsh-file-upload](https://github.com/HongMing-Huang/dsh-file-upload)). Companion only. Period and F3 omit `read_document`.
+- Office viewer: `dsh-univer-office@0.2.12` ([dream-num/dsh-univer-office](https://github.com/dream-num/dsh-univer-office)). Companion only, staged into `app/extra/dsh` by `npm run harness`. Period and F3 deny all thirteen `univer_*` tools. The app's workbook preview spawns the bundle's gateway itself, fenced to the task's artifacts directory and alive only while a preview is open; the plugin's own gateway is never used by the app. The Univer Pro licence inside the bundle expires 2026-11-15; after that the viewer watermarks, the close is unaffected.
 - Data Formulator: `data-formulator==0.7.0` (`data_formulator` binary, `pip install -e ".[formulator]"`). Do not pass `--disable-database` or `--disable-data-connectors`.
 - `node` on PATH for `host-smoke`, which loads the shipped dsh bundle. Nothing else in the period loop needs it.
 - `ps` on PATH lets `launch-formulator` confirm the served process is this window's Formulator. Without it the launch still runs and says `identity: unconfirmed` in its payload and on stderr.

@@ -52,7 +52,7 @@ verification: 决定结论的断言由主线程复核，标注在文内
 ### 明确不做
 
 - **不给 harness pane 装 preload。** `pane.ts` 用 `contextIsolation: true` 加 `sandbox: true`，整个 `harness/` 下没有 preload。`ipcMain.handle` 的通道是全 app 的，装上之后嵌入页面就够得到 `foundry:task-new` 和 `harness:open`——fence 的核心性质会从「页面根本没有桥」退化成「页面有一份 sender 白名单」。这条要以 KTD 形式进 plan，不要留在落败提案的脚注里等下一轮重新发现。
-- **不开 host RPC 给页面取数。** 那等于在跑模型的进程旁边开一条载着归档正文的 loopback HTTP，安全性最后落在一个 preset 文件的 `fetch: false` 上。KTD11 说的就是别建这种。
+- **不开 host RPC 给页面取数。** 那等于在跑模型的进程旁边开一条载着归档正文的 loopback HTTP，安全性最后落在一个 preset 文件的 `fetch: false` 上。KTD11 说的就是别建这种。边界是「模型够得着的路径上不许有载着任务字节的 loopback」，不是「不许有 loopback」：KTD20 的预览 gateway 服务的是临时副本、没有任何工具能到、随状态条一起退出，所以不在此列。
 - **不做头部常驻索引。** 它是交付物屏幕的劣化重复，而 `presentationMeta` 只投顶层调用，索引会漏报嵌套调用却自称完整。
 - **收窄 `viewBounds` 这个几何手法留着。** 以后任何要跟对话并排的东西走这条，不要覆盖层，也不要为它注册槽。这一问不该用它。
 

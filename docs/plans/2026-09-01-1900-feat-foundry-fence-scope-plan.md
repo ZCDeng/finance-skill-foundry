@@ -362,7 +362,8 @@ takes.
 **Not in this work**
 
 - Letting the model author a spreadsheet. The Office bundle is installed for the authoring
-  seat and for a rendering path we have not built yet; the close seat cannot see it.
+  seat, and for the look at a filed workbook that KTD20 built; the close seat cannot see its
+  tools.
 - Rendering the close in a viewer we host, as the way the close is delivered. `foundry export
   --format xlsx` writes the window as a workbook and the app hands it to the operator's own
   spreadsheet software; that stays the deliverable. KTD20 adds a look at it in this window, on
