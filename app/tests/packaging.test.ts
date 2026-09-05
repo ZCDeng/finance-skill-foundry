@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 import {
   HARNESS_ENTRY,
   entryPath,
+  availableMethodSkillDir,
   formulatorBin,
   foundryBin,
   harnessRoot,
+  methodSkillDir,
   pluginDir,
   stagedBundleDir,
 } from '../electron/harness/resources.js';
@@ -18,6 +20,7 @@ const BUILDER = read('../electron-builder.yml');
 
 const PACKED = { packaged: true, appPath: '/A/Foundry.app/Contents/Resources/app.asar', resourcesPath: '/A/Foundry.app/Contents/Resources' };
 const DEV = { packaged: false, appPath: '/repo/app', resourcesPath: '/unused' };
+const HERE = { packaged: false, appPath: fileURLToPath(new URL('..', import.meta.url)), resourcesPath: '/unused' };
 
 describe('where the runtime is', () => {
   it('rides beside the asar when packed, and in extra/ when not', () => {
@@ -42,6 +45,20 @@ describe('where the runtime is', () => {
     expect(pluginDir(PACKED)).not.toContain('.asar');
     // Normalised by `join`: one level up from the app is the kit's own copy.
     expect(pluginDir(DEV)).toBe('/repo/dsh-plugin');
+  });
+
+  it('hands the shipped finance method skills over as a directory', () => {
+    expect(methodSkillDir(PACKED)).toBe('/A/Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method');
+    expect(methodSkillDir(PACKED)).not.toContain('.asar');
+    expect(methodSkillDir(DEV)).toBe('/repo/method');
+    expect(availableMethodSkillDir(HERE)).toBe(methodSkillDir(HERE));
+  });
+
+  it('names the method skill root to the harness when it is available', () => {
+    const main = read('../electron/main.ts');
+    expect(main).toContain('const bundledSkillDir = availableMethodSkillDir(here)');
+    expect(main).toContain('bundledSkillDir: bundledSkillDir ?? undefined');
+    expect(main).toContain('bundled method skills unavailable');
   });
 
   it('looks for the staged copy inside the runtime tree', () => {

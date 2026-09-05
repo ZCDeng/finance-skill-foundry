@@ -382,6 +382,73 @@ def test_duplicate_relationship_rejected_before_sum(work, tmp_path):
     assert "duplicate" in run["error"].lower()
 
 
+def test_malformed_relationships_refused_when_saved(work, tmp_path):
+    actual = add(work, tmp_path, [{"id": 1, "revenue": 70}])
+    budget = add(work, tmp_path, [{"id": 1, "revenue": 60}], name="budget")
+    base = {
+        "question": "收入差异",
+        "sql": "SELECT a.revenue - b.revenue AS variance FROM actual a JOIN budget b USING(id)",
+        "bindings": {"actual": actual["id"], "budget": budget["id"]},
+    }
+
+    with pytest.raises(FoundryError, match="relationship #1 must be an object"):
+        work.save_analysis({**base, "relationships": ["actual to budget on id"]})
+    with pytest.raises(FoundryError, match="left and right"):
+        work.save_analysis(
+            {
+                **base,
+                "relationships": [
+                    {
+                        "source": "actual",
+                        "target": "budget",
+                        "on": ["id"],
+                        "cardinality": "1:1",
+                    }
+                ],
+            }
+        )
+    with pytest.raises(FoundryError, match="cardinality"):
+        work.save_analysis(
+            {
+                **base,
+                "relationships": [
+                    {
+                        "left": "actual",
+                        "right": "budget",
+                        "left_keys": ["id"],
+                        "right_keys": ["id"],
+                        "cardinality": "1:1",
+                    }
+                ],
+            }
+        )
+
+
+def test_relationship_schema_uses_left_and_right_keys(work, tmp_path):
+    actual = add(work, tmp_path, [{"id": 1, "revenue": 70}])
+    budget = add(work, tmp_path, [{"id": 1, "target": 60}], name="budget")
+    analysis = work.save_analysis(
+        {
+            "question": "收入差异",
+            "sql": "SELECT a.revenue - b.target AS variance FROM actual a JOIN budget b ON a.id = b.id",
+            "bindings": {"actual": actual["id"], "budget": budget["id"]},
+            "relationships": [
+                {
+                    "left": "actual",
+                    "right": "budget",
+                    "left_keys": ["id"],
+                    "right_keys": ["id"],
+                    "cardinality": "one-to-one",
+                }
+            ],
+        }
+    )
+    run = work.run_analysis(analysis["id"])
+    assert run["execution_status"] == "succeeded"
+    assert run["relationship_checks"][0]["left_keys"] == ["id"]
+    assert run["relationship_checks"][0]["right_keys"] == ["id"]
+
+
 def test_cross_task_path_and_tampered_snapshot_refused(work, tmp_path):
     other = AnalysisStore(work.task.store.create(title="Other"))
     data = add(other, tmp_path, [{"profit": 30}])

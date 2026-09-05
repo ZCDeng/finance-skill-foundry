@@ -11,6 +11,8 @@ argument-hint: "<frequency> <period>"
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >
 > When this skill runs inside finance-skill-foundry, also read [FOUNDRY.md](../FOUNDRY.md).
+>
+> Foundry runtime note: load this skill through the native skill tool, then read the companion notes with `method-resource {skill: "financial-statements", resource: "FOUNDRY.md"}` and `method-resource {skill: "financial-statements", resource: "CONNECTORS.md"}` when the trusted preset or session needs those rules. In analysis mode, use the current task datasets, multi-table SQL/Python, run records, and editable drafts; materiality, currency, accounting policy, and narrative judgment are manager-controlled and ordinary calculations do not require per-tool approval.
 
 **Important**: This command assists with financial statement workflows but does not provide financial advice. All statements should be reviewed by qualified financial professionals before use in reporting or filings.
 
@@ -118,7 +120,7 @@ Define what constitutes a "material" variance requiring investigation. Common ap
 - **Combined:** Either the dollar OR percentage threshold is exceeded
 - **Scaled:** Different thresholds for different line items based on their size and volatility
 
-*Example thresholds (adjust for your organization):*
+*Example thresholds, not fixed Foundry defaults (adjust for your organization):*
 
 | Line Item Size | Dollar Threshold | Percentage Threshold |
 |---------------|-----------------|---------------------|

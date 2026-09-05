@@ -60,8 +60,9 @@ describe('the environment the child gets', () => {
       DSH_PROFILE: 'standard',
       FOUNDRY_TASK: 'stale',
       FOUNDRY_VAR: '/somebody/else/var',
+      DSH_BUNDLED_SKILL_DIR: '/somebody/else/skills',
     },
-    { home: '/app/harness', varRoot: '/app/var', foundryBin: '/app/foundry' },
+    { home: '/app/harness', varRoot: '/app/var', foundryBin: '/app/foundry', bundledSkillDir: '/app/method' },
   );
 
   it('hands over no key-shaped name', () => {
@@ -79,6 +80,7 @@ describe('the environment the child gets', () => {
     // is the default, which is this product's fence.
     expect(scrubbed.DSH_PROFILE).toBeUndefined();
     expect(scrubbed.DSH_HOME).toBe('/app/harness');
+    expect(scrubbed.DSH_BUNDLED_SKILL_DIR).toBe('/app/method');
   });
 
   it('carries the Formulator pointer to the child', () => {

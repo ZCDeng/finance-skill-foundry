@@ -303,6 +303,16 @@ function specFor(toolName) {
 const METADATA_PREFIX = /^[_$]/;
 
 function checkArgs(toolName, spec, input) {
+  const fail = (message) => {
+    const error = new Error(message);
+    error.name = "FoundryRefusal";
+    error.status = REFUSED;
+    error.refused = true;
+    throw error;
+  };
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    fail(`foundry ${toolName} 参数错误: 参数必须为对象`);
+  }
   const declared = spec.parameters.properties;
   const missing = spec.parameters.required.filter((key) => String(input[key] ?? "").trim() === "");
   const undeclared = Object.keys(input).filter(
@@ -312,7 +322,7 @@ function checkArgs(toolName, spec, input) {
   if (missing.length) problems.push(`缺少必填参数 ${missing.join(",")}`);
   if (undeclared.length) problems.push(`未声明参数 ${undeclared.join(",")}`);
   if (problems.length) {
-    throw new Error(`foundry ${toolName} 参数错误: ${problems.join("; ")}; 可用参数 ${Object.keys(declared).join(",") || "(无)"}`);
+    fail(`foundry ${toolName} 参数错误: ${problems.join("; ")}; 可用参数 ${Object.keys(declared).join(",") || "(无)"}`);
   }
 }
 

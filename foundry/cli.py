@@ -286,7 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     p_wp = sub.add_parser("workpaper")
     p_wp.add_argument("--window", default="", help="window id; omit for the registered session or selected task window")
 
-    sub.add_parser("method-skills")
+    p_method_skills = sub.add_parser("method-skills")
+    p_method_skills.add_argument("--json", action="store_true", help="print the bundled skill root, ids, and file hashes")
     sub.add_parser("harness")
 
     p_presets = sub.add_parser("install-presets")
@@ -506,8 +507,11 @@ def main(argv: list[str] | None = None) -> int:
             fixtures = fixture_root(Path(args.fixtures) if args.fixtures else None)
             return host_smoke(Path(args.var), fixtures)
         if args.cmd == "method-skills":
-            from foundry.method_skills import bundled_skill_files
+            from foundry.method_skills import bundled_skill_files, bundled_skill_manifest
 
+            if args.json:
+                print(json.dumps(bundled_skill_manifest(), ensure_ascii=False))
+                return 0
             for skill_id, path in bundled_skill_files().items():
                 print(f"{skill_id}\t{path}")
             return 0

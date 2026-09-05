@@ -1,0 +1,755 @@
+{
+  "schema_version": 1,
+  "stage": "r2-stage0",
+  "date": "2026-09-06",
+  "scope": "A27-A34; two synthetic live model cases, not the later 30-question finance evaluation",
+  "verifier_sha256": {
+    "tools/verify_method_skill_session.py": "2156dc8d0b76a51632cd1a8993051ae6697273512fa27cc71d2645c72c3d7eb6",
+    "tools/verify_method_skill_session.mjs": "cd59058a7c0633ca1d18092911d5a2b0d571c10ba2fc04274412e8ec1d17f0b0"
+  },
+  "live": {
+    "development": {
+      "status": "passed",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "fixture_version": "r2-stage0-1",
+      "fixture_sha256": "5f326262bb99988f7df4efe5781bc3a2ce9499ba5cb907d6d388980c7f2df414",
+      "raw_session_sha256": "9fb6080968a52683f35d156cad89f8b098daa63f4e7cfa89db82881638d01b87",
+      "local_evidence": "build/verification/r2-skill-session-dev-07",
+      "validation_revision": "complete-bridge-claims; existing complete session rechecked without repeating model calls",
+      "cases": [
+        {
+          "id": "G1",
+          "session_id": "skill-G1-52ac22cd78f54f399e1e12c66f132813",
+          "task_id": "52ac22cd78f54f399e1e12c66f132813",
+          "skills_used": [
+            "variance-analysis"
+          ],
+          "run_ids": [
+            "a4ebb2126ad34168a3fc18f79f378940"
+          ],
+          "draft_ids": [
+            "de43c3b6e9f04f2cb0f64490420e4a18"
+          ],
+          "expected_difference": "5",
+          "verified_cells": {
+            "profit_difference": [
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "profit_variance",
+                "value": "5",
+                "label": "profit_variance 华东 2026-08"
+              }
+            ],
+            "revenue_contribution": [
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "revenue_contrib",
+                "value": "20",
+                "label": "revenue_contrib 华东 2026-08"
+              },
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "revenue_variance",
+                "value": "20",
+                "label": "revenue_variance 华东 2026-08"
+              }
+            ],
+            "cost_contribution": [
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "cost_contrib",
+                "value": "-10",
+                "label": "cost_contrib 华东 2026-08"
+              },
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "cost_variance",
+                "value": "-10",
+                "label": "cost_variance 华东 2026-08",
+                "raw_value": "10",
+                "normalization": "profit_contribution = -expense_variance"
+              }
+            ],
+            "expense_contribution": [
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "expense_contrib",
+                "value": "-5",
+                "label": "expense_contrib 华东 2026-08"
+              },
+              {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "expense_variance",
+                "value": "-5",
+                "label": "expense_variance 华东 2026-08",
+                "raw_value": "5",
+                "normalization": "profit_contribution = -expense_variance"
+              }
+            ]
+          },
+          "draft_metric_claims": {
+            "de43c3b6e9f04f2cb0f64490420e4a18": {
+              "profit_difference": {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "profit_variance",
+                "value": "5",
+                "label": "profit_variance 华东 2026-08"
+              },
+              "revenue_contribution": {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "revenue_contrib",
+                "value": "20",
+                "label": "revenue_contrib 华东 2026-08"
+              },
+              "cost_contribution": {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "cost_contrib",
+                "value": "-10",
+                "label": "cost_contrib 华东 2026-08"
+              },
+              "expense_contribution": {
+                "run_id": "a4ebb2126ad34168a3fc18f79f378940",
+                "row": 0,
+                "column": "expense_contrib",
+                "value": "-5",
+                "label": "expense_contrib 华东 2026-08"
+              }
+            }
+          },
+          "completed_at": "2026-09-05T22:13:02.368Z",
+          "tool_sequence": [
+            {
+              "name": "skill",
+              "is_error": false
+            },
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "method-resource",
+              "is_error": false
+            },
+            {
+              "name": "todo_write",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": true
+            },
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": false
+            },
+            {
+              "name": "analysis-export",
+              "is_error": false
+            },
+            {
+              "name": "todo_write",
+              "is_error": false
+            }
+          ],
+          "failed_run_count": 0,
+          "all_run_statuses": {
+            "a4ebb2126ad34168a3fc18f79f378940": "succeeded"
+          }
+        },
+        {
+          "id": "G2",
+          "session_id": "skill-G2-a6ee5838b97249389893f9bc47eadc50",
+          "task_id": "a6ee5838b97249389893f9bc47eadc50",
+          "skills_used": [
+            "variance-analysis"
+          ],
+          "run_ids": [
+            "39209c5c1ba847b3abf5ec7724c2b980"
+          ],
+          "draft_ids": [
+            "cd916081a28a4dda9403319f4a9261b6"
+          ],
+          "expected_difference": "32",
+          "verified_cells": {
+            "revenue_difference": [
+              {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "total_var",
+                "value": "32",
+                "label": "total_var 商品甲"
+              }
+            ],
+            "quantity_contribution": [
+              {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "qty_effect",
+                "value": "20",
+                "label": "qty_effect 商品甲"
+              }
+            ],
+            "price_contribution": [
+              {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "price_effect",
+                "value": "12",
+                "label": "price_effect 商品甲"
+              }
+            ]
+          },
+          "draft_metric_claims": {
+            "cd916081a28a4dda9403319f4a9261b6": {
+              "revenue_difference": {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "total_var",
+                "value": "32",
+                "label": "total_var 商品甲"
+              },
+              "quantity_contribution": {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "qty_effect",
+                "value": "20",
+                "label": "qty_effect 商品甲"
+              },
+              "price_contribution": {
+                "run_id": "39209c5c1ba847b3abf5ec7724c2b980",
+                "row": 0,
+                "column": "price_effect",
+                "value": "12",
+                "label": "price_effect 商品甲"
+              }
+            }
+          },
+          "completed_at": "2026-09-05T22:14:23.062Z",
+          "tool_sequence": [
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "skill",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "method-resource",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": true
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": true
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": true
+            },
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": false
+            }
+          ],
+          "failed_run_count": 1,
+          "all_run_statuses": {
+            "447dd263e794422b896ffe3d0081061d": "failed",
+            "39209c5c1ba847b3abf5ec7724c2b980": "succeeded"
+          }
+        }
+      ],
+      "loaded_skills": [
+        {
+          "name": "financial-statements",
+          "provider": "filesystem",
+          "content_sha256": "d624ce1c93c64c9bed23e4b57316021218d4699ea1fd86803509d96312cc0775",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Users/zcdeng/projects/finance-skill-foundry/method/financial-statements"
+          }
+        },
+        {
+          "name": "reconciliation",
+          "provider": "filesystem",
+          "content_sha256": "b25ac480e1bb15154c248e8afdf9666c44e42d3778e8758c239e2f29d5c4aee3",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Users/zcdeng/projects/finance-skill-foundry/method/reconciliation"
+          }
+        },
+        {
+          "name": "variance-analysis",
+          "provider": "filesystem",
+          "content_sha256": "8d2295fc0fadc2dadd0b035fa4690ca4acf38ea349f9080f7f19fa3858d6bfce",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Users/zcdeng/projects/finance-skill-foundry/method/variance-analysis"
+          }
+        },
+        {
+          "name": "journal-entry",
+          "provider": "filesystem",
+          "content_sha256": "d483b4f8f231d66b444b5778951dbe7955891e0511acfadfc4b8527fc7f23ca4",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Users/zcdeng/projects/finance-skill-foundry/method/journal-entry"
+          }
+        }
+      ]
+    },
+    "installed": {
+      "status": "passed",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "fixture_version": "r2-stage0-1",
+      "fixture_sha256": "5f326262bb99988f7df4efe5781bc3a2ce9499ba5cb907d6d388980c7f2df414",
+      "raw_session_sha256": "816e6b0d1ec10ae0b11f3dba971e1453313436f87ad5cce0ae0ee9f65c9d5de6",
+      "local_evidence": "build/verification/r2-skill-session-installed-04",
+      "validation_revision": "complete-bridge-claims",
+      "cases": [
+        {
+          "id": "G1",
+          "session_id": "skill-G1-ce6a5d8aec254cc0948826b1b01a34df",
+          "task_id": "ce6a5d8aec254cc0948826b1b01a34df",
+          "skills_used": [
+            "financial-statements",
+            "variance-analysis"
+          ],
+          "run_ids": [
+            "0cd638c071914344b72de5668b816a66"
+          ],
+          "draft_ids": [
+            "2497d5208dd94bdca96ee8db9ec78cae"
+          ],
+          "expected_difference": "5",
+          "verified_cells": {
+            "profit_difference": [
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_variance",
+                "value": "5",
+                "label": "profit_variance 华东 2026-08"
+              }
+            ],
+            "revenue_contribution": [
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_revenue",
+                "value": "20",
+                "label": "profit_impact_revenue 华东 2026-08"
+              },
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "revenue_variance",
+                "value": "20",
+                "label": "revenue_variance 华东 2026-08"
+              }
+            ],
+            "cost_contribution": [
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "cost_variance",
+                "value": "-10",
+                "label": "cost_variance 华东 2026-08",
+                "raw_value": "10",
+                "normalization": "profit_contribution = -expense_variance"
+              },
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_cost",
+                "value": "-10",
+                "label": "profit_impact_cost 华东 2026-08"
+              }
+            ],
+            "expense_contribution": [
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "expense_variance",
+                "value": "-5",
+                "label": "expense_variance 华东 2026-08",
+                "raw_value": "5",
+                "normalization": "profit_contribution = -expense_variance"
+              },
+              {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_expense",
+                "value": "-5",
+                "label": "profit_impact_expense 华东 2026-08"
+              }
+            ]
+          },
+          "draft_metric_claims": {
+            "2497d5208dd94bdca96ee8db9ec78cae": {
+              "profit_difference": {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_variance",
+                "value": "5",
+                "label": "profit_variance 华东 2026-08"
+              },
+              "revenue_contribution": {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_revenue",
+                "value": "20",
+                "label": "profit_impact_revenue 华东 2026-08"
+              },
+              "cost_contribution": {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_cost",
+                "value": "-10",
+                "label": "profit_impact_cost 华东 2026-08"
+              },
+              "expense_contribution": {
+                "run_id": "0cd638c071914344b72de5668b816a66",
+                "row": 0,
+                "column": "profit_impact_expense",
+                "value": "-5",
+                "label": "profit_impact_expense 华东 2026-08"
+              }
+            }
+          },
+          "completed_at": "2026-09-05T22:18:59.645Z",
+          "tool_sequence": [
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "skill",
+              "is_error": false
+            },
+            {
+              "name": "skill",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "method-resource",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": false
+            },
+            {
+              "name": "analysis-export",
+              "is_error": false
+            }
+          ],
+          "failed_run_count": 0,
+          "all_run_statuses": {
+            "0cd638c071914344b72de5668b816a66": "succeeded"
+          }
+        },
+        {
+          "id": "G2",
+          "session_id": "skill-G2-ee538e84f8124048aeb1cc5dcda76f73",
+          "task_id": "ee538e84f8124048aeb1cc5dcda76f73",
+          "skills_used": [
+            "variance-analysis"
+          ],
+          "run_ids": [
+            "2c8453d7880545abb6f03bac08254d5a"
+          ],
+          "draft_ids": [
+            "22a96a75165b45feb3a597d4974b18f3"
+          ],
+          "expected_difference": "32",
+          "verified_cells": {
+            "revenue_difference": [
+              {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "total_var",
+                "value": "32",
+                "label": "total_var "
+              }
+            ],
+            "quantity_contribution": [
+              {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "qty_effect",
+                "value": "20",
+                "label": "qty_effect "
+              }
+            ],
+            "price_contribution": [
+              {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "price_effect",
+                "value": "12",
+                "label": "price_effect "
+              }
+            ]
+          },
+          "draft_metric_claims": {
+            "22a96a75165b45feb3a597d4974b18f3": {
+              "revenue_difference": {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "total_var",
+                "value": "32",
+                "label": "total_var "
+              },
+              "quantity_contribution": {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "qty_effect",
+                "value": "20",
+                "label": "qty_effect "
+              },
+              "price_contribution": {
+                "run_id": "2c8453d7880545abb6f03bac08254d5a",
+                "row": 0,
+                "column": "price_effect",
+                "value": "12",
+                "label": "price_effect "
+              }
+            }
+          },
+          "completed_at": "2026-09-05T22:20:50.689Z",
+          "tool_sequence": [
+            {
+              "name": "skill",
+              "is_error": false
+            },
+            {
+              "name": "analysis-state",
+              "is_error": false
+            },
+            {
+              "name": "method-resource",
+              "is_error": false
+            },
+            {
+              "name": "dataset-read",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-save",
+              "is_error": false
+            },
+            {
+              "name": "analysis-run",
+              "is_error": false
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": true
+            },
+            {
+              "name": "analysis-draft",
+              "is_error": false
+            },
+            {
+              "name": "analysis-export",
+              "is_error": false
+            }
+          ],
+          "failed_run_count": 1,
+          "all_run_statuses": {
+            "1feff879f585458c9901cb722d43352f": "failed",
+            "2c8453d7880545abb6f03bac08254d5a": "succeeded"
+          }
+        }
+      ],
+      "loaded_skills": [
+        {
+          "name": "financial-statements",
+          "provider": "filesystem",
+          "content_sha256": "d624ce1c93c64c9bed23e4b57316021218d4699ea1fd86803509d96312cc0775",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method/financial-statements"
+          }
+        },
+        {
+          "name": "reconciliation",
+          "provider": "filesystem",
+          "content_sha256": "b25ac480e1bb15154c248e8afdf9666c44e42d3778e8758c239e2f29d5c4aee3",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method/reconciliation"
+          }
+        },
+        {
+          "name": "variance-analysis",
+          "provider": "filesystem",
+          "content_sha256": "8d2295fc0fadc2dadd0b035fa4690ca4acf38ea349f9080f7f19fa3858d6bfce",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method/variance-analysis"
+          }
+        },
+        {
+          "name": "journal-entry",
+          "provider": "filesystem",
+          "content_sha256": "d483b4f8f231d66b444b5778951dbe7955891e0511acfadfc4b8527fc7f23ca4",
+          "resourceBase": {
+            "kind": "directory",
+            "path": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method/journal-entry"
+          }
+        }
+      ],
+      "application": {
+        "path": "/Applications/FA Foundry.app",
+        "version": "0.1.2"
+      },
+      "initial_runtime": {
+        "pid": 11749,
+        "ppid": 11718,
+        "executable": "/Applications/FA Foundry.app/Contents/MacOS/FA Foundry",
+        "bundled_root": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method"
+      },
+      "restart": {
+        "status": "passed",
+        "body_hashes": {
+          "financial-statements": "d624ce1c93c64c9bed23e4b57316021218d4699ea1fd86803509d96312cc0775",
+          "reconciliation": "b25ac480e1bb15154c248e8afdf9666c44e42d3778e8758c239e2f29d5c4aee3",
+          "variance-analysis": "8d2295fc0fadc2dadd0b035fa4690ca4acf38ea349f9080f7f19fa3858d6bfce",
+          "journal-entry": "d483b4f8f231d66b444b5778951dbe7955891e0511acfadfc4b8527fc7f23ca4"
+        },
+        "runtime": {
+          "pid": 16914,
+          "ppid": 16785,
+          "executable": "/Applications/FA Foundry.app/Contents/MacOS/FA Foundry",
+          "bundled_root": "/Applications/FA Foundry.app/Contents/Resources/foundry/_internal/foundry/resources/method"
+        },
+        "raw_session_sha256": "269d97cdb07543a753d20e2b3500249cf2621909cbea8b2a3b0105e9d04eae84"
+      }
+    }
+  },
+  "package": {
+    "status": "passed",
+    "version": "0.1.2",
+    "installed": "/Applications/FA Foundry.app",
+    "built": "/Users/zcdeng/projects/finance-skill-foundry/app/release/mac-arm64/FA Foundry.app",
+    "method_file_count": 9,
+    "method_sha256": {
+      "LICENSE": "5d93b2ea703c35c2bad6b966d90fc52c23802a7bb261bc562d3ffae8614cac2b",
+      "FOUNDRY.md": "f4dec6c3a6182967480a6c0d4c82fa6793509915e514958803cdee2db6e43809",
+      "NOTICE": "e3c065f40a3a79b2346971d01e3eff924e722295b0cacaf5f3c8c690cae1a2a5",
+      "README.md": "05e2199206465c1a830f0bea0e6956b21580ae97c8d988be80ba42ae7fe51b96",
+      "CONNECTORS.md": "501120e224b7bf2866dd0d87423953f326ffc37cd2e6c826c3faccb20410828e",
+      "reconciliation/SKILL.md": "1454374764ce47455ffb66d71da34dd8951397ff308722df5a8838036b4716e8",
+      "financial-statements/SKILL.md": "25f75336ea41db0e805734eb11a4adbb0dd7cdde3297eb9306357d33c2b9cd4b",
+      "journal-entry/SKILL.md": "20f0597c2faca18dd97f92ebca6bd8f605288b5b1fa2964f5cf9a1b60d2fe0bf",
+      "variance-analysis/SKILL.md": "942cb0b6c519b5e782c84baf8064632be3367272ca2f431a7b02d508b586899d"
+    },
+    "components_sha256": {
+      "Contents/Info.plist": "55539a3353976e8a7a9ce3129c13ece8fd24ba4f412543343a0f0c6b84d09d1e",
+      "Contents/Resources/app.asar": "c723174ffba4e12e6d13fd91d7cf6309840b4ca9bdc35cc2008a8134fb72d371",
+      "Contents/Resources/foundry/foundry": "a1b81c9ded095f39a054893c4a1b401d86c375105324039a5feef3eeeb1d0952",
+      "Contents/Resources/dsh-plugin/analysis.js": "18ee395dbb89dc743c746ff8eee0d6dede8f521f58d820e1621f00401e5a1aaf",
+      "Contents/Resources/dsh-plugin/index.js": "563e01e66bd9e7bcb4492a19e96be447f73bd40016d6164422bbfa19c1648d6d",
+      "Contents/Resources/dsh-plugin/package.json": "fb3cee142b3306fb895a5457bd20c16faf876df1bc0b330821bef954d3b8d21f",
+      "Contents/Resources/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+    }
+  },
+  "archive": {
+    "path": "/Users/zcdeng/projects/finance-skill-foundry/app/release/FA-Foundry-0.1.2-macOS-arm64-r2-stage0.zip",
+    "bytes": 497538934,
+    "sha256": "1fa07bb073934ec02ef21b73df36d499a9a1a0dc2f4788a98baff29b3f83ef65",
+    "version": "0.1.2",
+    "archive_method_bytes_match": true
+  }
+}

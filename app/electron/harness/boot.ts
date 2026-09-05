@@ -67,6 +67,9 @@ const SECRET_NAME = /(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)($|_)/i;
  * `DSH_*` is dropped for a different reason. Those select profiles, homes and
  * tool modes, and an ambient one would silently change which composition boots
  * — including which agent preset is the default, which is this product's fence.
+ * `DSH_BUNDLED_SKILL_DIR` is put back from this app's own resource locator,
+ * never from the parent shell, so the skill provider sees the shipped finance
+ * method root while personal skill roots keep their usual priority.
  *
  * Three `FOUNDRY_*` are put back deliberately. `FOUNDRY_VAR` and `FOUNDRY_BIN`
  * are how the bundle finds the store. `FOUNDRY_FORMULATOR_BIN` is how the CLI
@@ -96,6 +99,7 @@ export function harnessEnv(
     varRoot: string;
     foundryBin: string;
     formulatorBin?: string;
+    bundledSkillDir?: string;
     companionEnv?: Record<string, string>;
   },
 ): NodeJS.ProcessEnv {
@@ -111,6 +115,7 @@ export function harnessEnv(
   out.FOUNDRY_VAR = own.varRoot;
   out.FOUNDRY_BIN = own.foundryBin;
   if (own.formulatorBin) out.FOUNDRY_FORMULATOR_BIN = own.formulatorBin;
+  if (own.bundledSkillDir) out.DSH_BUNDLED_SKILL_DIR = own.bundledSkillDir;
   // Not set here, and it would not matter if it were: the Univer bundle's
   // `gatewayLaunch` builds its gateway's environment from an explicit list
   // (`HOME LANG LC_ALL PATH TMPDIR` plus its own three names), read from

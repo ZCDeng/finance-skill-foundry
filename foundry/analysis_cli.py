@@ -11,6 +11,7 @@ from foundry.context import resolve_context
 from foundry.errors import FoundryError
 
 COMMANDS = {
+    "method-resource",
     "analysis-state",
     "dataset-add",
     "dataset-read",
@@ -27,6 +28,9 @@ COMMANDS = {
 
 
 def add_parsers(sub):
+    p = sub.add_parser("method-resource")
+    p.add_argument("--skill", required=True)
+    p.add_argument("--resource", required=True)
     sub.add_parser("analysis-state")
     sub.add_parser("analysis-refresh")
     p = sub.add_parser("dataset-add")
@@ -120,7 +124,11 @@ def dispatch(args) -> bool:
     if context.task is None:
         raise FoundryError("analysis requires a task; run task-new or provide --task")
     service = AnalysisStore(context.task)
-    if args.cmd == "analysis-state":
+    if args.cmd == "method-resource":
+        from foundry.method_skills import read_method_resource
+
+        result = read_method_resource(args.skill, args.resource)
+    elif args.cmd == "analysis-state":
         result = service.state()
         if context.session_id:
             allowed = set(context.snapshot_ids)

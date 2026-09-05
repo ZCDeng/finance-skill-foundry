@@ -33,6 +33,8 @@ export interface HostOptions {
   foundryBin: string;
   /** Passed through to the child, so a model calling `launch-formulator` finds it. */
   formulatorBin?: string;
+  /** Root consumed by dsh-skill-filesystem as this product's bundled skills. */
+  bundledSkillDir?: string;
   /** Switches a bundled companion is not allowed to run without. See `resources.ts`. */
   companionEnv?: Record<string, string>;
 }
@@ -75,6 +77,7 @@ export class HarnessHost {
           varRoot: this.opts.varRoot,
           foundryBin: this.opts.foundryBin,
           formulatorBin: this.opts.formulatorBin,
+          bundledSkillDir: this.opts.bundledSkillDir,
           companionEnv: this.opts.companionEnv,
         }) as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],

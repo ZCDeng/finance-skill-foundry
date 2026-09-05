@@ -285,15 +285,73 @@ def _staged_office() -> Path | None:
     return staged if (staged / "package.json").is_file() else None
 
 
+def _package_name(source: Path) -> str:
+    return json.loads((source / "package.json").read_text(encoding="utf-8"))["name"]
+
+
+def _write_json_if_changed(path: Path, value: object) -> None:
+    text = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(text, encoding="utf-8")
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _add_to_profile_manifest(home: Path, profile: str, source: Path) -> str:
+    name = _package_name(source)
+    manifest_path = home / "profiles" / profile / "package.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["dependencies"] = {**manifest.get("dependencies", {}), name: f"link:{source}"}
+    profile_config = manifest.setdefault("dsh", {}).setdefault("profile", {})
+    bundles = profile_config.setdefault("bundles", [])
+    if name not in bundles:
+        bundles.append(name)
+    _write_json_if_changed(manifest_path, manifest)
+    return name
+
+
+def _resolves_to(target: Path, source: Path) -> bool:
+    try:
+        target.lstat()
+        return target.stat().is_dir() and target.stat().st_ino == source.stat().st_ino
+    except OSError:
+        return False
+
+
+def _ensure_profile_link(home: Path, profile: str, source: Path) -> Path:
+    name = _package_name(source)
+    target = home / "profiles" / profile / "node_modules" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if _resolves_to(target, source):
+        return target
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
+    else:
+        target.unlink(missing_ok=True)
+    target.symlink_to(source, target_is_directory=True)
+    return target
+
+
 def _prepare(home: Path, probe: Path, profile: str) -> None:
     home.mkdir(parents=True, exist_ok=True)
-    assert _dsh(home, "--profile", profile, "--dump-config").returncode == 0
-    # Probe first: it wraps `ctx.tools.register`, so it has to be applied before
-    # the bundle whose registrations it counts.
+    dump = _dsh(home, "--profile", profile, "--dump-config")
+    assert dump.returncode == 0, dump.stderr or dump.stdout
+    # Probe first: it wraps `ctx.tools.register`, so it has to be declared before
+    # the bundle whose registrations it counts. This mirrors the product wiring:
+    # name each package in the profile manifest and put a link where the profile
+    # resolver looks, without shelling out to an external package manager.
     office = _staged_office()
     for source in (probe, PLUGIN, *( [office] if office else [] )):
-        added = _dsh(home, "plugin", "--profile", profile, "add", str(source))
-        assert added.returncode == 0, added.stderr
+        assert (source / "package.json").is_file(), source
+        _add_to_profile_manifest(home, profile, source)
+        _ensure_profile_link(home, profile, source)
 
 
 @needs_dsh

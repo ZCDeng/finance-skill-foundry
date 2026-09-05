@@ -31,6 +31,12 @@ CONFIG = {
     "max_temp_directory_size": "0B",
     "temp_directory": "",
 }
+RELATIONSHIP_CARDINALITIES = {
+    "one-to-one",
+    "one-to-many",
+    "many-to-one",
+    "many-to-many",
+}
 SAFE_TABLE_FUNCTIONS = {"range", "generate_series", "unnest"}
 FORBIDDEN_FUNCTIONS = {
     "query",
@@ -263,6 +269,65 @@ def _validate_join_keys(
             )
 
 
+def validate_relationship_contract(
+    relationships: Any, aliases: set[str] | None = None
+) -> list[dict]:
+    if not isinstance(relationships, list):
+        raise FoundryError("relationships must be an array")
+    checked = []
+    for index, relationship in enumerate(relationships, start=1):
+        label = f"relationship #{index}"
+        if not isinstance(relationship, dict):
+            raise FoundryError(
+                f"{label} must be an object with left, right, left_keys, right_keys and cardinality"
+            )
+        left, right = relationship.get("left"), relationship.get("right")
+        if (
+            not isinstance(left, str)
+            or not left
+            or not isinstance(right, str)
+            or not right
+        ):
+            raise FoundryError(f"{label} must name left and right bound aliases")
+        if aliases is not None and (left not in aliases or right not in aliases):
+            raise FoundryError(f"{label} left and right must name bound snapshots")
+        left_keys = relationship.get("left_keys")
+        right_keys = relationship.get("right_keys")
+        if left_keys is None and right_keys is None and "keys" in relationship:
+            left_keys = right_keys = relationship.get("keys")
+        if (
+            not isinstance(left_keys, list)
+            or not left_keys
+            or not isinstance(right_keys, list)
+            or not right_keys
+            or len(left_keys) != len(right_keys)
+            or any(
+                not isinstance(key, str) or not key
+                for key in [*left_keys, *right_keys]
+            )
+        ):
+            raise FoundryError(
+                f"{label} requires equally sized nonempty string arrays: left_keys and right_keys"
+            )
+        cardinality = relationship.get("cardinality")
+        if cardinality not in RELATIONSHIP_CARDINALITIES:
+            raise FoundryError(
+                f"{label} cardinality must be one of {', '.join(sorted(RELATIONSHIP_CARDINALITIES))}"
+            )
+        if cardinality == "many-to-many":
+            if relationship.get("allow_many_to_many") is not True:
+                raise FoundryError(
+                    f"{label} many-to-many requires allow_many_to_many=true"
+                )
+            rationale = relationship.get("rationale")
+            if not isinstance(rationale, str) or not rationale.strip():
+                raise FoundryError(
+                    f"{label} many-to-many requires an allocation rationale"
+                )
+        checked.append(relationship)
+    return checked
+
+
 def relationship_checks(
     datasets: dict[str, dict], spec: dict, parsed: dict
 ) -> list[dict]:
@@ -271,37 +336,14 @@ def relationship_checks(
         raise FoundryError(
             "multi-table JOIN requires explicit relationships and cardinality"
         )
+    validate_relationship_contract(relationships, set(datasets))
     _validate_join_keys(parsed, relationships, datasets)
     checks = []
     for relationship in relationships:
         left, right = relationship.get("left"), relationship.get("right")
-        if left not in datasets or right not in datasets:
-            raise FoundryError("relationship must name bound snapshots")
         left_keys = relationship.get("left_keys") or relationship.get("keys")
         right_keys = relationship.get("right_keys") or relationship.get("keys")
         cardinality = relationship.get("cardinality")
-        if cardinality not in {
-            "one-to-one",
-            "one-to-many",
-            "many-to-one",
-            "many-to-many",
-        }:
-            raise FoundryError("relationship cardinality must be explicit")
-        if cardinality == "many-to-many" and not relationship.get("allow_many_to_many"):
-            raise FoundryError(
-                "many-to-many relationship requires explicit allow_many_to_many and allocation rationale"
-            )
-        if cardinality == "many-to-many" and not relationship.get("rationale"):
-            raise FoundryError(
-                "many-to-many relationship requires allocation rationale"
-            )
-        if (
-            not isinstance(left_keys, list)
-            or not left_keys
-            or not isinstance(right_keys, list)
-            or len(left_keys) != len(right_keys)
-        ):
-            raise FoundryError("relationship requires equally sized nonempty key lists")
         left_types = {c["name"]: c["type"] for c in datasets[left]["schema"]}
         right_types = {c["name"]: c["type"] for c in datasets[right]["schema"]}
         if any(

@@ -81,6 +81,7 @@
             "analysis-refresh",
             "dataset-add",
             "dataset-read",
+            "method-resource",
             "analysis-save",
             "analysis-run",
             "analysis-script",
@@ -114,6 +115,7 @@
           "childTools": [
             "analysis-state",
             "dataset-read",
+            "method-resource",
             "analysis-save",
             "analysis-run",
             "analysis-script",

@@ -1,12 +1,12 @@
 # Foundry 企业财务分析补强：验收设计
 
-日期：2026-09-06。修订：r2，与实施计划同步增加阶段 0 技能接入验收。状态：规划，以下均为拟实施的验收条件，本轮没有运行这些新测试。
+日期：2026-09-06。修订：r2，与实施计划同步增加阶段 0 技能接入验收。状态：A27–A34 已通过；以下保留完整验收合同，各条实际证据见 [r2 实施记录](../../docs/plans/2026-09-06-finance-r2-execution-log.md)。未完成条目不计为通过，“新增”路径按规划时基线理解。
 
 ## 目的与证据要求
 
 证明从企业内部账套／Excel 到管理分析、经理修改、更新资料后重新出稿的完整流程。厂商页面、模拟接口、生成出的 XLSX、已有通用 SQL 样例分别只能证明各自覆盖的范围；不能替代真实 ERP 接入、真实 Excel 刷新和模型解释质量的验收。
 
-沿用当前测试入口 `tests/test_analysis_workbench.py`、`tests/test_analysis_parameters.py`、`tests/test_analysis_runtime.py`、`tests/test_runner.py`、`app/tests/analysis.test.tsx` 与 `tools/verify_analysis_workbench.py`。下表标注“新增”的测试文件尚不存在。
+沿用当前测试入口 `tests/test_analysis_workbench.py`、`tests/test_analysis_parameters.py`、`tests/test_analysis_runtime.py`、`tests/test_runner.py`、`app/tests/analysis.test.tsx` 与 `tools/verify_analysis_workbench.py`。下表标注“新增”的测试文件按各阶段实际落地状态记录。
 
 技能接入另复用 `tests/test_method_skills.py`、`app/tests/harness.test.ts`，拟新增 `tests/test_method_skill_runtime.py` 承接跨层合同。状态分四层记录：随包存在、会话可发现、正文已加载、方法已参与实际计算。包内文件核对只能证明第一层；manifest 包含名字仅代表声明，不能独立证明已打包。沿用 A01–A26，新增 A27–A34；合计 34 条，按阶段执行。
 
@@ -77,4 +77,4 @@
 3. 用固定合成账套跑端到端证据链，再用一份获准脱敏的真实企业样本核对科目余额、期间和管理利润。
 4. 金蝶／用友真实接口需要具体产品版本、租户／账套授权与测试数据；没有这些只报告“合同／模拟验证通过”，保留“真实 ERP 联调未验证”。
 5. Excel 插件需要实际 Excel 宿主和部署路径；没有宿主结果只报告原型，不把 XLSX 成功写盘等同于 Excel 不搬家。
-6. 阶段 0 及后续交付应用时重新打包，并比对包内、安装版版本与哈希后运行原生验收；本轮仅更新规划，不重打包。
+6. 阶段 0 及后续交付应用时重新打包，并比对包内、安装版版本与哈希后运行原生验收。

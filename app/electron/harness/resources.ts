@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -43,6 +43,24 @@ export function entryPath(layout: Layout): string {
 export function pluginDir(layout: Layout): string {
   if (layout.packaged) return join(layout.resourcesPath, 'dsh-plugin');
   return join(layout.appPath, '..', 'dsh-plugin');
+}
+
+/**
+ * The root handed to the runtime skill-filesystem provider for bundled finance
+ * method skills.
+ *
+ * In a packaged app those files live inside the frozen `foundry` one-dir bundle.
+ * In development they are the checkout's canonical `method/` tree, resolved
+ * from the app path in the same relocatable way as the DSH bundle.
+ */
+export function methodSkillDir(layout: Layout): string {
+  if (layout.packaged) return join(layout.resourcesPath, 'foundry', '_internal', 'foundry', 'resources', 'method');
+  return join(layout.appPath, '..', 'method');
+}
+
+export function availableMethodSkillDir(layout: Layout): string | null {
+  const dir = methodSkillDir(layout);
+  return existsSync(join(dir, 'FOUNDRY.md')) ? dir : null;
 }
 
 /**

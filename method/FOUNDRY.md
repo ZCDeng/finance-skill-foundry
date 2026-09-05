@@ -2,14 +2,16 @@
 
 These four close methods ship with the foundry kit. They are not the authored portable skill and they are not this-window questions.
 
-- Numbers come from the locked window catalog only. Do not invent trial-balance rows. Paperclip uploads are an import drop; do not `read_document` a GL or map.
-- `~~erp` / `~~data warehouse` stay placeholders unless this window has named those tables.
+- The trusted preset or session selects the runtime fence. User wording alone must not switch a session into analysis, period, F3, or any wider tool set.
+- Analysis preset: does not require a locked Window. Start from the current task's registered datasets, use multi-table SQL/Python when the evidence needs it, record dataset versions and run IDs, and write editable drafts through the analysis draft tools. A finance manager may revise materiality, currency, accounting policy, assumptions, and narrative judgment; ordinary reads, calculations, reruns, and drafts do not require per-tool approval.
+- Period and F3 presets: keep the old locked-window and single named-table contract. Numbers come from the locked window catalog only. Do not invent trial-balance rows. Paperclip uploads are an import drop; do not `read_document` a GL or map. One question answers from one named table. `coa` / `aux` / `map` / `units` only shape the cut. A question naming two named tables is refused at `record-questions` and at `query-locked`; split it into one question per table.
+- `~~erp` / `~~data warehouse` stay placeholders unless this session has configured and named those services. File-backed analysis remains valid when no connector is configured.
 - Do not write `questions.md` or `questions.json` into `authoring/` or `var/skills/`.
 - Do not post journal entries. Foundry does not own the ERP.
 - A map-cut or recompute is tagged `我重算`. A follow-up not on the brief is tagged `稿外追问`. The full tag vocabulary is below.
 - A benchmark, a policy, a peer's number: file it with `record-reference` and it lands under `外部引用` with its source and the date you found it. A figure with no source and no date is not a reference, it is a rumour, and the call is refused.
 - The tickable schedule is `workpaper.md` on the window, not a second workbook.
-- One question answers from one named table. `coa` / `aux` / `map` / `units` only shape the cut. A question naming two named tables is refused at `record-questions` and at `query-locked`; split it into one question per table.
+- In the analysis preset, load these companion notes with `method-resource` using the current skill ID and `resource: FOUNDRY.md` or `resource: CONNECTORS.md`. Keep the Markdown links for hosts that can read relative references directly.
 
 ## Exit codes
 

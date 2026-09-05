@@ -9,7 +9,9 @@ import {
   HARNESS_ENTRY,
   companionEnv,
   entryPath,
+  availableMethodSkillDir,
   harnessRoot,
+  methodSkillDir,
   formulatorBin as packedFormulatorBin,
   foundryBin as packedFoundryBin,
   pluginDir,
@@ -253,6 +255,10 @@ void app.whenReady().then(() => {
     : stagedBundleDir(here, BUNDLE_NAME);
   if (existsSync(entry)) {
     const home = path.join(app.getPath('userData'), 'harness');
+    const bundledSkillDir = availableMethodSkillDir(here);
+    if (!bundledSkillDir) {
+      console.warn(`[harness] bundled method skills unavailable at ${methodSkillDir(here)}`);
+    }
     const host = new HarnessHost({
       entry,
       root: override ?? harnessRoot(here),
@@ -262,6 +268,7 @@ void app.whenReady().then(() => {
       // `nameFormulator` has already run, so this is the packed one unless the
       // operator named their own.
       formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
+      bundledSkillDir: bundledSkillDir ?? undefined,
       companionEnv: companionEnv(here),
     });
     harness = host;

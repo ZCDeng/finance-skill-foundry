@@ -1,0 +1,43 @@
+{
+  "version": "r2-stage0-1",
+  "currency": "CNY",
+  "unit": "万元",
+  "cases": [
+    {
+      "id": "G1",
+      "business": "服务企业",
+      "question": "请分析华东本月管理利润与预算的差异，分别说明收入、成本和费用的贡献，保存可编辑的分析文稿并引用实际计算记录。资料已加入当前任务，请直接完成分析。",
+      "expected_difference": "5",
+      "expected_skill": ["financial-statements", "variance-analysis"],
+      "datasets": {
+        "实际": [{"department": "华东", "period": "2026-08", "revenue": 120, "cost": 70, "expense": 20}],
+        "预算": [{"department": "华东", "period": "2026-08", "revenue": 100, "cost": 60, "expense": 15}]
+      }
+    },
+    {
+      "id": "G2",
+      "business": "商品销售企业",
+      "question": "请分析这款商品本期相对基期的收入差异，采用先数量后价格的顺序分解贡献，保存可编辑的分析文稿并引用实际计算记录。资料已加入当前任务，请直接完成分析。",
+      "expected_difference": "32",
+      "expected_skill": ["variance-analysis"],
+      "datasets": {
+        "商品销售": [
+          {"product": "商品甲", "period": "基期", "quantity": 10, "price": 10},
+          {"product": "商品甲", "period": "本期", "quantity": 12, "price": 11}
+        ]
+      }
+    },
+    {
+      "id": "G7",
+      "business": "多组织企业",
+      "question": "只分析华东实际管理利润，排除同名科目所属的西南组织。",
+      "expected_profit": "30",
+      "datasets": {
+        "组织实际": [
+          {"ledger": "服务账套", "department": "华东", "period": "2026-08", "revenue": 120, "cost": 70, "expense": 20},
+          {"ledger": "服务账套", "department": "西南", "period": "2026-08", "revenue": 500, "cost": 100, "expense": 50}
+        ]
+      }
+    }
+  ]
+}

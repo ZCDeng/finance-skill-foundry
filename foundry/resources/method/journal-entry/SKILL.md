@@ -11,6 +11,8 @@ argument-hint: "<type> [period]"
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >
 > When this skill runs inside finance-skill-foundry, also read [FOUNDRY.md](../FOUNDRY.md).
+>
+> Foundry runtime note: load this skill through the native skill tool, then read the companion notes with `method-resource {skill: "journal-entry", resource: "FOUNDRY.md"}` and `method-resource {skill: "journal-entry", resource: "CONNECTORS.md"}` when the trusted preset or session needs those rules. In analysis mode, use the current task datasets, multi-table SQL/Python, run records, and editable drafts; materiality, currency, accounting policy, and narrative judgment are manager-controlled and ordinary calculations do not require per-tool approval. Journal-entry outputs are drafts only; Foundry does not post to an ERP.
 
 **Important**: This command assists with journal entry workflows but does not provide financial advice. All entries should be reviewed by qualified financial professionals before posting.
 
@@ -132,4 +134,4 @@ Provide:
 2. Supporting calculations
 3. Comparison to prior period entry of the same type (if available)
 4. Any items flagged for review or follow-up
-5. Instructions for posting (manual entry or upload format for the user's ERP)
+5. Review notes for manual posting outside Foundry (manual entry or upload format for the user's ERP)

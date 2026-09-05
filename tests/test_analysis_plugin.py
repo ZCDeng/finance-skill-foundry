@@ -48,6 +48,51 @@ process.stdout.write(JSON.stringify({names: seen.map((d) => d.name), restriction
     )
     assert "SQL" in result["descriptions"]["analysis-save"]
     assert "不会自动变成公式" in result["descriptions"]["analysis-save"]
+    assert "left_keys" in result["descriptions"]["analysis-save"]
+
+
+def test_analysis_save_relationship_schema_names_actual_join_contract(tmp_path: Path):
+    result = _node(tmp_path, """
+const save = definitions().find((d) => d.name === 'analysis-save');
+const relationship = save.parameters.properties.spec.properties.relationships.items;
+process.stdout.write(JSON.stringify({
+  required: relationship.required,
+  additionalProperties: relationship.additionalProperties,
+  properties: Object.keys(relationship.properties),
+  cardinality: relationship.properties.cardinality.enum,
+  hasEmptyItems: JSON.stringify(save.parameters).includes('"relationships":{"type":"array","items":{}'),
+}));
+""")
+    assert result["required"] == ["left", "right", "left_keys", "right_keys", "cardinality"]
+    assert result["additionalProperties"] is False
+    assert {"source", "target", "on", "keys"}.isdisjoint(result["properties"])
+    assert result["cardinality"] == ["one-to-one", "one-to-many", "many-to-one", "many-to-many"]
+    assert result["hasEmptyItems"] is False
+
+
+def test_analysis_draft_claim_schema_names_basis_and_zero_based_rows(tmp_path: Path):
+    result = _node(tmp_path, """
+const draft = definitions().find((d) => d.name === 'analysis-draft');
+const claim = draft.parameters.properties.spec.properties.claims.items;
+process.stdout.write(JSON.stringify({
+  required: claim.required,
+  basis: claim.properties.basis.enum,
+  rowMinimum: claim.properties.row.minimum,
+  rowType: claim.properties.row.type,
+  hasEmptyItems: JSON.stringify(draft.parameters).includes('"claims":{"type":"array","items":{"type":"object"}'),
+}));
+""")
+    assert result["required"] == ["basis"]
+    assert result["basis"] == [
+        "source_fact",
+        "calculation",
+        "external_reference",
+        "user_assumption",
+        "professional_judgment",
+    ]
+    assert result["rowType"] == "integer"
+    assert result["rowMinimum"] == 0
+    assert result["hasEmptyItems"] is False
 
 
 def test_analysis_executes_real_argument_shapes_and_session_only_binding(tmp_path: Path):
@@ -65,6 +110,7 @@ const inputs = {
  'analysis-refresh': {},
  'dataset-add': {path: '/task/uploads/actual.csv', name: '实际', meta: {currency: 'CNY'}},
  'dataset-read': {dataset: 'snapshot-1'},
+ 'method-resource': {skill: 'variance-analysis', resource: 'FOUNDRY.md'},
  'analysis-save': {spec: {question: '差异', sql: 'SELECT amount FROM actual', bindings: {actual: 'snapshot-1'}}},
  'analysis-run': {analysis: 'analysis-1'},
  'analysis-script': {spec: {language: 'python', code: "print('done')", bindings: {actual: 'snapshot-1'}}},
@@ -88,7 +134,8 @@ process.stdout.write(JSON.stringify(results));
     for row, tool in zip(rows, direct):
         assert row[:5] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", aliases.get(tool, tool)]
         assert "--task" not in row
-    assert json.loads(rows[4][6])["bindings"] == {"actual": "snapshot-1"}
+    assert rows[4][4:] == ["method-resource", "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
+    assert json.loads(rows[5][6])["bindings"] == {"actual": "snapshot-1"}
     assert rows[-1][5:] == ["--method", "method-1", "--bindings", '{"actual":"snapshot-2"}',
                             "--parameters", '["1.23"]', "--question", "下一期"]
     for value in result:
@@ -114,6 +161,21 @@ process.stdout.write(JSON.stringify(outcomes));
     assert "registered session" in result[0]["message"]
     assert "未声明参数 task" in result[1]["message"]
     assert "缺少必填参数 analysis" in result[2]["message"]
+
+
+def test_analysis_refuses_string_arguments_without_expanding_characters(tmp_path: Path):
+    result = _node(tmp_path, """
+const tools = Object.fromEntries(definitions().map((d) => [d.name, d]));
+try {
+  await tools['analysis-run'].execute(JSON.stringify({analysis: 'a'}), {agent: {id: 'session'}});
+  process.stdout.write(JSON.stringify({accepted: true}));
+} catch (error) {
+  process.stdout.write(JSON.stringify({message: error.message, refused: error.refused}));
+}
+""", {"FOUNDRY_VAR": str(tmp_path / "var"), "FOUNDRY_BIN": "/bin/false"})
+    assert result["refused"] is True
+    assert "参数必须为对象" in result["message"]
+    assert "未声明参数" not in result["message"]
 
 
 def test_analysis_preset_installs_with_harness_and_wheel_resource():

@@ -9,10 +9,51 @@ const object = (properties, required = Object.keys(properties)) => ({
   type: "object", properties, required, additionalProperties: false,
 });
 const json = (value) => JSON.stringify(value);
+const relationship = {
+  type: "object",
+  required: ["left", "right", "left_keys", "right_keys", "cardinality"],
+  additionalProperties: false,
+  properties: {
+    left: string("左侧 SQL 表别名，必须是 bindings 中的别名，例如 actual"),
+    right: string("右侧 SQL 表别名，必须是 bindings 中的别名，例如 budget"),
+    left_keys: { type: "array", minItems: 1, items: { type: "string" }, description: "左侧表参与 JOIN 的字段名数组，顺序对应 right_keys" },
+    right_keys: { type: "array", minItems: 1, items: { type: "string" }, description: "右侧表参与 JOIN 的字段名数组，顺序对应 left_keys" },
+    cardinality: { type: "string", enum: ["one-to-one", "one-to-many", "many-to-one", "many-to-many"], description: "按 left -> right 方向声明基数；预算/映射表常见为 many-to-one" },
+    allow_many_to_many: { type: "boolean", description: "仅当确需多对多并已说明分摊/去重口径时为 true" },
+    rationale: { type: "string", description: "many-to-many 必填；说明分摊、去重或重复行处理口径" },
+  },
+};
+const claim = {
+  type: "object",
+  required: ["basis"],
+  additionalProperties: true,
+  properties: {
+    basis: {
+      type: "string",
+      enum: ["source_fact", "calculation", "external_reference", "user_assumption", "professional_judgment"],
+      description: "证据类型；计算结果用 calculation，经理调整/假设用 user_assumption，专业判断用 professional_judgment",
+    },
+    run_id: string("basis=calculation 时必填，引用 analysis-run 返回的成功运行 id"),
+    row: { type: "integer", minimum: 0, description: "basis=calculation 时必填；result.rows 的下标，从 0 开始" },
+    column: string("basis=calculation 时必填，引用 result.rows[row] 中的列名"),
+    value: string("basis=calculation 时必填，必须等于该 run 对应单元格；经理调整另写 user_assumption claim"),
+    dataset_id: string("source_fact 可选，引用资料快照 id"),
+    paragraph: { type: "integer", minimum: 0, description: "背景资料段落号，按 dataset-read 返回值填写" },
+    reason: string("用户假设、专业判断或调整说明"),
+  },
+};
 
 // These commands share the legacy tool result envelope, but no Window state or
 // current pointer. Every call is resolved by the service from exec.agent.id.
 const SPECS = {
+  "method-resource": {
+    description: "读取已随包技能明确引用的配套说明。skill 工具加载正文后，用此入口读取 FOUNDRY.md 的运行模式规则或 CONNECTORS.md 的连接类别说明，也可核对 NOTICE/LICENSE。只能读取四项随包技能的这些资源，不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
+    parameters: object({
+      skill: { type: "string", enum: ["financial-statements", "variance-analysis", "reconciliation", "journal-entry"] },
+      resource: { type: "string", enum: ["FOUNDRY.md", "CONNECTORS.md", "NOTICE", "LICENSE"] },
+    }),
+    kind: "read", argv: (input) => ["method-resource", "--skill", input.skill, "--resource", input.resource],
+  },
   "analysis-state": {
     description: "读取当前分析任务的资料快照、分析版本、运行记录、文稿和可复用方法。先查看已有资料与字段，再明确计算表达式；无需建科目表或锁期间窗口。stdout 为 JSON。",
     parameters: object({}), kind: "read", argv: () => ["analysis-state"],
@@ -36,7 +77,7 @@ const SPECS = {
     kind: "read", argv: (input) => ["dataset-read", "--dataset", input.dataset],
   },
   "analysis-save": {
-    description: "保存可修改的分析定义，不执行计算。spec 必须包含 question、显式只读 SQL、bindings（SQL表别名到快照id）。question 仅说明业务目的，不会自动变成公式。可用 parameters 参数化查询；parameter_metadata 可为实际 SQL 参数绑定业务名称、类型、单位和约束，不能猜测没有绑定的字段。assumptions 只记录说明，修改说明不会改变公式；grain、relationships、metrics 记录粒度/关系/指标，parent_id 生成后续版本。金额口径、比较期间、币种和分摊规则须明确，跨表先检查重复键和匹配情况。",
+    description: "保存可修改的分析定义，不执行计算。spec 必须包含 question、显式只读 SQL、bindings（SQL表别名到快照id）。question 仅说明业务目的，不会自动变成公式。可用 parameters 参数化查询；parameter_metadata 可为实际 SQL 参数绑定业务名称、类型、单位和约束，不能猜测没有绑定的字段。assumptions 只记录说明，修改说明不会改变公式；grain、relationships、metrics 记录粒度/关系/指标，parent_id 生成后续版本。跨表 JOIN 必须声明 relationships，格式为 {left,right,left_keys,right_keys,cardinality}，例如 actual JOIN budget USING(period,region) 对应 left='actual', right='budget', left_keys=['period','region'], right_keys=['period','region'], cardinality='one-to-one'；不要传字符串、source/target/on 或 1:1。金额口径、比较期间、币种和分摊规则须明确，跨表先检查重复键和匹配情况。",
     parameters: object({ spec: {
       type: "object", required: ["question", "sql", "bindings"],
       properties: {
@@ -55,7 +96,7 @@ const SPECS = {
         } },
         assumptions: { type: "array", items: {}, description: "用户假设及其依据" },
         grain: { type: "array", items: {}, description: "参与计算的数据粒度" },
-        relationships: { type: "array", items: {}, description: "表间关联键和基数约束" },
+        relationships: { type: "array", items: relationship, description: "表间关联键和基数约束；JOIN 时必填 left/right/left_keys/right_keys/cardinality" },
         metrics: { type: "array", items: {}, description: "指标定义、币种、单位与舍入规则" },
         parent_id: string("修改既有定义时填写父分析id"),
       },
@@ -113,13 +154,13 @@ const SPECS = {
     parameters: object({ job: string("需要重试的后台任务id") }), kind: "execute", runtime: true,
   },
   "analysis-draft": {
-    description: "从分析结果与专业判断保存一版可编辑文稿，允许先导出草稿。spec 包含 title、body、run_ids、claims、limitations，可用 parent_id 延续上一版。计算数字的 claim 用 basis=calculation、run_id、row、column、value 引用真实输出；假设和判断分别标明，不伪造计算依据。review_status 与 publication_status 独立，只有用户明确选定归档时设置 archived，已归档内容不会原地修改。",
+    description: "从分析结果与专业判断保存一版可编辑文稿，允许先导出草稿。spec 包含 title、body、run_ids、claims、limitations，可用 parent_id 延续上一版。claims 的 basis 必须是 source_fact、calculation、external_reference、user_assumption 或 professional_judgment。计算数字用 basis=calculation、run_id、row、column、value 引用真实输出；row 是 result.rows 的 0-based 下标，第一行写 0，不要写自然语言行号；假设和判断分别标明，不伪造计算依据。review_status 与 publication_status 独立，只有用户明确选定归档时设置 archived，已归档内容不会原地修改。",
     parameters: object({ spec: {
       type: "object", required: ["title", "body"],
       properties: {
         title: string("文稿标题"), body: string("可编辑 Markdown 正文，包含结论、依据和局限"),
         run_ids: { type: "array", items: { type: "string" } },
-        claims: { type: "array", items: { type: "object" }, description: "数字定位与来源、用户假设、专业判断；计算引用包含 basis,run_id,row,column,value" },
+        claims: { type: "array", items: claim, description: "数字定位与来源、用户假设、专业判断；计算引用包含 basis,run_id,row,column,value；row 使用 result.rows 的 0-based 下标" },
         limitations: { type: "array", items: { type: "string" } },
         parent_id: string("上一文稿版本id"),
         publication_status: { type: "string", enum: ["draft", "archived"] },

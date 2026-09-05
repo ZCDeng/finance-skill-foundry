@@ -21,7 +21,7 @@ import duckdb
 from openpyxl import Workbook
 
 from foundry.analysis_data import MAX_SOURCE_BYTES, SUPPORTED, json_value, parse_source
-from foundry.analysis_sql import CONFIG, execute_sql, method_template
+from foundry.analysis_sql import CONFIG, execute_sql, method_template, validate_relationship_contract
 from foundry.analysis_parameters import normalize_parameter_metadata, method_parameters
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
@@ -357,6 +357,9 @@ class AnalysisStore:
             if not isinstance(value, list):
                 raise FoundryError(f"{key} must be an array")
             fields[key] = value
+        fields["relationships"] = validate_relationship_contract(
+            fields["relationships"], set(bindings)
+        )
         record = _new(
             self.task,
             question=question,

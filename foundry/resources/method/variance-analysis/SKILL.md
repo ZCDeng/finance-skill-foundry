@@ -11,6 +11,8 @@ argument-hint: "<line> vs <base>"
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >
 > When this skill runs inside finance-skill-foundry, also read [FOUNDRY.md](../FOUNDRY.md).
+>
+> Foundry runtime note: load this skill through the native skill tool, then read the companion notes with `method-resource {skill: "variance-analysis", resource: "FOUNDRY.md"}` and `method-resource {skill: "variance-analysis", resource: "CONNECTORS.md"}` when the trusted preset or session needs those rules. In analysis mode, use the current task datasets, multi-table SQL/Python, run records, and editable drafts; materiality, currency, accounting policy, and narrative judgment are manager-controlled and ordinary calculations do not require per-tool approval.
 
 **Important**: This skill assists with variance analysis workflows but does not provide financial advice. All analyses should be reviewed by qualified financial professionals before use in reporting.
 
@@ -119,6 +121,8 @@ Materiality thresholds determine which variances require investigation and narra
 4. **Management attention:** What level of variance would change a decision?
 
 ### Recommended Threshold Framework
+
+Examples, not fixed Foundry defaults:
 
 | Comparison Type | Dollar Threshold | Percentage Threshold | Trigger |
 |----------------|-----------------|---------------------|---------|
