@@ -1,0 +1,3 @@
+tenant,ledger,organization,period,currency,unit,sku,quantity,unit_price,revenue,cost,expense
+tenant-b,commerce-co,总部,2026-08,CNY,元,SKU-A,10,10,100,60,15
+tenant-b,commerce-co,门店一,2026-08,CNY,元,SKU-B,20,5,100,75,8

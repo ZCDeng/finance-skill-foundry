@@ -1,0 +1,10 @@
+source_system,tenant,ledger,organization,period,currency,unit,doc_id,line_id,account_code,account_name,amount,dc_flag,source_status,source_row
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-100,1,6001,主营业务收入,100,credit,active,1
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-100,2,1122,应收账款,100,debit,active,2
+fixture,tenant-c,group-co,上海主体,2026-08,USD,元,VCH-100,1,6001,主营业务收入,12,credit,active,3
+fixture,tenant-c,other-ledger,北京主体,2026-08,CNY,元,VCH-100,1,6001,主营业务收入,88,credit,active,4
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-DUP,1,6001,主营业务收入,5,credit,active,5
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-DUP,1,6001,主营业务收入,5,credit,duplicate_pull,6
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-CHG,1,6601,管理费用,8,debit,active,7
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-CHG,1,6601,管理费用-修订,9,debit,changed_amount,8
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,VCH-DEL,1,1122,应收账款,6,debit,deleted,9

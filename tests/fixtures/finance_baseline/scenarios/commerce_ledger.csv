@@ -1,0 +1,5 @@
+source_system,tenant,ledger,organization,period,currency,unit,scenario,sku,quantity,unit_price,revenue,cost,expense,source_row
+fixture,tenant-b,commerce-co,总部,2026-08,CNY,元,budget,SKU-A,10,10,100,60,15,1
+fixture,tenant-b,commerce-co,总部,2026-08,CNY,元,actual,SKU-A,12,11,132,72,18,2
+fixture,tenant-b,commerce-co,门店一,2026-08,CNY,元,budget,SKU-B,20,5,100,75,8,3
+fixture,tenant-b,commerce-co,门店一,2026-08,CNY,元,actual,SKU-B,18,6,108,78,9,4

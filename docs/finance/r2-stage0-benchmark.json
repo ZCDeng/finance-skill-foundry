@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "benchmark": "A25 finance baseline import and fixed profit query",
+  "rows": 100000,
+  "iterations": 5,
+  "machine": {
+    "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+    "python": "3.14.4",
+    "processor": "arm",
+    "machine": "arm64",
+    "cpu_count": 10,
+    "physical_memory_bytes": 25769803776
+  },
+  "measurement": {
+    "import_seconds": "AnalysisStore.add_dataset wall time for a generated CSV source",
+    "cold_query_seconds": "first AnalysisStore.run_analysis call for each newly imported dataset",
+    "rss": "process high-water mark from resource.getrusage(RUSAGE_SELF). In a 5-iteration run this is cumulative for the benchmark process; use separate processes for independent per-run RSS peaks.",
+    "truth": "expected_profit is computed independently from the generated row pattern for 华东 / 2026-08 / CNY / 元"
+  },
+  "expected_profit": "250110",
+  "fixture_hashes": {
+    "README.md": "2830038d5b42596ba17cbd3fe111e33b8255d72a9b22a004cb5f98386935ca7e",
+    "cases.json": "5f326262bb99988f7df4efe5781bc3a2ce9499ba5cb907d6d388980c7f2df414",
+    "expected_truth.json": "911e75f86c56b36a854db5dd7a24c1a48b04485cdedc56c0e9830dc503000688",
+    "scenarios/account_map_conflicts.csv": "f1a09a489d876c1dfbd03546ba719c83f6d41e5355ce51f92d501e500fddcb6b",
+    "scenarios/commerce_budget.csv": "cab67fabdd885c23d387b1d71c26a5bea5ed1ebe73bec530326bbe40f253153c",
+    "scenarios/commerce_ledger.csv": "04addd7b9ffd856ecaf9280bef37cbec216ce77e0334c95660bde5f0716c86b7",
+    "scenarios/g5_account_movements.csv": "490913c990f9b662c7d33aecbc05a1810bf853b8adc50a5fbb8d60d7ab6306e3",
+    "scenarios/g6_source_identity.csv": "c3db2c0b1cf96f16bc69b11a6d8849541e1c3df26c09f60bc300dbf324aa385e",
+    "scenarios/multi_org_ledger.csv": "6234ba7d2076b1f5ed3092b28b30a6536ab4e4df842d96257d8f369718613c47",
+    "scenarios/service_budget.csv": "6d2e704380b3659cc831e6c9bd8c436df810dd70229532200cfff9c91b105d57",
+    "scenarios/service_ledger.csv": "9352b0f6c2c6a4b02ae015506af74b8189fbedeb687e6792e6821f81baf086c6"
+  },
+  "runs": [
+    {
+      "iteration": 1,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "dataset_id": "dcb34c0fec7e403bbbc7a0bce95d5cc9",
+      "analysis_id": "b11d0564fe0a4c729705c8c77c0d8618",
+      "run_id": "d80ad2d0c4ac4dd5abe01b3922f74653",
+      "execution_status": "succeeded",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 0.927404124988243,
+      "cold_query_seconds": 175.9656784160179,
+      "process_high_water_mark_rss_bytes_after_import": 351076352,
+      "process_high_water_mark_rss_bytes_after_cold_query": 434847744
+    },
+    {
+      "iteration": 2,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "dataset_id": "8909fc1d44854292b0bc126678b3d090",
+      "analysis_id": "ab2b69ee27c74633af071e2285e2c0a8",
+      "run_id": "fcf1955790744aae810ec6d5e53ddb71",
+      "execution_status": "succeeded",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 2.6087591249961406,
+      "cold_query_seconds": 160.59539900001255,
+      "process_high_water_mark_rss_bytes_after_import": 434847744,
+      "process_high_water_mark_rss_bytes_after_cold_query": 436977664
+    },
+    {
+      "iteration": 3,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "dataset_id": "9b82e1aa16d741fcb1896b9375e0d6e0",
+      "analysis_id": "71a1b215abb2485d847ac0ccec74b599",
+      "run_id": "64c3e4ba465840d5950895cfc4a39a25",
+      "execution_status": "succeeded",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 1.3356811669946183,
+      "cold_query_seconds": 117.12043275000178,
+      "process_high_water_mark_rss_bytes_after_import": 436977664,
+      "process_high_water_mark_rss_bytes_after_cold_query": 439730176
+    },
+    {
+      "iteration": 4,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "dataset_id": "fdf122839df944768cf5055d392e91a9",
+      "analysis_id": "b71eb98219794ff3a43778e90cd2d966",
+      "run_id": "1a78712fc4444872ba90651ce13a826b",
+      "execution_status": "succeeded",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 1.5748917089949828,
+      "cold_query_seconds": 110.0460553339799,
+      "process_high_water_mark_rss_bytes_after_import": 439730176,
+      "process_high_water_mark_rss_bytes_after_cold_query": 439730176
+    },
+    {
+      "iteration": 5,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "dataset_id": "d343cf646db94617a59930572f850da6",
+      "analysis_id": "c08b90145e2242a084d00a22f29305a1",
+      "run_id": "7bb7e845a42f4780942b985f2f761174",
+      "execution_status": "succeeded",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 1.663107125001261,
+      "cold_query_seconds": 95.10089112498099,
+      "process_high_water_mark_rss_bytes_after_import": 439730176,
+      "process_high_water_mark_rss_bytes_after_cold_query": 439730176
+    }
+  ],
+  "median": {
+    "import_seconds": 1.5748917089949828,
+    "cold_query_seconds": 117.12043275000178,
+    "process_high_water_mark_rss_bytes_after_import": 436977664,
+    "process_high_water_mark_rss_bytes_after_cold_query": 439730176
+  }
+}

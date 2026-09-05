@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "generated_by": "static fixture",
+  "samples": {
+    "G1_profit_variance": {
+      "scenario": "service company",
+      "organization": "华东",
+      "period": "2026-08",
+      "currency": "CNY",
+      "unit": "万元",
+      "budget": {"revenue": "100", "cost": "60", "expense": "15", "profit": "25"},
+      "actual": {"revenue": "120", "cost": "70", "expense": "20", "profit": "30"},
+      "variance": "5",
+      "bridge": {"revenue_effect": "20", "cost_effect": "-10", "expense_effect": "-5"}
+    },
+    "G2_price_quantity": {
+      "scenario": "goods sales company",
+      "organization": "总部",
+      "period": "2026-08",
+      "currency": "CNY",
+      "unit": "元",
+      "sku": "SKU-A",
+      "budget": {"quantity": "10", "unit_price": "10", "revenue": "100"},
+      "actual": {"quantity": "12", "unit_price": "11", "revenue": "132"},
+      "total_revenue_variance": "32",
+      "quantity_first_method": {"quantity_effect": "20", "price_effect": "12"},
+      "base_weight_method": {"quantity_effect": "20", "price_effect": "10", "interaction": "2"}
+    },
+    "G3_cash_delay": {
+      "scenario": "service company",
+      "period": "2026-09",
+      "currency": "CNY",
+      "unit": "万元",
+      "opening_cash": "50",
+      "planned_inflow": "100",
+      "planned_outflow": "60",
+      "cutoff": "2026-09-30",
+      "baseline_ending_cash": "90",
+      "delay_days": 14,
+      "delayed_ending_cash": "-10"
+    },
+    "G4_aging": {
+      "scenario": "service company",
+      "as_of": "2026-09-05",
+      "currency": "CNY",
+      "unit": "万元",
+      "overdue": [{"customer": "甲客户", "amount": "80", "due_date": "2026-08-01", "overdue_days": 35}],
+      "not_due": [{"customer": "乙客户", "amount": "20", "due_date": "2026-09-20"}]
+    },
+    "G5_debit_credit_period": {
+      "scenario": "multi organization company",
+      "organization": "北京主体",
+      "period": "2026-08",
+      "currency": "CNY",
+      "unit": "元",
+      "debit_normal_account": {"account_code": "1122", "opening_debit": "100", "period_debit": "30", "period_credit": "20", "ending_debit": "110"},
+      "credit_normal_account": {"account_code": "2202", "opening_credit": "200", "period_credit": "50", "period_debit": "30", "ending_credit": "220"},
+      "credit_normal_signed_policy": "credit balances are represented separately and must not be abs-normalized",
+      "debit_positive_signed_credit_account": {"opening": "-200", "debit_movement": "30", "credit_movement": "50", "ending": "-220", "formula": "opening + debit_movement - credit_movement = ending"},
+      "special_rows": {
+        "red_letter": {"account_code": "6001", "amount": "-5", "dc_flag": "credit"},
+        "closing_transfer": {"account_code": "6601", "amount": "30", "dc_flag": "credit"},
+        "adjustment_period": {"account_code": "6601", "amount": "8", "dc_flag": "debit"},
+        "unposted": {"account_code": "6601", "amount": "6", "posting_status": "unposted"}
+      }
+    },
+    "G6_duplicates_changes_deletes": {
+      "scenario": "multi organization company",
+      "business_key_columns": ["source_system", "tenant", "ledger", "organization", "doc_id", "line_id"],
+      "same_voucher_multiline": {"doc_id": "VCH-100", "ledger": "group-co", "organization": "北京主体", "line_ids": ["1", "2"]},
+      "cross_ledger_same_doc_number": [
+        {"ledger": "group-co", "organization": "上海主体", "doc_id": "VCH-100", "line_id": "1"},
+        {"ledger": "other-ledger", "organization": "北京主体", "doc_id": "VCH-100", "line_id": "1"}
+      ],
+      "duplicate_keys": [["fixture", "tenant-c", "group-co", "北京主体", "GL-DUP", "1"]],
+      "changed_keys": [["fixture", "tenant-c", "group-co", "北京主体", "GL-CHG", "1"]],
+      "deleted_keys": [["fixture", "tenant-c", "group-co", "北京主体", "GL-DEL", "1"]],
+      "extended_duplicate_keys": [["fixture", "tenant-c", "group-co", "北京主体", "VCH-DUP", "1"]],
+      "extended_changed_keys": [["fixture", "tenant-c", "group-co", "北京主体", "VCH-CHG", "1"]],
+      "extended_deleted_keys": [["fixture", "tenant-c", "group-co", "北京主体", "VCH-DEL", "1"]]
+    }
+  },
+  "control_totals": {
+    "service_company_actual": [
+      {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "revenue": "120", "cost": "70", "expense": "20", "profit": "30"},
+      {"ledger": "service-co", "organization": "华东", "period": "2026-07", "currency": "CNY", "unit": "万元", "revenue": "100", "cost": "65", "expense": "15", "profit": "20"},
+      {"ledger": "service-co", "organization": "西南", "period": "2026-08", "currency": "CNY", "unit": "万元", "revenue": "50", "cost": "30", "expense": "10", "profit": "10"}
+    ],
+    "commerce_company": [
+      {"ledger": "commerce-co", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "actual_revenue": "132", "budget_revenue": "100", "actual_profit": "42", "budget_profit": "25"},
+      {"ledger": "commerce-co", "organization": "门店一", "period": "2026-08", "currency": "CNY", "unit": "元", "actual_revenue": "108", "budget_revenue": "100", "actual_profit": "21", "budget_profit": "17"}
+    ],
+    "multi_org_company": [
+      {"ledger": "group-co", "organization": "北京主体", "period": "2026-08", "currency": "CNY", "unit": "元", "active_rows": 6, "duplicate_pull_rows": 1, "changed_amount_rows": 1, "deleted_rows": 1},
+      {"ledger": "group-co", "organization": "上海主体", "period": "2026-08", "currency": "USD", "unit": "元", "active_rows": 3}
+    ]
+  },
+  "future_acceptance_coverage": {
+    "status": "prepared_inputs_not_complete_acceptance",
+    "A01": "control-total inputs by organization, period, currency, unit, and management account",
+    "A02": "balance-level actual inputs are available for future no-voucher analysis",
+    "A03": "duplicate mapping and parent-child overlap inputs require future manager-resolution tests",
+    "A04": "leading-zero account code, auxiliary customer/department, organizations, currencies, and units are present",
+    "A05": "same-account debit-normal and credit-normal movement inputs plus red-letter, closing-transfer, adjustment-period, and unposted rows are present",
+    "A06": "G1 exact budget bridge closes to +5",
+    "A07": "G2 exact price/quantity bridge closes to +32",
+    "A08": "multi-organization inputs are present; future tests may add purpose-built one-to-many and many-to-many fixture pairs",
+    "A09": "period, budget, actual, forecast/scenario and stock/flow metadata are present"
+  },
+  "known_gaps": {
+    "G4": "subsequent receipt, partial write-off, and credit memo rows are not yet included",
+    "A08": "purpose-built one-to-many and many-to-many fixture pairs may still be added when relationship-cardinality tests are written"
+  }
+}

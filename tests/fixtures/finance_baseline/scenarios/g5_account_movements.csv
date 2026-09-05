@@ -1,0 +1,13 @@
+source_system,tenant,ledger,organization,period,currency,unit,account_code,account_name,account_direction,line_type,amount,dc_flag,posting_status,source_row
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,1122,应收账款,debit,opening,100,debit,posted,1
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,1122,应收账款,debit,period_activity,30,debit,posted,2
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,1122,应收账款,debit,period_activity,20,credit,posted,3
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,1122,应收账款,debit,ending,110,debit,posted,4
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,2202,应付账款,credit,opening,200,credit,posted,5
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,2202,应付账款,credit,period_activity,50,credit,posted,6
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,2202,应付账款,credit,period_activity,30,debit,posted,7
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,2202,应付账款,credit,ending,220,credit,posted,8
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,6001,主营业务收入,credit,red_letter,-5,credit,posted,9
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,6601,管理费用,debit,closing_transfer,30,credit,posted,10
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,6601,管理费用,debit,adjustment_period,8,debit,posted,11
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,6601,管理费用,debit,unposted,6,debit,unposted,12

@@ -1,0 +1,13 @@
+source_system,tenant,ledger,organization,period,currency,unit,doc_id,line_id,account_code,account_name,account_direction,management_account,amount,dc_flag,source_status,source_row
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-001,1,01001,银行存款,debit,cash,100,debit,active,1
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-002,1,6601,管理费用,debit,expense,30,debit,active,2
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-003,1,6001,主营业务收入,credit,revenue,20,credit,active,3
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-004,1,2202,应付账款,credit,payable,20,credit,active,4
+fixture,tenant-c,group-co,上海主体,2026-08,USD,元,GL-001,1,01001,银行存款,debit,cash,15,debit,active,5
+fixture,tenant-c,group-co,上海主体,2026-08,USD,元,GL-005,1,6001,主营业务收入,credit,revenue,12,credit,active,6
+fixture,tenant-c,group-co,上海主体,2026-08,USD,元,GL-006,1,6401,主营业务成本,debit,cost,7,debit,active,7
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-DUP,1,6001,主营业务收入,credit,revenue,5,credit,active,8
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-DUP,1,6001,主营业务收入,credit,revenue,5,credit,duplicate_pull,9
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-CHG,1,6601,管理费用,debit,expense,8,debit,active,10
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-CHG,1,6601,管理费用-修订,debit,expense,9,debit,changed_amount,11
+fixture,tenant-c,group-co,北京主体,2026-08,CNY,元,GL-DEL,1,1122,应收账款,debit,accounts_receivable,6,debit,deleted,12

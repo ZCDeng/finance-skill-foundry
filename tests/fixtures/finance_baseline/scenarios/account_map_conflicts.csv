@@ -1,0 +1,9 @@
+source_system,ledger,effective_from,effective_to,account_code,account_name,account_direction,management_account,conflict_type,manager_resolution
+fixture,service-co,2026-01,9999-12,6001,服务收入,credit,revenue,none,
+fixture,service-co,2026-01,9999-12,6401,服务成本,debit,cost,none,
+fixture,service-co,2026-01,9999-12,6601,销售费用,debit,expense,none,
+fixture,group-co,2026-01,9999-12,01001,银行存款,debit,cash,leading_zero_required,
+fixture,group-co,2026-01,9999-12,6601,管理费用,debit,expense,duplicate_mapping,manager_keeps_expense
+fixture,group-co,2026-01,9999-12,6601,管理费用,debit,g_and_a,duplicate_mapping,manager_rejects_g_and_a
+fixture,group-co,2026-01,9999-12,66,费用父级,debit,expense,parent_child_overlap,manager_uses_child_accounts
+fixture,group-co,2026-01,9999-12,6601,管理费用-重叠,debit,expense,parent_child_overlap,manager_uses_child_accounts

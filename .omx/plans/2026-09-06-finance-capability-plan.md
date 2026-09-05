@@ -95,6 +95,7 @@
 
 ### 1. 企业账套与可执行指标
 
+- 阶段 0 实测补充：10 万行首次查询中位 117.12 秒，5,000 行剖析约 97.9% 时间在 DuckDB `executemany` 装载。扩容前先优化受控 snapshot 的批量装载，保留 DECIMAL、来源哈希与 SQL 外部访问限制；再测冷热查询和取消。详见 r2 实施记录，A25 尚未整体达标。
 - 修改落点：`foundry/analysis_data.py:48`、`foundry/analysis.py:236`、`foundry/analysis_sql.py:368`、`foundry/caliber.py:45`；建议新增 `foundry/finance_model.py` 与 `foundry/finance_metrics.py`。
 - 最小切片只包含 LedgerScope/SourceBatch、AccountMap、余额/预算和可选凭证行，以及管理损益 MetricDefinition。先做导出文件映射；账套、组织、期间、币种与辅助维度参与过滤。AR/AP、银行现金和完整汇兑政策保留扩展字段，在阶段 5 按输入合同实现，不作为本阶段出口。
 - 实现元/万元等明确单位换算并保留来源版本与舍入规则。多币种先分币种分析；已明确给定汇率的管理分析可扩展执行转换，缺汇率不得静默合并，不在首期建设合并报表汇兑引擎。

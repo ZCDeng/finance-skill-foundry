@@ -1,0 +1,14 @@
+source_system,tenant,ledger,organization,period,currency,unit,scenario,doc_id,line_id,account_code,account_name,account_direction,management_account,aux_customer,aux_department,amount,dc_flag,due_date,source_status,source_row
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,actual,SV-202608-001,1,6001,服务收入,credit,revenue,甲客户,销售一部,120,credit,,active,1
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,actual,SV-202608-002,1,6401,服务成本,debit,cost,甲客户,交付一部,70,debit,,active,2
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,actual,SV-202608-003,1,6601,销售费用,debit,expense,,销售一部,20,debit,,active,3
+fixture,tenant-a,service-co,华东,2026-07,CNY,万元,actual,SV-202607-001,1,6001,服务收入,credit,revenue,甲客户,销售一部,100,credit,,active,4
+fixture,tenant-a,service-co,华东,2026-07,CNY,万元,actual,SV-202607-002,1,6401,服务成本,debit,cost,甲客户,交付一部,65,debit,,active,5
+fixture,tenant-a,service-co,华东,2026-07,CNY,万元,actual,SV-202607-003,1,6601,销售费用,debit,expense,,销售一部,15,debit,,active,6
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,actual,SV-202608-004,1,6001,服务收入,credit,revenue,乙客户,销售二部,50,credit,,active,7
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,actual,SV-202608-005,1,6401,服务成本,debit,cost,乙客户,交付二部,30,debit,,active,8
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,actual,SV-202608-006,1,6601,销售费用,debit,expense,,销售二部,10,debit,,active,9
+fixture,tenant-a,service-co,华东,2026-09,CNY,万元,plan,AR-001,1,1122,应收账款,debit,accounts_receivable,甲客户,销售一部,80,debit,2026-08-01,open,10
+fixture,tenant-a,service-co,华东,2026-09,CNY,万元,plan,AR-002,1,1122,应收账款,debit,accounts_receivable,乙客户,销售一部,20,debit,2026-09-20,open,11
+fixture,tenant-a,service-co,华东,2026-09,CNY,万元,plan,CASH-001,1,1001,银行存款,debit,cash,甲客户,财务部,100,debit,2026-09-25,planned_inflow,12
+fixture,tenant-a,service-co,华东,2026-09,CNY,万元,plan,CASH-002,1,2202,应付账款,credit,cash_outflow,供应商A,财务部,60,credit,2026-09-30,planned_outflow,13

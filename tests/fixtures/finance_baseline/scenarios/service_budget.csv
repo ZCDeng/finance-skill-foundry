@@ -1,0 +1,7 @@
+source_system,tenant,ledger,organization,period,currency,unit,scenario,line_id,management_account,amount
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,budget,1,revenue,100
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,budget,2,cost,60
+fixture,tenant-a,service-co,华东,2026-08,CNY,万元,budget,3,expense,15
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,budget,4,revenue,45
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,budget,5,cost,28
+fixture,tenant-a,service-co,西南,2026-08,CNY,万元,budget,6,expense,9
