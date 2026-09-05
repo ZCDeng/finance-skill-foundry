@@ -1,30 +1,4 @@
-/**
- * Opening the embedded harness on a session this app created.
- *
- * `session.create` makes a session and hands back its id, but it does not decide
- * which one the page shows. That is `dsh.sessions.current`, a browser-storage
- * cell the client runtime reads once when its session service is constructed and
- * never again -- so a session created from out here cannot become the current
- * one without a fresh document. The seam is that cell plus a reload.
- *
- * The composer's text is the same kind of cell rather than server state: the
- * per-session conversation store persists its whole value to `localStorage`
- * under `<prefix>.<sessionId>` and rehydrates from it at construction.
- *
- * This is coupling to storage keys upstream owns, which is why the shapes are
- * named constants here with a test that reads them back out of an installed
- * runtime. A rename upstream has to turn into a red test rather than into a
- * hand-off that silently does nothing. Nothing here reads or writes the page's
- * markup, and the values written are what the page itself writes on every
- * keystroke.
- *
- * A draft is seeded rather than sent. There is no server verb that parks text:
- * `session.prompt` wakes the driver and opens a turn either way, so sending
- * would mean the agent had read the question and picked a model before the
- * operator had looked at the screen. A follow-up is the operator's to send.
- */
-
-/** The cell naming the session the page opens on. */
+/** The cell naming the session the page opens on: { sessionId, subagentAddress? }. */
 export const SESSION_SELECTION_KEY = 'dsh.sessions.current';
 
 /** The per-session conversation store; the real key carries the session id. */
@@ -49,8 +23,17 @@ export function handoffScript(sessionId: string, draft: string): string {
   const text = JSON.stringify(draft);
   return [
     'try {',
-    `  window.localStorage.setItem(${cell}, JSON.stringify(${id}));`,
-    draft ? `  window.localStorage.setItem(${chat}, JSON.stringify({ draft: ${text} }));` : '',
+    `  window.localStorage.setItem(${cell}, JSON.stringify({ sessionId: ${id} }));`,
+    ...(draft ? [
+      '  let previous = {};',
+      '  try {',
+      `    const saved = JSON.parse(window.localStorage.getItem(${chat}) ?? 'null');`,
+      '    if (saved && typeof saved === "object" && !Array.isArray(saved)) previous = saved;',
+      '  } catch {}',
+      // Upstream restores the whole value, replacing its defaults. Include all
+      // fields on first use and preserve existing view/selection on a follow-up.
+      `  window.localStorage.setItem(${chat}, JSON.stringify({ selection: null, view: null, inspect: null, ...previous, draft: ${text} }));`,
+    ] : []),
     '} catch (error) { console.error("foundry handoff failed", error); }',
   ]
     .filter(Boolean)
@@ -74,4 +57,41 @@ export function followupDraft(opts: { windowId: string; briefSha?: string | null
     '',
   ];
   return lines.filter((line, index) => line !== '' || index === lines.length - 1).join('\n');
+}
+
+export interface EmbeddedInput {
+  sessionId: string;
+  draft?: string;
+  submit?: boolean;
+  requestId?: string;
+}
+export interface EmbeddedReply {
+  sessionId: string;
+  submitted: boolean;
+  blockedReason?: string;
+}
+
+/** The checked client adapter calls the resident session and input services. */
+export function residentHandoffScript(request: EmbeddedInput): string {
+  return `(async () => {
+    const end = Date.now() + 12000;
+    while (!window.__foundryEmbedded && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 25));
+    if (window.__foundryEmbedded?.version !== 1) throw new Error('对话输入通道尚未就绪，请重试。');
+    return window.__foundryEmbedded.dispatch(${JSON.stringify(request)});
+  })()`;
+}
+
+export const snapshotDraftsScript = 'window.__foundryEmbedded?.snapshot() ?? {}';
+export function restoreDraftsScript(drafts: Record<string, unknown>): string {
+  return `(() => {
+    const snapshot = ${JSON.stringify(drafts)};
+    for (const [key, value] of Object.entries(snapshot.receipts ?? {})) {
+      if (key.startsWith('fnd.submitted.') && typeof value === 'string') window.localStorage.setItem(key, value);
+    }
+    for (const [id, value] of Object.entries(snapshot.drafts ?? {})) {
+      if (id.length <= 200 && value && typeof value === 'object' && typeof value.draft === 'string') {
+        window.localStorage.setItem('dsh.conversation.chat.' + id, JSON.stringify(value));
+      }
+    }
+  })()`;
 }

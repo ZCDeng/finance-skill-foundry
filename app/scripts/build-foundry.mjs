@@ -64,6 +64,8 @@ function sourceHash() {
     }
   };
   walk(root);
+  hash.update('build-foundry.mjs');
+  hash.update(readFileSync(fileURLToPath(import.meta.url)));
   return hash.digest('hex');
 }
 
@@ -94,6 +96,12 @@ function selfTest() {
     // bundle carries its own interpreter and its own native extensions.
     env: { HOME: process.env.HOME ?? '', PATH: '/usr/bin:/bin' },
   });
+  if (process.platform === 'darwin') {
+    execFileSync(BIN, ['--_foundry-runner-self-test', join(scratch, 'runner-workspace')], {
+      stdio: 'inherit',
+      env: { HOME: process.env.HOME ?? '', PATH: '/usr/bin:/bin' },
+    });
+  }
   rmSync(scratch, { recursive: true, force: true });
 }
 
@@ -149,7 +157,16 @@ execFileSync('uv', ['pip', 'install', '--python', python, 'pyinstaller', KIT], {
  * it cannot see through.
  */
 const entry = join(BUILD, 'entry.py');
-writeFileSync(entry, 'import sys\n\nfrom foundry.cli import main\n\nsys.exit(main())\n');
+writeFileSync(entry, [
+  'import sys',
+  'from foundry.runner_entry import dispatch',
+  'runner_result = dispatch(sys.argv[1:])',
+  'if runner_result is not None:',
+  '    sys.exit(runner_result)',
+  'from foundry.cli import main',
+  'sys.exit(main())',
+  '',
+].join('\n'));
 
 console.log('freezing …');
 rmSync(STAGE, { recursive: true, force: true });
@@ -168,7 +185,7 @@ execFileSync(
     // A native extension: its shared library and its own data have to come too.
     '--collect-all',
     'duckdb',
-    '--hidden-import',
+    '--collect-all',
     'openpyxl',
     '--distpath',
     join(BUILD, 'dist'),

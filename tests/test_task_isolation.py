@@ -108,6 +108,7 @@ def test_a_session_recorded_on_one_task_cannot_be_recorded_on_another(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     var, a, window_a, b, window_b = _two_tasks(tmp_path, capsys)
+    TaskStore(var).get(a).record_session("sess-leader", role="followup", window_id=window_a)
 
     assert _followup(var, window_a, "--session", "sess-leader") == 0
     capsys.readouterr()
@@ -132,6 +133,7 @@ def test_the_same_session_may_keep_asking_its_own_task(
     `--brief-window` is for, and a re-import makes it the ordinary case.
     """
     var, a, window_a, _b, _window_b = _two_tasks(tmp_path, capsys)
+    TaskStore(var).get(a).record_session("sess-leader", role="followup", window_id=window_a)
 
     for _ in range(2):
         assert _followup(var, window_a, "--session", "sess-leader") == 0
@@ -233,6 +235,7 @@ def test_record_session_refuses_directly_too(
 ) -> None:
     """The rule lives on the writer, so a library caller meets it as well."""
     var, a, window_a, b, _window_b = _two_tasks(tmp_path, capsys)
+    TaskStore(var).get(a).record_session("sess-leader", role="followup", window_id=window_a)
     assert _followup(var, window_a, "--session", "sess-leader") == 0
     capsys.readouterr()
 

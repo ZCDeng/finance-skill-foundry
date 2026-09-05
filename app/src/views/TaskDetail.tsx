@@ -26,6 +26,7 @@ const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
 };
 
 const ROLE_LABEL: Record<Detail['sessions'][number]['role'], string> = {
+  analysis: '财务分析',
   author: '写方法',
   period: '期间',
   followup: '追问',

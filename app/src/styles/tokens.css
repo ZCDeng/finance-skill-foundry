@@ -1,236 +1,52 @@
-/*
- * The token table, taken whole from `design-toolkit-app/src/styles/tokens.css`
- * with the `--dtk-` prefix renamed to `--fnd-`. Those values are that app's
- * measured :root, originally from a YouMind clone; nothing here re-derives them,
- * and a change there is worth carrying over rather than diverging from.
- *
- * Renamed rather than shared because the two products ship separately and
- * `--dtk-` reads as "design toolkit" in a finance window. Dropped on the way
- * over: the tokens that describe a picture gallery -- card and cover heights,
- * grid minimums, the carousel gutter, the selection strip. This product has no
- * gallery of images; it has tables of numbers.
- *
- * Theme follows the system only. There is no toggle. Bare :root is the light
- * table; [data-theme] and the media query keep a dark mapping so the packaged
- * app cannot render one theme's text on the other theme's ground.
- */
-
+/* FA Foundry: restrained, dense finance workspace. Fonts ship with the app. */
 :root {
-  /* -- surface and text ------------------------------------------------ */
   --fnd-bg: #ffffff;
   --fnd-surface: #ffffff;
   --fnd-surface-strong: #f7f7f7;
   --fnd-ink: #000000e0;
   --fnd-muted: #00000099;
   --fnd-line: #1f1f1f24;
-
-  /* Primary fill is near-black. Green is outline-only on the clone. */
   --fnd-accent: #1f1f1f;
   --fnd-accent-text: #1f1f1f;
   --fnd-on-accent: #f9fafb;
   --fnd-outline: #54d460;
-
-  /* -- geometry (clone: radius .5rem, card 16px, chip 30px) ------------ */
+  --fnd-selection-surface: #f5efe3;
   --fnd-radius-control: 8px;
-  --fnd-radius-container: 16px;
+  --fnd-radius-container: 12px;
   --fnd-radius-chip: 30px;
   --fnd-radius-pill: 9999px;
   --fnd-radius-mark: 6px;
   --fnd-radius-menu: 10px;
   --fnd-radius-menu-item: 7px;
-  /* The composer card, measured off youmind.com/overview. */
-  --fnd-radius-composer: 24px;
-
+  --fnd-radius-composer: 12px;
   --fnd-pad-button-y: 0px;
   --fnd-pad-button-x: 14px;
   --fnd-button-height: 32px;
   --fnd-header-height: 56px;
-  /*
-   * The selection strip. Mirrors `BASKET_HEIGHT` in
-   * `electron/harness/bounds.ts`, where main computes the rectangle the
-   * harness view gets when the strip is up. `tokens.test.ts` pins the two
-   * together, the same way it already pins the header height.
-   */
-  /*
-   * The tool library's own floor. Wider than the picture gallery's, because
-   * the entry there sets a paragraph in a face that advances every glyph
-   * 0.6364em: 258px is 25 Latin characters to a line at body size and 320px is
-   * 31. A gallery of covers has no paragraph and wants the narrower column.
-   */
   --fnd-grid-gap: 16px;
   --fnd-container: 1200px;
-  /* Reference: 60px between sections, 24px between carousel cards. */
-  --fnd-section-gap: 60px;
-
-  /*
-   * -- type -------------------------------------------------------------
-   *
-   * Two families, and the split between them is the design.
-   *
-   * Latin is Asap Sharp (Omnibus-Type, OFL 1.1). Chinese is LXGW WenKai Mono TC
-   * (The LXGW WenKai Project Authors, OFL 1.1). Both are bundled whole and
-   * sliced by unicode-range; `fonts.css` carries the rules, the measurements
-   * and the licences, and nothing here is fetched.
-   *
-   * The order in these stacks is load-bearing and it is not alphabetical. LXGW
-   * WenKai Mono TC carries a Latin of its own -- 304 printable ASCII across its
-   * slices -- so naming it first would win every English word in the product
-   * and Asap Sharp would never draw once. Asap Sharp therefore goes first: it
-   * takes the Latin because it has the Latin (95 of 95 printable ASCII), and
-   * Chinese falls past it because it has none, not one ideograph in U+4E00-9FFF,
-   * checked against its `cmap`. The fall-through is the whole mechanism and it
-   * only runs in that order. Swap these two names and the product silently
-   * changes typeface.
-   *
-   * The system faces after them are the safety net, not the plan. LXGW WenKai
-   * Mono TC is the Traditional Chinese cut and this interface is Simplified, so
-   * that is the pairing worth doubting -- and it was measured rather than
-   * trusted: its ranges cover all 197 non-ASCII characters the renderer uses,
-   * with none missing, and `fonts.test.ts` re-checks it every run. PingFang and
-   * Noto stay named because a stack that ran straight to `sans-serif` would
-   * still render, in whatever the platform picked, which is how a bundled
-   * Chinese face was once deleted without a single test failing.
-   *
-   * Two weights, and both are real in both scripts. Asap Sharp is variable with
-   * a `wght` axis of 100-900, so its bold costs no extra file. LXGW WenKai Mono
-   * TC is not variable, so its 700 is 115 more slices and 4.6 MB more on disk
-   * -- paid deliberately, because the alternative is `font-synthesis`, which
-   * fakes a bold by smearing the stems, and on a kai face that fills the
-   * counters. `base.css` still sets `font-synthesis-weight: none`, which now
-   * guards rather than restricts: a weight that ever goes missing draws at 400
-   * instead of drawing a smear.
-   *
-   * `strong` stays at 400 and `heavy` is the bold. Body text and every table of
-   * figures is regular; the two places that carry weight are the product's name
-   * and the destination row, which are the two things an operator looks for
-   * before they look at anything else.
-   */
-  --fnd-font-sans: 'Asap Sharp', 'LXGW WenKai Mono TC', ui-sans-serif,
-    system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC',
-    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  --fnd-font-display: 'Asap Sharp', 'LXGW WenKai Mono TC', ui-sans-serif,
-    system-ui, -apple-system, 'PingFang SC', 'Songti SC', 'Noto Sans SC',
-    sans-serif;
+  --fnd-section-gap: 32px;
+  --fnd-font-sans: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --fnd-font-display: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --fnd-font-brand: 'Asap Sharp', 'Noto Sans SC', sans-serif;
   --fnd-size-label: 12px;
-  --fnd-size-small: 12px;
-  --fnd-size-body: 16px;
-  --fnd-size-h3: 14px;
-  --fnd-size-h2: 36px;
-  --fnd-weight-strong: 400;
+  --fnd-size-small: 13px;
+  --fnd-size-body: 14px;
+  --fnd-size-h3: 16px;
+  --fnd-size-h2: 24px;
+  --fnd-weight-strong: 600;
   --fnd-weight-heavy: 700;
-  --fnd-leading-body: 24px;
-
-  /*
-   * -- the mark ---------------------------------------------------------
-   *
-   * The product's mark is artwork, not a token: `src/assets/mark.png`, drawn
-   * in the header beside the name. It carries its own three gradients and does
-   * not recolour with the theme, because a logo that changes colour in the dark
-   * is a different logo.
-   *
-   * Two tokens used to sit here, `--fnd-mark-from` and `--fnd-mark-to`, a gold
-   * pair measured off `design-toolkit-app`'s own artwork and inherited with the
-   * rest of this table. Nothing in this product ever drew with them, and this
-   * product's mark is not gold. They are gone; what survives them is the one
-   * value below, which earned its place on a different job.
-   */
-
-  /*
-   * The line that appears under a pointer, and the focus ring.
-   *
-   * A gold, and the last of the inherited mark pair to still do any work. It
-   * flips with the theme because a border has to be seen against the surface
-   * behind it. Both values clear the 3:1 that WCAG 1.4.11 asks of a non-text
-   * control edge, which is the floor `tokens.test.ts` holds it to:
-   *
-   *   light  #a67e3c  3.70:1 on #ffffff, 3.46:1 on #f7f7f7
-   *   dark   #e2c180  9.55:1 on #1f1f1f, 10.49:1 on #161616
-   *
-   * The mark's own dark end, #b28a45, was tried first and measures 2.96:1 on
-   * the hovered tile's #f7f7f7 ground, which is under the floor. #a67e3c is
-   * the same hue two steps down.
-   */
+  --fnd-leading-body: 22px;
   --fnd-line-hover: #a67e3c;
-
-  /*
-   * The destination the operator is on.
-   *
-   * A filled pill, and it used to be filled in `--fnd-accent`, which is
-   * near-black in the light table and near-white in the dark one -- the same
-   * fill every primary control in the borrowed system uses. That made the row
-   * of destinations look like four buttons with one pressed. Gold says which
-   * one is the way in, and it is the window's own colour rather than a fifth
-   * one: the same hue the hovered edges and the outside mark already carry.
-   *
-   * A fill takes text, so this pair answers to 4.5:1 rather than to the 3:1 an
-   * edge gets. Measured, and `tokens.test.ts` holds them there:
-   *
-   *   light  #f9fafb on #8a6729   4.96:1
-   *   dark   #1f1f1f on #e2c180   9.55:1
-   *
-   * `--fnd-line-hover`'s own light value, #a67e3c, was tried first and carries
-   * this label at 3.54:1 -- right for the border it was picked for, under the
-   * floor for a label sitting on it. This is the same hue two steps down, and
-   * it lands on the value the outside mark already uses, for the same reason:
-   * both are gold text against the same two grounds.
-   */
   --fnd-selected: #8a6729;
   --fnd-on-selected: #f9fafb;
-
-  /*
-   * -- the five words ----------------------------------------------------
-   *
-   * 报表声称 / 我重算 / 两者一致 / 稿外追问 / not-in-this-window is the whole
-   * claim vocabulary (KTD6), and five colours would out-shout the numbers they
-   * sit beside. So only two carry any, and they are the two that are not about
-   * arithmetic:
-   *
-   *   稿外追问          this answer is not on the brief the leader is holding
-   *   not-in-window     this window cannot answer it, and nothing was invented
-   *
-   * The first three say where a number came from and differ by their own label,
-   * drawn in ink on the surface. That follows the borrowed system's own rule,
-   * where the primary fill is near-black and colour is an outline.
-   *
-   * The outside mark takes the gold this table already uses for a hovered
-   * border, so the window carries one accent rather than two. Its text and its
-   * border are separate tokens in the light table, because they answer to
-   * different floors: WCAG asks 4.5:1 of text and 3:1 of a non-text edge, and
-   * the border gold does not clear the first. Measured against the surface a
-   * chip sits on, not against the page:
-   *
-   *   light  text #8a6729  5.18:1 on #ffffff, 4.84:1 on #f7f7f7
-   *          line #a67e3c  3.70:1 / 3.46:1  -- an edge, so 3:1 is its floor
-   *   dark   both #e2c180  9.55:1 on #1f1f1f, 10.49:1 on #161616
-   *
-   * `--fnd-muted` was tried for the absent mark and measures 2.85:1 on white,
-   * under the floor. A struck-through, dashed chip is meant to be quiet, and
-   * quiet is not the same as hard to read: it still says a question this window
-   * could not answer, which is the one an operator most needs to notice.
-   *
-   *   light  #6b6b6b  5.33:1 / 4.97:1
-   *   dark   #9a9a9a  5.86:1 / 6.43:1
-   *
-   * The external mark is cool where the other accent is warm, and that is the
-   * whole of its job: a figure someone else published sits in a row beside
-   * figures this window computed, and the two have to be told apart at a
-   * glance rather than by reading. It carries no fill -- the filled chip is
-   * the one that says "off the brief", and an attribution is not an alarm.
-   * One token for text and edge, since it clears the stricter floor:
-   *
-   *   light  #3a6b8a  5.75:1 / 5.37:1
-   *   dark   #96bcd2  8.18:1 / 8.98:1
-   */
   --fnd-mark-outside: #8a6729;
   --fnd-mark-outside-line: #a67e3c;
   --fnd-mark-outside-fill: #a67e3c1f;
   --fnd-mark-absent: #6b6b6b;
   --fnd-mark-external: #3a6b8a;
-
-  /* -- motion ---------------------------------------------------------- */
   --fnd-transition: 180ms ease;
 }
-
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --fnd-bg: #111111;
@@ -239,6 +55,7 @@
     --fnd-ink: #f9fafb;
     --fnd-muted: #a6a6a6;
     --fnd-line: #ffffff24;
+    --fnd-selection-surface: #302b21;
     --fnd-line-hover: #e2c180;
     --fnd-selected: #e2c180;
     --fnd-on-selected: #1f1f1f;
@@ -252,7 +69,6 @@
     --fnd-mark-external: #96bcd2;
   }
 }
-
 :root[data-theme='dark'] {
   --fnd-bg: #111111;
   --fnd-surface: #1f1f1f;
@@ -260,6 +76,7 @@
   --fnd-ink: #f9fafb;
   --fnd-muted: #a6a6a6;
   --fnd-line: #ffffff24;
+  --fnd-selection-surface: #302b21;
   --fnd-line-hover: #e2c180;
   --fnd-selected: #e2c180;
   --fnd-on-selected: #1f1f1f;
@@ -272,9 +89,6 @@
   --fnd-mark-absent: #9a9a9a;
   --fnd-mark-external: #96bcd2;
 }
-
 @media (prefers-reduced-motion: reduce) {
-  :root {
-    --fnd-transition: 0ms;
-  }
+  :root { --fnd-transition: 0ms; }
 }

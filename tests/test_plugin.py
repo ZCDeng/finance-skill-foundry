@@ -573,8 +573,12 @@ def test_a_receipt_names_the_versions_when_there_is_a_task(tmp_path: Path) -> No
     task_id = made.stdout.strip()
 
     script = _prelude() + (
+        "const { execFileSync } = await import('node:child_process');\n"
         "const [coa, named, questions] = process.argv.slice(2);\n"
-        "await call('create');\n"
+        "const windowId = (await call('create')).stdout.trim();\n"
+        "execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR, "
+        "'--task', process.env.FOUNDRY_TASK, '--session', 'sess-period', "
+        "'record-session', '--role', 'period', '--window', windowId]);\n"
         "await call('import', { coa, named });\n"
         "await call('lock');\n"
         "await call('record-questions', { questions });\n"

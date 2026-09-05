@@ -1,4 +1,4 @@
-import { type BrowserWindow, ipcMain, shell } from 'electron';
+import { type BrowserWindow, ipcMain, shell, dialog } from 'electron';
 
 import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
@@ -7,6 +7,7 @@ import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
 import { ensureTaskWorkspace } from '../harness/workspace.js';
 import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
+import { followupDraft } from '../harness/handoff.js';
 import {
   deliverableGallery,
   deliverablePath,
@@ -50,10 +51,10 @@ function taskId(value: unknown): string {
   return text;
 }
 
-/** An intent as it comes off the wire. One of three, or the call does not run. */
+/** Only an explicitly supported intent may open a conversation. */
 function intentOf(value: unknown): Intent {
   const text = String(value ?? '');
-  if (text === 'author' || text === 'period' || text === 'followup') return text;
+  if (text === 'author' || text === 'period' || text === 'followup' || text === 'analysis') return text;
   throw new FoundryFailure(`not an intent: ${text}`, null);
 }
 
@@ -86,6 +87,8 @@ export function registerIpc(
     preview: UniverPreviewHost;
     /** How the wiring went. Read, never awaited: a failed run has no harness to wait on. */
     wiring: () => Wiring;
+    /** Shared startup gate: sessions wait for plugin, presets and pane attachment. */
+    ready?: () => Promise<void>;
     window: () => BrowserWindow | null;
     /** Told on every change, so a resize can put the views back where they were. */
     remember: (screen: string) => void;
@@ -172,6 +175,80 @@ export function registerIpc(
     ),
   );
 
+  ipcMain.handle(CHANNELS.taskRename, (_event, task: unknown, title: unknown) => answer(async () =>
+    JSON.parse(await runFoundry({...binding, task: taskId(task)}, 'task-rename', ['--title', lineOf(title, 'title', 120)])),
+  ));
+
+  // Every analysis operation goes through the same domain CLI as legacy work.
+  const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
+    JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
+  const objectJson = (value: unknown): string => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected an object');
+    const text = JSON.stringify(value);
+    if (text.length > 1_000_000) throw new Error('analysis definition is too large');
+    return text;
+  };
+  const objectId = (value: unknown): string => {
+    const id = String(value ?? '');
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('invalid analysis object id');
+    return id;
+  };
+  ipcMain.handle(CHANNELS.analysisOpenOutput, (_e, task: unknown, run: unknown, output: unknown) =>
+    answer(async () => {
+      const result = await analysisCall(task, 'analysis-output', ['--run', objectId(run), '--output', lineOf(output, 'output name', 1000)]);
+      const trouble = await shell.openPath(result.path);
+      if (trouble) throw new Error(trouble);
+      return result;
+    }));
+  ipcMain.handle(CHANNELS.analysisState, (_e, task: unknown) =>
+    answer(() => analysisCall(task, 'analysis-state')));
+  ipcMain.handle(CHANNELS.analysisReadDataset, (_e, task: unknown, id: unknown) =>
+    answer(() => analysisCall(task, 'dataset-read', ['--dataset', objectId(id)])));
+  ipcMain.handle(CHANNELS.analysisSave, (_e, task: unknown, spec: unknown) =>
+    answer(() => analysisCall(task, 'analysis-save', ['--spec', objectJson(spec)])));
+  ipcMain.handle(CHANNELS.analysisRun, (_e, task: unknown, id: unknown) =>
+    answer(() => analysisCall(task, 'analysis-run', ['--analysis', objectId(id)])));
+  ipcMain.handle(CHANNELS.analysisDraft, (_e, task: unknown, spec: unknown) =>
+    answer(() => analysisCall(task, 'analysis-draft', ['--spec', objectJson(spec)])));
+  ipcMain.handle(CHANNELS.analysisMethodSave, (_e, task: unknown, id: unknown, name: unknown) =>
+    answer(() => analysisCall(task, 'analysis-method-save', [
+      '--analysis', objectId(id), '--name', lineOf(name, 'method name', 120),
+    ])));
+  ipcMain.handle(CHANNELS.analysisMethodApply, (_e, task: unknown, id: unknown, bindings: unknown, parameters: unknown = []) =>
+    answer(() => {
+      if (!parameters || typeof parameters !== 'object') throw new Error('method parameters must be an array or object');
+      const encoded = JSON.stringify(parameters);
+      if (encoded.length > 100_000) throw new Error('method parameters are too large');
+      return analysisCall(task, 'analysis-method-apply', [
+        '--method', objectId(id), '--bindings', objectJson(bindings), '--parameters', encoded,
+      ]);
+    }));
+  ipcMain.handle(CHANNELS.analysisExport, (_e, task: unknown, id: unknown, rawFormat: unknown) =>
+    answer(async () => {
+      if (rawFormat !== 'md' && rawFormat !== 'xlsx') throw new Error('unsupported export format');
+      const result = await analysisCall(task, 'analysis-export', ['--draft', objectId(id), '--format', rawFormat]);
+      // The domain service resolves the archived path, never the renderer.
+      if (typeof result.path === 'string') {
+        const trouble = await shell.openPath(result.path);
+        if (trouble) return { ...result, open_error: trouble };
+      }
+      return result;
+    }));
+  ipcMain.handle(CHANNELS.analysisAddFiles, (_e, rawTask: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const selected = await dialog.showOpenDialog({
+        title: '加入分析资料', properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '表格与背景资料', extensions: ['csv', 'xlsx', 'json', 'md', 'txt'] }],
+      });
+      if (selected.canceled) return [];
+      const rows = [];
+      for (const file of selected.filePaths) {
+        rows.push(await analysisCall(task, 'dataset-add', ['--path', file, '--name', path.basename(file)]));
+      }
+      return rows;
+    }));
+
   if (!panes) return;
   const harness = panes;
 
@@ -205,33 +282,82 @@ export function registerIpc(
    * the leader's own wording is written here rather than inferred later from
    * whatever a model passed to `query-locked`.
    */
+  // The action id belongs to one explicit user submission. Store its promise
+  // before work starts, so concurrent IPC retries cannot create another root.
+  const inputActions = new Map<string, {fingerprint: string; result: Promise<unknown>}>();
+  let openQueue: Promise<unknown> = Promise.resolve();
+  const serializeOpen = (seed: unknown, intent: unknown, task: unknown, operation: () => Promise<unknown>) => {
+    const action = seed as {submit?: boolean; requestId?: unknown} | undefined;
+    const key = action?.requestId;
+    if (action?.submit && (typeof key !== 'string' || !key || key.length > 200)) return answer(async () => { throw new Error('提交问题需要有效的操作编号。'); });
+    if (key !== undefined && (typeof key !== 'string' || !key || key.length > 200)) return answer(async () => { throw new Error('invalid action id'); });
+    const fingerprint = JSON.stringify([intent, task, seed]);
+    const previous = typeof key === 'string' ? inputActions.get(key) : undefined;
+    if (previous) return previous.fingerprint === fingerprint ? previous.result : answer(async () => { throw new Error('操作编号已用于其他内容。'); });
+    const result = openQueue.then(operation);
+    openQueue = result.catch(() => {});
+    if (typeof key === 'string') {
+      inputActions.set(key, {fingerprint, result});
+      result.then((reply) => {
+        const outcome = reply as Answer<{submitted?: boolean}>;
+        if (!outcome.ok || !outcome.value.submitted) inputActions.delete(key);
+      }, () => inputActions.delete(key));
+    }
+    return result;
+  };
   ipcMain.handle(
     CHANNELS.harnessOpen,
     (_event, rawIntent: unknown, rawTask: unknown, rawSeed: unknown) =>
-      answer(async () => {
+      serializeOpen(rawSeed, rawIntent, rawTask, () => answer(async () => {
         const intent = intentOf(rawIntent);
         const task = taskId(rawTask);
-        const seed = (rawSeed ?? {}) as { windowId?: string; briefSha?: string; verbatim?: string };
-
-        if (intent === 'period') {
-          await runFoundry({ ...binding, task }, 'create');
+        await harness.ready?.();
+        const seed = (rawSeed ?? {}) as { windowId?: string; briefSha?: string; verbatim?: string; draftId?: string; submit?: boolean; requestId?: string };
+        if (seed.verbatim !== undefined && (typeof seed.verbatim !== 'string' || seed.verbatim.length > 100000 || seed.verbatim.includes('\0'))) throw new Error('invalid question');
+        if (seed.submit && (intent !== 'analysis' || !seed.verbatim?.trim())) throw new Error('只有明确的分析问题可以直接提交。');
+        const action = seed.submit ? {submit: true, requestId: seed.requestId} : undefined;
+        const workspace = ensureTaskWorkspace(harness.userData(), task);
+        let workspaceTitle: string | undefined;
+        if (intent === 'analysis') {
+          const known = await analysisCall(task, 'task-show');
+          workspaceTitle = typeof known.task?.title === 'string' ? known.task.title : undefined;
+          const previous = [...(known.sessions ?? [])].reverse().find(
+            (row: { role: string; parent_session_id?: string }) => row.role === 'analysis' && !row.parent_session_id,
+          );
+          if (previous) {
+            // Refresh only this root conversation; an active run keeps its fixed inputs.
+            await runFoundry({ ...binding, task, session: previous.session_id }, 'analysis-refresh');
+            const draft = [seed.draftId ? `继续分析文稿 ${objectId(seed.draftId)}，先查看文稿依据。` : '', seed.verbatim ?? ''].filter(Boolean).join('\n');
+            const reply = action
+              ? await harness.host.show(previous.session_id, draft || undefined, workspace, workspaceTitle, action)
+              : await harness.host.show(previous.session_id, draft || undefined, workspace, workspaceTitle);
+            return { ...reply, sessionId: previous.session_id, preset: 'analysis' };
+          }
         }
-        const opened = await harness.host.open(
-          intent,
-          // Made real before the session names it: the runtime resolves a cwd
-          // through `realpath` and refuses one that is not there.
-          ensureTaskWorkspace(harness.userData(), task),
-          intent === 'followup' && seed.windowId
-            ? { windowId: seed.windowId, briefSha: seed.briefSha ?? null }
-            : undefined,
-        );
+        let windowId = seed.windowId;
+        if (intent === 'period') {
+          windowId = (await runFoundry({ ...binding, task }, 'create')).trim();
+        }
+        if (windowId && !/^[0-9a-f]{32}$/.test(windowId)) throw new Error('invalid window id');
+        const opened = await harness.host.open(intent, workspace, undefined, true);
+        // Register before the page exposes the conversation to user input.
         await runFoundry({ ...binding, task, session: opened.sessionId }, 'record-session', [
-          '--role',
-          ROLE_BY_INTENT[intent],
+          '--role', ROLE_BY_INTENT[intent], '--workspace', workspace,
+          ...(windowId ? ['--window', windowId] : []),
           ...(seed.verbatim ? ['--verbatim', seed.verbatim] : []),
         ]);
-        return opened;
-      }),
+        const draft = intent === 'analysis'
+          ? [seed.draftId ? `继续分析文稿 ${objectId(seed.draftId)}，先用 analysis-state 查看所引数据和运行。` : '', seed.verbatim ?? ''].filter(Boolean).join('\n')
+          : intent === 'followup' && windowId
+            ? followupDraft({ windowId, briefSha: seed.briefSha })
+            : '';
+        const reply = intent === 'analysis'
+          ? action
+            ? await harness.host.show(opened.sessionId, draft || undefined, workspace, workspaceTitle, action)
+            : await harness.host.show(opened.sessionId, draft || undefined, workspace, workspaceTitle)
+          : await harness.host.show(opened.sessionId, draft, workspace);
+        return {...opened, ...reply};
+      })),
   );
 
   /**
@@ -314,6 +440,12 @@ export function registerIpc(
    * that decides which rectangle is real, and it places both so a switch cannot
    * leave two stacked.
    */
+  ipcMain.handle(CHANNELS.harnessLayout, (event, value: unknown) => answer(async () => {
+    const window = panes.window();
+    if (!window || event.sender !== window.webContents) throw new Error('invalid layout sender');
+    return {accepted: panes.host.layout(window, value, event.sender.getZoomFactor())};
+  }));
+
   ipcMain.handle(CHANNELS.paneVisible, (_event, screen: unknown) =>
     answer(async () => {
       const name = String(screen ?? '');

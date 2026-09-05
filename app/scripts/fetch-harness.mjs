@@ -14,9 +14,11 @@
  *
  *   node scripts/fetch-harness.mjs           stage it
  *   node scripts/fetch-harness.mjs --check   verify without touching anything
+ *   node scripts/fetch-harness.mjs --refresh-local  refresh checked local assets; no npm
  */
 
 import { execFileSync } from 'node:child_process';
+import { adaptClient } from './adapt-harness-client.mjs';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +57,7 @@ function pinOnDisk() {
   return line ? line.slice(4).trim() : null;
 }
 
-function check() {
+function check(validateAdapter = true) {
   const problems = [];
   if (!existsSync(join(STAGE, harness.entry))) {
     problems.push(`no runtime entry at extra/dsh/${harness.entry}`);
@@ -89,6 +91,9 @@ function check() {
       problems.push(`companion ${companion.package} is staged at ${staged}, the kit declares ${companion.version}`);
     }
   }
+  if (validateAdapter) {
+    try { adaptClient(STAGE, {check: true}); } catch (error) { problems.push(String(error.message)); }
+  }
   return problems;
 }
 
@@ -103,6 +108,11 @@ if (process.argv.includes('--check')) {
   process.exit(1);
 }
 
+const refreshLocal = process.argv.includes('--refresh-local');
+if (refreshLocal) {
+  const problems = check(false);
+  if (problems.length) throw new Error(`Cannot refresh absent or mismatched runtime: ${problems.join('; ')}`);
+}
 mkdirSync(STAGE, { recursive: true });
 writeFileSync(
   join(STAGE, 'package.json'),
@@ -117,7 +127,7 @@ console.log([`staging ${PIN}`, ...COMPANION_PINS].join(' + ') + ' into extra/dsh
  * install or postinstall anywhere; the only lifecycle hooks are `prepare`,
  * which npm does not run for a registry tarball.
  */
-execFileSync('npm', ['install', PIN, ...COMPANION_PINS, '--no-audit', '--no-fund', '--omit=dev', '--ignore-scripts'], {
+if (!refreshLocal) execFileSync('npm', ['install', PIN, ...COMPANION_PINS, '--no-audit', '--no-fund', '--omit=dev', '--ignore-scripts'], {
   cwd: STAGE,
   stdio: 'inherit',
 });
@@ -133,6 +143,8 @@ cpSync(PLUGIN_DIR, bundleTarget, {
   recursive: true,
   filter: (src) => !src.endsWith('node_modules') && !src.endsWith('.DS_Store'),
 });
+
+adaptClient(STAGE);
 
 writeFileSync(
   PIN_FILE,

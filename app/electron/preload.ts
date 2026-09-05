@@ -11,6 +11,16 @@ import { contextBridge, ipcRenderer } from 'electron';
  * the suite instead of failing at runtime in a packaged build.
  */
 const api = {
+  analysisOpenOutput: (task: string, runId: string, output: string) => ipcRenderer.invoke('analysis:open-output', task, runId, output),
+  analysisState: (task: string) => ipcRenderer.invoke('analysis:state', task),
+  analysisAddFiles: (task: string) => ipcRenderer.invoke('analysis:add-files', task),
+  analysisReadDataset: (task: string, id: string) => ipcRenderer.invoke('analysis:read-dataset', task, id),
+  analysisSave: (task: string, spec: unknown) => ipcRenderer.invoke('analysis:save', task, spec),
+  analysisRun: (task: string, id: string) => ipcRenderer.invoke('analysis:run', task, id),
+  analysisDraft: (task: string, spec: unknown) => ipcRenderer.invoke('analysis:draft', task, spec),
+  analysisExport: (task: string, id: string, format: string) => ipcRenderer.invoke('analysis:export', task, id, format),
+  analysisMethodSave: (task: string, id: string, name: string) => ipcRenderer.invoke('analysis:method-save', task, id, name),
+  analysisMethodApply: (task: string, id: string, bindings: unknown, parameters: unknown = []) => ipcRenderer.invoke('analysis:method-apply', task, id, bindings, parameters),
   tasks: () => ipcRenderer.invoke('foundry:tasks'),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
@@ -20,6 +30,7 @@ const api = {
     ipcRenderer.invoke('foundry:deliverable-open', task, sha, ext),
   exportWorkbook: (task: string, window: string) =>
     ipcRenderer.invoke('foundry:export-workbook', task, window),
+  taskRename: (task: string, title: string) => ipcRenderer.invoke('foundry:task-rename', task, title),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),
@@ -32,6 +43,7 @@ const api = {
     ipcRenderer.invoke('preview:open', task, sha, ext),
   previewClose: () => ipcRenderer.invoke('preview:close'),
   previewStatus: () => ipcRenderer.invoke('preview:status'),
+  harnessLayout: (layout: unknown) => ipcRenderer.invoke('harness:layout', layout),
   paneVisible: (screen: string) => ipcRenderer.invoke('pane:visible', screen),
   /**
    * The one channel main pushes on. Returns its own unsubscribe, because a

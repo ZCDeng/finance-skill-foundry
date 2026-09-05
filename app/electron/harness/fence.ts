@@ -39,12 +39,9 @@ export type FencedMethod = (typeof FENCED_METHODS)[number];
  * naming the alternative is how a fence reads as a broken button.
  */
 export const FENCE_REASON: Record<FencedMethod, string> = {
-  'session.create':
-    '新会话只能从上面那三个入口开。这里开出来的会话不绑任务, 期间工具会落到别人的窗口上, 出的稿也没有来路。挑一个任务, 再按「写方法」「开始本期」或者「追问」。',
-  'session.fork':
-    '分叉出来的会话和新开一个是一回事, 一样不绑任务。要接着上一轮往下问, 用上面的「追问」, 它会把窗口和领导手上那一版一起带过去。',
-  'agentPreset.select':
-    '这个会话用哪个 preset, 是开它的那个按钮定的, 在这里改不了。「追问」只给 query-locked, 这道限制换个入口就没有意义了。',
+  'session.create': '请在分析页选择或新建任务，再点「继续分析」。资料和对话会一起保存在这个任务里。',
+  'session.fork': '请在当前对话中提出拆分调查或继续追问；助手会创建关联到当前任务的子任务。',
+  'agentPreset.select': '当前对话已关联到任务。新的分析能力请从分析页进入；旧版期间流程仍可在上方选择。',
 };
 
 /** The RPC method a URL names, if it is one this app fences on that origin. */

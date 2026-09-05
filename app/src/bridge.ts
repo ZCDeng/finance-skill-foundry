@@ -38,7 +38,7 @@ export interface WindowRow {
 
 export interface SessionRow {
   session_id: string;
-  role: 'author' | 'period' | 'followup';
+  role: 'author' | 'period' | 'followup' | 'analysis';
   opened_at: string;
   leader_verbatim?: string;
 }
@@ -72,7 +72,7 @@ export interface TaskDetail {
   deliverables: DeliverableRow[];
 }
 
-export type Intent = 'author' | 'period' | 'followup';
+export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
 /**
  * How the app's own wiring went, and what a stopped step costs.
@@ -92,6 +92,16 @@ export interface HarnessStatus {
 }
 
 export interface Bridge {
+  analysisOpenOutput?(task: string, runId: string, output: string): Promise<Answer<Record<string, unknown>>>;
+  analysisState?(task: string): Promise<Answer<AnalysisState>>;
+  analysisAddFiles?(task: string): Promise<Answer<DatasetSnapshot[]>>;
+  analysisReadDataset?(task: string, id: string): Promise<Answer<Record<string, unknown>>>;
+  analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
+  analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
+  analysisDraft?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisDraft>>;
+  analysisExport?(task: string, id: string, format: 'md' | 'xlsx'): Promise<Answer<Record<string, unknown>>>;
+  analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
+  analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
@@ -110,14 +120,16 @@ export interface Bridge {
     window: string,
   ): Promise<Answer<{ sha256: string; seq: number; ext: string }>>;
   /** The one call that changes the store. Always present; the reads are useless without it. */
+  taskRename?(task: string, title: string): Promise<Answer<{task_id: string; title: string}>>;
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(
     intent: Intent,
     task: string,
-    seed?: { windowId?: string; briefSha?: string | null; verbatim?: string },
-  ): Promise<Answer<{ sessionId: string; preset: string }>>;
+    seed?: { windowId?: string; briefSha?: string | null; verbatim?: string; draftId?: string; submit?: boolean; requestId?: string },
+  ): Promise<Answer<{ sessionId: string; preset: string; submitted?: boolean; blockedReason?: string }>>;
+  harnessLayout?(layout: {x: number; y: number; width: number; height: number; revision: number}): Promise<Answer<{accepted: boolean}>>;
   paneVisible?(screen: string): Promise<Answer<{ screen: string }>>;
   /**
    * Main pushes here when the fence cancelled a call the embedded page made.
@@ -178,4 +190,106 @@ export function when(iso: string): string {
   if (Number.isNaN(at.getTime())) return iso;
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+export interface AnalysisObject {
+  id: string;
+  task_id: string;
+  schema_version: string | number;
+  created_at: string;
+}
+export interface DatasetSnapshot extends AnalysisObject {
+  name: string;
+  kind: string;
+  source_hash: string;
+  data_hash?: string;
+  source_name: string;
+  sha256?: string;
+  metadata: Record<string, unknown>;
+  schema?: { name: string; type: string }[];
+  row_count?: number;
+  filename?: string;
+}
+export type AnalysisScalar = string | number | boolean | null;
+export interface AnalysisParameterMetadata {
+  key: string;
+  label: string;
+  type: 'string' | 'decimal' | 'integer' | 'boolean' | 'date';
+  role: 'business' | 'formula_constant';
+  unit?: string;
+  description?: string;
+  constraints?: {min?: string | number; max?: string | number; choices?: AnalysisScalar[]; nullable?: boolean};
+  default?: AnalysisScalar;
+}
+export interface AnalysisRevision extends AnalysisObject {
+  parameter_metadata?: AnalysisParameterMetadata[];
+  question: string;
+  sql: string | null;
+  engine?: 'sql' | 'python' | 'shell';
+  code?: string;
+  bindings: Record<string, string>;
+  parameters: unknown[] | Record<string, unknown>;
+  timeout_seconds?: number;
+  max_rows?: number;
+  missing_inputs?: string[];
+  conversion_rules?: unknown;
+  assumptions: unknown[];
+  grain: unknown[];
+  relationships: unknown[];
+  metrics: unknown[];
+  parent_id?: string | null;
+}
+export interface AnalysisRun extends AnalysisObject {
+  analysis_id: string;
+  bindings?: Record<string, string>;
+  parameters?: unknown[] | Record<string, unknown>;
+  parameter_metadata?: AnalysisParameterMetadata[];
+  assumptions?: unknown[];
+  execution_status: string;
+  reproducibility_status: string;
+  review_status: string;
+  publication_status: string;
+  input_hashes: Record<string, string>;
+  output_hash?: string;
+  error?: string | null;
+  engine?: string;
+  code?: string;
+  stdout?: string;
+  stderr?: string;
+  outputs?: {path: string; sha256: string; artifact_path: string; size: number}[];
+  result?: {
+    columns: { name: string; type: string }[];
+    rows: Record<string, unknown>[];
+    row_count: number;
+    truncated: boolean;
+  };
+}
+export interface AnalysisDraft extends AnalysisObject {
+  title: string;
+  body: string;
+  run_ids: string[];
+  claims: unknown[];
+  parent_id?: string | null;
+  publication_status: string;
+  review_status: string;
+  limitations: string[];
+}
+export interface AnalysisMethod extends AnalysisObject {
+  name: string;
+  sql: string;
+  parameters?: unknown[] | Record<string, unknown>;
+  parameter_metadata?: AnalysisParameterMetadata[];
+  parameter_policy_version?: 1;
+  parameter_contract?: {parameter: string; type: string; source: string; source_parameter?: string | null; role?: 'business' | 'formula_constant' | 'unclassified'; default?: AnalysisScalar; default_strategy?: string; metadata?: AnalysisParameterMetadata}[];
+  input_contracts?: Record<string, {schema: {name: string; type: string}[]}>;
+  inputs?: string[];
+  bindings?: Record<string, string>;
+}
+export interface AnalysisState {
+  task_id: string;
+  datasets: DatasetSnapshot[];
+  analyses: AnalysisRevision[];
+  runs: AnalysisRun[];
+  drafts: AnalysisDraft[];
+  methods: AnalysisMethod[];
 }

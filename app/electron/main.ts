@@ -233,12 +233,8 @@ if (!app.requestSingleInstanceLock()) {
 void app.whenReady().then(() => {
   // The losing process is on its way out; `whenReady` still fires for it.
   if (!app.hasSingleInstanceLock()) return;
-  // Every page this window embeds is told the scheme is dark. This app's own
-  // document is dark by construction; the harness page and the Univer viewer
-  // follow `prefers-color-scheme`, and left to the OS they came up light inside
-  // a dark frame. The viewer's own appearance setting defaults to `system`, so
-  // this is the one switch that reaches it without a click in its settings.
-  nativeTheme.themeSource = 'dark';
+  // The shell and native views follow the same operating-system appearance.
+  nativeTheme.themeSource = 'system';
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     // Only this app's own documents. The harness page and Formulator are served
     // by child processes over loopback and carry their own headers; rewriting
@@ -302,6 +298,10 @@ void app.whenReady().then(() => {
         formulator: pane,
         preview: look,
         wiring: () => wiring,
+        ready: async () => {
+          await ready;
+          if (wiring.state !== 'ready') throw new Error(wiring.state === 'failed' ? wiring.message : '对话服务尚未就绪');
+        },
         window: () => mainWindow,
         remember: (screen) => {
           onTop = screen;
@@ -313,7 +313,7 @@ void app.whenReady().then(() => {
     // its profile once at boot, so a plugin installed after the child has
     // started is a plugin that composition does not have. Attaching is what
     // starts the child, so it waits.
-    void (async () => {
+    const ready = (async () => {
       // Named per step, because which one stopped decides what is missing: the
       // period tools, the fence presets, or the page itself.
       let step: WiringStep = 'plugin';

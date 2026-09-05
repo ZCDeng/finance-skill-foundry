@@ -61,60 +61,59 @@ def record_reference(
     then still has to land somewhere, so it lands where every other post-brief
     answer does, on the workpaper, and the window moves to ``FollowUp``.
     """
-    if window.state not in QUERYABLE:
-        raise LockRefused(f"references refused in state {window.state}")
-    if not isinstance(entries, list) or not entries:
-        raise LockRefused("references must be a non-empty list")
-
-    kept = load_references(window)
-    seen = {item["id"] for item in kept}
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise LockRefused("reference must be an object")
-        missing = [name for name in REQUIRED if not _field(entry, name)]
-        if missing:
-            raise LockRefused(
-                f"reference {_field(entry, 'id') or '<missing>'} needs {', '.join(missing)}; "
-                "a reference without a source and a date is a number with no way back to it"
-            )
-        entry_id = _field(entry, "id")
-        if entry_id in seen:
-            raise LockRefused(f"duplicate reference id: {entry_id}")
-        text = _field(entry, "text")
-        # The whole point of the mark is that these two vocabularies stay apart.
-        # Checked here rather than at emit time so the analyst is told which
-        # reference is at fault, while it is still the one they are writing.
-        borrowed = sorted(word for word in RESERVED_WORDS if word in text)
-        if borrowed:
-            raise LockRefused(
-                f"reference {entry_id} uses {', '.join(borrowed)}, which is the brief's own "
-                "mark and may not appear in cited text"
-            )
-        seen.add(entry_id)
-        kept.append(
-            {
-                "id": entry_id,
-                "text": text,
-                "source": _field(entry, "source"),
-                "at": _field(entry, "at"),
-                **({"note": _field(entry, "note")} if _field(entry, "note") else {}),
-            }
-        )
-    # Renamed off `filed`, which is now the caller's collector.
-    kept_now = [entry for entry in kept if entry["id"] in {_field(item, "id") for item in entries}]
-    if window.state == "Locked":
-        # The brief has not been written yet, so `emit_brief` will pick these up
-        # and render them itself. Nothing else to do.
-        write_text_atomic(
-            window.references_path, json.dumps(kept, ensure_ascii=False, indent=2) + "\n"
-        )
-        return
-
-    # Past the brief, this is the only place the reference will ever be
-    # rendered, and the file list and the workpaper have to move together --
-    # exactly as `query.py` does for a follow-up, and for the same reason.
-    task = task_for(window.store.var_root, window.task_id)
     with exclusive(window.root / ".lock"):
+        if window.state not in QUERYABLE:
+            raise LockRefused(f"references refused in state {window.state}")
+        if not isinstance(entries, list) or not entries:
+            raise LockRefused("references must be a non-empty list")
+
+        kept = load_references(window)
+        seen = {item["id"] for item in kept}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise LockRefused("reference must be an object")
+            missing = [name for name in REQUIRED if not _field(entry, name)]
+            if missing:
+                raise LockRefused(
+                    f"reference {_field(entry, 'id') or '<missing>'} needs {', '.join(missing)}; "
+                    "a reference without a source and a date is a number with no way back to it"
+                )
+            entry_id = _field(entry, "id")
+            if entry_id in seen:
+                raise LockRefused(f"duplicate reference id: {entry_id}")
+            text = _field(entry, "text")
+            # The whole point of the mark is that these two vocabularies stay apart.
+            # Checked here rather than at emit time so the analyst is told which
+            # reference is at fault, while it is still the one they are writing.
+            borrowed = sorted(word for word in RESERVED_WORDS if word in text)
+            if borrowed:
+                raise LockRefused(
+                    f"reference {entry_id} uses {', '.join(borrowed)}, which is the brief's own "
+                    "mark and may not appear in cited text"
+                )
+            seen.add(entry_id)
+            kept.append(
+                {
+                    "id": entry_id,
+                    "text": text,
+                    "source": _field(entry, "source"),
+                    "at": _field(entry, "at"),
+                    **({"note": _field(entry, "note")} if _field(entry, "note") else {}),
+                }
+            )
+        # Renamed off `filed`, which is now the caller's collector.
+        kept_now = [entry for entry in kept if entry["id"] in {_field(item, "id") for item in entries}]
+        if window.state == "Locked":
+            # The brief has not been written yet, so `emit_brief` will pick these up
+            # and render them itself. Nothing else to do.
+            write_text_atomic(
+                window.references_path, json.dumps(kept, ensure_ascii=False, indent=2) + "\n"
+            )
+            return
+
+        # Past the brief, this is the only place the reference will ever be
+        # rendered, and the file list and the workpaper have to move together --
+        # exactly as `query.py` does for a follow-up, and for the same reason.
         write_text_atomic(
             window.references_path, json.dumps(kept, ensure_ascii=False, indent=2) + "\n"
         )
@@ -133,6 +132,7 @@ def record_reference(
             replace=False,
         )
         window._set_state("FollowUp")
+    task = task_for(window.store.var_root, window.task_id)
     record = register_window_deliverable(
         task,
         window_id=window.id,

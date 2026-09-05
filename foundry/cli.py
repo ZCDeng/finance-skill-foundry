@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry.brief import emit_brief
+from foundry.context import resolve_context
 from foundry.errors import REFUSED, FoundryError
 from foundry.harness import assert_no_escaping_symlink
 from foundry.launch_formulator import launch_formulator, purge_formulator_home, stop_formulator
@@ -18,7 +19,7 @@ from foundry.questions import record_questions
 from foundry.references import record_reference
 from foundry.sheet import workbook_bytes
 from foundry.resources import fixture_root
-from foundry.task import SESSION_ROLES, Filed, Task, TaskStore, resolve_task
+from foundry.task import SESSION_ROLES, Filed, Task, TaskStore, resolve_task, session_owner
 from foundry.window import Window, WindowStore
 
 
@@ -69,22 +70,6 @@ def _store(ns: argparse.Namespace) -> WindowStore:
         raise FoundryError(f"--var is not a usable directory: {ns.var} ({exc.strerror})") from exc
 
 
-
-SESSION_ROLE_BY_CMD = {
-    "query-locked": "followup",
-    "mark-done": "author",
-}
-"""Which kind of conversation a command belongs to.
-
-The role is decided by which command ran, not asked of the caller and never of
-a model. Everything not named here is a period step.
-"""
-
-
-def _session_role(cmd: str) -> str:
-    return SESSION_ROLE_BY_CMD.get(cmd, "period")
-
-
 def _adopt(
     tasks: TaskStore,
     window: Window,
@@ -93,7 +78,7 @@ def _adopt(
     reason: str = "initial",
     extra_task_ids: tuple[str | None, ...] = (),
 ) -> Task | None:
-    """Bind this window to a task, and record the conversation it happened in.
+    """Bind this window to the resolved task after validating session ownership.
 
     Adoption is on touch. A window created before the task store existed, or one
     an operator drove straight through the CLI, joins the first task that
@@ -114,6 +99,7 @@ def _adopt(
         tasks,
         explicit=getattr(ns, "task", "") or None,
         window_task_ids=(*extra_task_ids, window.task_id),
+        session_id=getattr(ns, "session", "") or None,
     )
     if task is None:
         return None
@@ -126,8 +112,8 @@ def _adopt(
         )
     task.bind_window(window.id, reason=reason)
     session = str(getattr(ns, "session", "") or "").strip()
-    if session:
-        task.record_session(session, role=_session_role(ns.cmd))
+    if session and reason == "initial" and ns.cmd == "create":
+        task.update_session_context(session, window_id=window.id)
     return task
 
 
@@ -248,12 +234,17 @@ def _import_kwargs(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    supplied = sys.argv[1:] if argv is None else argv
+    if supplied and supplied[0] == "--_foundry-job-worker":
+        from foundry.analysis_jobs import worker_main
+
+        return worker_main(supplied[1:])
     parser = argparse.ArgumentParser(prog="foundry")
     parser.add_argument("--var", required=True)
     parser.add_argument(
         "--task",
         default="",
-        help="task id; omit to take FOUNDRY_TASK, then the addressed window's own task",
+        help="task id; session calls use their registered task; sessionless CLI accepts FOUNDRY_TASK",
     )
     parser.add_argument(
         "--session",
@@ -293,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     p_brief.add_argument("--receipt", action="store_true", help=RECEIPT_HELP)
 
     p_wp = sub.add_parser("workpaper")
-    p_wp.add_argument("--window", default="", help="window id; omit for the current window")
+    p_wp.add_argument("--window", default="", help="window id; omit for the registered session or selected task window")
 
     sub.add_parser("method-skills")
     sub.add_parser("harness")
@@ -337,6 +328,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("task-list")
     sub.add_parser("task-show")
+    p_task_rename = sub.add_parser("task-rename")
+    p_task_rename.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
+    p_task_rename.add_argument("--title", required=True)
     sub.add_parser("deliverables")
 
     p_text = sub.add_parser("deliverable-text")
@@ -348,6 +342,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_session = sub.add_parser("record-session")
     p_session.add_argument("--role", default="", help=f"one of {SESSION_ROLES}; omit to derive")
+    p_session.add_argument("--window", default="", help="bind this existing task window")
+    p_session.add_argument("--parent-session", default="", help="inherit a registered parent context")
+    p_session.add_argument("--workspace", default="", help="trusted runtime workspace directory")
     p_session.add_argument(
         "--verbatim",
         default="",
@@ -355,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     p_export = sub.add_parser("export")
-    p_export.add_argument("--window", default="", help="window id; omit for the current window")
+    p_export.add_argument("--window", default="", help="window id; omit for the registered session or selected task window")
     p_export.add_argument("--kind", default="brief", choices=("brief", "workpaper"))
     p_export.add_argument(
         "--format",
@@ -375,8 +372,25 @@ def main(argv: list[str] | None = None) -> int:
     p_smoke = sub.add_parser("host-smoke")
     p_smoke.add_argument("--fixtures", default="")
 
+    from foundry import analysis_cli, analysis_jobs
+
+    analysis_cli.add_parsers(sub)
+    analysis_jobs.add_parsers(sub)
     args = parser.parse_args(argv)
     try:
+        # Refuse unknown/mismatched sessions before a store constructor can
+        # create directories or any command can append an unowned window.
+        if args.session and args.cmd != "record-session":
+            resolve_context(Path(args.var), session_id=args.session, task_id=args.task or None)
+        if args.cmd == "task-rename":
+            if not args.task:
+                raise FoundryError("task-rename needs an explicit --task")
+            task = TaskStore(Path(args.var)).get(args.task)
+            metadata = task.rename(args.title)
+            print(json.dumps({"task_id": task.id, "title": metadata["title"]}, ensure_ascii=False))
+            return 0
+        if analysis_jobs.dispatch(args) or analysis_cli.dispatch(args):
+            return 0
         store = _store(args)
         tasks = TaskStore(Path(args.var))
         if args.cmd == "task-new":
@@ -405,9 +419,21 @@ def main(argv: list[str] | None = None) -> int:
             "deliverable-text",
             "deliverable-path",
         }:
-            task = resolve_task(tasks, explicit=args.task or None)
-            if task is None:
-                task = tasks.current()
+            if args.cmd == "record-session":
+                if args.parent_session:
+                    task = resolve_context(
+                        Path(args.var), session_id=args.parent_session,
+                        task_id=args.task or None,
+                    ).task
+                else:
+                    task = session_owner(tasks, args.session) if args.session else None
+                    if task is not None and args.task and args.task != task.id:
+                        raise FoundryError(f"session {args.session} already belongs to task {task.id}")
+                    task = task or resolve_task(tasks, explicit=args.task or None) or tasks.current()
+            else:
+                task = resolve_context(
+                    Path(args.var), session_id=args.session or None, task_id=args.task or None,
+                ).task
             if task is None:
                 raise FoundryError("no task; pass --task or run task-new")
             if args.cmd == "deliverables":
@@ -436,7 +462,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     json.dumps(
                         task.record_session(
-                            session, role=role, leader_verbatim=args.verbatim or None
+                            session, role=role, leader_verbatim=args.verbatim or None,
+                            window_id=args.window or None,
+                            parent_session_id=args.parent_session or None,
+                            workspace_path=Path(args.workspace) if args.workspace else None,
                         ),
                         ensure_ascii=False,
                     )
@@ -459,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.cmd == "create":
+            # Validate an explicit task before creating an orphan on failure.
+            resolve_task(tasks, explicit=args.task or None, session_id=args.session or None)
             created = store.create()
             _adopt(tasks, created, args)
             print(created.id)
@@ -466,7 +497,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "probe":
             return run_probe(Path(args.var), fixture_root(Path(args.fixtures) if args.fixtures else None))
         if args.cmd == "mark-done":
-            mark_done(Path(args.skill), Path(args.var), Path(args.fixtures) if args.fixtures else None)
+            result = mark_done(
+                Path(args.skill), Path(args.var), Path(args.fixtures) if args.fixtures else None,
+            )
+            print(json.dumps(result, ensure_ascii=False))
             return 0
         if args.cmd == "host-smoke":
             fixtures = fixture_root(Path(args.fixtures) if args.fixtures else None)
@@ -491,16 +525,15 @@ def main(argv: list[str] | None = None) -> int:
             for path in install_presets(Path(home)):
                 print(path)
             return 0
-        if args.cmd == "workpaper" and args.window:
-            # An explicit window id is the whole address. Resolving `current`
-            # first would refuse a workpaper that is on disk just because a
-            # re-import (or a fresh var) left no current window behind.
-            target = store.get(args.window)
-            if not target.workpaper_path.exists():
-                raise FoundryError("workpaper not written")
-            print(target.workpaper_path.read_text(), end="")
-            return 0
-        window = store.current()
+        addressed_id = (
+            getattr(args, "brief_window", "") or getattr(args, "window", "") or None
+        )
+        context = resolve_context(
+            Path(args.var), session_id=args.session or None, task_id=args.task or None,
+            window_id=addressed_id, require_window=True,
+        )
+        window = context.window
+        assert window is not None
         if args.cmd == "export":
             target = store.get(args.window) if args.window else window
             task = _adopt(tasks, target, args)
@@ -632,6 +665,8 @@ def main(argv: list[str] | None = None) -> int:
                 # chain is what makes them one period rather than two.
                 nxt.bind_task(task.id)
                 task.bind_window(nxt.id, reason="reimport")
+                if args.session:
+                    task.update_session_context(args.session, window_id=nxt.id)
             print(nxt.id)
             return 0
     except FoundryError as exc:

@@ -58,6 +58,9 @@ export const HERO_HEADLINE = 'FA Foundry harness';
  * registration, so there is no supported override to prefer over this.
  */
 export const HARNESS_SKIN = `
+:root { --ds-font-family-base:'Noto Sans SC',sans-serif; --ds-font-family-sans:'Noto Sans SC',sans-serif; }
+body, button, input, textarea, select { font-family:'Noto Sans SC',sans-serif !important; }
+
 [class*="_cardWorkspaceTrigger"]::after {
   background: transparent !important;
 }

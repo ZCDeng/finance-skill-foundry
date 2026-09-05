@@ -72,11 +72,65 @@
             "read_document"
           ],
           "scope": "finance-skill-foundry-dsh/f3-scope"
+        },
+        "analysis": {
+          "sandbox": "bound-dataset-sql",
+          "cwd_writable": false,
+          "tools": [
+            "analysis-state",
+            "analysis-refresh",
+            "dataset-add",
+            "dataset-read",
+            "analysis-save",
+            "analysis-run",
+            "analysis-script",
+            "analysis-script-start",
+            "analysis-delegate",
+            "analysis-jobs",
+            "analysis-job-output",
+            "analysis-job-cancel",
+            "analysis-job-retry",
+            "analysis-draft",
+            "analysis-export",
+            "analysis-method-save",
+            "analysis-method-apply"
+          ],
+          "harnessTools": [
+            "skill",
+            "todo_write",
+            "ask_user_question",
+            "create_goal",
+            "update_goal",
+            "get_goal",
+            "exit_plan_mode",
+            "web_search"
+          ],
+          "scope": "finance-skill-foundry-dsh/analysis",
+          "execution": {
+            "sql": "bound snapshots, explicit expressions, recorded runs",
+            "shell": "isolated Python/shell runner with bound snapshot copies; unavailable platforms fail closed",
+            "office": "draft exports via foundry; raw companion tools unavailable"
+          },
+          "childTools": [
+            "analysis-state",
+            "dataset-read",
+            "analysis-save",
+            "analysis-run",
+            "analysis-script",
+            "web_search",
+            "skill",
+            "todo_write",
+            "create_goal",
+            "update_goal",
+            "get_goal",
+            "exit_plan_mode"
+          ]
         }
       },
       "presets": {
         "dir": "./presets",
         "ids": [
+          "analysis",
           "period",
           "f3"
         ],
@@ -163,6 +217,7 @@
     "./f3-scope": "./f3-scope.js",
     "./period-scope": "./period-scope.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./analysis": "./analysis.js"
   }
 }

@@ -44,6 +44,58 @@ def test_amounts_use_decimal_without_losing_big_ints(tmp_path: Path) -> None:
     assert total == Decimal(amount)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '[{"account_code":"001001","amount":900719925474099.99,"ratio":0.1234567890123456789,"active":true}]',
+        '{"headers":["Account Code","Amount","ratio","active"],"rows":[["001001",900719925474099.99,0.1234567890123456789,true]]}',
+        '{"headers":["Account Code","Amount","ratio","active"],"rows":[{"Account Code":"001001","Amount":900719925474099.99,"ratio":0.1234567890123456789,"active":true}]}',
+    ],
+)
+def test_raw_json_numbers_reach_the_locked_catalog_without_float_rounding(
+    tmp_path: Path, payload: str
+) -> None:
+    from foundry.catalog import load_tabular
+
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    gl = drop / "gl.json"
+    # These are original JSON tokens: json.dumps of a Python float would have
+    # lost the cents before the importer even saw the fixture.
+    gl.write_text(payload, encoding="utf-8")
+    headers, rows = load_tabular(gl)
+    assert rows[0][headers.index("amount")] == Decimal("900719925474099.99")
+    window = WindowStore(tmp_path / "var").create()
+    window.import_tables(coa=_coa(drop), named=[{"id": "gl", "path": gl}])
+    window.lock()
+    assert window.query("SELECT account_code, amount, ratio, active FROM gl") == [
+        ("001001", Decimal("900719925474099.99"), "0.1234567890123456789", True)
+    ]
+    assert window.query("SELECT SUM(amount) FROM gl")[0][0] == Decimal("900719925474099.99")
+
+
+@pytest.mark.parametrize(
+    ("token", "message"),
+    [
+        ("NaN", "non-numeric amount"),
+        ("Infinity", "non-numeric amount"),
+        ("-Infinity", "non-numeric amount"),
+        ("1e39", "DECIMAL\\(38\\) precision"),
+        ("1e-39", "DECIMAL\\(38\\) precision"),
+    ],
+)
+def test_json_numeric_tokens_still_obey_amount_validation(
+    tmp_path: Path, token: str, message: str
+) -> None:
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    gl = drop / "gl.json"
+    gl.write_text('[{"account_code":"001001","amount":' + token + '}]', encoding="utf-8")
+    window = WindowStore(tmp_path / "var").create()
+    with pytest.raises(LockRefused, match=message):
+        window.import_tables(coa=_coa(drop), named=[{"id": "gl", "path": gl}])
+
+
 def test_dirty_amount_refuses_import(tmp_path: Path) -> None:
     drop = tmp_path / "drop"
     gl = drop / "gl.csv"

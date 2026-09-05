@@ -70,7 +70,7 @@ def preset_ids() -> list[str]:
 
 
 def install_presets(dsh_home: Path) -> list[Path]:
-    """Copy the period and f3 agent presets where the runtime discovers them.
+    """Copy analysis and legacy agent presets where the runtime discovers them.
 
     `<DSH_HOME>/.agent-presets/<id>/` is the harness-home root the preset roster
     scans last, after every configured one. Discovery is unmemoized, so a preset

@@ -1,244 +1,190 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 
-const STYLES = fileURLToPath(new URL('../src/styles/', import.meta.url));
-const FONTS_CSS = readFileSync(resolve(STYLES, 'fonts.css'), 'utf8');
-const TOKENS_CSS = readFileSync(resolve(STYLES, 'tokens.css'), 'utf8');
-const ASSETS = fileURLToPath(new URL('../src/assets/fonts/', import.meta.url));
+const APP = fileURLToPath(new URL('../', import.meta.url));
+const STYLES = resolve(APP, 'src/styles');
+const ASSETS = resolve(APP, 'src/assets/fonts');
+const FONT = resolve(ASSETS, 'noto-sans-sc/NotoSansSC-variable.woff2');
+const CSS = readFileSync(resolve(STYLES, 'fonts.css'), 'utf8');
+const FACES = [...CSS.matchAll(/@font-face\s*\{([^}]*)\}/g)].map(([, body]) => ({
+  body,
+  family: /font-family:\s*'([^']+)'/.exec(body)?.[1],
+  weight: /font-weight:\s*([^;]+);/.exec(body)?.[1]?.trim(),
+  url: /url\('([^']+)'\)/.exec(body)?.[1],
+}));
+const KNOWN_TAGS = ['cmap', 'head', 'hhea', 'hmtx', 'maxp', 'name', 'OS/2', 'post', 'cvt ', 'fpgm', 'glyf', 'loca', 'prep', 'CFF ', 'VORG', 'EBDT', 'EBLC', 'gasp', 'hdmx', 'kern', 'LTSH', 'PCLT', 'VDMX', 'vhea', 'vmtx', 'BASE', 'GDEF', 'GPOS', 'GSUB', 'EBSC', 'JSTF', 'MATH', 'CBDT', 'CBLC', 'COLR', 'CPAL', 'SVG ', 'sbix', 'acnt', 'avar', 'bdat', 'bloc', 'bsln', 'cvar', 'fdsc', 'feat', 'fmtx', 'fvar', 'gvar', 'hsty', 'just', 'lcar', 'mort', 'morx', 'opbd', 'prop', 'trak', 'Zapf', 'Silf', 'Glat', 'Gloc', 'Feat', 'Sill'];
+let cachedTables: Map<string, Buffer> | undefined;
 
-const LATIN = 'Asap Sharp';
-const CJK = 'LXGW WenKai Mono TC';
-
-interface Face {
-  family: string;
-  weight: string;
-  url: string;
-  ranges: number[][];
-}
-
-/** Every `@font-face` in the bundled stylesheet, as family, url and ranges. */
-function faces(): Face[] {
-  const out: Face[] = [];
-  for (const [, body] of FONTS_CSS.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
-    const family = /font-family:\s*'([^']+)'/.exec(body)?.[1];
-    const url = /url\('([^']+)'\)/.exec(body)?.[1];
-    const weight = /font-weight:\s*([^;]+);/.exec(body)?.[1]?.trim();
-    if (!family || !url || !weight) continue;
-    const declared = /unicode-range:\s*([^;]+);/.exec(body)?.[1] ?? '';
-    const ranges: number[][] = [];
-    for (const part of declared.split(',')) {
-      const text = part.trim().replace(/^U\+/i, '');
-      if (!text) continue;
-      const [lo, hi] = text.split('-');
-      ranges.push([parseInt(lo, 16), parseInt(hi ?? lo, 16)]);
+/** The vendored WOFF2 retains raw SFNT tables, so Node can verify the font
+ * directly with its built-in Brotli decoder and no font/package dependency. */
+function tables(): Map<string, Buffer> {
+  if (cachedTables) return cachedTables;
+  const bytes = readFileSync(FONT);
+  expect(bytes.toString('ascii', 0, 4)).toBe('wOF2');
+  expect(bytes.readUInt32BE(8)).toBe(bytes.length);
+  let cursor = 48;
+  const uint128 = () => {
+    let value = 0;
+    for (let i = 0; i < 5; i++) {
+      const byte = bytes[cursor++];
+      value = value * 128 + (byte & 127);
+      if (!(byte & 128)) return value;
     }
-    out.push({ family, weight, url, ranges });
+    throw new Error('invalid WOFF2 UIntBase128');
+  };
+  const directory: { tag: string; size: number }[] = [];
+  for (let i = 0; i < bytes.readUInt16BE(12); i++) {
+    const flags = bytes[cursor++];
+    const index = flags & 63;
+    const tag = index === 63 ? bytes.toString('ascii', cursor, cursor += 4) : KNOWN_TAGS[index];
+    expect(flags >> 6, `${tag} must retain its raw SFNT table`).toBe(tag === 'glyf' || tag === 'loca' ? 3 : 0);
+    directory.push({ tag, size: uint128() });
+  }
+  const stream = brotliDecompressSync(bytes.subarray(cursor, cursor + bytes.readUInt32BE(20)));
+  expect(stream.length).toBe(directory.reduce((sum, row) => sum + row.size, 0));
+  let offset = 0;
+  cachedTables = new Map(directory.map(({ tag, size }) => [tag, stream.subarray(offset, offset += size)]));
+  return cachedTables;
+}
+function table(tag: string) {
+  const found = tables().get(tag);
+  if (!found) throw new Error(`font missing ${tag}`);
+  return found;
+}
+function cmap(): Map<number, number> {
+  const data = table('cmap');
+  for (let i = 0; i < data.readUInt16BE(2); i++) {
+    const record = 4 + i * 8;
+    const platform = data.readUInt16BE(record);
+    const encoding = data.readUInt16BE(record + 2);
+    const at = data.readUInt32BE(record + 4);
+    if (!(platform === 0 || (platform === 3 && encoding === 10)) || data.readUInt16BE(at) !== 12) continue;
+    const out = new Map<number, number>();
+    for (let group = 0; group < data.readUInt32BE(at + 12); group++) {
+      const row = at + 16 + group * 12;
+      const first = data.readUInt32BE(row), last = data.readUInt32BE(row + 4), glyph = data.readUInt32BE(row + 8);
+      for (let code = first; code <= last; code++) if (glyph + code - first > 0) out.set(code, glyph + code - first);
+    }
+    return out;
+  }
+  throw new Error('font missing Unicode cmap format 12');
+}
+function names(): Map<number, string[]> {
+  const data = table('name'), storage = data.readUInt16BE(4), out = new Map<number, string[]>();
+  for (let i = 0; i < data.readUInt16BE(2); i++) {
+    const at = 6 + i * 12;
+    if (data.readUInt16BE(at) !== 3) continue;
+    const id = data.readUInt16BE(at + 6), size = data.readUInt16BE(at + 8), start = storage + data.readUInt16BE(at + 10);
+    const value = Buffer.from(data.subarray(start, start + size)).swap16().toString('utf16le');
+    out.set(id, [...(out.get(id) ?? []), value]);
   }
   return out;
 }
-
-const FACES = faces();
-
-describe('the bundled faces', () => {
-  it('ships both families, sliced the way the foundry serves them', () => {
-    const counts = new Map<string, number>();
-    for (const face of FACES) counts.set(face.family, (counts.get(face.family) ?? 0) + 1);
-    expect([...counts.keys()].sort()).toEqual([LATIN, CJK].sort());
-    // Three Latin subsets carrying the whole 400-700 axis between them, and
-    // 115 CJK slices per weight in two cuts. A number that moved means the
-    // table was regenerated, and the coverage check below is the one that says
-    // whether that was safe.
-    expect(counts.get(LATIN)).toBe(3);
-    expect(counts.get(CJK)).toBe(230);
-  });
-
-  /*
-   * The bold is why this table doubled, and it is the half that is easy to
-   * ship broken: Asap Sharp carries its own bold on a variable axis, so Latin
-   * looks right whether or not the Chinese 700 was ever staged. A missing
-   * Chinese cut shows up only in Chinese, only in bold, and only as a slightly
-   * lighter word than the one beside it.
-   */
-  it('carries a real bold in both scripts, not a synthesised one', () => {
-    const latin = FACES.filter((f) => f.family === LATIN).map((f) => f.weight);
-    expect(new Set(latin)).toEqual(new Set(['400 700']));
-    const cjk = new Set(FACES.filter((f) => f.family === CJK).map((f) => f.weight));
-    expect(cjk).toEqual(new Set(['400', '700']));
-  });
-
-  /*
-   * The failure this catches is silent and total: a rule whose url names a file
-   * that is not there renders nothing for that range, and the browser falls
-   * through to a system face without saying so. It was a real mistake on the
-   * way in -- a naming collision in the download dropped eight slices, and
-   * nothing in the running app would have reported it.
-   */
-  it('has a file behind every url it declares', () => {
-    const missing = FACES.filter(
-      (face) => !existsSync(resolve(STYLES, face.url)),
-    ).map((face) => face.url);
-    expect(missing).toEqual([]);
-  });
-
-  it('carries the licence beside each family', () => {
-    // Both are OFL 1.1, which asks that the licence travel with the files.
-    for (const dir of ['asap-sharp', 'lxgw-wenkai-mono-tc']) {
-      const licence = resolve(ASSETS, dir, 'OFL.txt');
-      expect(existsSync(licence), `${dir}/OFL.txt`).toBe(true);
-      expect(readFileSync(licence, 'utf8')).toContain('SIL OPEN FONT LICENSE');
+function manifest() { return JSON.parse(readFileSync(resolve(ASSETS, 'noto-sans-sc/manifest.json'), 'utf8')); }
+function usedCharacters(): Set<number> {
+  const used = new Set<number>();
+  const walk = (dir: string) => {
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      const path = resolve(dir, item.name);
+      if (item.isDirectory()) walk(path);
+      else if (/\.tsx?$/.test(item.name)) for (const ch of readFileSync(path, 'utf8')) if (ch.codePointAt(0)! > 0x2000) used.add(ch.codePointAt(0)!);
     }
+  };
+  walk(resolve(APP, 'src'));
+  return used;
+}
+
+describe('offline font resources', () => {
+  it('ships one full Noto Sans SC variable face and keeps Asap for optional branding', () => {
+    expect(FACES.filter((face) => face.family === 'Noto Sans SC')).toHaveLength(1);
+    expect(FACES.filter((face) => face.family === 'Asap Sharp')).toHaveLength(3);
+    const noto = FACES.find((face) => face.family === 'Noto Sans SC')!;
+    expect(noto.weight).toBe('100 900');
+    expect(noto.body).not.toContain('unicode-range');
+    expect(CSS).not.toMatch(/LXGW|localhost|127\.0\.0\.1|@import\s+url|local\(/);
+    expect(existsSync(resolve(ASSETS, 'lxgw-wenkai-mono-tc'))).toBe(false);
   });
 
-  it('leaves nothing in the font directories that no rule names', () => {
-    // A face dropped from the table but left on disk is dead weight inside the
-    // bundle, and one that is still on disk under an old name reads like it is
-    // still in use.
-    const named = new Set(FACES.map((face) => resolve(STYLES, face.url)));
-    for (const dir of ['asap-sharp', 'lxgw-wenkai-mono-tc']) {
-      for (const file of readdirSync(resolve(ASSETS, dir))) {
-        if (!file.endsWith('.woff2')) continue;
-        expect(named.has(resolve(ASSETS, dir, file)), `${dir}/${file} is not in fonts.css`).toBe(
-          true,
-        );
-      }
-    }
-  });
-});
-
-describe('the fall-through between them', () => {
-  /*
-   * The mechanism, and it only runs in one order. LXGW WenKai Mono TC carries a
-   * Latin of its own, so naming it first would give it every English word in
-   * the product and Asap Sharp would never draw. Swapping these two names is a
-   * one-character edit that silently changes the whole product's typeface.
-   */
-  it('names the Latin face before the Chinese one, in both stacks', () => {
-    for (const token of ['--fnd-font-sans', '--fnd-font-display']) {
-      const stack = new RegExp(`${token}:\\s*([^;]+);`).exec(TOKENS_CSS)?.[1];
-      expect(stack, token).toBeTruthy();
-      const latin = stack!.indexOf(LATIN);
-      const cjk = stack!.indexOf(CJK);
-      expect(latin, `${token} does not name ${LATIN}`).toBeGreaterThanOrEqual(0);
-      expect(cjk, `${token} does not name ${CJK}`).toBeGreaterThan(latin);
-    }
-  });
-
-  it('keeps a system Chinese face behind them', () => {
-    // Not the plan, the safety net. A stack that ran straight to `sans-serif`
-    // would still render, in whatever the platform picked, which is how a
-    // bundled Chinese face was once deleted without a single test failing.
-    expect(TOKENS_CSS).toContain('PingFang SC');
-  });
-});
-
-describe('what the Chinese face can actually draw', () => {
-  /** Every codepoint one cut of the CJK family declares, across its slices. */
-  function covered(weight: string): Set<number> {
-    const out = new Set<number>();
+  it('resolves every face to an offline asset and includes both OFL licenses', () => {
     for (const face of FACES) {
-      if (face.family !== CJK || face.weight !== weight) continue;
-      for (const [lo, hi] of face.ranges) {
-        for (let c = lo; c <= hi; c += 1) out.add(c);
-      }
+      expect(face.url).toBeTruthy();
+      expect(face.url).not.toMatch(/^(?:https?:|data:|\/)/);
+      expect(existsSync(resolve(STYLES, face.url!)), face.url).toBe(true);
     }
-    return out;
-  }
-
-  /** Every non-ASCII character the renderer's own source puts on screen. */
-  function used(): Set<string> {
-    const out = new Set<string>();
-    const walk = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = resolve(dir, entry.name);
-        if (entry.isDirectory()) walk(path);
-        else if (/\.tsx?$/.test(entry.name)) {
-          for (const ch of readFileSync(path, 'utf8')) {
-            if (ch.codePointAt(0)! > 0x2000) out.add(ch);
-          }
-        }
-      }
-    };
-    walk(resolve(dirname(STYLES)));
-    return out;
-  }
-
-  /*
-   * The one thing worth doubting about this pairing.
-   *
-   * LXGW WenKai Mono TC is the Traditional Chinese cut of the family and every
-   * sentence in this window is Simplified. It does cover them -- 17,730
-   * codepoints, and all 197 characters the renderer uses -- but that is a fact
-   * about today's strings, not a property of the font. This is what turns the
-   * next sentence written with a character it cannot draw into a red test
-   * rather than into a tofu box in front of an operator.
-   */
-  it('covers every character the interface is written in, at every weight', () => {
-    for (const weight of ['400', '700']) {
-      const table = covered(weight);
-      const missing = [...used()].filter((ch) => !table.has(ch.codePointAt(0)!));
-      expect(
-        missing,
-        `not in ${CJK} ${weight}: ${missing
-          .map((c) => `${c} U+${c.codePointAt(0)!.toString(16)}`)
-          .join(', ')}`,
-      ).toEqual([]);
+    for (const family of ['asap-sharp', 'noto-sans-sc']) {
+      const license = readFileSync(resolve(ASSETS, family, 'OFL.txt'), 'utf8');
+      expect(license).toContain('SIL OPEN FONT LICENSE');
+      expect(CSS).toContain(license.split('\n').map((line) => line.trimEnd()).join('\n'));
+    }
+    const named = new Set(FACES.map((face) => resolve(STYLES, face.url!)));
+    for (const family of ['asap-sharp', 'noto-sans-sc']) for (const name of readdirSync(resolve(ASSETS, family))) {
+      if (/\.(woff2?|ttf|otf)$/.test(name)) expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
     }
   });
 
-  it('is a wide enough face that this is a real check', () => {
-    // A table that had lost its ranges would pass the check above by covering
-    // nothing and being asked about nothing. This is the floor under it.
-    expect(covered('400').size).toBeGreaterThan(15000);
-    expect(covered('700').size).toBeGreaterThan(15000);
-    expect(used().size).toBeGreaterThan(100);
+  it('ties the shipped font and license to the pinned official source', () => {
+    const record = manifest();
+    expect(record.source.repository).toBe('https://github.com/google/fonts');
+    expect(record.source.commit).toMatch(/^[a-f0-9]{40}$/);
+    expect(record.source.sha256).toBe('a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da');
+    expect(createHash('sha256').update(readFileSync(FONT)).digest('hex')).toBe(record.output.sha256);
+    expect(createHash('sha256').update(readFileSync(resolve(ASSETS, 'noto-sans-sc/OFL.txt'))).digest('hex')).toBe(record.license.sha256);
+    expect(record.coverage.codepoints).toBe(cmap().size);
+  });
+
+  it('uses local relative assets without Vite font inlining', () => {
+    const config = readFileSync(resolve(APP, 'vite.config.mts'), 'utf8');
+    expect(config).toMatch(/assetsInlineLimit:\s*0/);
+    expect(FACES.every((face) => face.url?.startsWith('../assets/fonts/'))).toBe(true);
   });
 });
 
-describe('what the build actually emits', () => {
-  /** The built stylesheet, if a build has been run in this checkout. */
-  function built(): string | null {
-    const dir = fileURLToPath(new URL('../dist-vite/assets/', import.meta.url));
-    if (!existsSync(dir)) return null;
-    const sheets = readdirSync(dir).filter((name) => name.endsWith('.css'));
-    if (sheets.length === 0) return null;
-    return sheets.map((name) => readFileSync(resolve(dir, name), 'utf8')).join('\n');
-  }
-
-  /*
-   * Both failures below only appear in a packaged build. The dev server shows
-   * neither, so without this the first sign of either would be an operator
-   * looking at the wrong thing.
-   */
-  it('inlines no face as a data: URI, which the policy would block', () => {
-    // `default-src 'none'` with `font-src 'self'` does not cover `data:`.
-    // Three of the Chinese slices are under Vite's default 4 KB inline limit,
-    // so this was real: they were inlined, and would have drawn tofu for their
-    // ranges in the packaged app only. See `assetsInlineLimit` in the config.
-    const css = built();
-    if (css === null) return;
-    expect(css).not.toContain('url(data:font');
-    expect(css).not.toContain('url("data:font');
+describe('actual Simplified Chinese glyphs and variable weights', () => {
+  it('contains the SC family, not a TC face carrying a CSS alias', () => {
+    expect(names().get(16)).toContain('Noto Sans SC');
+    expect(names().get(16)).not.toContain('Noto Sans TC');
+    expect(cmap().size).toBeGreaterThan(30000);
   });
 
-  it('emits the table once, not once per stylesheet that reaches it', () => {
-    // `fonts.css` used to be imported from `tokens.css`, which two entry
-    // stylesheets import, so every rule landed in the bundle twice.
-    const css = built();
-    if (css === null) return;
-    const rules = [...css.matchAll(/@font-face/g)].length;
-    expect(rules).toBe(FACES.length);
+  it('covers the interface and financial vocabulary from its real cmap', () => {
+    const mapping = cmap(), used = usedCharacters();
+    for (const char of '财务经理资产负债利润账簿建账资金应收应付预算现金流货币增值税人民币¥￥€−，。％（）') used.add(char.codePointAt(0)!);
+    expect(used.size).toBeGreaterThan(300);
+    expect([...used].filter((point) => !mapping.has(point)).map((point) => `U+${point.toString(16)}`)).toEqual([]);
   });
 
-  it('ships a file for every slice it names', () => {
-    const css = built();
-    if (css === null) return;
-    const dir = fileURLToPath(new URL('../dist-vite/assets/', import.meta.url));
-    const named = [...css.matchAll(/url\(\.\/([^)]+\.woff2)\)/g)].map((m) => m[1]);
-    expect(new Set(named).size).toBe(FACES.length);
-    for (const file of new Set(named)) {
-      expect(existsSync(resolve(dir, file)), file).toBe(true);
+  it('has a real 100–900 weight axis and Chinese glyph variations for all UI weights', () => {
+    const fvar = table('fvar'), offset = fvar.readUInt16BE(4), count = fvar.readUInt16BE(8), size = fvar.readUInt16BE(10);
+    const axes = Array.from({ length: count }, (_, i) => {
+      const at = offset + i * size;
+      return { tag: fvar.toString('ascii', at, at + 4), min: fvar.readInt32BE(at + 4) / 65536, max: fvar.readInt32BE(at + 12) / 65536 };
+    });
+    expect(axes).toContainEqual({ tag: 'wght', min: 100, max: 900 });
+    const gvar = table('gvar'), width = gvar.readUInt16BE(14) & 1 ? 4 : 2, mapping = cmap();
+    const glyphOffset = (glyph: number) => width === 4 ? gvar.readUInt32BE(20 + glyph * 4) : gvar.readUInt16BE(20 + glyph * 2) * 2;
+    for (const char of '财务分析账资') {
+      const glyph = mapping.get(char.codePointAt(0)!)!;
+      expect(glyphOffset(glyph + 1), char).toBeGreaterThan(glyphOffset(glyph));
+    }
+    const samples = manifest().weights as Record<string, { outline_sha256: string }>;
+    expect(Object.keys(samples)).toEqual(['400', '500', '600', '700']);
+    expect(new Set(Object.values(samples).map((sample) => sample.outline_sha256)).size).toBe(4);
+  });
+
+  it('has naturally equal-width digits and records measured widths at every UI weight', () => {
+    const mapping = cmap(), metrics = table('hmtx'), count = table('hhea').readUInt16BE(34);
+    const widths = [...'0123456789'].map((digit) => metrics.readUInt16BE(Math.min(mapping.get(digit.codePointAt(0)!)!, count - 1) * 4));
+    expect(new Set(widths).size).toBe(1);
+    const measured = manifest();
+    expect(measured.numerals.mode).toBe('equal-default-advances');
+    expect(measured.numerals.has_tnum_feature).toBe(false);
+    for (const sample of Object.values(measured.weights) as { digit_advances: number[] }[]) {
+      expect(sample.digit_advances).toHaveLength(10);
+      expect(new Set(sample.digit_advances).size).toBe(1);
     }
   });
 });

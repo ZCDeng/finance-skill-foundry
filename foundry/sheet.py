@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.compat.strings import safe_string
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -69,14 +70,17 @@ def _decimal(value: Any) -> Decimal | None:
 
 
 def survives_a_cell(value: Decimal) -> bool:
-    """Whether binary64 can hold this exactly.
+    """Whether the numeric cell survives both binary64 and XLSX serialization.
 
-    `repr` of a float is the shortest string that round-trips, so this asks the
-    only question that matters: read back out of the file, is it the same
-    number the lock holds.
+    openpyxl formats numeric XML through ``safe_string`` (currently 16
+    significant digits), which can round a value that Python's float repr
+    preserves. Check that serializer too before choosing a numeric cell.
     """
+    if not value.is_finite():
+        return False
     try:
-        return Decimal(repr(float(value))) == value
+        numeric = float(value)
+        return Decimal(repr(numeric)) == value and Decimal(safe_string(numeric)) == value
     except (OverflowError, ValueError, InvalidOperation):
         return False
 
@@ -98,7 +102,9 @@ def put_number(cell: Any, value: Any) -> None:
         cell.value = int(exact) if exact == exact.to_integral_value() else float(exact)
         cell.number_format = MONEY
         return
-    cell.value = format(exact.normalize(), "f")
+    # Decimal.normalize() applies the ambient precision and can round a
+    # 38-digit catalog value even on this text-only preservation path.
+    cell.value = format(exact, "f")
     cell.alignment = Alignment(horizontal="right")
 
 

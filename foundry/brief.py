@@ -52,7 +52,11 @@ def _aggregate(window: Window, table: str) -> Decimal | int:
 
 
 def _register_period_outputs(
-    window: Window, text: str, session_id: str | None, filed: list[Filed] | None = None
+    window: Window,
+    text: str,
+    workpaper: str | None,
+    session_id: str | None,
+    filed: list[Filed] | None = None,
 ) -> None:
     """File the brief and the workpaper as deliverable versions.
 
@@ -78,13 +82,13 @@ def _register_period_outputs(
             session_id=session_id,
         )
     ]
-    if window.workpaper_path.exists():
+    if workpaper is not None:
         written.append(
             register_window_deliverable(
                 task,
                 window_id=window.id,
                 kind="workpaper",
-                text=window.workpaper_path.read_text(encoding="utf-8"),
+                text=workpaper,
                 cause="emit-brief",
                 session_id=session_id,
             )
@@ -111,9 +115,23 @@ def emit_brief(
     into a pair to serve it would have rewritten ninety-odd call sites to reach
     through a tuple for the thing they already had.
     """
+    with exclusive(window.root / ".lock"):
+        text = _emit_brief_locked(window)
+        # Capture the exact bytes under the same lock: a late reference may
+        # rewrite workpaper.md before the task archive is registered below.
+        workpaper = (
+            window.workpaper_path.read_text(encoding="utf-8")
+            if window.workpaper_path.exists()
+            else None
+        )
+    _register_period_outputs(window, text, workpaper, session_id, filed)
+    return text
+
+
+def _emit_brief_locked(window: Window) -> str:
+    """Read references and publish the brief in one window transaction."""
     if window.state in {"Briefed", "FollowUp"} and window.brief_path.exists():
         text = window.brief_path.read_text()
-        _register_period_outputs(window, text, session_id, filed)
         return text
     if window.state != "Locked":
         raise LockRefused(f"brief refused in state {window.state}")
@@ -271,15 +289,11 @@ def emit_brief(
     text = "\n".join(lines).rstrip() + "\n"
     if OUTSIDE in text:
         raise LockRefused(f"brief must not carry {OUTSIDE} on in-window facts")
-    with exclusive(window.root / ".lock"):
-        if window.state != "Locked":
-            raise LockRefused(f"brief refused in state {window.state}")
-        write_text_atomic(
-            window.root / "brief_facts.json",
-            json.dumps(facts, ensure_ascii=False, indent=2) + "\n",
-        )
-        persist_schedules(window, schedules, replace=True)
-        write_text_atomic(window.brief_path, text)
-        window._set_state("Briefed")
-    _register_period_outputs(window, text, session_id, filed)
+    write_text_atomic(
+        window.root / "brief_facts.json",
+        json.dumps(facts, ensure_ascii=False, indent=2) + "\n",
+    )
+    persist_schedules(window, schedules, replace=True)
+    write_text_atomic(window.brief_path, text)
+    window._set_state("Briefed")
     return text

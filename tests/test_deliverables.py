@@ -19,6 +19,7 @@ def _period(
     var: Path, fixtures: Path, capsys: pytest.CaptureFixture[str], *, task: str, session: str
 ) -> str:
     """create → import → lock → questions → brief, all bound to one task and session."""
+    TaskStore(var).get(task).record_session(session, role="period")
     base = ["--var", str(var), "--task", task, "--session", session]
     assert main([*base, "create"]) == 0
     window_id = _out(capsys)
@@ -80,6 +81,8 @@ def test_a_follow_up_adds_a_workpaper_version_naming_its_schedule(
     task_id = _new_task(var, capsys)
     window_id = _period(var, fixtures, capsys, task=task_id, session="sess-period")
 
+    TaskStore(var).get(task_id).record_session("sess-leader", role="followup")
+
     assert (
         main(
             [
@@ -122,6 +125,8 @@ def test_the_follow_up_row_carries_its_task_and_session(
     fixtures = fixture_root(None)
     task_id = _new_task(var, capsys)
     window_id = _period(var, fixtures, capsys, task=task_id, session="sess-period")
+    TaskStore(var).get(task_id).record_session("sess-leader", role="followup")
+
     assert (
         main(
             [
@@ -158,6 +163,7 @@ def test_two_sessions_land_on_one_task_with_their_own_ids(
     task_id = _new_task(var, capsys)
     window_id = _period(var, fixtures, capsys, task=task_id, session="sess-period")
     for session, text in (("sess-day1", "按核算单元拆一下"), ("sess-day3", "再按分析节点拆一下")):
+        TaskStore(var).get(task_id).record_session(session, role="followup", window_id=window_id)
         args = [
             "--var",
             str(var),
@@ -376,6 +382,8 @@ def test_the_follow_up_is_anchored_to_the_exported_version(
     assert main(["--var", str(var), "--task", task_id, "export", "--kind", "brief"]) == 0
     exported = json.loads(_out(capsys))
 
+    TaskStore(var).get(task_id).record_session("sess-leader", role="followup")
+
     assert (
         main(
             [
@@ -421,6 +429,8 @@ def test_a_reference_filed_after_the_brief_versions_the_workpaper(
     fixtures = fixture_root(None)
     task_id = _new_task(var, capsys)
     _period(var, fixtures, capsys, task=task_id, session="sess-period")
+
+    TaskStore(var).get(task_id).record_session("sess-leader", role="followup")
 
     assert (
         main(

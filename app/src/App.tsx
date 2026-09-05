@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import './styles/base.css';
 
 import { Shell, type Screen } from './components/Shell.js';
+import { Workspace, type WorkspaceRect } from './components/Workspace.js';
 import {
   type Answer,
   type DeliverableRow,
-  type Intent,
   type LaunchSpec,
   type PreviewSpec,
   type TaskDetail as Detail,
@@ -20,8 +20,8 @@ import { PreviewBar } from './views/Preview.js';
 import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
-import { Guide } from './views/Guide.js';
-import { Booting, TaskBar, WiringTrouble, type OpenSession } from './views/Workbench.js';
+import { Analysis } from './views/Analysis.js';
+import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 
 /**
  * A refusal is a sentence the store wrote. Show it, do not translate it.
@@ -50,20 +50,14 @@ function Refusal({ message, onDismiss }: { message: string; onDismiss?: () => vo
 
 export function App() {
   const api = bridge();
-  /*
-   * The workbench is the app. It used to open on 任务, which is a form asking
-   * for the name of something an operator has no reason to name until they know
-   * what this window does -- and the embedded runtime, which is the answer to
-   * that question, was three screens behind it.
-   */
-  const [screen, setScreen] = useState<Screen>('workbench');
+  const [screen, setScreen] = useState<Screen>('analysis');
   /** The task every session opened here binds to. Survives a screen change. */
   const [current, setCurrent] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   /** The task being read on 任务. A different question from which one is bound. */
   const [open, setOpen] = useState<string | null>(null);
   const [openDetail, setOpenDetail] = useState<Detail | null>(null);
-  const [session, setSession] = useState<OpenSession | null>(null);
+  const [session, setSession] = useState<(OpenSession & { taskId: string }) | null>(null);
   const [opening, setOpening] = useState(false);
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<HarnessStatus | null>(null);
@@ -71,7 +65,6 @@ export function App() {
   const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   /** Until this is true, an empty list is "not asked yet", not "no tasks". */
-  const [listed, setListed] = useState(false);
   const [gallery, setGallery] = useState<{ task: TaskRow; row: DeliverableRow }[]>([]);
   /** The version the gallery is showing, and its text once the store answers. */
   const [opened, setOpened] = useState<OpenDeliverable | null>(null);
@@ -82,8 +75,30 @@ export function App() {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
   const [asked, setAsked] = useState(false);
+  const [conversationFocus, setConversationFocus] = useState(0);
+  const [conversationProblem, setConversationProblem] = useState<string | null>(null);
+  const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
+  const [sections, setSections] = useState<Record<string, 'materials' | 'results' | 'drafts' | 'methods'>>({});
+  const analysisSection = sections[current ?? ''] ?? 'results';
+  const setAnalysisSection = useCallback((value: 'materials' | 'results' | 'drafts' | 'methods') => {
+    setSections((held) => ({ ...held, [current ?? '']: value }));
+  }, [current]);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const detailSequence = useRef(0);
+  const openSequence = useRef(0);
+  const readerSequence = useRef(0);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  const explicitSelection = useRef(false);
+  const selectionRevision = useRef(0);
+  const conversationQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const layoutRevision = useRef(0);
+  const inWorkspace = screen === 'analysis' || screen === 'workbench';
+  const onWorkspaceLayout = useCallback((next: WorkspaceRect | null) => {
+    setNativeRect((held) => JSON.stringify(held) === JSON.stringify(next) ? held : next);
+  }, []);
 
   /** Every answer lands here, so one refusal path serves every screen. */
   const take = useCallback(<T,>(answer: Answer<T>, use: (value: T) => void) => {
@@ -110,8 +125,7 @@ export function App() {
     void api.tasks().then((a) =>
       take(a, (rows) => {
         setTasks(rows);
-        setListed(true);
-        setCurrent((held) => held ?? rows[rows.length - 1]?.id ?? null);
+        setCurrent((held) => held ?? (explicitSelection.current ? null : rows[rows.length - 1]?.id ?? null));
       }),
     );
   }, [api, take]);
@@ -131,30 +145,31 @@ export function App() {
     refreshGallery();
   }, [screen, refreshGallery]);
 
-  /** The bound task's own record, which is what the strip reads. */
-  const refreshDetail = useCallback(
-    (id: string | null) => {
-      if (!api || id === null) {
-        setDetail(null);
-        return;
-      }
-      void api.task(id).then((a) => take(a, setDetail));
-    },
-    [api, take],
-  );
+  /** Ignore stale reads after a task switch, including failures from the prior task. */
+  const refreshDetail = useCallback((id: string | null) => {
+    if (currentRef.current !== id) return;
+    const sequence = ++detailSequence.current;
+    if (!api || !id) { setDetail(null); return; }
+    void api.task(id).then((answer) => {
+      if (currentRef.current === id && detailSequence.current === sequence) take(answer, setDetail);
+    });
+  }, [api, take]);
+  useEffect(() => { refreshDetail(current); }, [refreshDetail, current]);
 
+  const refreshOpenDetail = useCallback((id: string | null) => {
+    if (openRef.current !== id) return;
+    const sequence = ++openSequence.current;
+    setOpenDetail(null);
+    if (!api || !id) return;
+    void api.task(id).then((answer) => {
+      if (openRef.current === id && openSequence.current === sequence) take(answer, setOpenDetail);
+    });
+  }, [api, take]);
   useEffect(() => {
-    refreshDetail(current);
-  }, [refreshDetail, current]);
-
-  useEffect(() => {
-    if (!api || open === null) {
-      setOpenDetail(null);
-      return;
-    }
+    readerSequence.current += 1;
     setReading(null);
-    void api.task(open).then((a) => take(a, setOpenDetail));
-  }, [api, open, take]);
+    refreshOpenDetail(open);
+  }, [refreshOpenDetail, open]);
 
   /*
    * Polled while the workbench is open rather than read once: the wiring runs
@@ -163,7 +178,7 @@ export function App() {
    * drawn. It stops on its own as soon as the answer is not `pending`.
    */
   useEffect(() => {
-    if (!api?.harnessStatus || screen !== 'workbench') return;
+    if (!api?.harnessStatus || !inWorkspace) return;
     let live = true;
     const ask = () => {
       void api.harnessStatus?.().then((a) =>
@@ -178,7 +193,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [api, screen, take]);
+  }, [api, inWorkspace, take]);
 
   /*
    * What the fence stopped, said in this window rather than in the page.
@@ -192,8 +207,7 @@ export function App() {
   useEffect(() => {
     if (!api?.onHarnessRefused) return;
     return api.onHarnessRefused((reason) => {
-      setScreen('workbench');
-      setProblem(reason);
+      setConversationProblem(reason);
     });
   }, [api]);
 
@@ -212,35 +226,32 @@ export function App() {
    * relying on, and "has this operator ever made a task" is a better answer to
    * the same question than a flag would be.
    */
-  const guide = screen === 'workbench' && (asked || (listed && tasks.length === 0 && !dismissed));
+  const guide = inWorkspace && asked;
   const ready = status?.wiring.state === 'ready';
   const failed = status?.wiring.state === 'failed';
 
-  /*
-   * The harness page is a native view, so it is not hidden by React unmounting
-   * anything -- main has to be told to give it a rectangle or take it away. This
-   * is the one place that says which screen is on top.
-   *
-   * It is no longer gated on a session. The runtime's own page is what this
-   * product looks like, and holding it back until three clicks had happened is
-   * what made a fresh install unreadable. What is still gated is the guide: it
-   * is drawn in this app's document, and anything drawn there while the view has
-   * a rectangle is behind it.
-   */
+  // Hide before geometry changes, then reveal only the current, correctly bound session.
   useEffect(() => {
-    // A refusal takes the rectangle away for the same reason the guide does: it
-    // is drawn in this app's document, and the page would be on top of it.
-    const blocked = guide || problem !== null;
-    const shown =
-      screen === 'workbench' && ready && !blocked
-        ? 'workbench'
-        : screen === 'formulator' && formulator !== null && !blocked
-          ? 'formulator'
-          : (screen === 'deliverables' || screen === 'tasks') && preview !== null && !blocked
-            ? 'preview'
-            : '';
-    void api?.paneVisible?.(shown);
-  }, [api, screen, ready, guide, problem, formulator, preview]);
+    let live = true;
+    const revision = ++layoutRevision.current;
+    const show = async () => {
+      if (inWorkspace) {
+        if (!nativeRect || !ready || guide || conversationProblem || opening || session?.taskId !== current) {
+          await api?.paneVisible?.(''); return;
+        }
+        const layout = await api?.harnessLayout?.({ ...nativeRect, revision });
+        if (!live) return;
+        if (layout && !layout.ok) { setConversationProblem(layout.message); return; }
+        await api?.paneVisible?.('workbench');
+      } else {
+        const shown = !problem && screen === 'formulator' && formulator ? 'formulator'
+          : !problem && (screen === 'deliverables' || screen === 'tasks') && preview ? 'preview' : '';
+        await api?.paneVisible?.(shown);
+      }
+    };
+    void show().catch((error: unknown) => { if (live) setConversationProblem(error instanceof Error ? error.message : '对话布局暂未就绪，请重试。'); });
+    return () => { live = false; };
+  }, [api, inWorkspace, nativeRect, ready, guide, conversationProblem, opening, session, current, screen, problem, formulator, preview]);
 
   /**
    * Take the preview down, gateway and all.
@@ -312,67 +323,76 @@ export function App() {
       .finally(() => setBusyData(false));
   }, [api, take]);
 
-  /*
-   * Open a conversation on a task, named rather than inferred.
-   *
-   * The id is an argument because the one flow that matters most does not have
-   * it in state yet: the guide creates a task and opens a period session on it
-   * in a single press, and a `current` set a render earlier is not visible to
-   * the call that follows.
-   */
-  const openSession = useCallback(
-    (intent: Intent, taskId?: string) => {
-      const target = taskId ?? current;
-      if (!api?.harnessOpen || !target) return;
-      setOpening(true);
-      const on = target === current ? detail : null;
-      const newest = on?.windows[on.windows.length - 1];
-      const latestBrief = [...(on?.deliverables ?? [])]
-        .reverse()
-        .find((row) => row.kind === 'export' || row.kind === 'brief');
-      const seed =
-        intent === 'followup' && newest
-          ? { windowId: newest.window_id, briefSha: latestBrief?.sha256 ?? null }
-          : undefined;
-      void api
-        .harnessOpen(intent, target, seed)
-        .then((a) =>
-          take(a, (value) => {
-            setSession({ ...value, intent });
-            setCurrent(target);
-            // A period session creates a window on the way in, and the strip
-            // above is drawn from `detail`. Without this it keeps saying the
-            // task has no window while the operator is typing into the one the
-            // button just opened.
-            refreshDetail(target);
-            refreshTasks();
-          }),
-        )
-        .finally(() => setOpening(false));
-    },
-    [api, current, detail, take, refreshDetail, refreshTasks],
-  );
+  const newAnalysisTask = useCallback(async (question: string) => {
+    if (!api) throw new Error('分析服务暂未连接，请重新打开应用。');
+    const selection = selectionRevision.current;
+    const result = await api.taskNew(question.trim().replace(/\s+/g, ' ').slice(0, 120) || '新的财务分析', '');
+    if (!result.ok) { setProblem(result.message); throw new Error(result.message); }
+    if (selectionRevision.current === selection) {
+      currentRef.current = result.value.id;
+      explicitSelection.current = true;
+      setCurrent(result.value.id);
+    }
+    refreshTasks();
+    return result.value.id;
+  }, [api, refreshTasks]);
 
-  /** Name a task and start working in it, in one press. */
-  const startFirst = useCallback(
-    (title: string, period: string) => {
-      if (!api) return;
-      setCreating(true);
-      void api
-        .taskNew(title, period)
-        .then((a) =>
-          take(a, ({ id }) => {
-            setCurrent(id);
-            setAsked(false);
-            setDismissed(true);
-            refreshTasks();
-            openSession('period', id);
-          }),
-        )
-        .finally(() => setCreating(false));
-    },
-    [api, take, refreshTasks, openSession],
-  );
+  const chatAnalysis = useCallback(async (question?: string, draftId?: string,
+    options?: { submit?: boolean; requestId?: string; targetTaskId?: string }) => {
+    const target = options?.targetTaskId ?? currentRef.current;
+    if (!api?.harnessOpen || !target) throw new Error('请先选择任务，或等待对话服务连接。');
+    if (currentRef.current === target && (question !== undefined || draftId !== undefined)) setConversationFocus((value) => value + 1);
+    const operation = conversationQueue.current.catch(() => undefined).then(async () => {
+      if (question === undefined && draftId === undefined && currentRef.current !== target) return;
+      setOpening(true);
+      setSession(null);
+      let connected = false;
+      try {
+        const result = await api.harnessOpen!('analysis', target, {
+          verbatim: question, draftId, submit: options?.submit, requestId: options?.requestId,
+        });
+        if (!result.ok) throw new Error(result.message);
+        connected = true;
+        if (currentRef.current === target) {
+          setSession({ ...result.value, intent: 'analysis', taskId: target });
+          setConversationProblem(null);
+          setAsked(false);
+        }
+        if (options?.submit && result.value.submitted !== true) {
+          throw new Error(result.value.blockedReason || '问题尚未发送，请检查对话中的模型设置后重试。');
+        }
+      } catch (error) {
+        if (!connected && currentRef.current === target) setConversationProblem(error instanceof Error ? error.message : '对话连接失败，请重试。');
+        throw error;
+      } finally {
+        // A background seed may have moved the one resident native view. Rebind
+        // the visible task before revealing it, even if current never changed.
+        const visibleTask = currentRef.current;
+        if (visibleTask && visibleTask !== target) {
+          try {
+            const restored = await api.harnessOpen!('analysis', visibleTask);
+            if (currentRef.current === visibleTask) {
+              if (restored.ok) {
+                setSession({ ...restored.value, intent: 'analysis', taskId: visibleTask });
+                setConversationProblem(null);
+              } else setConversationProblem(restored.message);
+            }
+          } catch (error) {
+            if (currentRef.current === visibleTask) setConversationProblem(error instanceof Error ? error.message : '对话连接失败，请重试。');
+          }
+        }
+        setOpening(false);
+      }
+    });
+    conversationQueue.current = operation;
+    await operation;
+  }, [api]);
+
+  useEffect(() => {
+    if (!inWorkspace || !ready || !current) return;
+    // Opening without a seed restores the session's own draft and never submits it.
+    void chatAnalysis(undefined, undefined, { targetTaskId: current }).catch(() => undefined);
+  }, [inWorkspace, ready, current, chatAnalysis]);
 
   /** Name a task from 任务, and open it there. The workbench binds to it too. */
   const createTask = useCallback(
@@ -477,19 +497,24 @@ export function App() {
         .exportWorkbook(open, windowId)
         .then((a) =>
           take(a, (filed) => {
+            refreshOpenDetail(open);
             void refreshDetail(open);
             void api.deliverableOpen(open, filed.sha256, filed.ext).then((b) => take(b, () => undefined));
           }),
         )
         .finally(() => setExporting(null));
     },
-    [api, open, take, refreshDetail],
+    [api, open, take, refreshDetail, refreshOpenDetail],
   );
 
   const read = useCallback(
     (sha: string) => {
       if (!api || open === null) return;
-      void api.deliverableText(open, sha).then((a) => take(a, (text) => setReading({ sha, text })));
+      const target = open;
+      const sequence = ++readerSequence.current;
+      void api.deliverableText(target, sha).then((answer) => {
+        if (openRef.current === target && readerSequence.current === sequence) take(answer, (text) => setReading({ sha, text }));
+      });
     },
     [api, open, take],
   );
@@ -498,13 +523,18 @@ export function App() {
     return (
       <Shell screen={screen} onScreen={setScreen}>
         <p className="fnd-empty">
-          这个窗口没有接到 foundry。它在 Electron 之外跑起来时就是这样, 主进程还没起来。
+          分析服务尚未连接。请从 FA Foundry 桌面应用打开工作区。
         </p>
       </Shell>
     );
   }
 
   const bound = tasks.find((row) => row.id === current) ?? null;
+  const pickAnalysisTask = (id: string) => {
+    selectionRevision.current += 1;
+    explicitSelection.current = true; currentRef.current = id || null;
+    setCurrent(id || null); setDetail(null); setSession(null); setConversationProblem(null); setScreen('analysis');
+  };
 
   return (
     <Shell
@@ -513,30 +543,10 @@ export function App() {
         if (next !== 'deliverables') setOpened(null);
         setScreen(next);
       }}
-      onGuide={screen === 'workbench' ? () => setAsked(true) : undefined}
+      onGuide={inWorkspace && bound ? () => setAsked(true) : undefined}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks')}
       strip={
-        screen === 'workbench' ? (
-          <TaskBar
-            tasks={tasks}
-            task={bound}
-            detail={detail}
-            session={session}
-            busy={opening || creating}
-            onPick={(id) => {
-              setCurrent(id);
-              // The old session belongs to the task that was bound a moment
-              // ago. Keeping it would put another task's round counter above a
-              // conversation that never touched it.
-              setSession(null);
-            }}
-            onNew={() => {
-              setScreen('tasks');
-              setOpen(null);
-            }}
-            onOpen={openSession}
-          />
-        ) : screen === 'formulator' ? (
+        screen === 'formulator' ? (
           <DataBar
             task={bound}
             detail={detail}
@@ -554,26 +564,31 @@ export function App() {
         ) : undefined
       }
     >
-      {problem ? (
-        <Refusal message={problem} onDismiss={() => setProblem(null)} />
-      ) : null}
-      {screen === 'workbench' ? (
-        guide ? (
-          <Guide
-            busy={creating || opening}
-            canStart={Boolean(api.harnessOpen)}
-            onStart={startFirst}
-            onDismiss={() => {
-              setAsked(false);
-              setDismissed(true);
-            }}
-          />
-        ) : failed ? (
-          <WiringTrouble status={status} />
-        ) : ready ? null : (
-          <Booting />
-        )
-      ) : null}
+      {problem && !inWorkspace ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
+      <div className="workspace-mount" hidden={!inWorkspace}>
+        <Workspace active={inWorkspace} focusConversationRequest={conversationFocus} task={bound} tasks={tasks} onPick={pickAnalysisTask}
+          onNew={() => pickAnalysisTask('')}
+          onMethods={() => setAnalysisSection('methods')}
+          onData={() => setScreen('formulator')}
+          onHistory={() => { setOpen(current); setScreen('tasks'); }}
+          onRename={api.taskRename ? async (id, title) => {
+            const result = await api.taskRename!(id, title);
+            if (!result.ok) throw new Error(result.message);
+            setTasks((rows) => rows.map((row) => row.id === id ? { ...row, title: result.value.title } : row));
+          } : undefined}
+          onLayout={onWorkspaceLayout}
+          conversation={guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>在对话中提出问题或添加资料。右侧查看计算结果、调整口径和编辑文稿，点击依据可以继续追问。</p><p>导出保留当前版本，归档由你决定。</p><button className="fnd-primary" onClick={() => setAsked(false)}>继续工作</button></div>
+            : conversationProblem ? <div className="workspace-connection" role="alert"><h2>对话暂时中断</h2><p>{conversationProblem}</p>
+              <p className="fnd-muted">右侧资料与成果仍可继续使用。</p><button className="fnd-primary" disabled={opening}
+                onClick={() => { setConversationProblem(null); void chatAnalysis().catch(() => undefined); }}>重新连接</button></div>
+            : failed ? <div className="workspace-connection"><WiringTrouble status={status} /></div>
+            : !ready || opening ? <div className="workspace-connection"><Booting /></div>
+            : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><button className="fnd-primary" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</button></div> : null}>
+          {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
+          <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
+            task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis} />
+        </Workspace>
+      </div>
       {screen === 'tasks' && open === null ? (
         <Tasks tasks={tasks} busy={creating} onOpen={setOpen} onCreate={createTask} />
       ) : null}

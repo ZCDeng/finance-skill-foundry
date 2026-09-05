@@ -1,0 +1,489 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-05T19:06:18.269437+00:00",
+  "title": "Design System: FA Foundry",
+  "extensions": {
+    "colorMeta": {
+      "fnd-bg": {
+        "role": "neutral",
+        "displayName": "窗口背景（色阶均为面板插值预览，非产品 token）",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-surface": {
+        "role": "neutral",
+        "displayName": "内容平面",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-surface-strong": {
+        "role": "neutral",
+        "displayName": "侧栏与悬停层",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-ink": {
+        "role": "neutral",
+        "displayName": "正文",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-muted": {
+        "role": "neutral",
+        "displayName": "次要文字",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-line": {
+        "role": "neutral",
+        "displayName": "细分隔线",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-accent": {
+        "role": "primary",
+        "displayName": "主操作底色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-on-accent": {
+        "role": "primary",
+        "displayName": "主操作文字",
+        "tonalRamp": [
+          "oklch(15.000% 0.00171 247.839)",
+          "oklch(26.429% 0.00171 247.839)",
+          "oklch(37.857% 0.00171 247.839)",
+          "oklch(49.286% 0.00171 247.839)",
+          "oklch(60.714% 0.00171 247.839)",
+          "oklch(72.143% 0.00171 247.839)",
+          "oklch(83.571% 0.00171 247.839)",
+          "oklch(95.000% 0.00171 247.839)"
+        ]
+      },
+      "fnd-selection-surface": {
+        "role": "primary",
+        "displayName": "选择底色",
+        "tonalRamp": [
+          "oklch(15.000% 0.01719 84.587)",
+          "oklch(26.429% 0.01719 84.587)",
+          "oklch(37.857% 0.01719 84.587)",
+          "oklch(49.286% 0.01719 84.587)",
+          "oklch(60.714% 0.01719 84.587)",
+          "oklch(72.143% 0.01719 84.587)",
+          "oklch(83.571% 0.01719 84.587)",
+          "oklch(95.000% 0.01719 84.587)"
+        ]
+      },
+      "fnd-line-hover": {
+        "role": "primary",
+        "displayName": "交互金色边界",
+        "tonalRamp": [
+          "oklch(15.000% 0.09706 77.788)",
+          "oklch(26.429% 0.09706 77.788)",
+          "oklch(37.857% 0.09706 77.788)",
+          "oklch(49.286% 0.09706 77.788)",
+          "oklch(60.714% 0.09706 77.788)",
+          "oklch(72.143% 0.09706 77.788)",
+          "oklch(83.571% 0.09706 77.788)",
+          "oklch(95.000% 0.09706 77.788)"
+        ]
+      },
+      "fnd-selected": {
+        "role": "primary",
+        "displayName": "当前导航金色",
+        "tonalRamp": [
+          "oklch(15.000% 0.09041 78.852)",
+          "oklch(26.429% 0.09041 78.852)",
+          "oklch(37.857% 0.09041 78.852)",
+          "oklch(49.286% 0.09041 78.852)",
+          "oklch(60.714% 0.09041 78.852)",
+          "oklch(72.143% 0.09041 78.852)",
+          "oklch(83.571% 0.09041 78.852)",
+          "oklch(95.000% 0.09041 78.852)"
+        ]
+      },
+      "fnd-on-selected": {
+        "role": "primary",
+        "displayName": "当前导航文字",
+        "tonalRamp": [
+          "oklch(15.000% 0.00171 247.839)",
+          "oklch(26.429% 0.00171 247.839)",
+          "oklch(37.857% 0.00171 247.839)",
+          "oklch(49.286% 0.00171 247.839)",
+          "oklch(60.714% 0.00171 247.839)",
+          "oklch(72.143% 0.00171 247.839)",
+          "oklch(83.571% 0.00171 247.839)",
+          "oklch(95.000% 0.00171 247.839)"
+        ]
+      },
+      "fnd-bg-dark": {
+        "role": "neutral",
+        "displayName": "窗口背景 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-surface-dark": {
+        "role": "neutral",
+        "displayName": "内容平面 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-surface-strong-dark": {
+        "role": "neutral",
+        "displayName": "侧栏与悬停层 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-ink-dark": {
+        "role": "neutral",
+        "displayName": "正文 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00171 247.839)",
+          "oklch(26.429% 0.00171 247.839)",
+          "oklch(37.857% 0.00171 247.839)",
+          "oklch(49.286% 0.00171 247.839)",
+          "oklch(60.714% 0.00171 247.839)",
+          "oklch(72.143% 0.00171 247.839)",
+          "oklch(83.571% 0.00171 247.839)",
+          "oklch(95.000% 0.00171 247.839)"
+        ]
+      },
+      "fnd-muted-dark": {
+        "role": "neutral",
+        "displayName": "次要文字 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-line-dark": {
+        "role": "neutral",
+        "displayName": "细分隔线 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-accent-dark": {
+        "role": "primary",
+        "displayName": "主操作底色 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00171 247.839)",
+          "oklch(26.429% 0.00171 247.839)",
+          "oklch(37.857% 0.00171 247.839)",
+          "oklch(49.286% 0.00171 247.839)",
+          "oklch(60.714% 0.00171 247.839)",
+          "oklch(72.143% 0.00171 247.839)",
+          "oklch(83.571% 0.00171 247.839)",
+          "oklch(95.000% 0.00171 247.839)"
+        ]
+      },
+      "fnd-on-accent-dark": {
+        "role": "primary",
+        "displayName": "主操作文字 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      },
+      "fnd-selection-surface-dark": {
+        "role": "primary",
+        "displayName": "选择底色 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.01883 84.500)",
+          "oklch(26.429% 0.01883 84.500)",
+          "oklch(37.857% 0.01883 84.500)",
+          "oklch(49.286% 0.01883 84.500)",
+          "oklch(60.714% 0.01883 84.500)",
+          "oklch(72.143% 0.01883 84.500)",
+          "oklch(83.571% 0.01883 84.500)",
+          "oklch(95.000% 0.01883 84.500)"
+        ]
+      },
+      "fnd-line-hover-dark": {
+        "role": "primary",
+        "displayName": "交互金色边界 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.09112 83.651)",
+          "oklch(26.429% 0.09112 83.651)",
+          "oklch(37.857% 0.09112 83.651)",
+          "oklch(49.286% 0.09112 83.651)",
+          "oklch(60.714% 0.09112 83.651)",
+          "oklch(72.143% 0.09112 83.651)",
+          "oklch(83.571% 0.09112 83.651)",
+          "oklch(95.000% 0.09112 83.651)"
+        ]
+      },
+      "fnd-selected-dark": {
+        "role": "primary",
+        "displayName": "当前导航金色 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.09112 83.651)",
+          "oklch(26.429% 0.09112 83.651)",
+          "oklch(37.857% 0.09112 83.651)",
+          "oklch(49.286% 0.09112 83.651)",
+          "oklch(60.714% 0.09112 83.651)",
+          "oklch(72.143% 0.09112 83.651)",
+          "oklch(83.571% 0.09112 83.651)",
+          "oklch(95.000% 0.09112 83.651)"
+        ]
+      },
+      "fnd-on-selected-dark": {
+        "role": "primary",
+        "displayName": "当前导航文字 · 深色",
+        "tonalRamp": [
+          "oklch(15.000% 0.00000 0.000)",
+          "oklch(26.429% 0.00000 0.000)",
+          "oklch(37.857% 0.00000 0.000)",
+          "oklch(49.286% 0.00000 0.000)",
+          "oklch(60.714% 0.00000 0.000)",
+          "oklch(72.143% 0.00000 0.000)",
+          "oklch(83.571% 0.00000 0.000)",
+          "oklch(95.000% 0.00000 0.000)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "brand": {
+        "displayName": "FA 品牌字",
+        "purpose": "仅用于 FA Foundry 标识文字。"
+      },
+      "document": {
+        "displayName": "文稿阅读",
+        "purpose": "Markdown 阅读正文；最大行宽 72ch。"
+      },
+      "composer": {
+        "displayName": "原生输入",
+        "purpose": "紧凑原生对话中的中文输入。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "help-panel",
+        "value": "0 24px 60px -30px rgb(0 0 0 / 45%)",
+        "purpose": "既有帮助面板；不用于常规数据卡片。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "fnd-transition",
+        "value": "180ms ease",
+        "purpose": "壳控件过渡。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0ms",
+        "purpose": "prefers-reduced-motion: reduce 时覆盖壳的过渡 token。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sidebar-wide",
+        "value": "1360px"
+      },
+      {
+        "name": "workspace-focus-max",
+        "value": "1100px"
+      },
+      {
+        "name": "desktop-min-window",
+        "value": "1080px"
+      },
+      {
+        "name": "evidence-container-max",
+        "value": "620px"
+      },
+      {
+        "name": "logical-viewport-fallback-max",
+        "value": "680px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主操作",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "新建、开始分析或保存新版；沿用无悬停变色的实心状态。",
+      "html": "<button class=\"ds-primary\">保存文稿新版</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--fnd-radius-control, 8px);cursor:pointer;font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);border:0;background:var(--fnd-accent, #1f1f1f);color:var(--fnd-on-accent, #f9fafb);transition:opacity var(--fnd-transition, 180ms ease);}.ds-primary:hover:not(:disabled){opacity:1;}.ds-primary:focus-visible{outline:2px solid var(--fnd-line-hover, #a67e3c);outline-offset:1px;}.ds-primary:disabled{opacity:.4;cursor:default;}"
+    },
+    {
+      "name": "次操作",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "查看依据、比较与编辑等次操作。",
+      "html": "<button class=\"ds-secondary\">查看本次计算依据</button>",
+      "css": ".ds-secondary{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--fnd-radius-control, 8px);cursor:pointer;font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);border:1px solid var(--fnd-line, #1f1f1f24);background:transparent;color:var(--fnd-ink, #000000e0);transition:border-color var(--fnd-transition, 180ms ease),background var(--fnd-transition, 180ms ease);}.ds-secondary:hover:not(:disabled){border-color:var(--fnd-line-hover, #a67e3c);background:var(--fnd-surface-strong, #f7f7f7);}.ds-secondary:focus-visible{outline:2px solid var(--fnd-line-hover, #a67e3c);outline-offset:1px;}.ds-secondary:disabled{opacity:.55;cursor:default;}"
+    },
+    {
+      "name": "业务参数字段",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "显示已记录的业务名称与单位；示例来自验收 fixture。",
+      "html": "<label class=\"ds-field-label\">总部费用分摊（万元）<input class=\"ds-field\" aria-label=\"总部费用分摊（万元）\" inputmode=\"decimal\" value=\"30.00\"></label>",
+      "css": ".ds-field-label{display:flex;flex-direction:column;gap:6px;color:var(--fnd-ink, #000000e0);font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);}.ds-field{height:32px;padding:0 12px;border:1px solid var(--fnd-line, #1f1f1f24);border-radius:var(--fnd-radius-control, 8px);background:var(--fnd-surface, #fff);color:var(--fnd-ink, #000000e0);caret-color:var(--fnd-selected, #8a6729);transition:border-color var(--fnd-transition, 180ms ease);font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);}.ds-field:hover{border-color:var(--fnd-line-hover, #a67e3c);}.ds-field:focus-visible{outline:2px solid var(--fnd-selected, #8a6729);outline-offset:3px;}"
+    },
+    {
+      "name": "顶层导航",
+      "kind": "nav",
+      "refersTo": "nav-current",
+      "description": "既有工作区与成果库导航；示例只展示外观，不模拟应用路由。",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><button class=\"ds-nav-tab\" aria-current=\"page\">工作区</button><button class=\"ds-nav-tab\">成果库</button></nav>",
+      "css": ".ds-nav{display:flex;gap:4px;}.ds-nav-tab{border:0;border-radius:8px;padding:0 16px;height:32px;font-weight:500;color:var(--fnd-muted, #00000099);background:transparent;cursor:pointer;transition:color var(--fnd-transition, 180ms ease),background var(--fnd-transition, 180ms ease);font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);}.ds-nav-tab:hover{color:var(--fnd-ink, #000000e0);background:var(--fnd-surface-strong, #f7f7f7);}.ds-nav-tab[aria-current=\"page\"]{background:var(--fnd-selected, #8a6729);color:var(--fnd-on-selected, #f9fafb);}.ds-nav-tab:focus-visible{outline:2px solid var(--fnd-line-hover, #a67e3c);outline-offset:2px;}"
+    },
+    {
+      "name": "历史标记",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "非交互的既有文字标记；不替代四项运行状态。",
+      "html": "<span class=\"ds-chip\">窗内</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;white-space:nowrap;font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif);font-size:12px;line-height:1;padding:4px 10px;border-radius:var(--fnd-radius-chip, 30px);border:1px solid var(--fnd-ink, #000000e0);color:var(--fnd-ink, #000000e0);background:transparent;}"
+    },
+    {
+      "name": "资料卡",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "可打开的实际资料；平面边框，悬停显示可操作性。",
+      "html": "<button class=\"ds-card\"><strong>八月经营数据</strong><span>数据表 · 3 行</span></button>",
+      "css": ".ds-card{display:flex;flex-direction:column;gap:5px;width:100%;text-align:left;border:1px solid var(--fnd-line, #1f1f1f24);border-radius:var(--fnd-radius-container, 12px);background:var(--fnd-surface, #fff);color:var(--fnd-ink, #000000e0);padding:18px 20px;cursor:pointer;transition:border-color var(--fnd-transition, 180ms ease),background var(--fnd-transition, 180ms ease);font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);}.ds-card span{color:var(--fnd-muted, #00000099);}.ds-card:hover{border-color:var(--fnd-line-hover, #a67e3c);background:var(--fnd-surface-strong, #f7f7f7);}.ds-card:focus-visible{outline:2px solid var(--fnd-selected, #8a6729);outline-offset:3px;}"
+    },
+    {
+      "name": "成果页签",
+      "kind": "nav",
+      "refersTo": "workspace-tab",
+      "description": "资料、结果、文稿的下划线定位；预览仅展示样式。",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"任务工作区\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">资料 <span>1</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">分析结果 <span>2</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">文稿 <span>1</span></button></div>",
+      "css": ".ds-tabs{display:flex;gap:22px;border-bottom:1px solid var(--fnd-line, #1f1f1f24);}.ds-tab{display:inline-flex;align-items:center;gap:7px;padding:12px 0;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--fnd-muted, #00000099);cursor:pointer;white-space:nowrap;font-family:var(--fnd-font-sans, \"Noto Sans SC\", sans-serif); font-size:var(--fnd-size-small, 13px);}.ds-tab[aria-selected=\"true\"]{border-bottom-color:var(--fnd-selected, #8a6729);color:var(--fnd-ink, #000000e0);}.ds-tab span{font-size:12px;color:var(--fnd-muted, #00000099);}.ds-tab:hover{background:transparent;}.ds-tab:focus-visible{outline:2px solid var(--fnd-selected, #8a6729);outline-offset:3px;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "财务经理的任务工作台",
+    "overview": "沿用 FA 标识、中性色与金色定位。业务问题、计算值与文稿承担主要层级；财务经理可以持续讨论并查看成果，专业判断和方法复用保留为用户可控动作。此名称概括已有产品定位，未新增品牌概念、comp 承诺或长期工作流偏好。\n\n本记录合并既有设计约定，描述 2026-09-06 的实际界面。样式来源为 [tokens](app/src/styles/tokens.css)、[base](app/src/styles/base.css)、[公共控件](app/src/components/components.css)、[工作区](app/src/components/Workspace.tsx)和[成果样式](app/src/views/analysis.css)；产品事实见 [PRODUCT.md](PRODUCT.md)。",
+    "keyCharacteristics": [
+      "FA 图形与 Asap Sharp 品牌字；离线 Noto Sans SC 中文工作界面。",
+      "中性平面、细分隔线、有限容器与金色交互定位。",
+      "持续对话与成果并排，空间不足时使用同任务专注视图。",
+      "按真实参数、来源、版本和状态呈现结果与文稿。"
+    ],
+    "rules": [
+      {
+        "name": "The Location Rule",
+        "body": "金色服务于当前位置、选择和焦点；主操作使用既有中性反差，数值与业务状态保留文字。",
+        "section": "colors"
+      },
+      {
+        "name": "The Real Weight Rule",
+        "body": "中文强调使用已打包的真实字重；数据保留原有精度、负号、零和缺值，不借排版制造业务含义。",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "**Do** 沿用现有 FA 标识、离线字体、系统主题、真实任务归属与可见焦点。",
+      "**Do** 用保存的名称、单位、参数、来源与版本支持财务经理自主判断。"
+    ],
+    "donts": [
+      "**Don't** 合并执行/复算/阅核/发布状态，猜测旧参数语义或添加不可用业务入口。",
+      "**Don't** 把工作副本恢复写成跨重启正式自动保存，或把窄窗回退写成移动端承诺。",
+      "**Don't** 将历史装饰性 eyebrow、未定义选择色的局部 fallback、原生控件的局部色差扩展为全局规则。"
+    ]
+  }
+}

@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from foundry.errors import FoundryError
-from foundry.fsutil import write_json_atomic as _write_json
+from foundry.fsutil import write_json_atomic as _write_json, write_text_atomic
 from foundry.locking import exclusive
 
 TASK_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-SESSION_ROLES = ("author", "period", "followup")
+SESSION_ROLES = ("author", "period", "followup", "analysis")
 DELIVERABLE_KINDS = ("brief", "workpaper", "export")
 WINDOW_REASONS = ("initial", "reimport")
 TASK_LOCK_TIMEOUT = 10.0
@@ -194,6 +194,16 @@ class Task:
             raise FoundryError(f"no such task: {self.id}")
         return json.loads(self.meta_path.read_text(encoding="utf-8"))
 
+    def rename(self, title: str) -> dict[str, Any]:
+        """Change the display title without moving the task or rewriting history."""
+        if not isinstance(title, str) or not title.strip():
+            raise FoundryError("task title is required")
+        with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
+            metadata = self.meta()
+            metadata["title"] = title.strip()
+            _write_json(self.meta_path, metadata)
+            return metadata
+
     # -- windows ---------------------------------------------------------
 
     def windows(self) -> list[dict[str, Any]]:
@@ -229,57 +239,177 @@ class Task:
         *,
         role: str,
         leader_verbatim: str | None = None,
+        window_id: str | None = None,
+        parent_session_id: str | None = None,
+        parent_context_revision: int | None = None,
+        workspace_path: Path | None = None,
     ) -> dict[str, Any]:
-        """Register a conversation against this task.
+        """Register a trusted session once, with a durable task/window context.
 
-        ``leader_verbatim`` is what the leader actually asked, in their own
-        words, and it is deliberately not the ``text`` a model later passes to
-        ``query-locked``. A model may paraphrase, narrow, or split one question
-        into two; what was asked and what was computed are two columns that have
-        to be readable side by side. It is written by the operator, once, when
-        the follow-up conversation opens -- never inferred from a tool argument.
+        Re-registering a session preserves its context. Explicit window/workspace
+        changes create a revision; opening another task never changes this row.
+        A registry-wide lock protects ownership across different task locks.
         """
         if role not in SESSION_ROLES:
             raise FoundryError(f"session role must be one of {SESSION_ROLES}: {role}")
         cleaned = str(session_id).strip()
         if not cleaned:
             raise FoundryError("session id is required")
-        # One conversation belongs to one task. The app opens a session for a
-        # named task and the fence stops the page opening any other kind, so a
-        # session id arriving at a second task means the call reached across --
-        # a follow-up addressing a window this conversation has no business in.
-        # Refused here rather than at the caller because this is the one writer,
-        # and the rule is about the row it is about to append.
-        owner = session_owner(self.store, cleaned)
-        if owner is not None and owner.id != self.id:
-            raise FoundryError(
-                f"session {cleaned} already belongs to task {owner.id}; "
-                f"it cannot also be recorded on {self.id}"
-            )
-        with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
-            existing = _read_jsonl(self.sessions_path)
-            for row in existing:
-                if row.get("session_id") == cleaned:
-                    if leader_verbatim is None or row.get("leader_verbatim"):
-                        return row
-                    # The session was first seen through a tool call, which
-                    # carries no verbatim. Filling it in later is the operator
-                    # supplying what was missing, not overwriting an answer.
-                    updated = {**row, "leader_verbatim": leader_verbatim}
-                    rows = [updated if item is row else item for item in existing]
-                    text = "".join(
-                        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in rows
-                    )
-                    self.sessions_path.write_text(text, encoding="utf-8")
-                    return updated
-            row = {
-                "session_id": cleaned,
-                "role": role,
-                "opened_at": now_iso(),
-                **({} if leader_verbatim is None else {"leader_verbatim": leader_verbatim}),
-            }
-            _append_jsonl(self.sessions_path, row)
-            return row
+        with exclusive(self.store.var_root / ".sessions.lock", timeout=TASK_LOCK_TIMEOUT):
+            owner = session_owner(self.store, cleaned)
+            if owner is not None and owner.id != self.id:
+                raise FoundryError(
+                    f"session {cleaned} already belongs to task {owner.id}; "
+                    f"it cannot also be recorded on {self.id}"
+                )
+            parent = None
+            if parent_session_id:
+                if parent_session_id == cleaned:
+                    raise FoundryError("a session cannot be its own parent")
+                parent_owner = session_owner(self.store, parent_session_id)
+                if parent_owner is None:
+                    raise FoundryError(f"unknown parent session {parent_session_id}; register it first")
+                if parent_owner.id != self.id:
+                    raise FoundryError(f"parent session {parent_session_id} belongs to task {parent_owner.id}")
+                parent = next(row for row in parent_owner.sessions() if row["session_id"] == parent_session_id)
+                if parent_context_revision is not None and parent.get("context_revision", 1) != parent_context_revision:
+                    historical = next((item for item in parent.get("context_history", []) if item.get("context_revision") == parent_context_revision), None)
+                    if historical is None:
+                        raise FoundryError("parent context revision is unavailable")
+                    parent = {**parent, **historical}
+            with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
+                rows = self.sessions()
+                existing = next((row for row in rows if row.get("session_id") == cleaned), None)
+                if existing is not None and parent_session_id and existing.get("parent_session_id") != parent_session_id:
+                    raise FoundryError("an existing session cannot change its parent")
+                source = existing if existing is not None else parent
+                target_window = window_id if window_id is not None else (source or {}).get("window_id")
+                if source is None and target_window is None:
+                    windows = self.windows()
+                    target_window = windows[-1]["window_id"] if windows else None
+                if source and (parent is not None or source.get("parent_session_id")):
+                    if window_id is not None and window_id != source.get("window_id"):
+                        raise FoundryError("a child session cannot widen its inherited window context")
+                if target_window:
+                    self._validate_session_window(target_window)
+                workspace = str((source or {}).get("workspace_path") or (self.root / "analysis").resolve())
+                if workspace_path is not None:
+                    try:
+                        resolved = Path(workspace_path).resolve(strict=True)
+                    except OSError as exc:
+                        raise FoundryError("session workspace must be an existing directory") from exc
+                    if not resolved.is_dir():
+                        raise FoundryError("session workspace must be a directory")
+                    if source and (parent is not None or source.get("parent_session_id")) and str(resolved) != workspace:
+                        raise FoundryError("a child session cannot change its inherited workspace")
+                    workspace = str(resolved)
+                if existing is None:
+                    row = {
+                        "session_id": cleaned, "task_id": self.id, "role": role,
+                        "opened_at": now_iso(), "window_id": target_window,
+                        "context_revision": 1, "workspace_id": self.id,
+                        "workspace_path": workspace,
+                        "snapshot_ids": list(parent.get("snapshot_ids") or []) if parent is not None else sorted(
+                            path.parent.name for path in (self.root / "analysis" / "datasets").glob("*/meta.json")
+                            if TASK_ID_RE.fullmatch(path.parent.name)
+                        ),
+                        "context_history": [],
+                        **({} if parent is None else {
+                            "parent_session_id": parent_session_id,
+                            "parent_context_revision": parent.get("context_revision", 1),
+                            "snapshot_ceiling": list(parent.get("snapshot_ids") or []),
+                        }),
+                        **({} if leader_verbatim is None else {"leader_verbatim": leader_verbatim}),
+                    }
+                    rows.append(row)
+                else:
+                    row = dict(existing)
+                    # Older rows require explicit registration to acquire a
+                    # window, rather than following whichever window is current.
+                    row.setdefault("task_id", self.id)
+                    row.setdefault("workspace_id", self.id)
+                    row.setdefault("context_revision", 1)
+                    row.setdefault("snapshot_ids", [])
+                    row.setdefault("context_history", [])
+                    if row.get("window_id") != target_window or row.get("workspace_path", workspace) != workspace:
+                        row = self._revised_context(row, window_id=target_window, workspace_path=workspace)
+                    row.setdefault("window_id", target_window)
+                    row.setdefault("workspace_path", workspace)
+                    if leader_verbatim is not None and not row.get("leader_verbatim"):
+                        row["leader_verbatim"] = leader_verbatim
+                    rows[rows.index(existing)] = row
+                self._write_sessions(rows)
+                return row
+
+    def _validate_session_window(self, window_id: str) -> None:
+        from foundry.window import WindowStore
+
+        window = WindowStore(self.store.var_root).get(window_id)
+        if window.task_id != self.id or window_id not in {row["window_id"] for row in self.windows()}:
+            raise FoundryError(f"window {window_id} belongs to task {window.task_id}, not {self.id}")
+
+    def _write_sessions(self, rows: list[dict[str, Any]]) -> None:
+        write_text_atomic(self.sessions_path, "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows
+        ))
+
+    @staticmethod
+    def _revised_context(row: dict[str, Any], **changes: Any) -> dict[str, Any]:
+        previous = {key: row.get(key) for key in (
+            "context_revision", "window_id", "workspace_id", "workspace_path", "snapshot_ids"
+        )}
+        return {
+            **row, **changes,
+            "context_revision": int(row.get("context_revision", 1)) + 1,
+            "context_history": [*row.get("context_history", []), previous],
+            "context_updated_at": now_iso(),
+        }
+
+    def update_session_context(
+        self, session_id: str, *, window_id: str | None = None,
+        snapshot_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Advance only this registered session, retaining earlier revisions.
+
+        Snapshot ids are immutable analysis dataset ids; legacy windows have a
+        separate window_id field and never masquerade as analysis datasets.
+        """
+        cleaned = str(session_id).strip()
+        with exclusive(self.store.var_root / ".sessions.lock", timeout=TASK_LOCK_TIMEOUT):
+            owner = session_owner(self.store, cleaned)
+            if owner is None or owner.id != self.id:
+                raise FoundryError(f"session {cleaned} is not registered on task {self.id}")
+            registered = next(row for row in self.sessions() if row["session_id"] == cleaned)
+            if window_id is not None:
+                self._validate_session_window(window_id)
+            if snapshot_ids is not None:
+                if registered.get("parent_session_id"):
+                    ceiling = set(registered.get("snapshot_ceiling", registered.get("snapshot_ids", [])))
+                    if not set(snapshot_ids).issubset(ceiling):
+                        raise FoundryError("a child session cannot expand its inherited snapshot context")
+                for snapshot_id in snapshot_ids:
+                    if not TASK_ID_RE.fullmatch(str(snapshot_id)):
+                        raise FoundryError(f"not a snapshot id: {snapshot_id}")
+                    if not (self.root / "analysis" / "datasets" / snapshot_id / "meta.json").is_file():
+                        raise FoundryError(f"snapshot {snapshot_id} is not registered on task {self.id}")
+            with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
+                rows = self.sessions()
+                row = next(row for row in rows if row["session_id"] == cleaned)
+                changes: dict[str, Any] = {}
+                if window_id is not None and row.get("window_id") != window_id:
+                    changes["window_id"] = window_id
+                if snapshot_ids is not None:
+                    # Concurrent imports append their immutable snapshots rather
+                    # than dropping a snapshot added since the caller resolved.
+                    merged = list(dict.fromkeys([*row.get("snapshot_ids", []), *snapshot_ids]))
+                    if row.get("snapshot_ids", []) != merged:
+                        changes["snapshot_ids"] = merged
+                if not changes:
+                    return row
+                updated = self._revised_context(row, **changes)
+                rows[rows.index(row)] = updated
+                self._write_sessions(rows)
+                return updated
 
     # -- deliverables ----------------------------------------------------
 
@@ -460,23 +590,25 @@ def resolve_task(
     *,
     explicit: str | None = None,
     window_task_ids: tuple[str | None, ...] = (),
+    session_id: str | None = None,
     env: dict[str, str] | None = None,
 ) -> Task | None:
-    """Decide which task a call belongs to. Code decides; no model is asked.
+    """Resolve registered sessions first, without ambient fallback.
 
-    First hit wins:
-
-    1. an explicit ``--task``
-    2. ``FOUNDRY_TASK`` in the environment, which the app sets when it opens a
-       session
-    3. the back-pointer of a window the caller already named -- the brief's
-       window for a follow-up, the current window for a period step
-    4. nothing, and the call is recorded unassigned
-
-    The session id is deliberately absent from this chain. One dsh process
-    hosts many conversations, so a session cannot come from the environment;
-    it arrives per call from the runtime and is passed through separately.
+    Sessionless operator calls retain explicit task, environment, and window
+    back-pointer precedence. The CLI resolves the addressed task's window
+    separately, so another task becoming current cannot redirect a session.
     """
+    if session_id:
+        task = session_owner(store, session_id)
+        if task is None:
+            raise FoundryError(f"unknown session {session_id}; run record-session before calling tools")
+        if explicit and explicit != task.id:
+            raise FoundryError(f"session {session_id} already belongs to task {task.id}, not {explicit}")
+        for owner_id in window_task_ids:
+            if owner_id and owner_id != task.id:
+                raise FoundryError(f"session {session_id} already belongs to task {task.id}, not {owner_id}")
+        return task
     environ = os.environ if env is None else env
     if explicit:
         return store.get(explicit)

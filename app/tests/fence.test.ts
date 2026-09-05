@@ -83,10 +83,10 @@ describe('what the embedded page may not do', () => {
       const reason = FENCE_REASON[method];
       expect(reason.length).toBeGreaterThan(20);
     }
-    expect(FENCE_REASON['session.create']).toContain('开始本期');
-    expect(FENCE_REASON['session.create']).toContain('写方法');
+    expect(FENCE_REASON['session.create']).toContain('分析页');
+    expect(FENCE_REASON['session.create']).toContain('继续分析');
     expect(FENCE_REASON['session.fork']).toContain('追问');
-    expect(FENCE_REASON['agentPreset.select']).toContain('query-locked');
+    expect(FENCE_REASON['agentPreset.select']).toContain('旧版期间流程');
   });
 });
 

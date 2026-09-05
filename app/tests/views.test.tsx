@@ -242,7 +242,7 @@ describe('the shell', () => {
    * form for naming a period in front of the runtime that explains why anyone
    * would name one.
    */
-  it('puts the workbench first among the destinations', async () => {
+  it('keeps analysis and conversation in one destination while retaining the archive', async () => {
     const { Shell } = await import('../src/components/Shell.js');
     const { container } = render(
       <Shell screen="workbench" onScreen={() => {}}>
@@ -250,8 +250,9 @@ describe('the shell', () => {
       </Shell>,
     );
     const tabs = [...container.querySelectorAll('.fnd-head__tab')].map((n) => n.textContent);
-    expect(tabs).toEqual(['工作台', '数据台', '任务', '交付物']);
-    expect(container.querySelector('.fnd-head__tab[aria-current="page"]')?.textContent).toBe('工作台');
+    expect(tabs).toEqual(['工作区', '成果库']);
+    expect(container.querySelector('.fnd-head__tab[aria-current="page"]')?.textContent).toBe('工作区');
+    expect(screen.queryByRole('button', { name: '对话' })).toBeNull();
   });
 
   /*
@@ -291,7 +292,7 @@ describe('the task bar', () => {
   const noop = () => {};
   const bar = async () => (await import('../src/views/Workbench.js')).TaskBar;
 
-  it('carries the three ways in, so the runtime is not behind a screen', async () => {
+  it('offers direct analysis and keeps legacy workflows in a selector', async () => {
     // They used to be cards on a panel the harness view covered, reachable only
     // after a task had been made on another screen and opened on a third.
     const TaskBar = await bar();
@@ -308,7 +309,7 @@ describe('the task bar', () => {
       />,
     );
     for (const label of ['写方法', '开始本期', '追问']) {
-      expect(screen.getByRole('button', { name: new RegExp(label) })).toBeTruthy();
+      expect(screen.getByRole('option', { name: label })).toBeTruthy();
     }
   });
 
@@ -326,7 +327,7 @@ describe('the task bar', () => {
         onOpen={noop}
       />,
     );
-    expect(screen.getByRole('button', { name: /开始本期/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /继续分析/ }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText('还没有选任务')).toBeTruthy();
   });
 
@@ -350,7 +351,7 @@ describe('the task bar', () => {
         onOpen={noop}
       />,
     );
-    expect(screen.getByText(/会话不是从这里开的/)).toBeTruthy();
+    expect(screen.getByText(/选择任务后继续分析/)).toBeTruthy();
   });
 
   it('names the role, the round and the preset once one did', async () => {
@@ -372,7 +373,7 @@ describe('the task bar', () => {
         onOpen={noop}
       />,
     );
-    expect(screen.getByText(/本会话 期间 · 第 1 轮 · period/)).toBeTruthy();
+    expect(screen.getByText(/期间 · 第 1 轮/)).toBeTruthy();
   });
 
   it('switches the binding, and asks for a new task through the same control', async () => {

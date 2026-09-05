@@ -1,5 +1,6 @@
 appId: com.foundry.finance-skill-foundry
 productName: FA Foundry
+afterPack: scripts/check-packaged-font.cjs
 directories:
   output: release
   buildResources: build
@@ -68,6 +69,11 @@ extraResources:
     to: dsh
     filter:
       - 'PIN'
+  # The native conversation loads the same offline font as the React shell.
+  - from: extra/dsh/assets/fonts
+    to: dsh/assets/fonts
+    filter:
+      - 'NotoSansSC-variable.woff2'
   # The frozen `foundry` CLI. The app shells out to it for every read and for the
   # wiring steps, so without it a packed build only works where the kit is
   # already installed.

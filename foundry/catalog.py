@@ -192,7 +192,7 @@ def _refuse_uncached_xlsx_formulas(path: Path, sheet_title: str) -> None:
 
 def _load_json(path: Path) -> tuple[list[str], list[tuple[Any, ...]]]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"), parse_float=Decimal)
     except json.JSONDecodeError as exc:
         raise LockRefused(f"invalid JSON table: {path}") from exc
     if isinstance(payload, dict) and "headers" in payload and "rows" in payload:

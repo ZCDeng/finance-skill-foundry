@@ -1,12 +1,4 @@
-/*
- * The faces are imported here and only here.
- *
- * They used to be pulled in from `tokens.css`, which both this file and
- * `components.css` import -- so the 118 `@font-face` rules were emitted into
- * the bundle twice, and the built stylesheet was 236 KB where half of it was a
- * second copy of the same table. Tokens are custom properties and cost nothing
- * to repeat; a font table is not.
- */
+/* Register bundled fonts once; token imports carry no font assets. */
 @import './fonts.css';
 @import './tokens.css';
 
@@ -30,12 +22,7 @@ body {
 html {
   font-family: var(--fnd-font-sans);
   line-height: var(--fnd-leading-body);
-  /*
-   * Both bundled faces are Regular only. Without this, Chromium fakes a bold at
-   * any requested weight of 600 or more by smearing the outline sideways, which
-   * is the one thing a pixel face must not have done to it, and it fills the
-   * counters on the Chinese face. Hierarchy comes from size, case and colour.
-   */
+  /* Both fonts provide real weights; never synthesize a missing face. */
   font-synthesis-weight: none;
 }
 
@@ -70,7 +57,7 @@ h3 {
 h2 {
   font-family: var(--fnd-font-display);
   font-size: var(--fnd-size-h2);
-  line-height: 48px;
+  line-height: 32px;
 }
 
 h3 {
@@ -96,3 +83,10 @@ button {
   font: inherit;
   color: inherit;
 }
+
+input, textarea, select { font: inherit; color: inherit; caret-color: var(--fnd-accent-text); }
+::placeholder { color: var(--fnd-muted); opacity: 1; }
+::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
+a { text-underline-offset: 3px; }
+:where(button, a, input, textarea, select, [tabindex]):focus-visible { outline-color: var(--fnd-line-hover); }
+[hidden] { display: none !important; }

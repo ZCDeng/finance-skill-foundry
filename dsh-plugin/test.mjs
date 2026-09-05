@@ -208,10 +208,8 @@ for (const toolName of ["emit-brief", "query-locked", "record-reference"]) {
 
 // -- binding --------------------------------------------------------------
 //
-// The task rides the environment the host set when it opened the session. The
-// session cannot: one dsh process hosts many conversations, so it is read per
-// call off the agent the loop attached to this execution. Both are top-level
-// flags and must land in front of the subcommand, or argparse rejects them.
+// Runtime calls resolve their task from a durable session. A process-wide
+// FOUNDRY_TASK belongs only to direct operator calls and must not cross sessions.
 {
   const mark = readFileSync(log, "utf8").trim().split("\n").length;
   process.env.FOUNDRY_TASK = "task-abc";
@@ -220,8 +218,6 @@ for (const toolName of ["emit-brief", "query-locked", "record-reference"]) {
   assert.deepEqual(line, [
     "--var",
     process.env.FOUNDRY_VAR,
-    "--task",
-    "task-abc",
     "--session",
     "sess-42",
     "emit-brief",

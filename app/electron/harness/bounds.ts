@@ -30,6 +30,41 @@ export interface Rect {
   height: number;
 }
 
+export interface HarnessLayout extends Rect { revision: number }
+
+/** Renderer CSS coordinates are converted once using the sender's actual zoom. */
+export class PaneGeometry {
+  private requested: Rect | null = null;
+  private revision = -1;
+  private zoom = 1;
+
+  accept(value: unknown, zoom: number): boolean {
+    if (!value || typeof value !== 'object') throw new Error('invalid harness layout');
+    const rect = value as HarnessLayout;
+    for (const key of ['x', 'y', 'width', 'height', 'revision'] as const) {
+      if (typeof rect[key] !== 'number' || !Number.isFinite(rect[key]) || rect[key] < 0 || rect[key] > Number.MAX_SAFE_INTEGER) {
+        throw new Error(`invalid harness layout ${key}`);
+      }
+    }
+    if (!Number.isSafeInteger(rect.revision) || !Number.isFinite(zoom) || zoom <= 0 || zoom > 10) throw new Error('invalid harness layout revision or zoom');
+    if (rect.revision <= this.revision) return false;
+    this.revision = rect.revision;
+    this.zoom = zoom;
+    this.requested = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    return true;
+  }
+
+  bounds(content: { width: number; height: number }): Rect {
+    if (!this.requested) return viewBounds(content);
+    const raw = this.requested;
+    const x = Math.min(content.width, Math.round(raw.x * this.zoom));
+    const y = Math.min(content.height, Math.max(Math.round(HEADER_HEIGHT * this.zoom), Math.round(raw.y * this.zoom)));
+    const right = Math.min(content.width, Math.round((raw.x + raw.width) * this.zoom));
+    const bottom = Math.min(content.height, Math.round((raw.y + raw.height) * this.zoom));
+    return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+  }
+}
+
 /**
  * The rectangle the harness gets, given the window's content size.
  *

@@ -207,6 +207,7 @@ export function rpcValue(method: string, body: unknown): unknown {
  * for the period loop, and this is not it.
  */
 export const PRESET_BY_INTENT = {
+  analysis: 'analysis',
   author: 'standard',
   period: 'period',
   followup: 'f3',
@@ -228,7 +229,7 @@ export type Intent = keyof typeof PRESET_BY_INTENT;
  * cannot open one at all -- `fence.ts` refuses `session.create`. So this moves
  * a label rather than a permission.
  */
-export const DEFAULT_PRESET = PRESET_BY_INTENT.period;
+export const DEFAULT_PRESET = PRESET_BY_INTENT.analysis;
 
 /**
  * The `settings.update` payload that names it.
@@ -244,6 +245,7 @@ export function defaultPresetPatch(preset: string = DEFAULT_PRESET): Record<stri
 
 /** The session role each intent records on the task. Same word the store uses. */
 export const ROLE_BY_INTENT = {
+  analysis: 'analysis',
   author: 'author',
   period: 'period',
   followup: 'followup',

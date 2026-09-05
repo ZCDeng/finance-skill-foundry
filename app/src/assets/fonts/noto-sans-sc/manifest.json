@@ -1,0 +1,105 @@
+{
+  "source": {
+    "repository": "https://github.com/google/fonts",
+    "commit": "5e35378e6bda803962ee6fd257e444a7d459660d",
+    "path": "ofl/notosanssc/NotoSansSC[wght].ttf",
+    "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+    "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+    "bytes": 17772300
+  },
+  "license": {
+    "name": "SIL Open Font License 1.1",
+    "url": "https://raw.githubusercontent.com/google/fonts/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notosanssc/OFL.txt",
+    "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+  },
+  "output": {
+    "file": "NotoSansSC-variable.woff2",
+    "sha256": "97a715fad95d3cacf4838b1ffedb123d2f1bf0f6bbd726c73e147dcaf317869f",
+    "bytes": 8490924
+  },
+  "build": {
+    "fonttools": "4.63.0",
+    "subset": false,
+    "woff2_transformed_tables": [],
+    "recalc_timestamp": false
+  },
+  "family": "Noto Sans SC",
+  "axes": [
+    {
+      "tag": "wght",
+      "min": 100.0,
+      "default": 100.0,
+      "max": 900.0
+    }
+  ],
+  "coverage": {
+    "codepoints": 30890,
+    "glyphs": 31036
+  },
+  "numerals": {
+    "mode": "equal-default-advances",
+    "has_tnum_feature": false
+  },
+  "weights": {
+    "400": {
+      "digit_advances": [
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625,
+        555.3212890625
+      ],
+      "outline_sha256": "c62f3efe778543b6229a6b2c19aa6fc87bef99b81fac239a6e80dc00b16ba399"
+    },
+    "500": {
+      "digit_advances": [
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625,
+        570.27978515625
+      ],
+      "outline_sha256": "ebb273acf1f4ed2a19b3780305e4edb88634fd0ec9036035b5fb3d37aade0d7d"
+    },
+    "600": {
+      "digit_advances": [
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625,
+        579.961181640625
+      ],
+      "outline_sha256": "a3f59c5b74581ae3bf47a8f48caf12fdeac1068cf21ca3a9516db162ffef3a7a"
+    },
+    "700": {
+      "digit_advances": [
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125,
+        589.642578125
+      ],
+      "outline_sha256": "9291b32dd9c1680e88ab2b62d79fcbda57495663a9317cb555bc91b0ff36e682"
+    }
+  }
+}

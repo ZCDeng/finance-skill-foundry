@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -256,8 +257,8 @@ describe('the environment the Univer gateway and its worker get', () => {
     // dark window. `nativeTheme.themeSource` is the one switch that reaches a
     // page this app does not own, and it is set before any page is loaded.
     const source = read('../electron/main.ts');
-    expect(source).toContain("nativeTheme.themeSource = 'dark'");
-    expect(source.indexOf("nativeTheme.themeSource = 'dark'")).toBeLessThan(source.indexOf('createWindow();'));
+    expect(source).toContain("nativeTheme.themeSource = 'system'");
+    expect(source.indexOf("nativeTheme.themeSource = 'system'")).toBeLessThan(source.indexOf('createWindow();'));
   });
 
   it('closes the page when a pane is detached, not only the view', () => {
@@ -335,21 +336,51 @@ describe('the button decides the preset', () => {
 });
 
 describe('the hand-off', () => {
-  it('uses the storage cells the installed runtime reads', () => {
-    // Coupling to keys upstream owns, so a rename there has to become a red test
-    // rather than a hand-off that silently does nothing.
-    const install = process.env.FOUNDRY_DSH_INSTALL;
-    if (!install) return;
-    const client = readFileSync(
-      `${install}/node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js`,
-      'utf8',
-    );
-    expect(client).toContain(SESSION_SELECTION_KEY);
-    const conversation = readFileSync(
-      `${install}/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js`,
-      'utf8',
-    );
-    expect(conversation).toContain(CHAT_STORE_PREFIX);
+  const install = process.env.FOUNDRY_DSH_INSTALL ?? fileURLToPath(new URL('../extra/dsh', import.meta.url));
+  const runtimePath = `${install}/node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js`;
+
+  it.skipIf(!existsSync(runtimePath))('rehydrates selection and the full chat state through the installed client', () => {
+    const storage = new Map<string, string>();
+    const localStorage = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    };
+    let runtime: Record<string, any> = {};
+    runInNewContext(readFileSync(runtimePath, 'utf8'), {
+      window: { __ModuleLoader__: { load: ({ factory }: { factory: (require: (name: string) => unknown) => Record<string, any> }) => {
+        runtime = factory((name) => name === '@deepseek-ai/cordis' ? { Service: class {} } : {});
+      } } },
+      localStorage, console, queueMicrotask,
+    });
+    new Function('window', handoffScript('session-fixture', '比较本月利润'))({ localStorage });
+    // Execute the actual upstream constructor: a primitive string can be in
+    // storage yet restores no session because the client reads .sessionId.
+    const sessions = new runtime.SessionRuntime({ get: () => undefined, reflect: { provide: () => {} } }, {}, {});
+    expect(sessions.manager.selected).toBe('session-fixture');
+
+    const conversation = readFileSync(`${install}/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js`, 'utf8');
+    const start = conversation.indexOf('function createChatStore()');
+    const end = conversation.indexOf('//#endregion', start);
+    expect(start).toBeGreaterThan(-1);
+    const createStore = new Function('_deepseek_ai_dsh_client_runtime_client', `${conversation.slice(start, end)}\nreturn createChatStore();`);
+    const chat = createStore(runtime).create('session-fixture');
+    expect(chat.getSnapshot()).toEqual({ selection: null, draft: '比较本月利润', view: null, inspect: null });
+    chat.actions.setDraft('第二个问题');
+    expect(JSON.parse(storage.get(chatStoreKey('session-fixture'))!)).toEqual({ selection: null, draft: '第二个问题', view: null, inspect: null });
+  });
+
+  it('preserves the existing conversation view when seeding a new question', () => {
+    const storage = new Map([[chatStoreKey('session-fixture'), JSON.stringify({
+      selection: { type: 'tool', id: 'tool-1' }, draft: '旧问题', view: 'trajectory', inspect: { callId: 'call-1' },
+    })]]);
+    new Function('window', handoffScript('session-fixture', '新问题'))({ localStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    } });
+    expect(JSON.parse(storage.get(SESSION_SELECTION_KEY)!)).toEqual({ sessionId: 'session-fixture' });
+    expect(JSON.parse(storage.get(chatStoreKey('session-fixture'))!)).toEqual({
+      selection: { type: 'tool', id: 'tool-1' }, draft: '新问题', view: 'trajectory', inspect: { callId: 'call-1' },
+    });
   });
 
   it('quotes every value it writes into the page', () => {
@@ -620,10 +651,14 @@ describe('the ground a session stands on', () => {
   });
 
   it('is named on every session the app opens', () => {
-    // A preset says which tools exist; the cwd says how far the ones that take
-    // a path can reach. Dropping it here reopens the whole disk silently.
+    // The host registers the directory as a workspace and uses its identity.
+    // A bare cwd neither accounts the session nor enables the native composer;
+    // the API also rejects sending cwd and workspaceId together.
     const host = read('../electron/harness/host.ts');
-    expect(host).toContain("this.rpc('session.create', { agentPreset: preset, cwd })");
+    expect(host).toContain("this.rpc('workspace.create', { path: cwd })");
+    expect(host).toContain("this.rpc('session.create', { agentPreset: preset, workspaceId })");
+    expect(host).toContain("this.rpc('session.create', { sessionId, workspaceId })");
+    expect(host).not.toMatch(/this\.rpc\('session\.create',\s*\{[^}]*\bcwd\b/);
     const register = read('../electron/ipc/register.ts');
     expect(register).toContain('ensureTaskWorkspace(harness.userData(), task)');
   });

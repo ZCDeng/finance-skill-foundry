@@ -40,7 +40,7 @@ export interface WindowRow {
 
 export interface SessionRow {
   session_id: string;
-  role: 'author' | 'period' | 'followup';
+  role: 'author' | 'period' | 'followup' | 'analysis';
   opened_at: string;
   /** What the leader actually asked, when the operator wrote it down. */
   leader_verbatim?: string;

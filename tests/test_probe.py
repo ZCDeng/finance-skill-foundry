@@ -105,7 +105,12 @@ def test_mark_done_after_probe(tmp_path: Path) -> None:
     skill.mkdir()
     (skill / "SKILL.md").write_text(authored_skill_text())
     write_contract(skill)
-    mark_done(skill, tmp_path / "var", FIXTURES)
+    status = mark_done(skill, tmp_path / "var", FIXTURES)
+    assert status == {
+        "contract_status": "valid",
+        "engine_status": "passed",
+        "method_status": "not_executed",
+    }
 
 
 def test_questions_file_detected() -> None:

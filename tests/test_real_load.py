@@ -109,16 +109,106 @@ export function apply(ctx) {
   // key it hands back is what `schemas` resolves the preset's own layer through,
   // so this is the tool list an agent on that preset would actually be offered.
   (async () => {
-    for (const id of ["period", "f3", "standard"]) {
+    for (const id of ["period", "f3", "analysis", "standard"]) {
       try {
         const key = await ctx.agentPresets.standingKeyFor(id);
         const names = ctx.tools.schemas(key).map((s) => s.name).sort();
         process.stdout.write(`FOUNDRY_PRESET ${id} ${JSON.stringify(names)}\\n`);
+        const { createScope } = await import(process.env.FOUNDRY_SCOPE_MODULE);
+        const agent = {id: `probe-${id}`};
+        const scope = createScope(ctx, agent);
+        await ctx.agentPresets.mount(scope.ctx, id);
+        const actual = ctx.tools.schemas(agent).map((s) => s.name).sort();
+        process.stdout.write(`FOUNDRY_AGENT ${id} ${JSON.stringify(actual)}\\n`);
+        await scope.dispose();
       } catch (error) {
         process.stdout.write(`FOUNDRY_PRESET ${id} ERR ${error.message}\\n`);
       }
     }
   })();
+}
+"""
+
+# A deterministic local model drives the actual Agent/subagent runtime. No
+# provider credentials or remote completions are needed to prove the lifecycle.
+ANALYSIS_RUNTIME_PROBE = r"""
+export const name = 'foundry-tool-probe';
+export const inject = ['tools', 'agentPresets', 'llm', 'agents', 'subagents'];
+export function apply(ctx) {
+  (async () => {
+    const { LlmAdapter, createUserMessage } = await import(process.env.FOUNDRY_LLM_MODULE);
+    const { invokeFoundry } = await import(process.env.FOUNDRY_PLUGIN_MODULE);
+    const observed = {}, calls = new Map();
+    let cancelledFixture = false;
+    ctx.llm.registerAdapter(['foundry-local-fixture'], new class extends LlmAdapter {
+      async *stream(options) {
+        options.signal?.throwIfAborted();
+        const id = options.sessionId;
+        const count = calls.get(id) ?? 0;
+        calls.set(id, count + 1);
+        observed[id] ??= {tools: options.tools.map(t => t.name), history: options.messages};
+        if (id !== 'runtime-parent' && !cancelledFixture && JSON.stringify(options.messages).includes('WAIT_FOR_CANCEL')) {
+          cancelledFixture = true;
+          await new Promise((resolve, reject) => {
+            if (options.signal.aborted) reject(options.signal.reason);
+            else options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true});
+          });
+        }
+        let block;
+        if (id !== 'runtime-parent' && count === 0) {
+          block = {type: 'tool-call', id: `state-${id}`, name: 'analysis-state', arguments: '{}'};
+        } else {
+          if (id !== 'runtime-parent') observed[id].result = options.messages;
+          block = {type: 'text', text: id === 'runtime-parent' ? 'parent history acknowledged' : 'child checked bound state'};
+        }
+        yield {type: 'block-start', index: 0, blockType: block.type};
+        yield {type: 'block-end', index: 0, block};
+        yield {type: 'finish', reason: {kind: block.type === 'tool-call' ? 'tool-calls' : 'stop'}};
+      }
+    }());
+    // standing composition awaits the same dependencies as a real web session.
+    await ctx.agentPresets.standingKeyFor('analysis');
+    const handle = await ctx.agents.create({
+      sessionId: 'runtime-parent', meta: {cwd: process.env.FOUNDRY_TEST_WORKSPACE, agentPreset: 'analysis'},
+      agentOptions: {provider: 'foundry-local-fixture', model: 'deterministic'},
+      setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, 'analysis'); },
+    });
+    const parent = handle.agent;
+    try {
+      parent.followup(createUserMessage({content: [{type: 'text', text: 'UNIQUE_COMPLETED_PARENT_HISTORY'}], source: {kind: 'user'}}));
+      await parent.whenIdle();
+      const dispatch = async (name, args) => {
+        const result = await ctx.tools.execute({callId: `probe-${name}-${Date.now()}`, name,
+          arguments: args, agent: parent, signal: new AbortController().signal});
+        if (result.isError) throw new Error(JSON.stringify(result.error));
+        return JSON.parse(result.value.stdout);
+      };
+      const jobs = [];
+      for (const mode of ['spawn', 'fork']) {
+        let job = await dispatch('analysis-delegate', {prompt: 'Read analysis-state and summarize the bound task.', label: mode, mode});
+        const deadline = Date.now() + 15000;
+        while (!['completed', 'failed', 'cancelled'].includes(job.status) && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 40));
+          job = JSON.parse(await invokeFoundry(['analysis-job-show', '--job', job.id], {agent: parent}));
+        }
+        jobs.push(job);
+      }
+      const pending = await dispatch('analysis-delegate', {prompt: 'WAIT_FOR_CANCEL', label: '取消测试', mode: 'spawn'});
+      const admissionDeadline = Date.now() + 5000;
+      while (!observed[pending.child_session_id] && Date.now() < admissionDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      const cancelled = await dispatch('analysis-job-cancel', {job: pending.id});
+      const drained = ctx.agents.get(pending.child_session_id) === undefined;
+      let retried = await dispatch('analysis-job-retry', {job: pending.id});
+      const retryDeadline = Date.now() + 15000;
+      while (!['completed', 'failed', 'cancelled'].includes(retried.status) && Date.now() < retryDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        retried = JSON.parse(await invokeFoundry(['analysis-job-show', '--job', retried.id], {agent: parent}));
+      }
+      process.stdout.write('FOUNDRY_RUNTIME ' + JSON.stringify({jobs, observed, cancelled, drained, retried}) + '\n');
+    } finally { await handle.dispose(); }
+  })().catch(error => process.stdout.write('FOUNDRY_RUNTIME_ERROR ' + (error.stack ?? error.message) + '\n'));
 }
 """
 
@@ -204,6 +294,78 @@ def _prepare(home: Path, probe: Path, profile: str) -> None:
     for source in (probe, PLUGIN, *( [office] if office else [] )):
         added = _dsh(home, "plugin", "--profile", profile, "add", str(source))
         assert added.returncode == 0, added.stderr
+
+
+@needs_dsh
+def test_analysis_real_spawn_and_fork_inherit_bound_context_and_settle(tmp_path):
+    from foundry.analysis import AnalysisStore
+    from foundry.harness import install_presets
+    from foundry.task import TaskStore
+
+    home = tmp_path / "dsh-home"
+    _prepare(home, _probe_package(tmp_path / "probe", ANALYSIS_RUNTIME_PROBE), "web")
+    install_presets(home)
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="真实子任务")
+    task.record_session("runtime-parent", role="analysis")
+    source = tmp_path / "source.csv"
+    source.write_text("revenue\n70.01\n")
+    dataset = AnalysisStore(task).add_dataset(source, name="实际")
+    task.update_session_context("runtime-parent", snapshot_ids=[dataset["id"]])
+    workspace = task.root / "analysis"
+    argv, env, cwd = _dsh_args(home, "--profile", "web", "--no-open")
+    env.update({
+        "FOUNDRY_VAR": str(var), "FOUNDRY_BIN": str(ROOT / ".venv" / "bin" / "foundry"),
+        "FOUNDRY_LLM_MODULE": (Path(DSH_BIN).resolve().parents[2] / "dsh-llm" / "lib" / "index.js").as_uri(),
+        "FOUNDRY_PLUGIN_MODULE": (PLUGIN / "index.js").as_uri(),
+        "FOUNDRY_TEST_WORKSPACE": str(workspace),
+    })
+    log = tmp_path / "runtime.log"
+    with log.open("wb") as sink:
+        child = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=env, cwd=cwd)
+        try:
+            deadline = time.monotonic() + WEB_SETTLE_SECONDS
+            while time.monotonic() < deadline:
+                output = log.read_text(errors="replace")
+                if "FOUNDRY_RUNTIME " in output or "FOUNDRY_RUNTIME_ERROR " in output:
+                    break
+                time.sleep(0.2)
+        finally:
+            child.terminate()
+            try:
+                child.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
+    output = log.read_text(errors="replace")
+    assert "FOUNDRY_RUNTIME_ERROR " not in output, output[-12000:]
+    lines = [line for line in output.splitlines() if line.startswith("FOUNDRY_RUNTIME ")]
+    assert lines, output[-12000:]
+    result = json.loads(lines[-1].split(" ", 1)[1])
+    assert len(result["jobs"]) == 2
+    assert result["cancelled"]["status"] == "cancelled"
+    assert result["drained"] is True
+    assert result["retried"]["status"] == "completed", result["retried"]
+    assert result["retried"]["retry_of"] == result["cancelled"]["id"]
+    assert result["retried"]["child_session_id"] != result["cancelled"]["child_session_id"]
+    assert result["retried"]["context_hash"] == result["cancelled"]["context_hash"]
+    for job in result["jobs"]:
+        assert job["status"] == "completed", job
+        assert job["task_id"] == task.id
+        assert job["snapshot_ids"] == [dataset["id"]]
+        observed = result["observed"][job["child_session_id"]]
+        assert "analysis-state" in observed["tools"]
+        assert not set(observed["tools"]) & {"analysis-delegate", "analysis-draft", "dataset-add", "bash", "create"}
+        serialized_history = json.dumps(observed["history"])
+        assert ("UNIQUE_COMPLETED_PARENT_HISTORY" in serialized_history) == (job["spec"]["mode"] == "fork")
+        # The child's model requested the tool through the real agent loop. Its
+        # actual return must contain this child's registered scope, not ambient.
+        actual_results = [message for message in observed["result"] if message["source"]["kind"] == "tool"]
+        assert actual_results
+        serialized_results = json.dumps(actual_results)
+        assert job["child_session_id"] in serialized_results
+        assert dataset["id"] in serialized_results
+        assert task.id in serialized_results
 
 
 # --- headless: the tool rows are the tool set ------------------------------
@@ -294,7 +456,8 @@ def web_presets(tmp_path_factory) -> dict[str, list[str]]:
 
     install_presets(home)
 
-    argv, env, cwd = _dsh_args(home, "--profile", "web")
+    argv, env, cwd = _dsh_args(home, "--profile", "web", "--no-open")
+    env["FOUNDRY_SCOPE_MODULE"] = (Path(DSH_BIN).resolve().parents[2] / "dsh-scope" / "lib" / "index.js").as_uri()
     log = tmp / "web.log"
     with log.open("wb") as sink:
         child = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=env, cwd=cwd)
@@ -302,7 +465,7 @@ def web_presets(tmp_path_factory) -> dict[str, list[str]]:
             deadline = time.monotonic() + WEB_SETTLE_SECONDS
             while time.monotonic() < deadline:
                 text = log.read_text(encoding="utf-8", errors="replace")
-                if len([l for l in text.splitlines() if l.startswith("FOUNDRY_PRESET ")]) >= 3:
+                if len([l for l in text.splitlines() if l.startswith("FOUNDRY_AGENT ")]) >= 4:
                     break
                 time.sleep(0.5)
         finally:
@@ -321,7 +484,13 @@ def web_presets(tmp_path_factory) -> dict[str, list[str]]:
         assert not rest.startswith("ERR"), f"{preset_id}: {rest}"
         reported[preset_id] = json.loads(rest)
     assert reported, f"no preset was measured; log tail={text[-2000:]}"
-    return reported
+    actual = {}
+    for line in text.splitlines():
+        if line.startswith("FOUNDRY_AGENT "):
+            _, preset_id, value = line.split(" ", 2)
+            actual[preset_id] = json.loads(value)
+    assert actual == reported, f"actual agent tools differ from standing presets: {actual}; standing={reported}"
+    return actual
 
 
 @needs_dsh
@@ -406,3 +575,16 @@ def test_the_stock_preset_is_still_the_wide_one(web_presets) -> None:
     standard = set(web_presets["standard"])
     assert REACH & standard, "the stock preset narrowed; re-derive ours from it"
     assert set(ROSTER) <= standard, "foundry's global registration stopped reaching a preset agent"
+
+
+@needs_dsh
+def test_analysis_preset_exposes_executable_analysis_without_legacy_tools(web_presets):
+    profile = FOUNDRY_DSH["profiles"]["analysis"]
+    offered = set(web_presets["analysis"])
+    assert offered == set(profile["tools"] + profile["harnessTools"])
+    assert not set(ROSTER) & offered
+    assert not REACH & offered
+    assert not any(name.startswith("univer_") for name in offered)
+    # Mounting the new preset must not widen another session's tool scope.
+    for legacy in ("period", "f3", "standard"):
+        assert not set(profile["tools"]) & set(web_presets[legacy])

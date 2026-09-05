@@ -49,9 +49,9 @@ export type Wiring =
 
 /** What a stopped step costs, in the operator's terms rather than the code's. */
 export const WIRING_CONSEQUENCE: Record<WiringStep, string> = {
-  plugin: '期间工具没有装进 FA Foundry harness。会话里调不到 create / import / lock, 模型也看不见它们。',
-  presets: '期间和追问的 agent preset 没有装上。开出来的会话会跑在上游的 standard 上, 那道围栏不在。',
-  attach: 'FA Foundry harness 没有起来, 工作台是空的。',
+  plugin: '分析工具未能加载，暂时无法在对话中读取资料或计算。',
+  presets: '分析助手配置未能加载，请查看下方错误后重试。',
+  attach: '对话服务未能启动；已保存的资料和分析仍可在工作台查看。',
 };
 
 /**

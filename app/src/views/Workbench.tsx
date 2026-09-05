@@ -9,7 +9,7 @@ import {
 import { APP_NAME } from '../components/Shell.js';
 import type { HarnessStatus, TaskDetail, TaskRow } from '../bridge.js';
 
-export type Intent = 'author' | 'period' | 'followup';
+export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
 export interface OpenSession {
   sessionId: string;
@@ -27,6 +27,7 @@ export interface OpenSession {
  * runs against one. So the button says 写方法 and the hint says what it is for.
  */
 const INTENTS: { id: Intent; label: string; hint: string; Icon: typeof PlayCircle }[] = [
+  { id: 'analysis', label: '继续分析', hint: '读取资料、比较、测算与改稿', Icon: PlayCircle },
   {
     id: 'author',
     label: '写方法',
@@ -37,7 +38,7 @@ const INTENTS: { id: Intent; label: string; hint: string; Icon: typeof PlayCircl
   { id: 'followup', label: '追问', hint: 'f3 · 只有 query-locked', Icon: MessagesSquare },
 ];
 
-const ROLE_LABEL: Record<Intent, string> = { author: '写方法', period: '期间', followup: '追问' };
+const ROLE_LABEL: Record<Intent, string> = { analysis: '财务分析', author: '写方法', period: '期间', followup: '追问' };
 
 /** The value the picker uses for its one entry that is not a task. */
 const NEW_TASK = '__new__';
@@ -103,7 +104,7 @@ export function TaskBar({
         <option value={NEW_TASK}>＋ 新建任务…</option>
       </select>
 
-      {task ? (
+      {task && session?.intent !== 'analysis' ? (
         <>
           <span className="fnd-taskbar__sep">/</span>
           <span className="fnd-muted">
@@ -130,12 +131,12 @@ export function TaskBar({
        */}
       <span className="fnd-muted">
         {session
-          ? `本会话 ${ROLE_LABEL[session.intent]} · 第 ${round} 轮 · ${session.preset}`
-          : '会话不是从这里开的 · 期间工具会落到当前窗口'}
+          ? `${ROLE_LABEL[session.intent]}${session.intent === 'analysis' ? '' : ` · 第 ${round} 轮`}`
+          : '选择任务后继续分析'}
       </span>
 
       <span className="fnd-taskbar__spacer" />
-      {INTENTS.map(({ id, label, Icon }) => (
+      {INTENTS.filter(({ id }) => id === 'analysis').map(({ id, label, Icon }) => (
         <button
           key={id}
           type="button"
@@ -149,6 +150,11 @@ export function TaskBar({
           {label}
         </button>
       ))}
+      <select className="fnd-picker" aria-label="旧版期间流程" value="" disabled={!task || busy}
+        onChange={(event) => { if (event.target.value) onOpen(event.target.value as Intent); }}>
+        <option value="">旧版期间流程…</option>
+        {INTENTS.filter(({ id }) => id !== 'analysis').map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+      </select>
     </div>
   );
 }

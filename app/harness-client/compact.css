@@ -1,0 +1,28 @@
+/* Only applied by the pinned adapter; every selector belongs to its checked build. */
+[data-foundry-frame] { display:block !important; }
+[data-foundry-frame] > .pI_x6G_sidebarCol { position:absolute; top:0; right:8px; z-index:11; width:32px; height:34px; overflow:visible; border:0; background:transparent; }
+[data-foundry-settings] { display:flex; align-items:center; height:34px; }
+[data-foundry-frame] > .pI_x6G_centerCol { height:100%; padding-top:34px; box-sizing:border-box; }
+[data-foundry-frame] > .pI_x6G_detailsCol { position:absolute; inset:34px 0 0; background:var(--dsw-alias-bg-base); z-index:10; }
+[data-foundry-frame][data-details-collapsed] > .pI_x6G_detailsCol { visibility:hidden; pointer-events:none; }
+[data-foundry-frame]:not([data-details-collapsed]) > .pI_x6G_centerCol { visibility:hidden; }
+[data-foundry-frame] .wSkVaW_header { padding:4px 12px 0; }
+[data-foundry-frame] .wSkVaW_headerUtilities { margin-left:4px; }
+[data-foundry-frame] .wSkVaW_crumb { max-width:180px; }
+[data-foundry-frame] .wSkVaW_tabs { gap:20px; }
+[data-foundry-frame] .wSkVaW_root[data-phase=hero] .wSkVaW_scrollBody { justify-content:flex-end; }
+[data-foundry-frame] .wSkVaW_composerHero { padding-bottom:12px; }
+[data-foundry-empty] { margin:16px; color:var(--dsw-alias-label-tertiary); font-size:14px; line-height:1.6; }
+[data-foundry-frame] [data-composer-card] { border-radius:12px; }
+[data-foundry-frame] textarea { font-size:15px; line-height:1.6; }
+[data-foundry-frame] [role=dialog] { max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); }
+
+/* Native settings retain their slot tree and focus trap; navigation becomes a row. */
+.VOzbGW_panel { flex-direction:column; width:calc(100vw - 16px); max-width:calc(100vw - 16px); height:calc(100vh - 16px); border-radius:12px; }
+.VOzbGW_nav { width:auto; gap:8px; padding:12px 12px 0; }
+.VOzbGW_navTitle { font-size:15px; padding:0; }
+.VOzbGW_navList { flex-direction:row; gap:4px; overflow-x:auto; }
+.VOzbGW_navCell { flex-shrink:0; height:36px; padding:6px 10px; }
+.VOzbGW_header { height:42px; padding:6px 12px; }
+.VOzbGW_options { padding:0 12px 16px; }
+[data-foundry-settings] .VOzbGW_trigger.VOzbGW_rail { width:32px; height:32px; margin:0; }

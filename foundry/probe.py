@@ -223,13 +223,15 @@ def validate_authored_skill(skill_dir: Path) -> None:
         raise FoundryError(f"skill must bind foundry method docs: {','.join(missing_docs)}")
 
 
-def mark_done(skill_dir: Path, var_root: Path, fixtures: Path | None = None) -> None:
+def mark_done(skill_dir: Path, var_root: Path, fixtures: Path | None = None) -> dict[str, str]:
     if skill_contains_questions(skill_dir):
         raise FoundryError("skill must not contain this-window questions")
     validate_authored_skill(skill_dir)
     code = run_probe(var_root, fixture_root(fixtures))
     if code != 0:
         raise FoundryError("fixture probe failed")
+    # The fixture exercises the engine, not the instructions authored above.
+    return {"contract_status": "valid", "engine_status": "passed", "method_status": "not_executed"}
 
 
 def main(argv: list[str] | None = None) -> int:

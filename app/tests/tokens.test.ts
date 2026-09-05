@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const TOKENS = readFileSync(fileURLToPath(new URL('../src/styles/tokens.css', import.meta.url)), 'utf8');
-const SOURCE = '/Users/zcdeng/projects/design-toolkit-app/src/styles/tokens.css';
 
 /** The declarations inside one selector block, as name → value. */
 function block(css: string, selector: string): Record<string, string> {
@@ -62,43 +61,12 @@ function contrast(hex: string, ground: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/**
- * Tokens this product deliberately no longer shares with its source table.
- *
- * The rule above exists so a value cannot drift apart silently. A value that is
- * *meant* to be different has to be named here, which keeps the check sharp on
- * everything else rather than being weakened into uselessness.
- *
- * The two stacks: this product was given its own faces -- Asap Sharp for Latin,
- * LXGW WenKai Mono TC for Chinese -- where `design-toolkit-app` still names
- * Departure Mono and Chocolate Classical Sans. See `fonts.css`.
- *
- * The heavy weight: 700 here and 400 there, and that is a property of the
- * faces rather than a preference. Both of this product's carry a real bold;
- * neither of that one's does, which is the whole of why its own table sets a
- * heavy that is not heavy.
- */
-const DIVERGED = new Set(['--fnd-font-sans', '--fnd-font-display', '--fnd-weight-heavy']);
-
 describe('the token table', () => {
-  it('carries its source values, renamed and not re-derived', () => {
-    // Copied from `design-toolkit-app` on purpose: a change there is worth
-    // carrying over rather than diverging from. This is what makes a silent
-    // divergence fail instead of drift.
-    let source: string;
-    try {
-      source = readFileSync(SOURCE, 'utf8');
-    } catch {
-      return; // the sibling checkout is not on this machine
-    }
-    const theirs = block(source, ':root');
-    const ours = block(TOKENS, ':root');
-    for (const [name, value] of Object.entries(theirs)) {
-      const renamed = name.replace('--dtk-', '--fnd-');
-      if (!(renamed in ours)) continue; // dropped on the way over, by design
-      if (DIVERGED.has(renamed)) continue;
-      expect(ours[renamed], renamed).toBe(value);
-    }
+  it('keeps operational and brand typography independently named', () => {
+    const values = block(TOKENS, ':root');
+    expect(values['--fnd-font-sans']).toMatch(/^'Noto Sans SC'/);
+    expect(values['--fnd-font-brand']).toMatch(/^'Asap Sharp'/);
+    expect(values['--fnd-font-sans']).not.toContain('LXGW');
   });
 
   it('resolves in all three theme states', () => {
@@ -130,7 +98,7 @@ describe('the five words are legible in both themes', () => {
       ['dark', dark, ['#1f1f1f', '#161616']],
     ];
     for (const [theme, table, grounds] of cases) {
-      for (const token of ['--fnd-ink', '--fnd-mark-outside', '--fnd-mark-absent']) {
+      for (const token of ['--fnd-ink', '--fnd-muted', '--fnd-mark-outside', '--fnd-mark-absent']) {
         for (const ground of grounds) {
           const ratio = contrast(table[token], ground);
           expect(ratio, `${theme} ${token} on ${ground} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);

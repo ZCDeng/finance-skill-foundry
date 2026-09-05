@@ -1,6 +1,6 @@
 import { type BrowserWindow, WebContentsView } from 'electron';
 
-import { HIDDEN, type Rect, viewBounds } from './bounds.js';
+import { HIDDEN, PaneGeometry, type Rect } from './bounds.js';
 
 /**
  * One embedded page, positioned in window coordinates.
@@ -8,8 +8,8 @@ import { HIDDEN, type Rect, viewBounds } from './bounds.js';
  * Both of this app's embedded surfaces -- the harness and Formulator -- are
  * somebody else's web app served on loopback, shown full-bleed under this app's
  * own strips. A `WebContentsView` is not part of the document, so React
- * unmounting something does not hide it: it is shown and hidden by being given a
- * rectangle or none, which is what `place` is for.
+ * unmounting something does not hide it. `place` controls native visibility as
+ * well as bounds; a zero-size rectangle alone can retain a painted macOS layer.
  *
  * Pinned to the origin it was opened on. A page that navigated somewhere else
  * would be a page this window is vouching for and did not launch.
@@ -17,6 +17,10 @@ import { HIDDEN, type Rect, viewBounds } from './bounds.js';
 export class Pane {
   private view: WebContentsView | null = null;
   private origin: string | null = null;
+  private readonly geometry = new PaneGeometry();
+  private visible = false;
+  private drawn = false;
+  private focusWhenShown = false;
   /**
    * A stylesheet re-applied after every load.
    *
@@ -41,7 +45,7 @@ export class Pane {
   /** Put the page in the window, once, and load it. */
   async attach(window: BrowserWindow, origin: string): Promise<void> {
     if (this.view) {
-      await this.load(origin);
+      if (this.origin !== origin) await this.load(origin);
       return;
     }
     const view = new WebContentsView({
@@ -49,6 +53,7 @@ export class Pane {
     });
     this.view = view;
     this.origin = origin;
+    view.setVisible(false);
     window.contentView.addChildView(view);
     view.setBounds(HIDDEN);
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -71,17 +76,39 @@ export class Pane {
   }
 
   /** Run one script in the page before its own bundle does. */
-  async run(script: string): Promise<void> {
+  async run(script: string): Promise<unknown> {
     if (!this.view) return;
-    await this.view.webContents.executeJavaScript(script, true);
+    return this.view.webContents.executeJavaScript(script, true);
   }
 
-  /** Show it by giving it the rectangle under this app's strips, or hide it. */
+  layout(window: BrowserWindow, value: unknown, zoom: number): boolean {
+    const accepted = this.geometry.accept(value, zoom);
+    if (accepted) this.place(window, this.visible);
+    return accepted;
+  }
+
+  focus(): void {
+    if (this.drawn) this.view?.webContents.focus();
+    else this.focusWhenShown = true;
+  }
+
+  /** Toggle the native layer; bounds alone are not a visibility control. */
   place(window: BrowserWindow, visible: boolean): void {
+    this.visible = visible;
     if (!this.view) return;
     const [width, height] = window.getContentSize();
-    const rect: Rect = visible ? viewBounds({ width, height }) : { ...HIDDEN };
+    const rect: Rect = visible ? this.geometry.bounds({ width, height }) : { ...HIDDEN };
+    this.drawn = visible && rect.width > 0 && rect.height > 0;
+    if (!this.drawn) {
+      if (this.view.webContents.isFocused()) window.webContents.focus();
+      this.view.setVisible(false);
+    }
     this.view.setBounds(rect);
+    if (this.drawn) this.view.setVisible(true);
+    if (this.drawn && this.focusWhenShown) {
+      this.focusWhenShown = false;
+      this.view.webContents.focus();
+    }
   }
 
   /**
@@ -99,6 +126,9 @@ export class Pane {
     const view = this.view;
     this.view = null;
     this.origin = null;
+    this.visible = false;
+    this.drawn = false;
+    this.focusWhenShown = false;
     window.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }

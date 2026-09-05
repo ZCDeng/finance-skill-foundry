@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const PACKAGE_URL = new URL("./package.json", import.meta.url);
@@ -44,24 +44,28 @@ function sessionOf(exec) {
 /**
  * Which task and which conversation this call writes to.
  *
- * Both are decided here rather than asked of the model. The task comes from the
- * environment the host set when it opened the session; the CLI falls through to
- * the addressed window's own back-pointer when it is absent, so an operator who
- * never set one still gets their window adopted.
+ * Runtime calls carry only the calling session. The CLI resolves its durable
+ * context; a process-wide task value must not influence a different session.
+ * Direct operator calls can still use FOUNDRY_TASK without inventing a session.
  *
  * These are top-level flags, so they go in front of the subcommand: argparse
  * stops accepting parser-level optionals once a subparser has been chosen.
  */
 function bindingArgs(exec) {
-  const out = [];
-  const task = String(process.env.FOUNDRY_TASK ?? "").trim();
-  if (task) out.push("--task", task);
   const session = sessionOf(exec);
-  if (session) out.push("--session", session);
-  return out;
+  if (session) return ["--session", session];
+  const task = String(process.env.FOUNDRY_TASK ?? "").trim();
+  return task ? ["--task", task] : [];
 }
 
-function foundry(args, exec) {
+function foundry(args, exec, requireSession = false) {
+  if (requireSession && !sessionOf(exec)) {
+    const error = new Error("analysis tools require a registered session; reopen the analysis task");
+    error.name = "FoundryRefusal";
+    error.status = REFUSED;
+    error.refused = true;
+    throw error;
+  }
   const bin = process.env.FOUNDRY_BIN ?? "foundry";
   const varRoot = process.env.FOUNDRY_VAR;
   if (!varRoot) {
@@ -84,6 +88,32 @@ function foundry(args, exec) {
     throw error;
   }
   return result.stdout;
+}
+
+/** Analysis calls must leave the harness event loop free for sibling sessions. */
+export function invokeFoundry(args, exec) {
+  if (!sessionOf(exec)) {
+    const error = new Error("analysis tools require a registered session");
+    error.name = "FoundryRefusal";
+    error.status = REFUSED;
+    error.refused = true;
+    return Promise.reject(error);
+  }
+  const varRoot = process.env.FOUNDRY_VAR;
+  if (!varRoot) return Promise.reject(new Error("FOUNDRY_VAR is required"));
+  return new Promise((resolve, reject) => {
+    execFile(process.env.FOUNDRY_BIN ?? "foundry", ["--var", varRoot, ...bindingArgs(exec), ...args], {
+      encoding: "utf8", timeout: Number(process.env.FOUNDRY_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
+      killSignal: "SIGKILL", maxBuffer: MAX_BUFFER,
+    }, (failure, stdout, stderr) => {
+      if (!failure) return resolve(stdout);
+      const error = new Error(stderr || stdout || failure.message);
+      error.name = failure.code === REFUSED ? "FoundryRefusal" : "FoundryError";
+      error.status = failure.code;
+      error.refused = failure.code === REFUSED;
+      reject(error);
+    });
+  });
 }
 
 /**
@@ -193,7 +223,7 @@ const TOOL_SPECS = {
     argv: (input) => ["record-reference", "--references", input.references, "--receipt"],
   },
   "emit-brief": {
-    description: "出本期结论稿: 窗内问题给结论, 窗外问题标 稿外追问 并落到底稿排期。同时写出可勾选底稿。stdout 是稿件 markdown。",
+    description: "生成旧版期间汇总稿和底稿：对点名事实表汇总 amount（没有该列时计数），映射表可提供既定分组。问题文字只是标题，不会被解析为筛选、占比或预算差异公式。stdout 是稿件 markdown。",
     parameters: { type: "object", properties: {}, required: [] },
     argv: () => ["emit-brief", "--receipt"],
   },
@@ -219,11 +249,11 @@ const TOOL_SPECS = {
     argv: () => ["stop-formulator"],
   },
   "query-locked": {
-    description: "对锁后的表重算一问。窗外或未点名的表一律拒绝; 结果带 稿外追问 标记。stdout 是重算结论文本。",
+    description: "读取或重算旧版锁表汇总：汇总所选事实表的 amount（没有该列时计数），可用 splitBy 做既定分组。text 仅记录问题，不生成筛选、比率、差异或任意计算表达式。窗外或未点名的表拒绝；结果保留 稿外追问 标记。stdout 是汇总文本。",
     parameters: {
       type: "object",
       properties: {
-        text: { type: "string", description: "要重算的问题原话" },
+        text: { type: "string", description: "问题原话，仅作标签；不作为自然语言计算指令" },
         tables: { type: "string", description: "本问依赖的表 id, 逗号分隔, 例如 gl,map; 必须是已点名的锁后表" },
         splitBy: { type: "string", description: "拆分维度: unit_id 或 analysis_node; 省略则不拆" },
         briefWindow: { type: "string", description: "结论稿窗口 id; 把重算挂回那一稿" },
@@ -348,8 +378,7 @@ const CALL_KINDS = {
   "re-import": "edit",
 };
 
-export function toolDefinition(toolName) {
-  const spec = specFor(toolName);
+export function toolDefinition(toolName, spec = specFor(toolName)) {
   return {
     name: toolName,
     description: spec.description,
@@ -382,11 +411,16 @@ export function toolDefinition(toolName) {
         filed: Array.isArray(value?.filed) ? value.filed : [],
       }),
     },
-    presentCall: presentCall(toolName, CALL_KINDS[toolName] ?? "other"),
+    presentCall: presentCall(toolName, spec.kind ?? CALL_KINDS[toolName] ?? "other"),
     execute: async (args, exec) => {
       const input = args ?? {};
       checkArgs(toolName, spec, input);
-      const { stdout, filed } = readReceipt(toolName, foundry(spec.argv(input), exec));
+      // The analysis bundle can supply a task-aware runtime operation, while
+      // keeping argument validation and the stdout envelope shared.
+      const raw = spec.execute
+        ? await spec.execute(input, exec)
+        : foundry(spec.argv(input), exec, spec.requireSession === true);
+      const { stdout, filed } = readReceipt(toolName, raw);
       return { tool: toolName, stdout, filed };
     },
   };

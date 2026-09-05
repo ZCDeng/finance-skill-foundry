@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { basename, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import type { BrowserWindow } from 'electron';
 
@@ -15,7 +17,7 @@ import {
   rpcUrl,
   rpcValue,
 } from './boot.js';
-import { followupDraft, handoffScript } from './handoff.js';
+import { followupDraft, residentHandoffScript, snapshotDraftsScript, restoreDraftsScript, type EmbeddedReply } from './handoff.js';
 import { noticePatch, readNotice } from './notice.js';
 import { Pane } from './pane.js';
 import { HARNESS_SKIN } from './skin.js';
@@ -51,6 +53,7 @@ export interface OpenedSession {
 export class HarnessHost {
   private child: ChildProcess | null = null;
   private readonly pane = new Pane();
+  private paneOrigin: string | null = null;
   private base: string | null = null;
   private starting: Promise<string> | null = null;
 
@@ -113,7 +116,39 @@ export class HarnessHost {
       body: rpcBody(method, payload),
     });
     if (!response.ok) throw new Error(`${method} answered ${response.status}`);
-    return rpcValue(method, await response.json());
+    const reply = await response.json();
+    try {
+      return rpcValue(method, reply);
+    } catch (error) {
+      const code = (reply as { result?: { error?: { code?: unknown } } } | null)?.result?.error?.code;
+      if (error instanceof Error && typeof code === 'string') Object.assign(error, { code });
+      throw error;
+    }
+  }
+
+  /** Adopt the task directory in the runtime's persistent workspace registry. */
+  private async ensureWorkspace(cwd: string, title?: string): Promise<string> {
+    const registered = await this.rpc('workspace.create', { path: cwd }) as {
+      workspace?: { workspaceId?: unknown; title?: unknown };
+    } | null;
+    const workspaceId = registered?.workspace?.workspaceId;
+    if (typeof workspaceId !== 'string' || !workspaceId.trim()) {
+      throw new Error('workspace.create returned no workspace id');
+    }
+    const label = title?.trim();
+    if (label && label !== registered?.workspace?.title && registered?.workspace?.title === basename(cwd)) {
+      for (const candidate of [label, `${label} · ${workspaceId.slice(-8)}`]) {
+        try {
+          await this.rpc('workspace.rename', { workspaceId, title: candidate });
+          break;
+        } catch (error) {
+          // A title collision is cosmetic. Other RPC failures still surface;
+          // they must not masquerade as a working workspace or connection.
+          if (!(error instanceof Error && 'code' in error && error.code === 'workspace-name-conflict')) throw error;
+        }
+      }
+    }
+    return workspaceId;
   }
 
   /**
@@ -132,28 +167,53 @@ export class HarnessHost {
     intent: Intent,
     cwd: string,
     seed?: { windowId: string; briefSha?: string | null },
+    deferShow = false,
   ): Promise<OpenedSession> {
     const preset = PRESET_BY_INTENT[intent];
-    // `cwd` is not a convenience. Every tool that takes a path resolves it
-    // against the session's own directory, and a session created without one
-    // stands in the host's -- measured as `/` on a Finder launch. See
-    // `workspace.ts`.
-    const created = (await this.rpc('session.create', { agentPreset: preset, cwd })) as {
+    // The registered workspace supplies cwd and the client conversation's
+    // workspace association. A bare cwd leaves the composer without a workspace.
+    const workspaceId = await this.ensureWorkspace(cwd);
+    const created = (await this.rpc('session.create', { agentPreset: preset, workspaceId })) as {
       sessionId?: string;
     } | null;
     const sessionId = created?.sessionId;
     if (!sessionId) throw new Error('session.create returned no session id');
     const draft = intent === 'followup' && seed ? followupDraft(seed) : '';
-    await this.show(sessionId, draft);
+    if (!deferShow) await this.show(sessionId, draft);
     return { sessionId, preset };
   }
 
-  /** Point the view at the new session and reload so the page reads the cell. */
-  private async show(sessionId: string, draft: string): Promise<void> {
+  /** Select a resident native session; passive resume preserves its input machine. */
+  async show(sessionId: string, draft?: string, cwd?: string, workspaceTitle?: string,
+    action?: {submit?: boolean; requestId?: string}): Promise<EmbeddedReply> {
     const origin = await this.start();
-    if (!this.pane.attached()) return;
-    await this.pane.run(handoffScript(sessionId, draft));
-    await this.pane.load(origin);
+    if (!this.pane.attached()) throw new Error('对话窗口尚未连接，请重新打开对话。');
+    if (cwd !== undefined) {
+      const workspaceId = await this.ensureWorkspace(cwd, workspaceTitle);
+      const attached = await this.rpc('session.create', { sessionId, workspaceId }) as {
+        sessionId?: unknown;
+      } | null;
+      if (attached?.sessionId !== sessionId) {
+        throw new Error('session.create returned a different session id while restoring the workspace');
+      }
+    }
+    // A restarted runtime gets a new port. Its storage belongs to that new
+    // origin, while the pane still holds the previous runtime's document.
+    if (this.paneOrigin !== origin) {
+      const drafts = await this.pane.run(snapshotDraftsScript) as Record<string, unknown> | undefined;
+      await this.pane.load(origin);
+      this.paneOrigin = origin;
+      if (drafts && Object.keys(drafts).length) {
+        await this.pane.run(restoreDraftsScript(drafts));
+        // New origins have separate browser stores. Restore before constructing
+        // the new conversation stores; same-origin task switches never reload.
+        await this.pane.load(origin);
+      }
+    }
+    const reply = await this.pane.run(residentHandoffScript({sessionId, draft, ...action})) as EmbeddedReply | undefined;
+    if (reply?.sessionId !== sessionId) throw new Error('对话未能恢复到当前任务，请重试。');
+    if (draft !== undefined) this.pane.focus();
+    return reply;
   }
 
   /**
@@ -194,13 +254,24 @@ export class HarnessHost {
   /** Put the page in the window. Called once, after the first start. */
   async attach(window: BrowserWindow): Promise<void> {
     // Before the load, so the first paint already carries it.
-    this.pane.skin(HARNESS_SKIN);
-    await this.pane.attach(window, await this.start());
+    let font = '';
+    if (this.opts.root) {
+      const bytes = readFileSync(join(this.opts.root, 'assets/fonts/NotoSansSC-variable.woff2'));
+      font = `@font-face{font-family:'Noto Sans SC';src:url(data:font/woff2;base64,${bytes.toString('base64')}) format('woff2');font-style:normal;font-weight:100 900;font-display:swap;}`;
+    }
+    this.pane.skin(font + HARNESS_SKIN);
+    const origin = await this.start();
+    await this.pane.attach(window, origin);
+    this.paneOrigin = origin;
   }
 
   /** Show or hide the page by giving it a rectangle or none. */
   place(window: BrowserWindow, visible: boolean): void {
     this.pane.place(window, visible);
+  }
+
+  layout(window: BrowserWindow, value: unknown, zoom: number): boolean {
+    return this.pane.layout(window, value, zoom);
   }
 
   stop(): void {

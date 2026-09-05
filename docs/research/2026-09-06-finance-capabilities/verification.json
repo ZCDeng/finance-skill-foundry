@@ -1,0 +1,49 @@
+{
+  "plan_revision": "r2",
+  "scope": "research and plan documents only; installed resources read without launching app; no software or vendor runtime tests",
+  "documents": 10,
+  "document_paths": [
+    "docs/research/2026-09-06-finance-capabilities/00-synthesis.md",
+    "docs/research/2026-09-06-finance-capabilities/01-excel-native.md",
+    "docs/research/2026-09-06-finance-capabilities/02-planning-systems.md",
+    "docs/research/2026-09-06-finance-capabilities/03-china-erp.md",
+    "docs/research/2026-09-06-finance-capabilities/04-codebase-map.md",
+    "docs/research/2026-09-06-finance-capabilities/05-implementation-evidence.md",
+    "docs/research/2026-09-06-finance-capabilities/06-plan-review.md",
+    "docs/research/2026-09-06-finance-capabilities/07-bundled-skills-integration.md",
+    ".omx/plans/2026-09-06-finance-capability-plan.md",
+    ".omx/plans/2026-09-06-finance-capability-test-spec.md"
+  ],
+  "unique_source_urls": 127,
+  "local_link_targets_checked": 12,
+  "code_path_line_anchors_checked": 89,
+  "acceptance_contracts": 34,
+  "new_contracts": "A27-A34; planned, not executed",
+  "independent_review": "APPROVE; planning executability only",
+  "git_diff_check": "passed",
+  "installed_resource_observation": {
+    "app": "/Applications/FA Foundry.app",
+    "version": "0.1.1",
+    "build": "0.1.1",
+    "skills": {
+      "financial-statements": {
+        "sha256": "55a45d06cdb22dc4966b48fe07ef6e255613bf90ecfcf70cb98e03eb216939b1",
+        "canonical_packaged_installed_equal": true
+      },
+      "variance-analysis": {
+        "sha256": "bb7440f6c087483195feb6d9e113566d1121866ccfbcbba00169b49c4be6edd9",
+        "canonical_packaged_installed_equal": true
+      },
+      "reconciliation": {
+        "sha256": "e547757f943cb7cd6b9878f7b3425ea4f0e2a3764f5852affeb498bb2f5f8225",
+        "canonical_packaged_installed_equal": true
+      },
+      "journal-entry": {
+        "sha256": "c756fdb8fc5167ce59538bd3a6e70f4088eddc66315a5223954f9647fba1bf5e",
+        "canonical_packaged_installed_equal": true
+      }
+    },
+    "runtime_discovery_load_and_invocation": "not executed"
+  },
+  "errors": []
+}

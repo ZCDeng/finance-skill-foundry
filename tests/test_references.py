@@ -197,3 +197,135 @@ def test_a_reference_found_after_the_brief_lands_on_the_workpaper(tmp_path: Path
     assert BENCHMARK["text"] not in window.brief_path.read_text()
     # The deliverable version this files is asserted at the CLI level, where a
     # window actually has a task: see `test_deliverables.py`.
+
+
+def _run_while_first_read_is_paused(first, second, entered, release) -> None:
+    """Force the stale-read interleaving, while allowing a correct lock to block."""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_call = pool.submit(first)
+        try:
+            assert entered.wait(timeout=5), "first operation never reached its read"
+            second_call = pool.submit(second)
+            try:
+                second_call.result(timeout=0.3)
+            except TimeoutError:
+                # A transaction spanning the read keeps the second writer out.
+                pass
+        finally:
+            release.set()
+        first_call.result(timeout=10)
+        second_call.result(timeout=10)
+
+
+@pytest.mark.parametrize("briefed", [False, True])
+def test_concurrent_reference_appends_keep_both_references_and_schedules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, briefed: bool
+) -> None:
+    import threading
+
+    import foundry.references as reference_module
+    from foundry.workpaper import load_schedules
+
+    window = _locked(tmp_path)
+    record_questions(window, [{"id": "q1", "text": "应收合计", "required_table_ids": ["ar"]}])
+    if briefed:
+        emit_brief(window)
+    entered, release = threading.Event(), threading.Event()
+    original_load = reference_module.load_references
+
+    def paused_load(target):
+        loaded = original_load(target)
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=5), "first reference read was not released"
+        return loaded
+
+    monkeypatch.setattr(reference_module, "load_references", paused_load)
+    _run_while_first_read_is_paused(
+        lambda: record_reference(window, [BENCHMARK]),
+        lambda: record_reference(window, [{**BENCHMARK, "id": "ref-2"}]),
+        entered,
+        release,
+    )
+    assert {entry["id"] for entry in load_references(window)} == {"ref-1", "ref-2"}
+    if not briefed:
+        emit_brief(window)
+    assert {item["id"] for item in load_schedules(window)["items"]} == {"q1", "ref-1", "ref-2"}
+    assert "ref-1" in window.workpaper_path.read_text()
+    assert "ref-2" in window.workpaper_path.read_text()
+
+
+def test_reference_arriving_during_emit_is_in_a_traced_workpaper_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    import foundry.brief as brief_module
+    from foundry.task import TaskStore
+    from foundry.workpaper import load_schedules
+
+    window = _locked(tmp_path)
+    task = TaskStore(window.store.var_root).create(title="并发分析")
+    window.bind_task(task.id)
+    record_questions(window, [{"id": "q1", "text": "应收合计", "required_table_ids": ["ar"]}])
+    entered, release = threading.Event(), threading.Event()
+    original_load = brief_module.load_references
+
+    def paused_load(target):
+        loaded = original_load(target)
+        entered.set()
+        assert release.wait(timeout=5), "brief reference read was not released"
+        return loaded
+
+    monkeypatch.setattr(brief_module, "load_references", paused_load)
+    _run_while_first_read_is_paused(
+        lambda: emit_brief(window),
+        lambda: record_reference(window, [BENCHMARK]),
+        entered,
+        release,
+    )
+    assert {entry["id"] for entry in load_references(window)} == {"ref-1"}
+    assert {item["id"] for item in load_schedules(window)["items"]} == {"q1", "ref-1"}
+    assert window.state == "FollowUp"
+    assert BENCHMARK["text"] not in window.brief_path.read_text()
+    assert BENCHMARK["text"] in window.workpaper_path.read_text()
+    versions = [row for row in task.deliverables() if row["kind"] == "workpaper"]
+    assert any(BENCHMARK["text"] in task.artifact_text(row["sha256"]) for row in versions)
+
+
+def test_emit_archives_the_workpaper_it_wrote_before_a_late_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    import foundry.brief as brief_module
+    from foundry.task import TaskStore
+
+    window = _locked(tmp_path)
+    task = TaskStore(window.store.var_root).create(title="底稿版本归档")
+    window.bind_task(task.id)
+    record_questions(window, [{"id": "q1", "text": "应收合计", "required_table_ids": ["ar"]}])
+    entered, release = threading.Event(), threading.Event()
+    original_register = brief_module.register_window_deliverable
+
+    def paused_register(*args, **kwargs):
+        if kwargs["kind"] == "brief":
+            entered.set()
+            assert release.wait(timeout=5), "brief archive was not released"
+        return original_register(*args, **kwargs)
+
+    monkeypatch.setattr(brief_module, "register_window_deliverable", paused_register)
+    _run_while_first_read_is_paused(
+        lambda: emit_brief(window),
+        lambda: record_reference(window, [BENCHMARK]),
+        entered,
+        release,
+    )
+    versions = [row for row in task.deliverables() if row["kind"] == "workpaper"]
+    initial = [row for row in versions if row["cause"] == "emit-brief"]
+    late = [row for row in versions if row["cause"] == "record-reference:ref-1"]
+    assert len(initial) == len(late) == 1
+    assert BENCHMARK["text"] not in task.artifact_text(initial[0]["sha256"])
+    assert BENCHMARK["text"] in task.artifact_text(late[0]["sha256"])

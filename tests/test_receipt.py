@@ -122,6 +122,8 @@ def test_a_follow_up_reports_the_workpaper_version_it_grew(
     assert main([*base, "emit-brief"]) == 0
     capsys.readouterr()
 
+    TaskStore(var).get(task).record_session("sess-leader", role="followup")
+
     assert (
         main(
             [

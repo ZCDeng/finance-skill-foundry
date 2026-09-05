@@ -11,3 +11,4 @@ app/dist-electron/
 app/extra/
 app/release/
 build/
+.omx/state/

@@ -1,124 +1,16 @@
 @import '../styles/tokens.css';
 
-/* -- shell ---------------------------------------------------------------- */
-
-.fnd-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  background: var(--fnd-bg);
-}
-
-/*
- * Three parts, and the middle one is centred on the window rather than on
- * what is left over.
- *
- * The two outer parts take equal shares of the free space, so the row of
- * destinations lands on the window's centre line whatever the brand and the
- * help control happen to measure. Centring it with `margin: auto` instead
- * would put it in the middle of the gap between them, which moves every time
- * either side changes.
- */
-.fnd-head {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  height: var(--fnd-header-height);
-  padding: 0 24px;
-  border-bottom: 1px solid var(--fnd-line);
-  background: var(--fnd-surface);
-}
-
-.fnd-head__brand {
-  flex: 1 0 0;
-}
-
-.fnd-head__nav {
-  flex: 0 0 auto;
-}
-
-.fnd-head__brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-/*
- * The mark, at the name's own size.
- *
- * The artwork is 197x256, so a 32px height gives it 24.6px of width; the box is
- * declared at both rather than at one and `auto`, because a background image
- * has no intrinsic size to lay out from.
- */
-.fnd-head__logo {
-  width: 24.6px;
-  height: 32px;
-  flex: 0 0 auto;
-  background: url('../assets/mark.png') center / contain no-repeat;
-}
-
-/*
- * The product's name.
- *
- * 32px against a 56px header, the same pair `design-toolkit-app` settled on.
- * Asap Sharp's cap height is 0.700em, so the name stands 22.4px in a strip that
- * leaves about 17px of air above and below it. It asks for the weight token,
- * which is 400: the Chinese face has one instance and a bold that applied to
- * half of a sentence would be a seam rather than a hierarchy.
- */
-.fnd-head__mark {
-  font-family: var(--fnd-font-display);
-  font-size: 32px;
-  line-height: 1;
-  font-weight: var(--fnd-weight-heavy);
-  letter-spacing: 0;
-  white-space: nowrap;
-  color: var(--fnd-ink);
-}
-
-.fnd-head__nav {
-  display: flex;
-  gap: 4px;
-}
-
-/*
- * 14.4px is `--fnd-size-small` a fifth larger, written out rather than
- * calculated so the value in the file is the value on screen.
- *
- * Bold, and both scripts can answer it: Asap Sharp on the axis, LXGW WenKai
- * Mono TC out of the 700 cut that `fonts.css` now carries. This row and the
- * product's name are the only two places in the window that ask for weight.
- */
-.fnd-head__tab {
-  border: 0;
-  background: transparent;
-  border-radius: var(--fnd-radius-pill);
-  padding: 0 var(--fnd-pad-button-x);
-  height: var(--fnd-button-height);
-  font-size: 14.4px;
-  font-weight: var(--fnd-weight-heavy);
-  color: var(--fnd-muted);
-  cursor: pointer;
-  transition: color var(--fnd-transition), background var(--fnd-transition);
-}
-
-.fnd-head__tab:hover {
-  color: var(--fnd-ink);
-  background: var(--fnd-surface-strong);
-}
-
-.fnd-head__tab[aria-current='page'] {
-  color: var(--fnd-on-selected);
-  background: var(--fnd-selected);
-}
-
-.fnd-column {
-  width: 100%;
-  max-width: var(--fnd-container);
-  margin: 0 auto;
-  padding: 32px 24px 96px;
-}
+/* Application identity stays compact; the task itself owns the workspace header. */
+.fnd-shell { display: flex; flex-direction: column; min-height: 100vh; background: var(--fnd-bg); }
+.fnd-head { display: flex; align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
+.fnd-head__brand { flex: 1 0 0; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.fnd-head__logo { width: 18.5px; height: 24px; flex: 0 0 auto; background: url('../assets/mark.png') center / contain no-repeat; }
+.fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-ink); }
+.fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
+.fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: 13px; font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
+.fnd-head__tab:hover { color: var(--fnd-ink); background: var(--fnd-surface-strong); }
+.fnd-head__tab[aria-current='page'] { color: var(--fnd-on-selected); background: var(--fnd-selected); }
+.fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
 /* -- the five words ------------------------------------------------------- */
 
@@ -454,7 +346,7 @@
   height: var(--fnd-button-height);
   padding: 0 var(--fnd-pad-button-x);
   border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-pill);
+  border-radius: var(--fnd-radius-control);
   background: transparent;
   color: var(--fnd-ink);
   font-family: inherit;
@@ -478,19 +370,19 @@
   opacity: 0.55;
 }
 
-.fnd-go:focus-visible {
+.fnd-go:focus-visible, .fnd-primary:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;
 }
 
-.fnd-go {
+.fnd-go, .fnd-primary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: var(--fnd-button-height);
   padding: 0 var(--fnd-pad-button-x);
   border: 0;
-  border-radius: var(--fnd-radius-pill);
+  border-radius: var(--fnd-radius-control);
   background: var(--fnd-accent);
   color: var(--fnd-on-accent);
   font-family: inherit;
@@ -500,7 +392,7 @@
   transition: opacity var(--fnd-transition);
 }
 
-.fnd-go:disabled {
+.fnd-go:disabled, .fnd-primary:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -930,3 +822,8 @@
 .fnd-linkish:hover {
   color: var(--fnd-line-hover);
 }
+
+/* Workspace has its own independently scrolling panes. */
+.fnd-shell[data-screen='analysis'] .fnd-column, .fnd-shell[data-screen='workbench'] .fnd-column { display: flex; flex: 1; flex-direction: column; padding: 0; max-width: none; min-height: 0; overflow: hidden; }
+.workspace-mount { flex: 1; min-height: 0; height: 100%; }
+.fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }

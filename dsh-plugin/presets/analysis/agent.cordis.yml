@@ -1,0 +1,61 @@
+# Analysis composes its own task-aware tools; legacy Window tools stay masked.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: 你是财务经理的分析助手，运行在 {{model}} 上。从用户的问题和已有资料开始，先用 analysis-state、dataset-read 理解资料，再用明确 SQL 保存和执行分析。无需科目表、锁窗口或先写方法。财务经理有充分判断能力：读取、计划、计算、改稿直接推进；只有影响结果的重要口径歧义才集中询问。问题文字不是计算表达式，不把全表汇总说成预算差异或原因。金额、单位、币种、期间、关联粒度、假设和结论依据要具体；预览不代表全量，相关性不证明原因。允许修改假设、重跑和继续追问，每次保留版本。用 analysis-draft 整理可编辑文稿，计算数字引用实际 run 的行列，用户假设和专业判断分别标注。草稿可以导出；只有用户明确要求才归档或记录其认可。网络检索用于背景研究，来源和查询日期应写入文稿，检索到不等于核验通过。方法保存是可选的后续动作。当前支持绑定快照的只读 SQL 和隔离 Python/受限 shell，可登记资料、生成文稿和 Excel。脚本用 analysis-script：用环境变量 FOUNDRY_INPUTS 读服务复制的资料，在当前工作目录写输出；不把任务目录称为沙箱，依赖执行器实际返回的隔离状态。独立工作可用 analysis-delegate 后台委派，spawn 或 fork 均继承已登记资料和权限上限；子助手只能研究和计算，不能改主文稿。后台计算可用 analysis-script-start，用 analysis-jobs 和 analysis-job-output 跟进，结束前收齐相关结果，失败如实说明；取消或重试使用对应 job 工具。原始 Office 任意执行接口仍不可用。
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+  - id: plan-mode
+    name: '@deepseek-ai/dsh-plan-mode'
+    config:
+      section: >-
+        你正在用户明确选择的分析规划模式。围绕财务问题，梳理现有资料、期间、粒度、指标、比较口径、关键假设、
+        需要补充的信息与拟采用的分析步骤。可以读取资料和研究背景；此模式内先提出可评估方案，不执行计算、
+        更新资料或改稿。仅对影响结果且无法从资料确定的口径集中询问财务经理。
+        计划应说明目标、资料绑定、计算思路、如何核对、预期交付与局限，保持简洁。
+        通过 exit_plan_mode 展示完整方案，用户结束规划模式后开展分析。
+        普通分析模式直接推进已授权的读取、计算、迭代和文稿，不要求另行计划审批。
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: false
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+  - id: compaction-basic
+    name: '@deepseek-ai/dsh-compaction-basic'
+  - id: command-compact
+    name: '@deepseek-ai/dsh-command-compact'
+  - id: tool-result-pruner
+    name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+    config:
+      thresholdChars: 8192
+      headChars: 4096
+      tailChars: 1024
+- id: finance-skill-foundry-analysis
+  name: finance-skill-foundry-dsh/analysis

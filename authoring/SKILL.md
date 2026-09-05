@@ -20,7 +20,7 @@ You are helping a finance manager author a portable analysis skill on the **pinn
 
 ## Done
 
-Foundry `mark_done` is the only done signal. It first validates a machine-readable `foundry.json` capability contract beside `SKILL.md`, then runs the model-free fixture probe (`foundry.probe`). Chat satisfaction is ignored. Cursor "validate then proceed" is the pattern, not the host.
+Foundry `mark_done` validates the legacy capability contract and runs the model-free engine fixture. Its receipt separates `contract_status=valid`, `engine_status=passed`, and `method_status=not_executed`. It does not execute the authored instructions or certify that the method works. A method needs its own actual scenario execution before being described as verified. New analysis tasks can run directly and optionally save a method afterwards.
 
 `python -m foundry.probe --var VAR --fixtures FIXTURES` and `foundry --var VAR probe --fixtures FIXTURES` are the same gate and report the same thing: `0` passed, `3` refused with the reason on stderr, `2` for an argparse usage error.
 

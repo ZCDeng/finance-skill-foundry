@@ -1,342 +1,97 @@
 # Finance Skill Foundry
 
-A finance manager authors a portable analysis skill, then each period imports and locks named statements, writes this-window questions, and emits a conclusion brief. Leader follow-up recomputes from that brief's window and tags `稿外追问` / `我重算`.
+面向财务经理的分析工作台。从问题与资料开始，检查计算、调整假设、修改文稿，再把有用的分析保存为可复用方法。建账和银行资金操作保留独立扩展边界。
 
-v1 kit: the native FA Foundry harness (`dsh-plugin/index.js`, the single Cordis module that execs this CLI), DuckDB lock catalog, Data Formulator live attach, Skill creator with a fixture done-gate.
+[代码审查](docs/reviews/2026-09-05-codex-review.md) · [产品与架构方案](docs/plans/2026-09-05-finance-analysis-workbench-plan.md) · [验收设计](docs/plans/2026-09-05-finance-analysis-workbench-test-spec.md) · [实施与验证记录](docs/plans/2026-09-05-execution-log.md)
 
-## Store
+## 使用流程
+
+1. 输入“华东利润为什么低于预算”等问题，或直接添加资料。首次使用无需先写 skill、配置科目表或锁定期间。
+2. 添加 CSV、JSON、XLSX 表格，或 Markdown、TXT 背景资料。原文件复制为带哈希的资料快照；补资料增加快照，不覆盖旧数据。
+3. 与助手研究问题。可以检索、检查资料、执行 SQL、运行隔离的 Python/Bash 脚本，也可以委派有明确范围的子任务。
+4. 在“分析结果”检查来源、计算与执行状态，修改参数和假设后保存新版并重跑。高级 SQL 默认折叠。
+5. 在“文稿”编辑内容、确认专业判断并归档，导出 Markdown 或 XLSX。回到助手可继续分析；旧稿和旧计算保留。
+6. 有复用价值时再“保存方法”。下个任务提供新的资料绑定和参数后运行，不继承原任务的数据与结论。
+
+财务经理决定口径、假设及文稿是否采用。系统分别记录执行、可复现性、用户判断和发布状态，不把程序运行成功当作业务结论正确。首次执行不会自动显示“可复现”；相同定义和输入的实际重跑一致后，才标记 SQL 结果可复现。
+
+## 当前能力与边界
+
+| 能力 | 当前行为 |
+|---|---|
+| 财务分析 | 真实条件筛选、分组、预算差异、账龄与现金情景计算；示例验收使用合成资料 |
+| 关联计算 | 声明快照、关联键和基数，检查重复计数；派生 CTE 的 JOIN 需先物化成快照 |
+| 金额 | 导入和常规运算保留 Decimal；DuckDB 除法产生的浮点结果明确提示；XLSX 无法精确保留的长数以文本输出 |
+| 脚本 | macOS 系统隔离、冻结输入、独立工作目录、资源上限、代码/环境/产物哈希；归档输出可打开 |
+| 后台任务 | 查看、取消、重试；重试创建新记录并沿用原输入；取消回收脚本进程 |
+| 子任务 | 真实 spawn/fork，冻结父任务上下文，有深度与工具范围限制；记录结束状态 |
+| Office | 隔离 Python/openpyxl 生成或修改工作簿成果，原始快照保持不变；可导出、打开后重新导入 |
+| 方法 | SQL 方法显式保存，移除注释与具体字面值，跨任务重新绑定；脚本暂不保存为方法 |
+| 后续领域 | 总账、凭证过账、银行支付尚未实现；现金预测属于分析，不执行资金划拨 |
+
+脚本隔离目前只支持 macOS；其它系统拒绝执行，没有静默降级。Bash 支持受限命令，不提供任意子进程或网络。工作簿生成不包含 Excel 公式重算引擎；带公式但缺少缓存值的输入会明确报错。实际模型效果取决于用户在助手中配置的 provider；自动验收使用确定性适配器，不使用用户凭据。
+
+## 数据与调用边界
 
 ```text
-var/tasks/<task_id>/{task.json,windows.jsonl,sessions.jsonl,deliverables.jsonl,artifacts/<sha256>.md}
-var/current-task
-var/windows/<window_id>/{catalog.duckdb,lock.json,questions.json,brief.md,schedules.json,workpaper.md,followup.jsonl}
-var/windows/<window_id>/{task,inputs/<role>.<ext>}
-var/current
-var/formulator/<window_id>/
-var/skills/<skill_id>/{SKILL.md,foundry.json}
-method/{financial-statements,reconciliation,variance-analysis,journal-entry}/SKILL.md
+var/tasks/<task_id>/
+  task.json, windows.jsonl, sessions.jsonl, deliverables.jsonl
+  analysis/
+    datasets/           # 原始资料与元信息、哈希
+    revisions/          # 不可变计算定义与版本
+    runs/               # 实际输入、执行结果与状态
+    drafts/             # 文稿版本、来源与用户判断
+    methods/            # 显式保存的复用方法
+    jobs/               # 后台/子任务运行记录
 ```
 
-A task is one period's work. It owns an ordered chain of windows -- the first import
-plus every successor a re-import opened -- the conversations that touched them, and every
-version of every document they produced. A window still owns the caliber lock.
+`foundry/` 统一负责数据读写；Electron 与插件调用 CLI，不另建数据库入口。每次助手调用以服务端登记的 session 解析 task、workspace 与资料范围；未知 session 拒绝执行。A→B→A 切换不会让 A 的会话落到全局 current 指向的 B。父任务补资料后可以显式刷新上下文，已派出的子任务保持原资料范围。
 
-Import copies each source file into `<window>/inputs/` and parses the copy, so the
-window holds the bytes it was built from. Delete the export afterwards and the window
-still locks, still emits, and still shows an auditor the workbook. Editing a master file
-between import and lock is still refused: caliber changes travel through a re-import.
+新任务默认使用 `analysis` preset，工具通过相同的数据与执行边界开放。旧 `period` / `f3` 和技能创作保留在“旧版期间流程”中，便于处理已有窗口。旧命令详见[期间流程参考](docs/legacy-period-workflow.md)。`mark-done` 的合同校验、引擎样例通过与方法实际执行分别报告，不能互相替代。
 
-`deliverables.jsonl` is append-only and content-addressed. A brief is one version per
-window; the workpaper grows one every time a follow-up appends a schedule, and each
-version names what caused it (`emit-brief`, `query-locked:followup-3`, `export:brief`).
-
-## Pin
-
-- DuckDB 1.5.5 (current stable; 1.6 is prerelease only)
-- FA Foundry harness runtime: `@deepseek-ai/dsh@0.1.1-rc.2` (bundled CLI used at install). Upgrades are breaking. Period tools are the Cordis bundle in `dsh-plugin/`. Headless smoke is `foundry --var VAR host-smoke`.
-- File drop: `dsh-file-upload@0.4.3` ([HongMing-Huang/dsh-file-upload](https://github.com/HongMing-Huang/dsh-file-upload)). Companion only. Period and F3 omit `read_document`.
-- Office viewer: `dsh-univer-office@0.2.12` ([dream-num/dsh-univer-office](https://github.com/dream-num/dsh-univer-office)). Companion only, staged into `app/extra/dsh` by `npm run harness`. Period and F3 deny all thirteen `univer_*` tools. The app's workbook preview spawns the bundle's gateway itself, fenced to the task's artifacts directory and alive only while a preview is open; the plugin's own gateway is never used by the app. The Univer Pro licence inside the bundle expires 2026-11-15; after that the viewer watermarks, the close is unaffected.
-- Data Formulator: `data-formulator==0.7.0` (`data_formulator` binary, `pip install -e ".[formulator]"`). Do not pass `--disable-database` or `--disable-data-connectors`.
-- `node` on PATH for `host-smoke`, which loads the shipped dsh bundle. Nothing else in the period loop needs it.
-- `ps` on PATH lets `launch-formulator` confirm the served process is this window's Formulator. Without it the launch still runs and says `identity: unconfirmed` in its payload and on stderr.
-
-Provider keys stay in the process environment. Never write a key into the window, skill, or Formulator home. Data Formulator writes its own `credentials.db` into `DATA_FORMULATOR_HOME` unconditionally; the foundry gives each window a `0700` home for it and `purge-formulator` removes it. Set `CREDENTIAL_VAULT_KEY` and the cleartext `.vault_key` stays out of that home too.
-
-## Task
+## CLI 示例
 
 ```bash
-foundry --var VAR task-new --title "2026-08 月度经营分析" --period 2026-08
-foundry --var VAR task-list
-foundry --var VAR --task TASK task-show
-foundry --var VAR --task TASK deliverables
-# what the leader actually asked, in their own words, kept apart from the
-# question a model later executes
-foundry --var VAR --task TASK --session SESSION record-session --role followup --verbatim "华东这个月怎么回事？"
-# file the version the leader is handed, so a later follow-up can cite it
-foundry --var VAR --task TASK export --kind brief
+foundry --var VAR task-new --title "华东利润与预算分析"
+foundry --var VAR --task TASK dataset-add --path actual.csv --name "本月实际"
+foundry --var VAR --task TASK analysis-state
+foundry --var VAR --task TASK analysis-save --spec '{"question":"经营利润","bindings":{"actual":"SNAPSHOT_ID"},"sql":"SELECT revenue-cost-expense AS profit FROM actual"}'
+foundry --var VAR --task TASK analysis-run --analysis ANALYSIS_ID
+foundry --var VAR --task TASK analysis-draft --spec '{"title":"经营简报","body":"可编辑的管理层判断","run_ids":["RUN_ID"]}'
+foundry --var VAR --task TASK analysis-export --draft DRAFT_ID --format xlsx
 ```
 
-`--task` and `--session` are global. The task is resolved by the first of: `--task`,
-`FOUNDRY_TASK`, the addressed window's own back-pointer. A window with no task keeps
-working and is adopted by the first task that touches it. The session id is never taken
-from the environment -- one harness process hosts many conversations, so it arrives per
-call.
+`--var`、`--task`、`--session` 是全局参数，放在子命令前。应用原生选文件是受信任的用户操作；助手只能导入已登记工作目录内的资料。
 
-## Period loop
+## 开发与打包
+
+依赖以 `pyproject.toml`、`uv.lock`、`app/package-lock.json` 为准。当前固定 harness 为 `@deepseek-ai/dsh@0.1.1-rc.2`。没有为本轮新增第三方依赖。
 
 ```bash
-foundry --var VAR create
-foundry --var VAR import --coa COA.xlsx --aux AUX.xlsx --map MAP.xlsx --named NAMED.json
-# or, after a paperclip drop whose stems are coa/aux/map/units/gl:
-foundry --var VAR import --drop-dir .dsh-uploads/SESSION
-foundry --var VAR lock
-foundry --var VAR record-questions --questions QUESTIONS.json
-foundry --var VAR emit-brief
-foundry --var VAR workpaper
-# after a re-import, the follow-up's workpaper is on the brief's window, not on current
-foundry --var VAR workpaper --window WINDOW
-foundry --var VAR query-locked --text "..." --tables gl --split-by unit_id --brief-window WINDOW --question-id QUESTION
-foundry --var VAR launch-formulator
-foundry --var VAR stop-formulator
-# use only after the process is stopped, to remove a stale per-window home
-foundry --var VAR purge-formulator
-```
-
-CSV, XLSX/XLSM, and tabular JSON inputs are supported.
-
-`--named` takes JSON inline, or a path to a JSON file, in one of three shapes:
-
-```jsonc
-[{"id": "gl", "path": "gl.xlsx"}]                                  // a list of entries
-{"gl": "gl.xlsx", "ar": "ar.xlsx"}                                 // an id-to-path map
-{"coa": "coa.xlsx", "units": "units.xlsx",                         // an envelope: defaults
- "tables": [{"id": "gl", "path": "gl.xlsx"}]}                      //   plus the table list
-```
-
-Anything else is refused by name. A dict carrying `coa`/`aux`/`map`/`units` but no `tables` key is refused as a malformed envelope rather than read as an id-to-path map. Referenced files resolve relative to, and must stay inside, the descriptor's directory. Explicit CLI paths remain available for operator-selected files.
-
-Exit codes: `0` done, `2` argparse usage error, `3` domain refusal. `python -m foundry.probe` uses the same three.
-
-A table id becomes a SQL identifier, so `ar-2024-08.xlsx` is the table `ar_2024_08`. Questions and `query-locked --tables` accept either spelling.
-
-## Harness
-
-The period tools reach a model through one command:
-
-```bash
-dsh plugin --profile PROFILE add /path/to/finance-skill-foundry/dsh-plugin
-foundry --var VAR harness   # prints this line with the paths filled in
-```
-
-That is the whole wiring. `add` writes the package into the profile's dependencies
-*and* appends it to `dsh.profile.bundles`, and the package carries its own
-`dsh.bundle.patch`, so the insert row arrives from there. Handing
-`dsh-plugin/cordis.patch.yml` to `--patch` as well composes the row a second time.
-
-`dsh plugin add` on a local directory links rather than copies, so an edit in the
-checkout is live in the profile.
-
-Verified on the pinned runtime: after that one command, `--dump-config` shows exactly
-one `id: finance-skill-foundry` row and all ten tools register. `tests/test_real_load.py`
-is that check, opt-in via `FOUNDRY_DSH_BIN`.
-
-### The fence
-
-Installing the bundle puts ten tools in front of a model. It does not take anything away,
-and `dsh.foundry.profiles.period.omit` cannot: that list is checked against the roster the
-bundle is handed, which never contained a shell in the first place. Closing the fence is a
-second, deliberate step, and **which step depends on the profile**.
-
-**A profile with agent presets** (`web`) — the preset decides the tool set, and a profile
-row cannot take away what a preset mounts.
-
-```bash
-foundry --var VAR install-presets --dsh-home "$DSH_HOME"
-```
-
-That copies `period` and `f3` into `<DSH_HOME>/.agent-presets/`. Point a session at
-`period` to run a close, at `f3` for a leader's follow-up. Both are derived from the stock
-`standard` preset by deletion.
-
-**A profile without them** (`headless`) — the tool rows *are* the tool set, so a patch
-takes them away.
-
-```bash
-dsh --profile headless --patch dsh-plugin/period.fence.yml
-```
-
-It is not part of `cordis.patch.yml` on purpose: a profile patch applies to the whole
-deployment, and a plugin that disabled the shell there would take it from every agent on
-that profile.
-
-Measured on the pinned runtime by `tests/test_real_load.py`:
-
-| | tools offered | shell / fs / editor / subagent / web |
-|---|---|---|
-| `headless`, unfenced | 35 | yes |
-| `headless` + `period.fence.yml` | 27 | no |
-| `web`, `standard` preset | 35 | yes |
-| `web`, `period` preset | 13 | no |
-| `web`, `f3` preset | 1 (`query-locked`) | no |
-
-`f3` gets to one because foundry registers its ten globally from the profile row, so a
-preset cannot register a smaller roster of its own — the names are taken. The
-`finance-skill-foundry-dsh/f3-scope` row masks them for that preset's agents instead.
-
-## Harness drop
-
-Paperclip / drag-drop is an input drop for import, not a second books surface.
-
-```bash
-dsh plugin --profile web add dsh-file-upload@0.4.3
-foundry --var VAR harness
-```
-
-Merge `dsh-plugin/file-upload.overlay.yml` into the installed plugin config. Do not add a second `id: file-upload` insert — that double-applies and crashes. Name files `coa.xlsx`, `aux.xlsx`, `map.xlsx`, `units.xlsx`, and one file per named table (`gl.xlsx`). Pass those `@` paths to `import`, or pass the upload folder as `--drop-dir`. Do not use `read_document` on locked books.
-
-A drop is an untrusted upload, so `--drop-dir` refuses every symlink inside the tree it scans: copy a shared source file in rather than linking it. Both `--drop-dir` and `--named` also refuse a path reached through a symlinked directory that points outside its own parent, because that silently moves the boundary the import is allowed to read from.
-
-If `stop-formulator` cannot confirm the pid's identity (no `ps`, or the pid belongs to another user) it refuses rather than killing an unverified process. `FOUNDRY_FORMULATOR_FORCE_STOP=1` releases the lease anyway so the window stays re-importable; it does **not** stop the server, and the payload says so. Kill that process yourself, or the next launch on this window will refuse on the port pre-flight.
-
-## App
-
-A desktop window over the same store, in `app/`. It shows the tasks, what each
-window was built from, and every version each one produced.
-
-```bash
+uv sync --extra dev
 cd app
-npm install
-FOUNDRY_VAR=../var npm run dev
+npm ci
+npm run harness
+npm run foundry
+npm run formulator
+npm run package
 ```
 
-The workbench embeds the pinned harness as a child process and its page as a view
-in the window. Three buttons, three agent presets, and the button decides:
+`npm run package` 检查 runtime/冻包版本，实际启动冻结的 Data Formulator 校验 connector，再构建 macOS 应用。`npm run foundry` 使用 PyInstaller one-dir，校验冻结引擎及真实脚本隔离。产物在 `app/release/`，构建脚本不会安装或覆盖 `/Applications`。
 
-| 按钮 | preset | 工具 |
-|---|---|---|
-| 授技能 | `standard` | 上游的编码 agent |
-| 开始本期 | `period` | foundry 十个 + skill / todo / ask |
-| 追问 | `f3` | `query-locked`，仅此一个 |
+开发时 `FOUNDRY_BIN` 可以指向本仓库虚拟环境的 `foundry`，`FOUNDRY_VAR` 指向独立测试目录；`npm run dev --prefix app` 启动桌面窗口。不要让测试使用真实财务资料或用户已有任务目录。
 
-The preset rides `session.create`, is recorded on the session's creation header,
-and nothing later can widen it. Opening a period session creates the window
-against the task first, so the window carries the back-pointer before a model can
-call anything — which is why one harness process can serve every task without an
-ambient `FOUNDRY_TASK`.
-
-The runtime and the CLI both ship with the app. Stage them once, then build:
+## 验证
 
 ```bash
-cd app
-npm install
-npm run harness      # ~280MB into app/extra/dsh, not in version control
-npm run foundry      # freezes the CLI into app/extra/foundry, ~65MB
-npm run formulator   # freezes Data Formulator into app/extra/formulator, ~530MB
-npm run package      # release/mac-arm64/Foundry.app, ~1.1GB
+.venv/bin/python -m pytest -q
+npm test --prefix app
+npm run build --prefix app
+FOUNDRY_DSH_BIN="$PWD/app/extra/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" .venv/bin/python -m pytest -q tests/test_real_load.py tests/test_analysis_runtime.py
+.venv/bin/python tools/verify_analysis_workbench.py --foundry .venv/bin/foundry
+.venv/bin/python tools/verify_analysis_workbench.py --foundry app/extra/foundry/foundry
 ```
 
-`npm run package` runs both checks first and stops if either is missing or its
-pin has moved. Packaging without them produces an app that opens and then fails
-at everything, and says nothing about why.
+桌面真实交互脚本为 `tools/verify_desktop_workbench.cjs` 和 `tools/verify_desktop_sessions.cjs`，使用已有 Playwright（`PLAYWRIGHT_MODULE` 指定其模块路径），无需添加项目依赖。会话脚本测试打包应用时另设 `QA_APP` 为应用可执行路径，`QA_FOUNDRY` 为包内 CLI；默认使用开发应用。
 
-`npm run foundry` freezes the CLI with PyInstaller as a one-dir bundle — a
-one-file build unpacks itself to a temp directory on every launch, and this
-binary runs dozens of times in a session. The build ends by running the kit's
-own `probe` against the frozen bundle with a bare environment, so a build that
-cannot read a workbook or open DuckDB fails there rather than in front of an
-operator.
-
-Two things are staged, not one. The runtime, and a copy of `dsh-plugin/` inside
-its `node_modules`: under `ELECTRON_RUN_AS_NODE` the loader does not resolve the
-bundle from the profile at all, and in a packed app nothing may write that copy
-at run time. `FOUNDRY_DSH_INSTALL` still overrides both, for pointing a dev run
-at a tree staged elsewhere.
-
-## Data Formulator
-
-A fourth destination, 数据台. It launches Formulator on the current window's
-locked catalog, shows its page in the same rectangle the workbench uses, and
-stops it on the way out.
-
-The app owns almost none of that. `launch-formulator` claims the window's lease,
-spawns the process, waits for it to answer and confirms the served process is
-this window's; `stop-formulator` refuses to kill one whose identity it cannot
-prove. All of it stays in the kit because a re-import has to be able to take the
-lease back, and only the library knows when that happens. What the app adds is a
-URL, a rectangle, and stopping on quit — Formulator is spawned in its own
-session, so a survivor would hold the lease and the port and break the next
-period.
-
-It is a reader, not a peer engine. A figure read off one of its charts is
-稿外追问, and the screen says so beside the button.
-
-Data Formulator ships with the app, frozen. `npm run formulator` builds it;
-`npm run formulator:gate` proves it works.
-
-The bundle carries `foundry` as well, and that is the part that is not obvious.
-`DF_PLUGIN_DIR` names a loose `.py` file that Data Formulator imports through
-`spec_from_file_location` — a frozen app can do that, but it ignores
-`PYTHONPATH`, so that file's own `foundry` imports resolve only from inside the
-bundle. A freeze without them starts, serves its frontend, passes a readiness
-probe and the identity gate, and offers no locked-catalog connector at all.
-
-Which is why `package` and `dist` run the gate, not just a file check. The gate
-locks a fixture window, launches the frozen Formulator with a bare environment
-and asks the running server for its connector list:
-
-```
-  http://127.0.0.1:5567 (identity confirmed)
-  connectors: mysql, postgresql, kusto, …, locked_catalog
-gate: the frozen Formulator serves this kit's locked catalog
-```
-
-`FOUNDRY_FORMULATOR_BIN` is how the kit is told where it is; there is nothing to
-find on PATH, because a frozen bundle is a directory beside an application. The
-app sets it, and passes it to the harness child too — otherwise a model calling
-`launch-formulator` inside a session would be told the binary is not installed
-while the app's own data screen worked fine.
-
-A frozen bundle also gets a longer readiness budget. Measured on this build: 43s
-to answer on the first launch after an install, 2.4s once the pages are warm.
-Eight seconds is right for a process that is merely starting and wrong for one
-being read off disk for the first time, and the long bound costs nothing when a
-launch is broken — readiness returns as soon as the child exits.
-
-`FOUNDRY_BIN` still wins when it is set, which is how a dev run points at a
-checkout's virtualenv. Worth knowing it shadows the bundled binary rather than
-being ignored.
-
-The app does not shell out to `dsh plugin add`. That command needs `pnpm` on
-PATH, and a clean machine gets `pnpm not found on PATH`. What it does is add a
-name to the profile's manifest and place the package where the loader looks;
-both are done directly, and the second had to be anyway.
-
-It is a caller, never a mutator (KTD2). The main process opens no catalog and
-reads no file under `var/`: every screen is a read-only CLI subcommand, and a
-view that wants something new needs a new subcommand rather than a second reader
-that can drift. `tests/test_app.py` asserts that from the Python side and
-`app/tests/reads.test.ts` from the other.
-
-The renderer names a task id and a sha256 and nothing else — never a path — and
-both are shape-checked in main before a call runs.
-
-Design tokens and the two bundled faces come from `design-toolkit-app`, renamed
-from `--dtk-` to `--fnd-`. Departure Mono draws on a 50-unit grid over a
-550-unit em, so a column of figures lines up without being asked to; the
-document sets `tabular-nums` globally for the same reason.
-
-The five claim words render as one chip shape, and only two of them carry
-colour: 稿外追问 and not-in-this-window, the two that say something other than
-where a number came from. Five colours would out-shout the numbers beside them.
-`app/tests/tokens.test.ts` measures every mark against the surface it sits on —
-4.5:1 for text, 3:1 for the one colour that is only an edge.
-
-## Method skills
-
-Four close methods ship in `method/`. They are kit files, not `var/skills/`.
-
-```bash
-foundry --var VAR method-skills
-```
-
-Numbers still come from the locked window. See `method/FOUNDRY.md`.
-
-## Authoring done-gate
-
-`mark-done` requires both authored instructions and a machine-readable capability contract, then runs the bundled period fixture:
-
-```text
-SKILL.md
-foundry.json  # schema finance-skill-foundry/f2-skill@1
-```
-
-The contract must declare the ordered F2 tools (`import`, `lock`, `record-questions`, `emit-brief`, `query-locked`), the locked-window safety policies, and bindings to `FOUNDRY.md` and `CONNECTORS.md`. This keeps per-period questions out of the portable skill.
-
-## Dev
-
-```bash
-uv venv
-uv pip install -e ".[dev]"
-.venv/bin/python -m pytest tests       # node on PATH runs the bundle tests too
-node dsh-plugin/test.mjs
-```
+最后一条请使用实际冻包中的可执行路径。详细结果、桌面交互证据及尚未验证的边界见[实施记录](docs/plans/2026-09-05-execution-log.md)。

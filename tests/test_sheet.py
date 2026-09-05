@@ -116,6 +116,32 @@ def test_a_figure_the_format_cannot_hold_goes_in_as_text() -> None:
     assert read["A3"].value == 5000
 
 
+@pytest.mark.parametrize(
+    "amount",
+    [
+        "123456789012345.67",
+        "1234567890.1234567",
+        "123456789012345678901234567890123456.78",
+        "0.12345678901234567890123456789012345678",
+        "282670.7525",
+        "5000",
+    ],
+)
+def test_exported_decimal_survives_real_xlsx_serialization(amount: str) -> None:
+    book = Workbook()
+    put_number(book.active["A1"], Decimal(amount))
+    buffer = io.BytesIO()
+    book.save(buffer)
+    loaded = load_workbook(io.BytesIO(buffer.getvalue()))
+    try:
+        value = loaded.active["A1"].value
+        assert Decimal(str(value)) == Decimal(amount)
+        if len(Decimal(amount).as_tuple().digits) > 16:
+            assert isinstance(value, str), "an imprecise Excel number must retain its exact text"
+    finally:
+        loaded.close()
+
+
 def test_the_round_trip_test_is_the_actual_question() -> None:
     assert survives_a_cell(Decimal("282670.7525"))
     assert survives_a_cell(Decimal(5000))
@@ -207,6 +233,8 @@ def test_the_sheet_and_the_workpaper_say_the_same_thing_about_a_follow_up(
     """
     var = tmp_path / "var"
     task_id, _ = _closed(var, capsys)
+    TaskStore(var).get(task_id).record_session("sess-leader", role="followup")
+
     assert (
         main(
             [

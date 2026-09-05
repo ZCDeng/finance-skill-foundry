@@ -11,6 +11,16 @@
  * check is about bounds and control characters rather than quoting.
  */
 export const CHANNELS = {
+  analysisOpenOutput: 'analysis:open-output',
+  analysisState: 'analysis:state',
+  analysisAddFiles: 'analysis:add-files',
+  analysisReadDataset: 'analysis:read-dataset',
+  analysisSave: 'analysis:save',
+  analysisRun: 'analysis:run',
+  analysisDraft: 'analysis:draft',
+  analysisExport: 'analysis:export',
+  analysisMethodSave: 'analysis:method-save',
+  analysisMethodApply: 'analysis:method-apply',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',
@@ -19,8 +29,10 @@ export const CHANNELS = {
   exportWorkbook: 'foundry:export-workbook',
   /** The one channel that changes the store. See `writes.ts`. */
   taskNew: 'foundry:task-new',
+  taskRename: 'foundry:task-rename',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
+  harnessLayout: 'harness:layout',
   formulatorLaunch: 'formulator:launch',
   formulatorStop: 'formulator:stop',
   formulatorStatus: 'formulator:status',
