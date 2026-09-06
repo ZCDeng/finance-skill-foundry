@@ -147,6 +147,13 @@ def render_evidence_appendix(prepared: dict) -> dict:
     groups = prepared.get("evidence_groups", [])
     if not isinstance(groups, list):
         raise FoundryError("prepared evidence_groups must be an array")
+    facts_by_id = {
+        fact["id"]: fact
+        for fact in prepared.get("facts", [])
+        if isinstance(fact, dict)
+        and isinstance(fact.get("id"), str)
+        and FACT_ID.fullmatch(fact["id"])
+    }
     lines = ["## 计算依据"]
     fact_ids: list[str] = []
     for group in groups:
@@ -160,30 +167,114 @@ def render_evidence_appendix(prepared: dict) -> dict:
         for member in members:
             if not isinstance(member, dict):
                 continue
-            state = member.get("state", "missing")
+            fact = _appendix_member_fact(group, member, facts_by_id)
+            state = fact.get("state") if fact else member.get("state", "missing")
             label = member.get("label") or member.get("semantic_role") or member.get("column")
-            value = member.get("display_value")
+            value = fact.get("display_value") if fact else None
             suffix = f"：{value}" if value not in (None, "") else ""
-            if member.get("fact_id"):
-                fact_ids.append(member["fact_id"])
-            source_count = member.get("source_row_count")
+            if fact:
+                fact_ids.append(fact["id"])
+            source_count = (
+                fact.get("source_trace", {}).get("source_row_count")
+                if fact
+                else member.get("source_row_count")
+            )
             source = (
                 "；有来源行"
-                if isinstance(source_count, int) and source_count > 0
+                if fact and isinstance(source_count, int) and source_count > 0
                 else ""
             )
-            lines.append(f"- {label}{suffix}（{_state_label(state)}{source}）")
+            lines.append(f"- {label}{suffix}（{_appendix_member_label(state, fact)}{source}）")
         closure = group.get("closure")
         if isinstance(closure, dict) and closure.get("status") != "unsupported":
             lines.append(f"- 闭合核对：{_closure_label(closure)}")
+    unique_fact_ids = list(dict.fromkeys(fact_ids))
     return {
         "schema_version": 1,
         "body": "\n".join(lines).strip() if len(lines) > 1 else "",
-        "fact_ids": list(dict.fromkeys(fact_ids)),
+        "fact_ids": unique_fact_ids,
         "claims": claims_for_facts(
-            prepared.get("facts", []), list(dict.fromkeys(fact_ids))
+            prepared.get("facts", []), unique_fact_ids
         ),
     }
+
+
+def _appendix_member_fact(group: dict, member: dict, facts_by_id: dict[str, dict]) -> dict | None:
+    fact_id = member.get("fact_id")
+    if not isinstance(fact_id, str):
+        return None
+    fact = facts_by_id.get(fact_id)
+    if not fact:
+        return None
+    if group.get("run_id") is not None and fact.get("run_id") != group.get("run_id"):
+        return None
+    for key in ("row", "column"):
+        if member.get(key) is not None and member.get(key) != fact.get(key):
+            return None
+    if member.get("value") is not None and not _decimal_equal(member.get("value"), fact.get("value")):
+        return None
+    if member.get("unit") is not None and member.get("unit") != fact.get("unit"):
+        return None
+    if member.get("state") is not None and member.get("state") != fact.get("state"):
+        return None
+    if not _appendix_scope_matches(member.get("scope"), fact.get("scope")):
+        return None
+    if (
+        member.get("display_value") is not None
+        and member.get("display_value") != fact.get("display_value")
+    ):
+        return None
+    return fact
+
+
+def _appendix_scope_matches(member_scope: Any, fact_scope: Any) -> bool:
+    if not isinstance(member_scope, dict) or not member_scope:
+        return True
+    if not isinstance(fact_scope, dict) or not fact_scope:
+        return False
+    for key, value in member_scope.items():
+        if value in (None, ""):
+            continue
+        if _appendix_scope_value(fact_scope, key) != value:
+            return False
+    return True
+
+
+def _appendix_scope_value(fact_scope: dict, key: str) -> Any:
+    if key in fact_scope:
+        return fact_scope.get(key)
+    if key.startswith("actual_scope."):
+        return _appendix_nested_scope_value(
+            fact_scope, ("actual",), key.removeprefix("actual_scope.")
+        )
+    if key.startswith("baseline_scope."):
+        return _appendix_nested_scope_value(
+            fact_scope, ("baseline", "budget"), key.removeprefix("baseline_scope.")
+        )
+    nested_values = [
+        scope.get(key)
+        for scope in fact_scope.values()
+        if isinstance(scope, dict) and key in scope
+    ]
+    if nested_values and all(value == nested_values[0] for value in nested_values):
+        return nested_values[0]
+    return None
+
+
+def _appendix_nested_scope_value(fact_scope: dict, aliases: tuple[str, ...], key: str) -> Any:
+    for alias in aliases:
+        scope = fact_scope.get(alias)
+        if isinstance(scope, dict) and key in scope:
+            return scope.get(key)
+    return None
+
+
+def _appendix_member_label(state: str, fact: dict | None) -> str:
+    if fact:
+        return _state_label(state)
+    if state in {"missing", "not_applicable"}:
+        return _state_label(state)
+    return "非可引用：未生成可核验事实"
 
 
 def validate_explanation(analysis, spec: dict) -> dict:
@@ -272,7 +363,8 @@ def validate_explanation(analysis, spec: dict) -> dict:
     allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
-    for token in _body_numbers(body):
+    ignored_number_spans = _generated_appendix_heading_number_spans(body, prepared)
+    for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         if _normalize_number(token["text"]) not in allowed_numbers:
             issues.append(
                 {
@@ -1640,10 +1732,27 @@ def _allowed_numbers(facts: list[dict]) -> set[str]:
     return {item for item in allowed if item}
 
 
-def _body_numbers(body: str) -> list[dict]:
+def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[tuple[int, int]]:
+    appendix = render_evidence_appendix(prepared).get("body", "")
+    if not appendix:
+        return []
+    start = body.rfind(appendix)
+    if start < 0:
+        return []
+    spans = []
+    for match in re.finditer(r"(?m)^### 结果行 (?P<number>\d+)$", appendix):
+        number_span = match.span("number")
+        spans.append((start + number_span[0], start + number_span[1]))
+    return spans
+
+
+def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = None) -> list[dict]:
+    ignored_spans = ignored_spans or []
     date_spans = [match.span() for match in DATE_SPAN.finditer(body)]
     values = []
     for match in NUMBER.finditer(body):
+        if any(_overlaps(match.span(), span) for span in ignored_spans):
+            continue
         if any(_overlaps(match.span(), span) for span in date_spans):
             continue
         before = body[match.start() - 1 : match.start()]

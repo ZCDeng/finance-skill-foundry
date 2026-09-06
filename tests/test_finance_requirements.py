@@ -1181,3 +1181,216 @@ def test_account_total_rejects_ordinary_sql_management_account_amount(analysis):
     assert result['coverage']['status'] == 'needs_attention'
     assert result['items'][0]['status'] == 'pending'
     assert result['items'][0]['locations'] == []
+
+
+def test_profit_bridge_method_alias_matches_same_canonical_run_method(analysis):
+    requirement = save_requirements(analysis, spec(
+        items=[{'id': 'profit', 'metric': 'profit',
+                'dimensions': {'method': '利润桥'}, 'requires_drilldown': False}],
+    ))
+    run = _run(analysis)
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': [_claim(run)]})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+
+
+def test_unclaimed_valid_profit_bridge_returns_claim_fixup_without_passing(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'profit', 'metric': 'profit',
+                                             'requires_drilldown': False}]))
+    run = _run(analysis)
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': []})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    fixups = result['items'][0]['fixups']
+    claim_fixup = next(fixup for fixup in fixups if fixup['code'] == 'add_calculation_claim')
+    assert {
+        key: claim_fixup[key]
+        for key in ('requirement_item_id', 'run_id', 'row', 'column', 'value', 'output_hash')
+    } == {
+        'requirement_item_id': 'profit',
+        'run_id': run['id'],
+        'row': 3,
+        'column': 'contribution',
+        'value': '5',
+        'output_hash': run['output_hash'],
+    }
+    assert claim_fixup['fact_id']
+
+
+def test_source_fixup_flows_to_completion_action_without_marking_complete(analysis):
+    from foundry.finance_completion import record_completion
+
+    save_requirements(analysis, spec())
+    run = _run(analysis)
+    quality = augment_quality(
+        analysis,
+        {'run_ids': [run['id']], 'claims': [_claim(run)]},
+        {'status': 'pass', 'issues': []},
+    )
+
+    assert quality['checks']['coverage']['status'] == 'pass'
+    assert quality['checks']['provenance']['status'] == 'needs_attention'
+    source_issue = next(issue for issue in quality['issues'] if issue['code'] == 'requested_source_missing')
+    source_fixup = next(fixup for fixup in source_issue['fixups'] if fixup['code'] == 'verify_source')
+    assert source_fixup['location'] == {
+        'run_id': run['id'],
+        'row': 3,
+        'column': 'contribution',
+        'output_hash': run['output_hash'],
+    }
+
+    completion = record_completion(
+        analysis,
+        {'id': 's' * 32, 'content_hash': 'source-fixup-draft', 'run_ids': [run['id']]},
+        quality,
+    )
+
+    assert completion['status'] == 'repair_available'
+    assert completion['repair_allowed'] is True
+    action = next(action for action in completion['actions'] if action['code'] == 'requested_source_missing')
+    assert action['fixups'] == [source_fixup]
+
+
+def test_control_totals_existing_valid_run_returns_complete_row_fixups_without_passing(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    _control_requirement(service.analysis)
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    cash_rows = [index for index, row in enumerate(run['result']['rows']) if row['management_account'] == 'cash']
+
+    result = check_requirements(service.analysis, {'run_ids': [run['id']], 'claims': []})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    claim_fixups = [fixup for fixup in result['items'][0]['fixups'] if fixup['code'] == 'add_calculation_claim']
+    assert {(fixup['row'], fixup['column'], fixup['value']) for fixup in claim_fixups} == {
+        (cash_rows[0], 'amount', '100'),
+        (cash_rows[1], 'amount', '10'),
+    }
+    assert all(fixup['fact_id'] for fixup in claim_fixups)
+
+
+def test_claimed_profit_bridge_does_not_suggest_duplicate_calculation_fixup(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'profit', 'metric': 'profit',
+                                             'requires_drilldown': False}]))
+    run = _run(analysis)
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run)]})
+
+    assert result['items'][0]['status'] == 'answered'
+    assert all(
+        fixup['code'] != 'add_calculation_claim'
+        for fixup in result['items'][0].get('fixups', [])
+    )
+
+
+def test_control_totals_fixup_only_suggests_unclaimed_required_rows(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    _control_requirement(service.analysis)
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    cash_rows = [index for index, row in enumerate(run['result']['rows']) if row['management_account'] == 'cash']
+
+    result = check_requirements(service.analysis, {'run_ids': [run['id']],
+                                                   'claims': [_amount_claim(run, cash_rows[0])]})
+
+    claim_fixups = [fixup for fixup in result['items'][0]['fixups'] if fixup['code'] == 'add_calculation_claim']
+    assert [(fixup['row'], fixup['column'], fixup['value']) for fixup in claim_fixups] == [
+        (cash_rows[1], 'amount', '10')
+    ]
+
+
+def test_control_totals_fixup_rejects_same_dataset_id_with_stale_hashes(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = service.analysis_requirements_save({
+        'question': '核对8月现金控制合计，必须覆盖CNY和USD',
+        'context_id': context['id'],
+        'scope': {'actual': {'ledger': 'control-ledger', 'organization': '总部',
+                             'period': '2026-08', 'scenario': 'actual'}},
+        'items': [{'id': 'cash_controls', 'metric': 'control_totals',
+                   'dimensions': {'management_account': 'cash'}, 'periods': ['2026-08'],
+                   'requires_drilldown': True}],
+    })
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    stale = {key: value for key, value in run.items() if key != '_integrity_hash'}
+    stale.update(_new(service.analysis.task))
+    stale.update({'input_hashes': {'actual': 'stale-data-hash'},
+                  'source_hashes': {'actual': 'stale-source-hash'}})
+    service.analysis._write(service.analysis._object_path('runs', stale['id']), stale)
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [stale['id']], 'claims': []})
+
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0].get('fixups', []) == []
+
+
+def test_profit_bridge_fixup_rejects_unclosed_fact_group(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'profit', 'metric': 'profit',
+                                             'requires_drilldown': False}]))
+    run = _run(analysis, result={
+        'method': 'revenue_minus_cost_minus_expense',
+        'columns': ['metric', 'actual', 'baseline', 'contribution'],
+        'rows': [
+            {'metric': 'revenue', 'actual': '120', 'baseline': '100', 'contribution': '20'},
+            {'metric': 'cost', 'actual': '70', 'baseline': '60', 'contribution': '-10'},
+            {'metric': 'expense', 'actual': '20', 'baseline': '15', 'contribution': '-5'},
+            {'metric': 'profit', 'actual': '30', 'baseline': '25', 'contribution': '6'},
+        ],
+    })
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': []})
+
+    assert result['items'][0]['status'] == 'pending'
+    assert all(
+        fixup['code'] != 'add_calculation_claim'
+        for fixup in result['items'][0].get('fixups', [])
+    )
+
+
+def test_control_totals_fixup_reports_truncated_result_instead_of_partial_claims(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    _control_requirement(service.analysis)
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    truncated = {key: value for key, value in run.items() if key != '_integrity_hash'}
+    truncated.update(_new(service.analysis.task))
+    truncated['result'] = {**run['result'], 'truncated': True, 'row_count': len(run['result']['rows'])}
+    service.analysis._write(service.analysis._object_path('runs', truncated['id']), truncated)
+
+    result = check_requirements(service.analysis, {'run_ids': [truncated['id']], 'claims': []})
+
+    fixups = result['items'][0]['fixups']
+    assert [fixup['code'] for fixup in fixups] == ['result_set_incomplete']
+    assert fixups[0]['row_count'] == len(run['result']['rows'])
+
+
+def test_non_string_method_dimension_does_not_crash_or_match_as_alias(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'profit', 'metric': 'profit',
+                                             'dimensions': {'method': ['利润桥']},
+                                             'requires_drilldown': False}]))
+    run = _run(analysis)
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run)]})
+
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_method_conflict_fixup_does_not_relax_matching(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'profit', 'metric': 'profit',
+                                             'dimensions': {'method': 'free_sql'},
+                                             'requires_drilldown': False}]))
+    run = _run(analysis)
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run)]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+    conflict = next(fixup for fixup in result['items'][0]['fixups'] if fixup['code'] == 'method_conflict')
+    assert conflict['expected_method'] == 'free_sql'
+    assert conflict['actual_method'] == 'revenue_minus_cost_minus_expense'

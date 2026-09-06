@@ -572,6 +572,112 @@ def test_evidence_appendix_renders_zero_facts_and_claims(service):
     assert {claim['fact_id'] for claim in appendix['claims']} == set(appendix['fact_ids'])
 
 
+def test_evidence_appendix_does_not_cite_unbacked_members(service):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    backed = prepared["facts"][0]
+    missing_fact_id = "e" * 64
+    prepared["evidence_groups"] = [
+        {
+            "id": "appendix-regression",
+            "run_id": backed["run_id"],
+            "group_type": "profit_bridge",
+            "label": "附录事实绑定",
+            "members": [
+                {
+                    "row": backed["row"],
+                    "column": backed["column"],
+                    "label": "已验证金额",
+                    "state": backed["state"],
+                    "fact_id": backed["id"],
+                    "value": backed["value"],
+                    "display_value": backed["display_value"],
+                    "unit": backed["unit"],
+                    "source_row_count": 1,
+                },
+                {
+                    "row": backed["row"],
+                    "column": "profit_impact",
+                    "label": "未生成事实成员",
+                    "state": "nonzero",
+                    "fact_id": None,
+                    "value": "20",
+                    "display_value": "20 万元",
+                    "unit": "万元",
+                    "source_row_count": 0,
+                },
+                {
+                    "row": backed["row"],
+                    "column": backed["column"],
+                    "label": "错配事实成员",
+                    "state": "nonzero",
+                    "fact_id": missing_fact_id,
+                    "value": "999",
+                    "display_value": "999 万元",
+                    "unit": "万元",
+                    "source_row_count": 1,
+                },
+                {
+                    "row": backed["row"],
+                    "column": backed["column"],
+                    "label": "同ID值错配成员",
+                    "state": "nonzero",
+                    "fact_id": backed["id"],
+                    "value": "999",
+                    "display_value": "999 万元",
+                    "unit": backed["unit"],
+                    "source_row_count": 1,
+                },
+                {
+                    "row": backed["row"],
+                    "column": backed["column"],
+                    "label": "同ID单位错配成员",
+                    "state": "nonzero",
+                    "fact_id": backed["id"],
+                    "value": backed["value"],
+                    "display_value": backed["display_value"],
+                    "unit": "元",
+                    "source_row_count": 1,
+                },
+                {
+                    "row": backed["row"],
+                    "column": backed["column"],
+                    "label": "同ID范围错配成员",
+                    "state": "nonzero",
+                    "fact_id": backed["id"],
+                    "value": backed["value"],
+                    "display_value": backed["display_value"],
+                    "unit": backed["unit"],
+                    "scope": {"period": "2099-12"},
+                    "source_row_count": 1,
+                },
+            ],
+            "closure": {"status": "passed"},
+        }
+    ]
+
+    appendix = render_evidence_appendix(prepared)
+
+    assert backed["id"] in appendix["fact_ids"]
+    assert missing_fact_id not in appendix["fact_ids"]
+    assert appendix["fact_ids"] == [backed["id"]]
+    assert "已验证金额" in appendix["body"]
+    assert "未生成事实成员：20 万元（已计算" not in appendix["body"]
+    assert "错配事实成员：999 万元（已计算" not in appendix["body"]
+    assert "同ID值错配成员：999 万元（已计算" not in appendix["body"]
+    assert "同ID单位错配成员" in appendix["body"]
+    assert "同ID范围错配成员" in appendix["body"]
+    assert "未生成事实成员（非可引用" in appendix["body"]
+    assert "错配事实成员（非可引用" in appendix["body"]
+    assert "同ID值错配成员（非可引用" in appendix["body"]
+    assert "同ID单位错配成员（非可引用" in appendix["body"]
+    assert "同ID范围错配成员（非可引用" in appendix["body"]
+    assert {claim["fact_id"] for claim in appendix["claims"]} == set(appendix["fact_ids"])
+
+
 def test_evidence_groups_distinguish_missing_from_not_applicable(service):
     from foundry.finance_explanations import prepare_explanation
 
@@ -857,6 +963,81 @@ def test_evidence_appendix_renders_control_count_without_money_unit(service):
 
     assert "row_count / actual / 2026-09：1 条（已计算；有来源行）" in appendix["body"]
     assert "row_count / actual / 2026-09：1 万元" not in appendix["body"]
+
+
+def test_generated_appendix_row_headings_do_not_trigger_uncited_numbers(service):
+    store, context = service
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+
+    draft = store.save_explanation_draft({
+        "body": "控制合计见计算依据。",
+        "run_ids": [run["id"]],
+    })
+
+    assert draft["body"].count("row_count /") >= 2
+    assert "### 结果行 2" in draft["body"]
+    assert "uncited_number" not in {
+        issue["code"] for issue in draft["explanation_check"]["issues"]
+    }
+
+
+def test_tampered_appendix_amount_still_fails_number_check(service):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, context = service
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = render_evidence_appendix(prepared)
+    tampered = appendix["body"].replace("120 万元", "121 万元", 1)
+    assert tampered != appendix["body"]
+
+    check = store.validate_explanation({
+        "body": tampered,
+        "run_ids": [run["id"]],
+        "fact_ids": appendix["fact_ids"],
+        "claims": appendix["claims"],
+    })
+
+    assert check["status"] == "needs_attention"
+    assert any(
+        issue["code"] == "uncited_number" and issue.get("text") == "121"
+        for issue in check["issues"]
+    )
+
+
+def test_manual_calculation_claim_without_fact_stays_unknown(service):
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "dddddddddddddddddddddddddddddddd",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": ["metric", "contribution"],
+            "rows": [{
+                "metric": "revenue",
+                "contribution": "20",
+                "profit_impact": "20",
+                "unit": "万元",
+            }],
+        },
+    })
+
+    check = store.validate_explanation({
+        "body": "收入利润影响20万元。",
+        "run_ids": [run["id"]],
+        "claims": [{
+            "basis": "calculation",
+            "run_id": run["id"],
+            "row": 0,
+            "column": "profit_impact",
+            "value": "20",
+            "display_value": "20 万元",
+        }],
+    })
+
+    assert check["status"] == "needs_attention"
+    assert any(issue["code"] == "unknown_fact" for issue in check["issues"])
 
 
 def test_quantity_and_unit_price_do_not_inherit_money_unit_without_explicit_unit(service):

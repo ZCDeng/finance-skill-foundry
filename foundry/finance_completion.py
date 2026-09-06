@@ -71,7 +71,8 @@ def record_completion(analysis, draft, quality):
         status = 'complete' if complete else 'awaiting_input' if awaiting_input else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available'
         actions = [{'code': issue.get('code'), 'message': issue.get('message'),
                     **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
-                    **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {})}
+                    **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {}),
+                    **({'fixups': issue['fixups']} if issue.get('fixups') else {})}
                    for issue in issues]
         if unassessed:
             actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})

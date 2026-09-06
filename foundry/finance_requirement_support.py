@@ -8,6 +8,14 @@ ALIASES = {
     "revenue=price×quantity": "revenue",
     "revenue=price*quantity": "revenue",
 }
+METHOD_ALIASES = {
+    "profit_bridge": "revenue_minus_cost_minus_expense",
+    "profit_variance_bridge": "revenue_minus_cost_minus_expense",
+    "利润桥": "revenue_minus_cost_minus_expense",
+    "利润变动桥": "revenue_minus_cost_minus_expense",
+    "收入-成本-费用": "revenue_minus_cost_minus_expense",
+    "收入减成本减费用": "revenue_minus_cost_minus_expense",
+}
 NATIVE_METRICS = {
     "management_pnl": "run_metric",
     "profit": "run_metric / explain_variance",
@@ -31,6 +39,21 @@ NATIVE_METRICS = {
 
 def canonical_metric(metric):
     return ALIASES.get(metric, metric)
+
+
+def canonical_method(method):
+    if not isinstance(method, str):
+        return method
+    return METHOD_ALIASES.get(method, method)
+
+
+def canonical_dimensions(dimensions):
+    if not isinstance(dimensions, dict):
+        return {}
+    normalized = dict(dimensions)
+    if normalized.get("method") is not None:
+        normalized["method"] = canonical_method(normalized["method"])
+    return normalized
 
 
 def metric_catalog():
@@ -79,7 +102,7 @@ def assess_requirement_support(analysis, spec):
                           next_action="先恢复并核验绑定快照，不能将读取失败当成数据不存在。")
         elif metric == "price_quantity" or (
             metric in {"revenue", "amount"}
-            and item.get("dimensions", {}).get("method") in {
+            and canonical_method(item.get("dimensions", {}).get("method")) in {
                 "quantity_then_price", "base_weights_with_interaction"
             }
         ):

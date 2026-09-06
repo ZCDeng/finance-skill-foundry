@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from foundry.analysis import _hash
 from foundry.errors import FoundryError
-from foundry.finance_requirement_support import canonical_metric
+from foundry.finance_requirement_support import canonical_dimensions, canonical_metric
 
 SEMANTIC_VERSION = 1
 
@@ -31,7 +31,7 @@ def requirement_semantics(analysis, record):
         'removed_item_ids': sorted(record.get('removed_item_ids', [])),
         'items': sorted([{
             'id': item['id'], 'metric': canonical_metric(item['metric']),
-            'dimensions': item.get('dimensions', {}),
+            'dimensions': canonical_dimensions(item.get('dimensions', {})),
             'periods': sorted(set(item.get('periods', []))),
             'requires_drilldown': item.get('requires_drilldown', False),
         } for item in record.get('items', [])], key=lambda item: item['id']),

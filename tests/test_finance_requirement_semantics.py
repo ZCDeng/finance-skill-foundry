@@ -132,6 +132,43 @@ def test_metric_alias_and_label_edit_can_reuse_semantically_equivalent_finance_r
     assert not completion["actions"]
 
 
+def test_profit_bridge_method_alias_reuses_same_semantic_fingerprint_and_run(tmp_path):
+    service, context = _management_service(tmp_path, dirname="profit-method")
+    original = service.analysis_requirements_save({
+        "question": "解释利润桥",
+        "context_id": context["id"],
+        "items": [{
+            "id": "profit",
+            "metric": "profit",
+            "label": "利润桥",
+            "dimensions": {"method": "利润桥"},
+            "requires_drilldown": False,
+        }],
+    })
+    old_run = service.explain_variance({"context_id": context["id"]})
+    revised = service.analysis_requirements_save({
+        "parent_id": original["id"],
+        "question": "解释利润桥",
+        "context_id": context["id"],
+        "items": [{
+            "id": "profit",
+            "metric": "profit",
+            "label": "利润桥展示名",
+            "dimensions": {"method": "profit_bridge"},
+            "requires_drilldown": False,
+        }],
+    })
+
+    _assert_bound_to_requirements(old_run, original)
+    assert old_run["result"]["method"] == "revenue_minus_cost_minus_expense"
+    assert revised["semantic_fingerprint"] == original["semantic_fingerprint"]
+
+    completion = _completion_for(service, revised, old_run, draft_id="p")
+
+    assert completion["status"] == "complete"
+    assert completion["reused_run_ids"] == [old_run["id"]]
+
+
 @pytest.mark.parametrize(
     ("name", "revised_context_kwargs"),
     [

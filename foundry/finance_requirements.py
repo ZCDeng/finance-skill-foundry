@@ -34,6 +34,11 @@ def _canonical_metric_name(metric):
     return canonical_metric(metric)
 
 
+def _canonical_method_name(method):
+    from foundry.finance_requirement_support import canonical_method
+    return canonical_method(method)
+
+
 def _assess_requirement_support(analysis, spec):
     from foundry.finance_requirement_support import assess_requirement_support
     return assess_requirement_support(analysis, spec)
@@ -230,7 +235,7 @@ def _bound_scopes_match(candidates, expected, row=None):
 
 
 def _matches(item, row, column, run=None):
-    method = item.get('dimensions', {}).get('method')
+    method = _canonical_method_name(item.get('dimensions', {}).get('method'))
     if method is not None and _run_method(run or {}) != method:
         return False
     if any(row.get(k) != value for k, value in item['dimensions'].items() if k != 'method'):
@@ -246,7 +251,7 @@ def _matches(item, row, column, run=None):
 
 
 def _run_method(run):
-    return run.get('result', {}).get('method') or run.get('method')
+    return _canonical_method_name(run.get('result', {}).get('method') or run.get('method'))
 
 
 def _run_finance_metric(analysis, run):
@@ -308,7 +313,7 @@ def _prepared_evidence(analysis, runs):
 
 
 def _price_quantity_requirement_matches(item, run, row, group):
-    method = item.get('dimensions', {}).get('method')
+    method = _canonical_method_name(item.get('dimensions', {}).get('method'))
     run_method = _run_method(run)
     metric = _canonical_metric_name(item.get('metric'))
     if metric == 'amount':
@@ -532,6 +537,219 @@ def _location_evidence_status(item, location, member):
     return 'answered', metadata
 
 
+def _claim_fixup(item, run, row_index, row, column, evidence, reason='valid_candidate_not_claimed'):
+    location = {'run_id': run['id'], 'row': row_index, 'column': column, 'output_hash': run.get('output_hash')}
+    status, metadata = _location_evidence_status(item, location, evidence['members'].get((run['id'], row_index, column)))
+    fact_id = metadata.get('fact_id')
+    if status != 'answered' or not fact_id:
+        return None
+    return {
+        'code': 'add_calculation_claim',
+        'requirement_item_id': item['id'],
+        **location,
+        'value': row.get(column),
+        'fact_id': fact_id,
+        'reason': reason,
+    }
+
+
+def _run_inputs_match_requirement(run, requirement):
+    basis = requirement.get('semantic_basis') if isinstance(requirement, dict) else None
+    sources = basis.get('sources') if isinstance(basis, dict) else None
+    if not sources:
+        return True
+    for alias, source in sources.items():
+        if (run.get('bindings', {}).get(alias) != source.get('dataset_id')
+                or run.get('input_hashes', {}).get(alias) != source.get('data_hash')
+                or run.get('source_hashes', {}).get(alias) != source.get('source_hash')):
+            return False
+    return True
+
+
+def _source_fixup(item, location, checks):
+    if not item.get('requires_drilldown') or _source_verified(location, checks):
+        return None
+    fact_id = (location.get('evidence') or {}).get('fact_id')
+    if not fact_id:
+        return None
+    return {
+        'code': 'verify_source',
+        'requirement_item_id': item['id'],
+        'location': {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')},
+        'fact_id': fact_id,
+        'reason': 'drilldown_required',
+    }
+
+
+def _dedupe_fixups(fixups):
+    seen = set()
+    deduped = []
+    for fixup in fixups:
+        if not isinstance(fixup, dict):
+            continue
+        key = _hash(fixup)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(fixup)
+    return deduped
+
+
+def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed):
+    kind = _result_set_kind(item)
+    if not kind:
+        return []
+    fixups = []
+    for run in runs.values():
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        if not _run_inputs_match_requirement(run, latest):
+            continue
+        metric = _run_finance_metric(analysis, run)
+        if not metric or metric.get('kind') != kind:
+            continue
+        if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
+            continue
+        if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
+            continue
+        rows = _result_set_required_rows(item, run, latest['scope'])
+        if not rows:
+            continue
+        if run.get('result', {}).get('truncated'):
+            fixups.append({
+                'code': 'result_set_incomplete',
+                'requirement_item_id': item['id'],
+                'run_id': run['id'],
+                'row_count': run.get('result', {}).get('row_count', len(run.get('result', {}).get('rows', []))),
+                'reason': 'run_result_truncated',
+            })
+            continue
+        row_fixups = []
+        source_fixups = []
+        for index, row in rows:
+            if (run['id'], index, 'amount') in claimed:
+                continue
+            claim = _claim_fixup(item, run, index, row, 'amount', evidence)
+            if not claim:
+                row_fixups = []
+                break
+            row_fixups.append(claim)
+            location = _result_set_location(
+                {'run_id': run['id'], 'row': index, 'column': 'amount', 'output_hash': run.get('output_hash')},
+                evidence, 'answered'
+            )
+            source = _source_fixup(item, location, checks)
+            if source:
+                source_fixups.append(source)
+        fixups.extend(row_fixups)
+        fixups.extend(source_fixups)
+    return fixups
+
+
+def _price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claimed):
+    fixups = []
+    for run in runs.values():
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        if not _run_inputs_match_requirement(run, latest):
+            continue
+        for index, row in enumerate(run.get('result', {}).get('rows', [])):
+            group = evidence['groups'].get((run['id'], index))
+            if not _scope_matches(run, row, latest['scope']):
+                continue
+            if not _price_quantity_requirement_matches(item, run, row, group):
+                continue
+            for member in _price_quantity_required_members(group):
+                if (run['id'], index, member['column']) in claimed:
+                    continue
+                claim = _claim_fixup(item, run, index, row, member['column'], evidence)
+                if claim:
+                    fixups.append(claim)
+                    location = _result_set_location(
+                        {'run_id': run['id'], 'row': index, 'column': member['column'], 'output_hash': run.get('output_hash')},
+                        evidence, 'answered'
+                    )
+                    source = _source_fixup(item, location, checks)
+                    if source:
+                        fixups.append(source)
+    return fixups
+
+
+def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
+    fixups = []
+    for run in runs.values():
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        if not _run_inputs_match_requirement(run, latest):
+            continue
+        for index, row in enumerate(run.get('result', {}).get('rows', [])):
+            if not _scope_matches(run, row, latest['scope']):
+                continue
+            for column in row:
+                if _account_amount_claim_requires_native_total(item, row, column):
+                    continue
+                if not _matches(item, row, column, run):
+                    continue
+                if (run['id'], index, column) in claimed:
+                    continue
+                claim = _claim_fixup(item, run, index, row, column, evidence)
+                if claim:
+                    fixups.append(claim)
+                    location = _result_set_location(
+                        {'run_id': run['id'], 'row': index, 'column': column, 'output_hash': run.get('output_hash')},
+                        evidence, 'answered'
+                    )
+                    source = _source_fixup(item, location, checks)
+                    if source:
+                        fixups.append(source)
+    return fixups
+
+
+def _method_conflict_fixups(item, latest, runs, evidence):
+    expected_method = _canonical_method_name(item.get('dimensions', {}).get('method'))
+    if expected_method is None:
+        return []
+    fixups = []
+    for run in runs.values():
+        actual_method = _run_method(run)
+        if actual_method in (None, expected_method):
+            continue
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        if not _run_inputs_match_requirement(run, latest):
+            continue
+        for index, row in enumerate(run.get('result', {}).get('rows', [])):
+            if not _scope_matches(run, row, latest['scope']):
+                continue
+            relaxed = {**item, 'dimensions': {k: v for k, v in item.get('dimensions', {}).items() if k != 'method'}}
+            group = evidence['groups'].get((run['id'], index))
+            if not (
+                _price_quantity_requirement_matches(relaxed, run, row, group)
+                or any(_matches(relaxed, row, column, run) for column in row)
+            ):
+                continue
+            fixups.append({
+                'code': 'method_conflict',
+                'requirement_item_id': item['id'],
+                'run_id': run['id'],
+                'row': index,
+                'expected_method': expected_method,
+                'actual_method': actual_method,
+                'reason': 'requirement_method_does_not_match_run',
+            })
+            break
+    return fixups
+
+
+def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed):
+    return _dedupe_fixups([
+        *_result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed),
+        *_price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claimed),
+        *_generic_candidate_fixups(item, latest, runs, checks, evidence, claimed),
+        *_method_conflict_fixups(item, latest, runs, evidence),
+    ])
+
+
 def check_requirements(analysis, spec):
     latest = latest_requirements(analysis)
     if not latest:
@@ -557,6 +775,7 @@ def check_requirements(analysis, spec):
     claimed_by_row = {}
     for run_id, index, column in claimed:
         claimed_by_row.setdefault((run_id, index), set()).add(column)
+    fixup_runs = {run_id: runs[run_id] for run_id in spec.get('run_ids', []) if run_id in runs}
     checks = analysis._list('evidence_checks')
     source_failures = _source_read_failures(spec.get('source_read_failures', []))
     items = []
@@ -614,9 +833,18 @@ def check_requirements(analysis, spec):
         provenance_status = 'not_requested'
         if item['requires_drilldown']:
             provenance_status = 'verified' if sourced else 'failed' if failed_source else 'pending'
-        items.append({**item, 'status': item_status, 'locations': locations,
-                      'source_read_failure': source_failures.get(item['id']),
-                      'provenance_status': provenance_status})
+        fixups = _requirement_fixups(analysis, item, latest, fixup_runs, checks, evidence, claimed)
+        if item_status == 'answered':
+            fixups = [fixup for fixup in fixups if fixup.get('code') == 'verify_source']
+        item_record = {**item, 'status': item_status, 'locations': locations,
+                       'source_read_failure': source_failures.get(item['id']),
+                       'provenance_status': provenance_status}
+        source_fixups = [fixup for location in locations
+                         for fixup in [_source_fixup(item, location, checks)] if fixup]
+        fixups = _dedupe_fixups([*fixups, *source_fixups])
+        if fixups:
+            item_record['fixups'] = fixups
+        items.append(item_record)
     scope_changed = selected['id'] != latest['id']
     complete = all(item['status'] == 'answered' for item in items) and not scope_changed
     trace_complete = all(item['provenance_status'] in {'verified', 'not_requested'} for item in items)
@@ -706,9 +934,12 @@ def augment_quality(analysis, spec, quality):
         issues.append({'code': 'requirements_changed', 'severity': 'warning', 'message': '分析范围已更新，请按当前要求复核文稿。'})
     for item in requirements['items']:
         if item['status'] != 'answered':
-            issues.append({'code': 'requirement_unanswered', 'severity': 'warning', 'message': f'尚未提供“{item["label"]}”的计算依据。', 'requirement_item_id': item['id']})
+            issues.append({'code': 'requirement_unanswered', 'severity': 'warning', 'message': f'尚未提供“{item["label"]}”的计算依据。', 'requirement_item_id': item['id'],
+                           **({'fixups': item['fixups']} if item.get('fixups') else {})})
         if item['provenance_status'] in {'pending', 'failed'}:
-            issues.append({'code': 'requested_source_missing', 'severity': 'warning', 'message': f'尚未完成“{item["label"]}”的指定来源核查。', 'requirement_item_id': item['id']})
+            source_fixups = [fixup for fixup in item.get('fixups', []) if fixup.get('code') == 'verify_source']
+            issues.append({'code': 'requested_source_missing', 'severity': 'warning', 'message': f'尚未完成“{item["label"]}”的指定来源核查。', 'requirement_item_id': item['id'],
+                           **({'fixups': source_fixups} if source_fixups else {})})
     return {**quality, 'issues': issues, 'status': 'needs_attention' if issues else quality['status'],
             'requirements': requirements,
             'checks': {'numbers': {'status': quality['status']}, 'coverage': requirements['coverage'], 'provenance': requirements['provenance']}}

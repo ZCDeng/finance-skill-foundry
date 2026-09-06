@@ -178,3 +178,9 @@
 
 - 新候选ZIP CRC通过，SHA256 ba66215d073bfb0ef29a47226da75e34f439383c28a25e8f7c77ebc1bd724d6f，26128条目；整体bundle树557244f69b82cb742a7249a8d107754b4cdd1b48b3f028557186b6f01e877afb。此为UI修复候选归档，未安装，不代表新增P0/P1已随包交付。
 - 4713729起跑全量pytest为991 passed/13 skipped（late-refresh-python-full.log）；跳过中11项为未配置DSH路径。使用当前候选真实DSH入口补跑test_real_load与test_completion_runtime_real，11 passed（late-refresh-real-dsh.log），无付费模型。两次运行单独保留，后续P0/P1改变源码后必须重新跑最终完整回归。
+
+
+- P0最小修复：附录引用反查prepared facts并核对位置、值、单位、状态、显示和范围；无事实成员不再宣称已计算。服务端完整重建附录匹配时只识别其结果行标题序号，真实金额继续扫描。首次回归2 failed/2 passed；修复后4 passed；root独立解释测试57 passed，Ruff通过（p0-appendix-root-tests.log）。手写未知claim、篡改金额和同ID错配负例保留。完整origin/hash持久化仍待后续跨保存链补齐。
+- P1源码切片：利润桥白名单方法在matcher和语义指纹一致规范化；check_requirements提供精确claim/source/method冲突建议并传到completion actions。保留原要求与完成判定，已引用位置不重复建议，过期输入哈希、未闭合组和截断控制合计不产生部分补齐假象。切片69 passed、Ruff通过；root已启动同一源码包含真实DSH的完整回归，日志p0-p1-full-tests.log。尚未冻结打包或做新版模型验收。
+
+- P0/P1整合后root完整pytest（含真实DSH）1018 passed/2 skipped，107.25秒。仅pyarrow/data_formulator可选依赖相关2项跳过，日志p0-p1-full-tests.log；Ruff与diff通过。此为源码验证，安装包与模型质量仍未验收。
