@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -323,6 +324,253 @@ def test_materiality_definition_survives_save_edit_and_reload(finance):
     updated = service.save_explanation_draft({'parent_id': draft['id'], 'body': '经理补充判断。'})
     assert updated['materiality'] == materiality
     assert service.analysis.get_draft(updated['id'])['materiality'] == materiality
+
+
+def test_saved_evidence_appendix_records_server_hash_metadata(finance):
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+
+    draft = service.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
+    persisted = service.analysis.get_draft(draft["id"])
+
+    assert draft["evidence_appendix_meta"]["schema_version"] == 1
+    assert draft["evidence_appendix_meta"]["render_version"] == 1
+    assert draft["evidence_appendix_meta"]["body_sha256"] == hashlib.sha256(
+        draft["evidence_appendix"].encode("utf-8")
+    ).hexdigest()
+    assert persisted["evidence_appendix_meta"] == draft["evidence_appendix_meta"]
+
+
+def test_generated_appendix_number_issues_are_located_without_skipping_amounts(finance):
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    draft = service.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
+
+    check = service.validate_explanation({
+        "body": draft["evidence_appendix"],
+        "run_ids": [run["id"]],
+        "fact_ids": [],
+        "claims": [],
+        "evidence_appendix": draft["evidence_appendix"],
+        "evidence_appendix_meta": draft["evidence_appendix_meta"],
+    })
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "120"
+    )
+    assert issue["origin"] == "generated_appendix"
+    assert issue["location"]["section"] == "generated_appendix"
+    assert issue["location"]["position"] >= 0
+
+
+def test_draft_id_validation_uses_persisted_appendix_origin_metadata(finance):
+    from foundry.finance_explanations import validate_explanation as validate_explanation_payload
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    draft = service.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
+
+    check = validate_explanation_payload(service.analysis, {
+        "draft_id": draft["id"],
+        "fact_ids": [],
+        "claims": [],
+    })
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "120"
+    )
+    assert issue["origin"] == "generated_appendix"
+    assert issue["location"]["section"] == "generated_appendix"
+
+
+def test_forged_appendix_hash_cannot_mark_unrebuilt_suffix_generated(finance):
+    from foundry.finance_explanations import evidence_appendix_metadata, render_evidence_appendix
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = render_evidence_appendix(prepared)
+    forged = appendix["body"] + "\n虚假金额 999 万元"
+    forged_meta = evidence_appendix_metadata(forged, base_body=appendix["body"])
+
+    check = service.validate_explanation({
+        "body": forged,
+        "run_ids": [run["id"]],
+        "fact_ids": appendix["fact_ids"],
+        "claims": appendix["claims"],
+        "evidence_appendix": forged,
+        "evidence_appendix_meta": forged_meta,
+    })
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "999"
+    )
+    assert issue["origin"] == "manager_body"
+    assert issue["location"]["section"] == "manager_body"
+
+
+def test_persisted_forged_appendix_is_not_trusted_on_draft_recheck(finance):
+    from foundry.finance_explanations import (
+        evidence_appendix_metadata,
+        render_evidence_appendix,
+        validate_explanation as validate_explanation_payload,
+    )
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = render_evidence_appendix(prepared)
+    forged = appendix["body"] + "\n虚假金额 999 万元"
+    draft = service.analysis.save_draft({
+        "body": forged,
+        "run_ids": [run["id"]],
+        "fact_ids": appendix["fact_ids"],
+        "claims": appendix["claims"],
+        "evidence_appendix": forged,
+        "evidence_appendix_meta": evidence_appendix_metadata(
+            forged, base_body=appendix["body"]
+        ),
+    })
+
+    check = validate_explanation_payload(service.analysis, {"draft_id": draft["id"]})
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "999"
+    )
+    assert issue["origin"] == "manager_body"
+    assert issue["location"]["section"] == "manager_body"
+
+
+def test_input_gap_appendix_origin_uses_saved_requirements_version(finance, monkeypatch):
+    from foundry.finance_explanations import validate_explanation as validate_explanation_payload
+    import foundry.finance_requirement_support as support
+
+    original_appendix = support.input_gap_appendix
+
+    def numbered_gap(requirements):
+        text = original_appendix(requirements)
+        return text + "\n- 缺少 2 个原始字段" if text else text
+
+    monkeypatch.setattr(support, "input_gap_appendix", numbered_gap)
+    service, context = finance
+    original_requirements = service.analysis_requirements_save({
+        "context_id": context["id"],
+        "question": "做收入量价分解",
+        "items": [{"id": "pq", "metric": "price_quantity"}],
+    })
+    run = service.explain_variance({"context_id": context["id"]})
+    draft = service.save_explanation_draft({
+        "body": "请看依据。",
+        "run_ids": [run["id"]],
+    })
+    initial_issue = next(
+        item
+        for item in draft["explanation_check"]["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "2"
+    )
+    assert draft["requirements_id"] == original_requirements["id"]
+    assert initial_issue["origin"] == "generated_appendix"
+    service.analysis_requirements_save({
+        "parent_id": original_requirements["id"],
+        "context_id": context["id"],
+        "question": "新问题不需要量价缺口",
+        "change_reason": "经理改成新的分析范围",
+        "items": [],
+    })
+
+    check = validate_explanation_payload(service.analysis, {
+        "draft_id": draft["id"],
+        "fact_ids": [],
+        "claims": [],
+    })
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "2"
+    )
+    assert issue["origin"] == "generated_appendix"
+    assert issue["location"]["section"] == "generated_appendix"
+
+
+def test_fake_appendix_hash_does_not_make_tampered_amount_generated(finance):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = render_evidence_appendix(prepared)
+    tampered = appendix["body"].replace("120 万元", "121 万元", 1)
+    assert tampered != appendix["body"]
+    fake_meta = {
+        "schema_version": 1,
+        "render_version": 1,
+        "body_sha256": hashlib.sha256(tampered.encode("utf-8")).hexdigest(),
+        "base_body_sha256": hashlib.sha256(tampered.encode("utf-8")).hexdigest(),
+    }
+
+    check = service.validate_explanation({
+        "body": tampered,
+        "run_ids": [run["id"]],
+        "fact_ids": appendix["fact_ids"],
+        "claims": appendix["claims"],
+        "evidence_appendix": tampered,
+        "evidence_appendix_meta": fake_meta,
+    })
+
+    issue = next(
+        item
+        for item in check["issues"]
+        if item["code"] == "uncited_number" and item["text"] == "121"
+    )
+    assert issue["origin"] == "manager_body"
+    assert issue["location"]["section"] == "manager_body"
+
+
+def test_manager_copied_appendix_body_still_gets_normal_fact_checks(finance):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    appendix = render_evidence_appendix(prepared)
+
+    check = service.validate_explanation({
+        "body": "经理复制了一段计算依据：\n\n" + appendix["body"],
+        "run_ids": [run["id"]],
+        "fact_ids": appendix["fact_ids"],
+        "claims": appendix["claims"],
+    })
+
+    assert check["status"] == "pass", check["issues"]
+
+
+def test_manual_unknown_claim_issue_is_located_as_claim_binding(finance):
+    service, context = finance
+    run = service.explain_variance({"context_id": context["id"]})
+    check = service.validate_explanation({
+        "body": "经理判断为 20 万元。",
+        "run_ids": [run["id"]],
+        "claims": [{
+            "basis": "calculation",
+            "run_id": run["id"],
+            "row": 999,
+            "column": "contribution",
+            "value": "20",
+        }],
+    })
+
+    issue = next(item for item in check["issues"] if item["code"] == "invalid_claim_location")
+    assert issue["origin"] == "claim_binding"
+    assert issue["location"]["section"] == "claim_binding"
 
 
 def test_concurrent_identical_completions_create_one_draft(finance):

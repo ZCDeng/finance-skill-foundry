@@ -8,7 +8,7 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
-  onDrilldown?(run: AnalysisRun, row: number, column?: string): Promise<FinanceDrilldown>;
+  onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
 }) {
   const [selected, setSelected] = useState(() => readCopy<string>(`${analysis.task_id}:run`) ?? '');
   const [evidence, setEvidence] = useState(false);
@@ -36,7 +36,7 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
       <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)}</p></div><RunStatus run={run} /></div>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
-      {run.engine === 'finance' && <FinanceRunDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
+      {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><button type="button" className="fnd-button" disabled={busy} aria-label={`打开文件 ${output.path}`}
@@ -96,8 +96,86 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
 
 function RunResultTable({ run }: { run: AnalysisRun }) {
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;
+  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} />;
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p></>;
+}
+
+type SourceDrilldownSection = 'rows' | 'detail_rows' | 'excluded_detail_rows';
+
+const structuredAggregateHiddenColumns = new Set(['result_key', 'source_rows', 'excluded_source_rows', 'provenance_status']);
+
+function isStructuredAggregateRun(run: AnalysisRun): boolean {
+  return run.engine === 'structured_aggregate';
+}
+
+function structuredAggregateColumns(run: AnalysisRun, rows: Record<string, unknown>[] = run.result?.rows ?? []) {
+  const columnByName = new Map((run.result?.columns ?? []).map((column) => [column.name, column]));
+  const rowNames = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const names = rowNames.length ? rowNames : run.result?.columns.map((column) => column.name) ?? [];
+  return names.filter((name) => !structuredAggregateHiddenColumns.has(name))
+    .map((name) => columnByName.get(name) ?? { name, type: typeof rows.find((row) => row[name] != null)?.[name] === 'number' ? 'DOUBLE' : 'VARCHAR' });
+}
+
+function structuredAggregateRows(rows: Record<string, unknown>[]) {
+  return rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !structuredAggregateHiddenColumns.has(key))));
+}
+
+function provenanceVerified(run: AnalysisRun): boolean {
+  const provenance = run.result?.provenance;
+  return Boolean(provenance && provenance.mode === 'executor_verified_source_map' && provenance.status === 'verified');
+}
+
+function diagnosticField(item: Record<string, unknown>, names: string[]): unknown {
+  for (const name of names) if (item[name] != null && item[name] !== '') return item[name];
+  return undefined;
+}
+
+function structuredDiagnosticText(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return textValue(value);
+  const item = value as Record<string, unknown>;
+  const code = textValue(item.code);
+  if (code === 'aggregate_missing_measure_values') {
+    const metric = diagnosticField(item, ['metric', 'measure', 'field', 'column', 'name']);
+    const count = diagnosticField(item, ['missing_count', 'count', 'source_count', 'row_count', 'rows']);
+    const method = textValue(item.aggregation ?? 'sum').toLowerCase();
+    const countText = count == null ? '部分' : textValue(count);
+    const metricText = metric == null ? '某指标' : `指标“${textValue(metric)}”`;
+    if (method.includes('sum')) return `${metricText}有 ${countText} 条来源金额缺失，汇总未完成。`;
+    const methodText = method.includes('count_distinct') ? '去重计数'
+      : method.includes('min') ? '最小值' : method.includes('max') ? '最大值' : textValue(item.aggregation ?? '聚合');
+    return `${metricText}有 ${countText} 条来源金额缺失，${methodText}结果已排除这些缺失来源，请复核口径。`;
+  }
+  const message = typeof item.message === 'string' ? item.message : '';
+  return message || `结构化汇总诊断：${textValue(value)}`;
+}
+
+function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
+  const result = run.result!;
+  const detailRows = result.detail_rows ?? [];
+  const excludedRows = result.excluded_detail_rows ?? [];
+  const columns = structuredAggregateColumns(run);
+  const diagnostics = result.diagnostics ?? [];
+  return <section className="analysis-structured-aggregate">
+    {provenanceVerified(run) && <p className="analysis-note">来源可追溯：执行器已核对来源映射；这不代表业务判断已经通过。</p>}
+    {diagnostics.length > 0 && <div className="analysis-message analysis-message--warning" role="status">
+      {diagnostics.map((item, index) => <p key={index}>{structuredDiagnosticText(item)}</p>)}
+    </div>}
+    <Table key={`${run.id}:structured`} columns={columns} rows={structuredAggregateRows(result.rows)} caption="结构化汇总结果" />
+    <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
+    {detailRows.length > 0 && <details className="analysis-details"><summary>来源明细 · {detailRows.length} 行</summary>
+      <Table key={`${run.id}:detail`} columns={structuredAggregateColumns(run, detailRows)} rows={structuredAggregateRows(detailRows)} caption="来源明细" />
+    </details>}
+    {excludedRows.length > 0 && <details className="analysis-details"><summary>剔除明细 · {excludedRows.length} 行</summary>
+      <Table key={`${run.id}:excluded`} columns={structuredAggregateColumns(run, excludedRows)} rows={structuredAggregateRows(excludedRows)} caption="剔除明细" />
+    </details>}
+    {diagnostics.length > 0 && <details className="analysis-details"><summary>原始诊断细节 · {diagnostics.length} 项</summary>
+      {diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}
+    </details>}
+    <details className="analysis-details"><summary>原始结果字段 · {result.columns.length} 列</summary>
+      <Table key={`${run.id}:structured-raw`} columns={result.columns} rows={result.rows} caption="原始计算结果" />
+    </details>
+  </section>;
 }
 
 type FinanceVarianceResult = NonNullable<AnalysisRun['result']> & {
@@ -208,13 +286,19 @@ function financeCompleteness(value?: string): string {
 
 function rowHasSources(row: Record<string, unknown>): boolean {
   const sources = row.source_rows;
+  const excluded = row.excluded_source_rows;
   const evidence = row.evidence;
   return Array.isArray(sources) && sources.length > 0
+    || Array.isArray(excluded) && excluded.length > 0
     || Boolean(evidence && typeof evidence === 'object' && Object.keys(evidence).length > 0);
 }
 
-function FinanceRunDetails({ run, busy, onDrilldown }: {
-  run: AnalysisRun; busy: boolean; onDrilldown?: (run: AnalysisRun, row: number, column?: string) => Promise<FinanceDrilldown>;
+function sourceLabel(row: Record<string, unknown>, index: number, prefix = '第'): string {
+  return `${prefix} ${index + 1} 行 · ${textValue(row.management_account ?? row.account_code ?? row.period ?? row.scenario ?? row.metric ?? row.customer ?? row.item ?? '')}`;
+}
+
+function SourceTraceDetails({ run, busy, onDrilldown }: {
+  run: AnalysisRun; busy: boolean; onDrilldown?: (run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection) => Promise<FinanceDrilldown>;
 }) {
   const [target, setTarget] = useState('');
   const [column, setColumn] = useState('');
@@ -222,8 +306,11 @@ function FinanceRunDetails({ run, busy, onDrilldown }: {
   const [error, setError] = useState('');
   const drilldownRequest = useRef(0);
   const rows = run.result?.rows ?? [];
-  const sourceRows = rows.map((row, index) => ({ row, index })).filter(({ row }) => rowHasSources(row));
-  const columns = run.result?.columns.map((item) => item.name) ?? [];
+  const mainSourceRows = rows.map((row, index) => ({ row, index, section: 'rows' as SourceDrilldownSection, value: run.engine === 'structured_aggregate' ? `rows:${index}` : String(index), label: sourceLabel(row, index) })).filter(({ row }) => rowHasSources(row));
+  const detailRows = (run.result?.detail_rows ?? []).map((row, index) => ({ row, index, section: 'detail_rows' as SourceDrilldownSection, value: `detail_rows:${index}`, label: sourceLabel(row, index, '明细') })).filter(({ row }) => rowHasSources(row));
+  const excludedRows = (run.result?.excluded_detail_rows ?? []).map((row, index) => ({ row, index, section: 'excluded_detail_rows' as SourceDrilldownSection, value: `excluded_detail_rows:${index}`, label: sourceLabel(row, index, '剔除') })).filter(({ row }) => rowHasSources(row));
+  const sourceRows = [...mainSourceRows, ...detailRows, ...excludedRows];
+  const columns = run.result?.columns.map((item) => item.name).filter((name) => !structuredAggregateHiddenColumns.has(name)) ?? [];
   useEffect(() => {
     drilldownRequest.current += 1;
     setTarget(''); setColumn(''); setDrilldown(null); setError('');
@@ -233,20 +320,22 @@ function FinanceRunDetails({ run, busy, onDrilldown }: {
     const request = ++drilldownRequest.current;
     setError('');
     try {
-      const result = await onDrilldown(run, Number(target), column || undefined);
+      const selectedSource = sourceRows.find((item) => item.value === target);
+      if (!selectedSource) return;
+      const result = await onDrilldown(run, selectedSource.index, column || undefined, run.engine === 'structured_aggregate' ? selectedSource.section : undefined);
       if (request === drilldownRequest.current) setDrilldown(result);
     }
     catch (failure) { if (request === drilldownRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
   }
-  return <section className="analysis-finance-run" aria-label="财务结果范围与来源">
-    <p className="analysis-note">{financeCompleteness(run.completeness)}</p>
-    {Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details"><summary>诊断 · {run.result.diagnostics.length} 项</summary>
+  return <section className="analysis-finance-run" aria-label="结果范围与来源">
+    {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}
+    {run.engine === 'finance' && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details"><summary>诊断 · {run.result.diagnostics.length} 项</summary>
       {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
     {run.finance_scope && <details className="analysis-details"><summary>运行范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
       <p key={alias}>{alias}：{textValue(scope)}</p>)}</details>}
     {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">
       <div className="analysis-edit-grid"><label>结果行来源<select className="fnd-field" value={target} onChange={(event) => setTarget(event.target.value)}>
-        <option value="">选择一行查看来源</option>{sourceRows.map(({ row, index }) => <option key={index} value={index}>第 {index + 1} 行 · {textValue(row.management_account ?? row.account_code ?? row.period ?? row.scenario ?? '')}</option>)}
+        <option value="">选择一行查看来源</option>{sourceRows.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
       </select></label><label>来源列（可选）<select className="fnd-field" value={column} onChange={(event) => setColumn(event.target.value)}>
         <option value="">整行来源</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</select></label></div>
       <button type="button" className="fnd-button" disabled={busy || !target} onClick={() => void open()}>查看来源行</button>

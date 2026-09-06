@@ -335,7 +335,11 @@ class AnalysisStore:
         question = _safe_text(
             spec.get("question"), "question", required=True, maximum=20000
         )
-        sql = _safe_text(spec.get("sql"), "SQL", required=True, maximum=100000)
+        engine = spec.get("engine", "sql")
+        if not isinstance(engine, str) or engine not in {"sql", "structured_aggregate"}:
+            raise FoundryError("analysis engine must be sql or structured_aggregate")
+        structured = engine == "structured_aggregate"
+        sql = _safe_text(spec.get("sql", ""), "SQL", required=not structured, maximum=100000)
         bindings = spec.get("bindings") or {}
         if not isinstance(bindings, dict) or not bindings or len(bindings) > 32:
             raise FoundryError("analysis needs 1–32 explicit snapshot bindings")
@@ -345,13 +349,26 @@ class AnalysisStore:
             if not isinstance(alias, str) or not ALIAS.fullmatch(alias):
                 raise FoundryError(f"invalid dataset alias: {alias}")
             self.read_dataset(dataset_id)
+        aggregate_plan = None
+        if structured:
+            from foundry.analysis_aggregate import validate_aggregate_plan
+            plan = spec.get("aggregate_plan")
+            if (not isinstance(plan, dict) or len(bindings) != 1
+                    or not isinstance(plan.get("dataset_alias"), str)
+                    or plan["dataset_alias"] not in bindings):
+                raise FoundryError("structured aggregate needs exactly its single snapshot binding")
+            if sql or spec.get("parameters") or spec.get("parameter_metadata") or spec.get("relationships"):
+                raise FoundryError("structured aggregate uses its plan, not SQL, parameters or relationships")
+            aggregate_plan = validate_aggregate_plan(plan, self.read_dataset(bindings[plan['dataset_alias']]))
+        elif spec.get("aggregate_plan") is not None:
+            raise FoundryError("aggregate_plan requires structured_aggregate engine")
         parent_id = spec.get("parent_id")
         if parent_id:
             self.get_analysis(parent_id)
         parameters = spec.get("parameters") or []
         if not isinstance(parameters, (list, dict)):
             raise FoundryError("SQL parameters must be an array or object")
-        parameter_metadata = normalize_parameter_metadata(
+        parameter_metadata = [] if structured else normalize_parameter_metadata(
             sql, parameters, spec.get("parameter_metadata")
         )
         timeout = spec.get("timeout_seconds", 15)
@@ -387,6 +404,7 @@ class AnalysisStore:
         )
         record = _new(
             self.task,
+            **({"engine": engine, "aggregate_plan": aggregate_plan} if structured else {}),
             question=question,
             sql=sql,
             bindings=bindings,
@@ -412,6 +430,27 @@ class AnalysisStore:
             if not path.is_file() or _hash_bytes(path.read_bytes()) != output["sha256"]:
                 raise FoundryError("run output integrity check failed")
         return run
+
+    def aggregate_sources_verified(self, run: dict) -> bool:
+        """Validate the persisted executor boundary, never caller source claims."""
+        if run.get("engine") != "structured_aggregate" or run.get("execution_status") != "succeeded":
+            return False
+        definition = self.get_analysis(run["analysis_id"])
+        result = run.get("result", {})
+        provenance = result.get("provenance", {})
+        if (definition.get("engine") != "structured_aggregate"
+                or definition.get("aggregate_plan") != run.get("aggregate_plan")
+                or definition.get("bindings") != run.get("bindings")
+                or _hash(result) != run.get("output_hash")
+                or provenance.get("mode") != "executor_verified_source_map"
+                or provenance.get("status") != "verified"):
+            return False
+        for alias, dataset_id in run["bindings"].items():
+            data = self.read_dataset(dataset_id)
+            if (run.get("input_hashes", {}).get(alias) != data["data_hash"]
+                    or run.get("source_hashes", {}).get(alias) != data["source_hash"]):
+                return False
+        return True
 
     def run_analysis(
         self,
@@ -447,16 +486,18 @@ class AnalysisStore:
             alias: self.read_dataset(dataset_id)
             for alias, dataset_id in analysis["bindings"].items()
         }
+        structured = analysis.get("engine") == "structured_aggregate"
         environment = {
             "python": platform.python_version(),
             "duckdb": duckdb.__version__,
             "platform": sys.platform,
-            "runner": "snapshot-sql-v1",
+            "runner": "snapshot-aggregate-v1" if structured else "snapshot-sql-v1",
             "settings": CONFIG,
             "configuration_locked": True,
         }
         code_hash = _hash(
-            {"sql": analysis["sql"], "parameters": analysis["parameters"]}
+            {"aggregate_plan": analysis["aggregate_plan"]} if structured
+            else {"sql": analysis["sql"], "parameters": analysis["parameters"]}
         )
         input_hashes = {alias: data["data_hash"] for alias, data in datasets.items()}
         fingerprint = _hash(
@@ -468,7 +509,23 @@ class AnalysisStore:
                 "max_rows": analysis["max_rows"],
             }
         )
-        result = execute_sql(datasets, analysis)
+        if structured:
+            from foundry.analysis_aggregate import execute_aggregate
+            import time
+            started = time.monotonic()
+            try:
+                aggregate = execute_aggregate(
+                    datasets[analysis["aggregate_plan"]["dataset_alias"]],
+                    analysis["aggregate_plan"], max_rows=analysis["max_rows"],
+                    timeout_seconds=analysis["timeout_seconds"],
+                )
+                result = {"result": aggregate, "deterministic": True,
+                          "duration_seconds": time.monotonic() - started}
+            except FoundryError as exc:
+                result = {"error": str(exc), "deterministic": True,
+                          "duration_seconds": time.monotonic() - started}
+        else:
+            result = execute_sql(datasets, analysis)
         succeeded = "error" not in result
         output_hash = _hash(result["result"]) if succeeded else None
         previous = [
@@ -489,6 +546,9 @@ class AnalysisStore:
         record = _new(
             self.task,
             analysis_id=analysis_id,
+            **({"engine": "structured_aggregate", "aggregate_plan": analysis["aggregate_plan"],
+                "finance_scope": analysis["aggregate_plan"].get("scope", {})}
+               if structured else {}),
             **requirements_snapshot,
             session_id=session_id,
             context_revision=context_revision,
@@ -623,20 +683,27 @@ class AnalysisStore:
 
         materiality = spec.get("materiality", parent.get("materiality", {}))
         source_read_failures = spec.get("source_read_failures", parent.get("source_read_failures", []))
-        explanation_check = validate_explanation(
-            self,
-            {
-                "body": body,
-                "run_ids": list(runs),
-                "fact_ids": fact_ids,
-                "claims": claims,
-                "materiality": materiality,
-            },
+        evidence_appendix = spec.get("evidence_appendix", parent.get("evidence_appendix", ""))
+        evidence_appendix_meta = spec.get(
+            "evidence_appendix_meta", parent.get("evidence_appendix_meta", {})
         )
         from foundry.finance_requirements import augment_quality, latest_requirements
 
         current_requirements = latest_requirements(self)
         requirements_id = spec.get("requirements_id", parent.get("requirements_id")) or (current_requirements or {}).get("id")
+        explanation_check = validate_explanation(
+            self,
+            {
+                "requirements_id": requirements_id,
+                "body": body,
+                "run_ids": list(runs),
+                "fact_ids": fact_ids,
+                "claims": claims,
+                "materiality": materiality,
+                "evidence_appendix": evidence_appendix,
+                "evidence_appendix_meta": evidence_appendix_meta,
+            },
+        )
         explanation_check = augment_quality(self, {
             "body": body, "run_ids": list(runs), "claims": claims,
             "requirements_id": requirements_id,
@@ -650,7 +717,8 @@ class AnalysisStore:
             completion_operation_id=spec.get("completion_operation_id"),
             completion_operation_revision=spec.get("completion_operation_revision"),
             source_read_failures=source_read_failures,
-            evidence_appendix=spec.get("evidence_appendix", parent.get("evidence_appendix", "")),
+            evidence_appendix=evidence_appendix,
+            evidence_appendix_meta=evidence_appendix_meta,
             title=title,
             body=body,
             **({"body_template": body_template} if body_template is not None else {}),
@@ -728,13 +796,23 @@ class AnalysisStore:
                             f"Run: {run['id']}; execution: {run['execution_status']}; reproducibility: {run['reproducibility_status']}",
                             f"Output SHA-256: {run.get('output_hash')}",
                             "```" + (run.get("engine") or "sql"),
-                            run.get("sql") or run.get("code") or "",
+                            run.get("sql") or run.get("code") or (
+                                json.dumps(run["aggregate_plan"], ensure_ascii=False, indent=2)
+                                if run.get("aggregate_plan") else ""
+                            ),
                             "```",
                             "Inputs: "
                             + json.dumps(run["input_hashes"], ensure_ascii=False),
+                            "Sources: " + json.dumps(run.get("source_hashes", {}), ensure_ascii=False),
                         ]
+                        if run.get("engine") == "structured_aggregate":
+                            result = run.get("result", {})
+                            lines += ["来源核验：" + str(result.get("provenance", {}).get("status", "unverified")),
+                                      "```json", json.dumps({key: result.get(key) for key in (
+                                          "provenance", "detail_rows", "excluded_detail_rows")},
+                                          ensure_ascii=False, indent=2), "```"]
                     for run in runs:
-                        if run.get("engine"):
+                        if run.get("engine") in {"python", "shell"}:
                             lines += [
                                 "",
                                 "Script stdout:",
@@ -790,11 +868,11 @@ class AnalysisStore:
                                 from decimal import InvalidOperation
 
                                 try:
-                                    number = Decimal(str(value))
+                                    amount_value = Decimal(str(value))
                                 except InvalidOperation:
                                     continue
                                 cell = target.cell(row_start, column_index)
-                                if number.is_finite() and survives_a_cell(number):
+                                if amount_value.is_finite() and survives_a_cell(amount_value):
                                     put_number(cell, value)
                                 else:
                                     cell.comment = Comment("超过 Excel 可安全保留的数值精度，按精确文本保存。", "Foundry")
@@ -810,6 +888,8 @@ class AnalysisStore:
                             "parameters",
                             "bindings",
                             "input_hashes",
+                            "source_hashes",
+                            "aggregate_plan",
                             "output_hash",
                             "execution_status",
                             "reproducibility_status",
@@ -824,6 +904,18 @@ class AnalysisStore:
                                     else str(run.get(key)),
                                 ],
                             )
+                        if run.get("engine") == "structured_aggregate":
+                            _append_excel(evidence, ["provenance", json.dumps(result.get("provenance", {}), ensure_ascii=False)])
+                            for section, label in (("detail_rows", "Sources "), ("excluded_detail_rows", "Excluded ")):
+                                source_sheet = workbook.create_sheet(label + str(number))
+                                fields = ["result_key", "included", "exclusion_reason", "source", "measure_values"]
+                                _append_excel(source_sheet, fields)
+                                for detail in result.get(section, []):
+                                    _append_excel(source_sheet, [
+                                        json.dumps(detail.get(key), ensure_ascii=False)
+                                        if isinstance(detail.get(key), (dict, list)) else detail.get(key)
+                                        for key in fields
+                                    ])
                     # Keep text literal, including identifiers and amounts that
                     # exceed Excel precision. Safe typed amounts stay numeric.
                     for sheet in workbook:
@@ -865,9 +957,9 @@ class AnalysisStore:
 
     def save_method(self, analysis_id: str, name: str) -> dict:
         analysis = self.get_analysis(analysis_id)
-        if analysis.get("engine") in {"python", "shell"}:
+        if analysis.get("engine") in {"python", "shell", "structured_aggregate"}:
             raise FoundryError(
-                "script revisions can be rerun; saving a reusable method currently requires a SQL analysis"
+                "non-SQL revisions can be rerun; saving a reusable method currently requires a SQL analysis"
             )
         _safe_text(name, "method name", required=True, maximum=200)
         # Values in WHERE clauses are data too. Replace SQL string literals with

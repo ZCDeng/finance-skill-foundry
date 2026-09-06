@@ -271,6 +271,9 @@ export interface AnalysisRun extends AnalysisObject {
     diagnostics?: unknown[];
     control_totals?: unknown[];
     movement_checks?: unknown[];
+    detail_rows?: Record<string, unknown>[];
+    excluded_detail_rows?: Record<string, unknown>[];
+    provenance?: { mode?: string; status?: string; plan_hash?: string; data_hash?: string; source_hash?: string } & Record<string, unknown>;
   };
 }
 export interface AnalysisDraft extends AnalysisObject {

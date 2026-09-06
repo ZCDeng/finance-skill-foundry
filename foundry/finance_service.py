@@ -9,6 +9,7 @@ from foundry.errors import FoundryError
 from foundry.finance_explanations import (
     background_applies,
     claims_for_facts,
+    evidence_appendix_metadata,
     normalize_background,
     prepare_explanation as prepare_explanation_payload,
     render_fact_template,
@@ -528,7 +529,10 @@ class FinanceStore:
             raise FoundryError("result row is outside the run")
         row = rows[index]
         column = spec.get("column")
-        refs = row.get("evidence", {}).get(column, row.get("source_rows", []))
+        fallback_refs = row.get("source_rows", [])
+        if section == "excluded_detail_rows" and not fallback_refs:
+            fallback_refs = row.get("excluded_source_rows", [])
+        refs = row.get("evidence", {}).get(column, fallback_refs)
         offset, limit = spec.get("offset", 0), spec.get("limit", 100)
         if (
             any(isinstance(v, bool) or not isinstance(v, int) for v in (offset, limit))
@@ -567,7 +571,8 @@ class FinanceStore:
         location = {"run_id": run["id"], "row": index, "column": column, "output_hash": run.get("output_hash")}
         if section != "rows":
             location["section"] = section
-        evidence_status = "verified" if values and run.get("engine") == "finance" else "unverified" if values else "missing"
+        trusted_run = run.get("engine") == "finance" or self.analysis.aggregate_sources_verified(run)
+        evidence_status = "verified" if values and trusted_run else "unverified" if values else "missing"
         evidence_key = _hash({"location": location, "status": evidence_status, "sources": [r["source"] for r in values]})
         existing = next((r for r in self.analysis._list("evidence_checks") if r.get("evidence_key") == evidence_key), None)
         if not existing:
@@ -585,6 +590,8 @@ class FinanceStore:
             "section": section,
             "rows": values,
             "total": len(unique),
+            "total_occurrences": len(refs),
+            "exclusion_reason": row.get("exclusion_reason") if section == "excluded_detail_rows" else None,
             "offset": offset,
             "has_more": offset + len(values) < len(unique),
             "message": "来源行可查看；仅有余额资料时不提供凭证分录链接。",
@@ -742,6 +749,7 @@ class FinanceStore:
         if not isinstance(explicit_fact_ids, list):
             raise FoundryError("fact_ids must be an array")
         appendix = render_evidence_appendix(prepared)
+        appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
         # Read actual requested evidence before evaluating the final draft.
         from foundry.finance_requirements import check_requirements
@@ -752,6 +760,9 @@ class FinanceStore:
         })
         provisional = with_input_gaps(self.analysis, provisional)
         appendix["body"] += input_gap_appendix(provisional)
+        appendix_meta = evidence_appendix_metadata(
+            appendix["body"], base_body=appendix_base_body
+        )
         if appendix["body"]:
             rendered = rendered.rstrip() + "\n\n" + appendix["body"].lstrip()
         source_read_failures = []
@@ -800,6 +811,7 @@ class FinanceStore:
                 **spec,
                 "body": rendered,
                 "evidence_appendix": appendix["body"],
+                "evidence_appendix_meta": appendix_meta,
                 "materiality": prepared.get("materiality", {}),
                 "source_read_failures": source_read_failures,
                 **({"body_template": body} if template_fact_ids else {}),

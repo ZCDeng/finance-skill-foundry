@@ -70,6 +70,63 @@ process.stdout.write(JSON.stringify({
     assert result["hasEmptyItems"] is False
 
 
+def test_analysis_save_structured_aggregate_schema_names_supported_contract(tmp_path: Path):
+    result = _node(tmp_path, """
+const save = definitions().find((d) => d.name === 'analysis-save');
+const spec = save.parameters.properties.spec;
+const plan = spec.properties.aggregate_plan;
+const fields = JSON.stringify(save.parameters);
+process.stdout.write(JSON.stringify({
+  specRequired: spec.required,
+  specAdditionalProperties: spec.additionalProperties,
+  branches: spec.oneOf.map((branch) => ({required: branch.required, engine: branch.properties?.engine?.enum ?? null, not: branch.not ?? null})),
+  description: save.description,
+  planRequired: plan.required,
+  planAdditionalProperties: plan.additionalProperties,
+  planProperties: Object.keys(plan.properties),
+  filterProperties: Object.keys(plan.properties.filters.items.properties),
+  filterOps: plan.properties.filters.items.properties.op.enum,
+  measureRequired: plan.properties.measures.items.required,
+  measureAggregations: plan.properties.measures.items.properties.aggregation.enum,
+  dedupePolicies: plan.properties.dedupe.properties.policy.enum,
+  hasSourceRows: fields.includes('source_rows'),
+  hasSourceSQL: fields.includes('sourceSQL'),
+}));
+""")
+    assert result["specRequired"] == ["question", "bindings"]
+    assert result["specAdditionalProperties"] is False
+    assert {tuple(branch["required"]) for branch in result["branches"]} == {
+        ("question", "sql", "bindings"),
+        ("question", "engine", "bindings", "aggregate_plan"),
+    }
+    sql = next(branch for branch in result["branches"] if branch["engine"] == ["sql"])
+    assert sql["not"] == {"required": ["aggregate_plan"]}
+    structured = next(branch for branch in result["branches"] if branch["engine"] == ["structured_aggregate"])
+    assert structured["not"] == {
+        "anyOf": [
+            {"required": ["sql"]},
+            {"required": ["parameters"]},
+            {"required": ["parameter_metadata"]},
+            {"required": ["relationships"]},
+        ]
+    }
+    assert "自由 SQL" in result["description"]
+    assert "不会因为金额相同就获得完整 verified" in result["description"]
+    assert result["planRequired"] == ["dataset_alias", "measures", "dedupe"]
+    assert result["planAdditionalProperties"] is False
+    assert {
+        "dataset_alias", "filters", "exclusions", "group_by", "measures",
+        "dedupe", "result_key_columns", "scope",
+    } == set(result["planProperties"])
+    assert {"field", "op", "value", "values", "reason"} == set(result["filterProperties"])
+    assert {"eq", "ne", "in", "not_in", "between", "gt", "gte", "lt", "lte", "is_null", "not_null"} == set(result["filterOps"])
+    assert result["measureRequired"] == ["name", "aggregation"]
+    assert result["measureAggregations"] == ["sum", "count", "count_distinct", "min", "max"]
+    assert result["dedupePolicies"] == ["none", "error_on_duplicate", "keep_first_identical_else_error"]
+    assert result["hasSourceRows"] is False
+    assert result["hasSourceSQL"] is False
+
+
 def test_analysis_draft_claim_schema_names_basis_and_zero_based_rows(tmp_path: Path):
     result = _node(tmp_path, """
 const draft = definitions().find((d) => d.name === 'analysis-draft');
@@ -250,6 +307,47 @@ process.stdout.write(JSON.stringify({{ output, log }}));
     ]
     stop = json.loads(result["log"][3]["args"][2])
     assert stop == {"operation_id": "b" * 32, "reason": "superseded"}
+
+
+def test_analysis_save_structured_aggregate_argv_keeps_plan_inside_spec(tmp_path: Path):
+    log = tmp_path / "argv.jsonl"
+    shim = tmp_path / "foundry"
+    shim.write_text("#!/usr/bin/env python3\nimport json,os,sys\n"
+                    "with open(os.environ['ANALYSIS_ARGV_LOG'],'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
+                    "print(json.dumps({'id': 'analysis-structured'}))\n")
+    shim.chmod(0o755)
+    result = _node(tmp_path, """
+const save = definitions().find((d) => d.name === 'analysis-save');
+const spec = {
+  question: '华东收入',
+  engine: 'structured_aggregate',
+  bindings: {actual: 'snapshot-1'},
+  aggregate_plan: {
+    dataset_alias: 'actual',
+    filters: [{field: 'region', op: 'eq', value: '华东', reason: '管理区口径'}],
+    exclusions: [{field: 'source_status', op: 'eq', value: 'duplicate_pull', reason: '剔除重复拉取'}],
+    group_by: ['period', 'region'],
+    measures: [{name: 'revenue', field: 'amount', aggregation: 'sum'}],
+    dedupe: {policy: 'keep_first_identical_else_error', keys: ['doc_id', 'line_id']},
+    result_key_columns: ['period', 'region'],
+    scope: {currency: 'CNY'},
+  },
+};
+const output = await save.execute({spec}, {agent: {id: 'analysis-session'}});
+process.stdout.write(JSON.stringify(output));
+""", {"FOUNDRY_VAR": str(tmp_path / "var"), "FOUNDRY_BIN": str(shim),
+       "ANALYSIS_ARGV_LOG": str(log)})
+    row = json.loads(log.read_text().splitlines()[0])
+    assert row[:6] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", "analysis-save", "--spec"]
+    spec = json.loads(row[6])
+    assert spec["engine"] == "structured_aggregate"
+    assert spec["bindings"] == {"actual": "snapshot-1"}
+    assert spec["aggregate_plan"]["dataset_alias"] == "actual"
+    assert spec["aggregate_plan"]["dedupe"] == {"policy": "keep_first_identical_else_error", "keys": ["doc_id", "line_id"]}
+    assert "sql" not in spec
+    assert "parameters" not in spec
+    assert "relationships" not in spec
+    assert json.loads(result["stdout"]) == {"id": "analysis-structured"}
 
 
 def test_analysis_refuses_unbound_calls_and_model_supplied_context(tmp_path: Path):

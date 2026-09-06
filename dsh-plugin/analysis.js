@@ -25,6 +25,85 @@ const relationship = {
     rationale: { type: "string", description: "many-to-many 必填；说明分摊、去重或重复行处理口径" },
   },
 };
+
+const filterCondition = {
+  type: "object",
+  required: ["field", "op"],
+  additionalProperties: false,
+  properties: {
+    field: string("数据集字段名；必须来自 dataset-read/schema，不猜不存在的列"),
+    op: { type: "string", enum: ["eq", "ne", "in", "not_in", "between", "gt", "gte", "lt", "lte", "is_null", "not_null"], description: "筛选操作；in/not_in/between 使用 values，其余比较使用 value；空值判断不传 value" },
+    value: { description: "单值筛选/比较值；金额保持字符串以保留精度" },
+    values: { type: "array", items: {}, description: "多值筛选或 between 两端；金额保持字符串以保留精度" },
+    reason: string("该筛选或剔除条件的业务原因，例如 剔除作废行、仅看本期收入"),
+  },
+};
+const aggregateMeasure = {
+  type: "object",
+  required: ["name", "aggregation"],
+  additionalProperties: false,
+  properties: {
+    name: string("结果列名，例如 revenue、customer_count"),
+    field: string("参与聚合的来源字段；count 可省略，sum/min/max/count_distinct 必须指向真实字段"),
+    aggregation: { type: "string", enum: ["sum", "count", "count_distinct", "min", "max"], description: "当前结构化聚合支持的确定性聚合函数" },
+  },
+};
+const aggregatePlan = {
+  type: "object",
+  required: ["dataset_alias", "measures", "dedupe"],
+  additionalProperties: false,
+  properties: {
+    dataset_alias: string("唯一输入快照别名；必须是 bindings 中唯一的键，例如 actual"),
+    filters: { type: "array", items: filterCondition, description: "纳入条件；所有条件都按 AND 应用，并保留可下钻来源行" },
+    exclusions: { type: "array", items: filterCondition, description: "剔除条件；被剔除行会进入可下钻的剔除明细，reason 应说明业务口径" },
+    group_by: { type: "array", items: { type: "string" }, description: "分组字段；跨币种/单位合计时必须把 currency/unit 纳入分组或先用 scope/filter 限定" },
+    measures: { type: "array", minItems: 1, items: aggregateMeasure, description: "输出指标；加总类指标可追溯纳入/剔除，min/max/count_distinct 不声称加总勾稽" },
+    dedupe: { type: "object", required: ["policy"], additionalProperties: false, properties: {
+      policy: { type: "string", enum: ["none", "error_on_duplicate", "keep_first_identical_else_error"], description: "重复业务键处理；不能静默选择冲突行" },
+      keys: { type: "array", items: { type: "string" }, description: "判定重复的业务键字段，例如 doc_id,line_id" },
+    } },
+    result_key_columns: { type: "array", items: { type: "string" }, description: "可选稳定结果键字段；通常与 group_by 一致，用于后续 claim/drilldown 定位" },
+    scope: { type: "object", additionalProperties: {}, description: "可选账套/组织/期间/币种等业务范围说明；只作为计划元数据，真实筛选仍写 filters/exclusions" },
+  },
+};
+const analysisSpec = {
+  type: "object",
+  required: ["question", "bindings"],
+  additionalProperties: false,
+  oneOf: [
+    { required: ["question", "sql", "bindings"], properties: { engine: { enum: ["sql"] } }, not: { required: ["aggregate_plan"] }, description: "自由 SQL 分支：必须提供显式只读 SQL；可做临时测算，但不会因为金额相同就获得完整 verified 来源行追溯。" },
+    { required: ["question", "engine", "bindings", "aggregate_plan"], properties: { engine: { enum: ["structured_aggregate"] }, bindings: { type: "object", minProperties: 1, maxProperties: 1 } }, not: { anyOf: [{ required: ["sql"] }, { required: ["parameters"] }, { required: ["parameter_metadata"] }, { required: ["relationships"] }] }, description: "结构化聚合分支：只接受一个绑定快照和 aggregate_plan；不接 SQL、parameters 或 relationships。" },
+  ],
+  properties: {
+    question: string("本次分析的业务问题"),
+    engine: { type: "string", enum: ["sql", "structured_aggregate"], description: "省略时为 sql；structured_aggregate 用声明式聚合计划生成可下钻来源行" },
+    sql: string("SQL 分支使用：对绑定表别名执行的显式只读 SQL；不允许外部文件读取、多条语句或任意连接；自由 SQL 可用但来源行不会自动升级为完整 verified"),
+    bindings: { type: "object", minProperties: 1, maxProperties: 32, additionalProperties: { type: "string" }, description: "表别名到已登记快照id，例如 {actual: dataset_id}；structured_aggregate 只允许一个别名" },
+    aggregate_plan: aggregatePlan,
+    parameters: { oneOf: [{ type: "array", items: {} }, { type: "object", additionalProperties: {} }], description: "SQL 分支使用：对应 SQL 占位符的数组或命名键对象；金额用字符串保留精度" },
+    parameter_metadata: { type: "array", description: "SQL 分支使用：可选业务参数描述；key必须对应实际SQL参数，position从1开始；默认不猜业务语义", items: {
+      type: "object", required: ["label", "type"], properties: {
+        key: { type: "string" }, position: { type: "integer", minimum: 1 }, label: { type: "string" },
+        type: { type: "string", enum: ["string", "decimal", "integer", "boolean", "date"] },
+        unit: { type: "string" }, description: { type: "string" },
+        role: { type: "string", enum: ["business", "formula_constant"] },
+        constraints: { type: "object", properties: { min: {}, max: {}, choices: { type: "array", items: {} }, nullable: { type: "boolean" } } },
+        default: { description: "共享方法仅保留明确声明的数值/布尔公式常数默认；业务值需在新任务提供" },
+      },
+    } },
+    assumptions: { type: "array", items: {}, description: "用户假设及其依据" },
+    grain: { type: "array", items: {}, description: "参与计算的数据粒度" },
+    relationships: { type: "array", items: relationship, description: "SQL JOIN 分支使用：表间关联键和基数约束；structured_aggregate 不使用 relationships" },
+    metrics: { type: "array", items: {}, description: "指标定义、币种、单位与舍入规则" },
+    missing_inputs: { type: "array", items: {}, description: "保存时已知缺失资料或口径，不把缺失推断为0" },
+    conversion_rules: { type: "array", items: {}, description: "明确的币种、单位或口径转换规则；未声明则不得改标签合并" },
+    timeout_seconds: { type: "number", minimum: 0.01, maximum: 60 },
+    max_rows: { type: "integer", minimum: 1, maximum: 10000 },
+    method_id: string("由方法应用生成时的来源方法 id"),
+    parent_id: string("修改既有定义时填写父分析id"),
+  },
+};
+
 const claim = {
   type: "object",
   required: ["basis"],
@@ -80,30 +159,8 @@ const SPECS = {
     kind: "read", argv: (input) => ["dataset-read", "--dataset", input.dataset],
   },
   "analysis-save": {
-    description: "保存可修改的分析定义，不执行计算。spec 必须包含 question、显式只读 SQL、bindings（SQL表别名到快照id）。question 仅说明业务目的，不会自动变成公式。可用 parameters 参数化查询；parameter_metadata 可为实际 SQL 参数绑定业务名称、类型、单位和约束，不能猜测没有绑定的字段。assumptions 只记录说明，修改说明不会改变公式；grain、relationships、metrics 记录粒度/关系/指标，parent_id 生成后续版本。跨表 JOIN 必须声明 relationships，格式为 {left,right,left_keys,right_keys,cardinality}，例如 actual JOIN budget USING(period,region) 对应 left='actual', right='budget', left_keys=['period','region'], right_keys=['period','region'], cardinality='one-to-one'；不要传字符串、source/target/on 或 1:1。金额口径、比较期间、币种和分摊规则须明确，跨表先检查重复键和匹配情况。",
-    parameters: object({ spec: {
-      type: "object", required: ["question", "sql", "bindings"],
-      properties: {
-        question: string("本次分析的业务问题"), sql: string("对绑定表别名执行的显式只读 SQL；不允许外部文件读取、多条语句或任意连接"),
-        bindings: { type: "object", additionalProperties: { type: "string" }, description: "SQL表别名到已登记快照id，例如 {actual: dataset_id}" },
-        parameters: { oneOf: [{ type: "array", items: {} }, { type: "object", additionalProperties: {} }], description: "对应 SQL 占位符的数组或命名键对象；金额用字符串保留精度" },
-        parameter_metadata: { type: "array", description: "可选业务参数描述；key必须对应实际SQL参数，position从1开始；默认不猜业务语义", items: {
-          type: "object", required: ["label", "type"], properties: {
-            key: { type: "string" }, position: { type: "integer", minimum: 1 }, label: { type: "string" },
-            type: { type: "string", enum: ["string", "decimal", "integer", "boolean", "date"] },
-            unit: { type: "string" }, description: { type: "string" },
-            role: { type: "string", enum: ["business", "formula_constant"] },
-            constraints: { type: "object", properties: { min: {}, max: {}, choices: { type: "array", items: {} }, nullable: { type: "boolean" } } },
-            default: { description: "共享方法仅保留明确声明的数值/布尔公式常数默认；业务值需在新任务提供" },
-          },
-        } },
-        assumptions: { type: "array", items: {}, description: "用户假设及其依据" },
-        grain: { type: "array", items: {}, description: "参与计算的数据粒度" },
-        relationships: { type: "array", items: relationship, description: "表间关联键和基数约束；JOIN 时必填 left/right/left_keys/right_keys/cardinality" },
-        metrics: { type: "array", items: {}, description: "指标定义、币种、单位与舍入规则" },
-        parent_id: string("修改既有定义时填写父分析id"),
-      },
-    } }),
+    description: "保存可修改的分析定义，不执行计算。默认 SQL 分支必须包含 question、显式只读 SQL、bindings（SQL表别名到快照id）；自由 SQL 可用于临时测算，但不会因为金额相同就获得完整 verified 来源行追溯。结构化聚合分支设置 engine='structured_aggregate'，只接一个 binding 和 aggregate_plan，不接 SQL/parameters/relationships；它会用声明式 filters/exclusions/group_by/measures/dedupe 生成可下钻来源行。question 仅说明业务目的，不会自动变成公式。金额口径、比较期间、币种和分摊规则须明确，跨表 SQL JOIN 仍必须声明 relationships，包含 left/right/left_keys/right_keys/cardinality。",
+    parameters: object({ spec: analysisSpec }),
     kind: "edit", argv: (input) => ["analysis-save", "--spec", json(input.spec)],
   },
   "analysis-run": {

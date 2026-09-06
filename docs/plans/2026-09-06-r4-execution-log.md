@@ -184,3 +184,15 @@
 - P1源码切片：利润桥白名单方法在matcher和语义指纹一致规范化；check_requirements提供精确claim/source/method冲突建议并传到completion actions。保留原要求与完成判定，已引用位置不重复建议，过期输入哈希、未闭合组和截断控制合计不产生部分补齐假象。切片69 passed、Ruff通过；root已启动同一源码包含真实DSH的完整回归，日志p0-p1-full-tests.log。尚未冻结打包或做新版模型验收。
 
 - P0/P1整合后root完整pytest（含真实DSH）1018 passed/2 skipped，107.25秒。仅pyarrow/data_formulator可选依赖相关2项跳过，日志p0-p1-full-tests.log；Ruff与diff通过。此为源码验证，安装包与模型质量仍未验收。
+
+
+## 2026-09-07：P0生成附表身份与P2单快照来源路径
+
+- P0跨保存链持久化附表版本及内容哈希。校验端重建完整计算附表与待补资料附表，再标记generated_appendix；经理正文、引用绑定分别定位。首保存先resolve要求版本，旧稿重检使用私有历史要求重建入口，公开覆盖检查仍按当前要求。自算hash、伪造后缀、先保存伪附表再重检均不能取得生成身份；真实金额照常扫描。
+- P2沿用analysis-save/run实现单快照structured_aggregate，计算和来源由同一计划生成。筛选、范围、分组、去重策略及输入哈希进入定义/结果键；filter/scope/exclusion/dedupe剔除记录可经同一下钻入口查看。任意SQL仍开放，金额相同不升级来源状态。暂不支持多表verified或将结构化计划保存成SQL方法模板。
+- root复核补齐无效算子类型、null范围比较、result_key保留字段、38位精确加总、缺失金额、物理行号，以及按部门分组时的逐行币种单位。解释事实同步保留分组范围与币种单位。Markdown/Excel保留计划、哈希、纳入/剔除记录。
+- UI结果主表隐藏技术列，原始字段可展开；显示来源/剔除明细及可读缺失诊断，来源可追溯不表示业务判断已通过。真实Analysis接线测试覆盖剔除section透传与旧异步响应隔离。finance与structured草稿均走同一解释保存/重检，问题不阻止经理修改保存。
+- 初次前端全量407通过/7失败，含2条新测试编辑步骤遗漏和5条并发超时；修复测试实际编辑步骤并限2 workers后414通过，补充缺失诊断后415通过。随后按真实aggregation合同修复诊断分支，定向5项通过，最终由完整pytest再次覆盖全部前端。原日志p2-app-full.log、p2-app-full-retest.log、p2-app-final.log保留。
+- root后端解释/服务/要求143项通过，聚合与集成31项通过，插件schema12项通过，Ruff/类型/镜像检查通过。完整pytest（真实DSH）日志p0-p2-full-tests.log；尚未重新冻结本轮源码、安装或运行本轮模型验收。旧模型观察与盲测材料未改动。
+
+- 最终同一源码完整回归1061 passed/2 skipped，180.24秒，收集1063项一致；仅pyarrow/data_formulator可选依赖跳过。包含真实DSH、完整前端及Electron/renderer类型检查。日志p0-p2-full-tests.log与p0-p2-collection.log；工程通过不代表新安装包或模型质量已验收。

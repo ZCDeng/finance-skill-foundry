@@ -1220,6 +1220,26 @@ describe('analysis workbench', () => {
     expect(saveCall?.[2]).not.toEqual(expect.objectContaining({ fact_ids: expect.arrayContaining(['fact-optional']) }));
   });
 
+  it.each(['finance', 'structured_aggregate'])('distinguishes generated appendix issues and keeps save available for %s', async (engine) => {
+    const financeRun: AnalysisRun = { ...run, engine };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'needs_attention', issues: [
+        { code: 'uncited_number', severity: 'error', origin: 'generated_appendix', excerpt: '自动附表金额' },
+        { code: 'unknown_fact', severity: 'error', origin: 'claim_binding' },
+      ] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/自动附表中的数字与计算依据尚未对应/)).toBeTruthy();
+    expect(screen.getByText(/对应片段：自动附表金额/)).toBeTruthy();
+    expect(screen.getByText(/引用绑定 · 需修正/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '文稿正文' }), { target: { value: '利润有所改善，业务原因待进一步确认。' } });
+    expect((screen.getByRole('button', { name: '保存文稿新版' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('clears saved quality details while automatic validation is pending, then shows the real validation result', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance' };
     const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'pass', issues: [],
@@ -1527,6 +1547,32 @@ describe('analysis workbench', () => {
     await act(async () => resolveDrilldown(success({ run_id: firstRun.id, row: 0, rows: [], total: 1, offset: 0, has_more: false, message: '旧运行来源' })));
     expect(screen.queryByText(/旧运行来源/)).toBeNull();
     expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('passes structured aggregate excluded-detail section through the Analysis drilldown IPC wiring', async () => {
+    const structuredRun: AnalysisRun = { ...run, engine: 'structured_aggregate', result: {
+      columns: [{ name: 'metric', type: 'VARCHAR' }, { name: 'amount', type: 'DECIMAL' }, { name: 'excluded_source_rows', type: 'JSON' }],
+      rows: [{ metric: '收入', amount: '120' }],
+      detail_rows: [{ customer: '客户甲', amount: '120', source_rows: [{ dataset_id: source.id, row_index: 1 }] }],
+      excluded_detail_rows: [{ customer: '客户乙', amount: '5', excluded_source_rows: [{ dataset_id: source.id, row_index: 2 }] }],
+      row_count: 1, truncated: false,
+      provenance: { mode: 'executor_verified_source_map', status: 'verified', plan_hash: 'p1', data_hash: 'd1', source_hash: 's1' },
+    } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drilldown'] });
+      if (command === 'drilldown-fact') return success({ run_id: structuredRun.id, row: 0, rows: [], total: 0, offset: 0, has_more: false, message: '剔除明细来源' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [structuredRun] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('来源可追溯：执行器已核对来源映射；这不代表业务判断已经通过。');
+    await waitFor(() => expect(Array.from((screen.getByLabelText('结果行来源') as HTMLSelectElement).options).map((option) => option.value)).toContain('excluded_detail_rows:0'));
+    fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: 'excluded_detail_rows:0' } });
+    await waitFor(() => expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('excluded_detail_rows:0'));
+    fireEvent.click(screen.getByRole('button', { name: '查看来源行' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', {
+      run_id: structuredRun.id, row: 0, section: 'excluded_detail_rows', offset: 0, limit: 100,
+    }));
   });
 
   it('runs baseline and delayed child scenarios from a saved finance context', async () => {

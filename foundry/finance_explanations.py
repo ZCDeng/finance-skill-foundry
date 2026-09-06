@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from datetime import date, datetime, timezone
 from calendar import monthrange
 from decimal import Decimal, InvalidOperation, localcontext
@@ -18,6 +19,7 @@ CLOSURE_EXPR = re.compile(r"(?P<expr>[-+]?\d+(?:\.\d+)?(?:\s*[+\-−]\s*\d+(?:\.
 DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
+EVIDENCE_APPENDIX_RENDER_VERSION = 1
 
 MONEY_COLUMNS = {
     "amount",
@@ -190,12 +192,27 @@ def render_evidence_appendix(prepared: dict) -> dict:
             lines.append(f"- 闭合核对：{_closure_label(closure)}")
     unique_fact_ids = list(dict.fromkeys(fact_ids))
     return {
-        "schema_version": 1,
+        "schema_version": EVIDENCE_APPENDIX_RENDER_VERSION,
         "body": "\n".join(lines).strip() if len(lines) > 1 else "",
         "fact_ids": unique_fact_ids,
         "claims": claims_for_facts(
             prepared.get("facts", []), unique_fact_ids
         ),
+    }
+
+
+def evidence_appendix_metadata(body: str, *, base_body: str | None = None) -> dict:
+    if not isinstance(body, str):
+        raise FoundryError("evidence appendix body must be text")
+    base = body if base_body is None else base_body
+    if not isinstance(base, str):
+        raise FoundryError("evidence appendix base body must be text")
+    return {
+        "schema_version": 1,
+        "render_version": EVIDENCE_APPENDIX_RENDER_VERSION,
+        "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "base_body_sha256": hashlib.sha256(base.encode("utf-8")).hexdigest(),
+        "body_chars": len(body),
     }
 
 
@@ -294,6 +311,9 @@ def validate_explanation(analysis, spec: dict) -> dict:
         analysis,
         [r for r in runs if r.get("execution_status") == "succeeded"],
         materiality=spec.get("materiality", draft.get("materiality", {})),
+    )
+    generated_regions = _trusted_generated_appendix_regions(
+        analysis, body, {**draft, **spec}, prepared
     )
     facts = prepared["facts"]
     by_id = {fact["id"]: fact for fact in facts}
@@ -405,6 +425,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 }
             )
     status = "pass" if not issues else "needs_attention"
+    issues = _locate_issues(issues, generated_regions)
     return {
         "schema_version": 1,
         "status": status,
@@ -685,6 +706,10 @@ def _make_fact(
     display = _display_value(exact, column, unit)
     semantics = _semantics(row, column, exact, materiality)
     refs = row.get("evidence", {}).get(column, row.get("source_rows", []))
+    scope = run.get("finance_scope", {})
+    if run.get("engine") == "structured_aggregate":
+        dimensions = [*run.get("aggregate_plan", {}).get("group_by", []), "currency", "unit"]
+        scope = {**scope, **{key: row[key] for key in dimensions if key in row}}
     return {
         "id": fact_id,
         "run_id": run["id"],
@@ -695,7 +720,7 @@ def _make_fact(
         "display_value": display,
         "label": _label(row, column),
         "unit": unit,
-        "scope": run.get("finance_scope", {}),
+        "scope": scope,
         "semantics": semantics,
         "state": _fact_state(value),
         "source_trace": {
@@ -704,6 +729,11 @@ def _make_fact(
             "source_hashes": run.get("source_hashes", {}),
             "source_rows": refs,
             "source_row_count": len(refs) if isinstance(refs, list) else 0,
+            "provenance_status": (
+                run.get("result", {}).get("provenance", {}).get("status", "unverified")
+                if run.get("engine") == "structured_aggregate" else
+                "available_for_verification" if run.get("engine") == "finance" else "unverified"
+            ),
         },
     }
 
@@ -1730,6 +1760,119 @@ def _allowed_numbers(facts: list[dict]) -> set[str]:
             allowed.add(_normalize_number(str(abs(Decimal(fact["value"])))))
         allowed.update(_numbers_from_text(fact["display_value"]))
     return {item for item in allowed if item}
+
+
+def _trusted_generated_appendix_regions(
+    analysis, body: str, spec: dict, prepared: dict
+) -> list[dict]:
+    appendix = spec.get("evidence_appendix")
+    meta = spec.get("evidence_appendix_meta")
+    if not isinstance(appendix, str) or not appendix:
+        return []
+    if not isinstance(meta, dict):
+        return []
+    rebuilt_base = render_evidence_appendix(prepared).get("body", "")
+    if not isinstance(rebuilt_base, str) or not rebuilt_base:
+        return []
+    rebuilt_gap = _rebuilt_input_gap_appendix(analysis, spec, prepared)
+    if rebuilt_gap is None:
+        return []
+    rebuilt = rebuilt_base + rebuilt_gap
+    expected = evidence_appendix_metadata(rebuilt, base_body=rebuilt_base)
+    if any(meta.get(key) != expected[key] for key in ("body_sha256", "base_body_sha256")):
+        return []
+    if meta.get("schema_version") != 1 or meta.get("render_version") != EVIDENCE_APPENDIX_RENDER_VERSION:
+        return []
+    if appendix != rebuilt:
+        return []
+    start = body.rfind(rebuilt)
+    if start < 0:
+        return []
+    return [
+        {
+            "section": "generated_appendix",
+            "start": start,
+            "end": start + len(rebuilt),
+        }
+    ]
+
+
+def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | None:
+    requirements_id = spec.get("requirements_id")
+    if not requirements_id:
+        return ""
+    try:
+        requirements = analysis._get("requirements", requirements_id)
+        from foundry.finance_requirement_support import (
+            input_gap_appendix,
+            with_input_gaps,
+        )
+        from foundry.finance_requirements import check_requirements
+
+        checked = check_requirements(
+            analysis,
+            {
+                "run_ids": spec.get("run_ids", []),
+                "claims": claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
+                "requirements_id": requirements_id,
+                "source_read_failures": spec.get("source_read_failures", []),
+            },
+            _requirements_record=requirements,
+        )
+        return input_gap_appendix(with_input_gaps(analysis, checked))
+    except FoundryError:
+        return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def _locate_issues(issues: list[dict], generated_regions: list[dict]) -> list[dict]:
+    return [
+        _locate_issue(issue, generated_regions)
+        for issue in issues
+        if isinstance(issue, dict)
+    ]
+
+
+def _locate_issue(issue: dict, generated_regions: list[dict]) -> dict:
+    located = dict(issue)
+    position = located.get("position")
+    if isinstance(position, int):
+        origin = _origin_for_position(position, generated_regions)
+        location = {"section": origin, "position": position}
+        if origin == "generated_appendix":
+            region = _region_for_position(position, generated_regions)
+            if region:
+                location["offset"] = position - region["start"]
+    else:
+        origin = _non_body_issue_origin(located)
+        location = {"section": origin}
+    located.setdefault("origin", origin)
+    located.setdefault("location", location)
+    return located
+
+
+def _origin_for_position(position: int, generated_regions: list[dict]) -> str:
+    return "generated_appendix" if _region_for_position(position, generated_regions) else "manager_body"
+
+
+def _region_for_position(position: int, generated_regions: list[dict]) -> dict | None:
+    for region in generated_regions:
+        if region["start"] <= position < region["end"]:
+            return region
+    return None
+
+
+def _non_body_issue_origin(issue: dict) -> str:
+    if issue.get("code") in {
+        "invalid_claim",
+        "invalid_claim_location",
+        "fact_claim_mismatch",
+        "unknown_fact",
+        "missing_required_fact",
+    }:
+        return "claim_binding"
+    return "manager_body"
 
 
 def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[tuple[int, int]]:

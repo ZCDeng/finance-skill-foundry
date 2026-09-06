@@ -22,7 +22,7 @@ type DraftEdit = { title: string; body: string; limitations: string; review: str
 interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
 }
-interface ExplanationIssue { code?: string; message?: string; severity?: string }
+interface ExplanationIssue { code?: string; message?: string; severity?: string; origin?: string; excerpt?: string }
 interface ExplanationQuality {
   status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[];
   checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
@@ -270,7 +270,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
-    const usesFinanceRun = (spec.run_ids as unknown[] | undefined)?.some((id) => view?.runs.some((run) => run.id === id && run.engine === 'finance'));
+    const usesFinanceRun = (spec.run_ids as unknown[] | undefined)?.some((id) => view?.runs.some((run) => run.id === id && (run.engine === 'finance' || run.engine === 'structured_aggregate')));
     if (!api?.analysisDraft && !(usesFinanceRun && api?.financeCall)) throw new Error('此版本暂不支持保存文稿。');
     const next = unwrap((usesFinanceRun && api.financeCall
       ? await api.financeCall(taskId, 'save-explanation-draft', spec)
@@ -374,10 +374,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 unwrap(await api.analysisMethodSave(taskId, id, name)); await refresh(taskId);
                 if (currentTask.current === taskId) setNotice('已保存方法，可在方法库中复用。');
               })}
-              onDrilldown={async (run, row, column) => {
+              onDrilldown={async (run, row, column, section) => {
                 const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持查看财务来源行。');
                 return unwrap(await api.financeCall(task.id, 'drilldown-fact', {
-                  run_id: run.id, row, ...(column ? { column } : {}), offset: 0, limit: 100,
+                  run_id: run.id, row, ...(column ? { column } : {}), ...(section ? { section } : {}), offset: 0, limit: 100,
                 }) as Answer<FinanceDrilldown>);
               }} />
             {dataset && <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>
@@ -787,7 +787,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   const [openingCash, setOpeningCash] = useState('');
   const [delayDays, setDelayDays] = useState('14');
   const [baselineScenarioId, setBaselineScenarioId] = useState('');
-  const hasFinanceResults = runs.some((row) => row.engine === 'finance' && row.execution_status === 'succeeded');
+  const hasFinanceResults = runs.some((row) => (row.engine === 'finance' || row.engine === 'structured_aggregate') && row.execution_status === 'succeeded');
   const [setupOpen, setSetupOpen] = useState(!hasFinanceResults);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -1094,7 +1094,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const backgroundRequest = useRef(0);
   const recoveryRequest = useRef(0);
   const draftRuns = runs.filter((run) => draft?.run_ids.includes(run.id));
-  const financeRuns = draftRuns.filter((run) => run.engine === 'finance');
+  const financeRuns = draftRuns.filter((run) => (run.engine === 'finance' || run.engine === 'structured_aggregate'));
   const primaryFinanceRun = financeRuns[0];
   const defaultScope = firstFinanceScope(primaryFinanceRun);
   const contextId = primaryFinanceRun?.finance_context_id;
@@ -1493,6 +1493,9 @@ function factLabel(fact: ExplanationFact): string {
 }
 
 function explanationIssueText(issue: ExplanationIssue): string {
+  if (issue.origin === 'generated_appendix' && issue.code === 'uncited_number') {
+    return '自动附表中的数字与计算依据尚未对应，需要重新核验附表。你的正文可以继续编辑和保存。';
+  }
   const messages: Record<string, string> = {
     uncited_number: '正文有数字尚未关联计算依据，请核对数字或补充引用。',
     unknown_fact: '引用已不属于当前计算结果，请重新选择依据。',
@@ -1520,7 +1523,10 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       })}
     </dl>}
     {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
-    {quality?.issues?.length ? <ul>{quality.issues.map((issue, index) => <li key={index}>{issue.severity === 'error' ? '需修正' : '请核对'}：{explanationIssueText(issue)}</li>)}</ul> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
+    {quality?.issues?.length ? <ul>{quality.issues.map((issue, index) => <li key={index}>
+      {issue.origin === 'generated_appendix' ? '自动附表' : issue.origin === 'claim_binding' ? '引用绑定' : '文稿'} · {issue.severity === 'error' ? '需修正' : '请核对'}：{explanationIssueText(issue)}
+      {issue.excerpt && <p className="analysis-note">对应片段：{issue.excerpt}</p>}
+    </li>)}</ul> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>

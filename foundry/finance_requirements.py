@@ -750,15 +750,16 @@ def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed)
     ])
 
 
-def check_requirements(analysis, spec):
-    latest = latest_requirements(analysis)
+def check_requirements(analysis, spec, *, _requirements_record=None):
+    latest = _requirements_record or latest_requirements(analysis)
     if not latest:
         return {'requirements_id': None, 'items': [], 'coverage': {'status': 'not_assessed'},
                 'provenance': {'status': 'not_assessed'}, 'scope_changed': False,
                 'original_requirements_completed': False}
     selected_id = spec.get('requirements_id') or latest['id']
-    selected = analysis._get('requirements', selected_id)
-    # Always check the current task obligations, even when an old draft is opened.
+    selected = latest if _requirements_record and latest.get('id') == selected_id else analysis._get('requirements', selected_id)
+    # Public checks use current obligations; only internal appendix reconstruction
+    # supplies an immutable historical record to recover its original text.
     runs = {r['id']: r for r in analysis._list('runs') if r.get('execution_status') == 'succeeded'}
     evidence = _prepared_evidence(analysis, runs)
     claimed = set()
@@ -845,7 +846,7 @@ def check_requirements(analysis, spec):
         if fixups:
             item_record['fixups'] = fixups
         items.append(item_record)
-    scope_changed = selected['id'] != latest['id']
+    scope_changed = False if _requirements_record else selected['id'] != latest['id']
     complete = all(item['status'] == 'answered' for item in items) and not scope_changed
     trace_complete = all(item['provenance_status'] in {'verified', 'not_requested'} for item in items)
     return {'requirements_id': latest['id'], 'draft_requirements_id': selected['id'],
