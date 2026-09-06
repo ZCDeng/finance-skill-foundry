@@ -517,10 +517,16 @@ class AnalysisStore:
             maximum=1000,
         )
         body = _safe_text(spec.get("body", parent.get("body", "")), "draft body")
+        body_template = spec.get("body_template")
+        if body_template is not None:
+            body_template = _safe_text(body_template, "draft body_template")
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
         runs = {run_id: self.get_run(run_id) for run_id in dict.fromkeys(run_ids)}
+        fact_ids = spec.get("fact_ids", parent.get("fact_ids", []))
+        if not isinstance(fact_ids, list):
+            raise FoundryError("fact_ids must be an array")
         claims = json_value(spec.get("claims", parent.get("claims", [])))
         if not isinstance(claims, list):
             raise FoundryError("claims must be an array")
@@ -602,12 +608,27 @@ class AnalysisStore:
             and all(c["basis"] == "calculation" for c in claims)
             else "unverified"
         )
+        from foundry.finance_explanations import validate_explanation
+
+        explanation_check = validate_explanation(
+            self,
+            {
+                "body": body,
+                "run_ids": list(runs),
+                "fact_ids": fact_ids,
+                "claims": claims,
+            },
+        )
         record = _new(
             self.task,
             title=title,
             body=body,
+            **({"body_template": body_template} if body_template is not None else {}),
             run_ids=list(runs),
+            fact_ids=fact_ids,
             claims=claims,
+            explanation_check=explanation_check,
+            quality=explanation_check,
             parent_id=parent.get("id"),
             execution_status="succeeded"
             if runs and all(r["execution_status"] == "succeeded" for r in runs.values())
@@ -622,7 +643,9 @@ class AnalysisStore:
                 {
                     "title": title,
                     "body": body,
+                    "body_template": body_template,
                     "run_ids": list(runs),
+                    "fact_ids": fact_ids,
                     "claims": claims,
                     "limitations": limitations,
                 }

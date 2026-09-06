@@ -34,13 +34,13 @@ def equal_amount(value, expected):
 # occurrence of a coincidentally equal number elsewhere in a result.
 EXPECTED_CELLS = {
     "G1": [
-        ("profit_difference", "5", r"(profit|利润).*(var|diff|delta|差异)|(var|diff|delta|差异).*(profit|利润)"),
+        ("profit_difference", "5", r"(profit|利润).*(var|diff|delta|change|impact|差异)|(var|diff|delta|change|impact|差异).*(profit|利润)"),
         ("revenue_contribution", "20", r"revenue|收入"),
         ("cost_contribution", "-10", r"cost|成本"),
         ("expense_contribution", "-5", r"expense|费用"),
     ],
     "G2": [
-        ("revenue_difference", "32", r"var|diff|delta|差异|增量"),
+        ("revenue_difference", "32", r"var|diff|delta|change|差异|增量"),
         ("quantity_contribution", "20", r"quantity|qty|volume|数量|销量"),
         ("price_contribution", "12", r"price|价格|单价"),
     ],
@@ -65,13 +65,13 @@ def verify_financial_cells(state, case_id):
             if not re.search(pattern, label, flags=re.I) or re.search(r"pct|percent|rate|share|率|占比|%", label, re.I):
                 continue
             if metric.endswith("contribution") and not re.search(
-                r"contrib|effect|impact|bridge|var|diff|delta|贡献|影响|差异|分解", label, re.I
+                r"contrib|effect|impact|bridge|var|diff|delta|change|贡献|影响|差异|分解", label, re.I
             ):
                 continue
             if equal_amount(cell["value"], amount):
                 matched.append(cell)
             elif (metric in ("cost_contribution", "expense_contribution")
-                  and re.search(r"var|diff|delta|差异", label, re.I)
+                  and re.search(r"var|diff|delta|change|差异", label, re.I)
                   and not re.search(r"contribution|effect|impact|贡献|影响", label, re.I)
                   and equal_amount(cell["value"], str(-Decimal(amount)))):
                 # An actual-minus-budget expense variance has the opposite
@@ -167,6 +167,7 @@ def main():
     parser.add_argument("--credentials-home", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=360)
+    parser.add_argument("--resume-observation", type=Path, help="Recheck saved cases in a copied var; launch only explicit resource/restart probes, no model rerun")
     parser.add_argument("--live", action="store_true", help="Allow requests to the existing configured model")
     args = parser.parse_args()
     if not args.live:
@@ -181,6 +182,14 @@ def main():
     dsh = dsh_root / "node_modules/@deepseek-ai/dsh/lib/bin.js"
     fixture = json.loads((repo / "tests/fixtures/finance_baseline/cases.json").read_text())
     var = output / "var"
+    resumed = None
+    if args.resume_observation:
+        source = args.resume_observation.resolve()
+        resumed = json.loads((source / "session.json").read_text())
+        if resumed.get("status") != "completed":
+            raise RuntimeError("Only a completed observation can be resumed")
+        shutil.copytree(source / "var", var)
+        shutil.copyfile(source / "session.json", output / "source-session.json")
 
     def cli(command, *parts, task=None, session=None, raw=False):
         result = subprocess.run([str(foundry), "--var", str(var),
@@ -198,7 +207,7 @@ def main():
             raise RuntimeError("App verification must use only resources inside the tested app")
     config = {"dshRoot": str(dsh_root), "report": str(output / "session.json"),
               "timeoutSeconds": args.timeout_seconds, "ids": manifest["ids"], "cases": []}
-    for case in [{"id": "explicit", "datasets": {}, "question": "", "explicit": True}, *fixture["cases"][:2]]:
+    for case in [{"id": "explicit", "datasets": {}, "question": "", "explicit": True}, *(fixture["cases"][:2] if resumed is None else [])]:
         task = cli("task-new", "--title", f"技能验收 {case['id']}", raw=True)
         session = f"skill-{case['id']}-{task}"
         for name, rows in case["datasets"].items():
@@ -281,6 +290,16 @@ def main():
                 raise AssertionError("Harness did not receive the application's bundled method root")
             if application and observed["runtime"]["ppid"] != child.pid:
                 raise AssertionError("The tested harness was not spawned by the tested native app")
+            if resumed is not None:
+                verify_loaded_resources(resumed, manifest)
+                if resumed["model"] != selection:
+                    raise AssertionError("Saved observation used a different model")
+                observed["cases"].extend(row for row in resumed["cases"] if row["id"] != "explicit")
+                results["resumed_observation"] = {
+                    "path": str(args.resume_observation.resolve()),
+                    "session_sha256": hashlib.sha256((output / "source-session.json").read_bytes()).hexdigest(),
+                    "model_rerun": False,
+                }
             for case in fixture["cases"][:2]:
                 row = next(item for item in observed["cases"] if item["id"] == case["id"])
                 loaded = [call for call in row["calls"] if call["name"] == "skill" and not call["isError"]

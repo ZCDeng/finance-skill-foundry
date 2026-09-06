@@ -24,6 +24,8 @@ Start with `list_finance_context` to see the current source snapshots, scenario 
 
 Use `run_metric` to establish actual, baseline, and control totals before explaining the bridge. Use `explain_variance` when the question fits a supported profit bridge or price/quantity decomposition and the current scenario/source versions are explicit. Use `drilldown_fact` to inspect source-backed cells from that run, and `save_explanation_draft` for commentary with calculation claims linked to real `run_id`, `row`, `column`, and `value` fields. Keep using SQL/Python for custom joins, unsupported decompositions, cohort analysis, and data-quality checks; do not force every variance into the specialized tools. Materiality, missing-group treatment, negative budget policy, and narrative judgment remain manager-controlled.
 
+For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
+
 ## Usage
 
 ```

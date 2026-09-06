@@ -206,10 +206,29 @@ def test_stdio_mcp_tool_flow_matches_direct_finance_service(tmp_path: Path, titl
         _handshake(client)
         tools = client.request(3, "tools/list")["result"]["tools"]
         by_name = {tool["name"]: tool for tool in tools}
-        assert set(by_name) >= {"run_metric", "drilldown_fact", "save_explanation_draft", "save_scenario", "run_scenario"}
+        assert set(by_name) >= {
+            "run_metric",
+            "drilldown_fact",
+            "prepare_explanation",
+            "validate_explanation",
+            "save_explanation_draft",
+            "finance_background_save",
+            "finance_background_list",
+            "save_scenario",
+            "run_scenario",
+        }
         assert by_name["run_metric"]["inputSchema"]["required"] == ["context_id", "metric"]
         assert by_name["run_metric"]["inputSchema"]["properties"]["metric"]["required"] == ["kind"]
+        ratio = by_name["run_metric"]["inputSchema"]["properties"]["metric"]["properties"]
+        assert {"numerator_accounts", "denominator_accounts", "account_signs"} <= set(ratio)
         assert by_name["run_scenario"]["inputSchema"]["required"] == ["scenario_id"]
+        assert by_name["prepare_explanation"]["inputSchema"]["required"] == ["run_ids"]
+        assert by_name["finance_background_save"]["inputSchema"]["properties"]["basis"]["enum"] == [
+            "source_fact",
+            "external_reference",
+            "user_assumption",
+            "professional_judgment",
+        ]
         response = client.request(4, "tools/call", {"name": "run_metric", "arguments": fixture["spec"]})
         result = response["result"]["structuredContent"]
     finally:
@@ -313,6 +332,74 @@ def test_context_bound_list_filters_same_snapshot_records(tmp_path: Path) -> Non
     assert hidden_scenario["id"] not in json.dumps(listed)
     assert other["id"] not in json.dumps(listed)
     assert denied["error"] == {"code": -32001, "message": "access denied"}
+
+
+def test_mcp_explanation_tools_cannot_cross_granted_run_or_context(tmp_path: Path) -> None:
+    alpha = _seed(tmp_path / "a", title="alpha", session="alpha-session", organization="华东", profit="30")
+    beta = _seed(tmp_path / "b", title="beta", session="beta-session", organization="华南", profit="45")
+    beta_run = _finance_store(
+        beta["task"],
+        snapshot_ids=[beta["dataset"]["id"]],
+        session_id=beta["session"],
+    ).run_metric(beta["spec"])
+    grant = create_stdio_grant(
+        alpha["store"].var_root,
+        task_id=alpha["task"].id,
+        session_id=alpha["session"],
+        snapshot_ids=[alpha["dataset"]["id"]],
+        context_ids=[alpha["context"]["id"]],
+    )
+    client = McpClient(grant["env"])
+    try:
+        _handshake(client)
+        prepare = client.request(4, "tools/call", {"name": "prepare_explanation", "arguments": {"run_ids": [beta_run["id"]]}})
+        validate = client.request(5, "tools/call", {"name": "validate_explanation", "arguments": {"run_ids": [beta_run["id"]], "body": "x"}})
+        background = client.request(6, "tools/call", {"name": "finance_background_save", "arguments": {"context_id": beta["context"]["id"], "text": "x", "basis": "professional_judgment"}})
+    finally:
+        client.close()
+    assert prepare["error"] == {"code": -32001, "message": "access denied"}
+    assert validate["error"] == {"code": -32001, "message": "access denied"}
+    assert background["error"] == {"code": -32001, "message": "access denied"}
+
+
+def test_mcp_background_tools_accept_matching_granted_scope_without_context_id(tmp_path: Path) -> None:
+    fixture = _seed(tmp_path, title="bg", session="bg-session", organization="华东", profit="30")
+    grant = create_stdio_grant(
+        fixture["store"].var_root,
+        task_id=fixture["task"].id,
+        session_id=fixture["session"],
+        snapshot_ids=[fixture["dataset"]["id"]],
+        context_ids=[fixture["context"]["id"]],
+    )
+    scope = {"ledger": "bg", "organization": "华东"}
+    client = McpClient(grant["env"])
+    try:
+        _handshake(client)
+        saved = client.request(
+            4,
+            "tools/call",
+            {
+                "name": "finance_background_save",
+                "arguments": {
+                    "text": "华东客户结构变化由经理确认。",
+                    "basis": "professional_judgment",
+                    "scope": scope,
+                    "effective_from": "2026-08",
+                },
+            },
+        )["result"]["structuredContent"]
+        listed = client.request(
+            5,
+            "tools/call",
+            {
+                "name": "finance_background_list",
+                "arguments": {"scope": scope, "as_of": "2026-08"},
+            },
+        )["result"]["structuredContent"]
+    finally:
+        client.close()
+    assert saved["scope"] == scope
+    assert [row["id"] for row in listed["business_contexts"]] == [saved["id"]]
 
 
 def test_granted_scenario_tools_match_direct_service(tmp_path: Path) -> None:

@@ -24,6 +24,8 @@ Start with `list_finance_context` to identify the current scenarios, source snap
 
 Use `run_metric` when the requested statement work fits a management P&L, ratio, account total, or control total. Use `explain_variance` for supported statement bridges, `finance_scenario_save` / `finance_scenario_run` when the answer depends on a saved actual/budget/forecast scenario, `drilldown_fact` for source-backed cells from the run, and `save_explanation_draft` for editable commentary with calculation claims tied to real run fields. Continue with SQL/Python for statement layouts, cash-flow reconstruction, disclosure tables, or presentation work outside those contracts. Do not claim an ERP or data-warehouse connection unless this session has configured and named one.
 
+For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
+
 ## Usage
 
 ```

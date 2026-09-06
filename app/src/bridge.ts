@@ -278,6 +278,8 @@ export interface AnalysisDraft extends AnalysisObject {
   body: string;
   run_ids: string[];
   claims: unknown[];
+  fact_ids?: string[];
+  quality?: Record<string, unknown>;
   parent_id?: string | null;
   publication_status: string;
   review_status: string;
@@ -315,6 +317,10 @@ export type FinanceCommand =
   | 'explain-variance'
   | 'drilldown-fact'
   | 'save-explanation-draft'
+  | 'prepare-explanation'
+  | 'validate-explanation'
+  | 'finance-background-save'
+  | 'finance-background-list'
   | 'workbook-inspect'
   | 'workbook-bind'
   | 'workbook-read'

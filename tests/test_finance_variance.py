@@ -36,9 +36,19 @@ def test_profit_bridge_closes_and_links_sources():
     assert [
         rows[m]["contribution"] for m in ("revenue", "cost", "expense", "profit")
     ] == ["20", "-10", "-5", "5"]
+    assert [
+        rows[m]["amount_change"] for m in ("revenue", "cost", "expense", "profit")
+    ] == ["20", "10", "5", "5"]
+    assert [
+        rows[m]["profit_impact"] for m in ("revenue", "cost", "expense", "profit")
+    ] == ["20", "-10", "-5", "5"]
     assert sum(
-        Decimal(rows[m]["contribution"]) for m in ("revenue", "cost", "expense")
+        Decimal(rows[m]["profit_impact"]) for m in ("revenue", "cost", "expense")
     ) == Decimal(rows["profit"]["contribution"])
+    assert rows["cost"]["display_value"] == "利润影响 -10 万元"
+    assert rows["cost"]["amount_change_display"] == "成本增加 10 万元"
+    assert rows["cost"]["semantics"]["amount_change_direction"] == "increase"
+    assert rows["cost"]["semantics"]["profit_impact_direction"] == "decrease"
     assert rows["cost"]["favorability"] == "unfavorable"
     assert len(rows["profit"]["source_rows"]) == 6
 
@@ -166,6 +176,45 @@ def test_same_scenario_period_comparison_pairs_distinct_sides():
     assert result["rows"][0]["total_variance"] == "32"
 
 
+def test_profit_bridge_same_scenario_period_comparison_is_explicit():
+    data = facts()
+    previous = []
+    for row in data["rows"][:3]:
+        previous.append(
+            {
+                **row,
+                "period": "2026-08",
+                "amount": {
+                    "revenue": "100",
+                    "cost": "60",
+                    "expense": "15",
+                }[row["management_account"]],
+                "source": {"dataset_id": "history", "row_index": row["source"]["row_index"]},
+            }
+        )
+    data["rows"] = [
+        *(row for row in data["rows"] if row["scenario"] == "actual"),
+        *previous,
+    ]
+
+    result = explain_variance(
+        data,
+        {
+            "actual_scenario": "actual",
+            "baseline_scenario": "actual",
+            "actual_filters": {"period": "2026-09"},
+            "baseline_filters": {"period": "2026-08"},
+        },
+    )
+    rows = {row["metric"]: row for row in result["rows"]}
+    assert rows["profit"]["actual"] == "30"
+    assert rows["profit"]["baseline"] == "25"
+    assert rows["profit"]["actual_scope"]["period"] == "2026-09"
+    assert rows["profit"]["baseline_scope"]["period"] == "2026-08"
+    assert rows["cost"]["amount_change"] == "10"
+    assert rows["cost"]["profit_impact"] == "-10"
+
+
 def test_nonperiod_side_filter_does_not_merge_months():
     data = facts()
     data["rows"] += [{**row, "period": "2026-08"} for row in data["rows"]]
@@ -173,6 +222,17 @@ def test_nonperiod_side_filter_does_not_merge_months():
         data, {"actual_filters": {"ledger": "L1"}, "baseline_filters": {"ledger": "L1"}}
     )
     assert len([row for row in out["rows"] if row["metric"] == "profit"]) == 2
+
+
+def test_missing_profit_bridge_group_reports_actionable_diagnostic():
+    sample = facts()
+    sample["rows"] = [row for row in sample["rows"] if row["scenario"] == "actual"]
+    out = explain_variance(sample, {})
+    issue = next(d for d in out["diagnostics"] if d["code"] == "comparison_group_missing")
+    assert issue["missing_side"] == "baseline"
+    assert issue["actual_filters"] == {}
+    assert issue["baseline_filters"] == {}
+    assert issue["suggested_actions"]
 
 
 def test_profit_variance_rejects_non_object_filters():
@@ -244,3 +304,8 @@ def test_price_quantity_filters_by_account_and_period_without_cross_period_merge
     assert explicit["rows"][0]["total_variance"] == "32"
     assert "period" not in explicit["columns"]
     assert {row["period"] for row in unfiltered["rows"]} == {"2026-08", "2026-09"}
+
+
+def test_profit_bridge_rejects_account_dimension_that_splits_the_equation():
+    with pytest.raises(FoundryError, match='management_account'):
+        explain_variance(facts(), {'dimensions': ['management_account']})

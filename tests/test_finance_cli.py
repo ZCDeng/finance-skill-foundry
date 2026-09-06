@@ -6,6 +6,7 @@ from openpyxl.workbook.defined_name import DefinedName
 
 from foundry.analysis import AnalysisStore
 from foundry.cli import main
+from foundry import finance_cli
 from foundry.task import TaskStore
 
 
@@ -97,3 +98,49 @@ def test_workbook_cli_writes_numeric_new_artifact_with_real_run(tmp_path, capsys
     assert original["Output"]["A2"].value == 0
     result_book.close()
     original.close()
+
+
+def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, capsys, monkeypatch):
+    root = tmp_path / "var"
+    task = TaskStore(root).create(title="解释质量")
+    task.record_session("manager", role="analysis")
+    calls = []
+
+    class FakeFinanceStore:
+        def __init__(self, task, **kwargs):
+            self.task = task
+            self.kwargs = kwargs
+
+        def prepare_explanation(self, spec):
+            calls.append(("prepare_explanation", spec, self.kwargs))
+            return {"ok": "prepare"}
+
+        def validate_explanation(self, spec):
+            calls.append(("validate_explanation", spec, self.kwargs))
+            return {"ok": "validate"}
+
+        def finance_background_save(self, spec):
+            calls.append(("finance_background_save", spec, self.kwargs))
+            return {"ok": "save"}
+
+        def finance_background_list(self, spec):
+            calls.append(("finance_background_list", spec, self.kwargs))
+            return {"ok": "list"}
+
+    monkeypatch.setattr(finance_cli, "FinanceStore", FakeFinanceStore)
+    args = ["--var", str(root), "--session", "manager"]
+    for command, payload, expected in [
+        ("prepare-explanation", {"run_ids": ["r1"]}, "prepare"),
+        ("validate-explanation", {"body": "收入 10", "run_ids": ["r1"]}, "validate"),
+        ("finance-background-save", {"text": "客户流失", "basis": "professional_judgment"}, "save"),
+        ("finance-background-list", {"as_of": "2026-09"}, "list"),
+    ]:
+        assert main([*args, command, "--spec", json.dumps(payload)]) == 0
+        assert json.loads(capsys.readouterr().out) == {"ok": expected}
+    assert [call[0] for call in calls] == [
+        "prepare_explanation",
+        "validate_explanation",
+        "finance_background_save",
+        "finance_background_list",
+    ]
+    assert all(call[2]["session_id"] == "manager" for call in calls)

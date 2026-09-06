@@ -219,6 +219,24 @@ def _ratio(rows: list[dict], spec: dict, diagnostics: list[dict]) -> dict:
                 "numerator": _money(bucket["numerator"]),
                 "denominator": _money(denominator),
                 "ratio": None if ratio is None else _money(ratio),
+                "numerator_exact": _money(bucket["numerator"]),
+                "denominator_exact": _money(denominator),
+                "ratio_exact": None if ratio is None else _money(ratio),
+                "numerator_display": _display_amount(bucket["numerator"], bucket["unit"]),
+                "denominator_display": _display_amount(denominator, bucket["unit"]),
+                "ratio_display": None if ratio is None else _display_percent(ratio),
+                "display_value": None if ratio is None else _display_percent(ratio),
+                "semantics": {
+                    "metric_kind": "ratio",
+                    "numerator_accounts": sorted(numerator_accounts),
+                    "denominator_accounts": sorted(denominator_accounts),
+                    "account_signs": {
+                        account: _money(signs.get(account, Decimal("1")))
+                        for account in sorted(numerator_accounts | denominator_accounts)
+                    },
+                    "precision": "exact_decimal",
+                    "display_policy": "ratio_percent_2dp",
+                },
                 "source_rows": bucket["source_rows"],
             }
         )
@@ -231,6 +249,10 @@ def _ratio(rows: list[dict], spec: dict, diagnostics: list[dict]) -> dict:
             "numerator",
             "denominator",
             "ratio",
+            "numerator_exact",
+            "denominator_exact",
+            "ratio_exact",
+            "display_value",
         ],
         "rows": out,
     }
@@ -363,6 +385,15 @@ def _dec(value: Any) -> Decimal:
 
 def _money(value: Decimal) -> str:
     return format(value, "f")
+
+
+def _display_amount(value: Decimal, unit: str | None) -> str:
+    amount = _money(value)
+    return f"{amount} {unit}" if unit else amount
+
+
+def _display_percent(value: Decimal) -> str:
+    return f"{value * Decimal('100'):.2f}%"
 
 
 def _diag(severity: str, code: str, message: str, **extra: Any) -> dict:

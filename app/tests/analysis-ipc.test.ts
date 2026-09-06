@@ -155,6 +155,10 @@ describe('analysis IPC task and session binding', () => {
       writes: [{ row: 1, field: 'amount', value: '10.00' }],
     });
     await invoke(CHANNELS.financeCall, task, 'drilldown-fact', { run_id: 'run-a', row: 0, limit: 100 });
+    await invoke(CHANNELS.financeCall, task, 'prepare-explanation', { run_ids: ['run-a'] });
+    await invoke(CHANNELS.financeCall, task, 'validate-explanation', { draft_id: 'draft-a' });
+    await invoke(CHANNELS.financeCall, task, 'finance-background-save', { text: '销售提前确认', basis: 'professional_judgment', scope: { ledger: '总账' }, effective_from: '2026-08' });
+    await invoke(CHANNELS.financeCall, task, 'finance-background-list', { scope: { ledger: '总账' }, as_of: '2026-08' });
     expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
       'list-finance-context',
       'finance-source-list',
@@ -163,6 +167,10 @@ describe('analysis IPC task and session binding', () => {
       'explain-variance',
       'workbook-preview',
       'drilldown-fact',
+      'prepare-explanation',
+      'validate-explanation',
+      'finance-background-save',
+      'finance-background-list',
     ]);
     expect(mocks.run.mock.calls[0][2]).toEqual([]);
     expect(mocks.run.mock.calls[1][2]).toEqual([]);
@@ -172,8 +180,10 @@ describe('analysis IPC task and session binding', () => {
     expect(varianceSpec.dimensions).not.toContain('management_account');
     expect((await invoke(CHANNELS.financeCall, task, 'dataset-add', { path: '/tmp/secret.csv' })).ok).toBe(false);
     expect((await invoke(CHANNELS.financeCall, task, 'list-finance-context', { unexpected: true })).ok).toBe(false);
+    const backgroundListSpec = JSON.parse(mocks.run.mock.calls[10][2][1]);
+    expect(backgroundListSpec.scope).toEqual({ ledger: '总账' });
     expect((await invoke(CHANNELS.financeCall, task, 'run-metric', ['not an object'])).ok).toBe(false);
-    expect(mocks.run).toHaveBeenCalledTimes(7);
+    expect(mocks.run).toHaveBeenCalledTimes(11);
   });
 
   it('refreshes finance source files only from the native file picker', async () => {

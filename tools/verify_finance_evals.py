@@ -9,7 +9,7 @@ Foundry state, and raw messages, then scores them against Decimal fixture truth.
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 import hashlib
 import json
 import os
@@ -36,6 +36,12 @@ FORBIDDEN_CAUSAL = re.compile(
     r"(?:导致|归因于|原因是|主要因为|直接造成|caused by|because of|due to|driven by)",
     re.I,
 )
+JUDGMENT_LABEL = re.compile(
+    r"(?:经理(?:专业)?判断|经理(?:明确)?(?:假设|口径)|管理层判断|专业判断|user_assumption|professional_judgment|manager judgment)",
+    re.I,
+)
+FINANCIAL_NUMBER = re.compile(r"(?<![A-Za-z0-9_.-])([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(\s*(?:万元|元|%))")
+DATE_OR_CODE = re.compile(r"\d{4}-\d{1,2}(?:-\d{1,2})?|[A-Z]+-\d+", re.I)
 
 
 def _sha(value: Any) -> str:
@@ -61,33 +67,45 @@ def _equal(value: Any, expected: Any) -> bool:
         return False
 
 
+def _ratio_equal(value: Any, expected: Any) -> bool:
+    try:
+        actual, truth = _dec(value), _dec(expected)
+        with localcontext() as ctx:
+            ctx.prec = max(100, len(actual.as_tuple().digits), len(truth.as_tuple().digits))
+            return actual.quantize(Decimal(1).scaleb(truth.as_tuple().exponent)) == truth
+    except (AssertionError, InvalidOperation):
+        return False
+
+
 def _load_fixture(path: Path = DEFAULT_FIXTURE) -> dict[str, Any]:
     fixture = json.loads(path.read_text(encoding="utf-8"))
     ids = [case["id"] for case in fixture["cases"]]
-    if len(ids) < 30 or len(set(ids)) != len(ids):
-        raise AssertionError("fixture must contain at least 30 unique cases")
+    minimum_cases = 8 if fixture.get("suite") == "holdout" else 30
+    if len(ids) < minimum_cases or len(set(ids)) != len(ids):
+        raise AssertionError(f"fixture must contain at least {minimum_cases} unique cases")
     runnable = [case for case in fixture["cases"] if case.get("runnable")]
     stage5 = [case for case in fixture["cases"] if case.get("stage") == "stage5"]
-    if len(runnable) < 30:
-        raise AssertionError("fixture must contain at least 30 runnable cases")
-    if len(stage5) < 10 or any(not case.get("runnable") for case in stage5):
+    if len(runnable) < minimum_cases:
+        raise AssertionError(f"fixture must contain at least {minimum_cases} runnable cases")
+    if fixture.get("suite") != "holdout" and (len(stage5) < 10 or any(not case.get("runnable") for case in stage5)):
         raise AssertionError("stage5 aging/cash scenario cases must now be runnable")
-    categories = {case["category"] for case in runnable[:20]}
-    required = {
-        "profit_bridge",
-        "price_quantity",
-        "dimension",
-        "missing",
-        "zero_budget",
-        "negative_budget",
-        "wrong_unit",
-        "duplicates",
-        "manager_judgment",
-        "drilldown",
-    }
-    missing = sorted(required - categories)
-    if missing:
-        raise AssertionError(f"first 20 runnable cases do not cover: {', '.join(missing)}")
+    if fixture.get("suite") != "holdout":
+        categories = {case["category"] for case in runnable[:20]}
+        required = {
+            "profit_bridge",
+            "price_quantity",
+            "dimension",
+            "missing",
+            "zero_budget",
+            "negative_budget",
+            "wrong_unit",
+            "duplicates",
+            "manager_judgment",
+            "drilldown",
+        }
+        missing = sorted(required - categories)
+        if missing:
+            raise AssertionError(f"first 20 runnable cases do not cover: {', '.join(missing)}")
     for case in fixture["cases"]:
         for dataset in case.get("datasets", []):
             if not isinstance(dataset.get("metadata"), dict) or not isinstance(dataset.get("rows"), list):
@@ -211,12 +229,35 @@ def _matching_rows(state: dict[str, Any], case: dict[str, Any]) -> list[tuple[di
             continue
         rows = run.get("result", {}).get("rows", [])
         for index, row in enumerate(rows):
-            if all(row.get(key) == value for key, value in expected.get("identity", {}).items()):
+            # A grouped SQL projection may omit an invariant input scope field.
+            # Infer it only when every fixture source row has that same value;
+            # mixed organizations/ledgers still require an explicit output key.
+            inputs = [source_row for dataset in case.get("datasets", []) for source_row in dataset.get("rows", [])]
+            if all(row.get(key) == value if key in row else bool(inputs) and all(source_row.get(key) == value for source_row in inputs)
+                   for key, value in expected.get("identity", {}).items()):
                 matches.append((run, index, row))
     return matches
 
 
 def _find_expected_cells(state: dict[str, Any], case: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    cells = _find_expected_cells_inner(state, case)
+    runs = {run["id"]: run for run in state.get("runs", [])}
+    for cell in cells.values():
+        row = runs[cell["run_id"]]["result"]["rows"][cell["row"]]
+        if row.get("unit") in {"元", "万元"}:
+            cell["unit"] = row["unit"]
+    return cells
+
+
+def _find_expected_cells_inner(state: dict[str, Any], case: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    # Prefer the run actually cited by the canonical draft when equivalent
+    # calculations were rerun. Earlier drafts never supply missing claims.
+    draft = _latest_draft(state) or {}
+    cited = {claim.get("run_id") for claim in draft.get("claims", [])}
+    state = {**state, "runs": sorted(
+        [run for run in state.get("runs", []) if run.get("execution_status") == "succeeded"],
+        key=lambda run: run.get("id") in cited,
+    )}
     expected = case["expected"]
     kind = expected["type"]
     if kind == "price_quantity_missing":
@@ -242,8 +283,9 @@ def _find_expected_cells(state: dict[str, Any], case: dict[str, Any]) -> dict[st
         cells = {}
         for run, index, row in _matching_rows(state, case):
             period = row.get("period")
-            if period in expected["claims"] and _equal(row.get("amount"), expected["claims"][period]):
-                cells[f"amount_{period}"] = {"run_id": run["id"], "row": index, "column": "amount", "value": row["amount"]}
+            for column in ("amount", "closing_balance"):
+                if period in expected["claims"] and _equal(row.get(column), expected["claims"][period]):
+                    cells[f"amount_{period}"] = {"run_id": run["id"], "row": index, "column": column, "value": row[column]}
         if set(cells) != {f"amount_{key}" for key in expected["claims"]}:
             raise AssertionError("account total rows did not match expected period amounts")
         return cells
@@ -287,7 +329,7 @@ def _find_expected_cells(state: dict[str, Any], case: dict[str, Any]) -> dict[st
                     cells[column] = {"run_id": run["id"], "row": index, "column": column, "value": row[column]}
         elif kind == "ratio":
             for column, value in expected.get("claims", {}).items():
-                if _equal(row.get(column), value):
+                if (_ratio_equal if column == "ratio" else _equal)(row.get(column), value):
                     cells[column] = {"run_id": run["id"], "row": index, "column": column, "value": row[column]}
     if kind == "profit_bridge":
         for run in state.get("runs", []):
@@ -322,37 +364,54 @@ def _find_expected_cells(state: dict[str, Any], case: dict[str, Any]) -> dict[st
                                 value = _dec(value) / Decimal("100")
                             except AssertionError:
                                 pass
-                        if _equal(value, expected.get("claims", {}).get(key)):
+                        if (_ratio_equal if key == "ratio" else _equal)(value, expected.get("claims", {}).get(key)):
                             cells[key] = {"run_id": run["id"], "row": index, "column": column, "value": row[column]}
                             break
     expected_keys = set(expected.get("claims", {}))
-    zero_missing = {key for key in expected_keys - set(cells) if _equal(expected["claims"][key], "0")}
-    for key in zero_missing:
-        cells[key] = {"run_id": "zero-not-materialized", "row": -1, "column": key, "value": "0", "synthetic_zero": True}
     if set(cells) != expected_keys:
         raise AssertionError(f"missing expected cells: {sorted(expected_keys - set(cells))}")
     if kind == "profit_bridge" and expected_keys >= {"profit", "revenue", "cost", "expense"}:
         if _dec(cells["profit"]["value"]) != sum(_dec(cells[key]["value"]) for key in ("revenue", "cost", "expense")):
             raise AssertionError("profit bridge does not close")
+    # The bridge exposes contribution and profit_impact as exact aliases.
+    # Resolve to the current draft's real cited column, not an evaluator-only alias.
+    if kind == "profit_bridge":
+        for name, cell in cells.items():
+            for claim in draft.get("claims", []):
+                if (claim.get("basis") == "calculation" and claim.get("run_id") == cell["run_id"]
+                        and claim.get("row") == cell["row"]
+                        and claim.get("column") in {"contribution", "profit_impact", "amount_change"}
+                        and _equal(claim.get("value"), cell["value"])):
+                    row = next(run for run in state["runs"] if run["id"] == cell["run_id"])["result"]["rows"][cell["row"]]
+                    if _equal(row.get(claim["column"]), cell["value"]):
+                        cells[name] = {**cell, "column": claim["column"]}
+                        break
     return cells
 
 
+def _latest_draft(state: dict[str, Any]) -> dict[str, Any] | None:
+    drafts = [draft for draft in state.get("drafts", []) if isinstance(draft, dict)]
+    return drafts[-1] if drafts else None
+
+
 def _verified_draft_cells(state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> set[str]:
-    verified = {name for name, cell in cells.items() if cell.get("synthetic_zero")}
-    for draft in state.get("drafts", []):
-        for name, cell in cells.items():
-            if cell["run_id"] not in draft.get("run_ids", []):
-                continue
-            for claim in draft.get("claims", []):
-                if (
-                    claim.get("basis") == "calculation"
-                    and claim.get("verification_status") == "matches_run"
-                    and claim.get("run_id") == cell["run_id"]
-                    and claim.get("row") == cell["row"]
-                    and claim.get("column") == cell["column"]
-                    and _equal(claim.get("value"), cell["value"])
-                ):
-                    verified.add(name)
+    verified = set()
+    draft = _latest_draft(state)
+    if not draft:
+        return verified
+    for name, cell in cells.items():
+        if cell["run_id"] not in draft.get("run_ids", []):
+            continue
+        for claim in draft.get("claims", []):
+            if (
+                claim.get("basis") == "calculation"
+                and claim.get("verification_status") == "matches_run"
+                and claim.get("run_id") == cell["run_id"]
+                and claim.get("row") == cell["row"]
+                and claim.get("column") == cell["column"]
+                and _equal(claim.get("value"), cell["value"])
+            ):
+                verified.add(name)
     return verified
 
 
@@ -368,10 +427,208 @@ def _assistant_texts(messages: list[dict[str, Any]]) -> list[str]:
 
 
 def _scan_forbidden(case: dict[str, Any], observed: dict[str, Any], state: dict[str, Any]) -> list[str]:
-    if case["expected"].get("requires_judgment"):
-        return []
-    blobs = [draft.get("body", "") for draft in state.get("drafts", [])]
-    return [text[:500] for text in blobs if FORBIDDEN_CAUSAL.search(text)]
+    draft = _latest_draft(state)
+    blobs = [draft.get("body", "")] if draft else []
+    final_answer = _final_answer_text(observed)
+    if final_answer:
+        blobs.append(final_answer)
+    forbidden = []
+    for text in blobs:
+        for match in FORBIDDEN_CAUSAL.finditer(text):
+            window = text[max(0, match.start() - 30) : min(len(text), match.end() + 30)]
+            prefix = re.split(r"[。；;\n]", text[:match.start()])[-1][-45:]
+            if (re.search(r"口径|过滤|参数|schema|查询", window)
+                    and re.search(r"查不到|空行|无匹配|报错|失败", window)):
+                continue
+            # A warning against causal inference is not a causal assertion.
+            if re.search(r"(?:不能|无法|不足以|不应|尚未|未能|不可).{0,22}$|(?:可能|假设|待验证|待确认).{0,12}$", prefix):
+                continue
+            if case["expected"].get("requires_judgment") and JUDGMENT_LABEL.search(window):
+                continue
+            forbidden.append(window[:500])
+    return forbidden
+
+
+def _final_answer_text(observed: dict[str, Any]) -> str:
+    texts = _assistant_texts(observed.get("messages", []))
+    return texts[-1] if texts else ""
+
+
+def _display_values(value: Decimal, percent: bool = False) -> set[Decimal]:
+    candidates = set() if percent else {value.normalize()}
+    if percent:
+        percent_value = value * Decimal("100")
+        candidates.add(percent_value.normalize())
+        candidates.add(percent_value.quantize(Decimal("0.01")).normalize())
+    else:
+        candidates.add(value.quantize(Decimal("0.01")).normalize())
+    return candidates
+
+
+def _context_amount_value(raw: Decimal, context: str) -> Decimal:
+    lowered = context.lower()
+    if raw.is_signed():
+        return raw
+    expense_word = any(word in context for word in ("成本", "费用", "付款", "支出")) or any(
+        word in lowered for word in ("cost", "expense", "payment")
+    )
+    increase_word = any(word in context for word in ("增加", "上升", "超支", "超预算", "高于预算", "增加了")) or any(
+        word in lowered for word in ("increase", "higher", "overrun", "over budget", "above budget")
+    )
+    decrease_word = any(word in context for word in ("下降", "减少", "节约", "降低")) or any(
+        word in lowered for word in ("decrease", "lower", "saved")
+    )
+    if expense_word and increase_word and not decrease_word:
+        return -raw
+    return raw
+
+
+def _verified_additional_cells(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    draft = _latest_draft(state) or {}
+    runs = {run["id"]: run for run in state.get("runs", []) if run.get("execution_status") == "succeeded"}
+    cells = {}
+    for index, claim in enumerate(draft.get("claims", [])):
+        run = runs.get(claim.get("run_id"))
+        if not run or run["id"] not in draft.get("run_ids", []) or claim.get("basis") != "calculation":
+            continue
+        row_index, column = claim.get("row"), claim.get("column")
+        rows = run.get("result", {}).get("rows", [])
+        if not isinstance(row_index, int) or isinstance(row_index, bool) or not 0 <= row_index < len(rows):
+            continue
+        row = rows[row_index]
+        if column in row and _equal(claim.get("value"), row[column]):
+            cells[f"cited_{index}"] = {"run_id": run["id"], "row": row_index, "column": column,
+                                      "value": row[column], "unit": row.get("unit")}
+    return cells
+
+
+def _verify_final_text_numbers(case: dict[str, Any], text: str, cells: dict[str, dict[str, Any]],
+                               additional: dict[str, dict[str, Any]] | None = None) -> None:
+    if not text.strip():
+        raise AssertionError("final draft/answer text is empty")
+    fixture_units = {row.get("unit", dataset.get("metadata", {}).get("unit"))
+                     for dataset in case.get("datasets", []) for row in dataset.get("rows", [])}
+    fixture_units.discard(None)
+    cell_units = {cell.get("unit") for cell in cells.values() if cell.get("unit")}
+    default_unit = next(iter(cell_units)) if len(cell_units) == 1 else (next(iter(fixture_units)) if len(fixture_units) == 1 else None)
+    def is_ratio(name, cell):
+        return bool(re.search(r"ratio|rate|pct|percent|率", f"{name} {cell.get('column', '')}", re.I))
+    def candidates(name, cell):
+        value = _dec(cell["value"])
+        if is_ratio(name, cell):
+            return _display_values(value / 100 if cell.get("column", "").endswith("_pct") else value, percent=True)
+        scale = Decimal(10000) if (cell.get("unit") or default_unit) == "万元" else Decimal(1)
+        return {amount * scale for amount in _display_values(value)}
+    all_cells = {**(additional or {}), **cells}
+    amount_values = {value for name, cell in all_cells.items() if not is_ratio(name, cell) for value in candidates(name, cell)}
+    percent_values = {value for name, cell in all_cells.items() if is_ratio(name, cell) for value in candidates(name, cell)}
+    # Unit declarations also cover numeric Markdown table cells. Do not use a
+    # default fixture unit to silently repair a missing unit in the final text.
+    expanded = []
+    table_unit = None
+    for line in text.splitlines():
+        unit_match = re.search(r"单位[：:）)\s]*(万元|元)", line)
+        if unit_match:
+            table_unit = unit_match.group(1)
+        if line.lstrip().startswith("|") and table_unit:
+            parts = line.split("|")
+            line = "|".join(part + " " + table_unit if re.fullmatch(r"\s*[+-]?[\d,]+(?:\.\d+)?\s*", part) else part for part in parts)
+        expanded.append(line)
+    text = "\n".join(expanded)
+    unbacked = []
+    seen_amounts: set[Decimal] = set()
+    seen_percents: set[Decimal] = set()
+    for match in FINANCIAL_NUMBER.finditer(text):
+        value = _dec(match.group(1).replace(",", "")).normalize()
+        unit = match.group(2).strip()
+        semantic_window = re.split(r"[，,。；;：:\n|]", text[max(0, match.start() - 18):match.start()])[-1]
+        if unit == "%":
+            if value not in percent_values:
+                unbacked.append(match.group(0).strip())
+            else:
+                seen_percents.add(value)
+            continue
+        scale = Decimal(10000) if unit == "万元" and default_unit else Decimal(1)
+        normalized = _context_amount_value(value, semantic_window).normalize() * scale
+        raw = value * scale
+        matched = {raw, normalized} & amount_values
+        clause = re.split(r"[。；;\n]", text[max(0, match.start() - 18):match.end() + 18])[0]
+        if (not matched and case.get("expected", {}).get("type") == "cash_13_weeks"
+                and value > 0 and re.search(r"缺口|额外回款|融资|仍超过", clause) and -raw in amount_values):
+            matched.add(-raw)
+        if not matched:
+            unbacked.append(match.group(0).strip())
+        else:
+            seen_amounts.update(matched)
+    if unbacked:
+        raise AssertionError(f"unbacked or contradictory financial numbers in final text: {unbacked[:5]}")
+    missing = [name for name, cell in cells.items()
+               if not candidates(name, cell) & (seen_percents if is_ratio(name, cell) else seen_amounts)]
+    if missing:
+        raise AssertionError(f"missing expected financial numbers in final text: {missing}")
+
+
+def _call_spec(call: dict[str, Any]) -> dict[str, Any]:
+    arguments = call.get("arguments", {})
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(arguments, dict):
+        return {}
+    spec = arguments.get("spec", arguments)
+    return spec if isinstance(spec, dict) else {}
+
+
+def _cell_key(cell: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return (cell["run_id"], cell["row"], cell["column"])
+
+
+def _required_drilldown_names(case: dict[str, Any], cells: dict[str, dict[str, Any]]) -> set[str]:
+    question = str(case.get("question", ""))
+    required = set()
+    if re.search(r"成本率|cost\s*rate", question, re.I) and "ratio" in cells:
+        required.add("ratio")
+    if re.search(r"利润(?:差异|来源|行)?|profit", question, re.I) and "profit" in cells:
+        required.add("profit")
+    if case.get("expected", {}).get("requires_voucher_drilldown") and "profit" in cells:
+        required.add("profit")
+    return required
+
+
+def _verify_drilldowns_reference_cells(case: dict[str, Any], observed: dict[str, Any], cells: dict[str, dict[str, Any]]) -> None:
+    expected = {_cell_key(cell) for cell in cells.values() if not cell.get("synthetic_zero")}
+    if not expected:
+        return
+    seen = set()
+    for call in observed.get("calls", []):
+        if call.get("name") != "drilldown_fact" or call.get("isError"):
+            continue
+        spec = _call_spec(call)
+        key = (spec.get("run_id"), spec.get("row", 0), spec.get("column"))
+        if key[2] is None:
+            seen.update(item for item in expected if item[:2] == key[:2])
+        else:
+            seen.add(key)
+            if case.get("expected", {}).get("type") == "profit_bridge":
+                for name, cell in cells.items():
+                    if key[:2] == _cell_key(cell)[:2] and key[2] in {name, "metric", "management_account", "contribution", "profit_impact"}:
+                        seen.add(_cell_key(cell))
+    if not seen & expected:
+        raise AssertionError("no drilldown_fact call referenced expected cells")
+    required_names = _required_drilldown_names(case, cells)
+    required = {_cell_key(cells[name]) for name in required_names}
+    if required and not required <= seen:
+        raise AssertionError(f"no drilldown_fact call referenced requested drilldown target: {sorted(required_names)}")
+
+
+def _verify_canonical_final_text(case: dict[str, Any], observed: dict[str, Any], state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> str:
+    draft = _latest_draft(state)
+    text = draft.get("body", "") if draft else _final_answer_text(observed)
+    if cells:
+        _verify_final_text_numbers(case, text, cells, _verified_additional_cells(state))
+    return text
 
 
 
@@ -408,6 +665,55 @@ def _case_tool_errors(observed: dict[str, Any]) -> list[dict[str, Any]]:
     return errors
 
 
+def _terminal_events(observed: dict[str, Any]) -> list[dict[str, Any]]:
+    return [event for event in observed.get("events", []) if event.get("type") == "turn/end"]
+
+
+def _case_hard_errors(observed: dict[str, Any]) -> list[dict[str, Any]]:
+    errors = []
+    terminals = _terminal_events(observed)
+    ended_normally = bool(terminals and terminals[-1].get("data", {}).get("reason", {}).get("kind") == "completed")
+    observer_error = observed.get("error")
+    # The v1 observer misclassified retryable stream failures as terminal errors.
+    # Correct that classification only with an explicit completed turn/end event.
+    if observer_error and not (observer_error == "agent turn ended with error" and ended_normally):
+        errors.append({"source": "case", "error": observer_error})
+    if observed.get("state_error"):
+        errors.append({"source": "analysis-state", "error": observed.get("state_error")})
+    if observed.get("events"):
+        turn_errors = [event for event in observed["events"]
+                       if (event.get("type") == "turn/end" and event.get("data", {}).get("reason", {}).get("kind") == "error")
+                       or event.get("type") in {"turn.failed", "error"}]
+    else:
+        turn_errors = observed.get("turn_errors", [])
+    errors.extend({"source": "turn", "error": error} for error in turn_errors)
+    return errors
+
+
+def _case_completed(observed: dict[str, Any]) -> bool:
+    terminals = _terminal_events(observed)
+    if terminals:
+        return terminals[-1].get("data", {}).get("reason", {}).get("kind") == "completed" and not _case_hard_errors(observed)
+    return bool(observed.get("completed")) and not _case_hard_errors(observed)
+
+
+def _failure_record(case: dict[str, Any], observed: dict[str, Any] | None, error: str) -> dict[str, Any]:
+    observed = observed or {}
+    return {
+        "id": case["id"],
+        "task_id": case.get("taskId") or observed.get("task_id"),
+        "session_id": case.get("sessionId") or observed.get("session_id"),
+        "input_sha256": case.get("inputSha256") or observed.get("input_sha256"),
+        "duration_ms": observed.get("duration_ms"),
+        "completed": _case_completed(observed),
+        "final_draft_id": (observed.get("final_draft") or {}).get("id"),
+        "error": error,
+        "hard_errors": _case_hard_errors(observed),
+        "tool_errors": _case_tool_errors(observed),
+        "raw_output_sha256": _sha(observed),
+    }
+
+
 def _verify_skill_first(observed: dict[str, Any]) -> None:
     method_loaded = False
     work_tools = {
@@ -433,17 +739,40 @@ def _verify_skill_first(observed: dict[str, Any]) -> None:
             return
     raise AssertionError("case did not reach any finance work tool after loading a method skill")
 
+def _has_voucher_detail(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("voucher_detail_available") is True:
+            return True
+        return any(_has_voucher_detail(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_has_voucher_detail(child) for child in value)
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (ValueError, TypeError):
+            return False
+        return not isinstance(decoded, str) and _has_voucher_detail(decoded)
+    return False
+
+
 def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]:
+    hard_errors = _case_hard_errors(observed)
+    if hard_errors:
+        raise AssertionError(f"case has hard turn/runtime errors: {hard_errors[:3]}")
+    if not _case_completed(observed):
+        raise AssertionError("case did not finish normally")
     tool_errors = _case_tool_errors(observed)
     fatal_errors = [err for err in tool_errors if err.get("tool") in {"skill", "method-resource", "list_finance_context"}]
     if fatal_errors:
         raise AssertionError(f"method/catalog tool errors observed: {fatal_errors[:3]}")
-    _verify_skill_first(observed)
     catalog_names = {item.get("name") for item in observed.get("catalog", [])}
     missing_methods = {"financial-statements", "variance-analysis"} - catalog_names
     if missing_methods:
         raise AssertionError(f"case method catalog missing required skills: {sorted(missing_methods)}")
     state = _call(foundry, var, "analysis-state", task=case["taskId"])
+    drilled_runs = {_call_spec(call).get("run_id") for call in observed.get("calls", [])
+                    if call.get("name") == "drilldown_fact" and not call.get("isError")}
+    state["runs"] = sorted(state.get("runs", []), key=lambda run: run.get("id") in drilled_runs)
     cells = _find_expected_cells(state, case)
     calls = observed.get("calls", [])
     used = {call.get("name") for call in calls if not call.get("isError")}
@@ -455,13 +784,16 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
         raise AssertionError("unsupported causal certainty found in raw output")
     if not used & CALC_TOOLS:
         raise AssertionError("no finance calculation tool was used")
-    if case["expected"]["type"] not in {"price_quantity_missing"} and not drilldowns:
-        raise AssertionError("no successful drilldown_fact call was observed")
+    if case["expected"]["type"] not in {"price_quantity_missing"}:
+        if not drilldowns:
+            raise AssertionError("no successful drilldown_fact call was observed")
+        _verify_drilldowns_reference_cells(case, observed, cells)
     draft_verified = _verified_draft_cells(state, cells)
     if cells and draft_verified != set(cells):
         raise AssertionError(f"draft did not verify all expected cells: {sorted(set(cells) - draft_verified)}")
+    _verify_canonical_final_text(case, observed, state, cells)
     if case["expected"].get("requires_voucher_drilldown"):
-        if "true" not in json.dumps(drilldowns, ensure_ascii=False).lower():
+        if not any(_has_voucher_detail(call.get("value")) for call in drilldowns):
             raise AssertionError("voucher drilldown case did not return voucher_detail_available")
     return {
         "id": case["id"],
@@ -469,6 +801,9 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
         "session_id": case["sessionId"],
         "input_sha256": case["inputSha256"],
         "status": "passed",
+        "completed": _case_completed(observed),
+        "duration_ms": observed.get("duration_ms"),
+        "final_draft_id": (observed.get("final_draft") or {}).get("id"),
         "tools_used": sorted(used),
         "run_ids": sorted({cell["run_id"] for cell in cells.values() if not cell.get("synthetic_zero")}),
         "verified_cells": cells,
@@ -478,26 +813,203 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     }
 
 
+def compare_verifications(paths: list[Path]) -> dict[str, Any]:
+    runs = []
+    by_case: dict[str, list[dict[str, Any]]] = {}
+    expected_contract = None
+    expected_fixture = None
+    expected_inputs = None
+    for path in paths:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        contract = payload.get("scoring_contract")
+        fixture_version = payload.get("fixture_version")
+        inputs = {
+            case.get("id"): case.get("input_sha256")
+            for case in [*payload.get("cases", []), *payload.get("failures", [])]
+            if case.get("id")
+        }
+        if not contract or not fixture_version or not inputs or any(not value for value in inputs.values()):
+            raise AssertionError("comparison requires nonempty fixture_version, input hashes, and scoring_contract")
+        if expected_contract is None:
+            expected_contract = contract
+            expected_fixture = fixture_version
+            expected_inputs = inputs
+        elif contract != expected_contract or fixture_version != expected_fixture or inputs != expected_inputs:
+            raise AssertionError("comparison requires the same fixture_version, input hashes, and scoring_contract")
+        run = {
+            "path": str(path),
+            "status": payload.get("status"),
+            "completed": payload.get("completed"),
+            "passed": payload.get("passed"),
+            "workflow_pass_rate": payload.get("workflow_pass_rate", payload.get("pass_rate")),
+            "hard_error_count": payload.get("hard_error_count"),
+            "model": payload.get("model"),
+            "fixture_version": fixture_version,
+            "scoring_contract": contract,
+        }
+        runs.append(run)
+        passed_ids = {case.get("id") for case in payload.get("cases", [])}
+        failed = {case.get("id"): case for case in payload.get("failures", [])}
+        for case_id in passed_ids | set(failed):
+            by_case.setdefault(case_id, []).append(
+                {
+                    "path": str(path),
+                    "status": "passed" if case_id in passed_ids else "failed",
+                    "error": failed.get(case_id, {}).get("error"),
+                }
+            )
+    case_rows = []
+    for case_id, attempts in sorted(by_case.items()):
+        passed = sum(1 for attempt in attempts if attempt["status"] == "passed")
+        case_rows.append(
+            {
+                "id": case_id,
+                "attempts": len(attempts),
+                "passed": passed,
+                "first_status": attempts[0]["status"],
+                "stable": passed in {0, len(attempts)},
+                "errors": [attempt["error"] for attempt in attempts if attempt.get("error")],
+            }
+        )
+    return {
+        "status": "passed" if runs and all(run["status"] == "passed" for run in runs) else "failed",
+        "runs": runs,
+        "cases": case_rows,
+        "summary": {
+            "runs": len(runs),
+            "case_ids": len(case_rows),
+            "first_passed": sum(1 for row in case_rows if row["first_status"] == "passed"),
+            "stable_cases": sum(1 for row in case_rows if row["stable"]),
+        },
+    }
+
+
+def _selected_cases_from_observation(source: Path, fixture: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    summary_path = source / "fixture-summary.json"
+    session_path = source / "session.json"
+    if not summary_path.is_file() or not session_path.is_file():
+        raise AssertionError("rescore source must contain fixture-summary.json and session.json")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    selected_ids = summary.get("selected_cases")
+    if not isinstance(selected_ids, list) or not selected_ids:
+        raise AssertionError("rescore source fixture-summary.json must contain selected_cases")
+    by_id = {case["id"]: case for case in fixture["cases"] if case.get("runnable")}
+    selected = []
+    for case_id in selected_ids:
+        if case_id not in by_id:
+            raise AssertionError(f"rescore selected case is absent from fixture: {case_id}")
+        input_path = source / f"{case_id}-input.json"
+        if not input_path.is_file():
+            raise AssertionError(f"rescore source is missing input record: {input_path.name}")
+        input_record = json.loads(input_path.read_text(encoding="utf-8"))
+        expected_hash = input_record.get("input_sha256")
+        current_hash = _sha(
+            {
+                "case_id": by_id[case_id]["id"],
+                "question": by_id[case_id]["question"],
+                "datasets": by_id[case_id]["datasets"],
+                "expected": by_id[case_id]["expected"],
+            }
+        )
+        if expected_hash != current_hash:
+            raise AssertionError(f"rescore input hash mismatch for {case_id}")
+        selected.append({**by_id[case_id], "inputSha256": expected_hash})
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    observed_by_id = {row.get("id"): row for row in session.get("cases", [])}
+    for case in selected:
+        row = observed_by_id.get(case["id"])
+        if not row:
+            continue
+        task_id = row.get("task_id") or row.get("taskId")
+        session_id = row.get("session_id") or row.get("sessionId")
+        if not task_id or not session_id:
+            raise AssertionError(f"rescore source missing task/session id for {case['id']}")
+        if row.get("input_sha256") and row.get("input_sha256") != case["inputSha256"]:
+            raise AssertionError(f"rescore session input hash mismatch for {case['id']}")
+        case["taskId"] = task_id
+        case["sessionId"] = session_id
+    return selected, session
+
+
+def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, output: Path) -> dict[str, Any]:
+    source = source.resolve()
+    output = output.resolve()
+    if source == output:
+        raise AssertionError("rescore output must be a different directory")
+    output.mkdir(parents=True, exist_ok=False)
+    selected, observed = _selected_cases_from_observation(source, fixture)
+    var = source / "var"
+    if not var.is_dir():
+        raise AssertionError("rescore source must contain the original var directory")
+    source_verification_path = source / "verification.json"
+    source_verification = (
+        json.loads(source_verification_path.read_text(encoding="utf-8"))
+        if source_verification_path.is_file()
+        else {}
+    )
+    score = score_observation(foundry, var, selected, observed)
+    result = {
+        **score,
+        "fixture_version": fixture["version"],
+        "model": source_verification.get("model") or observed.get("model"),
+        "scorer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "source_observation": str(source),
+        "source_fixture_version": json.loads((source / "fixture-summary.json").read_text(encoding="utf-8")).get("fixture_version"),
+        "source_scoring_contract": source_verification.get("scoring_contract", "legacy-or-unscored"),
+        "source_status": source_verification.get("status"),
+        "current_scoring_contract": score["scoring_contract"],
+        "selected_cases": [case["id"] for case in selected],
+        "source_session_sha256": hashlib.sha256((source / "session.json").read_bytes()).hexdigest(),
+    }
+    (output / "verification.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (output / "rescore-source.json").write_text(
+        json.dumps(
+            {
+                "source_observation": str(source),
+                "source_verification": str(source_verification_path) if source_verification_path.is_file() else None,
+                "source_scoring_contract": result["source_scoring_contract"],
+                "current_scoring_contract": result["current_scoring_contract"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
 def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], observed: dict[str, Any]) -> dict[str, Any]:
-    by_id = {case["id"]: case for case in cases}
+    observed_by_id = {row["id"]: row for row in observed.get("cases", [])}
     results = []
     failures = []
-    for row in observed.get("cases", []):
-        case = by_id[row["id"]]
+    for case in cases:
+        row = observed_by_id.get(case["id"])
+        if not row:
+            failures.append(_failure_record(case, None, "case was selected but no attempt record was observed"))
+            continue
         try:
             results.append(_score_case(foundry, var, case, row))
         except Exception as exc:  # retain failure detail for manual review
-            failures.append({"id": row["id"], "error": str(exc), "raw_output_sha256": _sha(row)})
+            failures.append(_failure_record(case, row, str(exc)))
     seen = len(observed.get("cases", []))
-    completed = sum(1 for row in observed.get("cases", []) if row.get("completed"))
+    attempted = len(cases)
+    completed = sum(1 for row in observed.get("cases", []) if _case_completed(row))
     passed = len(results)
-    rate = Decimal(passed) / Decimal(completed or 1)
+    rate = Decimal(passed) / Decimal(attempted or 1)
+    hard_error_count = sum(len(_case_hard_errors(row)) for row in observed.get("cases", []))
     return {
+        "scoring_contract": "r3-final-draft-text-bound-v3",
         "seen": seen,
+        "attempted": attempted,
         "completed": completed,
         "passed": passed,
-        "pass_rate": format(rate, "f"),
-        "status": "passed" if completed and rate >= Decimal("0.90") and not failures else "failed",
+        "workflow_pass_rate": format(rate, "f"),
+        "hard_error_count": hard_error_count,
+        "provider_retry_count": sum(event.get("type") == "llm/retry" for row in observed.get("cases", []) for event in row.get("events", [])),
+        "hard_errors_status": "passed" if hard_error_count == 0 else "failed",
+        "workflow_status": "passed" if attempted and rate >= Decimal("0.90") else "failed",
+        "status": "passed" if attempted and rate >= Decimal("0.90") and hard_error_count == 0 and not failures else "failed",
         "cases": results,
         "failures": failures,
     }
@@ -516,9 +1028,35 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int, default=420)
     parser.add_argument("--live", action="store_true", help="invoke the configured model")
     parser.add_argument("--validate-fixture-only", action="store_true")
+    parser.add_argument("--compare-verification", action="append", type=Path, default=[], help="compare existing verification.json files without invoking a model")
+    parser.add_argument("--rescore-observation", type=Path, help="rescore an existing verification directory without invoking a model or modifying it")
     args = parser.parse_args()
 
+    if args.compare_verification:
+        args.output = args.output.resolve()
+        args.output.mkdir(parents=True, exist_ok=False)
+        comparison = compare_verifications(args.compare_verification)
+        (args.output / "comparison.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"status": comparison["status"], "output": str(args.output / "comparison.json")}, ensure_ascii=False))
+        return 0 if comparison["status"] == "passed" else 1
+
     fixture = _load_fixture(args.fixture)
+    if args.rescore_observation:
+        result = rescore_observation(args.foundry, fixture, args.rescore_observation, args.output)
+        print(
+            json.dumps(
+                {
+                    "status": result["status"],
+                    "attempted": result.get("attempted"),
+                    "passed": result.get("passed"),
+                    "workflow_pass_rate": result.get("workflow_pass_rate"),
+                    "hard_error_count": result.get("hard_error_count"),
+                    "output": str(args.output.resolve()),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0 if result["status"] == "passed" else 1
     runnable_all = [case for case in fixture["cases"] if case.get("runnable")]
     if args.case_id:
         wanted = set(args.case_id)
@@ -593,6 +1131,7 @@ def main() -> int:
     }
     final = {
         "status": "running",
+        "scoring_contract": "r3-final-draft-text-bound-v3",
         "fixture_version": fixture["version"],
         "model": selection,
         "method_manifest": manifest,

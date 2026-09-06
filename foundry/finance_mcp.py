@@ -367,17 +367,31 @@ class FinanceMcpServer:
             context_ids.add(service._read("scenarios", spec["parent_id"])["context_id"])
         for run_id in [spec.get("run_id"), *spec.get("run_ids", [])]:
             if run_id:
-                run = analysis.get_run(run_id)
-                context_ids.add(run.get("finance_context_id"))
-        if spec.get("parent_id") and tool == "save_explanation_draft":
-            draft = analysis.get_draft(spec["parent_id"])
+                context_ids.add(_run_finance_context(analysis, run_id))
+        if spec.get("draft_id") and tool == "validate_explanation":
+            draft = _draft(analysis, spec["draft_id"])
             for run_id in draft.get("run_ids", []):
-                run = analysis.get_run(run_id)
-                context_ids.add(run.get("finance_context_id"))
+                context_ids.add(_run_finance_context(analysis, run_id))
+        if spec.get("parent_id") and tool == "save_explanation_draft":
+            draft = _draft(analysis, spec["parent_id"])
+            for run_id in draft.get("run_ids", []):
+                context_ids.add(_run_finance_context(analysis, run_id))
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("run_id"):
-                run = analysis.get_run(claim["run_id"])
-                context_ids.add(run.get("finance_context_id"))
+                context_ids.add(_run_finance_context(analysis, claim["run_id"]))
+            if isinstance(claim, dict) and claim.get("dataset_id"):
+                dataset_id = _assert_id(claim["dataset_id"])
+                if dataset_id not in set(grant.get("snapshot_ids") or []):
+                    raise McpRefused("finance source is outside this grant")
+        if spec.get("dataset_id"):
+            dataset_id = _assert_id(spec["dataset_id"])
+            if dataset_id not in set(grant.get("snapshot_ids") or []):
+                raise McpRefused("finance source is outside this grant")
+        if not context_ids and tool in {
+            "finance_background_save",
+            "finance_background_list",
+        }:
+            context_ids.update(_context_ids_matching_scope(service, allowed, spec))
         if not context_ids or not context_ids <= allowed:
             raise McpRefused("finance context is outside this grant")
 
@@ -396,7 +410,11 @@ TOOL_METHODS = {
     "save_scenario": "save_scenario",
     "run_scenario": "run_scenario",
     "drilldown_fact": "drilldown_fact",
+    "prepare_explanation": "prepare_explanation",
+    "validate_explanation": "validate_explanation",
     "save_explanation_draft": "save_explanation_draft",
+    "finance_background_save": "finance_background_save",
+    "finance_background_list": "finance_background_list",
 }
 
 
@@ -420,7 +438,43 @@ def _tools() -> list[dict[str, Any]]:
             "dimensions": {"type": "array", "items": text},
             "scenario_bindings": {"type": "object"},
             "filters": {"type": "object"},
+            "numerator_accounts": {"type": "array", "items": text},
+            "denominator_accounts": {"type": "array", "items": text},
+            "accounts": {"type": "array", "items": text},
+            "account_signs": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Explicit sign multipliers by management account; ratio tools return exact and display values separately.",
+            },
             "aggregate_dimensions": {"type": "boolean"},
+        },
+        "additionalProperties": True,
+    }
+    materiality_schema = {
+        "type": "object",
+        "properties": {
+            "absolute": text,
+
+        },
+        "additionalProperties": True,
+    }
+    basis_schema = {
+        "type": "string",
+        "enum": [
+            "source_fact",
+            "external_reference",
+            "user_assumption",
+            "professional_judgment",
+        ],
+    }
+    scope_schema = {
+        "type": "object",
+        "properties": {
+            "ledger": text,
+            "organization": text,
+            "period": text,
+            "currency": text,
+            "unit": text,
         },
         "additionalProperties": True,
     }
@@ -466,7 +520,38 @@ def _tools() -> list[dict[str, Any]]:
                     "method": {"type": "string", "enum": ["quantity_then_price", "base_weights_with_interaction"]},
                     "actual_filters": {"type": "object"},
                     "baseline_filters": {"type": "object"},
+                    "negative_budget_policy": {"type": "string", "enum": ["absolute_baseline", "signed_baseline"]},
                     "missing_groups_as_zero": {"type": "boolean"},
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "prepare_explanation",
+            "title": "Prepare finance explanation facts",
+            "description": "Prepare stable fact ids, exact values, display values, scopes, semantics, diagnostics, and applicable business context from granted successful finance runs.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_ids"],
+                "properties": {
+                    "run_ids": {"type": "array", "minItems": 1, "items": run_id},
+                    "materiality": materiality_schema,
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "validate_explanation",
+            "title": "Validate finance explanation draft",
+            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, and completeness. It does not approve the draft.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "draft_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "body": text,
+                    "run_ids": {"type": "array", "items": run_id},
+                    "fact_ids": {"type": "array", "items": text},
+                    "claims": {"type": "array", "items": {"type": "object"}},
                 },
                 "additionalProperties": True,
             },
@@ -474,7 +559,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_scenario",
             "title": "Save finance scenario",
-            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability.",
+            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability. Aging inputs support invoices_alias, activity_alias, as_of and scope; status/exclude_statuses filters are not supported. Use explicit SQL for disputed-invoice filtering instead of inventing scenario parameters.",
             "inputSchema": {
                 "type": "object",
                 "required": ["label"],
@@ -531,13 +616,102 @@ def _tools() -> list[dict[str, Any]]:
                     "title": text,
                     "body": text,
                     "run_ids": {"type": "array", "items": run_id},
+                    "fact_ids": {"type": "array", "items": text},
                     "claims": {"type": "array", "items": {"type": "object"}},
                     "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
                 },
                 "additionalProperties": True,
             },
         },
+        {
+            "name": "finance_background_save",
+            "title": "Save finance business background",
+            "description": "Version a manager-supplied or sourced business context note for the granted finance context/scope and effective period.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["text", "basis"],
+                "properties": {
+                    "context_id": context_id,
+                    "text": text,
+                    "basis": basis_schema,
+                    "scope": scope_schema,
+                    "effective_from": text,
+                    "effective_to": text,
+                    "external_reference": {"type": "object", "properties": {key: text for key in ("title", "url", "source_date", "retrieved_at")}},
+                    "dataset_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "paragraph": {"type": "integer", "minimum": 1},
+                    "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "label": text,
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "finance_background_list",
+            "title": "List finance business background",
+            "description": "List only granted and period-applicable business context notes for an explanation run or finance context.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "context_id": context_id,
+                    "scope": scope_schema,
+                    "as_of": text,
+                },
+                "additionalProperties": True,
+            },
+        },
     ]
+
+
+def _run_finance_context(analysis: Any, run_id: str) -> str:
+    try:
+        run = analysis.get_run(run_id)
+    except FoundryError as exc:
+        raise McpRefused("finance run is outside this grant") from exc
+    context_id = run.get("finance_context_id")
+    if not context_id:
+        raise McpRefused("finance run is outside this grant")
+    return context_id
+
+
+def _draft(analysis: Any, draft_id: str) -> dict[str, Any]:
+    try:
+        return analysis.get_draft(draft_id)
+    except FoundryError as exc:
+        raise McpRefused("finance draft is outside this grant") from exc
+
+
+def _context_ids_matching_scope(
+    service: Any, allowed: set[str], spec: dict[str, Any]
+) -> set[str]:
+    scope = spec.get("scope")
+    if not isinstance(scope, dict) or not scope:
+        return set()
+    matches = set()
+    for context_id in allowed:
+        try:
+            context = service._read("contexts", context_id)
+        except FoundryError:
+            continue
+        scopes = context.get("scopes", {})
+        if not isinstance(scopes, dict):
+            continue
+        for candidate in scopes.values():
+            if _scope_contains(candidate, scope):
+                matches.add(context_id)
+                break
+    return matches
+
+
+def _scope_contains(candidate: Any, requested: dict[str, Any]) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    for key, value in requested.items():
+        if value in (None, ""):
+            continue
+        if candidate.get(key) != value:
+            return False
+    return True
 
 
 def serve(server: FinanceMcpServer, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:

@@ -1,0 +1,314 @@
+{
+  "version": "0.1.4",
+  "engineering_checks": {
+    "python": "806 passed, 2 skipped",
+    "app": "367 passed in 27 files",
+    "typecheck_build": "passed",
+    "changed_python_ruff": "passed",
+    "installed_ui": "10 checks passed",
+    "skill_verifier_regression": "12 passed after alias/resume verifier changes"
+  },
+  "evaluation_batches": [
+    {
+      "batch": "main-1",
+      "report": "build/verification/explanation-quality-main-1-score-v3/verification.json",
+      "report_sha256": "5a2f7d091361afd74d67875f2b510ac74daeb639b0a23971ca3133058d7e3152",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 10,
+      "completed": 9,
+      "passed": 3,
+      "hard_error_count": 1,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "F01_profit_bridge_basic",
+          "error": "no drilldown_fact call referenced requested drilldown target: ['profit']"
+        },
+        {
+          "id": "F04_zero_budget_ratio",
+          "error": "no drilldown_fact call referenced requested drilldown target: ['profit']"
+        },
+        {
+          "id": "F06_duplicate_rows_ignored",
+          "error": "no drilldown_fact call referenced expected cells"
+        },
+        {
+          "id": "F07_manager_judgment_separated",
+          "error": "no drilldown_fact call referenced requested drilldown target: ['profit']"
+        },
+        {
+          "id": "F08_drilldown_voucher_available",
+          "error": "draft did not verify all expected cells: ['expense']"
+        },
+        {
+          "id": "F09_price_quantity_quantity_then_price",
+          "error": "draft did not verify all expected cells: ['interaction']"
+        },
+        {
+          "id": "F10_price_quantity_interaction",
+          "error": "case has hard turn/runtime errors: [{'source': 'case', 'error': 'case F10_price_quantity_interaction exceeded 420s'}]"
+        }
+      ]
+    },
+    {
+      "batch": "main-2",
+      "report": "build/verification/explanation-quality-main-2-score-v3/verification.json",
+      "report_sha256": "e0274cf98aab2da9aff960bdef9bccd65ec182d1cd717d6d59702367c2fb6e57",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 10,
+      "completed": 10,
+      "passed": 5,
+      "hard_error_count": 0,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "F11_price_quantity_by_product",
+          "error": "draft did not verify all expected cells: ['interaction']"
+        },
+        {
+          "id": "F13_ledger_separation",
+          "error": "draft did not verify all expected cells: ['expense']"
+        },
+        {
+          "id": "F17_negative_budget_policy",
+          "error": "draft did not verify all expected cells: ['cost', 'expense', 'profit']"
+        },
+        {
+          "id": "F19_prior_period_comparison",
+          "error": "draft did not verify all expected cells: ['expense']"
+        },
+        {
+          "id": "F20_period_dimension_no_cross_mix",
+          "error": "draft did not verify all expected cells: ['expense']"
+        }
+      ]
+    },
+    {
+      "batch": "main-3",
+      "report": "build/verification/explanation-quality-main-3-score-v3/verification.json",
+      "report_sha256": "af537d04aca7c7a1f04f2d69585095de9cb8e785b4ed81baa3d2f1ee16e151c6",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 10,
+      "completed": 9,
+      "passed": 9,
+      "hard_error_count": 1,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "F27_stage5_aging_dispute",
+          "error": "case has hard turn/runtime errors: [{'source': 'case', 'error': 'case F27_stage5_aging_dispute exceeded 420s'}]"
+        }
+      ]
+    },
+    {
+      "batch": "holdout",
+      "report": "build/verification/explanation-quality-holdout-score-v3/verification.json",
+      "report_sha256": "c4dc87f927b195ac8f3377ae370ed79212cf297df3270369386a5c1d610a27c3",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 8,
+      "completed": 8,
+      "passed": 5,
+      "hard_error_count": 0,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "H03_price_quantity_product_c",
+          "error": "draft did not verify all expected cells: ['interaction']"
+        },
+        {
+          "id": "H04_prior_period_profit_flat",
+          "error": "draft did not verify all expected cells: ['expense', 'profit']"
+        },
+        {
+          "id": "H07_dimension_excludes_other_org",
+          "error": "draft did not verify all expected cells: ['expense']"
+        }
+      ]
+    },
+    {
+      "batch": "installed-F01",
+      "report": "build/verification/explanation-quality-installed-F01-score-v3/verification.json",
+      "report_sha256": "e8ccea36250ded34ce5f24a919ec1bd9c166d337635e74c534384c44cf052aad",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 1,
+      "completed": 1,
+      "passed": 1,
+      "hard_error_count": 0,
+      "provider_retry_count": 3,
+      "failures": []
+    },
+    {
+      "batch": "installed-F11",
+      "report": "build/verification/explanation-quality-installed-F11-score-v3/verification.json",
+      "report_sha256": "1c213290fcf6027f5ab3d1ef9cc379b6b3a3a524ece814f2ae8491872a14b89f",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 1,
+      "completed": 1,
+      "passed": 1,
+      "hard_error_count": 0,
+      "provider_retry_count": 2,
+      "failures": []
+    },
+    {
+      "batch": "installed-H04",
+      "report": "build/verification/explanation-quality-installed-H04-score-v3/verification.json",
+      "report_sha256": "b0f1d86468b17c6272e5512985028f8d4e9b2b56f701d68df505e070e8bb7e4a",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 1,
+      "completed": 1,
+      "passed": 0,
+      "hard_error_count": 0,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "H04_prior_period_profit_flat",
+          "error": "draft did not verify all expected cells: ['expense']"
+        }
+      ]
+    },
+    {
+      "batch": "installed-F27",
+      "report": "build/verification/explanation-quality-installed-F27-score-v3/verification.json",
+      "report_sha256": "e712f542a57c6589be7841720b29c0015b0aaff3703e375771bccbcb2cadf573",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 1,
+      "completed": 1,
+      "passed": 0,
+      "hard_error_count": 0,
+      "provider_retry_count": 0,
+      "failures": [
+        {
+          "id": "F27_stage5_aging_dispute",
+          "error": "missing expected aging cells: ['CNY_0-30']"
+        }
+      ]
+    },
+    {
+      "batch": "installed-F10",
+      "report": "build/verification/explanation-quality-installed-F10-score-v3/verification.json",
+      "report_sha256": "3da5b45e365dd73821b4c49aa4a6f1cfae6093ac0a501331a1de2412b9e77009",
+      "scoring_contract": "r3-final-draft-text-bound-v3",
+      "model": {
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "reasoningEffort": "max"
+      },
+      "scorer_sha256": "47037969dd1089672e14708dc08fb57daad3b275e3f0b7d8ec158e244c2d1345",
+      "attempted": 1,
+      "completed": 1,
+      "passed": 1,
+      "hard_error_count": 0,
+      "provider_retry_count": 3,
+      "failures": []
+    }
+  ],
+  "package": {
+    "version": "0.1.4",
+    "archive": "/Users/zcdeng/projects/finance-skill-foundry/app/release/FA-Foundry-0.1.4-macOS-arm64-explanation-20260906-201821.zip",
+    "archive_sha256": "8f2a092e7593fe3b54c5f09717e8e47c19f4def2a0be7ad90ca5d138a05429bf",
+    "bytes": 497911162,
+    "crc": "passed",
+    "installed": "/Applications/FA Foundry.app",
+    "resource_hashes": {
+      "Contents/Resources/app.asar": "0ec70948bb88552b4c1d4f1eb003d6cc157badc775f1ba6d957dbef22239cb5d",
+      "Contents/Resources/foundry/foundry": "653c7529a88f5a581f7eca8ddcdd1e5d1c49002c8256d1e6dffd04bd6dd50c78",
+      "Contents/Resources/dsh-plugin/finance-tools.js": "a2cc22745a2400b32cfccb1674baeedb94450fc5078ed3d0a39a926d82e84590",
+      "Contents/Resources/dsh-plugin/presets/analysis/agent.cordis.yml": "ee0863d2df25d450f54f1c48d5704ca6ac1f23909e2d077c352b290599fc55f6",
+      "Contents/Resources/dsh/assets/fonts/NotoSansSC-variable.woff2": "97a715fad95d3cacf4838b1ffedb123d2f1bf0f6bbd726c73e147dcaf317869f"
+    },
+    "installed_resource_hashes_match": true,
+    "signing": "unsigned local build"
+  },
+  "limitations": [
+    "90 percent workflow target not achieved",
+    "Insight rubric not calibrated by finance managers",
+    "No live ERP tenant",
+    "Unsigned local build"
+  ],
+  "owned_application": {
+    "status": "passed",
+    "application": {
+      "path": "/Applications/FA Foundry.app",
+      "version": "0.1.4"
+    },
+    "cases": [
+      {
+        "id": "G1",
+        "skills_used": [
+          "variance-analysis"
+        ],
+        "expected_difference": "5"
+      },
+      {
+        "id": "G2",
+        "skills_used": [
+          "variance-analysis"
+        ],
+        "expected_difference": "32"
+      }
+    ],
+    "restart_status": "passed",
+    "resumed_observation": {
+      "path": "/Users/zcdeng/projects/finance-skill-foundry/build/verification/explanation-quality-owned-app-session-retry1",
+      "session_sha256": "40986619458fd5b9f31bfc39695a707936ad16028f566aba4ec3b186f96c46a0",
+      "model_rerun": false
+    },
+    "report": "build/verification/explanation-quality-owned-app-resume/verification.json",
+    "report_sha256": "395bf00ee8b5229285ed67317107e0b445e58812bb7d0898391bf1dda8f37279"
+  },
+  "cleanup": {
+    "removed": [
+      "app/release/FA-Foundry-0.1.3-macOS-arm64-r2-20260906-0853.zip",
+      "/var/folders/_d/3qhh3th93w5bsnlkgbxmrclc0000gn/T/foundry-install-backup-i0gm7v06/FA Foundry.app"
+    ],
+    "retained": "/Users/zcdeng/projects/finance-skill-foundry/app/release/FA-Foundry-0.1.4-macOS-arm64-explanation-20260906-201821.zip"
+  }
+}

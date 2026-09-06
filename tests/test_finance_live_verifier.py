@@ -66,3 +66,26 @@ def test_total_only_draft_does_not_prove_a_complete_bridge():
     assert verifier.verified_drafts(result, cells)[0]["verified_metric_claims"]["cost_contribution"]["value"] == "-10"
     result["drafts"][0]["run_ids"] = []
     assert verifier.verified_drafts(result, cells) == []
+
+
+def test_amount_change_and_profit_impact_named_rows_are_equivalent():
+    result = state({})
+    result["runs"][0]["result"]["rows"] = [
+        {"line": "管理利润", "amount_change": "5"},
+        {"line": "收入", "profit_impact": "20"},
+        {"line": "成本", "profit_impact": "-10"},
+        {"line": "费用", "profit_impact": "-5"},
+    ]
+    cells = verifier.verify_financial_cells(result, "G1")
+    assert cells["profit_difference"][0]["column"] == "amount_change"
+    assert cells["cost_contribution"][0]["value"] == "-10"
+    result["runs"][0]["result"]["rows"][2]["profit_impact"] = "10"
+    with pytest.raises(AssertionError):
+        verifier.verify_financial_cells(result, "G1")
+
+
+def test_revenue_change_requires_named_quantity_and_price_effects():
+    result = verifier.verify_financial_cells(state({
+        "revenue_change": "32", "quantity_effect": "20", "price_effect": "12",
+    }), "G2")
+    assert result["revenue_difference"][0]["column"] == "revenue_change"

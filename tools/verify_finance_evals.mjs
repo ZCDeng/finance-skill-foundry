@@ -19,8 +19,57 @@ export function apply(ctx) {
     bundled_root: process.env.DSH_BUNDLED_SKILL_DIR,
     harness_home: process.env.DSH_HOME, agents_home: process.env.DSH_AGENTS_HOME,
   }};
+  const checkpoint = `${config.report}.checkpoint.jsonl`;
   const save = () => writeFileSync(config.report, `${JSON.stringify(report, null, 2)}\n`);
   const sha = (text) => createHash('sha256').update(text).digest('hex');
+  const assistantText = (messages) => {
+    const texts = [];
+    for (const message of messages ?? []) {
+      if (message?.role !== 'assistant') continue;
+      for (const part of message.content ?? []) {
+        if (part?.type === 'text') texts.push(String(part.text ?? ''));
+      }
+    }
+    return texts.at(-1) ?? '';
+  };
+  const eventErrors = (events) => {
+    const errors = [];
+    for (const [index, event] of (events ?? []).entries()) {
+      if ((event.type === 'turn/end' && event.data?.reason?.kind === 'error')
+          || event.type === 'turn.failed' || event.type === 'error') {
+        errors.push({index, event});
+      }
+    }
+    return errors;
+  };
+  const saveCheckpoint = (row) => {
+    const finalAnswer = assistantText(row.messages);
+    const toolErrors = row.calls.filter(call => call.isError).map((call, index) => ({
+      index, tool: call.name, error: call.error,
+    }));
+    const compact = {
+      id: row.id,
+      session_id: row.session_id,
+      task_id: row.task_id,
+      input_sha256: row.input_sha256,
+      started_at: row.started_at,
+      completed_at: row.completed_at,
+      completed: row.completed === true,
+      duration_ms: row.duration_ms,
+      error: row.error,
+      calls: row.calls.length,
+      tool_errors: toolErrors,
+      turn_errors: row.turn_errors ?? [],
+      final_answer_sha256: finalAnswer ? sha(finalAnswer) : null,
+      final_draft: row.final_draft ? {
+        id: row.final_draft.id,
+        run_ids: row.final_draft.run_ids ?? [],
+        claims: (row.final_draft.claims ?? []).length,
+        body_sha256: row.final_draft.body ? sha(row.final_draft.body) : null,
+      } : null,
+    };
+    writeFileSync(checkpoint, `${JSON.stringify(compact)}\n`, {flag: 'a'});
+  };
   const run = async () => {
     const {createUserMessage} = await import(pathToFileURL(join(config.dshRoot, 'node_modules/@deepseek-ai/dsh-llm/lib/index.js')).href);
     await ctx.agentPresets.standingKeyFor('analysis');
@@ -60,6 +109,7 @@ export function apply(ctx) {
     }
     for (const item of config.cases) {
       const row = {id: item.id, session_id: item.sessionId, task_id: item.taskId, input_sha256: item.inputSha256, started_at: new Date().toISOString(), calls: [], catalog: []};
+      const startedMs = Date.now();
       report.cases.push(row);
       const handle = await ctx.agents.create({
         sessionId: item.sessionId,
@@ -86,8 +136,7 @@ export function apply(ctx) {
           const catalog = await ctx.skills.snapshot({cwd: item.workspace, scope: handle.agent});
           row.catalog = catalog.skills.map(s => ({name: s.name, provider: s.provider}));
           row.catalog_complete = catalog.complete;
-          const prompt = `${item.question}\n\nEval harness instruction: after optional state/list/data inspection, call the relevant method skill before any finance_context_save, finance_map_save, finance_scenario_save, run_metric, explain_variance, analysis-save, analysis-run, drilldown, or draft tool. Use only the exact exposed tool schemas. Omit optional policy/field-map fields unless the current tool schema or method resource explicitly requires them. Every saved draft calculation claim must reference a successful run_id, row, column, and exact value.`;
-          handle.agent.followup(createUserMessage({content: [{type: 'text', text: prompt}], source: {kind: 'user'}}));
+          handle.agent.followup(createUserMessage({content: [{type: 'text', text: item.question}], source: {kind: 'user'}}));
           let timer;
           try {
             await Promise.race([handle.agent.whenIdle(), new Promise((_, reject) => {
@@ -101,8 +150,24 @@ export function apply(ctx) {
           row.error = error.message;
           row.completed_at = new Date().toISOString();
         } finally {
+          row.duration_ms = Date.now() - startedMs;
           row.events = handle.agent.session.events;
           row.messages = handle.agent.session.deriveMessages();
+          row.turn_errors = eventErrors(row.events);
+          row.provider_retries = row.events.filter(event => event.type === 'llm/retry');
+          if (row.turn_errors.length) {
+            row.completed = false;
+            row.error = row.error ?? 'agent turn ended with error';
+          }
+          try {
+            const state = JSON.parse(execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR,
+              '--task', item.taskId, 'analysis-state'], {encoding: 'utf8'}));
+            row.final_draft = state.drafts?.at(-1) ?? null;
+            row.runs_seen = state.runs?.length ?? 0;
+          } catch (error) {
+            row.state_error = error.message;
+          }
+          saveCheckpoint(row);
           save();
         }
       } finally { await handle.dispose(); }

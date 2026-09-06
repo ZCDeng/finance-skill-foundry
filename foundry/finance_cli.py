@@ -20,7 +20,11 @@ OPERATIONS = {
     "run-metric": "run_metric",
     "explain-variance": "explain_variance",
     "drilldown-fact": "drilldown_fact",
+    "prepare-explanation": "prepare_explanation",
+    "validate-explanation": "validate_explanation",
     "save-explanation-draft": "save_explanation_draft",
+    "finance-background-save": "finance_background_save",
+    "finance-background-list": "finance_background_list",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }

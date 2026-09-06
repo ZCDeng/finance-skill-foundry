@@ -24,6 +24,8 @@ Start with `list_finance_context` to identify the registered ledgers, organizati
 
 Use `run_metric` for control totals, account totals, and ratio checks that fit the finance metric contract. Use `drilldown_fact` only for source-backed cells from a saved run, and `save_explanation_draft` for the reconciliation narrative and exception support. Use `finance_scenario_save` / `finance_scenario_run` when a reconciliation depends on a named scenario such as an aging cut or cash-timing view. Continue with SQL/Python for matching logic, exception aging, many-to-many joins, and reconciliations the finance tools do not model. Do not post entries, initiate payments, or claim actual ERP access unless a configured connector is named in the session.
 
+For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
+
 ## Usage
 
 ```

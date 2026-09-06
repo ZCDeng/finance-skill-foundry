@@ -6,11 +6,25 @@ from decimal import localcontext
 
 from foundry.analysis import AnalysisStore, _assert_id, _hash, _new, _safe_text
 from foundry.errors import FoundryError
+from foundry.finance_explanations import (
+    background_applies,
+    claims_for_facts,
+    normalize_background,
+    prepare_explanation as prepare_explanation_payload,
+    render_fact_template,
+    validate_explanation as validate_explanation_payload,
+)
 from foundry.finance_metrics import evaluate_metric
 from foundry.finance_model import normalize_finance_dataset, scoped_source_rows
 from foundry.finance_variance import explain_variance, price_quantity_bridge
 
-COLLECTIONS = {"contexts", "account_maps", "scenarios", "metric_definitions"}
+COLLECTIONS = {
+    "contexts",
+    "account_maps",
+    "scenarios",
+    "metric_definitions",
+    "backgrounds",
+}
 
 
 class FinanceStore:
@@ -552,16 +566,32 @@ class FinanceStore:
         }
 
     def save_explanation_draft(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("explanation draft spec must be an object")
         parent = (
             self.analysis.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         )
-        for run_id in [
-            *parent.get("run_ids", []),
-            *spec.get("run_ids", parent.get("run_ids", [])),
-        ]:
+        run_ids = spec.get("run_ids", parent.get("run_ids", []))
+        if not isinstance(run_ids, list):
+            raise FoundryError("run_ids must be an array")
+        for run_id in [*parent.get("run_ids", []), *run_ids]:
             self._authorize(self.analysis.get_run(run_id)["bindings"])
+        prepared = (
+            self.prepare_explanation({"run_ids": run_ids})
+            if run_ids
+            else {"facts": []}
+        )
+        body = spec.get("body", parent.get("body", ""))
+        rendered, template_fact_ids = render_fact_template(body, prepared["facts"])
+        explicit_fact_ids = spec.get("fact_ids", parent.get("fact_ids", []))
+        if not isinstance(explicit_fact_ids, list):
+            raise FoundryError("fact_ids must be an array")
+        fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids]))
+        auto_claims = claims_for_facts(prepared["facts"], fact_ids)
         claims = []
-        for claim in spec.get("claims", parent.get("claims", [])):
+        for claim in _dedupe_explanation_claims(
+            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
+        ):
             if not isinstance(claim, dict):
                 raise FoundryError("claims must contain objects")
             claim = dict(claim)
@@ -578,4 +608,159 @@ class FinanceStore:
                         account_map_id=run.get("account_map_id"),
                     )
             claims.append(claim)
-        return self.analysis.save_draft({**spec, "claims": claims})
+        return self.analysis.save_draft(
+            {
+                **spec,
+                "body": rendered,
+                **({"body_template": body} if template_fact_ids else {}),
+                "run_ids": run_ids,
+                "fact_ids": fact_ids,
+                "claims": claims,
+            }
+        )
+
+    def prepare_explanation(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("prepare explanation spec must be an object")
+        run_ids = spec.get("run_ids", [])
+        if not isinstance(run_ids, list) or not run_ids:
+            raise FoundryError("prepare explanation requires run_ids")
+        runs = []
+        for run_id in dict.fromkeys(run_ids):
+            run = self.analysis.get_run(run_id)
+            self._authorize(run["bindings"])
+            runs.append(run)
+        backgrounds = self._backgrounds_for_runs(runs)
+        return prepare_explanation_payload(
+            self.analysis,
+            runs,
+            backgrounds=backgrounds,
+            materiality=spec.get("materiality") or {},
+        )
+
+    def validate_explanation(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("validate explanation spec must be an object")
+        draft = (
+            self.analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
+        )
+        run_ids = spec.get("run_ids", draft.get("run_ids", []))
+        if not isinstance(run_ids, list):
+            raise FoundryError("run_ids must be an array")
+        for run_id in dict.fromkeys(run_ids):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        for run_id in draft.get("run_ids", []):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        for claim in spec.get("claims", draft.get("claims", [])):
+            if isinstance(claim, dict):
+                if claim.get("run_id"):
+                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                if claim.get("dataset_id"):
+                    self._authorize({"source": claim["dataset_id"]})
+        return validate_explanation_payload(self.analysis, {**spec, "run_ids": run_ids})
+
+    def finance_background_save(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("finance background spec must be an object")
+        parent = (
+            self._read("backgrounds", spec["parent_id"]) if spec.get("parent_id") else {}
+        )
+        context = (
+            self._read("contexts", spec["context_id"])
+            if spec.get("context_id")
+            else {}
+        )
+        if context and not spec.get("scope"):
+            spec = {**spec, "scope": self._primary_scope(context.get("scopes", {}))}
+        dataset = None
+        parent_source = parent.get("source") if isinstance(parent.get("source"), dict) else {}
+        dataset_id = spec.get("dataset_id", parent_source.get("dataset_id"))
+        if dataset_id:
+            self._authorize({"source": dataset_id})
+            dataset = self.analysis.read_dataset(dataset_id)
+
+        fields = normalize_background(spec, parent=parent, dataset=dataset)
+        context_bindings = self._background_scope_bindings(fields["scope"], context)
+        return self._write(
+            "backgrounds", **fields,
+            bindings={**parent.get("bindings", {}), **context_bindings, **({"source": dataset_id} if dataset_id else {})},
+        )
+
+    def finance_background_list(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("finance background list spec must be an object")
+        scope = spec.get("scope", {})
+        if spec.get("context_id"):
+            context = self._read("contexts", spec["context_id"])
+            scope = self._primary_scope(context.get("scopes", {})) or scope
+        if not isinstance(scope, dict):
+            raise FoundryError("background scope must be an object")
+        if not scope:
+            return {"schema_version": 1, "business_contexts": []}
+        self._background_scope_bindings(scope)
+        all_rows = self._list("backgrounds")
+        rows = [row for row in all_rows if background_applies(row, scope=scope, as_of=spec.get("as_of") or scope.get("period"))]
+        by_id = {row["id"]: row for row in all_rows}
+        superseded = set()
+        for row in rows:
+            parent_id = row.get("parent_id")
+            while parent_id in by_id and parent_id not in superseded:
+                superseded.add(parent_id)
+                parent_id = by_id[parent_id].get("parent_id")
+        return {"schema_version": 1, "business_contexts": [r for r in rows if r["id"] not in superseded]}
+
+    def _background_scope_bindings(self, scope, context=None):
+        contexts = [context] if context else self._list("contexts")
+        matching = [c for c in contexts if any(
+            all(s.get(k) == scope.get(k) for k in ("ledger", "organization", "currency", "unit") if scope.get(k))
+            for s in c.get("scopes", {}).values()
+        )]
+        if not matching and (self.allowed is not None or context):
+            raise FoundryError("background scope is outside authorized finance contexts")
+        return {f"context_{c['id']}_{alias}": value for c in matching for alias, value in c.get("bindings", {}).items()}
+
+
+    def _backgrounds_for_runs(self, runs):
+        contexts = []
+        for run in runs:
+            as_of = None
+            for scope in (run.get("finance_scope") or {}).values():
+                if isinstance(scope, dict) and scope.get("period"):
+                    as_of = scope["period"]
+                    break
+            scope = self._primary_scope(run.get("finance_scope", {})) or {}
+            contexts.extend(
+                self.finance_background_list({"scope": scope, "as_of": as_of})[
+                    "business_contexts"
+                ]
+            )
+        by_id = {row["id"]: row for row in contexts}
+        return sorted(by_id.values(), key=lambda row: row["seq"])
+
+    def _primary_scope(self, scopes):
+        if isinstance(scopes, dict):
+            for value in scopes.values():
+                if isinstance(value, dict):
+                    return value
+        return {}
+
+
+def _dedupe_explanation_claims(claims):
+    seen = set()
+    result = []
+    for claim in claims:
+        key = None
+        if isinstance(claim, dict) and claim.get("basis") == "calculation":
+            key = (
+                "calculation",
+                claim.get("fact_id"),
+                claim.get("run_id"),
+                claim.get("row"),
+                claim.get("column"),
+            )
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        result.append(claim)
+    return result

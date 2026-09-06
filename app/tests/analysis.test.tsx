@@ -869,6 +869,180 @@ describe('analysis workbench', () => {
     })));
   });
 
+
+  it('auto-checks finance drafts, marks edits stale, rechecks current body, and still saves quality warnings', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a',
+      finance_scope: { actual: { ledger: '总账', organization: '华东', period: '2026-09', currency: 'CNY', unit: '元' } } };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-profit', run_id: financeRun.id, row: 0, column: 'profit', label: '经营利润', display_value: '900719925474099.99', unit: '元', scope: { organization: '华东', period: '2026-09' } }], required_fact_ids: ['fact-profit'], business_contexts: [] });
+      if (command === 'validate-explanation' && spec?.draft_id) return success({ status: 'pass', issues: [], coverage: { required: 1, cited: 1 } });
+      if (command === 'validate-explanation') return success({ status: 'issues', issues: [{ severity: 'error', code: 'number_mismatch', message: '正文数字与引用事实不一致' }], coverage: { required: 1, cited: 0 } });
+      if (command === 'drilldown-fact') return success({ run_id: financeRun.id, row: 0, rows: [
+        { source: { dataset_id: source.id, row_index: 1 }, source_hash: source.source_hash, data: { customer: 'A客户', profit: '900719925474099.99' }, voucher_detail_available: true },
+      ], total: 2, offset: 0, has_more: false, message: '已定位到利润来源行' });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'save-explanation-draft') return success({ ...checkedDraft, ...spec, id: '7'.repeat(32) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    fireEvent.click(screen.getByText('可引用事实 · 1 条'));
+    expect(screen.getByText(/经营利润 · 900719925474099.99 · 元/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '下钻此事实来源' }));
+    expect(await screen.findByText(/已定位到利润来源行 · 2 行/)).toBeTruthy();
+    expect(await screen.findByRole('region', { name: '事实来源行' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'A客户' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '利润为 1 元，需要复核。' } });
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+    expect(screen.queryByText(/检查通过/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
+    expect(await screen.findByText(/正文数字与引用事实不一致/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+      body: '利润为 1 元，需要复核。', review_status: 'unreviewed',
+    })));
+    const saveCall = financeCall.mock.calls.find(([, command]) => command === 'save-explanation-draft');
+    expect(saveCall?.[2]).not.toHaveProperty('fact_ids');
+  });
+
+  it('saves only explicitly cited finance facts and does not promote prepared facts automatically', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const financeDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], body: '利润引用 {{fact:fact-body}}。', fact_ids: ['fact-draft'] };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'prepare-explanation') return success({ facts: [
+        { id: 'fact-body', run_id: financeRun.id, row: 0, column: 'profit', label: '正文事实', display_value: '90' },
+        { id: 'fact-optional', run_id: financeRun.id, row: 1, column: 'profit', label: '可选事实', display_value: '80' },
+      ] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'save-explanation-draft') return success({ ...financeDraft, ...spec, id: '8'.repeat(32) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText(/检查通过/);
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '利润引用 {{fact:fact-body}}，并沿用经理口径。' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+      fact_ids: ['fact-draft', 'fact-body'],
+    })));
+    const saveCall = financeCall.mock.calls.find(([, command]) => command === 'save-explanation-draft');
+    expect(saveCall?.[2]).not.toEqual(expect.objectContaining({ fact_ids: expect.arrayContaining(['fact-optional']) }));
+  });
+
+  it('invalidates an in-flight quality check when the draft body changes', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    let resolveCheck!: (value: Answer<Record<string, unknown>>) => void;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolveCheck = resolve; });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText(/检查中/);
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '检查未完成时修改正文。' } });
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+    await act(async () => resolveCheck(success({ status: 'pass', issues: [] })));
+    expect(screen.queryByText(/检查通过/)).toBeNull();
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+  });
+
+  it('does not show a green quality state for non-pass statuses without issues', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'needs_attention', issues: [], coverage: { required: 1, cited: 1 } });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/需要复核/)).toBeTruthy();
+    expect(screen.queryByText(/检查通过/)).toBeNull();
+  });
+
+  it('ignores stale draft quality responses after switching draft versions', async () => {
+    const second = { ...draft, id: '7'.repeat(32), title: '第二版', body: '第二版正文。' };
+    let resolveFirst!: (value: Answer<Record<string, unknown>>) => void;
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation' && spec?.draft_id === draft.id) return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolveFirst = resolve; });
+      if (command === 'validate-explanation') return success({ status: 'issues', issues: [{ severity: 'warning', message: '第二版需要补引用' }] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [draft, second] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText('第二版');
+    fireEvent.change(screen.getByLabelText('文稿版本'), { target: { value: draft.id } });
+    await screen.findByText('经营简报');
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', { draft_id: draft.id }));
+    fireEvent.change(screen.getByLabelText('文稿版本'), { target: { value: second.id } });
+    await screen.findByText(/第二版需要补引用/);
+    await act(async () => resolveFirst(success({ status: 'pass', issues: [] })));
+    expect(screen.queryByText(/检查通过/)).toBeNull();
+    expect(screen.getByText(/第二版需要补引用/)).toBeTruthy();
+  });
+
+  it('saves finance background with editable scope and lists applicability', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a', bindings: { actual: source.id },
+      finance_scope: { actual: { ledger: '总账', organization: '华东', period: '2026-09', currency: 'CNY', unit: '元' } } };
+    const financeDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id] };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [{ id: 'bg-old', label: '季节性', text: '春节备货提前', basis: 'professional_judgment', scope: spec?.scope, effective_from: '2026-09' }] });
+      if (command === 'finance-background-save') return success({ id: 'bg-new', ...spec });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText('财务背景与经理判断');
+    fireEvent.click(screen.getByText('财务背景与经理判断'));
+    await waitFor(() => expect((screen.getByLabelText('背景组织') as HTMLInputElement).value).toBe('华东'));
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '销售节奏' } });
+    fireEvent.change(screen.getByLabelText('背景正文'), { target: { value: '大客户提前下单，收入确认前置。' } });
+    fireEvent.change(screen.getByLabelText('依据类型'), { target: { value: 'source_fact' } });
+    fireEvent.change(screen.getByLabelText('背景授权资料'), { target: { value: source.id } });
+    fireEvent.change(screen.getByLabelText('背景段落编号'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('生效期间'), { target: { value: '2026-09' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存背景' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-background-save', expect.objectContaining({
+      context_id: 'ctx-a', label: '销售节奏', text: '大客户提前下单，收入确认前置。', basis: 'source_fact',
+      scope: expect.objectContaining({ ledger: '总账', organization: '华东', period: '2026-09' }), effective_from: '2026-09',
+      dataset_id: source.id, paragraph: 1,
+    })));
+    expect(screen.getByText('已保存财务背景。')).toBeTruthy();
+    expect(screen.getByText('销售节奏')).toBeTruthy();
+    expect(screen.getByText(/大客户提前下单/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('依据类型'), { target: { value: 'external_reference' } });
+    expect(screen.getByLabelText('背景外部来源')).toBeTruthy();
+    expect(screen.getByLabelText('背景查询日期')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '政策依据' } });
+    fireEvent.change(screen.getByLabelText('背景正文'), { target: { value: '税费政策引用外部公开说明。' } });
+    fireEvent.change(screen.getByLabelText('背景外部来源'), { target: { value: '财政部公开资料' } });
+    fireEvent.change(screen.getByLabelText('背景查询日期'), { target: { value: '2026-09-06' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存背景' }));
+    await waitFor(() => expect(financeCall.mock.calls.some(([, command, spec]) => command === 'finance-background-save'
+      && (spec as Record<string, unknown>)?.basis === 'external_reference')).toBe(true));
+    const externalSave = financeCall.mock.calls.find(([, command, spec]) => command === 'finance-background-save'
+      && (spec as Record<string, unknown>)?.basis === 'external_reference')?.[2] as Record<string, unknown>;
+    expect(externalSave.external_reference).toEqual({ title: '财政部公开资料', retrieved_at: '2026-09-06' });
+    expect(externalSave).not.toHaveProperty('source');
+    expect(externalSave).not.toHaveProperty('retrieved_at');
+    expect(externalSave).not.toHaveProperty('dataset_id');
+    fireEvent.click(screen.getByRole('button', { name: '刷新适用背景' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-background-list', expect.objectContaining({ context_id: 'ctx-a' })));
+    expect(await screen.findByText('季节性')).toBeTruthy();
+    expect(screen.getByText(/账簿 总账 · 组织 华东 · 期间 2026-09/)).toBeTruthy();
+  });
   it('refreshes finance source files through the native bridge and keeps duplicate batches visible', async () => {
     const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list'
       ? success({ batches: [{ id: '7'.repeat(32), created_at: task.created_at, source_name: '金蝶导出', dataset_id: null, effective_dataset_id: source.id, row_count: 1, publication_status: 'published' }] })

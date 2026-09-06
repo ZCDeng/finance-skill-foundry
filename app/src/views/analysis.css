@@ -156,3 +156,9 @@
 .analysis-finance-setup[open] > summary { margin-bottom: 2px; }
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .analysis-finance-variance .analysis-table th, .analysis-finance-variance .analysis-table td { white-space: nowrap; }
+.analysis-quality { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-card); padding: 14px; display: flex; flex-direction: column; gap: 12px; background: color-mix(in srgb, var(--fnd-surface) 88%, transparent); }
+.analysis-quality h4 { margin: 0; font-size: 15px; }
+.analysis-quality ul { margin: 0; padding-left: 20px; font-size: var(--fnd-size-small); }
+.analysis-fact-list { display: grid; gap: 10px; }
+.analysis-fact-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); padding: 10px 12px; display: grid; gap: 8px; }
+.analysis-background-panel .analysis-history-list { margin-top: 12px; }

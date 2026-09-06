@@ -49,6 +49,9 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
     actual_label = spec.get("actual_scenario", "actual")
     baseline_label = spec.get("baseline_scenario", "budget")
     dimensions = _dimensions(spec, default=[])
+    invalid = set(dimensions) & {"management_account", "account_code", "metric"}
+    if invalid:
+        raise FoundryError("profit bridge already groups accounts as metric rows; remove management_account/account_code/metric from dimensions and use organization, period or business dimensions")
     if not _explicit_period_comparison(spec):
         dimensions = list(dict.fromkeys([*dimensions, "period"]))
     if "scenario" in dimensions:
@@ -64,6 +67,10 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
             for r in normalized.get("rows", [])
             if r.get("scenario") == label and _matches_filters(r, filters)
         ]
+        selected_scopes = {}
+        for row in selected:
+            key = tuple(row.get(dim) for dim in dimensions)
+            selected_scopes.setdefault(key, []).append(row)
         metric = evaluate_metric(
             {"rows": selected, "diagnostics": []},
             {
@@ -88,6 +95,9 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     "cost": Decimal(0),
                     "expense": Decimal(0),
                     "profit": Decimal(0),
+                    "scope": _side_scope(
+                        selected_scopes.get(key, []), label=label, filters=filters
+                    ),
                     "evidence": defaultdict(list),
                 }
             group = groups[key]
@@ -109,6 +119,13 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     "severity": "warning",
                     "code": "comparison_group_missing",
                     "group": context,
+                    "missing_side": "actual" if a is None else "baseline",
+                    "actual_filters": spec.get("actual_filters", {}),
+                    "baseline_filters": spec.get("baseline_filters", {}),
+                    "suggested_actions": [
+                        "检查实际和基准 scenario、期间、组织、账套过滤条件",
+                        "补充缺失资料后重跑，或由经理明确 missing_groups_as_zero=true",
+                    ],
                     "message": "比较口径缺少实际或基准组；未自动把缺失资料视为零。",
                 }
             )
@@ -127,7 +144,8 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
         ):
             av, bv = (a or zero)[account], (b or zero)[account]
             calculable = not missing or spec.get("missing_groups_as_zero") is True
-            contribution = (av - bv) * sign if calculable else None
+            amount_change = av - bv if calculable else None
+            profit_impact = amount_change * sign if amount_change is not None else None
             refs = [
                 *(a or zero)["evidence"].get(account, []),
                 *(b or zero)["evidence"].get(account, []),
@@ -138,15 +156,36 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     "metric": account,
                     "actual": _text(av) if a or calculable else None,
                     "baseline": _text(bv) if b or calculable else None,
+                    "actual_scope": (a or {}).get(
+                        "scope", _declared_scope(actual_label, spec.get("actual_filters", {}))
+                    ),
+                    "baseline_scope": (b or {}).get(
+                        "scope", _declared_scope(baseline_label, spec.get("baseline_filters", {}))
+                    ),
+                    "amount_change": None
+                    if amount_change is None
+                    else _text(amount_change),
+                    "profit_impact": None
+                    if profit_impact is None
+                    else _text(profit_impact),
                     "contribution": None
-                    if contribution is None
-                    else _text(contribution),
+                    if profit_impact is None
+                    else _text(profit_impact),
+                    "amount_change_display": _display_amount_change(
+                        account, amount_change, context.get("unit")
+                    ),
+                    "profit_impact_display": _display_profit_impact(
+                        profit_impact, context.get("unit")
+                    ),
+                    "display_value": _display_profit_impact(
+                        profit_impact, context.get("unit")
+                    ),
                     "favorability": "unknown"
-                    if contribution is None
+                    if profit_impact is None
                     else "favorable"
-                    if contribution > 0
+                    if profit_impact > 0
                     else "unfavorable"
-                    if contribution < 0
+                    if profit_impact < 0
                     else "neutral",
                     "comparison_status": "assumed_zero"
                     if missing and calculable
@@ -154,6 +193,13 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     if missing
                     else "complete",
                     "basis": "calculation",
+                    "semantics": {
+                        "metric_kind": "profit_bridge",
+                        "amount_change_direction": _direction(amount_change),
+                        "profit_impact_direction": _direction(profit_impact),
+                        "profit_impact_sign_policy": "revenue - cost - expense",
+                        "contribution_alias": "profit_impact",
+                    },
                     "source_rows": refs,
                     **(
                         variance_ratio(
@@ -175,6 +221,8 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
             "metric",
             "actual",
             "baseline",
+            "amount_change",
+            "profit_impact",
             "contribution",
             "ratio",
             "ratio_status",
@@ -192,6 +240,49 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
             "baseline_filters": spec.get("baseline_filters", {}),
         },
     }
+
+
+def _declared_scope(label, filters):
+    return {"scenario": label, "filters": filters or {}}
+
+
+def _side_scope(rows, *, label, filters):
+    scope = _declared_scope(label, filters)
+    for key in ("ledger", "organization", "period", "currency", "unit"):
+        values = sorted({str(row.get(key)) for row in rows if row.get(key) not in (None, "")})
+        if len(values) == 1:
+            scope[key] = values[0]
+        elif len(values) > 1:
+            scope[key] = values
+    return scope
+
+
+def _direction(value):
+    if value is None:
+        return "unknown"
+    if value > 0:
+        return "increase"
+    if value < 0:
+        return "decrease"
+    return "neutral"
+
+
+def _display_profit_impact(value, unit):
+    if value is None:
+        return None
+    text = _text(value)
+    return f"利润影响 {text} {unit}" if unit else f"利润影响 {text}"
+
+
+def _display_amount_change(account, value, unit):
+    if value is None:
+        return None
+    labels = {"revenue": "收入", "cost": "成本", "expense": "费用", "profit": "利润"}
+    word = "增加" if value > 0 else "减少" if value < 0 else "持平"
+    amount = abs(value)
+    text = _text(amount)
+    suffix = f" {unit}" if unit else ""
+    return f"{labels.get(account, account)}{word} {text}{suffix}"
 
 
 def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:

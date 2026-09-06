@@ -107,6 +107,13 @@ def test_ratio_recomputes_from_numerator_and_denominator_not_prior_ratios() -> N
     assert Decimal(row["numerator"]) == Decimal("70")
     assert Decimal(row["denominator"]) == Decimal("120")
     assert Decimal(row["ratio"]) == Decimal("70") / Decimal("120")
+    assert row["numerator_exact"] == "70"
+    assert row["denominator_exact"] == "120"
+    assert Decimal(row["ratio_exact"]) == Decimal("70") / Decimal("120")
+    assert row["display_value"] == "58.33%"
+    assert row["semantics"]["numerator_accounts"] == ["cost"]
+    assert row["semantics"]["denominator_accounts"] == ["revenue"]
+    assert row["semantics"]["account_signs"] == {"cost": "1", "revenue": "1"}
 
 
 def test_stock_accounts_are_not_summed_across_periods() -> None:

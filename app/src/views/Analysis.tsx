@@ -14,6 +14,15 @@ import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
 type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindings'> & { sql: string };
 type DraftEdit = { title: string; body: string; limitations: string; review: string };
+interface ExplanationFact {
+  id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
+}
+interface ExplanationIssue { code?: string; message?: string; severity?: string }
+interface ExplanationQuality { status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[] }
+interface ExplanationPreparation { facts?: ExplanationFact[]; required_fact_ids?: string[]; diagnostics?: unknown[]; business_contexts?: FinanceBackground[] }
+interface FinanceBackground {
+  id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
+}
 type Selection = { analysis?: string; draft?: string };
 export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'methods';
 export type AnalysisChatOptions = { submit?: boolean; requestId?: string; targetTaskId?: string };
@@ -396,8 +405,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'drafts' && <>
           {view.drafts.length > 0 && <label className="analysis-select-label">文稿版本<select className="fnd-field" value={draft?.id ?? ''}
             onChange={(event) => setSelectedDraft(event.target.value)}>{[...view.drafts].reverse().map((row) =>
-            <option key={row.id} value={row.id}>{row.title} · {STATUS[row.publication_status] ?? row.publication_status} · {when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>}
-          <DraftEditor key={draftKey} draft={draft} busy={busy} runs={view.runs} onChat={(spec) => void perform(async (taskId) => {
+            <option key={row.id ?? row.title} value={row.id ?? ''}>{row.title} · {STATUS[row.publication_status] ?? row.publication_status} · {when(row.created_at)} · {row.id ? shortSha(row.id) : '未保存'}</option>)}</select></label>}
+          <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets} onChat={(spec) => void perform(async (taskId) => {
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               await handoff(undefined, id, spec ? { targetTaskId: taskId } : undefined);
             })}
@@ -968,8 +977,8 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ draft, busy, runs, edit, onEdit, onSave, onExport, onChat }: {
-  draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; onSave(spec: Record<string, unknown>): void;
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat }: {
+  taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'md' | 'xlsx', spec?: Record<string, unknown>): void; onChat(spec?: Record<string, unknown>): void;
 }) {
@@ -979,13 +988,136 @@ function DraftEditor({ draft, busy, runs, edit, onEdit, onSave, onExport, onChat
   const [review, setReview] = useState(edit?.review ?? draft?.review_status ?? 'unreviewed');
   const [editing, setEditing] = useState(!draft || Boolean(edit && (edit.body !== draft.body || edit.title !== draft.title
     || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status)));
+  const [quality, setQuality] = useState<ExplanationQuality | null>((draft?.quality as ExplanationQuality | undefined) ?? null);
+  const [qualityState, setQualityState] = useState<'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'>('idle');
+  const [facts, setFacts] = useState<ExplanationFact[]>([]);
+  const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
+  const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
+  const [background, setBackground] = useState({ label: '', text: '', basis: 'professional_judgment', effective_from: '', effective_to: '', dataset_id: '', paragraph: '', source: '', retrieved_at: '' });
+  const [backgroundScope, setBackgroundScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: '', unit: '' });
+  const [scopeJson, setScopeJson] = useState('');
+  const [backgroundMessage, setBackgroundMessage] = useState('');
+  const [toolError, setToolError] = useState('');
   const exportMenu = useRef<HTMLDetailsElement>(null);
+  const qualityRequest = useRef(0);
+  const factRequest = useRef(0);
+  const backgroundRequest = useRef(0);
+  const draftRuns = runs.filter((run) => draft?.run_ids.includes(run.id));
+  const financeRuns = draftRuns.filter((run) => run.engine === 'finance');
+  const primaryFinanceRun = financeRuns[0];
+  const defaultScope = firstFinanceScope(primaryFinanceRun);
+  const contextId = primaryFinanceRun?.finance_context_id;
+  const citedFactIds = explicitFactIds(draft, body);
+  const boundDatasetIds = Array.from(new Set(draftRuns.flatMap((run) => Object.values(run.bindings ?? {}))));
+  const sourceDatasets = datasets.filter((source) => boundDatasetIds.includes(source.id));
   useEffect(() => { onEdit({ title, body, limitations, review }); }, [title, body, limitations, review, onEdit]);
+  useEffect(() => {
+    setTitle(edit?.title ?? draft?.title ?? '经营分析');
+    setBody(edit?.body ?? draft?.body ?? '');
+    setLimitations(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
+    setReview(edit?.review ?? draft?.review_status ?? 'unreviewed');
+    setQuality((draft?.quality as ExplanationQuality | undefined) ?? null);
+    setQualityState('idle');
+    setFacts([]); setFactDetails({}); setBackgrounds([]); setToolError(''); setBackgroundMessage('');
+    setBackgroundScope(scopeToFields(defaultScope)); setScopeJson(JSON.stringify(defaultScope, null, 2));
+    qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1;
+  }, [draft?.id]);
+  useEffect(() => {
+    if (Object.values(backgroundScope).some(Boolean)) return;
+    const next = scopeToFields(defaultScope);
+    if (Object.values(next).some(Boolean)) { setBackgroundScope(next); setScopeJson(JSON.stringify(defaultScope, null, 2)); }
+  }, [primaryFinanceRun?.id]);
+  useEffect(() => {
+    if (!draft || !draft.run_ids.length) return;
+    const api = bridge();
+    if (!api?.financeCall) { setQualityState('unavailable'); return; }
+    const request = ++qualityRequest.current;
+    const bgRequest = ++backgroundRequest.current;
+    setQualityState('checking'); setToolError('');
+    void Promise.allSettled([
+      api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids }),
+      api.financeCall(taskId, 'validate-explanation', edit?.body != null && edit.body !== draft.body
+        ? { body: edit.body, run_ids: draft.run_ids, fact_ids: citedFactIds, claims: draft.claims }
+        : { draft_id: draft.id }),
+    ]).then(([prepared, checked]) => {
+      if (request !== qualityRequest.current) return;
+      if (prepared.status === 'fulfilled') {
+        const value = unwrap(prepared.value as Answer<ExplanationPreparation>);
+        setFacts(value.facts ?? []);
+        if (value.business_contexts?.length) setBackgrounds(value.business_contexts);
+      }
+      if (checked.status === 'fulfilled') {
+        const value = unwrap(checked.value as Answer<ExplanationQuality>);
+        setQuality(value);
+        setQualityState(qualityStateFromResult(value));
+      } else setQualityState('unavailable');
+    }).catch((failure) => { if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); } });
+    void loadBackgrounds(bgRequest, defaultScope);
+    return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
+  }, [draft?.id, taskId]);
   const changed = !draft || title !== draft.title || body !== draft.body || limitations !== draft.limitations.join('\n') || review !== draft.review_status;
   function spec(publication: 'draft' | 'archived') {
-    return { title: title.trim(), body, run_ids: draft?.run_ids ?? [], claims: draft?.claims ?? [],
+    return { title: title.trim(), body, run_ids: draft?.run_ids ?? [], claims: draft?.claims ?? [], ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
       ...(draft ? { parent_id: draft.id } : {}), publication_status: publication, review_status: review,
       limitations: limitations.split('\n').map((line) => line.trim()).filter(Boolean) };
+  }
+  async function recheck() {
+    if (!draft) return;
+    const api = bridge(); if (!api?.financeCall) { setQualityState('unavailable'); return; }
+    const request = ++qualityRequest.current;
+    try {
+      setQualityState('checking'); setToolError('');
+      const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids }) as Answer<ExplanationPreparation>);
+      if (request !== qualityRequest.current) return;
+      setFacts(prepared.facts ?? []);
+      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { body, run_ids: draft.run_ids, fact_ids: explicitFactIds(draft, body), claims: draft.claims }) as Answer<ExplanationQuality>);
+      if (request !== qualityRequest.current) return;
+      setQuality(checked); setQualityState(qualityStateFromResult(checked));
+    } catch (failure) {
+      if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    }
+  }
+  async function openFact(fact: ExplanationFact) {
+    const api = bridge(); if (!api?.financeCall || fact.row == null) return;
+    const request = ++factRequest.current;
+    try {
+      setToolError('');
+      const result = unwrap(await api.financeCall(taskId, 'drilldown-fact', { run_id: fact.run_id, row: fact.row, ...(fact.column ? { column: fact.column } : {}), offset: 0, limit: 100 }) as Answer<FinanceDrilldown>);
+      if (request === factRequest.current) setFactDetails((value) => ({ ...value, [fact.id]: result }));
+    } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function loadBackgrounds(request = ++backgroundRequest.current, scopeOverride?: Record<string, unknown>) {
+    const api = bridge(); if (!api?.financeCall) return;
+    try {
+      const scope = scopeOverride ?? currentBackgroundScope(backgroundScope, scopeJson);
+      const result = unwrap(await api.financeCall(taskId, 'finance-background-list', { ...(contextId ? { context_id: contextId } : {}), scope, as_of: scope.period }) as Answer<{ backgrounds?: FinanceBackground[]; business_contexts?: FinanceBackground[]; items?: FinanceBackground[] }>);
+      if (request === backgroundRequest.current) setBackgrounds(result.backgrounds ?? result.business_contexts ?? result.items ?? []);
+    } catch { /* background list is optional for old backends */ }
+  }
+  async function saveBackground() {
+    const api = bridge(); if (!api?.financeCall) { setToolError('此版本暂不支持财务背景。'); return; }
+    const request = ++backgroundRequest.current;
+    try {
+      setToolError(''); setBackgroundMessage('');
+      const scope = currentBackgroundScope(backgroundScope, scopeJson);
+      const paragraph = background.paragraph.trim() ? Number(background.paragraph) : undefined;
+      if (background.basis === 'source_fact' && (!background.dataset_id || !paragraph)) throw new Error('资料事实需要选择授权资料并填写段落编号。');
+      if (background.basis === 'external_reference' && (!background.source.trim() || !background.retrieved_at.trim())) throw new Error('外部依据需要填写来源和查询日期。');
+      const saved = unwrap(await api.financeCall(taskId, 'finance-background-save', {
+        ...(contextId ? { context_id: contextId } : {}), label: background.label.trim() || undefined, text: background.text.trim(), basis: background.basis,
+        scope, effective_from: background.effective_from || scope.period, effective_to: background.effective_to || undefined,
+        ...(background.basis === 'source_fact' && background.dataset_id ? { dataset_id: background.dataset_id } : {}),
+        ...(background.basis === 'source_fact' && paragraph ? { paragraph } : {}),
+        ...(background.basis === 'external_reference' ? { external_reference: externalReferencePayload(background.source.trim(), background.retrieved_at.trim()) } : {}),
+      }) as Answer<FinanceBackground>);
+      if (request !== backgroundRequest.current) return;
+      setBackgroundMessage('已保存财务背景。'); setBackground({ ...background, label: '', text: '', paragraph: '', source: '', retrieved_at: '' });
+      setBackgrounds((value) => [saved, ...value.filter((item) => item.id !== saved.id)]);
+    } catch (failure) { if (request === backgroundRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  function onBodyChange(value: string) {
+    qualityRequest.current += 1;
+    setBody(value); setReview('unreviewed'); setQuality(null); setQualityState('stale');
   }
   return <div className="analysis-draft">
     <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
@@ -995,17 +1127,20 @@ function DraftEditor({ draft, busy, runs, edit, onEdit, onSave, onExport, onChat
     {editing ? <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <label>文稿标题<input aria-label="文稿标题" className="fnd-field" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
     <label>文稿正文<textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
-      onChange={(event) => { setBody(event.target.value); setReview('unreviewed'); }} /></label>
+      onChange={(event) => onBodyChange(event.target.value)} /></label>
     <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
       onChange={(event) => setLimitations(event.target.value)} /></label><label>我的审阅状态<select aria-label="我的审阅状态" className="fnd-field" value={review}
       onChange={(event) => setReview(event.target.value)}><option value="unreviewed">未阅</option><option value="reviewed">已阅</option><option value="accepted">认可</option></select></label></div>
     </fieldset> : <article className="analysis-draft-reading" aria-label="文稿阅读"><h2>{title}</h2><DraftBody body={body} />
       {limitations.trim() && <section><h3>局限与待确认事项</h3><ul>{limitations.split('\n').filter(Boolean).map((line, index) => <li key={index}>{line}</li>)}</ul></section>}</article>}
+    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
         <p>{id}</p>{run ? <RunStatus run={run} /> : <p>此运行记录暂不可读取。</p>}</div>; })}
       {draft.claims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</details>}
+    {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
+      message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
     <div className="analysis-actions">{changed && <button type="button" className="fnd-go" disabled={busy || !title.trim() || !body.trim()} onClick={() => onSave(spec('draft'))}>保存文稿新版</button>}
       <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim()} onClick={() => onSave(spec('archived'))}>选定并归档此版</button>
       <details ref={exportMenu} className="analysis-export" onKeyDown={(event) => { if (event.key === 'Escape') {
@@ -1018,8 +1153,148 @@ function DraftEditor({ draft, busy, runs, edit, onEdit, onSave, onExport, onChat
           if (exportMenu.current) exportMenu.current.open = false; onExport('xlsx', changed ? spec('draft') : undefined);
         }}>导出工作簿<span>Excel</span></button></div></details></div>
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
+    {toolError && <p role="alert" className="analysis-message analysis-message--error">{toolError}</p>}
   </div>;
 }
+
+function firstFinanceScope(run?: AnalysisRun): Record<string, unknown> {
+  const scopes = Object.values(run?.finance_scope ?? {});
+  return scopes[0] ?? {};
+}
+
+function scopeToFields(scope: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(['ledger', 'organization', 'period', 'currency', 'unit'].map((key) => [key, scope[key] == null ? '' : textValue(scope[key])])) as Record<string, string>;
+}
+
+function currentBackgroundScope(fields: Record<string, string>, extraJson: string): Record<string, unknown> {
+  const base = Object.fromEntries(Object.entries(fields).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()]));
+  return { ...parseObject(extraJson, '高级范围 JSON'), ...base };
+}
+
+function parseObject(value: string, label: string): Record<string, unknown> {
+  if (!value.trim()) return {};
+  const parsed = JSON.parse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} 需要是对象。`);
+  return parsed as Record<string, unknown>;
+}
+
+function explicitFactIds(draft: AnalysisDraft | undefined, body: string): string[] {
+  const fromDraft = draft?.fact_ids ?? [];
+  const fromBody = Array.from(body.matchAll(/\{\{\s*fact:([A-Za-z0-9_.:-]+)\s*\}\}/g), (match) => match[1]);
+  return Array.from(new Set([...fromDraft, ...fromBody].filter(Boolean)));
+}
+
+
+function qualityStateFromResult(value: ExplanationQuality): 'passed' | 'issues' | 'unavailable' {
+  if (value.status === 'pass') return 'passed';
+  if ((value.issues ?? []).length || ['needs_attention', 'issues', 'failed'].includes(String(value.status ?? ''))) return 'issues';
+  return 'unavailable';
+}
+
+function externalReferencePayload(source: string, retrievedAt: string): Record<string, string> {
+  const payload: Record<string, string> = { title: source, retrieved_at: retrievedAt };
+  if (/^https?:\/\//i.test(source)) payload.url = source;
+  return payload;
+}
+
+function qualityLabel(state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'): string {
+  return ({ idle: '尚未检查', checking: '检查中', passed: '检查通过', issues: '需要复核', stale: '待重检', unavailable: '暂不可检查' } as Record<typeof state, string>)[state];
+}
+
+function coverageSummary(coverage: unknown): string {
+  if (!coverage || typeof coverage !== 'object') return '';
+  const value = coverage as Record<string, unknown>;
+  const required = value.required ?? value.required_facts ?? value.total;
+  const cited = value.cited ?? value.cited_facts ?? value.matched;
+  if (required != null && cited != null) return `覆盖 ${textValue(cited)}/${textValue(required)} 条关键事实`;
+  return '';
+}
+
+function factLabel(fact: ExplanationFact): string {
+  const value = textValue(fact.display_value ?? fact.value);
+  const label = String(fact.label ?? '').split(' / ').map((part) => STATUS[part] ?? metricLabel(part)).join(' / ');
+  return [label, value, fact.unit && !value.includes(fact.unit) ? fact.unit : ''].filter(Boolean).join(' · ') || fact.id;
+}
+
+function explanationIssueText(issue: ExplanationIssue): string {
+  const messages: Record<string, string> = {
+    uncited_number: '正文有数字尚未关联计算依据，请核对数字或补充引用。',
+    unknown_fact: '引用已不属于当前计算结果，请重新选择依据。',
+    invalid_claim: '这条依据缺少类型，请注明是计算、资料事实还是经理判断。',
+    invalid_claim_location: '找不到引用的计算位置，请重新选择依据。',
+    claim_value_mismatch: '引用的数字与计算结果不一致，请核对。',
+    fact_claim_mismatch: '引用内容与所选事实不一致，请重新关联。',
+    missing_required_fact: '重要的计算结果尚未在说明中引用。',
+  };
+  return messages[issue.code ?? ''] ?? textValue(issue.message ?? '请核对这条说明的数字和依据。');
+}
+
+function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, busy, onRecheck, onOpenFact }: {
+  quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
+  factDetails: Record<string, FinanceDrilldown>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void;
+}) {
+  const coverage = coverageSummary(quality?.coverage);
+  return <section className="analysis-quality" aria-label="文稿质量检查">
+    <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
+      <button type="button" className="fnd-button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</button></div>
+    {quality?.issues?.length ? <ul>{quality.issues.map((issue, index) => <li key={index}>{issue.severity === 'error' ? '需修正' : '请核对'}：{explanationIssueText(issue)}</li>)}</ul> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
+    {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
+      <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
+        <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
+        <p className="analysis-note">运行 {shortSha(fact.run_id)} · 第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
+        {fact.row != null && <button type="button" className="fnd-button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</button>}
+        {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
+      </article>)}</div></details>}
+    {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
+  </section>;
+}
+
+function FactDrilldown({ detail }: { detail: FinanceDrilldown }) {
+  const columns = Array.from(new Set(detail.rows.flatMap((row) => Object.keys(row.data ?? {})))).map((name) => ({ name, type: 'VARCHAR' }));
+  return <div className="analysis-drilldown-result"><p className="analysis-note">来源：{detail.message} · {detail.total} 行{detail.has_more ? ' · 仍有更多' : ''}</p>
+    {columns.length > 0 && <Table columns={columns} rows={detail.rows.map((row) => row.data)} caption="事实来源行" />}
+    {detail.rows.map((row, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(row.source)}</summary>
+      <p>来源摘要：{row.source_hash}</p><p>凭证明细：{row.voucher_detail_available ? '可用' : '不可用'}</p>
+      <pre className="analysis-source-text">{JSON.stringify(row.data, null, 2)}</pre></details>)}
+  </div>;
+}
+
+function FinanceBackgroundPanel({ background, scope, scopeJson, backgrounds, datasets, busy, message, onBackground, onScope, onScopeJson, onSave, onList }: {
+  background: { label: string; text: string; basis: string; effective_from: string; effective_to: string; dataset_id: string; paragraph: string; source: string; retrieved_at: string };
+  scope: Record<string, string>; scopeJson: string; backgrounds: FinanceBackground[]; datasets: DatasetSnapshot[]; busy: boolean; message: string;
+  onBackground(next: { label: string; text: string; basis: string; effective_from: string; effective_to: string; dataset_id: string; paragraph: string; source: string; retrieved_at: string }): void;
+  onScope(next: Record<string, string>): void; onScopeJson(next: string): void; onSave(): void; onList(): void;
+}) {
+  return <details className="analysis-details analysis-background-panel"><summary>财务背景与经理判断</summary>
+    <p className="analysis-note">保存业务原因、经理判断或资料来源解释。背景按范围和有效期复用，经理可改适用范围。</p>
+    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+      <label>标题<input className="fnd-field" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })} /></label>
+      <label>依据类型<select className="fnd-field" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
+        <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></select></label>
+      <label>账簿<input aria-label="背景账簿" className="fnd-field" value={scope.ledger ?? ''} onChange={(event) => onScope({ ...scope, ledger: event.target.value })} /></label>
+      <label>组织<input aria-label="背景组织" className="fnd-field" value={scope.organization ?? ''} onChange={(event) => onScope({ ...scope, organization: event.target.value })} /></label>
+      <label>期间<input aria-label="背景期间" className="fnd-field" value={scope.period ?? ''} onChange={(event) => onScope({ ...scope, period: event.target.value })} /></label>
+      <label>币种<input aria-label="背景币种" className="fnd-field" value={scope.currency ?? ''} onChange={(event) => onScope({ ...scope, currency: event.target.value })} /></label>
+      <label>单位<input aria-label="背景单位" className="fnd-field" value={scope.unit ?? ''} onChange={(event) => onScope({ ...scope, unit: event.target.value })} /></label>
+      <label>生效期间<input className="fnd-field" value={background.effective_from} placeholder="2026-09" onChange={(event) => onBackground({ ...background, effective_from: event.target.value })} /></label>
+      <label>失效期间（可选）<input className="fnd-field" value={background.effective_to} onChange={(event) => onBackground({ ...background, effective_to: event.target.value })} /></label>
+      {(background.basis === 'source_fact') && <><label>授权资料<select aria-label="背景授权资料" className="fnd-field" value={background.dataset_id} onChange={(event) => onBackground({ ...background, dataset_id: event.target.value })}>
+        <option value="">选择资料</option>{datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
+        <label>段落编号<input aria-label="背景段落编号" className="fnd-field" value={background.paragraph} onChange={(event) => onBackground({ ...background, paragraph: event.target.value })} /></label></>}
+      {(background.basis === 'external_reference') && <><label>外部来源<input aria-label="背景外部来源" className="fnd-field" value={background.source} onChange={(event) => onBackground({ ...background, source: event.target.value })} /></label>
+        <label>查询日期<input aria-label="背景查询日期" className="fnd-field" value={background.retrieved_at} placeholder="2026-09-06" onChange={(event) => onBackground({ ...background, retrieved_at: event.target.value })} /></label></>}
+    </div><label>背景正文<textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
+    <details className="analysis-details"><summary>高级：补充范围 JSON</summary><textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></fieldset>
+    <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</button>
+      <button type="button" className="fnd-button" disabled={busy} onClick={onList}>刷新适用背景</button></div>
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {backgrounds.length > 0 && <div className="analysis-history-list">{backgrounds.map((item, index) => <div className="analysis-history-row analysis-history-row--static" key={item.id ?? index}>
+      <span>{textValue(item.label ?? item.basis ?? '财务背景')}</span><span>{textValue(item.text ?? item.paragraph ?? '')}</span>
+      <span>{scopeSummary(item.scope ?? {})}</span><span>{textValue(item.effective_from ?? '未设期间')}{item.effective_to ? ` 至 ${textValue(item.effective_to)}` : ''}</span>
+    </div>)}</div>}
+  </details>;
+}
+
 function Methods({ state, busy, onApply }: {
   state: AnalysisState; busy: boolean;
   onApply(methodId: string, bindings: Record<string, string>, parameters: unknown[] | Record<string, unknown>): void;
