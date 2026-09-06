@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from foundry.analysis import AnalysisStore, _new
+from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
 
 
@@ -17,6 +18,134 @@ SPEC = importlib.util.spec_from_file_location("verify_finance_evals", REPO / "to
 verifier = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(verifier)
+
+
+def _semantic_basis(item_id: str = 'item-1') -> dict[str, object]:
+    return {
+        'version': 1,
+        'question': '解释利润变动。',
+        'context_id': 'ctx-main',
+        'scope': {'ledger': 'L1', 'period': '2026-08'},
+        'sources': {'actual': {'dataset_id': 'dataset-a', 'source_hash': 'source-hash', 'data_hash': 'data-hash'}},
+        'removed_item_ids': [],
+        'items': [
+            {
+                'id': item_id,
+                'metric': 'profit',
+                'dimensions': {},
+                'periods': ['2026-08'],
+                'requires_drilldown': False,
+            }
+        ],
+    }
+
+
+def _semantic_fingerprint() -> str:
+    return verifier._sha(_semantic_basis())
+
+
+def _semantic_requirement(requirement_id: str, seq: int, fingerprint: str | None = None) -> dict[str, object]:
+    basis = _semantic_basis()
+    return {
+        'id': requirement_id,
+        'seq': seq,
+        'question': basis['question'],
+        'context_id': basis['context_id'],
+        'scope': basis['scope'],
+        'bindings': {'actual': 'dataset-a'},
+        'items': [
+            {
+                'id': 'item-1',
+                'metric': 'profit',
+                'dimensions': {},
+                'periods': ['2026-08'],
+                'requires_drilldown': False,
+            },
+        ],
+        'removed_item_ids': [],
+        'semantic_version': 1,
+        'semantic_fingerprint': fingerprint or verifier._sha(basis),
+        'semantic_basis': basis,
+    }
+
+
+def _dataset_state() -> dict[str, object]:
+    return {
+        'id': 'dataset-a',
+        'source_hash': 'source-hash',
+        'data_hash': 'data-hash',
+        'row_count': 2,
+        'schema': [
+            {'name': 'ledger', 'type': 'VARCHAR'},
+            {'name': 'organization', 'type': 'VARCHAR'},
+            {'name': 'period', 'type': 'VARCHAR'},
+            {'name': 'amount', 'type': 'DECIMAL'},
+        ],
+    }
+
+
+def _bound_run(run_id: str = 'run1', seq: int = 20, requirement_id: str = 'req2') -> dict[str, object]:
+    return {
+        'id': run_id,
+        'seq': seq,
+        'execution_status': 'succeeded',
+        'requirements_id': requirement_id,
+        'requirements_semantic_fingerprint': _semantic_fingerprint(),
+        'bindings': {'actual': 'dataset-a'},
+        'input_hashes': {'actual': 'data-hash'},
+        'source_hashes': {'actual': 'source-hash'},
+    }
+
+
+def _r4_management_service(tmp_path: Path, dirname: str = 'r4-real') -> tuple[FinanceStore, dict[str, object]]:
+    service = FinanceStore(TaskStore(tmp_path / dirname).create(title='r4 verifier real backend'))
+    bindings = {}
+    rows_by_alias = {
+        'actual': [
+            {'account_code': '001', 'management_account': 'revenue', 'amount': '120', 'scenario': 'actual'},
+            {'account_code': '002', 'management_account': 'cost', 'amount': '70', 'scenario': 'actual'},
+        ],
+        'budget': [
+            {'account_code': '001', 'management_account': 'revenue', 'amount': '100', 'scenario': 'budget'},
+            {'account_code': '002', 'management_account': 'cost', 'amount': '60', 'scenario': 'budget'},
+        ],
+    }
+    for alias, rows in rows_by_alias.items():
+        path = tmp_path / f'{dirname}-{alias}.json'
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+        bindings[alias] = service.analysis.add_dataset(path, name=alias)['id']
+    context = service.save_context({
+        'bindings': bindings,
+        'scopes': {
+            alias: {
+                'ledger': 'L1',
+                'organization': 'O1',
+                'period': '2026-09',
+                'currency': 'CNY',
+                'unit': '万元',
+                'scenario': alias,
+            }
+            for alias in bindings
+        },
+    })
+    return service, context
+
+
+def _r4_contract_draft(service: FinanceStore, requirement: dict[str, object], run: dict[str, object], quality: dict[str, object]) -> dict[str, object]:
+    body = '成本率已按当前要求完成。'
+    draft = _new(
+        service.task,
+        requirements_id=requirement['id'],
+        body=body,
+        run_ids=[run['id']],
+        fact_ids=[],
+        claims=[],
+        explanation_check=quality,
+        quality=quality,
+        limitations=[],
+        content_hash=verifier._sha({'body': body, 'run_ids': [run['id']], 'quality': quality}),
+    )
+    return service.analysis._write(service.analysis._object_path('drafts', draft['id']), draft)
 
 
 def test_fixture_contract_has_30_cases_and_first_20_cover_required_categories() -> None:
@@ -467,8 +596,9 @@ def test_r4_contract_requires_latest_requirements_quality_and_completion() -> No
         },
     }
     state = {
-        'requirements': [{'id': 'req1', 'seq': 5}, {'id': 'req2', 'seq': 10}],
-        'runs': [{'id': 'run1', 'seq': 20, 'execution_status': 'succeeded'}],
+        'requirements': [_semantic_requirement('req1', 5), _semantic_requirement('req2', 10)],
+        'datasets': [_dataset_state()],
+        'runs': [_bound_run(requirement_id='req2')],
         'completions': [{'draft_id': 'draft1', 'status': 'complete', 'requirements_id': 'req2', 'draft_content_hash': 'draft-hash'}],
     }
     verifier._verify_r4_contract(state, draft, {})
@@ -479,7 +609,19 @@ def test_r4_contract_requires_latest_requirements_quality_and_completion() -> No
         verifier._verify_r4_contract({**state, 'completions': []}, draft, {})
 
 
-def test_r4_missing_data_contract_requires_review_stop_and_explicit_limitation() -> None:
+def test_r4_missing_data_contract_requires_awaiting_input_gap_and_explicit_limitation() -> None:
+    source = {
+        'alias': 'actual',
+        'dataset_id': 'dataset-a',
+        'source_hash': 'source-hash',
+        'data_hash': 'data-hash',
+        'columns': ['ledger', 'organization', 'period', 'amount'],
+    }
+    gap = {
+        'gap_code': 'native_price_quantity_fields_unavailable',
+        'missing_inputs': [{'dataset_id': 'dataset-a', 'alias': 'actual', 'columns': ['quantity', 'price']}],
+        'sources': [source],
+    }
     draft = {
         'id': 'draft-missing',
         'seq': 30,
@@ -488,22 +630,34 @@ def test_r4_missing_data_contract_requires_review_stop_and_explicit_limitation()
         'run_ids': ['run1'],
         'limitations': ['资料缺少数量和单价，不能完成量价拆分。'],
         'explanation_check': {
+            'checks': {'numbers': {'status': 'pass'}},
             'requirements': {
                 'requirements_id': 'req1',
                 'coverage': {'status': 'needs_attention'},
                 'provenance': {'status': 'needs_attention'},
+                'items': [
+                    {'id': 'item-1', 'status': 'missing_data', 'input_gap': gap},
+                ],
             },
         },
     }
     state = {
-        'requirements': [{'id': 'req1', 'seq': 10}],
-        'runs': [{'id': 'run1', 'seq': 20, 'execution_status': 'succeeded'}],
+        'datasets': [_dataset_state()],
+        'requirements': [{
+            **_semantic_requirement('req1', 10),
+            'support': {'items': [{**gap, 'requirement_item_id': 'item-1', 'status': 'requires_input'}]},
+        }],
+        'runs': [_bound_run(requirement_id='req1')],
         'completions': [{
             'draft_id': 'draft-missing',
-            'status': 'needs_review',
+            'status': 'awaiting_input',
             'requirements_id': 'req1',
             'draft_content_hash': 'draft-hash',
+            'response_status': 'ended_with_limitations',
             'repair_allowed': False,
+            'stop_reason': 'verified_input_gap',
+            'original_requirements_completed': False,
+            'actions': [{'code': 'verified_input_gap', 'requirement_item_id': 'item-1'}],
         }],
     }
     verifier._verify_r4_contract(state, draft, {}, allow_missing_data=True)
@@ -511,8 +665,353 @@ def test_r4_missing_data_contract_requires_review_stop_and_explicit_limitation()
     with pytest.raises(AssertionError, match='explicit draft limitations'):
         verifier._verify_r4_contract(state, {**draft, 'limitations': []}, {}, allow_missing_data=True)
     complete = {**state, 'completions': [{**state['completions'][0], 'status': 'complete'}]}
-    with pytest.raises(AssertionError, match='needs_review'):
+    with pytest.raises(AssertionError, match='awaiting_input'):
         verifier._verify_r4_contract(complete, draft, {}, allow_missing_data=True)
+    weak_numbers = {
+        **draft,
+        'explanation_check': {
+            **draft['explanation_check'],
+            'checks': {'numbers': {'status': 'needs_attention'}},
+        },
+    }
+    with pytest.raises(AssertionError, match='numeric checks'):
+        verifier._verify_r4_contract(state, weak_numbers, {}, allow_missing_data=True)
+    hash_mismatch = {**state, 'datasets': [{**state['datasets'][0], 'source_hash': 'different'}]}
+    with pytest.raises(AssertionError, match='semantic_basis'):
+        verifier._verify_r4_contract(hash_mismatch, draft, {}, allow_missing_data=True)
+    no_action = {**state, 'completions': [{**state['completions'][0], 'actions': []}]}
+    with pytest.raises(AssertionError, match='every verified input gap'):
+        verifier._verify_r4_contract(no_action, draft, {}, allow_missing_data=True)
+    present_quantity = {
+        **state,
+        'datasets': [{**_dataset_state(), 'schema': [*_dataset_state()['schema'], {'name': 'quantity', 'type': 'DECIMAL'}]}],
+    }
+    with pytest.raises(AssertionError, match='source columns'):
+        verifier._verify_r4_contract(present_quantity, draft, {}, allow_missing_data=True)
+    contradictory_source = {**source, 'columns': ['ledger', 'organization', 'period', 'amount', 'quantity']}
+    contradictory_gap = {**gap, 'sources': [contradictory_source], 'missing_inputs': [{**gap['missing_inputs'][0], 'columns': ['quantity']}]}
+    contradictory = {
+        **draft,
+        'explanation_check': {
+            **draft['explanation_check'],
+            'requirements': {
+                **draft['explanation_check']['requirements'],
+                'items': [{'id': 'item-1', 'status': 'missing_data', 'input_gap': contradictory_gap}],
+            },
+        },
+    }
+    contradictory_state = {
+        **state,
+        'datasets': [{**_dataset_state(), 'schema': [*_dataset_state()['schema'], {'name': 'quantity', 'type': 'DECIMAL'}]}],
+        'requirements': [{
+            **state['requirements'][0],
+            'support': {'items': [{**contradictory_gap, 'requirement_item_id': 'item-1', 'status': 'requires_input'}]},
+        }],
+    }
+    with pytest.raises(AssertionError, match='missing input columns exist'):
+        verifier._verify_r4_contract(contradictory_state, contradictory, {}, allow_missing_data=True)
+    unsupported_gap = {
+        **draft,
+        'explanation_check': {
+            **draft['explanation_check'],
+            'requirements': {
+                **draft['explanation_check']['requirements'],
+                'items': [{'id': 'item-1', 'status': 'missing_data', 'input_gap': {**gap, 'gap_code': 'client_asserted_missing'}}],
+            },
+        },
+    }
+    unsupported_support = {
+        **state,
+        'requirements': [{
+            **state['requirements'][0],
+            'support': {'items': [{**gap, 'gap_code': 'client_asserted_missing', 'requirement_item_id': 'item-1', 'status': 'requires_input'}]},
+        }],
+    }
+    with pytest.raises(AssertionError, match='gap code is not supported'):
+        verifier._verify_r4_contract(unsupported_support, unsupported_gap, {}, allow_missing_data=True)
+    unresolved_issue = {
+        **draft,
+        'explanation_check': {
+            **draft['explanation_check'],
+            'issues': [{'code': 'uncited_number', 'message': '还有未解释数字'}],
+        },
+    }
+    with pytest.raises(AssertionError, match='unresolved non-gap issues'):
+        verifier._verify_r4_contract(state, unresolved_issue, {}, allow_missing_data=True)
+    missing_quality_item = {
+        **draft,
+        'explanation_check': {
+            **draft['explanation_check'],
+            'requirements': {**draft['explanation_check']['requirements'], 'items': []},
+        },
+    }
+    with pytest.raises(AssertionError, match='cover all current items'):
+        verifier._verify_r4_contract(state, missing_quality_item, {}, allow_missing_data=True)
+    missing_schema = {**state, 'datasets': [{key: value for key, value in state['datasets'][0].items() if key != 'schema'}]}
+    with pytest.raises(AssertionError, match='source schema is missing'):
+        verifier._verify_r4_contract(missing_schema, draft, {}, allow_missing_data=True)
+
+
+def test_r4_v3_requires_semantic_binding_proof_for_selected_runs() -> None:
+    draft = {
+        'id': 'draft1',
+        'seq': 30,
+        'requirements_id': 'req2',
+        'content_hash': 'draft-hash',
+        'run_ids': ['run1'],
+        'explanation_check': {
+            'requirements': {
+                'requirements_id': 'req2',
+                'coverage': {'status': 'pass'},
+                'provenance': {'status': 'pass'},
+            },
+        },
+    }
+    state = {
+        'requirements': [_semantic_requirement('req1', 5), _semantic_requirement('req2', 10)],
+        'datasets': [_dataset_state()],
+        'runs': [_bound_run(requirement_id='req2')],
+        'completions': [{'draft_id': 'draft1', 'status': 'complete', 'requirements_id': 'req2', 'draft_content_hash': 'draft-hash'}],
+    }
+    verifier._verify_r4_contract(state, draft, {})
+
+    missing_current_fingerprint = {
+        **state,
+        'requirements': [state['requirements'][0], {key: value for key, value in state['requirements'][1].items() if key != 'semantic_fingerprint'}],
+    }
+    with pytest.raises(AssertionError, match='semantic_fingerprint'):
+        verifier._verify_r4_contract(missing_current_fingerprint, draft, {})
+    unbound_run = {
+        **state,
+        'runs': [{key: value for key, value in state['runs'][0].items() if key != 'requirements_id'}],
+    }
+    with pytest.raises(AssertionError, match='bind an existing requirements record'):
+        verifier._verify_r4_contract(unbound_run, draft, {})
+    mismatched_run = {
+        **state,
+        'runs': [{**state['runs'][0], 'requirements_semantic_fingerprint': 'fp-stale'}],
+    }
+    with pytest.raises(AssertionError, match='semantic fingerprint'):
+        verifier._verify_r4_contract(mismatched_run, draft, {})
+    mismatched_inputs = {
+        **state,
+        'runs': [{**state['runs'][0], 'input_hashes': {'actual': 'stale-data-hash'}}],
+    }
+    with pytest.raises(AssertionError, match='inputs do not match'):
+        verifier._verify_r4_contract(mismatched_inputs, draft, {})
+    tampered_basis = {
+        **state,
+        'requirements': [
+            state['requirements'][0],
+            {**state['requirements'][1], 'question': '改成另一个问题，但保留旧指纹'},
+        ],
+    }
+    with pytest.raises(AssertionError, match='semantic_basis'):
+        verifier._verify_r4_contract(tampered_basis, draft, {})
+
+
+def test_r4_v3_allows_prior_run_only_with_semantic_reuse_proof() -> None:
+    draft = {
+        'id': 'draft1',
+        'seq': 30,
+        'requirements_id': 'req2',
+        'content_hash': 'draft-hash',
+        'run_ids': ['run1'],
+        'explanation_check': {
+            'requirements': {
+                'requirements_id': 'req2',
+                'coverage': {'status': 'pass'},
+                'provenance': {'status': 'pass'},
+            },
+        },
+    }
+    state = {
+        'requirements': [_semantic_requirement('req1', 5), _semantic_requirement('req2', 10)],
+        'datasets': [_dataset_state()],
+        'runs': [_bound_run(seq=7, requirement_id='req1')],
+        'completions': [{'draft_id': 'draft1', 'status': 'complete', 'requirements_id': 'req2', 'draft_content_hash': 'draft-hash'}],
+    }
+    verifier._verify_r4_contract(state, draft, {})
+
+    stale_binding = {
+        **state,
+        'requirements': [{**state['requirements'][0], 'semantic_fingerprint': 'fp-stale'}, state['requirements'][1]],
+    }
+    with pytest.raises(AssertionError, match='semantic fingerprint'):
+        verifier._verify_r4_contract(stale_binding, draft, {})
+    missing_basis = {
+        **state,
+        'requirements': [
+            {key: value for key, value in state['requirements'][0].items() if key != 'semantic_basis'},
+            state['requirements'][1],
+        ],
+    }
+    with pytest.raises(AssertionError, match='semantic_basis'):
+        verifier._verify_r4_contract(missing_basis, draft, {})
+
+
+def test_r4_v3_accepts_real_finance_store_equivalent_requirement_reuse(tmp_path: Path) -> None:
+    from foundry.finance_completion import record_completion
+    from foundry.finance_explanations import claims_for_facts
+    from foundry.finance_requirements import check_requirements
+
+    service, context = _r4_management_service(tmp_path)
+    original = service.analysis_requirements_save({
+        'context_id': context['id'],
+        'question': '解释成本率',
+        'items': [{'id': 'margin', 'metric': 'variance_ratio', 'requires_drilldown': False}],
+    })
+    run = service.run_metric({
+        'context_id': context['id'],
+        'metric': {
+            'kind': 'ratio',
+            'numerator_accounts': ['cost'],
+            'denominator_accounts': ['revenue'],
+            'filters': {'scenario': 'actual'},
+        },
+    })
+    revised = service.analysis_requirements_save({
+        'context_id': context['id'],
+        'parent_id': original['id'],
+        'question': '解释成本率',
+        'items': [{'id': 'margin', 'metric': 'ratio', 'requires_drilldown': False}],
+    })
+    prepared = service.prepare_explanation({'run_ids': [run['id']]})
+    ratio = next(fact for fact in prepared['facts'] if fact['column'] == 'ratio')
+    requirement_quality = check_requirements(service.analysis, {
+        'requirements_id': revised['id'],
+        'run_ids': [run['id']],
+        'claims': claims_for_facts(prepared['facts'], [ratio['id']]),
+    })
+    quality = {
+        'status': 'pass',
+        'issues': [],
+        'checks': {'numbers': {'status': 'pass'}},
+        'requirements': requirement_quality,
+    }
+    draft = _r4_contract_draft(service, revised, run, quality)
+    completion = record_completion(service.analysis, draft, quality)
+
+    assert original['semantic_fingerprint'] == revised['semantic_fingerprint']
+    assert completion['status'] == 'complete'
+    assert completion['reused_run_ids'] == [run['id']]
+    verifier._verify_r4_contract(service.analysis.state(), draft, {})
+
+
+def test_r4_v3_accepts_real_finance_store_amount_only_input_gap(tmp_path: Path) -> None:
+    service = FinanceStore(TaskStore(tmp_path / 'r4-gap').create(title='r4 verifier amount only gap'))
+    path = tmp_path / 'amount-only.json'
+    path.write_text(
+        json.dumps(
+            [
+                {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual', 'product': 'A', 'amount': '120'},
+                {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '元', 'scenario': 'budget', 'product': 'A', 'amount': '100'},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding='utf-8',
+    )
+    dataset = service.analysis.add_dataset(path, name='amount-only')
+    context = service.save_context({
+        'bindings': {'pq': dataset['id']},
+        'scopes': {
+            'pq': {
+                'ledger': 'L1',
+                'organization': 'O1',
+                'period': '2026-09',
+                'currency': 'CNY',
+                'unit': '元',
+            },
+        },
+    })
+    requirement = service.analysis_requirements_save({
+        'context_id': context['id'],
+        'question': '解释商品A收入量价变化',
+        'items': [{'id': 'revenue_pq', 'metric': 'price_quantity', 'dimensions': {'product': 'A'}, 'requires_drilldown': False}],
+    })
+    run = service.explain_variance({
+        'context_id': context['id'],
+        'kind': 'price_quantity',
+        'dimensions': ['product'],
+        'actual_filters': {'scenario': 'actual'},
+        'baseline_filters': {'scenario': 'budget'},
+    })
+    draft = service.save_explanation_draft({
+        'run_ids': [run['id']],
+        'body': '量价分解缺少数量和单价字段，待补资料后重新计算。',
+    })
+
+    assert requirement['support']['items'][0]['gap_code'] == 'native_price_quantity_fields_unavailable'
+    assert run['result']['rows'] == []
+    assert draft['completion']['status'] == 'awaiting_input'
+    verifier._verify_r4_contract(service.analysis.state(), draft, {}, allow_missing_data=True)
+
+
+def test_r4_score_case_accepts_verified_awaiting_input_without_calc_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    service = FinanceStore(TaskStore(tmp_path / 'r4-score-gap').create(title='r4 score gap'))
+    path = tmp_path / 'amount-only-score.json'
+    path.write_text(
+        json.dumps(
+            [
+                {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual', 'product': 'A', 'amount': '120'},
+                {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '元', 'scenario': 'budget', 'product': 'A', 'amount': '100'},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding='utf-8',
+    )
+    dataset = service.analysis.add_dataset(path, name='amount-only-score')
+    context = service.save_context({
+        'bindings': {'pq': dataset['id']},
+        'scopes': {
+            'pq': {
+                'ledger': 'L1',
+                'organization': 'O1',
+                'period': '2026-09',
+                'currency': 'CNY',
+                'unit': '元',
+            },
+        },
+    })
+    service.analysis_requirements_save({
+        'context_id': context['id'],
+        'question': '资料只有金额，请尝试商品A收入量价拆分；无法拆分时保留诊断和可用来源。',
+        'items': [{'id': 'revenue_pq', 'metric': 'price_quantity', 'dimensions': {'product': 'A'}, 'requires_drilldown': False}],
+    })
+    draft = service.save_explanation_draft({
+        'run_ids': [],
+        'body': '量价分解缺少数量和单价字段，待补资料后重新计算。',
+    })
+
+    def fake_call(_foundry: Path, _var: Path, command: str, **_kwargs: object) -> dict[str, object]:
+        if command == 'analysis-state':
+            return service.analysis.state()
+        raise AssertionError(f'unexpected command: {command}')
+
+    monkeypatch.setattr(verifier, '_call', fake_call)
+    case = {
+        'id': 'F12_entry',
+        'taskId': service.task.id,
+        'sessionId': 'session-entry',
+        'inputSha256': 'input-sha',
+        'question': '资料只有金额，请尝试商品A收入量价拆分；无法拆分时保留诊断和可用来源。',
+        'expected': {'type': 'price_quantity_missing', 'diagnostic_code': 'price_quantity_missing'},
+    }
+    observed = {
+        'completed': True,
+        'duration_ms': 1000,
+        'catalog': [{'name': 'financial-statements'}, {'name': 'variance-analysis'}],
+        'calls': [{'name': 'skill', 'isError': False}, {'name': 'save_explanation_draft', 'isError': False}],
+        'final_draft': {'id': draft['id']},
+        'messages': [],
+    }
+
+    scored = verifier._score_case(Path('foundry'), tmp_path, case, observed, r4=True)
+    assert scored['status'] == 'passed'
+    assert scored['run_ids'] == []
+    assert scored['tools_used'] == ['save_explanation_draft', 'skill']
+    with pytest.raises(AssertionError, match='missing expected price_quantity_missing diagnostic'):
+        verifier._score_case(Path('foundry'), tmp_path, case, observed, r4=False)
 
 
 def test_r4_evidence_checks_can_replace_direct_drilldown_only_when_bound_and_paginated() -> None:

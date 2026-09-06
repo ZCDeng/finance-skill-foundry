@@ -5,7 +5,7 @@ from foundry.analysis import _hash, _new
 from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
-COMPLETION_POLICY_VERSION = 3
+COMPLETION_POLICY_VERSION = 4
 
 
 def record_completion(analysis, draft, quality):
@@ -17,8 +17,17 @@ def record_completion(analysis, draft, quality):
     runs = {run_id: analysis.get_run(run_id) for run_id in draft.get('run_ids', [])}
     run_hashes = {run_id: run.get('output_hash') for run_id, run in runs.items()}
     requirement = analysis._get('requirements', requirement_id) if requirement_id else None
-    stale_runs = [run_id for run_id, run in runs.items()
-                  if requirement and run.get('seq', -1) <= requirement['seq']]
+    from foundry.finance_requirement_semantics import (
+        run_has_equivalent_requirements, verified_requirement_fingerprint,
+    )
+    semantic_fingerprint = verified_requirement_fingerprint(analysis, requirement)
+    candidates = {run_id: run for run_id, run in runs.items()
+                  if requirement and (run.get('seq', -1) <= requirement['seq']
+                      or run.get('requirements_id') != requirement_id
+                      or (semantic_fingerprint and run.get('requirements_semantic_fingerprint') != semantic_fingerprint))}
+    reused_runs = [run_id for run_id, run in candidates.items()
+                   if run_has_equivalent_requirements(analysis, run, requirement)]
+    stale_runs = [run_id for run_id in candidates if run_id not in reused_runs]
     issues = list(quality.get('issues', []))
     remaining = {item['id'] for item in requirements.get('items', []) if item['status'] != 'answered'}
     gaps = {item['id']: item['input_gap'] for item in requirements.get('items', []) if item.get('input_gap')}
@@ -34,10 +43,11 @@ def record_completion(analysis, draft, quality):
                        'message': gaps[key]['next_action']} for key in sorted(remaining))
     if stale_runs:
         issues.append({'code': 'requirements_run_outdated', 'run_ids': sorted(stale_runs),
-                       'message': '这些运行早于本次要求版本。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
+                       'message': '这些运行未绑定当前要求，且无法证明语义兼容。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
     # A new run or draft must not reset the repair budget for the same question.
     # A deliberate requirements revision starts a new completion scope.
-    chain_key = _hash({'requirements_id': requirement_id} if requirement_id else
+    chain_key = _hash({'requirements_semantic_fingerprint': semantic_fingerprint} if semantic_fingerprint else
+                      {'requirements_id': requirement_id} if requirement_id else
                       {'unscoped_run_hashes': sorted(run_hashes.values(), key=str)})
     issue_fingerprint = _hash(issues)
     input_key = _hash({'chain_key': chain_key, 'draft_id': draft['id'],
@@ -67,7 +77,8 @@ def record_completion(analysis, draft, quality):
             actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})
         record = _new(analysis.task, draft_id=draft['id'], draft_content_hash=draft['content_hash'],
                       completion_policy_version=COMPLETION_POLICY_VERSION,
-                      requirements_id=requirement_id, run_hashes=run_hashes, chain_key=chain_key,
+                      requirements_id=requirement_id, requirements_semantic_fingerprint=semantic_fingerprint,
+                      reused_run_ids=sorted(reused_runs), run_hashes=run_hashes, chain_key=chain_key,
                       input_key=input_key, issue_fingerprint=issue_fingerprint,
                       status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
                       response_status='ended_with_limitations' if awaiting_input else 'complete' if complete else 'needs_review',

@@ -112,3 +112,14 @@
 - 剩余：评分合同兼容及语义等价运行复用、安装新包与实际窗口复测、完整30+8+20模型观察和经理校准。当前安装版仍是此前已验证控件候选，不能把本轮源码当作已安装能力。
 
 - 稳定代码最终完整回归：921 passed / 2 skipped，真实DSH已启用，日志result-set-input-gap-final-full-pytest.log。Ruff、App生产构建、资源镜像与diff检查通过；不代表模型质量或新包安装验收完成。
+
+## 2026-09-07：语义复用、评分 v3 与安装版验收
+
+- completion policy v4：计算开始时绑定要求版本与服务端语义指纹；白名单别名和标签编辑可以复用，期间、范围、单位、方法、来源与删除项变化不能冒用。旧运行无证明时不复用，等价修订沿用同一修复预算。SQL、Python和原生计算统一记录；受限会话不会读取越权要求来源。
+- 评分合同独立升级至 r4-requirements-evidence-completion-v3，重新核对要求语义、dataset metadata 和运行输入。只有完整核验的资料缺口答复可以不执行计算；普通问题仍需计算和溯源。历史 v2 观察及成绩不覆盖。新增真实 FinanceStore 端到端评分测试。
+- 完整 pytest 941 passed / 2 skipped（真实 DSH 启用）；评分最终收紧后再次定向 50 passed（评分36 + 语义14）。Ruff 与 diff 检查通过。UI 69项及类型检查通过。
+- 主表计算列修正为“科目增减”和“差异贡献”；成本增加10对应利润贡献-10，原始字段仍可展开。
+- 新构建已安装 /Applications/FA Foundry.app，整体包21444文件内容一致；整体树 e3d9e5d0abfa38be373fe1a0e0aa9a7bbfd0dc4a812b70aa426b2f981726dff1，asar 0ecc9c633f07fba3e6c034aca193a6456c121682ac8e31014929dbeefad90e47，后端源指纹17761fba255f54bc256dfaf20bbacbcd0daf7dec7b5815f4fa237392f33f4447。
+- 安装版真实窗口22/22通过，视觉94/pass：中文日期、搜索多选、light/dark、1080窄屏、125%缩放。回执与截图保存于 build/verification/r4-integration/semantic-reuse-v3-installed-ui。核验器改为对照后端实际引用数，保留旧20条硬编码断言失败记录。
+- 新包 app/release/FA-Foundry-0.1.5-macOS-arm64-r4-v3-candidate-17761fba-0ecc9c63.zip，CRC通过，SHA256 3231d13154ec99f49d69b63038a7d92c2e56eeda3b91ec5eccaa38514cbfea04。完整构建身份见 semantic-reuse-v3-release-receipt.json；仍为候选，不能称模型质量验收完成。
+- 待验收：在同一冻结构建上重新完整运行30主集、8留出和20盲测；经理人工校准；系统输入法候选窗和屏幕阅读器。真实ERP继续保留无测试账套限制。

@@ -334,6 +334,8 @@ class FinanceStore:
         return self.run_revision(revision)
 
     def run_revision(self, revision):
+        from foundry.finance_requirement_semantics import capture_requirements
+        requirements_snapshot = capture_requirements(self.analysis, self._authorize)
         self._authorize(revision["bindings"])
         context = self._read("contexts", revision["finance_context_id"])
         if context["bindings"] != revision["bindings"]:
@@ -471,6 +473,7 @@ class FinanceStore:
         record = _new(
             self.task,
             engine="finance",
+            **requirements_snapshot,
             analysis_id=revision["id"],
             finance_context_id=context["id"],
             session_id=self.session_id,

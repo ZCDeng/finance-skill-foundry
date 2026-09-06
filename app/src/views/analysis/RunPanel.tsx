@@ -105,7 +105,7 @@ type FinanceVarianceResult = NonNullable<AnalysisRun['result']> & {
   comparison?: { actual_scenario?: unknown; baseline_scenario?: unknown } | Record<string, unknown>;
 };
 
-const financeVarianceReservedColumns = new Set(['metric', 'actual', 'baseline', 'contribution', 'ratio', 'ratio_status', 'favorability', 'comparison_status']);
+const financeVarianceReservedColumns = new Set(['metric', 'actual', 'baseline', 'amount_change', 'profit_impact', 'contribution', 'ratio', 'ratio_status', 'favorability', 'comparison_status']);
 
 function financeVarianceResult(run: AnalysisRun): FinanceVarianceResult | undefined {
   return run.result as FinanceVarianceResult | undefined;
@@ -168,11 +168,13 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
 function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
   const dimensions = financeVarianceDimensionColumns(run);
   const copy = financeVarianceCopy(run);
+  const hasAmountChange = new Set(run.result?.columns.map((column) => column.name) ?? []).has('amount_change');
   const rows = (run.result?.rows ?? []).map((row) => ({
     ...Object.fromEntries(dimensions.map((column) => [financeScopeLabels[column.name] ?? column.name, row[column.name]])),
     科目: financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric),
     [copy.actualLabel]: row.actual,
     [copy.baselineLabel]: row.baseline,
+    ...(hasAmountChange ? { 科目增减: row.amount_change } : {}),
     差异贡献: row.contribution,
     差异率: formatVarianceRatio(row.ratio),
   }));
@@ -181,7 +183,7 @@ function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
     <p className="analysis-note">范围：{financeVarianceScope(run)}</p>
     <Table key={`${run.id}:finance-variance`} columns={[
       ...dimensionHeaders, { name: '科目', type: 'VARCHAR' }, { name: copy.actualLabel, type: 'DECIMAL' }, { name: copy.baselineLabel, type: 'DECIMAL' },
-      { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
+      ...(hasAmountChange ? [{ name: '科目增减', type: 'DECIMAL' }] : []), { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
     ]} rows={rows} caption={copy.caption} />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
     <details className="analysis-details"><summary>原始结果字段 · {run.result!.columns.length} 列</summary>

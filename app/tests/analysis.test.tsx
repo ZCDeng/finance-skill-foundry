@@ -784,14 +784,15 @@ describe('analysis workbench', () => {
     const bridgeResult = { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual', baseline_scenario: 'budget' }, columns: [
         { name: 'ledger', type: 'VARCHAR' }, { name: 'organization', type: 'VARCHAR' }, { name: 'currency', type: 'VARCHAR' },
         { name: 'unit', type: 'VARCHAR' }, { name: 'period', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' },
-        { name: 'actual', type: 'DECIMAL' }, { name: 'baseline', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' },
-        { name: 'ratio', type: 'DECIMAL' }, { name: 'ratio_status', type: 'VARCHAR' }, { name: 'favorability', type: 'VARCHAR' },
+        { name: 'actual', type: 'DECIMAL' }, { name: 'baseline', type: 'DECIMAL' }, { name: 'amount_change', type: 'DECIMAL' },
+        { name: 'profit_impact', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' }, { name: 'ratio', type: 'DECIMAL' },
+        { name: 'ratio_status', type: 'VARCHAR' }, { name: 'favorability', type: 'VARCHAR' },
         { name: 'comparison_status', type: 'VARCHAR' },
       ], rows: [
-        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'revenue', actual: '120', baseline: '100', contribution: '20', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete' },
-        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'cost', actual: '70', baseline: '60', contribution: '-10', ratio: '0.166666666666666666666666', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
-        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'expense', actual: '20', baseline: '15', contribution: '-5', ratio: '0.333333333333333333333333', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
-        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'profit', actual: '30', baseline: '25', contribution: '5', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete', source_rows: [{ dataset_id: source.id, row_index: 1 }] },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'revenue', actual: '120', baseline: '100', amount_change: '20', profit_impact: '20', contribution: '20', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'cost', actual: '70', baseline: '60', amount_change: '10', profit_impact: '-10', contribution: '-10', ratio: '0.166666666666666666666666', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'expense', actual: '20', baseline: '15', amount_change: '5', profit_impact: '-5', contribution: '-5', ratio: '0.333333333333333333333333', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'profit', actual: '30', baseline: '25', amount_change: '5', profit_impact: '5', contribution: '5', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete', source_rows: [{ dataset_id: source.id, row_index: 1 }] },
       ], row_count: 4, truncated: false } as AnalysisRun['result'] & { method: string };
     const bridgeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: '4'.repeat(32), completeness: 'not_reconciled', result: bridgeResult };
     mountBridge({ analysisState: async () => success({ ...initial, runs: [bridgeRun] }),
@@ -799,14 +800,22 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} embedded section="results" />);
     const bridge = await screen.findByRole('region', { name: '预算差异桥' });
     expect(within(bridge).getByRole('columnheader', { name: '科目' })).toBeTruthy();
+    expect(within(bridge).getByRole('columnheader', { name: '科目增减' })).toBeTruthy();
     expect(within(bridge).getByRole('columnheader', { name: '差异贡献' })).toBeTruthy();
+    expect(within(bridge).queryByRole('columnheader', { name: 'amount_change' })).toBeNull();
+    expect(within(bridge).queryByRole('columnheader', { name: 'profit_impact' })).toBeNull();
     expect(screen.getByText('范围：账簿 L1 · 组织 华东 · 币种 CNY · 单位 万元 · 期间 2026-09')).toBeTruthy();
     expect(within(bridge).getByRole('cell', { name: '利润' })).toBeTruthy();
     expect(within(bridge).getByRole('cell', { name: '33.33%' })).toBeTruthy();
-    const raw = screen.getByText('原始结果字段 · 13 列').closest('details') as HTMLDetailsElement;
+    const costRow = within(bridge).getAllByRole('row').find((rowElement) => (rowElement.textContent ?? '').includes('成本'));
+    expect(costRow?.textContent).toContain('10');
+    expect(costRow?.textContent).toContain('-10');
+    const raw = screen.getByText('原始结果字段 · 15 列').closest('details') as HTMLDetailsElement;
     expect(raw.open).toBe(false);
-    fireEvent.click(screen.getByText('原始结果字段 · 13 列'));
-    expect(await screen.findByRole('region', { name: '原始计算结果' })).toBeTruthy();
+    fireEvent.click(screen.getByText('原始结果字段 · 15 列'));
+    const rawTable = await screen.findByRole('region', { name: '原始计算结果' });
+    expect(within(rawTable).getByRole('columnheader', { name: 'amount_change' })).toBeTruthy();
+    expect(within(rawTable).getByRole('columnheader', { name: 'profit_impact' })).toBeTruthy();
   });
 
   it('keeps varying finance dimensions as columns and preserves row order in the manager bridge view', async () => {

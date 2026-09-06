@@ -420,6 +420,8 @@ class AnalysisStore:
         session_id: str | None = None,
         context_revision: int | None = None,
     ) -> dict:
+        from foundry.finance_requirement_semantics import capture_requirements
+        requirements_snapshot = capture_requirements(self)
         analysis = self.get_analysis(analysis_id)
         if analysis.get("engine") == "finance":
             from foundry.finance_service import FinanceStore
@@ -487,6 +489,7 @@ class AnalysisStore:
         record = _new(
             self.task,
             analysis_id=analysis_id,
+            **requirements_snapshot,
             session_id=session_id,
             context_revision=context_revision,
             sql=analysis["sql"],
@@ -956,6 +959,8 @@ class AnalysisStore:
         ownership/hashes again and never silently rebinds inputs during a run.
         """
         from foundry.runner import run_script
+        from foundry.finance_requirement_semantics import capture_requirements
+        requirements_snapshot = capture_requirements(self)
 
         if not isinstance(spec, dict):
             raise FoundryError("script spec must be an object")
@@ -1068,6 +1073,7 @@ class AnalysisStore:
         record = _new(
             self.task,
             analysis_id=revision["id"],
+            **requirements_snapshot,
             session_id=session_id,
             context_revision=context_revision,
             engine=language,

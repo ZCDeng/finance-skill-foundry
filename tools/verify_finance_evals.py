@@ -32,8 +32,17 @@ DEFAULT_FOUNDRY = REPO / ".venv/bin/foundry"
 DEFAULT_PLUGIN = REPO / "dsh-plugin"
 DEFAULT_CREDENTIALS_HOME = Path("/Users/zcdeng/Library/Application Support/FA Foundry/harness")
 SCORING_CONTRACT_R3 = "r3-final-draft-text-bound-v3"
-SCORING_CONTRACT_R4 = "r4-requirements-evidence-completion-v2"
+SCORING_CONTRACT_R4_V2 = "r4-requirements-evidence-completion-v2"
+SCORING_CONTRACT_R4 = "r4-requirements-evidence-completion-v3"
 CALC_TOOLS = {"run_metric", "explain_variance", "finance_scenario_run", "analysis-run"}
+SEMANTIC_VERSION = 1
+METRIC_ALIASES = {
+    "variance_ratio": "ratio",
+    "revenue=price×quantity": "revenue",
+    "revenue=price*quantity": "revenue",
+}
+SUPPORTED_R4_INPUT_GAP_CODES = {"native_price_quantity_fields_unavailable"}
+ALLOWED_R4_AWAITING_INPUT_ISSUES = {"requirement_unanswered", "requested_source_missing", "verified_input_gap"}
 FORBIDDEN_CAUSAL = re.compile(
     r"(?:导致|归因于|原因是|主要因为|直接造成|caused by|because of|due to|driven by)",
     re.I,
@@ -776,15 +785,23 @@ def _verify_r4_contract(
     if not requirements:
         raise AssertionError("r4 requires persisted analysis requirements before scoring")
     current = requirements[-1]
+    requirements_by_id = {row.get("id"): row for row in requirements if row.get("id")}
     if draft.get("requirements_id") != current.get("id"):
         raise AssertionError("r4 final draft is not bound to the latest requirements version")
     if not isinstance(current.get("seq"), int) or not isinstance(draft.get("seq"), int) or current["seq"] >= draft["seq"]:
         raise AssertionError("r4 requirements must be saved before the final draft")
-    runs = {run["id"]: run for run in state.get("runs", []) if isinstance(run, dict)}
+    runs = {run["id"]: run for run in state.get("runs", []) if isinstance(run, dict) and run.get("id")}
+    _verify_r4_semantic_bindings(state, current, requirements_by_id, runs, draft.get("run_ids", []))
     for run_id in draft.get("run_ids", []):
         run = runs.get(run_id)
-        if run and isinstance(run.get("seq"), int) and current["seq"] >= run["seq"]:
-            raise AssertionError("r4 requirements must be saved before selected final runs")
+        if not run:
+            raise AssertionError("r4 final draft references a missing selected run")
+        if (
+            isinstance(run.get("seq"), int)
+            and current["seq"] >= run["seq"]
+            and not _r4_run_has_semantic_reuse_proof(current, requirements_by_id, run, state)
+        ):
+            raise AssertionError("r4 requirements must be saved before selected final runs unless semantic reuse is proven")
     quality = draft.get("explanation_check", draft.get("quality", {}))
     requirement_quality = quality.get("requirements", {}) if isinstance(quality, dict) else {}
     if requirement_quality.get("requirements_id") != current.get("id"):
@@ -798,16 +815,302 @@ def _verify_r4_contract(
     if not completions:
         raise AssertionError("r4 requires a persistent completion receipt")
     receipt = completions[-1]
-    expected_status = "needs_review" if allow_missing_data else "complete"
+    expected_status = "awaiting_input" if allow_missing_data else "complete"
     if receipt.get("status") != expected_status or receipt.get("requirements_id") != current.get("id"):
         raise AssertionError(f"r4 completion receipt is not {expected_status} for the latest requirements")
     if receipt.get("draft_content_hash") != draft.get("content_hash"):
         raise AssertionError("r4 completion receipt is not bound to the final draft content hash")
     if allow_missing_data:
-        if not draft.get("limitations"):
-            raise AssertionError("r4 missing-data cases require explicit draft limitations")
-        if receipt.get("repair_allowed") is not False:
-            raise AssertionError("r4 missing-data cases must stop instead of requesting more blind repairs")
+        _verify_r4_awaiting_input_gap(state, current, draft, quality, requirement_quality, receipt)
+
+
+def _verify_r4_semantic_bindings(
+    state: dict[str, Any],
+    current: dict[str, Any],
+    requirements_by_id: dict[Any, dict[str, Any]],
+    runs: dict[Any, dict[str, Any]],
+    run_ids: list[Any],
+) -> None:
+    datasets = _datasets_by_id(state)
+    current_fingerprint = current.get("semantic_fingerprint")
+    if not isinstance(current_fingerprint, str) or not current_fingerprint:
+        raise AssertionError("r4/v3 requires current requirements semantic_fingerprint")
+    _verify_r4_requirement_semantics(current, "current requirements", datasets)
+    if _r4_requirement_fingerprint(current, datasets) != current_fingerprint:
+        raise AssertionError("r4/v3 current requirements semantic_fingerprint does not match semantic_basis")
+    if not _r4_requirement_sources(current):
+        raise AssertionError("r4/v3 requires current requirements semantic_basis")
+    for run_id in run_ids:
+        run = runs.get(run_id)
+        if not run:
+            raise AssertionError("r4 final draft references a missing selected run")
+        if run.get("requirements_semantic_fingerprint") != current_fingerprint:
+            raise AssertionError("r4 selected run semantic fingerprint does not match current requirements")
+        bound_requirement = requirements_by_id.get(run.get("requirements_id"))
+        if not bound_requirement:
+            raise AssertionError("r4 selected run does not bind an existing requirements record")
+        _verify_r4_requirement_semantics(bound_requirement, "selected run requirements binding", datasets)
+        if bound_requirement.get("semantic_fingerprint") != current_fingerprint:
+            raise AssertionError("r4 selected run requirements binding does not match current semantic fingerprint")
+        if _r4_requirement_fingerprint(bound_requirement, datasets) != current_fingerprint:
+            raise AssertionError("r4 selected run requirements binding semantic_basis does not match fingerprint")
+        if isinstance(bound_requirement.get("seq"), int) and isinstance(run.get("seq"), int) and bound_requirement["seq"] >= run["seq"]:
+            raise AssertionError("r4 selected run requirements binding was not saved before the run")
+        if not _r4_run_inputs_match_requirement(run, bound_requirement):
+            raise AssertionError("r4 selected run inputs do not match its bound requirements")
+
+
+def _r4_run_has_semantic_reuse_proof(
+    current: dict[str, Any], requirements_by_id: dict[Any, dict[str, Any]], run: dict[str, Any], state: dict[str, Any]
+) -> bool:
+    current_fingerprint = current.get("semantic_fingerprint")
+    bound_requirement = requirements_by_id.get(run.get("requirements_id"))
+    if not isinstance(bound_requirement, dict):
+        return False
+    datasets = _datasets_by_id(state)
+    try:
+        _verify_r4_requirement_semantics(current, "current requirements", datasets)
+        _verify_r4_requirement_semantics(bound_requirement, "selected run requirements binding", datasets)
+    except AssertionError:
+        return False
+    if not (
+        isinstance(bound_requirement.get("seq"), int)
+        and isinstance(run.get("seq"), int)
+        and bound_requirement["seq"] < run["seq"]
+    ):
+        return False
+    return (
+        isinstance(current_fingerprint, str)
+        and bool(current_fingerprint)
+        and run.get("requirements_semantic_fingerprint") == current_fingerprint
+        and bound_requirement.get("semantic_fingerprint") == current_fingerprint
+        and _r4_requirement_fingerprint(current, datasets) == current_fingerprint
+        and _r4_requirement_fingerprint(bound_requirement, datasets) == current_fingerprint
+        and _r4_run_inputs_match_requirement(run, bound_requirement)
+    )
+
+
+def _verify_r4_requirement_semantics(record: dict[str, Any], label: str, datasets: dict[str, dict[str, Any]]) -> None:
+    if record.get("semantic_version") != SEMANTIC_VERSION:
+        raise AssertionError(f"r4/v3 {label} must use semantic_version 1")
+    if not isinstance(record.get("semantic_basis"), dict) or not record["semantic_basis"]:
+        raise AssertionError(f"r4/v3 {label} lacks semantic_basis")
+    expected = _r4_canonical_requirement_basis(record, datasets)
+    if record["semantic_basis"] != expected:
+        raise AssertionError(f"r4/v3 {label} semantic_basis does not match persisted requirement fields")
+
+
+def _r4_requirement_fingerprint(record: dict[str, Any], datasets: dict[str, dict[str, Any]]) -> str | None:
+    try:
+        basis = _r4_canonical_requirement_basis(record, datasets)
+    except AssertionError:
+        return None
+    return _sha(basis)
+
+
+def _r4_canonical_requirement_basis(record: dict[str, Any], datasets: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    bindings = record.get("bindings")
+    if not isinstance(bindings, dict) or not bindings:
+        raise AssertionError("r4/v3 requirements must bind source snapshots")
+    sources = {}
+    for alias, dataset_id in bindings.items():
+        if not isinstance(alias, str) or not isinstance(dataset_id, str):
+            raise AssertionError("r4/v3 requirements bindings must map aliases to dataset ids")
+        dataset = datasets.get(dataset_id)
+        if not dataset:
+            raise AssertionError("r4/v3 requirements source references a missing dataset snapshot")
+        source_hash = dataset.get("source_hash")
+        data_hash = dataset.get("data_hash")
+        if not isinstance(source_hash, str) or not source_hash or not isinstance(data_hash, str) or not data_hash:
+            raise AssertionError("r4/v3 requirements source hashes must match dataset metadata")
+        sources[alias] = {"dataset_id": dataset_id, "source_hash": source_hash, "data_hash": data_hash}
+    items = []
+    for item in record.get("items", []):
+        if not isinstance(item, dict):
+            raise AssertionError("r4/v3 requirements items must be objects")
+        periods = item.get("periods", [])
+        if periods in (None, ""):
+            periods = []
+        if not isinstance(periods, list):
+            raise AssertionError("r4/v3 requirements item periods must be arrays")
+        items.append({
+            "id": item["id"],
+            "metric": METRIC_ALIASES.get(item["metric"], item["metric"]),
+            "dimensions": item.get("dimensions", {}),
+            "periods": sorted(set(periods)),
+            "requires_drilldown": item.get("requires_drilldown", False),
+        })
+    return {
+        "version": SEMANTIC_VERSION,
+        "question": record.get("question"),
+        "context_id": record.get("context_id"),
+        "scope": record.get("scope", {}),
+        "sources": sources,
+        "removed_item_ids": sorted(record.get("removed_item_ids", [])),
+        "items": sorted(items, key=lambda item: item["id"]),
+    }
+
+
+def _r4_requirement_sources(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    basis = record.get("semantic_basis")
+    sources = basis.get("sources") if isinstance(basis, dict) else None
+    return {
+        alias: source
+        for alias, source in (sources or {}).items()
+        if isinstance(alias, str) and isinstance(source, dict)
+    }
+
+
+def _r4_run_inputs_match_requirement(run: dict[str, Any], requirement: dict[str, Any]) -> bool:
+    sources = _r4_requirement_sources(requirement)
+    bindings = run.get("bindings")
+    input_hashes = run.get("input_hashes")
+    source_hashes = run.get("source_hashes")
+    requirement_bindings = requirement.get("bindings")
+    if not sources or not isinstance(bindings, dict) or not isinstance(requirement_bindings, dict):
+        return False
+    if bindings != requirement_bindings:
+        return False
+    if not isinstance(input_hashes, dict) or not isinstance(source_hashes, dict):
+        return False
+    for alias, source in sources.items():
+        if (
+            bindings.get(alias) != source.get("dataset_id")
+            or input_hashes.get(alias) != source.get("data_hash")
+            or source_hashes.get(alias) != source.get("source_hash")
+        ):
+            return False
+    return True
+
+
+def _verify_r4_awaiting_input_gap(
+    state: dict[str, Any],
+    current: dict[str, Any],
+    draft: dict[str, Any],
+    quality: dict[str, Any],
+    requirement_quality: dict[str, Any],
+    receipt: dict[str, Any],
+) -> None:
+    if quality.get("checks", {}).get("numbers", {}).get("status") != "pass":
+        raise AssertionError("r4 awaiting_input requires numeric checks to pass")
+    quality_items = [item for item in requirement_quality.get("items", []) if isinstance(item, dict)]
+    quality_item_ids = {item.get("id") for item in quality_items}
+    current_item_ids = {item.get("id") for item in current.get("items", []) if isinstance(item, dict)}
+    if not current_item_ids <= quality_item_ids:
+        raise AssertionError("r4 awaiting_input requirement quality must cover all current items")
+    remaining = [item for item in quality_items if item.get("status") != "answered"]
+    if not remaining:
+        raise AssertionError("r4 awaiting_input requires remaining unmet requirements")
+    if any(item.get("status") != "missing_data" or not isinstance(item.get("input_gap"), dict) for item in remaining):
+        raise AssertionError("r4 awaiting_input remaining requirements must be verified input gaps")
+    remaining_ids = {item.get("id") for item in remaining}
+    unresolved = [
+        issue for issue in quality.get("issues", [])
+        if isinstance(issue, dict)
+        and (issue.get("code") not in ALLOWED_R4_AWAITING_INPUT_ISSUES or issue.get("requirement_item_id") not in remaining_ids)
+    ]
+    if unresolved:
+        raise AssertionError("r4 awaiting_input has unresolved non-gap issues")
+    support_items = {
+        item.get("requirement_item_id"): item
+        for item in current.get("support", {}).get("items", [])
+        if isinstance(item, dict)
+    }
+    datasets = _datasets_by_id(state)
+    for item in remaining:
+        gap = item["input_gap"]
+        support = support_items.get(item.get("id"))
+        if not isinstance(support, dict) or support.get("status") != "requires_input":
+            raise AssertionError("r4 awaiting_input gap must be verified by requirement support snapshot")
+        _verify_r4_input_gap_snapshot(gap, support, datasets)
+    action_ids = {
+        action.get("requirement_item_id")
+        for action in receipt.get("actions", [])
+        if isinstance(action, dict) and action.get("code") == "verified_input_gap"
+    }
+    if not remaining_ids <= action_ids:
+        raise AssertionError("r4 awaiting_input completion receipt must name every verified input gap")
+    if receipt.get("response_status") != "ended_with_limitations":
+        raise AssertionError("r4 awaiting_input must end with limitations")
+    if receipt.get("repair_allowed") is not False or receipt.get("stop_reason") != "verified_input_gap":
+        raise AssertionError("r4 awaiting_input must stop instead of requesting more blind repairs")
+    if receipt.get("original_requirements_completed") is not False:
+        raise AssertionError("r4 awaiting_input must preserve original requirements as incomplete")
+    if not _draft_has_explicit_limitations(draft):
+        raise AssertionError("r4 awaiting_input cases require explicit draft limitations")
+
+
+def _verify_r4_input_gap_snapshot(
+    gap: dict[str, Any], support: dict[str, Any], datasets: dict[str, dict[str, Any]]
+) -> None:
+    if gap.get("gap_code") != support.get("gap_code"):
+        raise AssertionError("r4 awaiting_input gap code does not match support snapshot")
+    if gap.get("gap_code") not in SUPPORTED_R4_INPUT_GAP_CODES:
+        raise AssertionError("r4 awaiting_input gap code is not supported by the r4 contract")
+    missing_inputs = gap.get("missing_inputs")
+    if not isinstance(missing_inputs, list) or not missing_inputs:
+        raise AssertionError("r4 awaiting_input gap must include missing input columns")
+    support_missing = support.get("missing_inputs")
+    if missing_inputs != support_missing:
+        raise AssertionError("r4 awaiting_input gap missing_inputs changed after support snapshot")
+    sources = gap.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise AssertionError("r4 awaiting_input gap must include source snapshot hashes")
+    if sources != support.get("sources"):
+        raise AssertionError("r4 awaiting_input gap sources changed after support snapshot")
+    source_ids = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            raise AssertionError("r4 awaiting_input gap sources must be objects")
+        dataset_id = source.get("dataset_id")
+        source_ids.add(dataset_id)
+        dataset = datasets.get(dataset_id)
+        if (
+            not dataset
+            or dataset.get("source_hash") != source.get("source_hash")
+            or dataset.get("data_hash") != source.get("data_hash")
+        ):
+            raise AssertionError("r4 awaiting_input gap source hash does not match bound snapshot")
+        row_count = dataset.get("row_count")
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
+            raise AssertionError("r4 awaiting_input gap source snapshot row_count is invalid")
+        schema_names = _dataset_schema_names(dataset)
+        if not schema_names:
+            raise AssertionError("r4 awaiting_input gap source schema is missing")
+        if source.get("columns") and set(source["columns"]) != schema_names:
+            raise AssertionError("r4 awaiting_input gap source columns do not match dataset schema")
+    for group in missing_inputs:
+        if not isinstance(group, dict):
+            raise AssertionError("r4 awaiting_input missing_inputs must be source column groups")
+        dataset_id = group.get("dataset_id")
+        if dataset_id not in source_ids:
+            raise AssertionError("r4 awaiting_input missing input references an unverified source")
+        columns = group.get("columns")
+        if not isinstance(columns, list) or not columns or not all(isinstance(column, str) and column for column in columns):
+            raise AssertionError("r4 awaiting_input missing input columns are invalid")
+        schema_names = _dataset_schema_names(datasets[dataset_id])
+        present = sorted(set(columns) & schema_names)
+        if present:
+            raise AssertionError(f"r4 awaiting_input missing input columns exist in dataset schema: {present}")
+
+
+def _dataset_schema_names(dataset: dict[str, Any]) -> set[str]:
+    names = set()
+    for column in dataset.get("schema", []):
+        if isinstance(column, dict) and isinstance(column.get("name"), str):
+            names.add(column["name"])
+        elif isinstance(column, str):
+            names.add(column)
+    return names
+
+
+def _draft_has_explicit_limitations(draft: dict[str, Any]) -> bool:
+    limitations = draft.get("limitations")
+    if isinstance(limitations, list) and any(str(item).strip() for item in limitations):
+        return True
+    body = draft.get("body")
+    return isinstance(body, str) and "待补资料" in body and ("缺" in body or "补" in body)
+
 
 def _verify_canonical_final_text(case: dict[str, Any], observed: dict[str, Any], state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> str:
     draft = _latest_draft(state)
@@ -959,7 +1262,16 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     drilled_runs = {_call_spec(call).get("run_id") for call in observed.get("calls", [])
                     if call.get("name") == "drilldown_fact" and not call.get("isError")}
     state["runs"] = sorted(state.get("runs", []), key=lambda run: run.get("id") in drilled_runs)
-    cells = _find_expected_cells(state, case)
+    allow_missing_data = r4 and case["expected"].get("type") == "price_quantity_missing"
+    missing_data_contract_verified = False
+    try:
+        cells = _find_expected_cells(state, case)
+    except AssertionError:
+        if not allow_missing_data:
+            raise
+        _verify_r4_contract(state, _latest_draft(state), {}, allow_missing_data=True)
+        missing_data_contract_verified = True
+        cells = {}
     calls = observed.get("calls", [])
     used = {call.get("name") for call in calls if not call.get("isError")}
     drilldowns = [call for call in calls if call.get("name") == "drilldown_fact" and not call.get("isError")]
@@ -969,7 +1281,11 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     if forbidden:
         raise AssertionError("unsupported causal certainty found in raw output")
     if not used & CALC_TOOLS:
-        raise AssertionError("no finance calculation tool was used")
+        if not allow_missing_data:
+            raise AssertionError("no finance calculation tool was used")
+        if not missing_data_contract_verified:
+            _verify_r4_contract(state, _latest_draft(state), {}, allow_missing_data=True)
+            missing_data_contract_verified = True
     if case["expected"]["type"] not in {"price_quantity_missing"}:
         if not drilldowns and not r4:
             raise AssertionError("no successful drilldown_fact call was observed")
@@ -980,12 +1296,12 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     draft_verified = _verified_draft_cells(state, cells)
     if cells and draft_verified != set(cells):
         raise AssertionError(f"draft did not verify all expected cells: {sorted(set(cells) - draft_verified)}")
-    if r4:
+    if r4 and not missing_data_contract_verified:
         _verify_r4_contract(
             state,
             _latest_draft(state),
             cells,
-            allow_missing_data=case["expected"].get("type") == "price_quantity_missing",
+            allow_missing_data=allow_missing_data,
         )
     _verify_canonical_final_text(case, observed, state, cells)
     if case["expected"].get("requires_voucher_drilldown"):

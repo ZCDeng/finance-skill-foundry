@@ -404,7 +404,7 @@ def test_completion_requests_fresh_run_after_requirements_revision(finance):
     assert stopped['status'] == 'repair_available'
     assert stopped['actions'][0]['code'] == 'requirements_run_outdated'
     assert stopped['actions'][0]['run_ids'] == [old_run['id']]
-    assert stopped['completion_policy_version'] == 3
+    assert stopped['completion_policy_version'] == 4
     assert record_completion(service.analysis, draft, quality)['id'] == stopped['id']
 
     fresh_run = service.explain_variance({'context_id': context['id']})
@@ -415,3 +415,28 @@ def test_completion_requests_fresh_run_after_requirements_revision(finance):
     assert fresh['status'] == 'complete'
     assert fresh['stop_reason'] == 'complete'
     assert not fresh['actions']
+
+
+def test_saved_draft_reuses_equivalent_requirement_run_with_actual_checks(finance):
+    service, context = finance
+    original = service.analysis_requirements_save({
+        'question': '解释收入变化', 'context_id': context['id'],
+        'items': [{'id': 'revenue', 'metric': 'revenue=price×quantity',
+                   'label': '收入', 'requires_drilldown': True}],
+    })
+    run = service.explain_variance({'context_id': context['id']})
+    current = service.analysis_requirements_save({
+        'question': original['question'], 'context_id': context['id'],
+        'parent_id': original['id'],
+        'items': [{'id': 'revenue', 'metric': 'revenue',
+                   'label': '收入', 'requires_drilldown': True}],
+    })
+    draft = service.save_explanation_draft({
+        'requirements_id': current['id'], 'run_ids': [run['id']],
+        'body': '收入增加20万元。',
+    })
+    assert draft['explanation_check']['status'] == 'pass'
+    assert draft['explanation_check']['requirements']['coverage']['status'] == 'pass'
+    assert draft['explanation_check']['requirements']['provenance']['status'] == 'pass'
+    assert draft['completion']['status'] == 'complete'
+    assert draft['completion']['reused_run_ids'] == [run['id']]

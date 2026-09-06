@@ -731,8 +731,19 @@ async function verifyUi(seed) {
   );
   const qualityText = await quality.textContent();
   const checkStatuses = await quality.getByLabel('分项核对状态').evaluate((node) => Array.from(node.querySelectorAll('div')).map((row) => row.textContent || ''));
-  check('quality_panel_shows_three_stale_check_statuses', 'real renderer exposes the three quality statuses and marks the old draft stale after requirements revision', {qualityText, checkStatuses},
-    qualityText.includes('需要复核') && qualityText.includes('已引用 20 条事实')
+  const referencedFactsFromHeader = Number((qualityText.match(/已引用\s*(\d+)\s*条事实/) || [])[1]);
+  const availableFactsFromHeader = Number((qualityText.match(/可引用事实\s*·\s*(\d+)\s*条/) || [])[1]);
+  const referencedFactsFromDetails = Number((qualityText.match(/"referenced_fact_count":\s*(\d+)/) || [])[1]);
+  const availableFactsFromDetails = Number((qualityText.match(/"available_fact_count":\s*(\d+)/) || [])[1]);
+  const expectedReferencedFacts = report.sourceReceipt?.factCount ?? 0;
+  const qualityCounts = {referencedFactsFromHeader, availableFactsFromHeader, referencedFactsFromDetails, availableFactsFromDetails, expectedReferencedFacts};
+  check('quality_panel_shows_stale_coverage_and_provenance_statuses', 'real renderer exposes number pass, coverage/provenance gaps, stale requirements, and fact counts consistent with source receipt', {qualityText, checkStatuses, qualityCounts},
+    qualityText.includes('需要复核')
+    && expectedReferencedFacts > 0
+    && referencedFactsFromHeader === expectedReferencedFacts
+    && referencedFactsFromDetails === expectedReferencedFacts
+    && availableFactsFromHeader >= referencedFactsFromHeader
+    && availableFactsFromDetails >= referencedFactsFromDetails
     && checkStatuses.some((text) => text.includes('数字与口径') && text.includes('已核对'))
     && checkStatuses.some((text) => text.includes('问题覆盖') && text.includes('仍有缺口'))
     && checkStatuses.some((text) => text.includes('来源追溯') && text.includes('仍有缺口'))

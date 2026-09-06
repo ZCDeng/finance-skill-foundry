@@ -99,7 +99,9 @@ def save_requirements(analysis, spec):
         if removed and not reason.strip():
             raise FoundryError('removing requirements requires a change reason')
         assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
-        record = _new(analysis.task, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
+        from foundry.finance_requirement_semantics import requirement_semantics
+        semantics = requirement_semantics(analysis, {**assessed_spec, 'removed_item_ids': removed})
+        record = _new(analysis.task, **semantics, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
                       items=normalized, parent_id=(parent or {}).get('id'),
                       removed_item_ids=removed, change_reason=reason,
                       support=_assess_requirement_support(analysis, assessed_spec),
