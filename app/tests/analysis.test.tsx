@@ -51,6 +51,14 @@ function chooseSearchable(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
   fireEvent.mouseDown(screen.getByRole('option', { name: option }));
 }
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise; reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 const props = { task, tasks: [task], onPick: vi.fn(), onNew: vi.fn(), onChat: vi.fn() };
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); vi.useRealTimers(); sessionStorage.clear(); });
 
@@ -700,6 +708,84 @@ describe('analysis workbench', () => {
     expect(within(evidence).getByText('参数：overhead：30.00；legacy_rate：0.8500000000000001')).toBeTruthy();
     expect(within(evidence).getByText('假设说明：估计依据：经理提供的本次估计；note：未知结构保持原文')).toBeTruthy();
     expect(within(evidence).queryByText(/万元|回款比例/)).toBeNull();
+  });
+
+  it('keeps the user on drafts when a finance run refresh finishes after they leave results', async () => {
+    const refreshGate = deferred<Answer<AnalysisState>>();
+    const analysisState = vi.fn(async () => analysisState.mock.calls.length === 1 ? success({ ...initial, datasets: [source, budgetSource] }) : refreshGate.promise);
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source, budgetSource], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-context-save') return success({ ...object, id: '4'.repeat(32), name: spec?.name, bindings: spec?.bindings, scopes: spec?.scopes, diagnostics: [] });
+      if (command === 'run-metric') return success({ ...run, engine: 'finance', finance_context_id: '4'.repeat(32) });
+      return success({});
+    });
+    mountBridge({ analysisState, financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('财务业务口径');
+    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
+    await screen.findByRole('tabpanel', { name: /文稿/ });
+    await act(async () => refreshGate.resolve(success({ ...initial, datasets: [source, budgetSource], runs: [{ ...run, engine: 'finance', finance_context_id: '4'.repeat(32) }] })));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByRole('tab', { name: /分析结果/ }).getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('keeps the user on drafts when a source refresh finishes after they leave datasets', async () => {
+    const refreshGate = deferred<Answer<AnalysisState>>();
+    let firstRead = true;
+    const analysisState = vi.fn(async () => {
+      if (firstRead) { firstRead = false; return success({ ...initial, task_id: task.id }); }
+      return refreshGate.promise;
+    });
+    const financeSourceRefresh = vi.fn(async () => success({ dataset_id: '6'.repeat(32), effective_dataset_id: '6'.repeat(32) }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState, financeSourceRefresh, financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
+    await screen.findByText('刷新财务来源');
+    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
+    await screen.findByRole('tabpanel', { name: /文稿/ });
+    await act(async () => refreshGate.resolve(success({ ...initial, datasets: [{ ...source, id: '6'.repeat(32), name: '刷新后资料' }] })));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByRole('tab', { name: /资料/ }).getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('does not let a delayed source refresh from the previous task replace the current draft', async () => {
+    const other = { ...task, id: '8'.repeat(32), title: '西南经营分析' };
+    const refreshGate = deferred<Answer<AnalysisState>>();
+    let firstRead = true;
+    const otherState = { ...initial, task_id: other.id, datasets: [{ ...source, task_id: other.id, name: '西南资料' }],
+      drafts: [{ ...draft, task_id: other.id, body: '西南原稿。' }] };
+    const analysisState = vi.fn(async (id: string) => {
+      if (id === other.id) return success(otherState);
+      if (firstRead) { firstRead = false; return success({ ...initial, task_id: task.id }); }
+      return refreshGate.promise;
+    });
+    const financeSourceRefresh = vi.fn(async () => success({ dataset_id: '6'.repeat(32), effective_dataset_id: '6'.repeat(32) }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState, financeSourceRefresh, financeCall });
+    const { rerender } = render(<Analysis {...props} embedded section="results" tasks={[task, other]} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
+    await screen.findByText('刷新财务来源');
+    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
+    rerender(<Analysis {...props} embedded section="drafts" task={other} tasks={[task, other]} />);
+    await screen.findByText('西南原稿。');
+    await act(async () => refreshGate.resolve(success({ ...initial, datasets: [{ ...source, id: '6'.repeat(32), name: '刷新后资料' }] })));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /文稿/ }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByText('西南原稿。')).toBeTruthy();
+    expect(screen.queryByText('刷新后资料')).toBeNull();
   });
 
   it('creates an isolated finance context from registered datasets and runs management P&L', async () => {

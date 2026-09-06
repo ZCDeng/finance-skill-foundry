@@ -165,3 +165,9 @@
 - 首轮修复后完整App402通过/2失败，日志quality-state-app-full.log保留：映射弹层只加载了默认项时同步查找目标option、来源select等待缓存的旧DOM值。局部改为等待真实option并重查当前节点，原调用/错误/失效断言保留；未加大超时。Analysis74项与类型检查通过，完整App重跑中。
 
 - 稳定后完整App29文件404项通过（quality-state-app-full-rerun.log）；观察器/分类器15项通过，类型/Ruff/node语法/diff通过。当前变化仅UI检查状态和验收工具，未重跑或改写旧模型成绩。
+
+
+- 4663920已推送并独立核对远端哈希；重新打包成功，asar61f2be1ab1c401f29befa5a1a7dc0e07445847d7fdec9e8c5bc48ac7594c1435，backend仍为3830d9bf源指纹。原真实workbench两次复测均在15项通过后失败：已打开文稿页却被账龄运行的晚到onRefresh强制切回results。直接源码复核确认FinanceWorkbench和SourceRefreshPanel刷新回调均在await之后无条件chooseTab。本候选同样标记failed_ui_qa，未安装，未制作其ZIP。
+- 最小修复处理中：这两个背景刷新只更新数据，不完成后强制跳页；用户主动保存/运行等有意导航路径保持。新增延迟刷新与用户切页回归，保持原窗口QA断言。证据quality-state-candidate-ui与quality-state-release-receipt.json，旧安装版仍为cee4c26候选。
+
+- 晚到刷新导航修复完成：移除两处刷新后的强制chooseTab，数据刷新本身保留；3项延迟响应覆盖运行后切文稿、资料刷新后切文稿、先切任务再返回旧刷新。完整App29文件407项通过（late-refresh-app-full.log），类型/diff通过。新包需再次构建与原窗口QA复测。

@@ -333,7 +333,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><button type="button" className="fnd-button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</button></div>}
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="无需先准备科目表。也可以先与助手讨论分析口径和所需资料。"
             onChat={() => void chat(question.trim() || undefined)} />}
-          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={async () => { await refresh(task.id); chooseTab('datasets'); }} />
+          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
@@ -350,7 +350,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'results' && <>
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
-            onRefresh={async () => { await refresh(task.id); chooseTab('results'); }} />}
+            onRefresh={() => refresh(task.id)} />}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
           {!analysis ? <Empty title="从资料到可检查的结果" body="告诉助手你想比较什么、按什么口径看。计算完成后，在这里查看结果与依据。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
