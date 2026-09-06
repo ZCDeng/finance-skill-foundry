@@ -199,3 +199,7 @@
 
 - d9c52f2推送并独立核对远端一致；本轮冻结ab66f32d、自检/打包成功。候选asar ea735a06，原窗口QA22/22通过，零模型；新结构化窗口脚本首轮在来源记录折叠未展开时断言失败，实际IPC已返回1条来源。保留p0-p2-structured-candidate-ui首失败回执。
 - 同轮发现结构化定义被旧fallback标为脚本，现按engine展示汇总规则与JSON计划，handoff明确结构化分析。补真实Analysis断言；415项前端及类型检查通过（p2-definition-app-full.log）。新QA脚本使用实际来源展开动作，并核对后端不可变evidence_checks中的section及原始第5行，不以金额或文字出现替代来源证明。ea735a06候选未安装，将被文案修复候选替代。
+
+- 1e2a18de74238ae6f0137c6364302fbc90b05cf6已推送并独立核对；新候选asar98c3dd5b、backend a02ddbcb，冻结源指纹仍ab66f32d。结构化真实窗口11项通过，原窗口同构建22项通过。原失败证据保留，修复后的QA实际展开来源记录，并核对持久evidence_checks。
+- 已替换/Applications/FA Foundry.app；安装前后完整目录树与候选一致，21499条目，tree daeb8d0656fd667b02506409d3ab101b8fbd3eb2c05e602b2ee68d5e655c8481。旧安装备份/tmp/FA-Foundry-before-r4-98c3dd5b.app。安装版真实汇总窗口11/11通过，来源/剔除/缺失提示可用。安装回执p2-definition-install-receipt.json、窗口回执p2-definition-installed-ui。
+- 新包FA-Foundry-0.1.5-macOS-arm64-r4-p0-p2-ab66f32d-98c3dd5b.zip，SHA256 24fad8be36b200882216d4ada44fbaa49ca35bcd0f0b11fe7b279fcf245dd850，CRC通过26128条目。4个旧ZIP已移入废纸篓，发布目录只保留新ZIP；清理路径回执p2-definition-old-package-cleanup.json。代码/构建/安装验收已前进，但新构建30+8+20、中文候选真实提交、VoiceOver朗读和经理校准仍未完成，r4不标记整体验收通过。
