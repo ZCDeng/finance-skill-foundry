@@ -123,3 +123,12 @@
 - 安装版真实窗口22/22通过，视觉94/pass：中文日期、搜索多选、light/dark、1080窄屏、125%缩放。回执与截图保存于 build/verification/r4-integration/semantic-reuse-v3-installed-ui。核验器改为对照后端实际引用数，保留旧20条硬编码断言失败记录。
 - 新包 app/release/FA-Foundry-0.1.5-macOS-arm64-r4-v3-candidate-17761fba-0ecc9c63.zip，CRC通过，SHA256 3231d13154ec99f49d69b63038a7d92c2e56eeda3b91ec5eccaa38514cbfea04。完整构建身份见 semantic-reuse-v3-release-receipt.json；仍为候选，不能称模型质量验收完成。
 - 待验收：在同一冻结构建上重新完整运行30主集、8留出和20盲测；经理人工校准；系统输入法候选窗和屏幕阅读器。真实ERP继续保留无测试账套限制。
+
+## 2026-09-07：完整观察继续与验收边界复核
+
+- 冻结主集 r4-v3-main-first-20260907-0128 已启动，实际 installed backend/DSH/plugin，源提交cee4c26184e54edff2d0de9f064bc70803ef34fa；完整选择30例。观察进程保持运行，不因轮询超时重启。
+- 阶段性真实结果：F01正常结束272560ms/32调用，最终数字与来源pass，因删除control_actual/control_budget要求仍未完成原范围；F02达到420140ms评测时限，保留分母；F03保存complete，但全case四个receipt，不能算两轮内完成。此处不是最终整套分数。
+- F01回合后analysis-state采样发生ENOBUFS。独立stdout文件读回1254064 bytes成功，保存observation-recovery旁路回执，未改session或模型成绩。该错误属于观察工具，不等于模型运行错误。
+- 新增 tools/report_r4_acceptance.py 旁路汇总器（不改冻结评分器）：固定fixture所选分母、未观察占位、provisional、首次/两轮内receipt声明与独立评分分开、跨chain累计实际尝试、延迟/工具错误/模型重试、单独观察错误与坏记录。最新稿必须匹配receipt的draft id和content hash；不存在绑定时不能冒用旧receipt。7项测试及Ruff通过。
+- 实际macOS AX已读到AXWindow和“应收状态筛选搜索”AXTextField。原IME测试只输入拉丁拼音，不能称中文候选验收；继续使用公开输入源API核验，不修改TCC或安装输入法。
+- 逐项审查发现设计四仍缺产品级持久deadline、可配置自动修复预算和runtime-owned操作身份。现有两轮receipt与提示词不等于harness工程强制；eval 420秒不能算产品超时。最小设计与边界审查保存build/verification/r4-integration/completion-runtime-gap-design.md，待落实可信运行时身份、窄取消和保留草稿。不得因此把目标缩成已有工程测试通过。
