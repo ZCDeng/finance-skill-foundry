@@ -227,7 +227,8 @@ export interface AnalysisRevision extends AnalysisObject {
   parameter_metadata?: AnalysisParameterMetadata[];
   question: string;
   sql: string | null;
-  engine?: 'sql' | 'python' | 'shell' | 'finance';
+  engine?: 'sql' | 'python' | 'shell' | 'finance' | 'structured_aggregate';
+  aggregate_plan?: Record<string, unknown>;
   code?: string;
   bindings: Record<string, string>;
   parameters: unknown[] | Record<string, unknown>;

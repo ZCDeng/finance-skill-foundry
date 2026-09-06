@@ -405,10 +405,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 const api = bridge(); if (!api?.analysisRun) throw new Error('此版本暂不支持计算。');
                 try { unwrap(await api.analysisRun(taskId, analysis.id)); } finally { await refresh(taskId); }
               })} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
-                <p className="analysis-note">这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。</p>
+                <p className="analysis-note">{analysis.engine === 'structured_aggregate' ? '这项分析按已保存的筛选、分组和汇总规则计算，来源与剔除记录可在结果中查看。' : '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。'}</p>
                 {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
-                <details className="analysis-details"><summary>高级：查看计算脚本</summary><pre className="analysis-source-text">{analysis.code}</pre></details>
-                <button type="button" className="fnd-button" disabled={busy} onClick={() => void chat(`请读取脚本分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</button>
+                <details className="analysis-details"><summary>{analysis.engine === 'structured_aggregate' ? '高级：查看汇总规则' : '高级：查看计算脚本'}</summary><pre className="analysis-source-text">{analysis.engine === 'structured_aggregate' ? JSON.stringify(analysis.aggregate_plan, null, 2) : analysis.code}</pre></details>
+                <button type="button" className="fnd-button" disabled={busy} onClick={() => void chat(`请读取${analysis.engine === 'structured_aggregate' ? '结构化汇总' : '脚本'}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</button>
               </div>}
 
           </>}

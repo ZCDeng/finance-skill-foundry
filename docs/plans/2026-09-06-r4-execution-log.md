@@ -196,3 +196,6 @@
 - root后端解释/服务/要求143项通过，聚合与集成31项通过，插件schema12项通过，Ruff/类型/镜像检查通过。完整pytest（真实DSH）日志p0-p2-full-tests.log；尚未重新冻结本轮源码、安装或运行本轮模型验收。旧模型观察与盲测材料未改动。
 
 - 最终同一源码完整回归1061 passed/2 skipped，180.24秒，收集1063项一致；仅pyarrow/data_formulator可选依赖跳过。包含真实DSH、完整前端及Electron/renderer类型检查。日志p0-p2-full-tests.log与p0-p2-collection.log；工程通过不代表新安装包或模型质量已验收。
+
+- d9c52f2推送并独立核对远端一致；本轮冻结ab66f32d、自检/打包成功。候选asar ea735a06，原窗口QA22/22通过，零模型；新结构化窗口脚本首轮在来源记录折叠未展开时断言失败，实际IPC已返回1条来源。保留p0-p2-structured-candidate-ui首失败回执。
+- 同轮发现结构化定义被旧fallback标为脚本，现按engine展示汇总规则与JSON计划，handoff明确结构化分析。补真实Analysis断言；415项前端及类型检查通过（p2-definition-app-full.log）。新QA脚本使用实际来源展开动作，并核对后端不可变evidence_checks中的section及原始第5行，不以金额或文字出现替代来源证明。ea735a06候选未安装，将被文案修复候选替代。

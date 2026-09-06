@@ -1563,9 +1563,11 @@ describe('analysis workbench', () => {
       if (command === 'drilldown-fact') return success({ run_id: structuredRun.id, row: 0, rows: [], total: 0, offset: 0, has_more: false, message: '剔除明细来源' });
       return success({});
     });
-    mountBridge({ analysisState: async () => success({ ...initial, runs: [structuredRun] }), financeCall });
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [{ ...analysis, engine: 'structured_aggregate', sql: '', aggregate_plan: { group_by: ['region'] } }], runs: [structuredRun] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('来源可追溯：执行器已核对来源映射；这不代表业务判断已经通过。');
+    expect(screen.getByText('高级：查看汇总规则')).toBeTruthy();
+    expect(screen.queryByText('高级：查看计算脚本')).toBeNull();
     await waitFor(() => expect(Array.from((screen.getByLabelText('结果行来源') as HTMLSelectElement).options).map((option) => option.value)).toContain('excluded_detail_rows:0'));
     fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: 'excluded_detail_rows:0' } });
     await waitFor(() => expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('excluded_detail_rows:0'));
