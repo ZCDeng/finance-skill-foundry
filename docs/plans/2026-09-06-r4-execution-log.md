@@ -161,3 +161,7 @@
 - 无授权HEAD探测：curl与Node fetch均获得DeepSeek HTTP401，证明当时端点可达，不能证明授权请求或持续连接稳定。完整新构建30+8+20、中文候选提交、VoiceOver与经理校准仍待验收。
 
 - 后续观察器与分类器组合回归15项通过，Ruff/node语法/diff检查通过。自动/手动重检开始时清空旧质量结果、不可用路径也清空；新增pending响应与失败回归，完整App复测中。
+
+- 首轮修复后完整App402通过/2失败，日志quality-state-app-full.log保留：映射弹层只加载了默认项时同步查找目标option、来源select等待缓存的旧DOM值。局部改为等待真实option并重查当前节点，原调用/错误/失效断言保留；未加大超时。Analysis74项与类型检查通过，完整App重跑中。
+
+- 稳定后完整App29文件404项通过（quality-state-app-full-rerun.log）；观察器/分类器15项通过，类型/Ruff/node语法/diff通过。当前变化仅UI检查状态和验收工具，未重跑或改写旧模型成绩。

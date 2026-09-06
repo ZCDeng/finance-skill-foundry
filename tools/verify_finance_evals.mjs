@@ -9,6 +9,25 @@ const config = JSON.parse(readFileSync(new URL('./config.json', import.meta.url)
 export const name = 'foundry-finance-evals-verifier';
 export const inject = ['agents', 'agentPresets', 'agentDefaultModel', 'tools', 'skills'];
 
+const DEFAULT_FOUNDRY_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const CONFIGURED_FOUNDRY_MAX_BUFFER_BYTES = Number(process.env.FOUNDRY_OBSERVER_MAX_BUFFER_BYTES ?? DEFAULT_FOUNDRY_MAX_BUFFER_BYTES);
+const FOUNDRY_MAX_BUFFER_BYTES = Number.isInteger(CONFIGURED_FOUNDRY_MAX_BUFFER_BYTES)
+  && CONFIGURED_FOUNDRY_MAX_BUFFER_BYTES > 0
+  && CONFIGURED_FOUNDRY_MAX_BUFFER_BYTES <= DEFAULT_FOUNDRY_MAX_BUFFER_BYTES
+  ? CONFIGURED_FOUNDRY_MAX_BUFFER_BYTES
+  : DEFAULT_FOUNDRY_MAX_BUFFER_BYTES;
+
+function foundryOutput(args) {
+  return execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR, ...args], {
+    encoding: 'utf8',
+    maxBuffer: FOUNDRY_MAX_BUFFER_BYTES,
+  });
+}
+
+function foundryJson(args) {
+  return JSON.parse(foundryOutput(args));
+}
+
 export function apply(ctx) {
   const started = globalThis[Symbol.for('foundry.financeEvals.started')] ??= new Set();
   if (started.has(config.report)) return;
@@ -87,9 +106,8 @@ export function apply(ctx) {
         setup: async (agentCtx) => { await ctx.agentPresets.mount(agentCtx, 'analysis'); },
       });
       try {
-        execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR,
-          '--task', taskId, '--session', methodSessionId, 'record-session',
-          '--role', 'analysis', '--workspace', workspace], {encoding: 'utf8'});
+        foundryOutput(['--task', taskId, '--session', methodSessionId, 'record-session',
+          '--role', 'analysis', '--workspace', workspace]);
         for (const methodName of (config.ids ?? [])) {
           const result = await ctx.tools.execute({name: 'skill', callId: `explicit-${methodName}`,
             arguments: {name: methodName}, agent: handle.agent, signal: new AbortController().signal});
@@ -130,9 +148,8 @@ export function apply(ctx) {
       });
       try {
         try {
-          execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR,
-            '--task', item.taskId, '--session', item.sessionId, 'record-session',
-            '--role', 'analysis', '--workspace', item.workspace, '--verbatim', item.question], {encoding: 'utf8'});
+          foundryOutput(['--task', item.taskId, '--session', item.sessionId, 'record-session',
+            '--role', 'analysis', '--workspace', item.workspace, '--verbatim', item.question]);
           const catalog = await ctx.skills.snapshot({cwd: item.workspace, scope: handle.agent});
           row.catalog = catalog.skills.map(s => ({name: s.name, provider: s.provider}));
           row.catalog_complete = catalog.complete;
@@ -160,8 +177,7 @@ export function apply(ctx) {
             row.error = row.error ?? 'agent turn ended with error';
           }
           try {
-            const state = JSON.parse(execFileSync(process.env.FOUNDRY_BIN, ['--var', process.env.FOUNDRY_VAR,
-              '--task', item.taskId, 'analysis-state'], {encoding: 'utf8'}));
+            const state = foundryJson(['--task', item.taskId, 'analysis-state']);
             row.final_draft = state.drafts?.at(-1) ?? null;
             row.runs_seen = state.runs?.length ?? 0;
           } catch (error) {

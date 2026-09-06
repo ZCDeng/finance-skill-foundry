@@ -721,7 +721,9 @@ describe('analysis workbench', () => {
     fireEvent.click(screen.getByText('高级：管理科目映射 JSON'));
     expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('revenue');
     expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('expense');
-    chooseSearchable('已保存映射', /标准管理科目映射/);
+    fireEvent.click(screen.getByRole('button', { name: '已保存映射' }));
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /标准管理科目映射/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '已保存映射' }).textContent).toContain('标准管理科目映射'));
     expect(screen.getByText(/当前口径保存时会使用映射/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', { context_id: '4'.repeat(32), metric: { kind: 'management_pnl' } }));
@@ -774,9 +776,9 @@ describe('analysis workbench', () => {
     await screen.findByText('范围尚未完成：存在需要处理的诊断。');
     fireEvent.click(screen.getByText('诊断 · 1 项'));
     expect(screen.getByText(/control_total_missing/)).toBeTruthy();
-    const sourceRow = screen.getByLabelText('结果行来源') as HTMLSelectElement;
-    fireEvent.change(sourceRow, { target: { value: '0' } });
-    await waitFor(() => expect(sourceRow.value).toBe('0'));
+    await waitFor(() => expect(Array.from((screen.getByLabelText('结果行来源') as HTMLSelectElement).options).map((option) => option.value)).toContain('0'));
+    fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: '0' } });
+    await waitFor(() => expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('0'));
     const drilldown = screen.getByRole('button', { name: '查看来源行' }) as HTMLButtonElement;
     await waitFor(() => expect(drilldown.disabled).toBe(false));
     fireEvent.click(drilldown);
@@ -1132,6 +1134,63 @@ describe('analysis workbench', () => {
     expect(saveCall?.[2]).not.toEqual(expect.objectContaining({ fact_ids: expect.arrayContaining(['fact-optional']) }));
   });
 
+  it('clears saved quality details while automatic validation is pending, then shows the real validation result', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'pass', issues: [],
+      checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } } };
+    let resolveCheck!: (value: Answer<Record<string, unknown>>) => void;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolveCheck = resolve; });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText(/检查中/);
+    expect(screen.queryByText('数字与口径')).toBeNull();
+    expect(screen.queryAllByText('已核对')).toHaveLength(0);
+
+    await act(async () => resolveCheck(success({ status: 'pass', issues: [], checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } })));
+    expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    expect(screen.getByText('数字与口径')).toBeTruthy();
+    expect(screen.getAllByText('已核对')).toHaveLength(3);
+  });
+
+  it('clears existing quality details during manual recheck and does not restore them after failure', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'pass', issues: [],
+      checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } } };
+    let resolveCheck!: (value: Answer<Record<string, unknown>>) => void;
+    let validationCalls = 0;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') {
+        validationCalls += 1;
+        if (validationCalls === 1) return success({ status: 'pass', issues: [], checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } });
+        return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolveCheck = resolve; });
+      }
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    expect(screen.getByText('数字与口径')).toBeTruthy();
+    expect(screen.getAllByText('已核对')).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
+    await screen.findByText(/检查中/);
+    expect(screen.queryByText('数字与口径')).toBeNull();
+    expect(screen.queryAllByText('已核对')).toHaveLength(0);
+    await act(async () => resolveCheck({ ok: false, refused: true, message: '校验服务暂不可用' }));
+    expect(await screen.findByText(/暂不可检查/)).toBeTruthy();
+    expect(screen.queryByText('数字与口径')).toBeNull();
+    expect(screen.queryAllByText('已核对')).toHaveLength(0);
+  });
+
   it('invalidates an in-flight quality check when the draft body changes', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance' };
     let resolveCheck!: (value: Answer<Record<string, unknown>>) => void;
@@ -1371,7 +1430,9 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: vi.fn(async () => success(backend)), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('第 1 行 · revenue');
+    await waitFor(() => expect(Array.from((screen.getByLabelText('结果行来源') as HTMLSelectElement).options).map((option) => option.value)).toContain('0'));
     fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: '0' } });
+    await waitFor(() => expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('0'));
     fireEvent.click(screen.getByRole('button', { name: '查看来源行' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', { run_id: firstRun.id, row: 0, offset: 0, limit: 100 }));
     backend = { ...initial, runs: [firstRun, secondRun] };

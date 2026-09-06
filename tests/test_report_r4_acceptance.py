@@ -201,7 +201,7 @@ def test_report_r4_acceptance_excludes_hard_error_from_flow_success(tmp_path: Pa
     root = tmp_path / "r4-run"
     _write_json(root / "session.json", {
         "status": "completed",
-        "cases": [{"id": "F01", "task_id": "task-hard", "completed": True, "error": "case exceeded 420s"}],
+        "cases": [{"id": "F01", "task_id": "task-hard", "completed": True, "error": "case F01 exceeded 420s"}],
     })
     _write_analysis(root, "task-hard", completion_status="complete", repair_attempts=0)
 
@@ -209,8 +209,122 @@ def test_report_r4_acceptance_excludes_hard_error_from_flow_success(tmp_path: Pa
 
     assert report["cases"][0]["observed_completed"] is False
     assert report["metrics"]["receipt_reported_first_attempt_completion"]["completed"] == 0
-    assert report["metrics"]["model_hard_errors"]["case_ids"] == ["F01"]
+    assert report["metrics"]["timeout_errors"]["case_ids"] == ["F01"]
+    assert report["metrics"]["execution_terminal_errors"]["case_ids"] == ["F01"]
+    assert report["metrics"]["model_hard_errors"]["case_ids"] == []
     assert report["metrics"]["hard_errors"]["case_ids"] == ["F01"]
+
+
+def test_report_r4_acceptance_separates_transport_from_model_turn_error(tmp_path: Path) -> None:
+    root = tmp_path / "r4-run"
+    _write_json(root / "session.json", {
+        "status": "completed",
+        "cases": [{
+            "id": "F20",
+            "task_id": "task-transport",
+            "completed": False,
+            "error": "agent turn ended with error",
+            "turn_errors": [{
+                "index": 31,
+                "event": {
+                    "data": {
+                        "reason": {
+                            "kind": "error",
+                            "error": {
+                                "code": "TRANSPORT",
+                                "message": "DeepSeek API request to https://api.deepseek.com failed",
+                            },
+                        },
+                    },
+                },
+            }],
+        }],
+    })
+    _write_analysis(root, "task-transport", completion_status="complete", repair_attempts=0)
+
+    report = reporter.build_report(root)
+
+    assert report["cases"][0]["observed_completed"] is False
+    assert report["metrics"]["provider_terminal_errors"]["case_ids"] == ["F20"]
+    assert report["metrics"]["provider_terminal_errors"]["known_codes"] == ["TRANSPORT"]
+    assert report["metrics"]["model_turn_errors"]["case_ids"] == []
+    assert report["metrics"]["model_hard_errors"]["case_ids"] == []
+    assert report["metrics"]["execution_terminal_errors"]["case_ids"] == ["F20"]
+    assert report["metrics"]["hard_errors"]["case_ids"] == ["F20"]
+    assert report["metrics"]["receipt_reported_first_attempt_completion"]["completed"] == 0
+
+
+def test_report_r4_acceptance_unknown_turn_code_stays_conservative(tmp_path: Path) -> None:
+    root = tmp_path / "r4-run"
+    _write_json(root / "session.json", {
+        "status": "completed",
+        "cases": [{
+            "id": "F21",
+            "task_id": "task-unknown",
+            "completed": False,
+            "turn_errors": [{
+                "event": {
+                    "data": {
+                        "reason": {
+                            "kind": "error",
+                            "error": {"code": "RATE_LIMIT", "message": "provider returned an error"},
+                        },
+                    },
+                },
+            }],
+        }],
+    })
+
+    report = reporter.build_report(root)
+
+    assert report["metrics"]["provider_terminal_errors"]["case_ids"] == []
+    assert report["metrics"]["model_turn_errors"]["case_ids"] == ["F21"]
+    assert report["metrics"]["model_hard_errors"]["case_ids"] == ["F21"]
+    assert report["metrics"]["execution_terminal_errors"]["case_ids"] == ["F21"]
+
+
+def test_report_r4_acceptance_rate_limit_exceeded_is_not_timeout(tmp_path: Path) -> None:
+    root = tmp_path / "r4-run"
+    _write_json(root / "session.json", {
+        "status": "completed",
+        "cases": [{"id": "F22", "completed": False, "error": "provider rate limit exceeded"}],
+    })
+
+    report = reporter.build_report(root)
+
+    assert report["metrics"]["timeout_errors"]["case_ids"] == []
+    assert report["metrics"]["model_turn_errors"]["case_ids"] == ["F22"]
+    assert report["metrics"]["execution_terminal_errors"]["case_ids"] == ["F22"]
+
+
+def test_report_r4_acceptance_event_fallback_only_counts_turn_end_errors(tmp_path: Path) -> None:
+    root = tmp_path / "r4-run"
+    _write_json(root / "session.json", {
+        "status": "completed",
+        "cases": [
+            {
+                "id": "F23",
+                "completed": False,
+                "events": [{
+                    "type": "llm/error",
+                    "data": {"reason": {"kind": "error", "error": {"code": "TRANSPORT"}}},
+                }],
+            },
+            {
+                "id": "F24",
+                "completed": False,
+                "events": [{
+                    "type": "turn/end",
+                    "data": {"reason": {"kind": "error", "error": {"code": "TRANSPORT"}}},
+                }],
+            },
+        ],
+    })
+
+    report = reporter.build_report(root)
+
+    assert report["metrics"]["provider_terminal_errors"]["case_ids"] == ["F24"]
+    assert report["metrics"]["execution_terminal_errors"]["case_ids"] == ["F24"]
 
 
 def test_report_r4_acceptance_records_corrupt_analysis_json(tmp_path: Path) -> None:

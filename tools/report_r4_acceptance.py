@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 from collections import Counter
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 RECEIPT_TERMINAL_STATUSES = {"complete", "awaiting_input"}
+PROVIDER_TERMINAL_CODES = {"TRANSPORT"}
+OBSERVER_CASE_TIMEOUT_RE = re.compile(r"\bcase\s+\S+\s+exceeded\s+\d+(?:\.\d+)?s\b", re.IGNORECASE)
 INDEPENDENT_STATUS_PATHS = {
     "numbers": ("checks", "numbers", "status"),
     "requirements_coverage": ("requirements", "coverage", "status"),
@@ -189,14 +192,80 @@ def _tool_errors(case: dict[str, Any]) -> list[dict[str, Any]]:
     return errors
 
 
-def _model_hard_errors(case: dict[str, Any]) -> list[dict[str, Any]]:
-    errors = []
-    if case.get("error"):
-        errors.append({"source": "case", "error": case.get("error")})
+def _error_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(value)
+
+
+def _is_timeout_error(value: Any) -> bool:
+    text = _error_text(value).lower()
+    return "timed out" in text or "timeout" in text or bool(OBSERVER_CASE_TIMEOUT_RE.search(text))
+
+
+def _error_codes(value: Any) -> set[str]:
+    codes: set[str] = set()
+    if isinstance(value, dict):
+        code = value.get("code")
+        if isinstance(code, str) and code:
+            codes.add(code)
+        for child in value.values():
+            codes.update(_error_codes(child))
+    elif isinstance(value, list):
+        for child in value:
+            codes.update(_error_codes(child))
+    return codes
+
+
+def _turn_error_records(case: dict[str, Any]) -> list[dict[str, Any]]:
     turn_errors = case.get("turn_errors")
     if isinstance(turn_errors, list):
-        errors.extend({"source": "turn", "error": err} for err in turn_errors)
-    return errors
+        return [{"source": "turn", "error": err} for err in turn_errors]
+    records = []
+    events = case.get("events")
+    if isinstance(events, list):
+        for index, event in enumerate(events):
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") != "turn/end":
+                continue
+            reason = _dig(event, ("data", "reason"))
+            if isinstance(reason, dict) and reason.get("kind") == "error":
+                records.append({"source": "turn", "index": index, "error": event})
+    return records
+
+
+def _terminal_error_buckets(case: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    timeout_errors = []
+    provider_terminal_errors = []
+    model_turn_errors = []
+
+    for record in _turn_error_records(case):
+        codes = _error_codes(record)
+        provider_codes = sorted(codes & PROVIDER_TERMINAL_CODES)
+        if provider_codes:
+            provider_terminal_errors.append({**record, "codes": provider_codes})
+        else:
+            model_turn_errors.append(record)
+
+    case_error = case.get("error")
+    if case_error:
+        case_error_record = {"source": "case", "error": case_error}
+        if _is_timeout_error(case_error):
+            timeout_errors.append(case_error_record)
+        elif not provider_terminal_errors and not model_turn_errors:
+            model_turn_errors.append(case_error_record)
+
+    execution_terminal_errors = timeout_errors + provider_terminal_errors + model_turn_errors
+    return {
+        "timeout_errors": timeout_errors,
+        "provider_terminal_errors": provider_terminal_errors,
+        "model_turn_errors": model_turn_errors,
+        "execution_terminal_errors": execution_terminal_errors,
+    }
 
 
 def _observation_errors(case: dict[str, Any]) -> list[dict[str, Any]]:
@@ -229,6 +298,10 @@ def _placeholder_case(case_id: str) -> dict[str, Any]:
         "tool_call_count": 0,
         "tool_error_count": 0,
         "tool_errors": [],
+        "timeout_errors": [],
+        "provider_terminal_errors": [],
+        "model_turn_errors": [],
+        "execution_terminal_errors": [],
         "model_hard_errors": [],
         "hard_errors": [],
         "observation_errors": [],
@@ -282,9 +355,10 @@ def _case_report(root: Path, case: dict[str, Any], scoring_by_id: dict[str, dict
         repair_attempts = None
     if isinstance(first_repair_attempts, bool) or not isinstance(first_repair_attempts, int):
         first_repair_attempts = None
-    model_hard_errors = _model_hard_errors(case)
+    terminal_errors = _terminal_error_buckets(case)
+    execution_terminal_errors = terminal_errors["execution_terminal_errors"]
     observation_errors = _observation_errors(case)
-    observed_completed = bool(case.get("completed")) and not model_hard_errors
+    observed_completed = bool(case.get("completed")) and not execution_terminal_errors
     receipt_terminal = completion_status in RECEIPT_TERMINAL_STATUSES
     first_status = first_completion.get("status") if isinstance(first_completion, dict) else None
     receipt_attempt_count = completion_info["receipt_attempt_count"]
@@ -331,8 +405,12 @@ def _case_report(root: Path, case: dict[str, Any], scoring_by_id: dict[str, dict
         "tool_call_count": len(case.get("calls", []) or []),
         "tool_error_count": len(_tool_errors(case)),
         "tool_errors": _tool_errors(case),
-        "model_hard_errors": model_hard_errors,
-        "hard_errors": model_hard_errors,
+        "timeout_errors": terminal_errors["timeout_errors"],
+        "provider_terminal_errors": terminal_errors["provider_terminal_errors"],
+        "model_turn_errors": terminal_errors["model_turn_errors"],
+        "execution_terminal_errors": execution_terminal_errors,
+        "model_hard_errors": terminal_errors["model_turn_errors"],
+        "hard_errors": execution_terminal_errors,
         "observation_errors": observation_errors,
         "provider_retry_count": _provider_retry_count(case),
         "run_count": len(records["runs"]),
@@ -409,7 +487,10 @@ def build_report(root: Path) -> dict[str, Any]:
     within_two_ids = [case["id"] for case in cases if case["receipt_reported_within_two_repairs_complete"]]
     scorer_verified_ids = [case["id"] for case in cases if case["independent_scorer_verified"]]
     tool_error_cases = [case for case in cases if case["tool_error_count"]]
-    hard_error_cases = [case for case in cases if case["model_hard_errors"]]
+    timeout_error_cases = [case for case in cases if case["timeout_errors"]]
+    provider_terminal_error_cases = [case for case in cases if case["provider_terminal_errors"]]
+    model_turn_error_cases = [case for case in cases if case["model_turn_errors"]]
+    execution_terminal_error_cases = [case for case in cases if case["execution_terminal_errors"]]
     observation_error_cases = [case for case in cases if case["observation_errors"]]
     provider_retry_cases = [case for case in cases if case["provider_retry_count"]]
     data_error_cases = [case for case in cases if case["data_errors"]]
@@ -455,14 +536,33 @@ def build_report(root: Path) -> dict[str, Any]:
                 "by_tool": dict(sorted(Counter(error["tool"] for case in tool_error_cases for error in case["tool_errors"]).items())),
                 "case_ids": [case["id"] for case in tool_error_cases],
             },
+            "timeout_errors": {
+                "case_count": len(timeout_error_cases),
+                "case_ids": [case["id"] for case in timeout_error_cases],
+            },
+            "provider_terminal_errors": {
+                "case_count": len(provider_terminal_error_cases),
+                "case_ids": [case["id"] for case in provider_terminal_error_cases],
+                "known_codes": sorted(PROVIDER_TERMINAL_CODES),
+            },
+            "model_turn_errors": {
+                "case_count": len(model_turn_error_cases),
+                "case_ids": [case["id"] for case in model_turn_error_cases],
+                "note": "Non-timeout terminal turn/case errors that are not a known provider terminal code.",
+            },
+            "execution_terminal_errors": {
+                "case_count": len(execution_terminal_error_cases),
+                "case_ids": [case["id"] for case in execution_terminal_error_cases],
+            },
             "model_hard_errors": {
-                "case_count": len(hard_error_cases),
-                "case_ids": [case["id"] for case in hard_error_cases],
+                "case_count": len(model_turn_error_cases),
+                "case_ids": [case["id"] for case in model_turn_error_cases],
+                "note": "Backward-compatible alias for model_turn_errors; provider terminal and timeout errors are reported separately.",
             },
             "hard_errors": {
-                "case_count": len(hard_error_cases),
-                "case_ids": [case["id"] for case in hard_error_cases],
-                "note": "Backward-compatible alias for model_hard_errors; observation sampling errors are reported separately.",
+                "case_count": len(execution_terminal_error_cases),
+                "case_ids": [case["id"] for case in execution_terminal_error_cases],
+                "note": "Backward-compatible alias for execution_terminal_errors; observation sampling errors are reported separately.",
             },
             "observation_errors": {
                 "case_count": len(observation_error_cases),

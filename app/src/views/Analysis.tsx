@@ -1152,7 +1152,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   useEffect(() => {
     if (!draft || !draft.run_ids.length) return;
     const api = bridge();
-    if (!api?.financeCall) { setQualityState('unavailable'); return; }
+    if (!api?.financeCall) { setQuality(null); setQualityState('unavailable'); return; }
     const request = ++qualityRequest.current;
     const bgRequest = ++backgroundRequest.current;
     if (hasUnsavedQualityInputs) {
@@ -1160,7 +1160,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       void loadBackgrounds(bgRequest, defaultScope);
       return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
     }
-    setQualityState('checking'); setToolError('');
+    setQuality(null); setQualityState('checking'); setToolError('');
     void Promise.allSettled([
       api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids, materiality: materialitySpec }),
       api.financeCall(taskId, 'validate-explanation', edit?.body != null && edit.body !== draft.body || materialityChanged || updatedRequirementsId
@@ -1196,10 +1196,10 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   }
   async function recheck() {
     if (!draft && !recovery) return;
-    const api = bridge(); if (!api?.financeCall) { setQualityState('unavailable'); return; }
+    const api = bridge(); if (!api?.financeCall) { setQuality(null); setQualityState('unavailable'); return; }
     const request = ++qualityRequest.current;
     try {
-      setQualityState('checking'); setToolError('');
+      setQuality(null); setQualityState('checking'); setToolError('');
       const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: effectiveRunIds, materiality: materialitySpec }) as Answer<ExplanationPreparation>);
       if (request !== qualityRequest.current) return;
       setFacts(prepared.facts ?? []);
@@ -1208,7 +1208,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
     } catch (failure) {
-      if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); }
+      if (request === qualityRequest.current) { setQuality(null); setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); }
     }
   }
   async function openFact(fact: ExplanationFact) {
