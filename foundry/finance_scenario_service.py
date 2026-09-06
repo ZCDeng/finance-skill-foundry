@@ -43,27 +43,37 @@ def calculate_scenario(scenario, context, datasets):
             as_of=required("as_of"),
             scope=scope,
             buckets=inputs.get("buckets"),
+            status_filter=inputs.get("status_filter"),
         )
-        for row in result["rows"]:
+
+        def identity_key(detail):
+            return (
+                detail["invoice_id"],
+                detail["ledger"],
+                detail["organization"],
+                detail["currency"],
+                detail["unit"],
+            )
+
+        def detail_keys(key, row):
             details = [
-                r
-                for r in result["detail_rows"]
+                detail
+                for detail in result[key]
                 if all(
-                    r.get(key) == row.get(key)
-                    for key in ("ledger", "organization", "currency", "unit", "bucket")
+                    detail.get(field) == row.get(field)
+                    for field in (
+                        "ledger",
+                        "organization",
+                        "currency",
+                        "unit",
+                        "bucket",
+                    )
                 )
             ]
-            keys = {
-                (
-                    r["invoice_id"],
-                    r["ledger"],
-                    r["organization"],
-                    r["currency"],
-                    r["unit"],
-                )
-                for r in details
-            }
-            row["source_rows"] = [
+            return {identity_key(detail) for detail in details}
+
+        def source_rows(keys):
+            refs = [
                 r["source"]
                 for r in invoices
                 if (
@@ -75,7 +85,7 @@ def calculate_scenario(scenario, context, datasets):
                 )
                 in keys
             ]
-            row["source_rows"] += [
+            refs += [
                 r["source"]
                 for r in activity
                 if (
@@ -88,6 +98,18 @@ def calculate_scenario(scenario, context, datasets):
                 in keys
                 and r.get("effective_date", "9999") <= inputs["as_of"]
             ]
+            return refs
+
+        for detail in result["detail_rows"]:
+            detail["source_rows"] = source_rows({identity_key(detail)})
+        for detail in result["excluded_detail_rows"]:
+            detail["source_rows"] = source_rows({identity_key(detail)})
+
+        for row in result["rows"]:
+            row["source_rows"] = source_rows(detail_keys("detail_rows", row))
+            row["excluded_source_rows"] = source_rows(
+                detail_keys("excluded_detail_rows", row)
+            )
             row["as_of"] = inputs["as_of"]
     elif kind == "cash_13_weeks":
         receipts = records("receipts_alias", "receipts", True)

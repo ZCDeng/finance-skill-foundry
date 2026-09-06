@@ -422,6 +422,254 @@ def test_aging_refuses_ambiguous_negative_reduction_but_accepts_declared_reversa
     assert amount(result["rows"], "31-60") == Decimal("90")
 
 
+def test_aging_status_filter_tracks_excluded_unknown_and_current_status_limit():
+    invoices = [
+        {
+            "id": "disputed-open",
+            "customer": "甲客户",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "unit": "元",
+            "issue_date": "2026-08-01",
+            "due_date": "2026-08-01",
+            "amount": "100",
+            "invoice_status": "争议",
+        },
+        {
+            "id": "active-open",
+            "customer": "乙客户",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "unit": "元",
+            "issue_date": "2026-08-01",
+            "due_date": "2026-08-01",
+            "amount": "30",
+            "invoice_status": "正常",
+        },
+        {
+            "id": "unknown-open",
+            "customer": "丙客户",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "unit": "元",
+            "issue_date": "2026-08-01",
+            "due_date": "2026-08-01",
+            "amount": "20",
+            "invoice_status": "暂停催收",
+        },
+    ]
+    activity = [
+        {
+            "id": "pay-disputed",
+            "invoice_id": "disputed-open",
+            "kind": "payment",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "effective_date": "2026-08-15",
+            "amount": "40",
+        }
+    ]
+
+    result = compute_receivables_aging(
+        invoices,
+        activity,
+        as_of="2026-09-05",
+        scope=SCOPE,
+        status_filter={
+            "field": "invoice_status",
+            "include": ["disputed"],
+            "mapping": {"disputed": ["争议"], "active": ["正常"]},
+        },
+    )
+
+    assert amount(result["rows"], "31-60") == Decimal("60")
+    assert all(row["as_of"] == "2026-09-05" for row in result["rows"])
+    assert all(row["result_key"] for row in result["rows"])
+    assert [row["invoice_id"] for row in result["detail_rows"]] == ["disputed-open"]
+    assert result["detail_rows"][0]["as_of"] == "2026-09-05"
+    assert result["detail_rows"][0]["result_key"]
+    assert result["detail_rows"][0]["status"] == "disputed"
+    status = result["evidence"]["status_filter"]
+    assert status["field"] == "invoice_status"
+    assert status["include"] == ["disputed"]
+    assert status["status_evaluation_mode"] == "current_state"
+    assert status["included_open_amount_by_scope"] == [
+        {**SCOPE, "open_amount": "60"}
+    ]
+    assert status["excluded_open_amount_by_scope"] == [
+        {**SCOPE, "open_amount": "50"}
+    ]
+    assert status["total_scope_open_amount_by_scope"] == [
+        {**SCOPE, "open_amount": "110"}
+    ]
+    excluded = {row["invoice_id"]: row for row in result["excluded_detail_rows"]}
+    assert excluded["active-open"]["status"] == "active"
+    assert excluded["active-open"]["as_of"] == "2026-09-05"
+    assert excluded["active-open"]["result_key"]
+    assert excluded["active-open"]["exclusion_reason"] == "status_not_included"
+    assert excluded["unknown-open"]["status"] == "unknown"
+    assert excluded["unknown-open"]["raw_status"] == "暂停催收"
+    assert excluded["unknown-open"]["exclusion_reason"] == "unknown_status"
+    assert any("current invoice status" in warning for warning in result["warnings"])
+
+
+def test_aging_status_filter_preserves_identity_cutoff_boundaries_and_keys():
+    invoices = [
+        {
+            "id": "same-id",
+            "customer": "甲客户",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "unit": "元",
+            "issue_date": "2026-08-01",
+            "due_date": "2026-08-06",
+            "amount": "100",
+            "invoice_status": "争议",
+        },
+        {
+            "id": "same-id",
+            "customer": "甲客户",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "USD",
+            "unit": "元",
+            "issue_date": "2026-08-01",
+            "due_date": "2026-08-05",
+            "amount": "50",
+            "invoice_status": "争议",
+        },
+    ]
+    activity = [
+        {
+            "id": "pay-cny-before",
+            "invoice_id": "same-id",
+            "kind": "payment",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "effective_date": "2026-09-05",
+            "amount": "10",
+        },
+        {
+            "id": "pay-cny-after",
+            "invoice_id": "same-id",
+            "kind": "payment",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "CNY",
+            "effective_date": "2026-09-06",
+            "amount": "7",
+        },
+        {
+            "id": "pay-usd-before",
+            "invoice_id": "same-id",
+            "kind": "payment",
+            "organization": "华东",
+            "ledger": "service-co",
+            "currency": "USD",
+            "effective_date": "2026-09-05",
+            "amount": "5",
+        },
+    ]
+
+    result = compute_receivables_aging(
+        invoices,
+        activity,
+        as_of="2026-09-05",
+        scope={**SCOPE, "currency": ["CNY", "USD"]},
+        status_filter={
+            "field": "invoice_status",
+            "include": ["disputed"],
+            "mapping": {"disputed": ["争议"]},
+        },
+    )
+    repeated = compute_receivables_aging(
+        invoices,
+        activity,
+        as_of="2026-09-05",
+        scope={**SCOPE, "currency": ["CNY", "USD"]},
+        status_filter={
+            "field": "invoice_status",
+            "include": ["disputed"],
+            "mapping": {"disputed": ["争议"]},
+        },
+    )
+
+    assert amount(result["rows"], "0-30", "CNY") == Decimal("90")
+    assert amount(result["rows"], "31-60", "USD") == Decimal("45")
+    assert result["evidence"]["future_activity_ignored"] == [
+        {
+            "id": "pay-cny-after",
+            "kind": "payment",
+            "effective_date": "2026-09-06",
+            "amount": "7",
+            "ledger": "service-co",
+            "organization": "华东",
+            "currency": "CNY",
+            "unit": "元",
+            "invoice_id": "same-id",
+        }
+    ]
+    rows_by_currency = {
+        row["currency"]: row for row in result["detail_rows"]
+    }
+    assert rows_by_currency["CNY"]["overdue_days"] == 30
+    assert rows_by_currency["CNY"]["bucket"] == "0-30"
+    assert rows_by_currency["CNY"]["as_of"] == "2026-09-05"
+    assert rows_by_currency["USD"]["overdue_days"] == 31
+    assert rows_by_currency["USD"]["bucket"] == "31-60"
+    assert rows_by_currency["USD"]["as_of"] == "2026-09-05"
+    assert {
+        row["result_key"] for row in result["detail_rows"]
+    } == {row["result_key"] for row in repeated["detail_rows"]}
+    assert {
+        (row["currency"], row["bucket"], row["result_key"])
+        for row in result["rows"]
+    } == {
+        (row["currency"], row["bucket"], row["result_key"])
+        for row in repeated["rows"]
+    }
+
+
+def test_aging_status_filter_rejects_invalid_mapping():
+    with pytest.raises(FoundryError, match="mapping values"):
+        compute_receivables_aging(
+            [],
+            as_of="2026-09-05",
+            scope=SCOPE,
+            status_filter={"field": "invoice_status", "include": ["active"], "mapping": {"active": "正常"}},
+        )
+
+    with pytest.raises(FoundryError, match="aliases must be unique"):
+        compute_receivables_aging(
+            [],
+            as_of="2026-09-05",
+            scope=SCOPE,
+            status_filter={
+                "field": "invoice_status",
+                "include": ["active"],
+                "mapping": {"active": ["正常"], "disputed": ["正常"]},
+            },
+        )
+
+    with pytest.raises(FoundryError, match="cannot combine include and exclude"):
+        compute_receivables_aging(
+            [],
+            as_of="2026-09-05",
+            scope=SCOPE,
+            status_filter={
+                "field": "invoice_status",
+                "include": ["active"],
+                "exclude": ["disputed"],
+            },
+        )
+
+
 def test_g3_cash_forecast_baseline_delay_and_weekly_continuity():
     receipts = [
         {

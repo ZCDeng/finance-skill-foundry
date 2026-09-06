@@ -32,7 +32,7 @@ from foundry.sheet import survives_a_cell, put_number
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-KINDS = {"revisions", "runs", "drafts", "methods"}
+KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
 BASIS = {
@@ -155,12 +155,17 @@ class AnalysisStore:
         self._inside(path)
         record = json_value(record)
         with exclusive(self.task.lock_path, timeout=10):
-            self._inside(path)
-            if path.exists():
-                raise FoundryError("immutable analysis object already exists")
-            record["seq"] = self._next_seq()
-            record["_integrity_hash"] = _hash(record)
-            write_json_atomic(path, record)
+            return self._write_locked(path, record)
+
+    def _write_locked(self, path: Path, record: dict) -> dict:
+        """Commit an immutable object while the caller holds the task lock."""
+        self._inside(path)
+        if path.exists():
+            raise FoundryError("immutable analysis object already exists")
+        record = json_value(record)
+        record["seq"] = self._next_seq()
+        record["_integrity_hash"] = _hash(record)
+        write_json_atomic(path, record)
         return record
 
     def _next_seq(self) -> int:
@@ -233,6 +238,9 @@ class AnalysisStore:
             "analyses": self._list("revisions"),
             "runs": self._list("runs"),
             "drafts": self._list("drafts"),
+            "requirements": self._list("requirements"),
+            "evidence_checks": self._list("evidence_checks"),
+            "completions": self._list("completions"),
             "methods": self._methods(),
         }
 
@@ -610,6 +618,8 @@ class AnalysisStore:
         )
         from foundry.finance_explanations import validate_explanation
 
+        materiality = spec.get("materiality", parent.get("materiality", {}))
+        source_read_failures = spec.get("source_read_failures", parent.get("source_read_failures", []))
         explanation_check = validate_explanation(
             self,
             {
@@ -617,10 +627,25 @@ class AnalysisStore:
                 "run_ids": list(runs),
                 "fact_ids": fact_ids,
                 "claims": claims,
+                "materiality": materiality,
             },
         )
+        from foundry.finance_requirements import augment_quality, latest_requirements
+
+        current_requirements = latest_requirements(self)
+        requirements_id = spec.get("requirements_id", parent.get("requirements_id")) or (current_requirements or {}).get("id")
+        explanation_check = augment_quality(self, {
+            "body": body, "run_ids": list(runs), "claims": claims,
+            "requirements_id": requirements_id,
+            "source_read_failures": source_read_failures,
+        }, explanation_check)
         record = _new(
             self.task,
+            requirements_id=requirements_id,
+            materiality=materiality,
+            completion_request_key=spec.get("completion_request_key"),
+            source_read_failures=source_read_failures,
+            evidence_appendix=spec.get("evidence_appendix", parent.get("evidence_appendix", "")),
             title=title,
             body=body,
             **({"body_template": body_template} if body_template is not None else {}),
@@ -642,6 +667,8 @@ class AnalysisStore:
             content_hash=_hash(
                 {
                     "title": title,
+                    "requirements_id": requirements_id,
+                    "materiality": materiality,
                     "body": body,
                     "body_template": body_template,
                     "run_ids": list(runs),

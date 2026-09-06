@@ -185,3 +185,307 @@ def test_receivables_aging_service_links_scope_totals_and_source_rows(tmp_path):
     assert row["source_rows"] == [
         {"dataset_id": invoices["id"], "row_index": 1, "source_row": 1}
     ]
+
+
+def test_receivables_aging_service_applies_status_filter_and_exclusion_sources(
+    tmp_path,
+):
+    task = TaskStore(tmp_path / "var").create(title="争议账龄")
+    service = FinanceStore(task)
+    invoice_path = tmp_path / "invoices.json"
+    invoice_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "I-disputed",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "issue_date": "2026-08-01",
+                    "due_date": "2026-08-01",
+                    "amount": "100",
+                    "invoice_status": "争议",
+                },
+                {
+                    "id": "I-active",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "issue_date": "2026-08-01",
+                    "due_date": "2026-08-01",
+                    "amount": "30",
+                    "invoice_status": "正常",
+                },
+            ],
+            ensure_ascii=False,
+        )
+    )
+    activity_path = tmp_path / "activity.json"
+    activity_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "P-disputed",
+                    "invoice_id": "I-disputed",
+                    "kind": "payment",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "effective_date": "2026-08-20",
+                    "amount": "40",
+                },
+                {
+                    "id": "P-active",
+                    "invoice_id": "I-active",
+                    "kind": "payment",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "effective_date": "2026-08-20",
+                    "amount": "5",
+                },
+            ],
+            ensure_ascii=False,
+        )
+    )
+    invoices = service.analysis.add_dataset(invoice_path, name="invoices")
+    activity = service.analysis.add_dataset(activity_path, name="activity")
+    context = service.save_context(
+        {
+            "bindings": {"invoices": invoices["id"], "activity": activity["id"]},
+            "scopes": {
+                "invoices": {"currency": "CNY", "unit": "元"},
+                "activity": {"currency": "CNY", "unit": "元"},
+            },
+        }
+    )
+    scenario = service.save_scenario(
+        {
+            "context_id": context["id"],
+            "kind": "receivables_aging",
+            "label": "争议账龄",
+            "inputs": {
+                "as_of": "2026-09-05",
+                "scope": {
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                },
+                "status_filter": {
+                    "field": "invoice_status",
+                    "include": ["disputed"],
+                    "mapping": {"disputed": ["争议"], "active": ["正常"]},
+                },
+            },
+        }
+    )
+
+    run = service.run_scenario({"scenario_id": scenario["id"]})
+
+    row = next(
+        row for row in run["result"]["rows"] if row["bucket"] == "31-60"
+    )
+    assert row["open_amount"] == "60"
+    assert row["source_rows"] == [
+        {"dataset_id": invoices["id"], "row_index": 1, "source_row": 1},
+        {"dataset_id": activity["id"], "row_index": 1, "source_row": 1},
+    ]
+    assert row["excluded_source_rows"] == [
+        {"dataset_id": invoices["id"], "row_index": 2, "source_row": 2},
+        {"dataset_id": activity["id"], "row_index": 2, "source_row": 2},
+    ]
+    excluded = run["result"]["evidence"]["status_filter"]["excluded"][0]
+    assert {
+        key: excluded[key]
+        for key in (
+            "invoice_id",
+            "ledger",
+            "organization",
+            "currency",
+            "unit",
+            "bucket",
+            "raw_status",
+            "status",
+            "exclusion_reason",
+            "open_amount",
+        )
+    } == {
+        "invoice_id": "I-active",
+        "ledger": "L1",
+        "organization": "O1",
+        "currency": "CNY",
+        "unit": "元",
+        "bucket": "31-60",
+        "raw_status": "正常",
+        "status": "active",
+        "exclusion_reason": "status_not_included",
+        "open_amount": "25",
+    }
+
+
+def test_receivables_aging_service_keeps_excluded_sources_when_all_filtered_out(
+    tmp_path,
+):
+    task = TaskStore(tmp_path / "var").create(title="全部剔除账龄")
+    service = FinanceStore(task)
+    invoice_path = tmp_path / "invoices.json"
+    invoice_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "I-same",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "issue_date": "2026-08-01",
+                    "due_date": "2026-08-06",
+                    "amount": "100",
+                    "invoice_status": "正常",
+                },
+                {
+                    "id": "I-same",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "USD",
+                    "unit": "元",
+                    "issue_date": "2026-08-01",
+                    "due_date": "2026-08-05",
+                    "amount": "50",
+                    "invoice_status": "正常",
+                },
+            ],
+            ensure_ascii=False,
+        )
+    )
+    activity_path = tmp_path / "activity.json"
+    activity_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "P-cny",
+                    "invoice_id": "I-same",
+                    "kind": "payment",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "effective_date": "2026-09-05",
+                    "amount": "10",
+                },
+                {
+                    "id": "P-usd",
+                    "invoice_id": "I-same",
+                    "kind": "payment",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "USD",
+                    "unit": "元",
+                    "effective_date": "2026-09-05",
+                    "amount": "5",
+                },
+                {
+                    "id": "P-cny-after",
+                    "invoice_id": "I-same",
+                    "kind": "payment",
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "effective_date": "2026-09-06",
+                    "amount": "7",
+                },
+            ],
+            ensure_ascii=False,
+        )
+    )
+    invoices = service.analysis.add_dataset(invoice_path, name="invoices")
+    activity = service.analysis.add_dataset(activity_path, name="activity")
+    context = service.save_context(
+        {
+            "bindings": {"invoices": invoices["id"], "activity": activity["id"]},
+            "scopes": {
+                "invoices": {"currency": ["CNY", "USD"], "unit": "元"},
+                "activity": {"currency": ["CNY", "USD"], "unit": "元"},
+            },
+        }
+    )
+    scenario = service.save_scenario(
+        {
+            "context_id": context["id"],
+            "kind": "receivables_aging",
+            "label": "全部剔除账龄",
+            "inputs": {
+                "as_of": "2026-09-05",
+                "scope": {
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": ["CNY", "USD"],
+                    "unit": "元",
+                },
+                "status_filter": {
+                    "field": "invoice_status",
+                    "include": ["disputed"],
+                    "mapping": {"active": ["正常"], "disputed": ["争议"]},
+                },
+            },
+        }
+    )
+
+    run = service.run_scenario({"scenario_id": scenario["id"]})
+
+    assert all(row["open_amount"] == "0" for row in run["result"]["rows"])
+    cny_bucket = next(
+        row
+        for row in run["result"]["rows"]
+        if row["currency"] == "CNY" and row["bucket"] == "0-30"
+    )
+    usd_bucket = next(
+        row
+        for row in run["result"]["rows"]
+        if row["currency"] == "USD" and row["bucket"] == "31-60"
+    )
+    assert cny_bucket["as_of"] == "2026-09-05"
+    assert usd_bucket["as_of"] == "2026-09-05"
+    assert cny_bucket["source_rows"] == []
+    assert usd_bucket["source_rows"] == []
+    assert cny_bucket["excluded_source_rows"] == [
+        {"dataset_id": invoices["id"], "row_index": 1, "source_row": 1},
+        {"dataset_id": activity["id"], "row_index": 1, "source_row": 1},
+    ]
+    assert usd_bucket["excluded_source_rows"] == [
+        {"dataset_id": invoices["id"], "row_index": 2, "source_row": 2},
+        {"dataset_id": activity["id"], "row_index": 2, "source_row": 2},
+    ]
+    excluded_by_currency = {
+        row["currency"]: row for row in run["result"]["excluded_detail_rows"]
+    }
+    assert excluded_by_currency["CNY"]["source_rows"] == cny_bucket[
+        "excluded_source_rows"
+    ]
+    assert excluded_by_currency["USD"]["source_rows"] == usd_bucket[
+        "excluded_source_rows"
+    ]
+    assert run["result"]["evidence"]["status_filter"][
+        "total_scope_open_amount_by_scope"
+    ] == [
+        {
+            "ledger": "L1",
+            "organization": "O1",
+            "currency": "CNY",
+            "unit": "元",
+            "open_amount": "90",
+        },
+        {
+            "ledger": "L1",
+            "organization": "O1",
+            "currency": "USD",
+            "unit": "元",
+            "open_amount": "45",
+        },
+    ]

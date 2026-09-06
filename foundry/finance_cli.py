@@ -14,6 +14,8 @@ from foundry.finance_files import FinanceFiles
 from foundry.source_refresh import SourceRefreshService, SourceScope
 
 OPERATIONS = {
+    "analysis-requirements-save": "analysis_requirements_save",
+    "analysis-requirements-list": "analysis_requirements_list",
     "finance-context-save": "save_context",
     "finance-map-save": "save_account_map",
     "finance-metric-save": "save_metric_definition",

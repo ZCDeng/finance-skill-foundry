@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -14,7 +14,45 @@ const financeScope = {
   additionalProperties: true,
 };
 const financeBasis = { type: "string", enum: ["source_fact", "external_reference", "user_assumption", "professional_judgment"] };
+const statusFilter = {
+  type: "object",
+  description: "账龄状态筛选，由来源适配或经理口径声明；工具不写死企业状态含义。",
+  properties: {
+    field: text("状态字段名，如 invoice_status"),
+    include: { type: "array", items: { type: "string" }, description: "只纳入这些规范状态" },
+    exclude: { type: "array", items: { type: "string" }, description: "剔除这些规范状态" },
+    mapping: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "规范状态到来源值的映射；未命中会标记 unknown" },
+  },
+  additionalProperties: true,
+};
+const scenarioInputs = {
+  type: "object",
+  properties: {
+    invoices_alias: text("应收发票资料别名"),
+    activity_alias: text("核销/收款/减项活动资料别名"),
+    as_of: text("账龄截止日 YYYY-MM-DD"),
+    scope: financeScope,
+    buckets: { type: "array", items: { type: "object" } },
+    status_filter: statusFilter,
+    opening_cash: text("13周现金期初余额"),
+    start_date: text("13周现金起始日期"),
+    actual_cutoff: text("实际收付截止日"),
+    receipts_alias: text("收款资料别名"),
+    payments_alias: text("付款资料别名"),
+    scenario: { type: "object" },
+    drivers: { type: "array", items: { type: "object" } },
+    values: { type: "object" },
+    manager_assumptions: { type: "object" },
+  },
+  additionalProperties: true,
+};
 export const FINANCE_TOOLS = {
+  analysis_requirements_list: specTool("analysis-requirements-list", "读取当前任务已登记的分析要求及版本；先于选择文稿引用确认哪些问题必须回答。", {}),
+  analysis_requirements_save: specTool("analysis-requirements-save", "计算前登记用户要求：问题、范围、必答指标和指定下钻对象。更新必须带当前parent_id，移除项必须说明change_reason，不代表原问题已经完成。", {
+    question: text("用户要回答的管理问题"), context_id: contextId, scope: financeScope,
+    bindings: {type:"object", additionalProperties:{type:"string"}}, parent_id: text("当前要求版本id"), change_reason: text("范围或要求调整原因"),
+    items: {type:"array", items:{type:"object", required:["id","metric"], properties:{id:text("稳定要求标识"),metric:text("语义指标，如profit/revenue/cost/expense或实际指标列名"),label:text("用户可读的要求"),dimensions:{type:"object"},requires_drilldown:{type:"boolean"}}}},
+  }, ["question","items"]),
   finance_source_list: {
     description: "列出当前会话已授权的文件刷新批次、变化摘要与快照。重复批次不会产生重复数据。旧运行固定原快照；需要更新分析时显式保存新口径。没有真实 ERP 授权时只说明文件或适配合同能力。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["finance-source-list"],
@@ -37,10 +75,10 @@ export const FINANCE_TOOLS = {
   workbook_apply: specTool("workbook-apply", "应用已保存且未失效的Excel预览，生成新工作簿并返回路径/哈希。resolutions按冲突单元格声明经理选择keep或apply。原快照不覆盖；不要擅自代替经理决定冲突。", {
     patch_id: text("workbook_preview返回的patch_id"), resolutions: { type: "object", additionalProperties: { type: "string", enum: ["keep", "apply"] } },
   }, ["patch_id"]),
-  finance_scenario_save: specTool("finance-scenario-save", "保存账龄、13周现金或驱动情景。kind=receivables_aging 的 inputs 含 invoices_alias、activity_alias、as_of、scope；账龄引擎不支持 status/exclude_statuses 等状态过滤，需剔除争议发票时直接用显式 SQL 筛选并计算，不能反复猜参数；kind=cash_13_weeks 含 opening_cash、start_date、actual_cutoff、scope 和可选 receipts_alias/payments_alias/scenario.delay_receipts_days。scope明确单一ledger/organization/currency/unit。驱动模型 kind=driver_model，inputs.drivers 声明公式和depends_on、values或manager_assumptions。创建子情景只用parent_id、changes和label，保留父输入。没有支付或过账能力。", {
-    context_id: contextId, kind: { type: "string", enum: ["receivables_aging", "cash_13_weeks", "driver_model"] }, inputs: { type: "object" }, label: text("经理可辨认的情景名称"), parent_id: text("父情景id"), changes: { type: "object", description: "替换指定输入键；如 {scenario:{delay_receipts_days:14}}" },
+  finance_scenario_save: specTool("finance-scenario-save", "保存账龄、13周现金或驱动情景。kind=receivables_aging 的 inputs 含 invoices_alias、activity_alias、as_of、scope；账龄支持 inputs.status_filter={field,include,exclude,mapping}，按来源或经理声明映射状态；筛选保留 rows/detail_rows/excluded_detail_rows 的稳定键、as_of、纳入/剔除余额与来源，不能把当前状态声称为截止日历史状态；kind=cash_13_weeks 含 opening_cash、start_date、actual_cutoff、scope 和可选 receipts_alias/payments_alias/scenario.delay_receipts_days。scope明确单一ledger/organization/currency/unit。驱动模型 kind=driver_model，inputs.drivers 声明公式和depends_on、values或manager_assumptions。创建子情景只用parent_id、changes和label，保留父输入。没有支付或过账能力。", {
+    context_id: contextId, kind: { type: "string", enum: ["receivables_aging", "cash_13_weeks", "driver_model"] }, inputs: scenarioInputs, label: text("经理可辨认的情景名称"), parent_id: text("父情景id"), changes: { type: "object", description: "替换指定输入键；如 {scenario:{delay_receipts_days:14}}" },
   }, ["label"]),
-  finance_scenario_run: specTool("finance-scenario-run", "计算已保存财务情景并生成同源运行与来源依据。账龄以实际截止日核算，不引入未来收款；现金每周连续，延迟收款保留未来计划。输出可下钻并整理为经理可编辑草稿。", { scenario_id: text("finance_scenario_save 返回的id"), question: text("业务问题") }, ["scenario_id"]),
+  finance_scenario_run: specTool("finance-scenario-run", "计算已保存财务情景并生成同源运行与来源依据。账龄以实际截止日核算，不引入未来收款；现金每周连续，延迟收款保留未来计划。账龄输出包含 rows、detail_rows 和 excluded_detail_rows，可用 drilldown_fact 的 section 参数下钻。输出可整理为经理可编辑草稿。", { scenario_id: text("finance_scenario_save 返回的id"), question: text("业务问题") }, ["scenario_id"]),
   list_finance_context: {
     description: "查看本任务已授权资料、财务口径、科目映射和指标定义。先检查现有可复用方法与已加载财务技能；没有专用口径可建立，或继续 SQL/Python。无需审批。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["list-finance-context"],
@@ -69,16 +107,16 @@ export const FINANCE_TOOLS = {
     method: { type: "string", enum: ["quantity_then_price", "base_weights_with_interaction"] }, field_map: { type: "object" }, actual_filters: { type: "object" }, baseline_filters: { type: "object" },
     negative_budget_policy: { type: "string", enum: ["absolute_baseline", "signed_baseline"] }, missing_groups_as_zero: { type: "boolean", description: "仅经理明确将缺失组按零处理时使用，资料缺失不能自行启用" },
   }, ["context_id"]),
-  drilldown_fact: specTool("drilldown-fact", "从当前任务真实 run 的结果行/列下钻到原始快照行。row 是 result.rows 下标（从0开始）；返回精确 source_hash 和原始数据，不搜索其他账套或最新快照。余额资料无凭证链接；分页最多1000行。", {
-    run_id: runId, row: { type: "integer", minimum: 0 }, column: text("可选结果列"), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 1000 },
+  drilldown_fact: specTool("drilldown-fact", "从当前任务真实 run 的结果行/列下钻到原始快照行。row 是所选 section 的下标（从0开始），section 可为 rows、detail_rows 或 excluded_detail_rows；返回精确 source_hash 和原始数据，不搜索其他账套或最新快照。余额资料无凭证链接；分页最多1000行。", {
+    run_id: runId, section: { type: "string", enum: ["rows", "detail_rows", "excluded_detail_rows"] }, row: { type: "integer", minimum: 0 }, column: text("可选结果列"), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 1000 },
   }, ["run_id", "row"]),
-  prepare_explanation: specTool("prepare-explanation", "为财务解释准备稳定 fact id、精确值、展示值、scope、semantics、必引事实和适用业务背景。只读取当前授权的成功 run；用于让模型选择事实而不是手写 run/row/column。示例：{run_ids:[run.id], materiality:{absolute:'10'}}。", {
+  prepare_explanation: specTool("prepare-explanation", "为财务解释准备稳定 fact id、精确值、展示值、scope、semantics、evidence_groups、自动附表和适用业务背景。先登记分析要求，再只读取能回答要求的当前授权成功 run；用于让模型选择事实而不是手写 run/row/column。示例：{run_ids:[run.id], materiality:{absolute:'10'}}。", {
     run_ids: { type: "array", minItems: 1, items: runId }, materiality: { type: "object", properties: { absolute: text("绝对重要性阈值") }, additionalProperties: true },
   }, ["run_ids"]),
-  validate_explanation: specTool("validate-explanation", "检查当前说明正文与事实引用是否一致：数字、方向、单位、舍入展示和缺失引用。可传 draft_id，或传未保存的 body/run_ids/fact_ids/claims。检查不代表经理认可，也不阻止保存普通草稿。", {
+  validate_explanation: specTool("validate-explanation", "检查当前说明正文与事实引用、已登记分析要求、来源追溯和自动附表是否一致：数字、方向、单位、舍入展示和缺失引用。可传 draft_id，或传未保存的 body/run_ids/fact_ids/claims。检查不代表经理认可，也不阻止保存普通草稿。", {
     require_all_material_facts: { type: "boolean", description: "检查全部重要行是否引用；正文通常只需当前问题相关事实" }, draft_id: text("可选已保存文稿 id"), body: text("未保存正文"), run_ids: { type: "array", items: runId }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object" } },
   }),
-  save_explanation_draft: specTool("save-explanation-draft", "保存可由经理自由编辑的说明。优先使用 prepare_explanation 返回的 fact_ids 或 {{fact:FACT_ID}}；服务会补齐精确 claims。每个计算数字 claim 引用 run_id、row、column、value，value必须匹配真实单元格；服务保留口径/映射版本。业务原因若来自经理，basis=professional_judgment；直接假设为user_assumption。缺少原因证据可以保存草稿，不能写成确定因果。修改可用parent_id，新版本不覆盖历史。", {
+  save_explanation_draft: specTool("save-explanation-draft", "保存可由经理自由编辑的说明。优先使用 prepare_explanation 返回的 fact_ids 或 {{fact:FACT_ID}}；服务会补齐精确 claims 并返回 quality 与 completion。completion 中 repair_allowed、stop_reason=no_progress 和最多两轮修复预算用于继续或停止自动收尾。每个计算数字 claim 引用 run_id、row、column、value，value必须匹配真实单元格；服务保留口径/映射版本。业务原因若来自经理，basis=professional_judgment；直接假设为user_assumption。缺少原因证据可以保存草稿，不能写成确定因果。修改可用parent_id，新版本不覆盖历史。", {
     title: text("说明标题"), body: text("可编辑的Markdown正文"), run_ids: { type: "array", items: { type: "string" } }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object", properties: { basis: { type: "string", enum: ["calculation", "source_fact", "external_reference", "user_assumption", "professional_judgment"] }, run_id: text("运行id"), row: { type: "integer", minimum: 0 }, column: text("结果列名"), value: text("精确结果值"), reason: text("判断或假设依据") }, required: ["basis"] } }, parent_id: text("被修改的文稿 id"),
   }, ["body"]),
   finance_background_save: specTool("finance-background-save", "保存一条版本化业务背景，只在当前授权财务范围和有效期内供解释使用。basis 区分 source_fact/external_reference/user_assumption/professional_judgment；经理输入不要伪装为系统事实。可用 dataset_id/paragraph 绑定授权资料段落。", {

@@ -66,19 +66,24 @@ def prepare_explanation(
     facts: list[dict] = []
     materiality = _materiality(materiality or {})
     diagnostics: list[dict] = []
+    evidence_groups: list[dict] = []
     for run in runs:
         if run.get("execution_status") != "succeeded":
             raise FoundryError("explanation facts require a referenced successful run")
         diagnostics.extend(_run_diagnostics(run))
-        facts.extend(_facts_for_run(run, materiality))
+        run_facts = _facts_for_run(run, materiality)
+        facts.extend(run_facts)
+        evidence_groups.extend(_evidence_groups_for_run(run, run_facts))
     required = _required_fact_ids(facts)
     return {
         "schema_version": 1,
         "task_id": analysis.task.id,
         "facts": facts,
+        "evidence_groups": evidence_groups,
         "required_fact_ids": required,
         "diagnostics": diagnostics,
         "business_contexts": backgrounds or [],
+        "materiality": materiality,
     }
 
 
@@ -118,6 +123,52 @@ def claims_for_facts(facts: list[dict], fact_ids: list[str]) -> list[dict]:
     return claims
 
 
+def render_evidence_appendix(prepared: dict) -> dict:
+    """Render readable calculation evidence without changing manager prose."""
+    if not isinstance(prepared, dict):
+        raise FoundryError("prepared explanation payload must be an object")
+    groups = prepared.get("evidence_groups", [])
+    if not isinstance(groups, list):
+        raise FoundryError("prepared evidence_groups must be an array")
+    lines = ["## 计算依据"]
+    fact_ids: list[str] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        title = group.get("label") or group.get("group_type") or group.get("id")
+        lines.append(f"\n### {title}")
+        members = group.get("members", [])
+        if not isinstance(members, list):
+            continue
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            state = member.get("state", "missing")
+            label = member.get("label") or member.get("semantic_role") or member.get("column")
+            value = member.get("display_value")
+            suffix = f"：{value}" if value not in (None, "") else ""
+            if member.get("fact_id"):
+                fact_ids.append(member["fact_id"])
+            source_count = member.get("source_row_count")
+            source = (
+                "；有来源行"
+                if isinstance(source_count, int) and source_count > 0
+                else ""
+            )
+            lines.append(f"- {label}{suffix}（{_state_label(state)}{source}）")
+        closure = group.get("closure")
+        if isinstance(closure, dict) and closure.get("status") != "unsupported":
+            lines.append(f"- 闭合核对：{_closure_label(closure)}")
+    return {
+        "schema_version": 1,
+        "body": "\n".join(lines).strip() if len(lines) > 1 else "",
+        "fact_ids": list(dict.fromkeys(fact_ids)),
+        "claims": claims_for_facts(
+            prepared.get("facts", []), list(dict.fromkeys(fact_ids))
+        ),
+    }
+
+
 def validate_explanation(analysis, spec: dict) -> dict:
     if not isinstance(spec, dict):
         raise FoundryError("explanation spec must be an object")
@@ -131,9 +182,12 @@ def validate_explanation(analysis, spec: dict) -> dict:
     if not isinstance(claims, list):
         raise FoundryError("claims must be an array")
     runs = [analysis.get_run(run_id) for run_id in dict.fromkeys(run_ids)]
-    facts = prepare_explanation(
-        analysis, [r for r in runs if r.get("execution_status") == "succeeded"]
-    )["facts"]
+    prepared = prepare_explanation(
+        analysis,
+        [r for r in runs if r.get("execution_status") == "succeeded"],
+        materiality=spec.get("materiality", draft.get("materiality", {})),
+    )
+    facts = prepared["facts"]
     by_id = {fact["id"]: fact for fact in facts}
     by_location = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts}
     issues: list[dict] = []
@@ -208,11 +262,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
                     "position": token["start"],
                 }
             )
-    required = (
-        set(_required_fact_ids(facts))
-        if spec.get("require_all_material_facts") is True
-        else set()
-    )
+    required = set(_required_fact_ids(facts))
     missing_required = sorted(required - referenced)
     for fact_id in missing_required:
         issues.append(
@@ -223,6 +273,24 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 "fact_id": fact_id,
             }
         )
+    for group in prepared.get("evidence_groups", []):
+        if not isinstance(group, dict):
+            continue
+        closure = group.get("closure", {})
+        if isinstance(closure, dict) and closure.get("status") in {
+            "closure_mismatch",
+            "scope_mismatch",
+            "unit_mismatch",
+        }:
+            issues.append(
+                {
+                    "code": "evidence_group_not_closed",
+                    "severity": "warning",
+                    "message": "计算依据组未通过同范围同单位闭合核对。",
+                    "group_id": group.get("id"),
+                    "closure_status": closure.get("status"),
+                }
+            )
     status = "pass" if not issues else "needs_attention"
     return {
         "schema_version": 1,
@@ -232,8 +300,13 @@ def validate_explanation(analysis, spec: dict) -> dict:
             "referenced_fact_count": len(referenced),
             "available_fact_count": len(facts),
             "missing_required_fact_ids": missing_required,
+            "fact_states": _fact_state_counts(facts),
+            "evidence_group_statuses": _evidence_group_statuses(
+                prepared.get("evidence_groups", [])
+            ),
         },
         "facts": facts,
+        "evidence_groups": prepared.get("evidence_groups", []),
     }
 
 
@@ -399,9 +472,41 @@ def _facts_for_run(run: dict, materiality: dict) -> list[dict]:
 def _materiality(materiality: dict) -> dict:
     if not isinstance(materiality, dict):
         raise FoundryError("materiality must be an object")
-    if materiality.get("relative") is not None:
-        raise FoundryError("materiality.relative is not supported yet")
-    return materiality
+    cleaned = {"absolute": str(materiality.get("absolute", "0"))}
+    try:
+        Decimal(cleaned["absolute"])
+    except InvalidOperation as exc:
+        raise FoundryError("materiality.absolute must be a decimal string") from exc
+    relative = materiality.get("relative")
+    if relative is None:
+        return cleaned
+    if isinstance(relative, dict):
+        threshold = relative.get("threshold", relative.get("value"))
+        denominator = relative.get("denominator", "baseline_abs")
+        negative_policy = relative.get("negative_policy", "absolute")
+    else:
+        threshold = relative
+        denominator = "baseline_abs"
+        negative_policy = "absolute"
+    try:
+        threshold_text = str(threshold)
+        threshold_value = Decimal(threshold_text)
+    except (InvalidOperation, TypeError) as exc:
+        raise FoundryError("materiality.relative threshold must be a decimal string") from exc
+    if threshold_value < 0:
+        raise FoundryError("materiality.relative threshold cannot be negative")
+    if denominator not in {"baseline_abs", "actual_abs", "max_abs"}:
+        raise FoundryError("materiality.relative denominator is unsupported")
+    if negative_policy not in {"absolute", "signed"}:
+        raise FoundryError("materiality.relative negative_policy is unsupported")
+    return {
+        **cleaned,
+        "relative": {
+            "threshold": threshold_text,
+            "denominator": denominator,
+            "negative_policy": negative_policy,
+        },
+    }
 
 
 def _run_diagnostics(run: dict) -> list[dict]:
@@ -473,6 +578,7 @@ def _make_fact(run: dict, row_index: int, row: dict, column: str, value: Any, ma
         "unit": "%" if column in RATIO_COLUMNS else unit,
         "scope": run.get("finance_scope", {}),
         "semantics": semantics,
+        "state": _fact_state(value),
         "source_trace": {
             "output_hash": run.get("output_hash"),
             "input_hashes": run.get("input_hashes", {}),
@@ -488,20 +594,35 @@ def _semantics(row: dict, column: str, exact: str, materiality: dict) -> dict:
     if column in {"contribution", "profit_impact"}:
         role = "profit_impact"
     try:
-        magnitude = abs(Decimal(exact.rstrip("%")))
+        signed_value = Decimal(exact.rstrip("%"))
+        magnitude = abs(signed_value)
     except InvalidOperation:
+        signed_value = Decimal(0)
         magnitude = Decimal(0)
     threshold = materiality.get("absolute", "0") if isinstance(materiality, dict) else "0"
     try:
-        material = magnitude >= Decimal(str(threshold))
+        absolute_material = magnitude >= Decimal(str(threshold))
     except InvalidOperation:
-        material = magnitude != 0
+        absolute_material = magnitude != 0
+    relative = _relative_materiality(row, column, signed_value, magnitude, materiality)
+    material = absolute_material or relative["is_material"]
     return {
         "role": role,
         "metric": row.get("metric") or column,
         "direction": "positive" if not exact.startswith("-") else "negative",
+        "state": "observed_zero" if magnitude == 0 else "nonzero",
+        "materiality": {
+            "absolute": {
+                "threshold": str(threshold),
+                "is_material": absolute_material,
+            },
+            "relative": relative,
+        },
         "required_for_explanation": (
-            material and magnitude != 0 and role in {"amount", "ratio", "profit_impact"}
+            column not in {"actual", "baseline"}
+            and material
+            and magnitude != 0
+            and role in {"amount", "ratio", "profit_impact", "value"}
         ) or (magnitude == 0 and column in {
             "contribution", "profit_impact", "total_variance", "interaction", "residual",
         }),
@@ -536,6 +657,466 @@ def _is_fact_value(value: Any, column: str) -> bool:
         return not isinstance(value, bool) and Decimal(str(value)).is_finite()
     except InvalidOperation:
         return False
+
+
+def _relative_materiality(
+    row: dict, column: str, signed_value: Decimal, magnitude: Decimal, materiality: dict
+) -> dict:
+    configured = materiality.get("relative") if isinstance(materiality, dict) else None
+    if not configured:
+        return {"enabled": False, "is_material": False, "status": "not_configured"}
+    denominator = configured["denominator"]
+    denominator_value = _relative_denominator(row, column, denominator)
+    threshold = Decimal(configured["threshold"])
+    payload = {
+        "enabled": True,
+        "threshold": configured["threshold"],
+        "denominator": denominator,
+        "negative_policy": configured["negative_policy"],
+        "denominator_value": None,
+        "ratio": None,
+        "absolute_ratio": None,
+        "is_material": False,
+        "status": "not_applicable",
+    }
+    if denominator_value is None:
+        return payload
+    if denominator_value == 0:
+        payload["denominator_value"] = "0"
+        payload["status"] = "denominator_zero"
+        return payload
+    signed_denominator = denominator_value
+    display_denominator = abs(denominator_value) if configured["negative_policy"] == "absolute" else denominator_value
+    signed_ratio = signed_value / signed_denominator
+    absolute_ratio = abs(magnitude) / abs(signed_denominator)
+    ratio = absolute_ratio if configured["negative_policy"] == "absolute" else signed_ratio
+    payload["denominator_value"] = format(display_denominator, "f")
+    payload["ratio"] = format(ratio.normalize(), "f")
+    payload["absolute_ratio"] = format(absolute_ratio.normalize(), "f")
+    payload["is_material"] = absolute_ratio >= threshold
+    payload["status"] = (
+        "negative_denominator"
+        if configured["negative_policy"] == "signed" and signed_denominator < 0
+        else "complete"
+    )
+    return payload
+
+
+def _relative_denominator(row: dict, column: str, denominator: str) -> Decimal | None:
+    candidates: list[Decimal] = []
+    for key in ("baseline", "actual"):
+        value = row.get(key)
+        if value is None:
+            candidates.append(None)  # type: ignore[arg-type]
+            continue
+        try:
+            candidates.append(Decimal(str(value)))
+        except InvalidOperation:
+            candidates.append(None)  # type: ignore[arg-type]
+    baseline, actual = candidates if len(candidates) == 2 else (None, None)
+    if denominator == "baseline_abs":
+        return baseline
+    if denominator == "actual_abs":
+        return actual
+    if denominator == "max_abs":
+        values = [abs(v) for v in (baseline, actual) if v is not None]
+        return max(values) if values else None
+    return None
+
+
+def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
+    result = run.get("result", {})
+    rows = result.get("rows", [])
+    columns = [
+        c["name"] if isinstance(c, dict) else str(c)
+        for c in result.get("columns", [])
+    ]
+    if not isinstance(rows, list):
+        return []
+    by_cell = {(fact["row"], fact["column"]): fact for fact in facts}
+    method = result.get("method")
+    if method == "revenue_minus_cost_minus_expense" or (
+        {"contribution", "profit_impact"} & set(columns)
+        and any(isinstance(row, dict) and row.get("metric") for row in rows)
+    ):
+        return _profit_bridge_groups(run, rows, columns, by_cell)
+    if method in {"quantity_then_price", "base_weights_with_interaction"}:
+        return [
+            _row_evidence_group(
+                run,
+                index,
+                row,
+                columns,
+                by_cell,
+                group_type="price_quantity_bridge",
+                member_columns=[
+                    "total_variance",
+                    "quantity_contribution",
+                    "price_contribution",
+                    "interaction",
+                    "residual",
+                    "actual",
+                    "baseline",
+                ],
+            )
+            for index, row in enumerate(rows)
+            if isinstance(row, dict)
+        ]
+    return [
+        _row_evidence_group(
+            run,
+            index,
+            row,
+            columns,
+            by_cell,
+            group_type="calculation_row",
+            member_columns=[
+                column
+                for column in columns
+                if column not in META_COLUMNS and column in row
+            ],
+        )
+        for index, row in enumerate(rows)
+        if isinstance(row, dict)
+    ]
+
+
+def _profit_bridge_groups(
+    run: dict, rows: list[dict], columns: list[str], by_cell: dict
+) -> list[dict]:
+    grouped: dict[tuple, list[tuple[int, dict]]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        grouped.setdefault(_bridge_scope_key(row), []).append((index, row))
+    groups = []
+    for key, items in grouped.items():
+        members = []
+        for index, row in items:
+            metric = row.get("metric", f"row_{index}")
+            for column in (
+                "contribution",
+                "profit_impact",
+                "amount_change",
+                "actual",
+                "baseline",
+            ):
+                members.append(
+                    _evidence_member(
+                        index,
+                        row,
+                        column,
+                        columns,
+                        by_cell,
+                        semantic_role=f"{metric}.{column}",
+                    )
+                )
+        label = "利润桥闭合依据"
+        if key:
+            label = f"{label} / " + " / ".join(f"{k}={v}" for k, v in key)
+        groups.append(
+            _group_payload(
+                run,
+                group_type="profit_bridge",
+                label=label,
+                members=members,
+                row=None,
+            )
+        )
+    return groups
+
+
+def _row_evidence_group(
+    run: dict,
+    index: int,
+    row: dict,
+    columns: list[str],
+    by_cell: dict,
+    *,
+    group_type: str,
+    member_columns: list[str],
+) -> dict:
+    label = row.get("metric") or row.get("product") or f"结果行 {index + 1}"
+    return _group_payload(
+        run,
+        group_type=group_type,
+        label=str(label),
+        members=[
+            _evidence_member(index, row, column, columns, by_cell)
+            for column in member_columns
+        ],
+        row=index,
+    )
+
+
+def _group_payload(
+    run: dict, *, group_type: str, label: str, members: list[dict], row: int | None
+) -> dict:
+    factual = [m for m in members if m.get("fact_id")]
+    missing = [m for m in members if m.get("state") == "missing"]
+    closure = _closure_check(group_type, members)
+    status = closure["status"] if closure["status"] != "passed" else "complete"
+    if missing:
+        status = "missing_data"
+    return {
+        "id": _hash(
+            {
+                "kind": "finance-evidence-group-v1",
+                "run_id": run["id"],
+                "output_hash": run.get("output_hash"),
+                "group_type": group_type,
+                "row": row,
+                "label": label,
+            }
+        ),
+        "run_id": run["id"],
+        "group_type": group_type,
+        "label": label,
+        "row": row,
+        "status": status,
+        "closure": closure,
+        "members": members,
+        "fact_ids": [m["fact_id"] for m in factual],
+    }
+
+
+def _evidence_member(
+    row_index: int,
+    row: dict,
+    column: str,
+    columns: list[str],
+    by_cell: dict,
+    *,
+    semantic_role: str | None = None,
+) -> dict:
+    fact = by_cell.get((row_index, column))
+    state = _cell_state(row, column, columns)
+    payload = {
+        "row": row_index,
+        "column": column,
+        "semantic_role": semantic_role or column,
+        "label": _label(row, column),
+        "state": state,
+        "fact_id": fact["id"] if fact else None,
+        "value": fact["value"] if fact else None,
+        "display_value": fact["display_value"] if fact else None,
+        "unit": fact.get("unit") if fact else row.get("unit"),
+        "scope": _row_scope(row),
+        "source_row_count": (
+            fact.get("source_trace", {}).get("source_row_count") if fact else 0
+        ),
+    }
+    if state in {"missing", "not_applicable"}:
+        payload["reason"] = (
+            "结果列存在但本行未产生可核验数值"
+            if state == "missing"
+            else "当前计算方法未定义该分项"
+        )
+    return payload
+
+
+def _cell_state(row: dict, column: str, columns: list[str]) -> str:
+    if column not in columns:
+        return "not_applicable"
+    value = row.get(column)
+    if value is None:
+        return "missing"
+    return _fact_state(value)
+
+
+def _fact_state(value: Any) -> str:
+    try:
+        return "observed_zero" if Decimal(str(value)) == 0 else "nonzero"
+    except InvalidOperation:
+        return "missing"
+
+
+def _state_label(state: str) -> str:
+    return {
+        "observed_zero": "已计算为零",
+        "nonzero": "已计算",
+        "missing": "缺少数据",
+        "not_applicable": "不适用",
+    }.get(state, str(state))
+
+
+def _fact_state_counts(facts: list[dict]) -> dict:
+    counts = {"nonzero": 0, "observed_zero": 0}
+    for fact in facts:
+        state = fact.get("state", fact.get("semantics", {}).get("state", "nonzero"))
+        counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+def _evidence_group_statuses(groups: list[dict]) -> dict:
+    counts: dict[str, int] = {}
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        status = str(group.get("status", "unknown"))
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _closure_check(group_type: str, members: list[dict]) -> dict:
+    if group_type == "profit_bridge":
+        return _profit_bridge_closure(members)
+    if group_type == "price_quantity_bridge":
+        return _price_quantity_closure(members)
+    return {"status": "unsupported", "equation": None, "message": "未声明可复算闭合规则"}
+
+
+def _profit_bridge_closure(members: list[dict]) -> dict:
+    contribution = {
+        str(member.get("semantic_role", "")).split(".", 1)[0]: member
+        for member in members
+        if member.get("column") == "contribution"
+    }
+    required = ("revenue", "cost", "expense", "profit")
+    missing = [
+        metric
+        for metric in required
+        if contribution.get(metric, {}).get("value") is None
+    ]
+    if missing:
+        return {
+            "status": "missing_data",
+            "equation": "profit = revenue + cost + expense",
+            "missing": missing,
+        }
+    consistency = _member_consistency([contribution[metric] for metric in required])
+    if consistency:
+        return consistency
+    values = {metric: Decimal(str(contribution[metric]["value"])) for metric in required}
+    expected = values["revenue"] + values["cost"] + values["expense"]
+    difference = values["profit"] - expected
+    return {
+        "status": "passed" if difference == 0 else "closure_mismatch",
+        "equation": "profit = revenue + cost + expense",
+        "expected": format(expected, "f"),
+        "actual": format(values["profit"], "f"),
+        "difference": format(difference, "f"),
+        "inputs": {metric: format(value, "f") for metric, value in values.items()},
+    }
+
+
+def _price_quantity_closure(members: list[dict]) -> dict:
+    by_column = {member.get("column"): member for member in members}
+    required = ("quantity_contribution", "price_contribution", "interaction", "residual", "total_variance")
+    missing = [
+        column for column in required if by_column.get(column, {}).get("value") is None
+    ]
+    if missing:
+        return {
+            "status": "missing_data",
+            "equation": "total_variance = quantity_contribution + price_contribution + interaction + residual",
+            "missing": missing,
+        }
+    consistency = _member_consistency([by_column[column] for column in required])
+    if consistency:
+        return consistency
+    values = {column: Decimal(str(by_column[column]["value"])) for column in required}
+    expected = (
+        values["quantity_contribution"]
+        + values["price_contribution"]
+        + values["interaction"]
+        + values["residual"]
+    )
+    difference = values["total_variance"] - expected
+    return {
+        "status": "passed" if difference == 0 else "closure_mismatch",
+        "equation": "total_variance = quantity_contribution + price_contribution + interaction + residual",
+        "expected": format(expected, "f"),
+        "actual": format(values["total_variance"], "f"),
+        "difference": format(difference, "f"),
+        "inputs": {column: format(value, "f") for column, value in values.items()},
+    }
+
+
+def _member_consistency(members: list[dict]) -> dict | None:
+    units = {member.get("unit") for member in members if member.get("unit")}
+    if len(units) > 1:
+        return {
+            "status": "unit_mismatch",
+            "equation": None,
+            "units": sorted(str(unit) for unit in units),
+        }
+    scopes = {
+        tuple(sorted((member.get("scope") or {}).items()))
+        for member in members
+        if member.get("scope")
+    }
+    if len(scopes) > 1:
+        return {
+            "status": "scope_mismatch",
+            "equation": None,
+            "scopes": [dict(scope) for scope in sorted(scopes, key=repr)],
+        }
+    return None
+
+
+def _bridge_scope_key(row: dict) -> tuple:
+    skip = (
+        MONEY_COLUMNS
+        | RATIO_COLUMNS
+        | META_COLUMNS
+        | {
+            "profit_impact",
+            "quantity_contribution",
+            "price_contribution",
+            "amount_change",
+            "amount_change_display",
+            "profit_impact_display",
+            "total_variance",
+            "interaction",
+            "residual",
+            "display_value",
+            "evidence",
+            "source_rows",
+            "semantics",
+            "actual_scope",
+            "baseline_scope",
+        }
+    )
+    return tuple(
+        sorted(
+            (key, str(value))
+            for key, value in row.items()
+            if key not in skip and value not in (None, "")
+        )
+    )
+
+
+def _row_scope(row: dict) -> dict:
+    scope = {}
+    for key in ("ledger", "organization", "period", "currency"):
+        if row.get(key) not in (None, ""):
+            scope[key] = str(row[key])
+    for side in ("actual_scope", "baseline_scope"):
+        if isinstance(row.get(side), dict):
+            for key in ("ledger", "organization", "period", "currency"):
+                value = row[side].get(key)
+                if value not in (None, ""):
+                    scope[f"{side}.{key}"] = str(value)
+    return scope
+
+
+def _closure_label(closure: dict) -> str:
+    status = closure.get("status")
+    if status == "passed":
+        return (
+            f"通过，{closure.get('equation')}，"
+            f"实际 {closure.get('actual')}，复算 {closure.get('expected')}，差额为零"
+        )
+    return {
+        "closure_mismatch": (
+            f"不匹配，{closure.get('equation')}，实际 {closure.get('actual')}，"
+            f"复算 {closure.get('expected')}，差额 {closure.get('difference')}"
+        ),
+        "scope_mismatch": "范围不一致",
+        "unit_mismatch": "单位不一致",
+        "missing_data": "缺少闭合所需数据",
+    }.get(str(status), str(status))
 
 
 def _fact_context_issues(body: str, facts: list[dict]) -> list[dict]:

@@ -141,6 +141,8 @@ const inputs = {
  'workbook_read': {spec: {binding_id: 'binding-1'}},
  'workbook_preview': {spec: {binding_id: 'binding-1', writes: [{cell: 'A1', field: 'amount', value: '10'}]}},
  'workbook_apply': {spec: {patch_id: 'patch-1', resolutions: {A1: 'keep'}}},
+ 'analysis_requirements_save': {spec: {context_id: 'context-1', question: '解释利润', items: [{id: 'profit', metric: 'profit'}]}},
+ 'analysis_requirements_list': {spec: {context_id: 'context-1'}},
 };
 const results = [];
 for (const [name, input] of Object.entries(inputs)) results.push(await tools[name].execute(input, exec));

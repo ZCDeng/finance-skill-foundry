@@ -69,7 +69,11 @@ def test_prepare_explanation_returns_stable_bound_facts_for_successful_runs(serv
     assert profit["display_value"] == "5 万元"
     assert profit["source_trace"]["output_hash"] == run["output_hash"]
     assert profit["scope"]["actual"]["ledger"] == "L1"
+    assert profit["state"] == "nonzero"
+    assert profit["semantics"]["materiality"]["absolute"]["threshold"] == "0"
     assert profit["id"] in prepared["required_fact_ids"]
+    assert prepared["evidence_groups"][0]["group_type"] == "profit_bridge"
+    assert prepared["evidence_groups"][0]["status"] == "complete"
 
 
 def test_save_explanation_draft_renders_fact_templates_and_refreshes_checks(service):
@@ -93,8 +97,10 @@ def test_save_explanation_draft_renders_fact_templates_and_refreshes_checks(serv
     assert "{{fact:" in draft["body_template"]
     assert draft["claims"][0]["fact_id"] == fact["id"]
     assert draft["claims"][0]["value"] == "5"
+    assert draft["body"].startswith("利润超预算 5 万元，2026-09 继续跟踪。")
+    assert "## 计算依据" in draft["body"]
     assert draft["explanation_check"]["status"] == "pass"
-    assert not draft["explanation_check"]["issues"]
+    assert not draft["explanation_check"]["coverage"]["missing_required_fact_ids"]
 
     edited = store.analysis.save_draft(
         {
@@ -142,9 +148,11 @@ def test_parent_auto_claims_do_not_duplicate_on_edit(service):
         }
     )
 
-    assert len(
-        [claim for claim in edited["claims"] if claim["basis"] == "calculation"]
-    ) == 1
+    calculation_claims = [
+        claim for claim in edited["claims"] if claim["basis"] == "calculation"
+    ]
+    assert len(calculation_claims) == len({claim["fact_id"] for claim in calculation_claims})
+    assert len(calculation_claims) == len(edited["fact_ids"])
     assert len(
         [claim for claim in edited["claims"] if claim["basis"] == "professional_judgment"]
     ) == 1
@@ -164,7 +172,7 @@ def test_explanation_rejects_failed_or_out_of_scope_runs(service):
         child.prepare_explanation({"run_ids": [run["id"]]})
 
 
-def test_prepare_explanation_carries_run_diagnostics_and_rejects_relative_materiality(service):
+def test_prepare_explanation_carries_run_diagnostics_and_relative_materiality(service):
     store, context = service
     run = store.explain_variance(
         {
@@ -184,10 +192,18 @@ def test_prepare_explanation_carries_run_diagnostics_and_rejects_relative_materi
         for item in prepared["diagnostics"]
     )
 
-    with pytest.raises(FoundryError, match="materiality.relative is not supported"):
-        store.prepare_explanation(
-            {"run_ids": [run["id"]], "materiality": {"relative": "0.1"}}
-        )
+    prepared = store.prepare_explanation(
+        {"run_ids": [run["id"]], "materiality": {"relative": "0.1"}}
+    )
+    assert prepared["materiality"]["relative"] == {
+        "threshold": "0.1",
+        "denominator": "baseline_abs",
+        "negative_policy": "absolute",
+    }
+    assert any(
+        fact["semantics"]["materiality"]["relative"]["status"] == "not_applicable"
+        for fact in prepared["facts"]
+    )
 
 
 def test_require_all_material_facts_deduplicates_same_row_semantic_groups(service):
@@ -488,7 +504,8 @@ def test_manual_claim_cannot_supply_its_own_display_value_or_omit_run(service):
     assert check['status'] == 'needs_attention'
     assert any(i['code'] == 'uncited_number' for i in check['issues'])
     good = store.validate_explanation({'body': '利润超预算5万元', 'run_ids': [run['id']], 'claims': [claim]})
-    assert good['status'] == 'pass'
+    assert good['status'] == 'needs_attention'
+    assert any(i['code'] == 'missing_required_fact' for i in good['issues'])
     assert good['coverage']['referenced_fact_count'] == 1
     omitted = store.validate_explanation({'body': '利润超预算5万元', 'run_ids': [], 'claims': [claim]})
     assert omitted['status'] == 'needs_attention'
@@ -504,6 +521,169 @@ def test_zero_reconciliation_facts_remain_required(service):
     ]}}], materiality={'absolute': '100'})
     required = [fact for fact in payload['facts'] if fact['id'] in payload['required_fact_ids']]
     assert {(fact['row'], fact['column']) for fact in required} == {(0, 'contribution'), (1, 'interaction'), (1, 'residual')}
+    assert all(fact['state'] == 'observed_zero' for fact in required)
+
+
+def test_evidence_appendix_renders_zero_facts_and_claims(service):
+    from foundry.finance_explanations import prepare_explanation, render_evidence_appendix
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'zero-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'method': 'quantity_then_price', 'columns': ['product', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction', 'residual'], 'rows': [
+        {'product': '商品A', 'total_variance': '32', 'quantity_contribution': '20', 'price_contribution': '12', 'interaction': '0', 'residual': '0', 'unit': '元', 'source_rows': [{'dataset_id': 'd1', 'row': 1}]},
+    ]}}])
+
+    appendix = render_evidence_appendix(payload)
+
+    assert '## 计算依据' in appendix['body']
+    assert 'interaction：0 元（已计算为零；有来源行）' in appendix['body']
+    assert 'residual：0 元（已计算为零；有来源行）' in appendix['body']
+    assert '来源行 1' not in appendix['body']
+    assert {claim['fact_id'] for claim in appendix['claims']} == set(appendix['fact_ids'])
+
+
+def test_evidence_groups_distinguish_missing_from_not_applicable(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'partial-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'columns': ['metric', 'contribution', 'profit_impact'], 'rows': [
+        {'metric': 'revenue', 'contribution': None, 'unit': '万元'},
+    ]}}])
+    group = payload['evidence_groups'][0]
+
+    assert group['status'] == 'missing_data'
+    states = {(member['column'], member['state']) for member in group['members']}
+    assert ('contribution', 'missing') in states
+    assert ('amount_change', 'not_applicable') in states
+
+
+def test_relative_materiality_records_denominator_zero_and_negative_policy(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'relative-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'columns': ['metric', 'actual', 'baseline', 'contribution'], 'rows': [
+        {'metric': 'profit', 'actual': '5', 'baseline': '0', 'contribution': '5', 'unit': '万元'},
+        {'metric': 'cost', 'actual': '-120', 'baseline': '-100', 'contribution': '-20', 'unit': '万元'},
+    ]}}], materiality={'absolute': '1000', 'relative': {'threshold': '0.1', 'denominator': 'baseline_abs'}})
+    by_metric = {
+        fact['semantics']['metric']: fact['semantics']['materiality']['relative']
+        for fact in payload['facts']
+        if fact['column'] == 'contribution'
+    }
+
+    assert by_metric['profit']['status'] == 'denominator_zero'
+    assert by_metric['profit']['is_material'] is False
+    assert by_metric['cost']['denominator_value'] == '100'
+    assert by_metric['cost']['ratio'] == '0.2'
+    assert by_metric['cost']['is_material'] is True
+
+
+def test_signed_relative_materiality_preserves_negative_denominator_direction(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'signed-relative-run',
+        'execution_status': 'succeeded', 'output_hash': 'fixed',
+        'result': {'columns': ['metric', 'actual', 'baseline', 'contribution'], 'rows': [
+            {'metric': 'cost', 'actual': '-120', 'baseline': '-100',
+             'contribution': '20', 'unit': '万元'},
+            {'metric': 'expense', 'actual': '-80', 'baseline': '-100',
+             'contribution': '-20', 'unit': '万元'},
+        ]}}], materiality={'absolute': '1000',
+                           'relative': {'threshold': '0.1',
+                                        'denominator': 'baseline_abs',
+                                        'negative_policy': 'signed'}})
+    by_metric = {
+        fact['semantics']['metric']: fact['semantics']['materiality']['relative']
+        for fact in payload['facts']
+        if fact['column'] == 'contribution'
+    }
+
+    assert by_metric['cost']['denominator_value'] == '-100'
+    assert by_metric['cost']['ratio'] == '-0.2'
+    assert by_metric['cost']['absolute_ratio'] == '0.2'
+    assert by_metric['cost']['is_material'] is True
+    assert by_metric['cost']['status'] == 'negative_denominator'
+    assert by_metric['expense']['ratio'] == '0.2'
+    assert by_metric['expense']['absolute_ratio'] == '0.2'
+    assert by_metric['expense']['status'] == 'negative_denominator'
+
+
+def test_profit_bridge_evidence_group_checks_mathematical_closure(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'bad-bridge', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'method': 'revenue_minus_cost_minus_expense', 'columns': ['metric', 'contribution', 'unit'], 'rows': [
+        {'metric': 'revenue', 'contribution': '20', 'unit': '万元'},
+        {'metric': 'cost', 'contribution': '-10', 'unit': '万元'},
+        {'metric': 'expense', 'contribution': '-5', 'unit': '万元'},
+        {'metric': 'profit', 'contribution': '6', 'unit': '万元'},
+    ]}}])
+    closure = payload['evidence_groups'][0]['closure']
+
+    assert payload['evidence_groups'][0]['status'] == 'closure_mismatch'
+    assert closure == {
+        'status': 'closure_mismatch',
+        'equation': 'profit = revenue + cost + expense',
+        'expected': '5',
+        'actual': '6',
+        'difference': '1',
+        'inputs': {'revenue': '20', 'cost': '-10', 'expense': '-5', 'profit': '6'},
+    }
+
+
+def test_price_quantity_evidence_group_checks_mathematical_closure(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'bad-pq', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'method': 'quantity_then_price', 'columns': ['product', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction', 'residual', 'unit'], 'rows': [
+        {'product': '商品A', 'total_variance': '31', 'quantity_contribution': '20', 'price_contribution': '12', 'interaction': '0', 'residual': '0', 'unit': '元'},
+    ]}}])
+    closure = payload['evidence_groups'][0]['closure']
+
+    assert closure['status'] == 'closure_mismatch'
+    assert closure['equation'] == 'total_variance = quantity_contribution + price_contribution + interaction + residual'
+    assert closure['expected'] == '32'
+    assert closure['actual'] == '31'
+    assert closure['difference'] == '-1'
+
+
+def test_evidence_group_rejects_mismatched_units_and_scopes(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    unit_payload = prepare_explanation(store.analysis, [{'id': 'unit-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'method': 'revenue_minus_cost_minus_expense', 'columns': ['metric', 'contribution', 'unit'], 'rows': [
+        {'metric': 'revenue', 'contribution': '20', 'unit': '万元'},
+        {'metric': 'cost', 'contribution': '-10', 'unit': '元'},
+        {'metric': 'expense', 'contribution': '-5', 'unit': '万元'},
+        {'metric': 'profit', 'contribution': '5', 'unit': '万元'},
+    ]}}])
+    scope_payload = prepare_explanation(store.analysis, [{'id': 'scope-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'method': 'revenue_minus_cost_minus_expense', 'columns': ['metric', 'contribution', 'actual_scope'], 'rows': [
+        {'metric': 'revenue', 'contribution': '20', 'unit': '万元', 'actual_scope': {'ledger': 'L1'}},
+        {'metric': 'cost', 'contribution': '-10', 'unit': '万元', 'actual_scope': {'ledger': 'L1'}},
+        {'metric': 'expense', 'contribution': '-5', 'unit': '万元', 'actual_scope': {'ledger': 'L1'}},
+        {'metric': 'profit', 'contribution': '5', 'unit': '万元', 'actual_scope': {'ledger': 'L2'}},
+    ]}}])
+
+    assert unit_payload['evidence_groups'][0]['closure']['status'] == 'unit_mismatch'
+    assert scope_payload['evidence_groups'][0]['closure']['status'] == 'scope_mismatch'
+
+
+def test_generic_sql_groups_are_marked_unsupported_without_forcing_actual_baseline(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{'id': 'sql-run', 'execution_status': 'succeeded', 'output_hash': 'fixed', 'result': {'columns': ['actual', 'baseline', 'custom_margin'], 'rows': [
+        {'actual': '120', 'baseline': '100', 'custom_margin': '20', 'unit': '万元'},
+    ]}}])
+    required = {
+        fact['column']
+        for fact in payload['facts']
+        if fact['id'] in payload['required_fact_ids']
+    }
+
+    assert payload['evidence_groups'][0]['status'] == 'unsupported'
+    assert payload['evidence_groups'][0]['closure']['status'] == 'unsupported'
+    assert required == {'custom_margin'}
 
 
 def test_sql_percentage_points_render_once_and_reject_hundredfold_body(service):

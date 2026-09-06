@@ -114,7 +114,9 @@
             "workbook_bind",
             "workbook_read",
             "workbook_preview",
-            "workbook_apply"
+            "workbook_apply",
+            "analysis_requirements_save",
+            "analysis_requirements_list"
           ],
           "harnessTools": [
             "skill",
@@ -157,7 +159,9 @@
             "finance_scenario_run",
             "finance_source_list",
             "workbook_inspect",
-            "workbook_read"
+            "workbook_read",
+            "analysis_requirements_save",
+            "analysis_requirements_list"
           ]
         }
       },

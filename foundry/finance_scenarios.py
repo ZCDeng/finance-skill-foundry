@@ -52,6 +52,10 @@ def _money(value: Decimal) -> str:
     return format(value, "f")
 
 
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
 def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -180,6 +184,128 @@ def _bucket_name(days: int | None, buckets: list[dict] | None = None) -> str:
     raise FoundryError(f"no aging bucket covers {days} overdue days")
 
 
+def _text_list(value: Any, field: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise FoundryError(f"{field} must be a list of text values")
+    cleaned = [item.strip() for item in value if item.strip()]
+    if len(cleaned) != len(value):
+        raise FoundryError(f"{field} cannot include blank values")
+    return cleaned
+
+
+def _normalize_status_filter(raw: Any) -> dict[str, Any] | None:
+    if raw in (None, {}):
+        return None
+    if not isinstance(raw, dict):
+        raise FoundryError("status_filter must be an object")
+    field = raw.get("field", "status")
+    if not isinstance(field, str) or not field.strip():
+        raise FoundryError("status_filter field must be nonempty text")
+    include = _text_list(raw.get("include", raw.get("statuses")), "status_filter include")
+    exclude = _text_list(
+        raw.get("exclude", raw.get("exclude_statuses")), "status_filter exclude"
+    )
+    if include and exclude:
+        raise FoundryError("status_filter cannot combine include and exclude")
+    mapping = raw.get("mapping", {})
+    if not isinstance(mapping, dict):
+        raise FoundryError("status_filter mapping must be an object")
+    aliases: dict[str, str] = {}
+    canonical_values = set(include or exclude)
+    for canonical, values in mapping.items():
+        if not isinstance(canonical, str) or not canonical.strip():
+            raise FoundryError("status_filter mapping keys must be nonempty text")
+        canonical = canonical.strip()
+        canonical_values.add(canonical)
+        folded_canonical = canonical.casefold()
+        if folded_canonical in aliases and aliases[folded_canonical] != canonical:
+            raise FoundryError("status_filter mapping aliases must be unique")
+        aliases[folded_canonical] = canonical
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) for value in values
+        ):
+            raise FoundryError("status_filter mapping values must be lists of text")
+        for value in values:
+            if not value.strip():
+                raise FoundryError("status_filter mapping aliases cannot be blank")
+            alias = value.strip().casefold()
+            if alias in aliases and aliases[alias] != canonical:
+                raise FoundryError("status_filter mapping aliases must be unique")
+            aliases[alias] = canonical
+    return {
+        "field": field.strip(),
+        "include": include,
+        "exclude": exclude,
+        "mapping": mapping,
+        "aliases": aliases,
+        "canonical_values": {value.casefold(): value for value in canonical_values},
+    }
+
+
+def _invoice_status(invoice: dict, status_filter: dict[str, Any] | None) -> dict:
+    if not status_filter:
+        return {
+            "raw_status": None,
+            "status": None,
+            "included": True,
+            "exclusion_reason": None,
+        }
+    raw_status = _text(invoice.get(status_filter["field"]))
+    if not raw_status:
+        status = "unknown"
+        known = False
+        missing = True
+    else:
+        status = status_filter["aliases"].get(raw_status.casefold())
+        if status is None:
+            status = status_filter["canonical_values"].get(raw_status.casefold())
+        known = status is not None
+        if status is None:
+            status = "unknown"
+        missing = False
+    include = status_filter["include"]
+    exclude = status_filter["exclude"]
+    included = True
+    reason = None
+    if include and status.casefold() not in {value.casefold() for value in include}:
+        included = False
+        if missing:
+            reason = "missing_status"
+        elif not known:
+            reason = "unknown_status"
+        else:
+            reason = "status_not_included"
+    elif exclude and status.casefold() in {value.casefold() for value in exclude}:
+        included = False
+        reason = "status_excluded"
+    return {
+        "raw_status": raw_status or None,
+        "status": status,
+        "included": included,
+        "exclusion_reason": reason,
+    }
+
+
+def _scope_amount_rows(amounts: dict[tuple[str, str, str, str], Decimal]) -> list[dict]:
+    return [
+        {
+            "ledger": ledger,
+            "organization": organization,
+            "currency": currency,
+            "unit": unit,
+            "open_amount": _money(amount),
+        }
+        for ledger, organization, currency, unit in sorted(amounts)
+        for amount in [amounts[(ledger, organization, currency, unit)]]
+    ]
+
+
+def _aging_row_key(*, as_of: str, parts: tuple[Any, ...]) -> str:
+    return _hash({"as_of": as_of, "parts": parts})[:16]
+
+
 def compute_receivables_aging(
     invoices: list[dict],
     activity: list[dict] | None = None,
@@ -187,6 +313,7 @@ def compute_receivables_aging(
     as_of: str | date,
     scope: dict[str, Any] | None = None,
     buckets: list[dict] | None = None,
+    status_filter: dict[str, Any] | None = None,
 ) -> dict:
     """Compute open receivables and aging buckets as of a point in time.
 
@@ -196,6 +323,7 @@ def compute_receivables_aging(
 
     scope = _require_scope(scope, "receivables aging")
     cutoff = _date(as_of, "as_of")
+    normalized_status_filter = _normalize_status_filter(status_filter)
     scoped_invoices = []
     future_invoices = []
     identities_by_invoice_id: dict[str, set[tuple]] = defaultdict(set)
@@ -288,7 +416,13 @@ def compute_receivables_aging(
             future_activity.append(evidence | {"invoice_id": invoice_id})
 
     detail_rows = []
-    summary: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    excluded_detail_rows = []
+    summary: dict[tuple[str, str, str, str, str], Decimal] = defaultdict(Decimal)
+    included_by_scope: dict[tuple[str, str, str, str], Decimal] = defaultdict(Decimal)
+    excluded_by_scope: dict[tuple[str, str, str, str], Decimal] = defaultdict(Decimal)
+    total_by_scope_before_filter: dict[tuple[str, str, str, str], Decimal] = defaultdict(
+        Decimal
+    )
     for identity, invoice in scoped_invoices:
         invoice_id, ledger, organization, currency, unit = identity
         due = _date(invoice.get("due_date"), "invoice due_date")
@@ -312,23 +446,36 @@ def compute_receivables_aging(
             continue
         overdue_days = None if due > cutoff else (cutoff - due).days
         bucket = _bucket_name(overdue_days, buckets)
-        summary[(ledger, organization, currency, unit, bucket)] += open_amount
-        detail_rows.append(
-            {
-                "invoice_id": invoice_id,
-                "customer": invoice.get("customer"),
-                "organization": organization,
-                "ledger": ledger,
-                "currency": currency,
-                "unit": unit,
-                "due_date": due.isoformat(),
-                "original_amount": _money(amount),
-                "settled_amount": _money(settled),
-                "open_amount": _money(open_amount),
-                "overdue_days": overdue_days,
-                "bucket": bucket,
-            }
-        )
+        scope_key = (ledger, organization, currency, unit)
+        total_by_scope_before_filter[scope_key] += open_amount
+        status = _invoice_status(invoice, normalized_status_filter)
+        detail = {
+            "result_key": _aging_row_key(as_of=cutoff.isoformat(), parts=identity),
+            "invoice_id": invoice_id,
+            "customer": invoice.get("customer"),
+            "organization": organization,
+            "ledger": ledger,
+            "currency": currency,
+            "unit": unit,
+            "as_of": cutoff.isoformat(),
+            "due_date": due.isoformat(),
+            "original_amount": _money(amount),
+            "settled_amount": _money(settled),
+            "open_amount": _money(open_amount),
+            "overdue_days": overdue_days,
+            "bucket": bucket,
+            "raw_status": status["raw_status"],
+            "status": status["status"],
+        }
+        if status["included"]:
+            summary[(ledger, organization, currency, unit, bucket)] += open_amount
+            included_by_scope[scope_key] += open_amount
+            detail_rows.append(detail)
+        else:
+            excluded_by_scope[scope_key] += open_amount
+            excluded_detail_rows.append(
+                detail | {"exclusion_reason": status["exclusion_reason"]}
+            )
 
     ordered_buckets = ["not_due", "0-30", "31-60", "61-90", "90+"]
     if buckets:
@@ -336,10 +483,15 @@ def compute_receivables_aging(
     groups = sorted({identity[1:5] for identity, _invoice in scoped_invoices})
     rows = [
         {
+            "result_key": _aging_row_key(
+                as_of=cutoff.isoformat(),
+                parts=(ledger, organization, currency, unit, name),
+            ),
             "ledger": ledger,
             "organization": organization,
             "currency": currency,
             "unit": unit,
+            "as_of": cutoff.isoformat(),
             "bucket": name,
             "open_amount": _money(
                 summary[(ledger, organization, currency, unit, name)]
@@ -368,27 +520,51 @@ def compute_receivables_aging(
     ]
     return {
         "columns": [
+            {"name": "result_key", "type": "string"},
             {"name": "ledger", "type": "string"},
             {"name": "organization", "type": "string"},
             {"name": "currency", "type": "string"},
             {"name": "unit", "type": "string"},
+            {"name": "as_of", "type": "date"},
             {"name": "bucket", "type": "string"},
             {"name": "open_amount", "type": "decimal"},
         ],
         "rows": rows,
         "detail_columns": [
+            {"name": "result_key", "type": "string"},
             {"name": "invoice_id", "type": "string"},
             {"name": "customer", "type": "string"},
             {"name": "organization", "type": "string"},
             {"name": "ledger", "type": "string"},
             {"name": "currency", "type": "string"},
             {"name": "unit", "type": "string"},
+            {"name": "as_of", "type": "date"},
             {"name": "due_date", "type": "date"},
             {"name": "open_amount", "type": "decimal"},
             {"name": "overdue_days", "type": "integer"},
             {"name": "bucket", "type": "string"},
+            {"name": "raw_status", "type": "string"},
+            {"name": "status", "type": "string"},
         ],
         "detail_rows": detail_rows,
+        "excluded_detail_columns": [
+            {"name": "result_key", "type": "string"},
+            {"name": "invoice_id", "type": "string"},
+            {"name": "customer", "type": "string"},
+            {"name": "organization", "type": "string"},
+            {"name": "ledger", "type": "string"},
+            {"name": "currency", "type": "string"},
+            {"name": "unit", "type": "string"},
+            {"name": "as_of", "type": "date"},
+            {"name": "due_date", "type": "date"},
+            {"name": "open_amount", "type": "decimal"},
+            {"name": "overdue_days", "type": "integer"},
+            {"name": "bucket", "type": "string"},
+            {"name": "raw_status", "type": "string"},
+            {"name": "status", "type": "string"},
+            {"name": "exclusion_reason", "type": "string"},
+        ],
+        "excluded_detail_rows": excluded_detail_rows,
         "row_count": len(rows),
         "evidence": {
             "as_of": cutoff.isoformat(),
@@ -398,6 +574,28 @@ def compute_receivables_aging(
             "future_invoices_ignored": future_invoices,
             "overapplied": overapplied,
             "total_open_amount_by_scope": total_by_scope,
+            "status_filter": (
+                {
+                    "field": normalized_status_filter["field"],
+                    "include": normalized_status_filter["include"],
+                    "exclude": normalized_status_filter["exclude"],
+                    "mapping": normalized_status_filter["mapping"],
+                    "status_evaluation_mode": "current_state",
+                    "included_open_amount_by_scope": _scope_amount_rows(
+                        included_by_scope
+                    ),
+                    "excluded_open_amount_by_scope": _scope_amount_rows(
+                        excluded_by_scope
+                    ),
+                    "total_scope_open_amount_by_scope": _scope_amount_rows(
+                        total_by_scope_before_filter
+                    ),
+                    "included": detail_rows,
+                    "excluded": excluded_detail_rows,
+                }
+                if normalized_status_filter
+                else None
+            ),
         },
         "assumptions": [
             {
@@ -409,7 +607,16 @@ def compute_receivables_aging(
                 ),
             }
         ],
-        "warnings": warnings,
+        "warnings": (
+            warnings
+            + (
+                [
+                    "receivables status filter uses current invoice status; historical status as of the aging date is unavailable"
+                ]
+                if normalized_status_filter
+                else []
+            )
+        ),
     }
 
 

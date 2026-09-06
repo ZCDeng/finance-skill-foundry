@@ -12,6 +12,7 @@ from foundry.finance_explanations import (
     normalize_background,
     prepare_explanation as prepare_explanation_payload,
     render_fact_template,
+    render_evidence_appendix,
     validate_explanation as validate_explanation_payload,
 )
 from foundry.finance_metrics import evaluate_metric
@@ -509,7 +510,10 @@ class FinanceStore:
         run = self.analysis.get_run(spec["run_id"])
         self._authorize(run["bindings"])
         index = spec.get("row", 0)
-        rows = run.get("result", {}).get("rows", [])
+        section = spec.get("section", "rows")
+        if section not in {"rows", "detail_rows", "excluded_detail_rows"}:
+            raise FoundryError("unsupported drilldown section")
+        rows = run.get("result", {}).get(section, [])
         if (
             isinstance(index, bool)
             or not isinstance(index, int)
@@ -554,10 +558,25 @@ class FinanceStore:
                     ),
                 }
             )
+        location = {"run_id": run["id"], "row": index, "column": column, "output_hash": run.get("output_hash")}
+        if section != "rows":
+            location["section"] = section
+        evidence_status = "verified" if values and run.get("engine") == "finance" else "unverified" if values else "missing"
+        evidence_key = _hash({"location": location, "status": evidence_status, "sources": [r["source"] for r in values]})
+        existing = next((r for r in self.analysis._list("evidence_checks") if r.get("evidence_key") == evidence_key), None)
+        if not existing:
+            record = _new(self.task, location=location, status=evidence_status, evidence_key=evidence_key,
+                          bindings=run["bindings"], sources=[r["source"] for r in values],
+                          source_hashes={dataset_id: dataset["source_hash"] for dataset_id, dataset in snapshots.items()},
+                          total=len(unique), offset=offset, read_count=len(values),
+                          has_more=offset + len(values) < len(unique))
+            self.analysis._write(self.analysis._object_path("evidence_checks", record["id"]), record)
         return {
             "run_id": run["id"],
             "row": index,
             "column": column,
+            "provenance_status": evidence_status,
+            "section": section,
             "rows": values,
             "total": len(unique),
             "offset": offset,
@@ -565,28 +584,111 @@ class FinanceStore:
             "message": "来源行可查看；仅有余额资料时不提供凭证分录链接。",
         }
 
+    def analysis_requirements_save(self, spec):
+        from foundry.finance_requirements import latest_requirements, save_requirements
+
+        if not isinstance(spec, dict):
+            raise FoundryError("analysis requirements spec must be an object")
+        parent = latest_requirements(self.analysis)
+        if parent:
+            self._authorize(parent.get("bindings", {}))
+        if spec.get("context_id"):
+            context = self._read("contexts", spec["context_id"])
+            spec = {**spec, "bindings": context["bindings"],
+                    "scope": spec.get("scope", self._primary_scope(context.get("scopes", {})))}
+        self._authorize(spec.get("bindings", {}))
+        return save_requirements(self.analysis, spec)
+
+    def analysis_requirements_list(self, spec):
+        records = self.analysis._list("requirements")
+        visible = [r for r in records if self.allowed is None or set(r.get("bindings", {}).values()) <= self.allowed]
+        if spec.get("context_id"):
+            self._read("contexts", spec["context_id"])
+            visible = [r for r in visible if r.get("context_id") == spec["context_id"]]
+        return {"requirements": visible, "current": visible[-1] if visible else None}
+
     def save_explanation_draft(self, spec):
         if not isinstance(spec, dict):
             raise FoundryError("explanation draft spec must be an object")
+        from foundry.finance_requirements import latest_requirements
+        from foundry.finance_completion import record_completion
+        from foundry.locking import exclusive
+
+        # Serialize retries separately from the short task-record write lock.
+        # A committed draft also acts as recovery evidence if receipt writing fails.
+        with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
+            requirements = latest_requirements(self.analysis)
+            if requirements:
+                self._authorize(requirements.get("bindings", {}))
+            key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
+            previous = next((row for row in self.analysis._list("drafts")
+                             if row.get("completion_request_key") == key), None)
+            if previous:
+                if previous.get("requirements_id"):
+                    self._authorize(self.analysis._get("requirements", previous["requirements_id"]).get("bindings", {}))
+                for run_id in previous.get("run_ids", []):
+                    self._authorize(self.analysis.get_run(run_id)["bindings"])
+                for claim in previous.get("claims", []):
+                    if claim.get("dataset_id"):
+                        self._authorize({"source": claim["dataset_id"]})
+                receipt = record_completion(self.analysis, previous, previous["explanation_check"])
+                return {**previous, "completion": receipt, "replayed": True,
+                        "validation_basis": "saved_draft_version"}
+            return self._save_explanation_draft({**spec, "completion_request_key": key})
+
+    def _save_explanation_draft(self, spec):
         parent = (
             self.analysis.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         )
+        if parent.get("requirements_id"):
+            self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
         for run_id in [*parent.get("run_ids", []), *run_ids]:
             self._authorize(self.analysis.get_run(run_id)["bindings"])
         prepared = (
-            self.prepare_explanation({"run_ids": run_ids})
+            self.prepare_explanation({"run_ids": run_ids,
+                                      "materiality": spec.get("materiality", parent.get("materiality", {}))})
             if run_ids
             else {"facts": []}
         )
         body = spec.get("body", parent.get("body", ""))
+        previous_appendix = parent.get("evidence_appendix", "")
+        if previous_appendix and body.endswith(previous_appendix):
+            body = body[:-len(previous_appendix)].rstrip()
         rendered, template_fact_ids = render_fact_template(body, prepared["facts"])
         explicit_fact_ids = spec.get("fact_ids", parent.get("fact_ids", []))
         if not isinstance(explicit_fact_ids, list):
             raise FoundryError("fact_ids must be an array")
-        fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids]))
+        appendix = render_evidence_appendix(prepared)
+        fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
+        if appendix["body"]:
+            rendered = rendered.rstrip() + "\n\n" + appendix["body"]
+        # Read actual requested evidence before evaluating the final draft.
+        from foundry.finance_requirements import check_requirements
+        provisional = check_requirements(self.analysis, {
+            "run_ids": run_ids, "claims": claims_for_facts(prepared["facts"], fact_ids),
+            "requirements_id": spec.get("requirements_id", parent.get("requirements_id")),
+        })
+        source_read_failures = []
+        for item in provisional["items"]:
+            if item["requires_drilldown"]:
+                for location in item["locations"]:
+                    try:
+                        offset = 0
+                        while True:
+                            result = self.drilldown_fact({**{key: location[key] for key in ("run_id", "row", "column")},
+                                                         "offset": offset, "limit": 1000})
+                            if not result.get("has_more"):
+                                break
+                            count = len(result.get("rows", []))
+                            if not count:
+                                raise FoundryError("source pagination made no progress")
+                            offset += count
+                    except FoundryError as exc:
+                        source_read_failures.append({"requirement_item_id": item["id"],
+                                                     "location": location, "message": str(exc)})
         auto_claims = claims_for_facts(prepared["facts"], fact_ids)
         claims = []
         for claim in _dedupe_explanation_claims(
@@ -608,16 +710,24 @@ class FinanceStore:
                         account_map_id=run.get("account_map_id"),
                     )
             claims.append(claim)
-        return self.analysis.save_draft(
+        draft = self.analysis.save_draft(
             {
                 **spec,
                 "body": rendered,
+                "evidence_appendix": appendix["body"],
+                "materiality": prepared.get("materiality", {}),
+                "source_read_failures": source_read_failures,
                 **({"body_template": body} if template_fact_ids else {}),
                 "run_ids": run_ids,
                 "fact_ids": fact_ids,
                 "claims": claims,
             }
         )
+
+        from foundry.finance_completion import record_completion
+
+        completion = record_completion(self.analysis, draft, draft["explanation_check"])
+        return {**draft, "completion": completion}
 
     def prepare_explanation(self, spec):
         if not isinstance(spec, dict):
@@ -657,7 +767,13 @@ class FinanceStore:
                     self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
                 if claim.get("dataset_id"):
                     self._authorize({"source": claim["dataset_id"]})
-        return validate_explanation_payload(self.analysis, {**spec, "run_ids": run_ids})
+        from foundry.finance_requirements import augment_quality, latest_requirements
+
+        current = latest_requirements(self.analysis)
+        if current:
+            self._authorize(current.get("bindings", {}))
+        merged = {**draft, **spec, "run_ids": run_ids}
+        return augment_quality(self.analysis, merged, validate_explanation_payload(self.analysis, merged))
 
     def finance_background_save(self, spec):
         if not isinstance(spec, dict):

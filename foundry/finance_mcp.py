@@ -363,6 +363,12 @@ class FinanceMcpServer:
             context_ids.add(service._read("metric_definitions", spec["definition_id"])["context_id"])
         if spec.get("scenario_id"):
             context_ids.add(service._read("scenarios", spec["scenario_id"])["context_id"])
+        if spec.get("parent_id") and tool == "analysis_requirements_save":
+            parent = analysis._get("requirements", spec["parent_id"])
+            if parent.get("context_id"):
+                context_ids.add(parent["context_id"])
+            else:
+                raise McpRefused("requirements parent has no grant-verifiable context")
         if spec.get("parent_id") and tool == "save_scenario":
             context_ids.add(service._read("scenarios", spec["parent_id"])["context_id"])
         for run_id in [spec.get("run_id"), *spec.get("run_ids", [])]:
@@ -404,6 +410,8 @@ class JsonRpcError(Exception):
 
 
 TOOL_METHODS = {
+    "analysis_requirements_save": "analysis_requirements_save",
+    "analysis_requirements_list": "analysis_requirements_list",
     "list_finance_context": "list_finance_context",
     "run_metric": "run_metric",
     "explain_variance": "explain_variance",
@@ -458,6 +466,21 @@ def _tools() -> list[dict[str, Any]]:
         },
         "additionalProperties": True,
     }
+    status_filter_schema = {
+        "type": "object",
+        "description": "Receivables status filter declared by the source adapter or manager. Canonical status meanings are supplied by mapping; the tool does not hardcode enterprise status semantics.",
+        "properties": {
+            "field": text,
+            "include": {"type": "array", "items": text},
+            "exclude": {"type": "array", "items": text},
+            "mapping": {
+                "type": "object",
+                "additionalProperties": {"type": "array", "items": text},
+                "description": "Canonical status to source values, for example disputed -> source labels. An unmapped status is reported as unknown.",
+            },
+        },
+        "additionalProperties": True,
+    }
     basis_schema = {
         "type": "string",
         "enum": [
@@ -478,7 +501,43 @@ def _tools() -> list[dict[str, Any]]:
         },
         "additionalProperties": True,
     }
+    scenario_inputs_schema = {
+        "type": "object",
+        "properties": {
+            "invoices_alias": text,
+            "activity_alias": text,
+            "as_of": text,
+            "scope": scope_schema,
+            "buckets": {"type": "array", "items": {"type": "object"}},
+            "status_filter": status_filter_schema,
+            "opening_cash": text,
+            "start_date": text,
+            "actual_cutoff": text,
+            "receipts_alias": text,
+            "payments_alias": text,
+            "scenario": {"type": "object"},
+            "drivers": {"type": "array", "items": {"type": "object"}},
+            "values": {"type": "object"},
+            "manager_assumptions": {"type": "object"},
+        },
+        "additionalProperties": True,
+    }
     return [
+        {
+            "name": "analysis_requirements_save",
+            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question.",
+            "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
+                "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
+                "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
+                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "requires_drilldown": {"type": "boolean"}}},
+                },
+            }},
+        },
+        {
+            "name": "analysis_requirements_list",
+            "description": "Read the versioned requirements for this authorized financial context.",
+            "inputSchema": {"type": "object", "required": ["context_id"], "properties": {"context_id": context_id}},
+        },
         {
             "name": "list_finance_context",
             "title": "List finance context",
@@ -529,7 +588,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "prepare_explanation",
             "title": "Prepare finance explanation facts",
-            "description": "Prepare stable fact ids, exact values, display values, scopes, semantics, diagnostics, and applicable business context from granted successful finance runs.",
+            "description": "Prepare stable fact ids, exact values, display values, scopes, semantics, diagnostics, evidence_groups and automatic supporting tables from granted successful finance runs. Call this after successful runs that answer the registered requirements.",
             "inputSchema": {
                 "type": "object",
                 "required": ["run_ids"],
@@ -543,7 +602,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "validate_explanation",
             "title": "Validate finance explanation draft",
-            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, and completeness. It does not approve the draft.",
+            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. It does not approve the draft.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -559,14 +618,14 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_scenario",
             "title": "Save finance scenario",
-            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability. Aging inputs support invoices_alias, activity_alias, as_of and scope; status/exclude_statuses filters are not supported. Use explicit SQL for disputed-invoice filtering instead of inventing scenario parameters.",
+            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability. Aging inputs support invoices_alias, activity_alias, as_of, buckets and status_filter {field, include, exclude, mapping}. Mapping follows source/manager status semantics; rows, detail_rows and excluded_detail_rows retain stable keys, as_of, balances and source evidence. Current status does not prove historical status.",
             "inputSchema": {
                 "type": "object",
                 "required": ["label"],
                 "properties": {
                     "context_id": context_id,
                     "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model"]},
-                    "inputs": {"type": "object"},
+                    "inputs": scenario_inputs_schema,
                     "label": text,
                     "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
                     "changes": {"type": "object"},
@@ -577,7 +636,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "run_scenario",
             "title": "Run finance scenario",
-            "description": "Run a saved finance scenario and generate a task-local finance run with source evidence.",
+            "description": "Run a saved finance scenario and generate a task-local finance run with source evidence. Aging outputs expose rows, detail_rows and excluded_detail_rows; use drilldown_fact with section to inspect the relevant row set.",
             "inputSchema": {
                 "type": "object",
                 "required": ["scenario_id"],
@@ -591,12 +650,13 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "drilldown_fact",
             "title": "Drill down finance fact",
-            "description": "Return source rows behind a finance run result without exposing arbitrary filesystem paths.",
+            "description": "Return source rows behind a finance run result without exposing arbitrary filesystem paths. section can target rows, detail_rows, or excluded_detail_rows.",
             "inputSchema": {
                 "type": "object",
                 "required": ["run_id", "row"],
                 "properties": {
                     "run_id": run_id,
+                    "section": {"type": "string", "enum": ["rows", "detail_rows", "excluded_detail_rows"]},
                     "row": {"type": "integer", "minimum": 0},
                     "column": text,
                     "offset": {"type": "integer", "minimum": 0},
@@ -608,7 +668,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_explanation_draft",
             "title": "Save finance explanation draft",
-            "description": "Save a task-local explanation draft linked to granted finance runs and source claims.",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. The returned quality and completion record preserve editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow.",
             "inputSchema": {
                 "type": "object",
                 "required": ["body"],

@@ -85,8 +85,10 @@ def test_shared_run_draft_drilldown_and_immutable_mapping(finance):
             "claims": [{"basis": "professional_judgment", "reason": "经理判断"}],
         }
     )
-    assert updated["claims"][0]["verification_status"] == "unverified"
-    assert service.analysis.get_draft(draft["id"])["body"] == "利润超预算 5 万元。"
+    assert next(c for c in updated["claims"] if c["basis"] == "professional_judgment")["verification_status"] == "unverified"
+    assert service.analysis.get_draft(draft["id"])["body"] == draft["body"]
+    assert draft["body"].startswith("利润超预算 5 万元。")
+    assert "## 计算依据" in draft["body"]
     rerun = service.analysis.run_analysis(run["analysis_id"])
     assert rerun["output_hash"] == run["output_hash"]
     assert rerun["reproducibility_status"] == "reproducible"
@@ -279,3 +281,105 @@ def test_price_quantity_run_uses_account_alias_and_explicit_period_filters(tmp_p
     assert run["result"]["rows"][0]["total_variance"] == "32"
     assert run["result"]["rows"][0]["quantity_contribution"] == "20"
     assert len(run["result"]["rows"][0]["source_rows"]) == 2
+
+
+def test_retried_completion_does_not_create_a_second_draft(finance):
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    spec = {'title': '完成检查', 'body': '查看计算依据。', 'run_ids': [run['id']]}
+    first = service.save_explanation_draft(spec)
+    reopened = FinanceStore(service.task)
+    second = reopened.save_explanation_draft(spec)
+    assert second['id'] == first['id']
+    assert second['completion']['id'] == first['completion']['id']
+    assert len(service.analysis._list('drafts')) == 1
+    changed = reopened.save_explanation_draft({**spec, 'body': '补充经理判断。'})
+    assert changed['id'] != first['id']
+
+
+def test_source_read_failure_retains_editable_draft(finance, monkeypatch):
+    service, context = finance
+    service.analysis_requirements_save({'context_id': context['id'], 'question': '解释利润并下钻',
+        'items': [{'id': 'profit', 'metric': 'profit', 'requires_drilldown': True}]})
+    run = service.explain_variance({'context_id': context['id']})
+    def unavailable(spec):
+        raise FoundryError('source temporarily unavailable')
+    monkeypatch.setattr(service, 'drilldown_fact', unavailable)
+    draft = service.save_explanation_draft({'body': '查看计算依据。', 'run_ids': [run['id']]})
+    assert service.analysis.get_draft(draft['id'])['body'] == draft['body']
+    assert draft['quality']['checks']['provenance']['status'] == 'needs_attention'
+    assert any(issue['code'] == 'requested_source_missing' for issue in draft['quality']['issues'])
+    assert draft['source_read_failures']
+
+
+def test_materiality_definition_survives_save_edit_and_reload(finance):
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    materiality = {'absolute': '10', 'relative': {'threshold': '0.1',
+                    'denominator': 'baseline_abs', 'negative_policy': 'absolute'}}
+    draft = service.save_explanation_draft({'body': '查看计算依据。', 'run_ids': [run['id']],
+                                          'materiality': materiality})
+    assert draft['materiality'] == materiality
+    updated = service.save_explanation_draft({'parent_id': draft['id'], 'body': '经理补充判断。'})
+    assert updated['materiality'] == materiality
+    assert service.analysis.get_draft(updated['id'])['materiality'] == materiality
+
+
+def test_concurrent_identical_completions_create_one_draft(finance):
+    from concurrent.futures import ThreadPoolExecutor
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    spec = {'title': '并发重试', 'body': '查看计算依据。', 'run_ids': [run['id']]}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: FinanceStore(service.task).save_explanation_draft(spec), range(2)))
+    assert results[0]['id'] == results[1]['id']
+    assert len(service.analysis._list('drafts')) == 1
+
+
+def test_retry_recovers_after_draft_committed_before_receipt(finance, monkeypatch):
+    import foundry.finance_completion as completion
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    spec = {'body': '查看计算依据。', 'run_ids': [run['id']]}
+    original = completion.record_completion
+    def interrupted(*args):
+        raise FoundryError('interrupted before receipt')
+    monkeypatch.setattr(completion, 'record_completion', interrupted)
+    with pytest.raises(FoundryError, match='interrupted'):
+        service.save_explanation_draft(spec)
+    assert len(service.analysis._list('drafts')) == 1
+    monkeypatch.setattr(completion, 'record_completion', original)
+    result = FinanceStore(service.task).save_explanation_draft(spec)
+    assert result['completion']['draft_id'] == result['id']
+    assert len(service.analysis._list('drafts')) == 1
+
+
+def test_numeric_pass_without_task_requirements_is_not_complete(finance):
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    draft = service.save_explanation_draft({'body': '查看计算依据。', 'run_ids': [run['id']]})
+    assert draft['completion']['status'] == 'needs_requirements'
+    assert any(action['code'] == 'requirements_not_defined' for action in draft['completion']['actions'])
+
+
+def test_empty_requirements_cannot_mark_workflow_complete(finance):
+    service, context = finance
+    service.analysis_requirements_save({'context_id': context['id'], 'question': '解释利润', 'items': []})
+    run = service.explain_variance({'context_id': context['id']})
+    draft = service.save_explanation_draft({'body': '查看计算依据。', 'run_ids': [run['id']]})
+    assert draft['completion']['status'] == 'needs_requirements'
+
+
+def test_replay_marks_historical_validation_and_authorizes_original_scope(finance):
+    service, context = finance
+    requirement = service.analysis_requirements_save({'context_id': context['id'], 'question': '解释利润',
+        'items': [{'id': 'profit', 'metric': 'profit'}]})
+    spec = {'body': '经理的背景说明。', 'run_ids': []}
+    draft = service.save_explanation_draft(spec)
+    replay = service.save_explanation_draft(spec)
+    assert replay['replayed'] is True
+    assert replay['validation_basis'] == 'saved_draft_version'
+    restricted = FinanceStore(service.task, snapshot_ids=[])
+    with pytest.raises(FoundryError, match='outside'):
+        restricted.save_explanation_draft({'parent_id': draft['id']})
+    assert draft['requirements_id'] == requirement['id']
