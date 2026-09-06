@@ -27,6 +27,12 @@ PRICE_QUANTITY_REQUIRED_COLUMNS = (
     'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
 )
 RESULT_SET_METRICS = {'control_totals'}
+INTENT_DIMENSION_KEYS = {'dimension', 'scenario_compare'}
+PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
+CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
+    'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
+    'management_account', 'account_id', 'account_code',
+)
 
 
 def _canonical_metric_name(metric):
@@ -83,9 +89,10 @@ def save_requirements(analysis, spec):
             or any(not isinstance(period, str) or not period.strip() for period in periods)
         ):
             raise FoundryError('requirement periods must be an array of non-empty strings')
+        from foundry.finance_requirement_support import canonical_dimensions
         normalized_item = {'id': item['id'], 'metric': metric,
                            'label': _safe_text(item.get('label', metric), 'requirement label', maximum=500),
-                           'dimensions': dimensions,
+                           'dimensions': canonical_dimensions(dimensions),
                            'requires_drilldown': item.get('requires_drilldown', False)}
         if periods:
             normalized_item['periods'] = list(dict.fromkeys(periods))
@@ -235,10 +242,7 @@ def _bound_scopes_match(candidates, expected, row=None):
 
 
 def _matches(item, row, column, run=None):
-    method = _canonical_method_name(item.get('dimensions', {}).get('method'))
-    if method is not None and _run_method(run or {}) != method:
-        return False
-    if any(row.get(k) != value for k, value in item['dimensions'].items() if k != 'method'):
+    if not _dimensions_match(item, row, run or {}):
         return False
     metric = _canonical_metric_name(item['metric'])
     aliases = METRIC_LABELS.get(metric, (metric,))
@@ -252,6 +256,51 @@ def _matches(item, row, column, run=None):
 
 def _run_method(run):
     return _canonical_method_name(run.get('result', {}).get('method') or run.get('method'))
+
+
+def _dimensions_match(item, row, run=None):
+    dimensions = item.get('dimensions', {})
+    if not isinstance(dimensions, dict):
+        return False
+    method = _canonical_method_name(dimensions.get('method'))
+    if method is not None and _run_method(run or {}) != method:
+        return False
+    for key, value in dimensions.items():
+        if key in {'method', *INTENT_DIMENSION_KEYS}:
+            continue
+        if row.get(key) != value:
+            return False
+    if 'scenario_compare' in dimensions and not _scenario_compare_matches(dimensions['scenario_compare'], row, run or {}):
+        return False
+    if 'dimension' in dimensions and not _dimension_intent_matches(dimensions['dimension'], row, run or {}):
+        return False
+    return True
+
+
+def _scenario_compare_matches(value, row, run):
+    if value != 'actual_vs_budget':
+        return False
+    result = run.get('result', {}) if isinstance(run, dict) else {}
+    if result.get('metric_id') == 'control_totals':
+        return _control_totals_actual_budget_pairs_complete(
+            [(index, item) for index, item in enumerate(result.get('rows', [])) if isinstance(item, dict)]
+        )
+    scopes = run.get('finance_scope', {}) if isinstance(run, dict) else {}
+    actual_scope = row.get('actual_scope') if isinstance(row.get('actual_scope'), dict) else scopes.get('actual')
+    baseline_scope = row.get('baseline_scope') if isinstance(row.get('baseline_scope'), dict) else scopes.get('baseline') or scopes.get('budget')
+    actual_scenario = actual_scope.get('scenario') if isinstance(actual_scope, dict) else row.get('actual_scenario')
+    baseline_scenario = baseline_scope.get('scenario') if isinstance(baseline_scope, dict) else row.get('baseline_scenario')
+    return actual_scenario == 'actual' and baseline_scenario == 'budget'
+
+
+def _dimension_intent_matches(value, row, run):
+    if value != 'management_account':
+        return False
+    if row.get('management_account') is not None:
+        return True
+    if _run_method(run) == 'revenue_minus_cost_minus_expense' and row.get('metric') in set(METRIC_LABELS):
+        return True
+    return False
 
 
 def _run_finance_metric(analysis, run):
@@ -392,7 +441,7 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
         if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
             continue
         rows = _result_set_required_rows(item, run, latest['scope'])
-        if rows:
+        if rows and _result_set_comparison_complete(kind, item, latest, run, rows):
             bases.append((run, rows))
     if not bases:
         return {'locations': [], 'status': 'pending'}
@@ -459,6 +508,14 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
                 if expected_value != value:
                     return True
                 continue
+            if (
+                key == 'scenario'
+                and _result_set_kind(item) == 'control_totals'
+                and not expected['actual'].get('scenario')
+                and not expected['source'].get('scenario')
+                and value in {'actual', 'budget'}
+            ):
+                continue
             if key in item.get('dimensions', {}):
                 if item['dimensions'][key] != value:
                     return True
@@ -477,7 +534,7 @@ def _result_set_required_rows(item, run, scope):
     for index, row in enumerate(run.get('result', {}).get('rows', [])):
         if not _scope_matches(run, row, scope):
             continue
-        if not _item_dimensions_match(item, row):
+        if not _item_dimensions_match(item, row, run):
             continue
         if periods and row.get('period') not in periods:
             continue
@@ -487,13 +544,113 @@ def _result_set_required_rows(item, run, scope):
     return rows
 
 
-def _item_dimensions_match(item, row):
-    for key, value in item.get('dimensions', {}).items():
-        if key == 'method':
-            continue
-        if row.get(key) != value:
+def _item_dimensions_match(item, row, run=None):
+    return _dimensions_match(item, row, run or {})
+
+
+def _result_set_comparison_complete(kind, item, latest, run, rows):
+    if kind != 'control_totals':
+        return True
+    bindings = latest.get('bindings', {})
+    dimensions = item.get('dimensions', {}) if isinstance(item.get('dimensions'), dict) else {}
+    needs_actual_budget = (
+        {'actual', 'budget'}.issubset(set(bindings))
+        or dimensions.get('scenario_compare') == 'actual_vs_budget'
+    )
+    if not needs_actual_budget:
+        return True
+    return _control_totals_actual_budget_pairs_complete(rows)
+
+
+def _control_totals_actual_budget_pairs_complete(rows):
+    scenarios_by_grain = {}
+    for _, row in rows:
+        if not isinstance(row, dict):
             return False
-    return True
+        scenario = row.get('scenario')
+        if scenario not in {'actual', 'budget'}:
+            return False
+        grain = tuple((key, row.get(key)) for key in CONTROL_TOTAL_COMPARISON_GRAIN_KEYS if row.get(key) not in (None, ''))
+        if not grain:
+            return False
+        scenarios_by_grain.setdefault(grain, set()).add(scenario)
+    return bool(scenarios_by_grain) and all(scenarios == {'actual', 'budget'} for scenarios in scenarios_by_grain.values())
+
+
+def _profit_bridge_group_required(item):
+    dimensions = item.get('dimensions', {}) if isinstance(item.get('dimensions'), dict) else {}
+    return (
+        _canonical_metric_name(item.get('metric')) == 'profit'
+        and _canonical_method_name(dimensions.get('method')) == 'revenue_minus_cost_minus_expense'
+        and dimensions.get('dimension') == 'management_account'
+        and dimensions.get('scenario_compare') == 'actual_vs_budget'
+    )
+
+
+def _run_finance_variance_method(analysis, run):
+    if run.get('engine') != 'finance':
+        return None
+    analysis_id = run.get('analysis_id')
+    if not analysis_id:
+        return None
+    try:
+        revision = analysis.get_analysis(analysis_id)
+    except FoundryError:
+        return None
+    if (
+        revision.get('engine') != 'finance'
+        or revision.get('operation') != 'variance'
+        or revision.get('finance_context_id') != run.get('finance_context_id')
+        or revision.get('bindings') != run.get('bindings')
+    ):
+        return None
+    result = run.get('result', {})
+    if not isinstance(result, dict):
+        return None
+    return _canonical_method_name(result.get('method'))
+
+
+def _profit_bridge_candidate_locations(analysis, item, run, evidence, scope):
+    by_line = _profit_bridge_native_group(analysis, item, run, evidence, scope)
+    if by_line is None:
+        return []
+    return [by_line[line] for line in PROFIT_BRIDGE_REQUIRED_LINES]
+
+
+def _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, scope):
+    locations = _profit_bridge_candidate_locations(analysis, item, run, evidence, scope)
+    if not locations:
+        return []
+    if any('contribution' not in claimed_by_row.get((run['id'], location['row']), set()) for location in locations):
+        return []
+    return locations
+
+
+def _profit_bridge_native_group(analysis, item, run, evidence, scope):
+    if not _profit_bridge_group_required(item):
+        return None
+    method = 'revenue_minus_cost_minus_expense'
+    if _run_finance_variance_method(analysis, run) != method:
+        return None
+    rows = run.get('result', {}).get('rows', [])
+    by_line = {}
+    group_ids = set()
+    for index, row in enumerate(rows):
+        if not _scope_matches(run, row, scope) or not _dimensions_match(item, row, run):
+            continue
+        metric = row.get('metric')
+        if metric not in PROFIT_BRIDGE_REQUIRED_LINES:
+            continue
+        member = evidence['members'].get((run['id'], index, 'contribution'))
+        if not member or member.get('group_type') != 'profit_bridge':
+            return None
+        if member.get('group_status') != 'complete' or member.get('closure_status') != 'passed':
+            return None
+        group_ids.add(member.get('group_id'))
+        by_line[metric] = {'run_id': run['id'], 'row': index, 'column': 'contribution', 'output_hash': run.get('output_hash')}
+    if set(by_line) != set(PROFIT_BRIDGE_REQUIRED_LINES) or len(group_ids) != 1:
+        return None
+    return by_line
 
 
 def _result_set_location(location, evidence, status):
@@ -676,6 +833,8 @@ def _price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claim
 
 
 def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
+    if _profit_bridge_group_required(item):
+        return []
     fixups = []
     for run in runs.values():
         if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
@@ -702,6 +861,30 @@ def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
                     source = _source_fixup(item, location, checks)
                     if source:
                         fixups.append(source)
+    return fixups
+
+
+def _profit_bridge_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed):
+    if not _profit_bridge_group_required(item):
+        return []
+    fixups = []
+    for run in runs.values():
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        if not _run_inputs_match_requirement(run, latest):
+            continue
+        if _profit_bridge_native_group(analysis, item, run, evidence, latest['scope']) is None:
+            continue
+        for location in _profit_bridge_candidate_locations(analysis, item, run, evidence, latest['scope']):
+            key = (location['run_id'], location['row'], location['column'])
+            if key not in claimed:
+                row = run['result']['rows'][location['row']]
+                claim = _claim_fixup(item, run, location['row'], row, location['column'], evidence)
+                if claim:
+                    fixups.append(claim)
+            source = _source_fixup(item, _result_set_location(location, evidence, 'answered'), checks)
+            if source:
+                fixups.append(source)
     return fixups
 
 
@@ -746,6 +929,7 @@ def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed)
         *_result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed),
         *_price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claimed),
         *_generic_candidate_fixups(item, latest, runs, checks, evidence, claimed),
+        *_profit_bridge_candidate_fixups(analysis, item, latest, runs, checks, evidence, claimed),
         *_method_conflict_fixups(item, latest, runs, evidence),
     ])
 
@@ -798,6 +982,16 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                 continue
             row = run['result']['rows'][index]
             group = evidence['groups'].get((run_id, index))
+            profit_bridge_locations = _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, latest['scope'])
+            if profit_bridge_locations and ('profit_bridge', run_id) not in processed_groups:
+                processed_groups.add(('profit_bridge', run_id))
+                for location in profit_bridge_locations:
+                    status, metadata = _location_evidence_status(
+                        item, location, evidence['members'].get((run_id, location['row'], location['column']))
+                    )
+                    locations.append({**location, 'evidence': metadata, 'status': status})
+                    statuses.append(status)
+                continue
             if (
                 _price_quantity_requirement_matches(item, run, row, group)
                 and (run_id, index) not in processed_groups
@@ -813,6 +1007,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                     locations.append({**location, 'evidence': metadata, 'status': status})
                     statuses.append(status)
                 continue
+            if _profit_bridge_group_required(item):
+                continue
             account_total_match = _account_total_requirement_matches(analysis, item, run, row, column)
             generic_match_allowed = not _account_amount_claim_requires_native_total(item, row, column)
             if (account_total_match and _scope_matches(run, row, latest['scope'])) or (
@@ -826,10 +1022,16 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                 statuses.append(status)
         item_status = _item_status(statuses)
         failed_source = item['id'] in source_failures
+        source_matches = [_source_verified(location, checks) for location in locations]
+        source_complete = (
+            bool(source_matches) and all(source_matches)
+            if _profit_bridge_group_required(item)
+            else any(source_matches)
+        )
         sourced = (
             item_status == 'answered'
             and not failed_source
-            and any(_source_verified(location, checks) for location in locations)
+            and source_complete
         )
         provenance_status = 'not_requested'
         if item['requires_drilldown']:
@@ -888,6 +1090,13 @@ def _source_verified(location, checks):
         if check.get('status') == 'verified'
         and _location_matches(check.get('location'), base)
     ]
+    if not matching and location.get('column') is not None:
+        row_base = {**base, 'column': None}
+        matching = [
+            check for check in checks
+            if check.get('status') == 'verified'
+            and _location_matches(check.get('location'), row_base)
+        ]
     if not matching:
         return False
     if any(not _has_paging_metadata(check) for check in matching):

@@ -219,3 +219,17 @@
 
 - 新候选工作台22/22通过；已替换 `/Applications/FA Foundry.app`，安装前后完整树与候选一致（本轮按目录/文件/符号链接及mode共26127条记录，算法与前轮不同，不直接比较两轮tree值）。安装版汇总窗口11/11通过；安装runtime资源与评测冻结副本及源码字节相同。新包 `FA-Foundry-0.1.5-macOS-arm64-r4-preflight-70ee3798-98c3dd5b.zip`，SHA256 `d72fb8d814414abeb1312bc3867e02098c639c2bc18e8ea7f0dd6b21bef0546a`，CRC通过。上一版ZIP定向移至废纸篓，详见preflight-resource系列回执。
 - 原生IME已有一次真实composition与候选编号提交中文“预期”的证据，但其后完整筛选链失败，最新复测未稳定重现，故仍不宣称原生中文交互链整体验收通过。保留v4及各次回执；根代理收尾恢复本轮最初ABC输入源。VoiceOver和经理校准仍待完成。
+
+
+## 2026-09-07：原生中文候选完整选择链通过
+
+- 在当前安装版独立原生QA通过15项检查（含种植/窗口及本次输入链），证据 `native-ime-chain-passed/receipt.json`、verifier及截图已留存。System Events物理Digit2触发真实compositionend“逾期”，匹配“逾期应收”时aria-selected仍false；之后非组合态Enter变为true。原输入源恢复并核对。此项不依赖DOM构造composition事件。
+- 先前 `keystroke "2"` 实际产生Numpad2，WeType提交首候选“预期”；改为物理key code19后为Digit2，按真实候选编号选择成功。旧失败和辅助功能浅层查询失败均保留，不删除断言伪造通过。独立链路不覆盖VoiceOver，后者另验收。
+
+- VoiceOver独立尝试未通过：实际启动后`last phrase`与AppleScript quit均10秒超时，无可用朗读证据。仅对本次新启动的精确PID发送SIGTERM，随后确认VoiceOver不再运行，恢复原始关闭状态；见`native-voiceover.log`及`native-voiceover-restoration.json`。不以AX树替代朗读，不宣称是权限拒绝（当前证据仅证明超时）。
+- 冻结模型观察继续进行；已结束F01/F02均耗尽两次修复后needs_review。原记录证明已有实际计算/引用/来源，但control_totals比较scenario范围及利润桥意图维度匹配仍存在缺口，正在独立源码分支内修复和做正反回归。当前冻结记录不更改、不重评分冒充原始通过。
+
+- P1意图匹配首轮定向68项通过，代理全量1064 passed/14 skipped（未设置真实DSH）；该结果不是最终验收。独立审查复现两项缺口：实际有收入/成本而预算仅收入，仍被全局scenario集合误判完整；原生闭合桥缺引用时无自动修复动作。审查结论REQUEST CHANGES，已安排按比较粒度补齐检查及复用完整组合同生成修复建议；增加反例后再做最终同一源码回归，不降低原要求。
+- 二次审查确认上述两项已修，另发现严格四行利润桥沿用通用any来源判断，导致来源pass仍保留三项必需来源动作。root将严格桥限定为四项all来源核验，普通要求保留既有语义。新增实际消费修复动作的闭环回归：部分来源保持pending，全部补齐后pass且无剩余动作。定向74项及Ruff通过；最终含真实DSH完整回归日志`intent-scope-final-full-tests.log`。先前`intent-scope-full-tests.log`为1076 passed/2 skipped，但运行期间代理修订源码，不作为最终同一源码验收。
+- 最终独立复审APPROVE，范围内无剩余阻塞：14项聚焦回归、74项完整要求测试、Ruff/编译通过，独立探针确认部分来源pending、全部执行建议后pass且无剩余动作。控制数逐粒度两侧核对、显式零值，以及同run/row/output_hash的行级来源兼容均已复查。真实模型仍使用未修改的既有冻结集，修复源码尚未进入安装包或新模型验收。
+- root最终同一源码完整回归（真实DSH开启）1082 passed/2 skipped，201.19秒，日志`intent-scope-final-full-tests.log`；两项为既有可选依赖跳过。Ruff、diff及独立审查通过。最终源码文件哈希保存在`intent-scope-final-source-hashes.json`。当前冻结主集已进入F11、全套仍运行；完整模型质量、VoiceOver读出和经理校准仍未验收。

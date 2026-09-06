@@ -296,6 +296,31 @@ def test_sql_unsupported_does_not_claim_finance_closure(analysis):
     assert result['coverage']['status'] == 'pass'
 
 
+
+def test_row_level_source_check_verifies_same_row_claim_column(analysis):
+    save_requirements(analysis, spec())
+    run = _run(analysis)
+    _verified_source(analysis, {'run_id': run['id'], 'row': 3, 'column': None, 'output_hash': run['output_hash']})
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run)]})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['provenance']['status'] == 'pass'
+    assert result['items'][0]['provenance_status'] == 'verified'
+
+
+def test_row_level_source_check_does_not_cross_row_or_hash(analysis):
+    save_requirements(analysis, spec())
+    run = _run(analysis)
+    _verified_source(analysis, {'run_id': run['id'], 'row': 2, 'column': None, 'output_hash': run['output_hash']})
+    _verified_source(analysis, {'run_id': run['id'], 'row': 3, 'column': None, 'output_hash': 'other-hash'})
+
+    result = check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run)]})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['provenance']['status'] == 'needs_attention'
+    assert result['items'][0]['provenance_status'] == 'pending'
+
 def test_source_read_failure_overrides_stale_verified_source(analysis):
     save_requirements(analysis, spec())
     run = _run(analysis)
@@ -361,6 +386,416 @@ def test_completion_reuses_same_input_and_stops_no_progress(analysis):
     assert second['draft_id'] == '2'*32
     assert not second['repair_allowed']
 
+
+def _finance_service_from_rows(tmp_path, rows_by_alias, scopes, *, title='财务分析'):
+    task = TaskStore(tmp_path / (title + '-var')).create(title=title)
+    analysis = AnalysisStore(task)
+    bindings = {}
+    for alias, rows in rows_by_alias.items():
+        path = tmp_path / f'{title}-{alias}.json'
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+        bindings[alias] = analysis.add_dataset(path, name=alias)['id']
+    service = FinanceStore(task)
+    context = service.save_context({'bindings': bindings, 'scopes': scopes})
+    return service, context, bindings
+
+
+def _control_rows(amounts, *, organization='O1', period='2026-09', currency='CNY', unit='万元'):
+    return [
+        {'ledger': 'L1', 'organization': organization, 'period': period, 'currency': currency, 'unit': unit,
+         'scenario': scenario, 'management_account': account, 'amount': amount, 'source_row': index}
+        for index, (scenario, account, amount) in enumerate(amounts, start=1)
+    ]
+
+
+def _claims_for_columns(run, column):
+    return [
+        {'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': column, 'value': row[column]}
+        for index, row in enumerate(run['result']['rows'])
+        if column in row
+    ]
+
+
+def _verify_run_column(service, run, column):
+    for index, row in enumerate(run['result']['rows']):
+        if column in row:
+            service.drilldown_fact({'run_id': run['id'], 'row': index, 'column': column})
+
+
+def _regional_rows(*, organization='华东', period='2026-08', currency='CNY', unit='万元'):
+    east = [
+        ('actual', 'revenue', '150', 'E-A-R'),
+        ('actual', 'cost', '80', 'E-A-C'),
+        ('actual', 'expense', '30', 'E-A-E'),
+        ('budget', 'revenue', '130', 'E-B-R'),
+        ('budget', 'cost', '75', 'E-B-C'),
+        ('budget', 'expense', '22', 'E-B-E'),
+    ]
+    rows = [
+        {'ledger': 'region-ledger', 'organization': organization, 'period': period, 'currency': currency, 'unit': unit,
+         'scenario': scenario, 'management_account': account, 'amount': amount, 'source_row': index,
+         'doc_id': doc_id, 'line_id': str(index)}
+        for index, (scenario, account, amount, doc_id) in enumerate(east, start=1)
+    ]
+    rows.append({'ledger': 'region-ledger', 'organization': '华南', 'period': period, 'currency': currency, 'unit': unit,
+                 'scenario': 'actual', 'management_account': 'revenue', 'amount': '999', 'source_row': 7,
+                 'doc_id': 'S-A-R', 'line_id': '7'})
+    return rows
+
+
+def _profit_bridge_requirement(service, context, bindings, *, dimensions=None, scope=None):
+    return service.analysis_requirements_save({
+        'question': '请只分析华东组织的本期实际对预算利润差异桥；资料里还有华南行，不能混到华东。保存说明并下钻华东利润行。',
+        'context_id': context['id'],
+        'scope': scope or {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+        'bindings': {'regional': bindings['regional']},
+        'items': [{
+            'id': 'east_pnl_actual_budget',
+            'metric': 'profit',
+            'label': '华东 2026-08 实际vs预算利润差异桥：总差异与收入/成本/费用贡献',
+            'dimensions': dimensions if dimensions is not None else {
+                'dimension': 'management_account',
+                'method': 'profit_bridge',
+                'scenario_compare': 'actual_vs_budget',
+            },
+            'requires_drilldown': True,
+        }],
+    })
+
+
+def _regional_service(tmp_path, *, rows=None, scope=None, title='regional'):
+    rows = rows or _regional_rows()
+    return _finance_service_from_rows(
+        tmp_path,
+        {'regional': rows},
+        {'regional': scope or {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'}},
+        title=title,
+    )
+
+
+def _run_east_profit_bridge(service, context, *, method='revenue_minus_cost_minus_expense', actual_filters=None, baseline_filters=None):
+    return service.explain_variance({
+        'context_id': context['id'],
+        'method': method,
+        'actual_scenario': 'actual',
+        'baseline_scenario': 'budget',
+        'actual_filters': actual_filters or {'organization': '华东', 'period': '2026-08'},
+        'baseline_filters': baseline_filters or {'organization': '华东', 'period': '2026-08'},
+    })
+
+
+def test_control_totals_actual_budget_scope_without_scenario_satisfies_result_set_requirement(tmp_path):
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path,
+        {
+            'actual': _control_rows([('actual', 'revenue', '120'), ('actual', 'cost', '70'), ('actual', 'expense', '20')]),
+            'budget': _control_rows([('budget', 'revenue', '100'), ('budget', 'cost', '60'), ('budget', 'expense', '15')]),
+        },
+        {
+            'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'},
+            'budget': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'budget'},
+        },
+        title='controls',
+    )
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算各科目控制数对照',
+        'context_id': context['id'],
+        'scope': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'},
+        'bindings': bindings,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'label': '实际与预算各科目控制数对照', 'requires_drilldown': False}],
+    })
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+
+    result = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [run['id']],
+        'claims': _claims_for_columns(run, 'amount'),
+    })
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['provenance']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+    assert {location['row'] for location in result['items'][0]['locations']} == set(range(6))
+
+
+@pytest.mark.parametrize('bad_scope', [
+    {'ledger': 'L1', 'organization': 'O2', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'},
+    {'ledger': 'L1', 'organization': 'O1', 'period': '2026-10', 'currency': 'CNY', 'unit': '万元'},
+    {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'USD', 'unit': '万元'},
+])
+def test_control_totals_comparison_keeps_scope_guards(tmp_path, bad_scope):
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path,
+        {
+            'actual': _control_rows([('actual', 'revenue', '120')]),
+            'budget': _control_rows([('budget', 'revenue', '100')]),
+        },
+        {
+            'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'},
+            'budget': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'budget'},
+        },
+        title='bad-controls',
+    )
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算各科目控制数对照',
+        'context_id': context['id'],
+        'scope': bad_scope,
+        'bindings': bindings,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}],
+    })
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'amount')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+def test_control_totals_actual_budget_requirement_rejects_actual_only_result(tmp_path):
+    service, two_sided, bindings = _finance_service_from_rows(
+        tmp_path,
+        {
+            'actual': _control_rows([('actual', 'revenue', '120')]),
+            'budget': _control_rows([('budget', 'revenue', '100')]),
+        },
+        {
+            'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'},
+            'budget': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'budget'},
+        },
+        title='two-sided-controls',
+    )
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算各科目控制数对照',
+        'context_id': two_sided['id'],
+        'scope': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'},
+        'bindings': bindings,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'dimensions': {'scenario_compare': 'actual_vs_budget'}, 'requires_drilldown': False}],
+    })
+    actual_only = service.save_context({
+        'bindings': {'actual': bindings['actual']},
+        'scopes': {'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'}},
+    })
+    run = service.run_metric({'context_id': actual_only['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'amount')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+
+def test_control_totals_actual_budget_requires_each_grain_to_have_both_sides(tmp_path):
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path,
+        {
+            'actual': _control_rows([('actual', 'revenue', '120'), ('actual', 'cost', '70')]),
+            'budget': _control_rows([('budget', 'revenue', '100')]),
+        },
+        {
+            'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'},
+            'budget': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'budget'},
+        },
+        title='unpaired-controls',
+    )
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算各科目控制数对照',
+        'context_id': context['id'],
+        'scope': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'},
+        'bindings': bindings,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'label': '实际与预算各科目控制数对照', 'requires_drilldown': False}],
+    })
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+
+    result = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [run['id']],
+        'claims': _claims_for_columns(run, 'amount'),
+    })
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+def test_profit_bridge_intent_missing_claims_get_actionable_fixups(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='bridge-fixups')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context)
+
+    result = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [run['id']],
+        'claims': [],
+    })
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    add_claims = [fixup for fixup in result['items'][0].get('fixups', []) if fixup['code'] == 'add_calculation_claim']
+    verify_sources = [fixup for fixup in result['items'][0].get('fixups', []) if fixup['code'] == 'verify_source']
+    assert {(fixup['row'], fixup['column']) for fixup in add_claims} == {(0, 'contribution'), (1, 'contribution'), (2, 'contribution'), (3, 'contribution')}
+    assert {(fixup['location']['row'], fixup['location']['column']) for fixup in verify_sources} == {(0, 'contribution'), (1, 'contribution'), (2, 'contribution'), (3, 'contribution')}
+
+    _verify_run_column(service, run, 'contribution')
+    sourced = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [run['id']],
+        'claims': [],
+    })
+    sourced_add_claims = [fixup for fixup in sourced['items'][0].get('fixups', []) if fixup['code'] == 'add_calculation_claim']
+    sourced_verify_sources = [fixup for fixup in sourced['items'][0].get('fixups', []) if fixup['code'] == 'verify_source']
+    assert {(fixup['row'], fixup['column']) for fixup in sourced_add_claims} == {(0, 'contribution'), (1, 'contribution'), (2, 'contribution'), (3, 'contribution')}
+    assert sourced_verify_sources == []
+
+
+def test_profit_bridge_source_fixups_close_only_after_all_required_sources(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='bridge-source-closure')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context)
+    spec = {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': []}
+    pending = check_requirements(service.analysis, spec)
+    spec['claims'] = [
+        {'basis': 'calculation', **{key: action[key] for key in ('run_id', 'row', 'column', 'value')}}
+        for action in pending['items'][0]['fixups'] if action['code'] == 'add_calculation_claim'
+    ]
+    service.drilldown_fact({'run_id': run['id'], 'row': 3, 'column': 'contribution'})
+    partial = check_requirements(service.analysis, spec)
+    assert partial['coverage']['status'] == 'pass'
+    assert partial['provenance']['status'] == 'needs_attention'
+    assert partial['items'][0]['provenance_status'] == 'pending'
+    actions = partial['items'][0]['fixups']
+    assert len(actions) == 3
+    assert all(action['code'] == 'verify_source' for action in actions)
+    for action in actions:
+        service.drilldown_fact({key: action['location'][key] for key in ('run_id', 'row', 'column')})
+    completed = check_requirements(service.analysis, spec)
+    assert completed['coverage']['status'] == 'pass'
+    assert completed['provenance']['status'] == 'pass'
+    assert completed['items'][0]['provenance_status'] == 'verified'
+    assert completed['items'][0].get('fixups', []) == []
+
+
+def test_profit_bridge_intent_does_not_suggest_fixups_for_wrong_scope_or_free_sql(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='no-bridge-fixups')
+    requirement = _profit_bridge_requirement(
+        service,
+        context,
+        bindings,
+        scope={'ledger': 'region-ledger', 'organization': '华南', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+    )
+    native_run = _run_east_profit_bridge(service, context)
+    forged = _run(service.analysis, id_suffix='forged-bridge-fixup', bindings={'regional': bindings['regional']}, finance_scope={
+        'regional': {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+    }, result={
+        'method': 'revenue_minus_cost_minus_expense',
+        'columns': ['metric', 'contribution'],
+        'rows': [
+            {'metric': 'revenue', 'contribution': '20'},
+            {'metric': 'cost', 'contribution': '-5'},
+            {'metric': 'expense', 'contribution': '-8'},
+            {'metric': 'profit', 'contribution': '7'},
+        ],
+    })
+
+    result = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [native_run['id'], forged['id']],
+        'claims': [],
+    })
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0].get('fixups', []) == []
+
+def test_profit_bridge_intent_dimensions_accept_verified_native_actual_budget_bridge(tmp_path):
+    service, context, bindings = _regional_service(tmp_path)
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    assert requirement['items'][0]['dimensions']['method'] == 'revenue_minus_cost_minus_expense'
+    run = _run_east_profit_bridge(service, context)
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {
+        'requirements_id': requirement['id'],
+        'run_ids': [run['id']],
+        'claims': _claims_for_columns(run, 'contribution'),
+    })
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['provenance']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+    assert {location['row'] for location in result['items'][0]['locations']} == {0, 1, 2, 3}
+    assert all(location['evidence']['group_type'] == 'profit_bridge' for location in result['items'][0]['locations'])
+
+
+@pytest.mark.parametrize('dimensions', [
+    {'dimension': 'management_account', 'method': 'profit_bridge', 'scenario_compare': 'budget_vs_actual'},
+    {'dimension': 'product', 'method': 'profit_bridge', 'scenario_compare': 'actual_vs_budget'},
+    {'dimension': 'management_account', 'method': 'quantity_then_price', 'scenario_compare': 'actual_vs_budget'},
+])
+def test_profit_bridge_intent_dimensions_reject_conflicting_intent(tmp_path, dimensions):
+    service, context, bindings = _regional_service(tmp_path, title='conflicting-intent')
+    requirement = _profit_bridge_requirement(service, context, bindings, dimensions=dimensions)
+    run = _run_east_profit_bridge(service, context)
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+def test_profit_bridge_intent_requires_all_contribution_claims(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='missing-bridge-claim')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context)
+    _verify_run_column(service, run, 'contribution')
+    claims = [claim for claim in _claims_for_columns(run, 'contribution') if claim['row'] != 2]
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+@pytest.mark.parametrize('scope', [
+    {'ledger': 'region-ledger', 'organization': '华南', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+    {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'},
+    {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'USD', 'unit': '万元'},
+])
+def test_profit_bridge_intent_keeps_scope_guards(tmp_path, scope):
+    service, context, bindings = _regional_service(tmp_path, title='bad-bridge-scope')
+    requirement = _profit_bridge_requirement(service, context, bindings, scope=scope)
+    run = _run_east_profit_bridge(service, context)
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+
+
+def test_profit_bridge_intent_does_not_trust_free_sql_method_label(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='free-sql-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run(service.analysis, id_suffix='forged-profit-bridge', bindings={'regional': bindings['regional']}, finance_scope={
+        'regional': {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+    }, result={
+        'method': 'revenue_minus_cost_minus_expense',
+        'columns': ['metric', 'contribution'],
+        'rows': [
+            {'metric': 'revenue', 'contribution': '20'},
+            {'metric': 'cost', 'contribution': '-5'},
+            {'metric': 'expense', 'contribution': '-8'},
+            {'metric': 'profit', 'contribution': '7'},
+        ],
+    })
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
 
 def test_completion_limits_changing_failures_to_two_repairs(analysis):
     from foundry.finance_completion import record_completion
