@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "version": "0.1.3",
+  "artifact": "app/release/FA-Foundry-0.1.3-macOS-arm64-r2-20260906-0853.zip",
+  "zip_sha256": "7aa0a4fa34c151ad3bd78335e360ac916f834bba0ea9f2db21fe7364890b6131",
+  "zip_bytes": 497870440,
+  "crc_passed": true,
+  "installed_matches": {
+    "Contents/Resources/app.asar": {
+      "zip_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+      "installed_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+      "matches": true
+    },
+    "Contents/Resources/foundry/foundry": {
+      "zip_sha256": "0f3fc321b6cc8d9d809c4393e0195d0b383aefe3c28c74969cbbaab3c814bc7f",
+      "installed_sha256": "0f3fc321b6cc8d9d809c4393e0195d0b383aefe3c28c74969cbbaab3c814bc7f",
+      "matches": true
+    }
+  },
+  "source_zip_installed_resource_hashes": {
+    "method/CONNECTORS.md": "501120e224b7bf2866dd0d87423953f326ffc37cd2e6c826c3faccb20410828e",
+    "method/FOUNDRY.md": "a1be3b5d87a00e61f9cf6dae2093d714487bd52b9d746de3f822e5024ef13edc",
+    "method/LICENSE": "5d93b2ea703c35c2bad6b966d90fc52c23802a7bb261bc562d3ffae8614cac2b",
+    "method/NOTICE": "e3c065f40a3a79b2346971d01e3eff924e722295b0cacaf5f3c8c690cae1a2a5",
+    "method/README.md": "05e2199206465c1a830f0bea0e6956b21580ae97c8d988be80ba42ae7fe51b96",
+    "method/financial-statements/SKILL.md": "070991730bcb019181cf01ba127815da15865243fe441d30a4ea9f15500cbe94",
+    "method/journal-entry/SKILL.md": "20f0597c2faca18dd97f92ebca6bd8f605288b5b1fa2964f5cf9a1b60d2fe0bf",
+    "method/reconciliation/SKILL.md": "1ff013edcbfa764c946354ec886d2bf492fb189ec5fb811800cf392e3d719f95",
+    "method/variance-analysis/SKILL.md": "b63ca8b5b8d6952ee2e65768429d8ef150cbeccf4a1c47ec5836e660ab45ebeb",
+    "excel-addin/README.md": "b8b4ed94106e8205eb40755b86695e0ef543b1b13ed55ec9bd8f37f9b2f7879a",
+    "excel-addin/icon.png": "9671d358628268d866010a826d963d7bcb684a2c8c601a7f7e5ead271fa739be",
+    "excel-addin/icon.svg": "88e3bed17a6145e9a0689952835c6dd7fdf471769f2776252360a668c6fef093",
+    "excel-addin/manifest.xml": "fa63fc545727e5ecd91ad75a90a053180d4bbcbd94389b65b840637fe7e976f7",
+    "excel-addin/taskpane.css": "d2bfe9f9906f0830d2693c51a74d8cec37d48b62107d7af2f28237c819234aae",
+    "excel-addin/taskpane.html": "5694c64128fb240b1858c08bae55ef656febe0e3fac3568744b32b5f2151760b",
+    "excel-addin/taskpane.js": "2175679ca214bf5d69455f04b19e75840390f0711530caf6be17918c1312055f"
+  },
+  "signed": false
+}

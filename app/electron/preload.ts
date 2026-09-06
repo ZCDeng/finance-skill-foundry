@@ -21,6 +21,8 @@ const api = {
   analysisExport: (task: string, id: string, format: string) => ipcRenderer.invoke('analysis:export', task, id, format),
   analysisMethodSave: (task: string, id: string, name: string) => ipcRenderer.invoke('analysis:method-save', task, id, name),
   analysisMethodApply: (task: string, id: string, bindings: unknown, parameters: unknown = []) => ipcRenderer.invoke('analysis:method-apply', task, id, bindings, parameters),
+  financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),
+  financeSourceRefresh: (task: string, spec: unknown) => ipcRenderer.invoke('finance:source-refresh', task, spec),
   tasks: () => ipcRenderer.invoke('foundry:tasks'),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),

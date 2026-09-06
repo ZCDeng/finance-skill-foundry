@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
+import { FINANCE_TOOLS } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
   .dsh.foundry.profiles.analysis;
@@ -46,6 +47,7 @@ const claim = {
 // These commands share the legacy tool result envelope, but no Window state or
 // current pointer. Every call is resolved by the service from exec.agent.id.
 const SPECS = {
+  ...FINANCE_TOOLS,
   "method-resource": {
     description: "读取已随包技能明确引用的配套说明。skill 工具加载正文后，用此入口读取 FOUNDRY.md 的运行模式规则或 CONNECTORS.md 的连接类别说明，也可核对 NOTICE/LICENSE。只能读取四项随包技能的这些资源，不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
     parameters: object({

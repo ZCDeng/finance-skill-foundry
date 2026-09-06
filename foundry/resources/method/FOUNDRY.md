@@ -13,6 +13,16 @@ These four close methods ship with the foundry kit. They are not the authored po
 - The tickable schedule is `workpaper.md` on the window, not a second workbook.
 - In the analysis preset, load these companion notes with `method-resource` using the current skill ID and `resource: FOUNDRY.md` or `resource: CONNECTORS.md`. Keep the Markdown links for hosts that can read relative references directly.
 
+## Analysis-mode finance tools
+
+When the analysis preset is active, stay skill-first: load the relevant method skill and companion notes, then inspect the registered finance context before choosing tools. Use `list_finance_context` to see current datasets, contexts, maps, scenarios, saved metric definitions, and the available finance capabilities.
+
+For uploaded files that are not yet registered as finance context, use `finance_source_refresh` only for file-backed snapshots. Ordinary budget, balance, and statement files without real document and line identifiers should use `file_identity_policy: "snapshot_only"`; document-line exports with genuine source keys may use `"business_key"`. Save the resulting bindings and explicit scope with `finance_context_save`, and save an account map with `finance_map_save` when presentation or rollup logic depends on it. A file refresh publishes a new immutable source version; it does not rebind old runs, infer row-level deletes from row order, or claim a live ERP connector.
+
+For high-frequency analysis, prefer the finance tools when their contract matches the question: `run_metric` for management P&L, ratios, account totals, and control totals; `explain_variance` for supported profit bridges or price/quantity explanations; `finance_scenario_save` and `finance_scenario_run` for saved scenario comparisons. Use `drilldown_fact` only against run rows and source-backed cells that can be traced to the run's own bindings. Continue to use SQL/Python for layouts, reconciliations, joins, or analytics the finance tools do not cover.
+
+When drafting commentary, use `save_explanation_draft` with calculation claims tied to real `run_id`, `row`, `column`, and `value` fields. Classify manager assumptions, professional judgment, policy choices, and narrative edits as `user_assumption`, `professional_judgment`, or plain draft text; do not present them as system-computed facts.
+
 ## Exit codes
 
 Every foundry entry point (`foundry`, `python -m foundry.probe`) uses the same three.

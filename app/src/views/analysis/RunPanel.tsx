@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { shortSha, when, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
+import { shortSha, when, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
 
-export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod }: {
+export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
+  onDrilldown?(run: AnalysisRun, row: number, column?: string): Promise<FinanceDrilldown>;
 }) {
   const [selected, setSelected] = useState(() => readCopy<string>(`${analysis.task_id}:run`) ?? '');
   const [evidence, setEvidence] = useState(false);
@@ -34,8 +35,8 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
     {!run ? <p className="analysis-note">此版本尚未运行。检查口径后即可计算。</p> : <article className="analysis-result">
       <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)}</p></div><RunStatus run={run} /></div>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
-      {run.result && run.result.columns.length > 0 && <><Table key={run.id} columns={run.result.columns} rows={run.result.rows} caption="计算结果" />
-        <p className="analysis-note">{run.result.row_count} 行{run.result.truncated ? ' · 当前为截断预览' : ''}</p></>}
+      {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
+      {run.engine === 'finance' && <FinanceRunDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><button type="button" className="fnd-button" disabled={busy} aria-label={`打开文件 ${output.path}`}
@@ -67,6 +68,8 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
       })}</div>
       <p>参数：{parameterSummary(run.parameters ?? analysis.parameters, run.parameter_metadata ?? analysis.parameter_metadata)}</p>
       {assumptions.length > 0 && <p>假设说明：{assumptionSummary(assumptions)}</p>}
+      {run.finance_scope && <details className="analysis-details"><summary>财务范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+        <p key={alias}>{alias}：{textValue(scope)}</p>)}</details>}
       <details className="analysis-details"><summary>运行标识与结果摘要</summary><p>{run.id}</p>{run.output_hash && <p>{run.output_hash}</p>}</details>
     </aside></div>}
     {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
@@ -88,4 +91,168 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
         <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>{shortSha(row.id)}</span></button>)}</div>
     </details>
   </div>;
+}
+
+
+function RunResultTable({ run }: { run: AnalysisRun }) {
+  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;
+  return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
+    <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p></>;
+}
+
+type FinanceVarianceResult = NonNullable<AnalysisRun['result']> & {
+  method?: unknown;
+  comparison?: { actual_scenario?: unknown; baseline_scenario?: unknown } | Record<string, unknown>;
+};
+
+const financeVarianceReservedColumns = new Set(['metric', 'actual', 'baseline', 'contribution', 'ratio', 'ratio_status', 'favorability', 'comparison_status']);
+
+function financeVarianceResult(run: AnalysisRun): FinanceVarianceResult | undefined {
+  return run.result as FinanceVarianceResult | undefined;
+}
+
+function isFinanceVarianceRun(run: AnalysisRun): boolean {
+  const result = financeVarianceResult(run);
+  const names = new Set(result?.columns.map((column) => column.name) ?? []);
+  return run.engine === 'finance' && result?.method === 'revenue_minus_cost_minus_expense'
+    && ['metric', 'actual', 'baseline', 'contribution', 'ratio'].every((name) => names.has(name));
+}
+
+const financeMetricLabel: Record<string, string> = { revenue: '收入', cost: '成本', expense: '费用', profit: '利润' };
+const financeScopeLabels: Record<string, string> = {
+  ledger: '账簿', ledger_id: '账簿', organization: '组织', organization_id: '组织', period: '期间', currency: '币种', unit: '单位', scenario: '情景',
+};
+
+function formatVarianceRatio(value: unknown): string {
+  if (value == null || value === '') return '—';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return `${textValue(value)} 倍`;
+  if (Math.abs(numeric) > 1000) return `${textValue(value)} 倍`;
+  return `${(numeric * 100).toLocaleString('zh-CN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}%`;
+}
+
+function distinctFinanceValues(rows: Record<string, unknown>[], name: string): string[] {
+  return Array.from(new Set(rows.map((row) => row[name]).filter((value) => value != null && value !== '').map(textValue)));
+}
+
+function financeVarianceScope(run: AnalysisRun): string {
+  const rows = run.result?.rows ?? [];
+  const columns = run.result?.columns.map((column) => column.name) ?? [];
+  const parts = columns.filter((name) => !financeVarianceReservedColumns.has(name)).flatMap((name) => {
+    const values = distinctFinanceValues(rows, name);
+    if (values.length !== 1) return [];
+    const label = financeScopeLabels[name] ?? name;
+    return `${label} ${values[0]}`;
+  });
+  return parts.join(' · ') || '按当前财务口径汇总';
+}
+
+function financeVarianceDimensionColumns(run: AnalysisRun): { name: string; type?: string }[] {
+  const rows = run.result?.rows ?? [];
+  return run.result?.columns.filter((column) => !financeVarianceReservedColumns.has(column.name) && distinctFinanceValues(rows, column.name).length > 1) ?? [];
+}
+
+function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel: string; actualLabel: string } {
+  const comparison = financeVarianceResult(run)?.comparison;
+  const actual = textValue(comparison?.actual_scenario ?? 'actual');
+  const baseline = textValue(comparison?.baseline_scenario ?? 'baseline');
+  const baselineIsBudget = /budget|预算/i.test(baseline);
+  const actualIsDefault = /^actual$/i.test(actual) || actual === '实际';
+  return {
+    caption: baselineIsBudget ? '预算差异桥' : actualIsDefault ? '损益差异桥' : '对照损益差异桥',
+    actualLabel: actualIsDefault ? '实际' : actual,
+    baselineLabel: baselineIsBudget ? '预算' : baseline === 'baseline' ? '对照' : `对照（${baseline}）`,
+  };
+}
+
+function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
+  const dimensions = financeVarianceDimensionColumns(run);
+  const copy = financeVarianceCopy(run);
+  const rows = (run.result?.rows ?? []).map((row) => ({
+    ...Object.fromEntries(dimensions.map((column) => [financeScopeLabels[column.name] ?? column.name, row[column.name]])),
+    科目: financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric),
+    [copy.actualLabel]: row.actual,
+    [copy.baselineLabel]: row.baseline,
+    差异贡献: row.contribution,
+    差异率: formatVarianceRatio(row.ratio),
+  }));
+  const dimensionHeaders = dimensions.map((column) => ({ name: financeScopeLabels[column.name] ?? column.name, type: column.type }));
+  return <section className="analysis-finance-variance">
+    <p className="analysis-note">范围：{financeVarianceScope(run)}</p>
+    <Table key={`${run.id}:finance-variance`} columns={[
+      ...dimensionHeaders, { name: '科目', type: 'VARCHAR' }, { name: copy.actualLabel, type: 'DECIMAL' }, { name: copy.baselineLabel, type: 'DECIMAL' },
+      { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
+    ]} rows={rows} caption={copy.caption} />
+    <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
+    <details className="analysis-details"><summary>原始结果字段 · {run.result!.columns.length} 列</summary>
+      <Table key={`${run.id}:raw`} columns={run.result!.columns} rows={run.result!.rows} caption="原始计算结果" />
+    </details>
+  </section>;
+}
+
+function textValue(value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value !== 'object') return String(value);
+  return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key}：${textValue(item)}`).join(' · ');
+}
+
+function financeCompleteness(value?: string): string {
+  return ({
+    incomplete: '范围尚未完成：存在需要处理的诊断。',
+    not_reconciled: '范围尚未完成：尚未做控制数核对。',
+    complete: '范围已完成控制核对。',
+  } as Record<string, string>)[value ?? ''] ?? (value ? `范围状态：${value}` : '范围状态尚未记录。');
+}
+
+function rowHasSources(row: Record<string, unknown>): boolean {
+  const sources = row.source_rows;
+  const evidence = row.evidence;
+  return Array.isArray(sources) && sources.length > 0
+    || Boolean(evidence && typeof evidence === 'object' && Object.keys(evidence).length > 0);
+}
+
+function FinanceRunDetails({ run, busy, onDrilldown }: {
+  run: AnalysisRun; busy: boolean; onDrilldown?: (run: AnalysisRun, row: number, column?: string) => Promise<FinanceDrilldown>;
+}) {
+  const [target, setTarget] = useState('');
+  const [column, setColumn] = useState('');
+  const [drilldown, setDrilldown] = useState<FinanceDrilldown | null>(null);
+  const [error, setError] = useState('');
+  const drilldownRequest = useRef(0);
+  const rows = run.result?.rows ?? [];
+  const sourceRows = rows.map((row, index) => ({ row, index })).filter(({ row }) => rowHasSources(row));
+  const columns = run.result?.columns.map((item) => item.name) ?? [];
+  useEffect(() => {
+    drilldownRequest.current += 1;
+    setTarget(''); setColumn(''); setDrilldown(null); setError('');
+  }, [run.id]);
+  async function open() {
+    if (!onDrilldown || !target) return;
+    const request = ++drilldownRequest.current;
+    setError('');
+    try {
+      const result = await onDrilldown(run, Number(target), column || undefined);
+      if (request === drilldownRequest.current) setDrilldown(result);
+    }
+    catch (failure) { if (request === drilldownRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  return <section className="analysis-finance-run" aria-label="财务结果范围与来源">
+    <p className="analysis-note">{financeCompleteness(run.completeness)}</p>
+    {Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details"><summary>诊断 · {run.result.diagnostics.length} 项</summary>
+      {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
+    {run.finance_scope && <details className="analysis-details"><summary>运行范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+      <p key={alias}>{alias}：{textValue(scope)}</p>)}</details>}
+    {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">
+      <div className="analysis-edit-grid"><label>结果行来源<select className="fnd-field" value={target} onChange={(event) => setTarget(event.target.value)}>
+        <option value="">选择一行查看来源</option>{sourceRows.map(({ row, index }) => <option key={index} value={index}>第 {index + 1} 行 · {textValue(row.management_account ?? row.account_code ?? row.period ?? row.scenario ?? '')}</option>)}
+      </select></label><label>来源列（可选）<select className="fnd-field" value={column} onChange={(event) => setColumn(event.target.value)}>
+        <option value="">整行来源</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</select></label></div>
+      <button type="button" className="fnd-button" disabled={busy || !target} onClick={() => void open()}>查看来源行</button>
+      {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+      {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>
+        {drilldown.rows.map((item, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(item.source)}</summary>
+          <p>来源摘要：{item.source_hash}</p><p>凭证明细：{item.voucher_detail_available ? '可用' : '不可用'}</p>
+          <pre className="analysis-source-text">{JSON.stringify(item.data, null, 2)}</pre></details>)}</div>}
+    </div>}
+  </section>;
 }

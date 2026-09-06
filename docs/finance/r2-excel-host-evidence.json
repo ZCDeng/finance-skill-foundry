@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checks": {
+    "modified_input": true,
+    "refreshed_profit": true,
+    "excel_recalculation": true,
+    "outside_formulas_preserved": true,
+    "manager_note_preserved": true,
+    "chart_preserved": true,
+    "two_real_imports": true,
+    "two_real_metrics": true,
+    "host_recalc_and_save": true,
+    "conflict_keep_observed": true
+  },
+  "sha256": "08e0cc8ce1c8e009f1fcf6cb81848c8974b1a155af337f30e5e65dbf4fdc20ed",
+  "host_event_counts": {
+    "input_imported": 3,
+    "metric_run": 5,
+    "output_previewed": 7,
+    "output_applied": 4,
+    "full_recalc": 1,
+    "workbook_saved": 1
+  },
+  "hosts": [
+    {
+      "excelApi11": true,
+      "excelApi111": true,
+      "host": "Excel",
+      "platform": "Mac",
+      "version": "16.111.802.3"
+    }
+  ],
+  "boundary": "Requires independent native Excel open/save/reopen observation; file checks alone are insufficient.",
+  "verification_setup_cleanup": {
+    "temporary_manifest_removed": true,
+    "temporary_bridge_stopped": true,
+    "temporary_tls_key_and_token_removed": true,
+    "temporary_user_trusted_certificate_removed": true,
+    "certificate_cleanup_status": "User trust was removed; remaining untrusted certificate deleted successfully; exact certificate no longer found"
+  }
+}

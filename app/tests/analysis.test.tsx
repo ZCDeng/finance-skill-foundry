@@ -8,6 +8,7 @@ const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period:
 const object = { task_id: task.id, schema_version: 1, created_at: task.created_at };
 const source: DatasetSnapshot = { ...object, id: 'b'.repeat(32), name: '本月实际', kind: 'table', source_hash: 'c'.repeat(64), source_name: 'actual.csv',
   metadata: { currency: 'CNY', unit: '元' }, schema: [{ name: 'profit', type: 'DECIMAL(38,2)' }], row_count: 1 };
+const budgetSource: DatasetSnapshot = { ...source, id: '1'.repeat(32), name: '本月预算', source_hash: '1'.repeat(64), source_name: 'budget.csv' };
 const analysis: AnalysisRevision = { ...object, id: 'd'.repeat(32), question: '华东利润分析', sql: 'select profit * ? as profit from actual',
   bindings: { actual: source.id }, parameters: ['0.85'], assumptions: ['回款率 85%'], grain: ['项目'], relationships: [],
   metrics: [{ name: '经营利润', expression: '收入−成本−费用' }, '利润率'] };
@@ -688,5 +689,359 @@ describe('analysis workbench', () => {
     expect(within(evidence).getByText('参数：overhead：30.00；legacy_rate：0.8500000000000001')).toBeTruthy();
     expect(within(evidence).getByText('假设说明：估计依据：经理提供的本次估计；note：未知结构保持原文')).toBeTruthy();
     expect(within(evidence).queryByText(/万元|回款比例/)).toBeNull();
+  });
+
+  it('creates an isolated finance context from registered datasets and runs management P&L', async () => {
+    const accountMap = { ...object, id: '9'.repeat(32), name: '标准管理科目映射' };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source, budgetSource], contexts: [], account_maps: [accountMap], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-context-save') return success({ ...object, id: '4'.repeat(32), name: spec?.name, bindings: spec?.bindings, scopes: spec?.scopes, diagnostics: [] });
+      if (command === 'run-metric') return success({ ...run, engine: 'finance', finance_context_id: String(spec?.context_id) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('财务业务口径');
+    fireEvent.change(screen.getByLabelText('预算资料（可选）'), { target: { value: budgetSource.id } });
+    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByText('高级：管理科目映射 JSON'));
+    expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('revenue');
+    expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('expense');
+    fireEvent.change(screen.getByLabelText('已保存映射'), { target: { value: accountMap.id } });
+    expect(screen.getByText(/当前口径保存时会使用映射/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', { context_id: '4'.repeat(32), metric: { kind: 'management_pnl' } }));
+    expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(false);
+    fireEvent.click(screen.getByText('财务业务口径'));
+    expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByText('情景测算').closest('details')?.open).toBe(false);
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({
+      bindings: { actual: source.id, budget: budgetSource.id },
+      account_map_id: accountMap.id,
+      scopes: expect.objectContaining({
+        actual: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-08', scenario: 'actual' }),
+        budget: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-08', scenario: 'budget' }),
+      }),
+    }));
+  });
+
+  it('runs a newly saved budget bridge at organization-period grain without account slicing', async () => {
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source, budgetSource], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] });
+      if (command === 'finance-context-save') return success({ ...object, id: '4'.repeat(32), name: spec?.name, bindings: spec?.bindings, scopes: spec?.scopes, diagnostics: [] });
+      if (command === 'explain-variance') return success({ ...run, engine: 'finance', finance_context_id: String(spec?.context_id) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('财务业务口径');
+    fireEvent.change(screen.getByLabelText('预算资料（可选）'), { target: { value: budgetSource.id } });
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
+    fireEvent.click(screen.getByRole('button', { name: '运行预算桥' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
+      context_id: '4'.repeat(32), actual_scenario: 'actual', baseline_scenario: 'budget',
+      dimensions: ['organization', 'period'],
+    })));
+    expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it('surfaces finance diagnostics, incomplete scope and source-row drilldown errors', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: '4'.repeat(32), completeness: 'incomplete',
+      finance_scope: { actual: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } },
+      result: { columns: [{ name: 'management_account', type: 'VARCHAR' }, { name: 'profit', type: 'DECIMAL' }],
+        rows: [{ management_account: '经营利润', profit: '100.00', source_rows: [{ dataset_id: source.id, row_index: 1 }] }],
+        row_count: 1, truncated: false, diagnostics: [{ severity: 'error', code: 'control_total_missing', message: '控制数未提供' }] } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drilldown'] })
+      : ({ ok: false as const, refused: true, message: 'source evidence row is invalid' }));
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('范围尚未完成：存在需要处理的诊断。');
+    fireEvent.click(screen.getByText('诊断 · 1 项'));
+    expect(screen.getByText(/control_total_missing/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看来源行' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('source evidence row is invalid');
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', { run_id: financeRun.id, row: 0, offset: 0, limit: 100 });
+  });
+
+  it('shows a manager-first finance budget bridge while keeping raw result fields expandable', async () => {
+    const bridgeResult = { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual', baseline_scenario: 'budget' }, columns: [
+        { name: 'ledger', type: 'VARCHAR' }, { name: 'organization', type: 'VARCHAR' }, { name: 'currency', type: 'VARCHAR' },
+        { name: 'unit', type: 'VARCHAR' }, { name: 'period', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' },
+        { name: 'actual', type: 'DECIMAL' }, { name: 'baseline', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' },
+        { name: 'ratio', type: 'DECIMAL' }, { name: 'ratio_status', type: 'VARCHAR' }, { name: 'favorability', type: 'VARCHAR' },
+        { name: 'comparison_status', type: 'VARCHAR' },
+      ], rows: [
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'revenue', actual: '120', baseline: '100', contribution: '20', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'cost', actual: '70', baseline: '60', contribution: '-10', ratio: '0.166666666666666666666666', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'expense', actual: '20', baseline: '15', contribution: '-5', ratio: '0.333333333333333333333333', ratio_status: 'absolute_baseline', favorability: 'unfavorable', comparison_status: 'complete' },
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'profit', actual: '30', baseline: '25', contribution: '5', ratio: '0.2', ratio_status: 'absolute_baseline', favorability: 'favorable', comparison_status: 'complete', source_rows: [{ dataset_id: source.id, row_index: 1 }] },
+      ], row_count: 4, truncated: false } as AnalysisRun['result'] & { method: string };
+    const bridgeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: '4'.repeat(32), completeness: 'not_reconciled', result: bridgeResult };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [bridgeRun] }),
+      financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] }) });
+    render(<Analysis {...props} embedded section="results" />);
+    const bridge = await screen.findByRole('region', { name: '预算差异桥' });
+    expect(within(bridge).getByRole('columnheader', { name: '科目' })).toBeTruthy();
+    expect(within(bridge).getByRole('columnheader', { name: '差异贡献' })).toBeTruthy();
+    expect(screen.getByText('范围：账簿 L1 · 组织 华东 · 币种 CNY · 单位 万元 · 期间 2026-09')).toBeTruthy();
+    expect(within(bridge).getByRole('cell', { name: '利润' })).toBeTruthy();
+    expect(within(bridge).getByRole('cell', { name: '33.33%' })).toBeTruthy();
+    const raw = screen.getByText('原始结果字段 · 13 列').closest('details') as HTMLDetailsElement;
+    expect(raw.open).toBe(false);
+    fireEvent.click(screen.getByText('原始结果字段 · 13 列'));
+    expect(await screen.findByRole('region', { name: '原始计算结果' })).toBeTruthy();
+  });
+
+  it('keeps varying finance dimensions as columns and preserves row order in the manager bridge view', async () => {
+    const bridgeResult = { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual', baseline_scenario: 'budget' }, columns: [
+        { name: 'ledger', type: 'VARCHAR' }, { name: 'organization', type: 'VARCHAR' }, { name: 'currency', type: 'VARCHAR' },
+        { name: 'unit', type: 'VARCHAR' }, { name: 'period', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' },
+        { name: 'actual', type: 'DECIMAL' }, { name: 'baseline', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' },
+        { name: 'ratio', type: 'DECIMAL' },
+      ], rows: [
+        { ledger: 'L1', organization: '华东', currency: 'CNY', unit: '万元', period: '2026-09', metric: 'profit', actual: '130', baseline: '100', contribution: '30', ratio: '0.3' },
+        { ledger: 'L1', organization: '华南', currency: 'CNY', unit: '万元', period: '2026-10', metric: 'profit', actual: '80', baseline: '100', contribution: '-20', ratio: '-0.2' },
+      ], row_count: 2, truncated: false } as AnalysisRun['result'] & { method: string; comparison: { actual_scenario: string; baseline_scenario: string } };
+    const bridgeRun: AnalysisRun = { ...run, engine: 'finance', result: bridgeResult };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [bridgeRun] }),
+      financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] }) });
+    render(<Analysis {...props} embedded section="results" />);
+    const bridge = await screen.findByRole('region', { name: '预算差异桥' });
+    expect(within(bridge).getByRole('columnheader', { name: '组织' })).toBeTruthy();
+    expect(within(bridge).getByRole('columnheader', { name: '期间' })).toBeTruthy();
+    expect(screen.getByText('范围：账簿 L1 · 币种 CNY · 单位 万元')).toBeTruthy();
+    expect(screen.queryByText(/组织 2 项|期间 2 项/)).toBeNull();
+    const rows = within(bridge).getAllByRole('row').map((rowElement) => rowElement.textContent ?? '');
+    expect(rows[1]).toContain('华东');
+    expect(rows[1]).toContain('2026-09');
+    expect(rows[2]).toContain('华南');
+    expect(rows[2]).toContain('2026-10');
+  });
+
+  it('shows explicit units for very large finance variance ratios', async () => {
+    const bridgeResult = { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual', baseline_scenario: 'budget' }, columns: [
+        { name: 'period', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' }, { name: 'actual', type: 'DECIMAL' },
+        { name: 'baseline', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' }, { name: 'ratio', type: 'DECIMAL' },
+      ], rows: [{ period: '2026-09', metric: 'profit', actual: '1000000', baseline: '1', contribution: '999999', ratio: '1000000.1234567890123456789' }],
+      row_count: 1, truncated: false } as AnalysisRun['result'] & { method: string; comparison: { actual_scenario: string; baseline_scenario: string } };
+    const bridgeRun: AnalysisRun = { ...run, engine: 'finance', result: bridgeResult };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [bridgeRun] }),
+      financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] }) });
+    render(<Analysis {...props} embedded section="results" />);
+    const bridge = await screen.findByRole('region', { name: '预算差异桥' });
+    expect(within(bridge).getByRole('cell', { name: '1000000.1234567890123456789 倍' })).toBeTruthy();
+  });
+
+  it('uses comparison-aware finance bridge copy for non-budget scenarios', async () => {
+    const bridgeResult = { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual_2026', baseline_scenario: 'actual_2025' }, columns: [
+        { name: 'period', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' }, { name: 'actual', type: 'DECIMAL' },
+        { name: 'baseline', type: 'DECIMAL' }, { name: 'contribution', type: 'DECIMAL' }, { name: 'ratio', type: 'DECIMAL' },
+      ], rows: [{ period: '2026-09', metric: 'profit', actual: '120', baseline: '100', contribution: '20', ratio: '0.2' }],
+      row_count: 1, truncated: false } as AnalysisRun['result'] & { method: string; comparison: { actual_scenario: string; baseline_scenario: string } };
+    const bridgeRun: AnalysisRun = { ...run, engine: 'finance', result: bridgeResult };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [bridgeRun] }),
+      financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] }) });
+    render(<Analysis {...props} embedded section="results" />);
+    expect(await screen.findByRole('region', { name: '对照损益差异桥' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '预算差异桥' })).toBeNull();
+    const bridge = screen.getByRole('region', { name: '对照损益差异桥' });
+    expect(within(bridge).getByRole('columnheader', { name: 'actual_2026' })).toBeTruthy();
+    expect(within(bridge).getByRole('columnheader', { name: '对照（actual_2025）' })).toBeTruthy();
+  });
+
+  it('saves manager edits on finance drafts through the finance draft command', async () => {
+    const financeRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drafts'] })
+      : success({ ...draft, ...spec, id: '4'.repeat(32), review_status: spec?.review_status ?? 'unreviewed' }));
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />); await screen.findByText('文稿');
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '经理调整后的判断。' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+      parent_id: draft.id, body: '经理调整后的判断。', run_ids: [financeRun.id], review_status: 'unreviewed',
+    })));
+  });
+
+  it('refreshes finance source files through the native bridge and keeps duplicate batches visible', async () => {
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list'
+      ? success({ batches: [{ id: '7'.repeat(32), created_at: task.created_at, source_name: '金蝶导出', dataset_id: null, effective_dataset_id: source.id, row_count: 1, publication_status: 'published' }] })
+      : success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] }));
+    const financeSourceRefresh = vi.fn(async () => success({ dataset_id: '8'.repeat(32), effective_dataset_id: '8'.repeat(32) }));
+    mountBridge({ analysisState: async () => success(initial), financeCall, financeSourceRefresh });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('刷新财务来源');
+    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-31T23:59:59+08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledWith(task.id, expect.objectContaining({
+      product: 'file', version: 'export', file_identity_policy: 'snapshot_only',
+      scope: expect.objectContaining({ ledger_id: '经营总账', organization_id: '华东', period: '2026-08', currency: 'CNY' }),
+    })));
+    expect(screen.getByText(/已发布新来源快照/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/来源刷新批次/));
+    expect(screen.getByText(/沿用/)).toBeTruthy();
+  });
+
+  it('inspects, binds, previews and applies an Excel collaboration workbook', async () => {
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const refreshedWorkbook = { ...workbook, id: '8'.repeat(32), name: '预算工作簿 · 经理刷新' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-source-list') return success({ batches: [] });
+      if (command === 'workbook-inspect') return success({ sheet_names: ['Sheet1'], tables: ['OutputTable'], named_ranges: [], unsupported_features: [] });
+      if (command === 'workbook-bind') return success({ id: 'bind-1' });
+      if (command === 'workbook-read') return success({ rows: [{ amount: '10.00' }], diagnostics: [] });
+      if (command === 'workbook-preview') return success({ patch_id: 'patch-1', patch: { cells: [{ cell: 'B2', field: 'amount', old_value: '10.00', new_value: '0.00', conflict: true }] } });
+      if (command === 'workbook-apply') return success({ artifact_path: 'finance/workbook_outputs/files/out.xlsx' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
+    await screen.findByText(/工作表：Sheet1/);
+    fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });
+    fireEvent.change(screen.getByLabelText('用途'), { target: { value: 'output' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存绑定' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-bind', expect.objectContaining({
+      source: { kind: 'table', name: 'OutputTable' }, writable: true,
+    })));
+    fireEvent.change(screen.getByLabelText('工作簿资料'), { target: { value: refreshedWorkbook.id } });
+    fireEvent.click(screen.getByRole('button', { name: '读取区域' }));
+    await screen.findByText('10.00');
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-read', { binding_id: 'bind-1', dataset_id: refreshedWorkbook.id });
+    fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
+    await screen.findByText('B2');
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-preview', expect.objectContaining({ binding_id: 'bind-1', dataset_id: refreshedWorkbook.id }));
+    expect((screen.getByLabelText(/B2 · 原值/) as HTMLSelectElement).value).toBe('keep');
+    fireEvent.change(screen.getByLabelText(/B2 · 原值/), { target: { value: 'apply' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成工作簿' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-apply', { patch_id: 'patch-1', resolutions: { B2: 'apply' } }));
+  });
+
+  it('ignores stale Excel writeback previews after the target snapshot changes', async () => {
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const refreshedWorkbook = { ...workbook, id: '8'.repeat(32), name: '预算工作簿 · 经理刷新' };
+    let resolvePreview!: (value: Answer<Record<string, unknown>>) => void;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-source-list') return success({ batches: [] });
+      if (command === 'workbook-preview') {
+        return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolvePreview = resolve; });
+      }
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    fireEvent.change(screen.getByLabelText('绑定编号'), { target: { value: 'bind-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
+    fireEvent.change(screen.getByLabelText('工作簿资料'), { target: { value: refreshedWorkbook.id } });
+    await act(async () => resolvePreview(success({ patch_id: 'old-patch', patch: { cells: [
+      { cell: 'Z9', field: 'amount', old_value: '1.00', new_value: '2.00', conflict: true },
+    ] } })));
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-preview', expect.objectContaining({ binding_id: 'bind-1', dataset_id: workbook.id }));
+    expect(screen.queryByText('Z9')).toBeNull();
+    expect((screen.getByRole('button', { name: '生成工作簿' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('uses explicit actual and budget scope aliases for budget bridge reruns even when they are stored out of order', async () => {
+    const customContext = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { budget: budgetSource.id, actual: source.id },
+      scopes: { budget: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'prior-plan' },
+        actual: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'current' } } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source, budgetSource], contexts: [customContext], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] })
+      : success({}));
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('八月经营口径');
+    fireEvent.click(screen.getByRole('button', { name: '用已保存口径运行预算桥' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
+      context_id: customContext.id, actual_scenario: 'current', baseline_scenario: 'prior-plan',
+      dimensions: ['organization', 'period'],
+    })));
+  });
+
+  it('rejects ambiguous budget bridge contexts instead of guessing scenario label order', async () => {
+    const customContext = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { current: source.id, plan: budgetSource.id },
+      scopes: { current: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'current' },
+        plan: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'prior-plan' } } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source, budgetSource], contexts: [customContext], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['variance'] })
+      : success({}));
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('八月经营口径');
+    fireEvent.click(screen.getByRole('button', { name: '用已保存口径运行预算桥' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('明确的 actual 与 budget 情景别名');
+    expect(financeCall).not.toHaveBeenCalledWith(task.id, 'explain-variance', expect.anything());
+  });
+
+  it('drops stale source-row drilldown when the selected finance run changes', async () => {
+    const firstRun: AnalysisRun = { ...run, id: '5'.repeat(32), engine: 'finance', finance_context_id: 'ctx-a',
+      result: { columns: [{ name: 'management_account', type: 'VARCHAR' }], rows: [{ management_account: 'revenue', source_rows: [{ dataset_id: source.id, row_index: 1 }] }], row_count: 1, truncated: false } };
+    const secondRun: AnalysisRun = { ...firstRun, id: '6'.repeat(32), created_at: '2026-09-06T00:00:00Z',
+      result: { columns: [{ name: 'management_account', type: 'VARCHAR' }], rows: [{ management_account: 'cost', source_rows: [{ dataset_id: source.id, row_index: 2 }] }], row_count: 1, truncated: false } };
+    let backend: AnalysisState = { ...initial, runs: [firstRun] };
+    let resolveDrilldown!: (value: Answer<Record<string, unknown>>) => void;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drilldown'] });
+      if (command === 'drilldown-fact') return new Promise<Answer<Record<string, unknown>>>((resolve) => { resolveDrilldown = resolve; });
+      return success({});
+    });
+    mountBridge({ analysisState: vi.fn(async () => success(backend)), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('第 1 行 · revenue');
+    fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看来源行' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', { run_id: firstRun.id, row: 0, offset: 0, limit: 100 }));
+    backend = { ...initial, runs: [firstRun, secondRun] };
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await screen.findByText('第 1 行 · cost');
+    await act(async () => resolveDrilldown(success({ run_id: firstRun.id, row: 0, rows: [], total: 1, offset: 0, has_more: false, message: '旧运行来源' })));
+    expect(screen.queryByText(/旧运行来源/)).toBeNull();
+    expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('runs baseline and delayed child scenarios from a saved finance context', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id, budget: budgetSource.id },
+      scopes: { actual: { ledger: '经营总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source, budgetSource], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['scenarios'] });
+      if (command === 'finance-scenario-save') return success({ ...object, id: spec?.parent_id ? '6'.repeat(32) : spec?.kind === 'cash_13_weeks' ? '7'.repeat(32) : '5'.repeat(32), ...spec });
+      if (command === 'finance-scenario-run') return success({ ...run, engine: 'finance', finance_context_id: context.id });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('情景测算');
+    fireEvent.change(screen.getByLabelText('账龄日期'), { target: { value: '2026-08-31' } });
+    fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-run', { scenario_id: '5'.repeat(32) }));
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
+      context_id: context.id, kind: 'receivables_aging', inputs: expect.objectContaining({ as_of: '2026-08-31', invoices_alias: 'actual' }),
+    }));
+    expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('情景类型'), { target: { value: 'cash_13_weeks' } });
+    expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('期初现金'), { target: { value: '5000000.00' } });
+    fireEvent.change(screen.getByLabelText('预测开始日'), { target: { value: '2026-09-01' } });
+    fireEvent.change(screen.getByLabelText('实际截止日'), { target: { value: '2026-08-31' } });
+    fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
+      context_id: context.id, kind: 'cash_13_weeks', inputs: expect.objectContaining({ opening_cash: '5000000.00', scenario: { delay_receipts_days: 0 } }),
+    })));
+    await waitFor(() => expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '运行延迟回款子情景' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
+      parent_id: '7'.repeat(32), changes: { scenario: expect.objectContaining({ delay_receipts_days: 14 }) },
+    })));
   });
 });

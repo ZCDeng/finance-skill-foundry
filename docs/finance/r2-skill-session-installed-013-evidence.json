@@ -1,0 +1,150 @@
+{
+  "app_asar": {
+    "sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+    "size_bytes": 9032204
+  },
+  "application": {
+    "path": "/Applications/FA Foundry.app",
+    "version": "0.1.3"
+  },
+  "cases": [
+    {
+      "draft_metric_claim_keys": [
+        "cost_contribution",
+        "expense_contribution",
+        "profit_difference",
+        "revenue_contribution"
+      ],
+      "expected_difference": "5",
+      "id": "G1",
+      "skills_used": [
+        "financial-statements",
+        "variance-analysis"
+      ],
+      "verified_values": {
+        "cost_contribution": [
+          {
+            "column": "cost_contribution",
+            "normalization": null,
+            "value": "-10"
+          },
+          {
+            "column": "cost_var",
+            "normalization": "profit_contribution = -expense_variance",
+            "value": "-10"
+          }
+        ],
+        "expense_contribution": [
+          {
+            "column": "expense_contribution",
+            "normalization": null,
+            "value": "-5"
+          },
+          {
+            "column": "expense_var",
+            "normalization": "profit_contribution = -expense_variance",
+            "value": "-5"
+          }
+        ],
+        "profit_difference": [
+          {
+            "column": "profit_var",
+            "normalization": null,
+            "value": "5"
+          }
+        ],
+        "revenue_contribution": [
+          {
+            "column": "revenue_contribution",
+            "normalization": null,
+            "value": "20"
+          }
+        ]
+      }
+    },
+    {
+      "draft_metric_claim_keys": [
+        "price_contribution",
+        "quantity_contribution",
+        "revenue_difference"
+      ],
+      "expected_difference": "32",
+      "id": "G2",
+      "skills_used": [
+        "variance-analysis"
+      ],
+      "verified_values": {
+        "price_contribution": [
+          {
+            "column": "price_effect",
+            "normalization": null,
+            "value": "12"
+          }
+        ],
+        "quantity_contribution": [
+          {
+            "column": "quantity_effect",
+            "normalization": null,
+            "value": "20"
+          }
+        ],
+        "revenue_difference": [
+          {
+            "column": "total_variance",
+            "normalization": null,
+            "value": "32"
+          }
+        ]
+      }
+    }
+  ],
+  "evidence": "build/verification/r2-skill-session-installed-013-final",
+  "fixture_version": "r2-stage0-1",
+  "manifest": {
+    "ids": [
+      "financial-statements",
+      "reconciliation",
+      "variance-analysis",
+      "journal-entry"
+    ],
+    "missing": [],
+    "skill_sha256": {
+      "financial-statements": "070991730bcb019181cf01ba127815da15865243fe441d30a4ea9f15500cbe94",
+      "journal-entry": "20f0597c2faca18dd97f92ebca6bd8f605288b5b1fa2964f5cf9a1b60d2fe0bf",
+      "reconciliation": "1ff013edcbfa764c946354ec886d2bf492fb189ec5fb811800cf392e3d719f95",
+      "variance-analysis": "b63ca8b5b8d6952ee2e65768429d8ef150cbeccf4a1c47ec5836e660ab45ebeb"
+    },
+    "source": "package"
+  },
+  "model": {
+    "model": "deepseek-v4-flash",
+    "provider": "deepseek-official",
+    "reasoningEffort": "max"
+  },
+  "previous_a34_attempts": [
+    {
+      "classification": "intermediate renderer package before final UI-defect fix; superseded by final evidence path",
+      "evidence": "build/verification/r2-skill-session-installed-013-retry1",
+      "status": "passed"
+    },
+    {
+      "classification": "model output shape miss; install paths, bundle manifest, and credentials setup were available",
+      "error": "G1: missing named successful result for cost_contribution=-10",
+      "evidence": "build/verification/r2-skill-session-installed-013",
+      "status": "failed"
+    }
+  ],
+  "redaction": "No tokens, auth files, temp profile paths, or user-home absolute paths are copied here.",
+  "restart": {
+    "body_hashes": {
+      "financial-statements": "ea1fc05500a966dbea54269497e2da983880cf99079ca72a3d653450f3dbea02",
+      "journal-entry": "d483b4f8f231d66b444b5778951dbe7955891e0511acfadfc4b8527fc7f23ca4",
+      "reconciliation": "beec72cd285fd3c63f8686d6eef896c3c59b7a2cabcfda04648741ff2ad919d7",
+      "variance-analysis": "1d5472e0e880f937a6e015bbac903a107e41df12f893c2a5d02b35a3ba6ac7fc"
+    },
+    "status": "passed"
+  },
+  "schema_version": 1,
+  "session_evidence_sha256": "88f295d50ff6fd21a042de332954cf581bc889c48b606fef615babc6a1fca17b",
+  "status": "passed"
+}

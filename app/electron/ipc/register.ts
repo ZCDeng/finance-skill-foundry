@@ -193,6 +193,49 @@ export function registerIpc(
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('invalid analysis object id');
     return id;
   };
+  const financeCommands = new Set([
+    'list-finance-context',
+    'finance-source-list',
+    'finance-context-save',
+    'finance-map-save',
+    'finance-metric-save',
+    'finance-scenario-save',
+    'finance-scenario-run',
+    'run-metric',
+    'explain-variance',
+    'drilldown-fact',
+    'save-explanation-draft',
+    'workbook-inspect',
+    'workbook-bind',
+    'workbook-read',
+    'workbook-preview',
+    'workbook-apply',
+  ]);
+  const financeListCommands = new Set(['list-finance-context', 'finance-source-list']);
+  ipcMain.handle(CHANNELS.financeCall, (_e, task: unknown, command: unknown, spec: unknown = undefined) =>
+    answer(() => {
+      const name = String(command ?? '');
+      if (!financeCommands.has(name)) throw new Error('unsupported finance command');
+      if (financeListCommands.has(name)) {
+        if (spec !== undefined && spec !== null) throw new Error('finance command does not take a spec');
+        return analysisCall(task, name);
+      }
+      return analysisCall(task, name, ['--spec', objectJson(spec)]);
+    }));
+  ipcMain.handle(CHANNELS.financeSourceRefresh, (_e, rawTask: unknown, rawSpec: unknown) =>
+    answer(async () => {
+      if (!rawSpec || typeof rawSpec !== 'object' || Array.isArray(rawSpec)) throw new Error('expected a source refresh object');
+      const selected = await dialog.showOpenDialog({
+        title: '刷新财务来源文件',
+        properties: ['openFile'],
+        filters: [{ name: '财务来源文件', extensions: ['csv', 'xlsx', 'json'] }],
+      });
+      if (selected.canceled || selected.filePaths.length === 0) return { cancelled: true };
+      return analysisCall(rawTask, 'finance-source-refresh', [
+        '--spec',
+        objectJson({ ...(rawSpec as Record<string, unknown>), path: selected.filePaths[0] }),
+      ]);
+    }));
   ipcMain.handle(CHANNELS.analysisOpenOutput, (_e, task: unknown, run: unknown, output: unknown) =>
     answer(async () => {
       const result = await analysisCall(task, 'analysis-output', ['--run', objectId(run), '--output', lineOf(output, 'output name', 1000)]);

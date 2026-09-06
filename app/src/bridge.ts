@@ -102,6 +102,8 @@ export interface Bridge {
   analysisExport?(task: string, id: string, format: 'md' | 'xlsx'): Promise<Answer<Record<string, unknown>>>;
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
+  financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
@@ -225,7 +227,7 @@ export interface AnalysisRevision extends AnalysisObject {
   parameter_metadata?: AnalysisParameterMetadata[];
   question: string;
   sql: string | null;
-  engine?: 'sql' | 'python' | 'shell';
+  engine?: 'sql' | 'python' | 'shell' | 'finance';
   code?: string;
   bindings: Record<string, string>;
   parameters: unknown[] | Record<string, unknown>;
@@ -257,11 +259,18 @@ export interface AnalysisRun extends AnalysisObject {
   stdout?: string;
   stderr?: string;
   outputs?: {path: string; sha256: string; artifact_path: string; size: number}[];
+  finance_context_id?: string;
+  finance_scope?: Record<string, Record<string, unknown>>;
+  completeness?: string;
+  diagnostics?: unknown[];
   result?: {
     columns: { name: string; type: string }[];
     rows: Record<string, unknown>[];
     row_count: number;
     truncated: boolean;
+    diagnostics?: unknown[];
+    control_totals?: unknown[];
+    movement_checks?: unknown[];
   };
 }
 export interface AnalysisDraft extends AnalysisObject {
@@ -292,4 +301,69 @@ export interface AnalysisState {
   runs: AnalysisRun[];
   drafts: AnalysisDraft[];
   methods: AnalysisMethod[];
+}
+
+export type FinanceCommand =
+  | 'list-finance-context'
+  | 'finance-source-list'
+  | 'finance-context-save'
+  | 'finance-map-save'
+  | 'finance-metric-save'
+  | 'finance-scenario-save'
+  | 'finance-scenario-run'
+  | 'run-metric'
+  | 'explain-variance'
+  | 'drilldown-fact'
+  | 'save-explanation-draft'
+  | 'workbook-inspect'
+  | 'workbook-bind'
+  | 'workbook-read'
+  | 'workbook-preview'
+  | 'workbook-apply';
+
+export interface FinanceContextState {
+  task_id: string;
+  datasets: DatasetSnapshot[];
+  contexts: FinanceContext[];
+  account_maps: Record<string, unknown>[];
+  scenarios: Record<string, unknown>[];
+  metric_definitions: Record<string, unknown>[];
+  capabilities: string[];
+}
+
+export interface FinanceSourceBatch {
+  id: string;
+  created_at: string;
+  source_name?: string;
+  product?: string;
+  version?: string;
+  dataset_id?: string | null;
+  effective_dataset_id?: string | null;
+  prior_snapshot_id?: string | null;
+  row_count?: number;
+  publication_status?: string;
+  duplicate_of?: string | null;
+  change_counts?: Record<string, unknown>;
+  scope?: Record<string, unknown>;
+}
+
+export interface FinanceContext extends AnalysisObject {
+  name: string;
+  bindings: Record<string, string>;
+  scopes: Record<string, Record<string, unknown>>;
+  policies?: Record<string, Record<string, unknown>>;
+  source_hashes?: Record<string, string>;
+  account_map_id?: string | null;
+  diagnostics?: unknown[];
+}
+
+export interface FinanceDrilldown {
+  run_id: string;
+  row: number;
+  column?: string | null;
+  rows: { source: Record<string, unknown>; source_hash: string; data: Record<string, unknown>; voucher_detail_available: boolean }[];
+  total: number;
+  offset: number;
+  has_more: boolean;
+  message: string;
 }

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+  <Id>b3e2c8f7-6c1d-4cc5-b73d-c7e9d7d9d9a1</Id>
+  <Version>0.1.0.0</Version>
+  <ProviderName>Finance Skill Foundry</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Finance Foundry"/>
+  <Description DefaultValue="Import bound Excel ranges into immutable finance snapshots and write approved outputs back to bound areas."/>
+  <IconUrl DefaultValue="https://localhost:8765/icon.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:8765/icon.png"/>
+  <SupportUrl DefaultValue="https://localhost:8765/taskpane.html"/>
+  <AppDomains><AppDomain>https://localhost:8765</AppDomain></AppDomains>
+  <Hosts><Host Name="Workbook"/></Hosts>
+  <DefaultSettings><SourceLocation DefaultValue="https://localhost:8765/taskpane.html"/></DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Workbook">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="GetStarted.Url"/>
+          </GetStarted>
+          <FunctionFile resid="Taskpane.Url"/>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="Foundry.Group">
+                <Label resid="Foundry.GroupLabel"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16"/>
+                  <bt:Image size="32" resid="Icon.32"/>
+                  <bt:Image size="80" resid="Icon.80"/>
+                </Icon>
+                <Control xsi:type="Button" id="Foundry.Open">
+                  <Label resid="Foundry.OpenLabel"/>
+                  <Supertip>
+                    <Title resid="Foundry.OpenLabel"/>
+                    <Description resid="Foundry.OpenTip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16" DefaultValue="https://localhost:8765/icon.png"/>
+        <bt:Image id="Icon.32" DefaultValue="https://localhost:8765/icon.png"/>
+        <bt:Image id="Icon.80" DefaultValue="https://localhost:8765/icon.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:8765/taskpane.html"/>
+        <bt:Url id="GetStarted.Url" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/excel/excel-add-ins-workbooks"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="Finance Foundry is ready"/>
+        <bt:String id="Foundry.GroupLabel" DefaultValue="Finance Foundry"/>
+        <bt:String id="Foundry.OpenLabel" DefaultValue="Open Foundry"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="Bind an input range, import a snapshot, run a metric, and apply reviewed outputs to a dedicated bound area."/>
+        <bt:String id="Foundry.OpenTip" DefaultValue="Open the Finance Foundry task pane."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

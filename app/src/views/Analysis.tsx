@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
+import { ArrowUp, FilePlus2, FileSpreadsheet, MessageSquare, Play, RefreshCw } from 'lucide-react';
 import { bridge, shortSha, when, type Answer, type AnalysisDraft, type AnalysisMethod,
-  type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot,
+  type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot, type FinanceContext,
+  type FinanceContextState, type FinanceDrilldown, type FinanceSourceBatch,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
 import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js';
@@ -246,8 +247,12 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.analyses.length ?? 0,
     drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
-    const api = bridge(); if (!api?.analysisDraft) throw new Error('此版本暂不支持保存文稿。');
-    const next = unwrap(await api.analysisDraft(taskId, spec));
+    const api = bridge();
+    const usesFinanceRun = (spec.run_ids as unknown[] | undefined)?.some((id) => view?.runs.some((run) => run.id === id && run.engine === 'finance'));
+    if (!api?.analysisDraft && !(usesFinanceRun && api?.financeCall)) throw new Error('此版本暂不支持保存文稿。');
+    const next = unwrap((usesFinanceRun && api.financeCall
+      ? await api.financeCall(taskId, 'save-explanation-draft', spec)
+      : await api.analysisDraft!(taskId, spec)) as Answer<AnalysisDraft>);
     draftEdits.current.delete(draftKey); removeCopy(draftKey);
     await refresh(taskId);
     if (currentTask.current === taskId) {
@@ -307,6 +312,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><button type="button" className="fnd-button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</button></div>}
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="无需先准备科目表。也可以先与助手讨论分析口径和所需资料。"
             onChat={() => void chat(question.trim() || undefined)} />}
+          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={async () => { await refresh(task.id); chooseTab('datasets'); }} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
@@ -319,8 +325,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
+          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} />
         </>}
         {view && tab === 'results' && <>
+          {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
+            onRefresh={async () => { await refresh(task.id); chooseTab('results'); }} />}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
           {!analysis ? <Empty title="从资料到可检查的结果" body="告诉助手你想比较什么、按什么口径看。计算完成后，在这里查看结果与依据。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
@@ -344,7 +353,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 const api = bridge(); if (!api?.analysisMethodSave) throw new Error('此版本暂不支持保存方法。');
                 unwrap(await api.analysisMethodSave(taskId, id, name)); await refresh(taskId);
                 if (currentTask.current === taskId) setNotice('已保存方法，可在方法库中复用。');
-              })} />
+              })}
+              onDrilldown={async (run, row, column) => {
+                const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持查看财务来源行。');
+                return unwrap(await api.financeCall(task.id, 'drilldown-fact', {
+                  run_id: run.id, row, ...(column ? { column } : {}), offset: 0, limit: 100,
+                }) as Answer<FinanceDrilldown>);
+              }} />
             {dataset && <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>
               <button type="button" className="fnd-button" onClick={() => setDataset(null)}>关闭资料预览</button></div>
               <DatasetPreview source={dataset.source} content={dataset.content} /></section>}
@@ -426,6 +441,469 @@ function DatasetPreview({ source, content }: { source: DatasetSnapshot; content:
       <p key={key}>{key}：{textValue(value)}</p>)}
       {columns.length > 0 && <p>字段：{columns.map((column) => `${column.name}${column.type ? ` (${column.type})` : ''}`).join('、')}</p>}
     </details></article>;
+}
+
+const scopeFields = [
+  ['ledger', '账簿'], ['organization', '组织'], ['period', '期间'],
+  ['currency', '币种'], ['unit', '单位'], ['scenario', '情景'],
+] as const;
+const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
+  String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
+  || source.metadata?.source_file === 'source.xlsx');
+
+function scopeSummary(scope: Record<string, unknown> = {}): string {
+  return scopeFields.map(([key, label]) => scope[key] ? `${label} ${textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
+}
+
+function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy: boolean; onRefresh(): Promise<void> }) {
+  const [batches, setBatches] = useState<FinanceSourceBatch[]>([]);
+  const [scope, setScope] = useState({
+    source_id: 'erp-export', tenant_id: 'default', ledger_id: '', organization_id: '', period: '',
+    currency: 'CNY', cutoff_at: '', calendar: '', mode: 'snapshot',
+  });
+  const [product, setProduct] = useState('file');
+  const [version, setVersion] = useState('export');
+  const [name, setName] = useState('');
+  const [policy, setPolicy] = useState<'snapshot_only' | 'business_key'>('snapshot_only');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall) return;
+    const answer = unwrap(await api.financeCall(taskId, 'finance-source-list') as Answer<{ batches: FinanceSourceBatch[] }>);
+    setBatches(answer.batches ?? []);
+  }, [taskId]);
+  useEffect(() => { void load().catch(() => {}); }, [load]);
+  async function refreshSource() {
+    try {
+      const api = bridge(); if (!api?.financeSourceRefresh) throw new Error('此版本暂不支持刷新财务来源文件。');
+      setError(''); setMessage('');
+      const cleanScope = Object.fromEntries(Object.entries(scope).filter(([, value]) => value.trim())) as Record<string, string>;
+      const result = unwrap(await api.financeSourceRefresh(taskId, {
+        product, version, name: name.trim() || undefined, file_identity_policy: policy, scope: cleanScope,
+      }));
+      if (result.cancelled) { setMessage('已取消刷新。'); return; }
+      await onRefresh(); await load();
+      const usable = typeof result.effective_dataset_id === 'string' ? result.effective_dataset_id : result.dataset_id;
+      const datasetId = typeof usable === 'string' ? shortSha(usable) : '';
+      setMessage(typeof result.dataset_id === 'string'
+        ? `已发布新来源快照 ${datasetId}。历史结果仍按原快照保留。`
+        : '文件内容与已发布快照一致，已保留原结果引用。');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+  const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
+    && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
+  return <section className="analysis-source-refresh" aria-label="刷新财务来源">
+    <div className="analysis-section-heading"><div><h3>刷新财务来源</h3>
+      <p className="analysis-note">用于 ERP 导出、账套文件和月结快照。刷新会生成新资料版本，旧运行继续引用旧快照。</p></div></div>
+    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+      <label>来源编号<input className="fnd-field" value={scope.source_id} onChange={(event) => setScope({ ...scope, source_id: event.target.value })} /></label>
+      <label>租户/账套<input className="fnd-field" value={scope.tenant_id} onChange={(event) => setScope({ ...scope, tenant_id: event.target.value })} /></label>
+      <label>账簿<input className="fnd-field" value={scope.ledger_id} onChange={(event) => setScope({ ...scope, ledger_id: event.target.value })} /></label>
+      <label>组织<input className="fnd-field" value={scope.organization_id} onChange={(event) => setScope({ ...scope, organization_id: event.target.value })} /></label>
+      <label>期间<input className="fnd-field" value={scope.period} placeholder="2026-08" onChange={(event) => setScope({ ...scope, period: event.target.value })} /></label>
+      <label>截止时间<input className="fnd-field" value={scope.cutoff_at} placeholder="2026-08-31T23:59:59+08:00" onChange={(event) => setScope({ ...scope, cutoff_at: event.target.value })} /></label>
+      <label>币种<input className="fnd-field" value={scope.currency} onChange={(event) => setScope({ ...scope, currency: event.target.value })} /></label>
+      <label>来源产品<input className="fnd-field" value={product} onChange={(event) => setProduct(event.target.value)} /></label>
+    </div>
+    <details className="analysis-details"><summary>高级：来源身份与刷新方式</summary><div className="analysis-edit-grid">
+      <label>版本<input className="fnd-field" value={version} onChange={(event) => setVersion(event.target.value)} /></label>
+      <label>资料名称<input className="fnd-field" value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label>日历<input className="fnd-field" value={scope.calendar} onChange={(event) => setScope({ ...scope, calendar: event.target.value })} /></label>
+      <label>刷新模式<input className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value })} /></label>
+      <label>文件身份策略<select className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
+        <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></label>
+    </div></details></fieldset>
+    <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !ready} onClick={() => void refreshSource()}>
+      <RefreshCw size={14} aria-hidden />选择文件并刷新</button></div>
+    {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
+      <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
+        <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
+        <time>{when(batch.created_at)}</time><span>{batch.dataset_id ? `新快照 ${shortSha(batch.dataset_id)}` : batch.effective_dataset_id ? `沿用 ${shortSha(batch.effective_dataset_id)}` : batch.prior_snapshot_id ? `沿用 ${shortSha(batch.prior_snapshot_id)}` : shortSha(batch.id)}</span>
+      </div>)}</div></details>}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </section>;
+}
+
+function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean }) {
+  const xlsx = fileDatasets(datasets);
+  const [datasetId, setDatasetId] = useState(xlsx[0]?.id ?? '');
+  const [inspection, setInspection] = useState<Record<string, unknown> | null>(null);
+  const [bindingId, setBindingId] = useState('');
+  const [sourceKind, setSourceKind] = useState<'table' | 'named_range' | 'range'>('table');
+  const [sourceName, setSourceName] = useState('');
+  const [sheet, setSheet] = useState('');
+  const [range, setRange] = useState('');
+  const [role, setRole] = useState<'input' | 'output'>('input');
+  const [fields, setFields] = useState('[{"name":"amount","policy":"amount"}]');
+  const [writes, setWrites] = useState('[{"row":1,"field":"amount","value":"0.00"}]');
+  const [runId, setRunId] = useState('');
+  const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
+  const [resolutions, setResolutions] = useState<Record<string, 'keep' | 'apply'>>({});
+  const [readResult, setReadResult] = useState<Record<string, unknown> | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const workbookRequest = useRef(0);
+  const workbookPreviewMounted = useRef(false);
+  const workbookDatasetMounted = useRef(false);
+  useEffect(() => { setDatasetId((value) => value || xlsx[0]?.id || ''); }, [xlsx]);
+  useEffect(() => {
+    if (!workbookPreviewMounted.current) { workbookPreviewMounted.current = true; return; }
+    workbookRequest.current += 1; setPreview(null); setResolutions({});
+  }, [datasetId, bindingId, writes, runId]);
+  useEffect(() => {
+    if (!workbookDatasetMounted.current) { workbookDatasetMounted.current = true; return; }
+    workbookRequest.current += 1; setInspection(null); setReadResult(null);
+  }, [datasetId]);
+  if (!xlsx.length) return null;
+  const sourceSpec = () => sourceKind === 'range' ? { kind: 'range', sheet, range } : { kind: sourceKind, name: sourceName };
+  async function call(command: 'workbook-inspect' | 'workbook-bind' | 'workbook-read' | 'workbook-preview' | 'workbook-apply', spec: Record<string, unknown>) {
+    const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持 Excel 协作。');
+    return unwrap(await api.financeCall(taskId, command, spec));
+  }
+  async function inspect() {
+    const request = ++workbookRequest.current;
+    try {
+      setError(''); setMessage('');
+      const result = await call('workbook-inspect', { dataset_id: datasetId });
+      if (request !== workbookRequest.current) return;
+      setInspection(result); setMessage('已读取工作簿结构。');
+    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function bind() {
+    const request = ++workbookRequest.current;
+    try {
+      setError(''); setMessage('');
+      const parsed = JSON.parse(fields);
+      if (!Array.isArray(parsed)) throw new Error('字段 JSON 需要是数组。');
+      const result = await call('workbook-bind', { dataset_id: datasetId, source: sourceSpec(), fields: parsed, role, writable: role === 'output', header: true });
+      if (request !== workbookRequest.current) return;
+      setBindingId(String(result.id ?? '')); setPreview(null); setResolutions({}); setMessage('已保存 Excel 区域绑定。');
+    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function read() {
+    const request = ++workbookRequest.current;
+    try {
+      setError(''); setMessage('');
+      const result = await call('workbook-read', { binding_id: bindingId, dataset_id: datasetId });
+      if (request !== workbookRequest.current) return;
+      setReadResult(result); setMessage('已读取绑定区域。');
+    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function previewPatch() {
+    const request = ++workbookRequest.current;
+    try {
+      setError(''); setMessage('');
+      const parsed = JSON.parse(writes);
+      if (!Array.isArray(parsed)) throw new Error('写入 JSON 需要是数组。');
+      const result = await call('workbook-preview', { binding_id: bindingId, dataset_id: datasetId, writes: parsed, ...(runId ? { run_id: runId } : {}) });
+      if (request !== workbookRequest.current) return;
+      const patch = result.patch as Record<string, unknown> | undefined;
+      const nextCells = Array.isArray(patch?.cells) ? patch.cells as Record<string, unknown>[] : [];
+      setResolutions(Object.fromEntries(nextCells
+        .filter((cell) => cell.conflict === true && cell.cell)
+        .map((cell) => [String(cell.cell), 'keep'])));
+      setPreview(result); setMessage('已生成写回预览。冲突单元格需要选择保留或应用后再生成文件。');
+    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function applyPatch() {
+    try {
+      setError(''); setMessage('');
+      if (!preview?.patch_id) throw new Error('请先生成写回预览。');
+      const result = await call('workbook-apply', { patch_id: preview.patch_id, resolutions });
+      setMessage(`已生成协作工作簿：${textValue(result.artifact_path ?? result.path ?? result.id)}`);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  const sheetNames = Array.isArray(inspection?.sheet_names) ? inspection.sheet_names.map(String) : [];
+  const tables = Array.isArray(inspection?.tables) ? inspection.tables.map(String) : [];
+  const names = Array.isArray(inspection?.named_ranges) ? inspection.named_ranges.map(String) : [];
+  const previewPatchValue = preview?.patch as Record<string, unknown> | undefined;
+  const cells = Array.isArray(previewPatchValue?.cells) ? previewPatchValue.cells as Record<string, unknown>[] : [];
+  const conflictCells = cells.filter((cell) => cell.conflict === true && cell.cell);
+  return <section className="analysis-workbook-panel" aria-label="Excel 协作">
+    <div className="analysis-section-heading"><div><h3>Excel 协作</h3><p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p></div></div>
+    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+      <label>工作簿资料<select className="fnd-field" value={datasetId} onChange={(event) => setDatasetId(event.target.value)}>
+        {xlsx.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
+      <label>绑定编号<input className="fnd-field" value={bindingId} onChange={(event) => setBindingId(event.target.value)} placeholder="读取、预览或应用已有绑定" /></label>
+      <label>区域类型<select className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
+        <option value="table">表格</option><option value="named_range">命名区域</option><option value="range">工作表范围</option></select></label>
+      {sourceKind === 'range' ? <><label>工作表<select className="fnd-field" value={sheet} onChange={(event) => setSheet(event.target.value)}>
+        <option value="">输入或选择</option>{sheetNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>范围<input className="fnd-field" value={range} placeholder="A1:D20" onChange={(event) => setRange(event.target.value)} /></label></>
+        : <label>{sourceKind === 'table' ? '表格名称' : '命名区域'}<input className="fnd-field" list={`workbook-source-${taskId}`} value={sourceName} onChange={(event) => setSourceName(event.target.value)} /></label>}
+      <datalist id={`workbook-source-${taskId}`}>{[...tables, ...names].map((name) => <option key={name} value={name} />)}</datalist>
+      <label>用途<select className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+        <option value="input">读取输入</option><option value="output">写回输出</option></select></label>
+      <label>校验运行（可选）<select className="fnd-field" value={runId} onChange={(event) => setRunId(event.target.value)}>
+        <option value="">经理直接写入</option>{runs.filter((row) => row.execution_status === 'succeeded').map((row) =>
+          <option key={row.id} value={row.id}>{when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
+    </div>
+    <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
+      <label>字段数组<textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
+      <label>写入数组<textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
+    </div></details></fieldset>
+    <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
+    <div className="analysis-actions">
+      <button type="button" className="fnd-button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</button>
+      <button type="button" className="fnd-button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</button>
+      <button type="button" className="fnd-button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</button>
+      <button type="button" className="fnd-button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</button>
+      <button type="button" className="fnd-go" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</button>
+    </div>
+    {inspection && <details className="analysis-details" open><summary>工作簿结构</summary>
+      <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
+      {Array.isArray(inspection.unsupported_features) && inspection.unsupported_features.length > 0 && <p>需生成独立结果工作簿：{inspection.unsupported_features.map(textValue).join('、')}</p>}
+    </details>}
+    {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" />}
+    {cells.length > 0 && <Table columns={[{ name: 'cell', type: 'VARCHAR' }, { name: 'field', type: 'VARCHAR' }, { name: 'old_value', type: 'VARCHAR' }, { name: 'new_value', type: 'VARCHAR' }, { name: 'conflict', type: 'BOOLEAN' }]} rows={cells} caption="写回预览" />}
+    {conflictCells.length > 0 && <div className="analysis-workbook-conflicts" aria-label="写回冲突处理">
+      <strong>冲突处理</strong>
+      {conflictCells.map((cell) => {
+        const cellId = String(cell.cell);
+        return <label key={cellId}>{cellId} · 原值 {textValue(cell.old_value)} → 新值 {textValue(cell.new_value)}
+          <select className="fnd-field" value={resolutions[cellId] ?? 'keep'} onChange={(event) => setResolutions((value) => ({ ...value, [cellId]: event.target.value as 'keep' | 'apply' }))}>
+            <option value="keep">保留原单元格</option><option value="apply">应用新结果</option>
+          </select></label>;
+      })}
+    </div>}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </section>;
+}
+
+function bridgeScenarioLabels(context?: FinanceContext): { actual: string; baseline: string } {
+  const scopes = context?.scopes ?? {};
+  const actualScope = scopes.actual;
+  const budgetScope = scopes.budget;
+  if (!actualScope || !budgetScope) {
+    throw new Error('预算桥需要已保存口径包含明确的 actual 与 budget 情景别名。请用实际资料和预算资料重新保存口径后再运行。');
+  }
+  return {
+    actual: textValue(actualScope.scenario ?? 'actual'),
+    baseline: textValue(budgetScope.scenario ?? 'budget'),
+  };
+}
+
+const bridgeDimensions = ['organization', 'period'];
+
+function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
+  taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void>;
+}) {
+  const [finance, setFinance] = useState<FinanceContextState | null>(null);
+  const [actual, setActual] = useState(datasets[0]?.id ?? '');
+  const [budget, setBudget] = useState('');
+  const [scope, setScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: 'CNY', unit: '元', scenario: 'actual' });
+  const [budgetScope, setBudgetScope] = useState<Record<string, string>>({ scenario: 'budget' });
+  const [contextId, setContextId] = useState('');
+  const [mapName, setMapName] = useState('管理科目映射');
+  const [mapRows, setMapRows] = useState('[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]');
+  const [accountMapId, setAccountMapId] = useState('');
+  const [scenarioKind, setScenarioKind] = useState<'receivables_aging' | 'cash_13_weeks'>('receivables_aging');
+  const [scenarioLabel, setScenarioLabel] = useState('基准情景');
+  const [scenarioPrimary, setScenarioPrimary] = useState('actual');
+  const [scenarioSecondary, setScenarioSecondary] = useState('');
+  const [scenarioAsOf, setScenarioAsOf] = useState('');
+  const [scenarioStart, setScenarioStart] = useState('');
+  const [scenarioCutoff, setScenarioCutoff] = useState('');
+  const [openingCash, setOpeningCash] = useState('');
+  const [delayDays, setDelayDays] = useState('14');
+  const [baselineScenarioId, setBaselineScenarioId] = useState('');
+  const hasFinanceResults = runs.some((row) => row.engine === 'finance' && row.execution_status === 'succeeded');
+  const [setupOpen, setSetupOpen] = useState(!hasFinanceResults);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => { setActual((value) => value || datasets[0]?.id || ''); }, [datasets]);
+  useEffect(() => { if (hasFinanceResults) setSetupOpen(false); }, [hasFinanceResults]);
+  useEffect(() => {
+    let cancelled = false;
+    const api = bridge();
+    if (!api?.financeCall) return;
+    void api.financeCall(taskId, 'list-finance-context').then((answer) => {
+      if (!cancelled) {
+        const value = unwrap(answer as Answer<FinanceContextState>);
+        setFinance(value);
+        setContextId((current) => current || value.contexts.at(-1)?.id || '');
+      }
+    }).catch((failure) => { if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure)); });
+    return () => { cancelled = true; };
+  }, [taskId]);
+  async function saveContext(runAfter?: 'pnl' | 'bridge') {
+    try {
+      const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
+      setError(''); setMessage('');
+      const bindings = { actual, ...(budget ? { budget } : {}) };
+      const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope } } : {}) };
+      const context = unwrap(await api.financeCall(taskId, 'finance-context-save', {
+        name: `${scope.period || '本期'}${scope.organization ? ` ${scope.organization}` : ''}经营口径`,
+        bindings, scopes, ...(accountMapId ? { account_map_id: accountMapId } : {}),
+      }) as Answer<FinanceContext>);
+      setContextId(context.id);
+      setFinance((value) => value ? {
+        ...value,
+        contexts: value.contexts.some((item) => item.id === context.id) ? value.contexts : [...value.contexts, context],
+      } : value);
+      if (runAfter === 'pnl') {
+        unwrap(await api.financeCall(taskId, 'run-metric', { context_id: context.id, metric: { kind: 'management_pnl' } }));
+        setMessage('已保存口径并运行管理口径损益。');
+        setSetupOpen(false);
+      } else if (runAfter === 'bridge') {
+        const labels = bridgeScenarioLabels(context);
+        unwrap(await api.financeCall(taskId, 'explain-variance', {
+          context_id: context.id, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
+          dimensions: bridgeDimensions,
+        }));
+        setMessage('已保存口径并运行预算差异桥。');
+        setSetupOpen(false);
+      } else {
+        setMessage('已保存财务分析口径。');
+      }
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+  async function saveMap() {
+    try {
+      const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持管理科目映射。');
+      setError(''); setMessage('');
+      const parsed = JSON.parse(mapRows);
+      if (!Array.isArray(parsed)) throw new Error('映射 JSON 需要是数组。');
+      const record = unwrap(await api.financeCall(taskId, 'finance-map-save', { name: mapName, rows: parsed }) as Answer<Record<string, unknown>>);
+      setAccountMapId(String(record.id ?? ''));
+      setFinance((value) => value ? { ...value, account_maps: [...value.account_maps, record] } : value);
+      setMessage('已保存管理科目映射，可用于下一次口径保存。');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+  const runExisting = async (kind: 'pnl' | 'bridge') => {
+    try {
+      const api = bridge(); if (!api?.financeCall || !contextId) return;
+      setError(''); setMessage('');
+      if (kind === 'pnl') unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' } }));
+      else {
+        const labels = bridgeScenarioLabels(selectedContext);
+        unwrap(await api.financeCall(taskId, 'explain-variance', {
+          context_id: contextId, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
+          dimensions: bridgeDimensions,
+        }));
+      }
+      setMessage(kind === 'pnl' ? '已运行管理口径损益。' : '已运行预算差异桥。');
+      setSetupOpen(false);
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  };
+  const selectedContext = finance?.contexts.find((context) => context.id === contextId);
+  const aliases = Object.keys(selectedContext?.bindings ?? {});
+  useEffect(() => {
+    setScenarioPrimary((value) => value || aliases[0] || 'actual');
+  }, [aliases.join('|')]);
+  useEffect(() => { setBaselineScenarioId(''); }, [contextId, scenarioKind]);
+  async function runScenario(child = false) {
+    try {
+      const api = bridge(); if (!api?.financeCall || !contextId) throw new Error('请先保存或选择财务口径。');
+      setError(''); setMessage('');
+      const scenarioScope = selectedContext?.scopes?.[scenarioPrimary] ?? scope;
+      let scenario: Record<string, unknown>;
+      if (child) {
+        if (scenarioKind !== 'cash_13_weeks') throw new Error('延迟回款子情景仅适用于 13 周现金测算。');
+        if (!baselineScenarioId) throw new Error('请先运行一个 13 周现金基准情景。');
+        const parent = finance?.scenarios.find((item) => item.id === baselineScenarioId);
+        if (parent && (parent.kind !== 'cash_13_weeks' || parent.context_id !== contextId)) throw new Error('请选择同一财务口径下的 13 周现金基准情景。');
+        scenario = unwrap(await api.financeCall(taskId, 'finance-scenario-save', {
+          parent_id: baselineScenarioId,
+          label: `${scenarioLabel || '情景'} · 延迟 ${delayDays || '0'} 天`,
+          changes: { scenario: { delay_receipts_days: Number(delayDays || 0), label: `回款延迟 ${delayDays || 0} 天` } },
+        }));
+      } else {
+        const inputs = scenarioKind === 'receivables_aging'
+          ? { as_of: scenarioAsOf || scope.period || scope.cutoff_at, scope: scenarioScope, invoices_alias: scenarioPrimary, ...(scenarioSecondary ? { activity_alias: scenarioSecondary } : {}) }
+          : { opening_cash: openingCash, start_date: scenarioStart, actual_cutoff: scenarioCutoff, scope: scenarioScope,
+              receipts_alias: scenarioPrimary, ...(scenarioSecondary ? { payments_alias: scenarioSecondary } : {}), scenario: { delay_receipts_days: 0 } };
+        scenario = unwrap(await api.financeCall(taskId, 'finance-scenario-save', {
+          context_id: contextId, kind: scenarioKind, label: scenarioLabel || '基准情景', inputs,
+        }));
+        setBaselineScenarioId(String(scenario.id ?? ''));
+      }
+      unwrap(await api.financeCall(taskId, 'finance-scenario-run', { scenario_id: String(scenario.id) }));
+      setFinance((value) => value && !value.scenarios.some((item) => item.id === scenario.id)
+        ? { ...value, scenarios: [...value.scenarios, scenario] } : value);
+      setMessage(child ? '已运行延迟回款子情景。' : '已运行基准情景。');
+      setSetupOpen(false);
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+  const disabled = busy || !actual;
+  return <details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
+    onToggle={(event) => setSetupOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <summary><div className="analysis-section-heading"><h3>财务业务口径</h3><span className="analysis-note">用已登记资料建立范围，结果仍保留 SQL 与脚本高级路径。</span></div></summary>
+    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+      <label>实际资料<select className="fnd-field" value={actual} onChange={(event) => setActual(event.target.value)}>
+        {datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
+      <label>预算资料（可选）<select className="fnd-field" value={budget} onChange={(event) => setBudget(event.target.value)}>
+        <option value="">暂不选择</option>{datasets.filter((source) => source.id !== actual).map((source) =>
+          <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
+      {scopeFields.map(([key, label]) => <label key={key}>{label}<input className="fnd-field" value={scope[key] ?? ''}
+        onChange={(event) => setScope({ ...scope, [key]: event.target.value })} /></label>)}
+      {budget && <label>预算情景名称<input className="fnd-field" value={budgetScope.scenario ?? ''}
+        onChange={(event) => setBudgetScope({ ...budgetScope, scenario: event.target.value })} /></label>}
+    </div></fieldset>
+    <div className="analysis-actions">
+      <button type="button" className="fnd-button" disabled={disabled} onClick={() => void saveContext()}>保存口径</button>
+      <button type="button" className="fnd-go" disabled={disabled} onClick={() => void saveContext('pnl')}>保存并运行 P&L</button>
+      <button type="button" className="fnd-button" disabled={disabled || !budget} onClick={() => void saveContext('bridge')}>运行预算桥</button>
+      {contextId && <button type="button" className="fnd-button" disabled={busy} onClick={() => void runExisting('pnl')}>用已保存口径重跑 P&L</button>}
+      {contextId && <button type="button" className="fnd-button" disabled={busy} onClick={() => void runExisting('bridge')}>用已保存口径运行预算桥</button>}
+    </div>
+    {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
+      <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+        <label>情景类型<select className="fnd-field" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
+          <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></label>
+        <label>情景名称<input className="fnd-field" value={scenarioLabel} onChange={(event) => setScenarioLabel(event.target.value)} /></label>
+        <label>{scenarioKind === 'receivables_aging' ? '应收/发票资料' : '回款资料'}<select className="fnd-field" value={scenarioPrimary} onChange={(event) => setScenarioPrimary(event.target.value)}>
+          {aliases.map((alias) => <option key={alias} value={alias}>{alias} · {shortSha(selectedContext?.bindings[alias] ?? '')}</option>)}</select></label>
+        <label>{scenarioKind === 'receivables_aging' ? '核销活动（可选）' : '付款资料（可选）'}<select className="fnd-field" value={scenarioSecondary} onChange={(event) => setScenarioSecondary(event.target.value)}>
+          <option value="">暂不选择</option>{aliases.filter((alias) => alias !== scenarioPrimary).map((alias) => <option key={alias} value={alias}>{alias} · {shortSha(selectedContext?.bindings[alias] ?? '')}</option>)}</select></label>
+        {scenarioKind === 'receivables_aging' ? <label>账龄日期<input className="fnd-field" value={scenarioAsOf} placeholder="2026-08-31" onChange={(event) => setScenarioAsOf(event.target.value)} /></label> : <>
+          <label>期初现金<input className="fnd-field" value={openingCash} placeholder="5000000.00" onChange={(event) => setOpeningCash(event.target.value)} /></label>
+          <label>预测开始日<input className="fnd-field" value={scenarioStart} placeholder="2026-09-01" onChange={(event) => setScenarioStart(event.target.value)} /></label>
+          <label>实际截止日<input className="fnd-field" value={scenarioCutoff} placeholder="2026-08-31" onChange={(event) => setScenarioCutoff(event.target.value)} /></label>
+        </>}
+        {scenarioKind === 'cash_13_weeks' && <label>回款延迟天数<input className="fnd-field" value={delayDays} onChange={(event) => setDelayDays(event.target.value)} /></label>}
+      </div></fieldset>
+      <div className="analysis-actions">
+        <button type="button" className="fnd-button" disabled={busy || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</button>
+        <button type="button" className="fnd-button" disabled={busy || scenarioKind !== 'cash_13_weeks' || !baselineScenarioId} onClick={() => void runScenario(true)}>运行延迟回款子情景</button>
+      </div>
+      {finance?.scenarios.filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).length ? <div className="analysis-history-list">{[...finance.scenarios].filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).reverse().slice(0, 6).map((scenario) => <button type="button" className="analysis-history-row" key={String(scenario.id)}
+        aria-current={scenario.id === baselineScenarioId ? 'true' : undefined} onClick={() => setBaselineScenarioId(String(scenario.id ?? ''))}>
+        <span>{textValue(scenario.label ?? scenario.kind)}</span><span>{textValue(scenario.kind)}</span><time>{when(String(scenario.created_at ?? ''))}</time><span>{shortSha(String(scenario.id ?? ''))}</span></button>)}</div> : null}
+    </details>}
+    {finance?.contexts.length ? <details className="analysis-details"><summary>已保存财务口径 · {finance.contexts.length} 个</summary>
+      <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row"
+        aria-current={context.id === contextId ? 'true' : undefined} onClick={() => setContextId(context.id)}>
+        <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；')}</span><span>{shortSha(context.id)}</span></button>)}</div></details> : null}
+    <details className="analysis-details"><summary>高级：管理科目映射 JSON</summary>
+      <p className="analysis-note">引擎识别的管理科目为 revenue（收入）、cost（成本）、expense（费用）；中文科目名请映射到这些标准值。</p>
+      <div className="analysis-edit-grid"><label>映射名称<input className="fnd-field" value={mapName} onChange={(event) => setMapName(event.target.value)} /></label>
+        <label>已保存映射<select className="fnd-field" value={accountMapId} onChange={(event) => setAccountMapId(event.target.value)}>
+          <option value="">暂不使用</option>{finance?.account_maps.map((item) => <option key={String(item.id)} value={String(item.id)}>{textValue(item.name ?? '管理科目映射')} · {shortSha(String(item.id ?? ''))}</option>)}
+        </select></label>
+        <label>映射行数组<textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
+          onChange={(event) => setMapRows(event.target.value)} /></label></div>
+      {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
+      <button type="button" className="fnd-button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</button>
+    </details>
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </details>;
 }
 function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave, onChat }: {
   analysis: AnalysisRevision; datasets: DatasetSnapshot[]; busy: boolean;

@@ -1,0 +1,674 @@
+"""Minimal stdio MCP adapter for task-scoped finance analysis."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import hmac
+import json
+import os
+import stat
+import secrets
+import sys
+import uuid
+from pathlib import Path
+from typing import Any, TextIO
+
+from foundry.analysis import AnalysisStore, _assert_id, _safe_text
+from foundry.analysis_data import json_value, load_json
+from foundry.errors import FoundryError
+from foundry.fsutil import write_json_atomic
+from foundry.task import TaskStore, session_owner
+
+PROTOCOL_VERSION = "2025-06-18"
+SERVER_NAME = "finance-skill-foundry"
+SERVER_VERSION = "0.1.0"
+MAX_MESSAGE_BYTES = 1024 * 1024
+GRANT_ENV = {
+    "var_root": "FOUNDRY_MCP_VAR_ROOT",
+    "grant_id": "FOUNDRY_MCP_GRANT_ID",
+    "token": "FOUNDRY_MCP_TOKEN",
+}
+COMMANDS = {"finance-mcp-serve", "finance-mcp-grant", "finance-mcp-revoke"}
+
+
+class McpRefused(FoundryError):
+    pass
+
+
+def create_stdio_grant(
+    var_root: Path,
+    *,
+    task_id: str,
+    session_id: str,
+    snapshot_ids: list[str] | None = None,
+    context_ids: list[str] | None = None,
+    grant_root: Path | None = None,
+    token: str | None = None,
+) -> dict[str, Any]:
+    """Create a revocable task/session grant for a local stdio MCP server.
+
+    The returned token is shown once to the caller for subprocess environment
+    injection. Only its hash is stored on disk.
+    """
+
+    store = TaskStore(Path(var_root))
+    task = store.get(task_id)
+    owner = session_owner(store, session_id)
+    if owner is None or owner.id != task.id:
+        raise FoundryError("session is not registered on this task")
+    session = next(row for row in task.sessions() if row["session_id"] == session_id)
+    ceiling = list(snapshot_ids) if snapshot_ids is not None else list(session.get("snapshot_ids", []))
+    if not ceiling:
+        raise FoundryError("grant requires at least one snapshot id")
+    session_ceiling = set(session.get("snapshot_ids", []))
+    if not set(ceiling).issubset(session_ceiling):
+        raise FoundryError("grant snapshots exceed the session context")
+    for snapshot_id in ceiling:
+        _assert_id(snapshot_id)
+        AnalysisStore(task).read_dataset(snapshot_id)
+    for context_id in context_ids or []:
+        _assert_id(context_id)
+        _finance_store(task, snapshot_ids=ceiling, session_id=session_id, context_revision=session.get("context_revision"))._read("contexts", context_id)
+
+    plain = token or secrets.token_urlsafe(32)
+    grant_id = uuid.uuid4().hex
+    root = _grant_root(Path(var_root), grant_root)
+    record = {
+        "schema_version": 1,
+        "grant_id": grant_id,
+        "task_id": task.id,
+        "session_id": session_id,
+        "context_revision": session.get("context_revision", 1),
+        "snapshot_ids": ceiling,
+        "context_ids": list(context_ids or []),
+        "token_hash": _token_hash(plain),
+        "revoked": False,
+    }
+    path = _grant_path(root, grant_id)
+    write_json_atomic(path, record)
+    try:
+        path.chmod(0o600)
+        root.chmod(0o700)
+    except OSError:
+        pass
+    return {
+        "grant_id": grant_id,
+        "token": plain,
+        "env": {
+            GRANT_ENV["var_root"]: str(Path(var_root)),
+            GRANT_ENV["grant_id"]: grant_id,
+            GRANT_ENV["token"]: plain,
+        },
+        "command": [sys.executable, "-m", "foundry.finance_mcp"],
+    }
+
+
+def write_client_config(
+    grant: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+    server_name: str = SERVER_NAME,
+    frozen: bool | None = None,
+) -> dict[str, Any]:
+    """Write a protected MCP client config containing the one-time token."""
+
+    env = grant.get("env")
+    if not isinstance(env, dict):
+        raise FoundryError("grant result is missing environment")
+    if config_path is None:
+        var_root = Path(str(env[GRANT_ENV["var_root"]]))
+        config_path = _grant_root(var_root, None) / f"{_assert_id(grant['grant_id'])}.mcp.json"
+    config_path = Path(config_path)
+    command = client_command(frozen=frozen)
+    payload = {
+        "mcpServers": {
+            _safe_text(server_name, "server name", required=True, maximum=80): {
+                "type": "stdio",
+                "command": command[0],
+                "args": command[1:],
+                "env": env,
+            }
+        }
+    }
+    _write_new_json_file(config_path, payload)
+    return {"config_path": str(config_path), "grant_id": grant["grant_id"]}
+
+
+def client_command(*, frozen: bool | None = None) -> list[str]:
+    use_frozen = frozen if frozen is not None else getattr(sys, "frozen", False)
+    if use_frozen:
+        return [sys.executable, "finance-mcp-serve"]
+    return [sys.executable, "-m", "foundry.finance_mcp"]
+
+
+def _finance_store(*args, **kwargs):
+    from foundry.finance_service import FinanceStore
+
+    return FinanceStore(*args, **kwargs)
+
+
+def _write_new_json_file(path: Path, payload: dict[str, Any]) -> None:
+    path = Path(path)
+    if path.exists() or path.is_symlink():
+        raise FoundryError(f"client config already exists: {path}")
+    parent = path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    if parent.is_symlink():
+        raise FoundryError(f"client config parent must not be a symlink: {parent}")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+            handle.write("\n")
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode != 0o600:
+        path.chmod(0o600)
+
+
+def revoke_stdio_grant(var_root: Path, grant_id: str, *, grant_root: Path | None = None) -> dict[str, Any]:
+    root = _grant_root(Path(var_root), grant_root)
+    path = _grant_path(root, grant_id)
+    record = _read_grant(path)
+    record["revoked"] = True
+    write_json_atomic(path, record)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return {"grant_id": grant_id, "revoked": True}
+
+
+def add_parsers(sub) -> None:
+    sub.add_parser("finance-mcp-serve")
+    grant = sub.add_parser("finance-mcp-grant")
+    grant.add_argument("--spec", required=True)
+    revoke = sub.add_parser("finance-mcp-revoke")
+    revoke.add_argument("--grant-id", required=True)
+
+
+def dispatch(args) -> bool:
+    if args.cmd not in COMMANDS:
+        return False
+    if args.cmd in {"finance-mcp-grant", "finance-mcp-revoke"} and str(getattr(args, "session", "") or "").strip():
+        raise FoundryError("finance MCP grant commands must be run by a local operator without --session")
+    if args.cmd == "finance-mcp-serve":
+        token = os.environ.get(GRANT_ENV["token"])
+        grant_id = os.environ.get(GRANT_ENV["grant_id"])
+        var_root = os.environ.get(GRANT_ENV["var_root"]) or getattr(args, "var", None)
+        if not token or not grant_id or not var_root:
+            raise FoundryError("missing Finance MCP grant environment")
+        serve(FinanceMcpServer(var_root=Path(var_root), grant_id=grant_id, token=token))
+        return True
+    if args.cmd == "finance-mcp-grant":
+        spec = _grant_spec(args.spec)
+        if spec.get("session_driven"):
+            raise FoundryError("finance MCP grants must be issued by a local operator command")
+        grant = create_stdio_grant(
+            Path(args.var),
+            task_id=spec["task_id"],
+            session_id=spec["session_id"],
+            snapshot_ids=spec.get("snapshot_ids"),
+            context_ids=spec.get("context_ids"),
+        )
+        result = write_client_config(
+            grant,
+            config_path=Path(spec["config_path"]) if spec.get("config_path") else None,
+            server_name=spec.get("server_name", SERVER_NAME),
+            frozen=spec.get("frozen"),
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return True
+    revoke_stdio_grant(Path(args.var), args.grant_id)
+    print(json.dumps({"grant_id": args.grant_id, "revoked": True}, ensure_ascii=False, sort_keys=True))
+    return True
+
+
+class FinanceMcpServer:
+    def __init__(self, *, var_root: Path, grant_id: str, token: str, grant_root: Path | None = None) -> None:
+        self.var_root = Path(var_root)
+        self.grant_id = grant_id
+        self.token = token
+        self.grant_root = grant_root
+        self.initialize_completed = False
+        self.initialized = False
+        self.negotiated_version = PROTOCOL_VERSION
+
+    def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        if message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
+            raise JsonRpcError(-32600, "Invalid Request")
+        params = _object_params(message)
+        if "id" not in message:
+            if message["method"] == "notifications/initialized" and self.initialize_completed:
+                self.initialized = True
+            return None
+        method = message["method"]
+        if method == "initialize":
+            return self._initialize(message["id"], params)
+        if method == "ping":
+            return _ok(message["id"], {})
+        if not self.initialized:
+            raise JsonRpcError(-32002, "server is not initialized")
+        if method == "tools/list":
+            self._authorized()
+            return _ok(message["id"], {"tools": _tools()})
+        if method == "tools/call":
+            return _ok(message["id"], self._call(params))
+        raise JsonRpcError(-32601, "Method not found")
+
+    def _initialize(self, request_id: str | int, params: dict[str, Any]) -> dict[str, Any]:
+        requested = params.get("protocolVersion")
+        self.negotiated_version = requested if requested == PROTOCOL_VERSION else PROTOCOL_VERSION
+        self.initialize_completed = True
+        return _ok(
+            request_id,
+            {
+                "protocolVersion": self.negotiated_version,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {
+                    "name": SERVER_NAME,
+                    "title": "Finance Skill Foundry",
+                    "version": SERVER_VERSION,
+                },
+                "instructions": "Task-scoped finance analysis tools. Grants are checked on every request.",
+            },
+        )
+
+    def _authorized(self) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+        record = _read_grant(_grant_path(_grant_root(self.var_root, self.grant_root), self.grant_id))
+        if record.get("revoked"):
+            raise McpRefused("grant revoked")
+        if not hmac.compare_digest(str(record.get("token_hash") or ""), _token_hash(self.token)):
+            raise McpRefused("grant token invalid")
+        task_id = _assert_id(record.get("task_id"))
+        store = TaskStore(self.var_root)
+        task = store.get(task_id)
+        session_id = str(record.get("session_id") or "")
+        owner = session_owner(store, session_id)
+        if owner is None or owner.id != task.id:
+            raise McpRefused("session is not registered on this task")
+        session = next(row for row in task.sessions() if row["session_id"] == session_id)
+        if session.get("context_revision", 1) != record.get("context_revision", 1):
+            raise McpRefused("grant context revision is stale")
+        snapshots = list(record.get("snapshot_ids") or [])
+        if not snapshots or not set(snapshots).issubset(set(session.get("snapshot_ids", []))):
+            raise McpRefused("grant snapshots exceed the session context")
+        for snapshot_id in snapshots:
+            _assert_id(snapshot_id)
+        return record, task, session
+
+    def _service(self) -> tuple[dict[str, Any], Any]:
+        grant, task, session = self._authorized()
+        return grant, _finance_store(
+            task,
+            snapshot_ids=list(grant["snapshot_ids"]),
+            session_id=session["session_id"],
+            context_revision=session.get("context_revision", 1),
+        )
+
+    def _call(self, params: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+            raise JsonRpcError(-32602, "invalid tool call")
+        name = params["name"]
+        arguments = params.get("arguments", {})
+        if not isinstance(arguments, dict) or isinstance(arguments, bool):
+            raise JsonRpcError(-32602, "tool arguments must be an object")
+        grant, service = self._service()
+        if name not in TOOL_METHODS:
+            raise JsonRpcError(-32602, "unknown tool")
+        try:
+            if name == "list_finance_context":
+                result = self._filter_context_list(grant, service.list_finance_context())
+            else:
+                self._authorize_context(grant, service, name, arguments)
+                result = getattr(service, TOOL_METHODS[name])(arguments)
+        except McpRefused:
+            raise
+        except FoundryError as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:
+            raise JsonRpcError(-32000, "finance tool failed") from exc
+        payload = json_value(result)
+        return _tool_result(payload, is_error=False)
+
+    def _filter_context_list(self, grant: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        allowed = set(grant.get("context_ids") or [])
+        if not allowed:
+            return result
+        contexts = [row for row in result.get("contexts", []) if row.get("id") in allowed]
+        account_map_ids = {row.get("account_map_id") for row in contexts if row.get("account_map_id")}
+        return {
+            **result,
+            "contexts": contexts,
+            "account_maps": [row for row in result.get("account_maps", []) if row.get("id") in account_map_ids],
+            "scenarios": [row for row in result.get("scenarios", []) if row.get("context_id") in allowed],
+            "metric_definitions": [row for row in result.get("metric_definitions", []) if row.get("context_id") in allowed],
+        }
+
+    def _authorize_context(self, grant: dict[str, Any], service: Any, tool: str, spec: dict[str, Any]) -> None:
+        allowed = set(grant.get("context_ids") or [])
+        if not allowed:
+            return
+        context_ids: set[str] = set()
+        analysis = service.analysis
+        if spec.get("context_id"):
+            context_ids.add(_assert_id(spec["context_id"]))
+        if spec.get("definition_id"):
+            context_ids.add(service._read("metric_definitions", spec["definition_id"])["context_id"])
+        if spec.get("scenario_id"):
+            context_ids.add(service._read("scenarios", spec["scenario_id"])["context_id"])
+        if spec.get("parent_id") and tool == "save_scenario":
+            context_ids.add(service._read("scenarios", spec["parent_id"])["context_id"])
+        for run_id in [spec.get("run_id"), *spec.get("run_ids", [])]:
+            if run_id:
+                run = analysis.get_run(run_id)
+                context_ids.add(run.get("finance_context_id"))
+        if spec.get("parent_id") and tool == "save_explanation_draft":
+            draft = analysis.get_draft(spec["parent_id"])
+            for run_id in draft.get("run_ids", []):
+                run = analysis.get_run(run_id)
+                context_ids.add(run.get("finance_context_id"))
+        for claim in spec.get("claims", []):
+            if isinstance(claim, dict) and claim.get("run_id"):
+                run = analysis.get_run(claim["run_id"])
+                context_ids.add(run.get("finance_context_id"))
+        if not context_ids or not context_ids <= allowed:
+            raise McpRefused("finance context is outside this grant")
+
+
+class JsonRpcError(Exception):
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+TOOL_METHODS = {
+    "list_finance_context": "list_finance_context",
+    "run_metric": "run_metric",
+    "explain_variance": "explain_variance",
+    "save_scenario": "save_scenario",
+    "run_scenario": "run_scenario",
+    "drilldown_fact": "drilldown_fact",
+    "save_explanation_draft": "save_explanation_draft",
+}
+
+
+def _tools() -> list[dict[str, Any]]:
+    text = {"type": "string"}
+    context_id = {
+        "type": "string",
+        "description": "Finance context id returned by list_finance_context.",
+        "pattern": "^[0-9a-f]{32}$",
+    }
+    run_id = {
+        "type": "string",
+        "description": "Finance run id returned by run_metric, explain_variance, or run_scenario.",
+        "pattern": "^[0-9a-f]{32}$",
+    }
+    metric_schema = {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+            "kind": {"type": "string", "enum": ["management_pnl", "ratio", "account_total", "control_totals"]},
+            "dimensions": {"type": "array", "items": text},
+            "scenario_bindings": {"type": "object"},
+            "filters": {"type": "object"},
+            "aggregate_dimensions": {"type": "boolean"},
+        },
+        "additionalProperties": True,
+    }
+    return [
+        {
+            "name": "list_finance_context",
+            "title": "List finance context",
+            "description": "List finance snapshots, contexts, account maps, scenarios, metric definitions, and capabilities available to the scoped grant.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+        {
+            "name": "run_metric",
+            "title": "Run finance metric",
+            "description": "Run a saved or inline finance metric within the granted task, session, snapshots, and finance context scope.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["context_id", "metric"],
+                "properties": {
+                    "context_id": context_id,
+                    "question": text,
+                    "metric": metric_schema,
+                    "definition_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "assumptions": {"type": "array", "items": {"type": "object"}},
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "explain_variance",
+            "title": "Explain finance variance",
+            "description": "Compute a variance bridge within the granted task, session, snapshots, and finance context scope.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["context_id"],
+                "properties": {
+                    "context_id": context_id,
+                    "question": text,
+                    "kind": {"type": "string", "enum": ["profit_bridge", "price_quantity"]},
+                    "actual_scenario": text,
+                    "baseline_scenario": text,
+                    "dimensions": {"type": "array", "items": text},
+                    "method": {"type": "string", "enum": ["quantity_then_price", "base_weights_with_interaction"]},
+                    "actual_filters": {"type": "object"},
+                    "baseline_filters": {"type": "object"},
+                    "missing_groups_as_zero": {"type": "boolean"},
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "save_scenario",
+            "title": "Save finance scenario",
+            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["label"],
+                "properties": {
+                    "context_id": context_id,
+                    "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model"]},
+                    "inputs": {"type": "object"},
+                    "label": text,
+                    "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "changes": {"type": "object"},
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "run_scenario",
+            "title": "Run finance scenario",
+            "description": "Run a saved finance scenario and generate a task-local finance run with source evidence.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["scenario_id"],
+                "properties": {
+                    "scenario_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "question": text,
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "drilldown_fact",
+            "title": "Drill down finance fact",
+            "description": "Return source rows behind a finance run result without exposing arbitrary filesystem paths.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id", "row"],
+                "properties": {
+                    "run_id": run_id,
+                    "row": {"type": "integer", "minimum": 0},
+                    "column": text,
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+                },
+                "additionalProperties": True,
+            },
+        },
+        {
+            "name": "save_explanation_draft",
+            "title": "Save finance explanation draft",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["body"],
+                "properties": {
+                    "title": text,
+                    "body": text,
+                    "run_ids": {"type": "array", "items": run_id},
+                    "claims": {"type": "array", "items": {"type": "object"}},
+                    "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                },
+                "additionalProperties": True,
+            },
+        },
+    ]
+
+
+def serve(server: FinanceMcpServer, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
+    for line in stdin:
+        if not line.strip():
+            continue
+        try:
+            if len(line.encode("utf-8")) > MAX_MESSAGE_BYTES:
+                response = _err(None, -32600, "message too large")
+                stdout.write(json.dumps(response, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                stdout.flush()
+                continue
+            message = json.loads(line)
+            if not isinstance(message, dict):
+                raise JsonRpcError(-32600, "Invalid Request")
+            response = server.handle(message)
+        except json.JSONDecodeError:
+            response = _err(None, -32700, "Parse error")
+        except McpRefused:
+            response = _err(_request_id_from_line(line), -32001, "access denied")
+        except JsonRpcError as exc:
+            response = _err(_request_id_from_line(line), exc.code, exc.message)
+        except Exception:
+            response = _err(_request_id_from_line(line), -32000, "internal server error")
+        if response is not None:
+            stdout.write(json.dumps(response, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+            stdout.flush()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the Finance Skill Foundry MCP stdio server.")
+    parser.add_argument("--var-root", default=os.environ.get(GRANT_ENV["var_root"]))
+    parser.add_argument("--grant-id", default=os.environ.get(GRANT_ENV["grant_id"]))
+    args = parser.parse_args(argv)
+    token = os.environ.get(GRANT_ENV["token"])
+    if not args.var_root or not args.grant_id or not token:
+        sys.stderr.write("missing Finance MCP grant environment\n")
+        return 2
+    serve(FinanceMcpServer(var_root=Path(args.var_root), grant_id=args.grant_id, token=token))
+    return 0
+
+
+def _grant_root(var_root: Path, grant_root: Path | None) -> Path:
+    root = Path(grant_root) if grant_root is not None else var_root / "mcp-grants"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _grant_path(root: Path, grant_id: str) -> Path:
+    return root / f"{_assert_id(grant_id)}.json"
+
+
+def _read_grant(path: Path) -> dict[str, Any]:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise McpRefused("grant unavailable") from exc
+    if record.get("grant_id") != path.stem:
+        raise McpRefused("grant integrity failed")
+    return record
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def _grant_spec(value: str) -> dict[str, Any]:
+    spec = load_json(value)
+    if not isinstance(spec, dict):
+        raise FoundryError("finance MCP grant spec must be a JSON object")
+    for key in ("task_id", "session_id"):
+        if not isinstance(spec.get(key), str) or not spec[key].strip():
+            raise FoundryError(f"finance MCP grant spec requires {key}")
+    _assert_id(spec["task_id"])
+    if "snapshot_ids" in spec:
+        if not isinstance(spec["snapshot_ids"], list) or any(not isinstance(item, str) for item in spec["snapshot_ids"]):
+            raise FoundryError("snapshot_ids must be a list of snapshot id strings")
+        for item in spec["snapshot_ids"]:
+            _assert_id(item)
+    if "context_ids" in spec:
+        if not isinstance(spec["context_ids"], list) or any(not isinstance(item, str) for item in spec["context_ids"]):
+            raise FoundryError("context_ids must be a list of finance context id strings")
+        for item in spec["context_ids"]:
+            _assert_id(item)
+    if spec.get("config_path") is not None and not isinstance(spec["config_path"], str):
+        raise FoundryError("config_path must be a string")
+    if spec.get("server_name") is not None and not isinstance(spec["server_name"], str):
+        raise FoundryError("server_name must be a string")
+    if spec.get("frozen") is not None and not isinstance(spec["frozen"], bool):
+        raise FoundryError("frozen must be a boolean")
+    return spec
+
+
+def _ok(request_id: str | int, result: dict[str, Any]) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _err(request_id: str | int | None, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _object_params(message: dict[str, Any]) -> dict[str, Any]:
+    if "params" not in message:
+        return {}
+    params = message["params"]
+    if not isinstance(params, dict) or isinstance(params, bool):
+        raise JsonRpcError(-32602, "params must be an object")
+    return params
+
+
+def _tool_result(payload: dict[str, Any], *, is_error: bool) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, sort_keys=True)}],
+        "structuredContent": payload,
+        "isError": is_error,
+    }
+
+
+def _tool_error(message: str) -> dict[str, Any]:
+    if "/" in message or "\\" in message:
+        message = "finance request refused"
+    return _tool_result({"error": "finance request refused", "message": message}, is_error=True)
+
+
+def _request_id_from_line(line: str) -> str | int | None:
+    try:
+        message = json.loads(line)
+    except ValueError:
+        return None
+    return message.get("id") if isinstance(message, dict) else None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

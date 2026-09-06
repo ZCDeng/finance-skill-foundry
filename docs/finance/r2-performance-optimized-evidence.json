@@ -1,0 +1,150 @@
+{
+  "schema_version": 2,
+  "benchmark": "R2 optimized A25 snapshot SQL staging",
+  "accepted_algorithm": "validate user SQL with CONFIG external access disabled, then use trusted temporary NDJSON staging via DuckDB read_json, disable external access again, and lock configuration before user SQL",
+  "rejected_candidates": [
+    {
+      "candidate": "UNNEST(?::TYPE[]) with enable_external_access=false",
+      "semantic_result": "preserved VARCHAR, DECIMAL, NULL, Unicode, empty strings, and leading-zero numeric-looking codes on small samples",
+      "measurements": [
+        {
+          "rows": 100,
+          "mode": "param_cast",
+          "load_seconds": 0.041070541978115216
+        },
+        {
+          "rows": 100,
+          "mode": "select_cast",
+          "load_seconds": 0.03920216701226309
+        },
+        {
+          "rows": 5000,
+          "mode": "param_cast",
+          "load_seconds": 2.4229631250200327
+        },
+        {
+          "rows": 5000,
+          "mode": "select_cast",
+          "load_seconds": 2.8569781669939402
+        }
+      ],
+      "rejected_reason": "5k staging alone was close to the 3s hot-query target and 100k did not complete in the bounded probe, so it cannot replace the accepted staging path for A25."
+    }
+  ],
+  "rows": 100000,
+  "iterations": 5,
+  "machine": {
+    "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+    "python": "3.14.2",
+    "processor": "arm",
+    "machine": "arm64",
+    "cpu_count": 10,
+    "physical_memory_bytes": 25769803776
+  },
+  "measurement": {
+    "import_seconds": "AnalysisStore.add_dataset wall time for generated CSV source",
+    "cold_query_seconds": "first run_analysis call after import for each new dataset",
+    "hot_query_seconds": "second run_analysis call for the same analysis and dataset in the same process",
+    "rss": "process high-water mark from resource.getrusage(RUSAGE_SELF); cumulative for this benchmark process",
+    "cancellation": "real run_analysis timeout path using staged 100000-row snapshot and a broad DuckDB query"
+  },
+  "expected_profit": "250110",
+  "runs": [
+    {
+      "iteration": 1,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "source_sha256": "0667ec143bdc03bbb5b57ff80335e3260e3cfc98b692a660bd4d0aca69036611",
+      "dataset_id": "fc085694a53c445985f31e09d27db5ec",
+      "analysis_id": "795c170ae8a34a4b939e7cf3a1d3f250",
+      "cold_run_id": "32cd7f342aee4f3f8031589de6521e77",
+      "hot_run_id": "193119c255dc487e9357d3f7939bcb5f",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 2.8472379999875557,
+      "cold_query_seconds": 1.744634375005262,
+      "hot_query_seconds": 1.1302053749968763,
+      "process_high_water_mark_rss_bytes": 537001984
+    },
+    {
+      "iteration": 2,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "source_sha256": "0667ec143bdc03bbb5b57ff80335e3260e3cfc98b692a660bd4d0aca69036611",
+      "dataset_id": "ec9874cea9b24da2a50c66f1f4c5c82a",
+      "analysis_id": "1d90aee4da8d46a59c48a517ed8a024c",
+      "cold_run_id": "a3d6bbd541074218a6e74b4b7e4d00c5",
+      "hot_run_id": "04af58bf347e4b4299f028e11a632cc0",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 2.007095915992977,
+      "cold_query_seconds": 0.775460375007242,
+      "hot_query_seconds": 0.7788384589948691,
+      "process_high_water_mark_rss_bytes": 630751232
+    },
+    {
+      "iteration": 3,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "source_sha256": "0667ec143bdc03bbb5b57ff80335e3260e3cfc98b692a660bd4d0aca69036611",
+      "dataset_id": "9e915ac0860f449b93d56c1a05381c4d",
+      "analysis_id": "572d9aa5508342799b4a8bd085b22217",
+      "cold_run_id": "4dcf4b1a2fce40efa638407c212e6be6",
+      "hot_run_id": "47af3976c4ad454290f44c9acf53c27d",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 2.823913333006203,
+      "cold_query_seconds": 0.9380467079754453,
+      "hot_query_seconds": 1.0493997499870602,
+      "process_high_water_mark_rss_bytes": 630751232
+    },
+    {
+      "iteration": 4,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "source_sha256": "0667ec143bdc03bbb5b57ff80335e3260e3cfc98b692a660bd4d0aca69036611",
+      "dataset_id": "d4d58aa5f28c4f0fb1d235818fae5007",
+      "analysis_id": "c84868736abc4c97bd2750d0a6a8af91",
+      "cold_run_id": "7ef7638f003b4a51b7d0096568ea313f",
+      "hot_run_id": "62e298374f3543dd8cddb101fea81ade",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 1.792719874996692,
+      "cold_query_seconds": 1.2694935000035912,
+      "hot_query_seconds": 1.5646574579877779,
+      "process_high_water_mark_rss_bytes": 630751232
+    },
+    {
+      "iteration": 5,
+      "rows": 100000,
+      "source_bytes": 8122339,
+      "source_sha256": "0667ec143bdc03bbb5b57ff80335e3260e3cfc98b692a660bd4d0aca69036611",
+      "dataset_id": "0112436e38de4a528e294127b7e7d0a8",
+      "analysis_id": "3fe5c256d3634fc6943cfed95c6fb21d",
+      "cold_run_id": "dd207d69680a416aaf7c17cd821e123d",
+      "hot_run_id": "aaeb2e53e96e41f2bf414bb869a9ae2e",
+      "profit": "250110",
+      "expected_profit": "250110",
+      "import_seconds": 3.5839396250084974,
+      "cold_query_seconds": 2.2032622910046484,
+      "hot_query_seconds": 1.641759791993536,
+      "process_high_water_mark_rss_bytes": 630751232
+    }
+  ],
+  "median": {
+    "import_seconds": 2.823913333006203,
+    "cold_query_seconds": 1.2694935000035912,
+    "hot_query_seconds": 1.1302053749968763,
+    "process_high_water_mark_rss_bytes": 630751232
+  },
+  "cancellation": {
+    "rows": 100000,
+    "staging": "actual 100000-row bound snapshot is loaded before the broad query timeout is observed; the timeout query itself uses generated rows so relationship checks do not short-circuit it",
+    "analysis_id": "0e344dbb7fc3420ca4485cde9c70a8be",
+    "run_id": "e09535cd7869415b8afe5c6bc47ad9d0",
+    "execution_status": "failed",
+    "error_code": "timeout",
+    "elapsed_seconds": 0.4129844589915592,
+    "bounded_under_3_seconds": true
+  }
+}

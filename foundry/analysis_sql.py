@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import tempfile
 import threading
 from collections import Counter
 from decimal import Decimal
@@ -31,6 +32,7 @@ CONFIG = {
     "max_temp_directory_size": "0B",
     "temp_directory": "",
 }
+STAGING_CONFIG = {**CONFIG, "enable_external_access": True}
 RELATIONSHIP_CARDINALITIES = {
     "one-to-one",
     "one-to-many",
@@ -77,6 +79,10 @@ VOLATILE_FUNCTIONS = {
 
 def quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
+
+
+def quote_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _walk(value):
@@ -328,8 +334,16 @@ def validate_relationship_contract(
     return checked
 
 
+def _raise_if_expired(expired: threading.Event | None) -> None:
+    if expired is not None and expired.is_set():
+        raise FoundryError("SQL exceeded its execution time limit")
+
+
 def relationship_checks(
-    datasets: dict[str, dict], spec: dict, parsed: dict
+    datasets: dict[str, dict],
+    spec: dict,
+    parsed: dict,
+    expired: threading.Event | None = None,
 ) -> list[dict]:
     relationships = spec.get("relationships") or []
     if parsed["has_join"] and len(parsed["tables"]) > 1 and not relationships:
@@ -363,15 +377,19 @@ def relationship_checks(
             ):
                 raise FoundryError(f"relationship keys not in {alias}")
             types = {column["name"]: column["type"] for column in table["schema"]}
-            values = [
-                tuple(
-                    Decimal(row[key])
-                    if row[key] is not None and types[key].startswith("DECIMAL")
-                    else row[key]
-                    for key in keys
+            values = []
+            for index, row in enumerate(table["rows"], start=1):
+                if index % 8192 == 0:
+                    _raise_if_expired(expired)
+                values.append(
+                    tuple(
+                        Decimal(row[key])
+                        if row[key] is not None and types[key].startswith("DECIMAL")
+                        else row[key]
+                        for key in keys
+                    )
                 )
-                for row in table["rows"]
-            ]
+            _raise_if_expired(expired)
             nulls.append(sum(any(v is None for v in value) for value in values))
             counters.append(
                 Counter(value for value in values if all(v is not None for v in value))
@@ -447,50 +465,72 @@ def _value(value: Any) -> Any:
     raise FoundryError(f"unsupported result value: {type(value).__name__}")
 
 
+def _stage_table(connection, alias: str, dataset: dict, expired: threading.Event) -> None:
+    fields = dataset["schema"]
+    quoted_alias = quote_identifier(alias)
+    connection.execute(
+        f"CREATE TABLE {quoted_alias} ("
+        + ",".join(quote_identifier(f["name"]) + " " + f["type"] for f in fields)
+        + ")"
+    )
+    if not dataset["rows"]:
+        return
+    columns = "{" + ",".join(
+        quote_literal(field["name"]) + ": 'VARCHAR'" for field in fields
+    ) + "}"
+    projection = ",".join(
+        f"{quote_identifier(field['name'])}::{field['type']}" for field in fields
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".ndjson", delete=True
+    ) as handle:
+        for index, row in enumerate(dataset["rows"], start=1):
+            if expired.is_set():
+                raise FoundryError("SQL exceeded its execution time limit")
+            handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
+            if index % 8192 == 0:
+                handle.flush()
+        handle.flush()
+        connection.execute(
+            f"INSERT INTO {quoted_alias} SELECT {projection} "
+            "FROM read_json(?, records=true, columns="
+            + columns
+            + ")",
+            [handle.name],
+        )
+
+
 def execute_sql(datasets: dict[str, dict], spec: dict) -> dict:
-    connection = duckdb.connect(":memory:", config=CONFIG)
+    connection = None
     timer = None
     expired = threading.Event()
     try:
-        parsed = validate_sql(connection, spec["sql"], set(datasets))
-        checks = relationship_checks(datasets, spec, parsed)
-        for alias, dataset in datasets.items():
-            if dataset["kind"] != "table":
-                continue
-            fields = dataset["schema"]
-            connection.execute(
-                f"CREATE TABLE {quote_identifier(alias)} ("
-                + ",".join(
-                    quote_identifier(f["name"]) + " " + f["type"] for f in fields
-                )
-                + ")"
-            )
-            if dataset["rows"]:
-                rows = [
-                    tuple(
-                        Decimal(row[f["name"]])
-                        if row[f["name"]] is not None
-                        and f["type"].startswith("DECIMAL")
-                        else row[f["name"]]
-                        for f in fields
-                    )
-                    for row in dataset["rows"]
-                ]
-                connection.executemany(
-                    f"INSERT INTO {quote_identifier(alias)} VALUES ("
-                    + ",".join("?" for _ in fields)
-                    + ")",
-                    rows,
-                )
-        connection.execute("SET lock_configuration=true")
-
         def interrupt():
             expired.set()
-            connection.interrupt()
+            if connection is not None:
+                connection.interrupt()
 
         timer = threading.Timer(spec.get("timeout_seconds", 15), interrupt)
         timer.daemon = True
         timer.start()
+
+        with duckdb.connect(":memory:", config=CONFIG) as validation_connection:
+            parsed = validate_sql(validation_connection, spec["sql"], set(datasets))
+        if expired.is_set():
+            raise FoundryError("SQL exceeded its execution time limit")
+        checks = relationship_checks(datasets, spec, parsed, expired)
+        if expired.is_set():
+            raise FoundryError("SQL exceeded its execution time limit")
+        connection = duckdb.connect(":memory:", config=STAGING_CONFIG)
+        for alias, dataset in datasets.items():
+            if dataset["kind"] != "table":
+                continue
+            _stage_table(connection, alias, dataset, expired)
+            if expired.is_set():
+                raise FoundryError("SQL exceeded its execution time limit")
+        connection.execute("SET enable_external_access=false")
+        connection.execute("SET lock_configuration=true")
         cursor = connection.execute(spec["sql"], spec.get("parameters") or [])
         columns = [{"name": c[0], "type": str(c[1])} for c in cursor.description]
         if len({c["name"] for c in columns}) != len(columns):
@@ -539,7 +579,8 @@ def execute_sql(datasets: dict[str, dict], spec: dict) -> dict:
         if timer is not None:
             timer.cancel()
             timer.join()
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 def _formula_defaults(tree: dict) -> dict[int, dict]:

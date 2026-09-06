@@ -18,6 +18,12 @@ argument-hint: "<frequency> <period>"
 
 Generate financial statements with period-over-period comparison and variance analysis. The workflow below walks through income statement generation; balance sheet and cash flow statement reference formats, GAAP presentation requirements (ASC 220/210/230), and common period-end adjustments are included as supporting reference material.
 
+## Foundry analysis mode
+
+Start with `list_finance_context` to identify the current scenarios, source snapshots, account maps, and dataset versions. If the current task includes uploaded statement, balance, or budget files that have not been registered, use `finance_source_refresh` with `file_identity_policy: "snapshot_only"` for ordinary files without real document-line identifiers, then bind the published snapshot with `finance_context_save` and any account rollups with `finance_map_save`. Use `"business_key"` only when the file carries genuine source keys.
+
+Use `run_metric` when the requested statement work fits a management P&L, ratio, account total, or control total. Use `explain_variance` for supported statement bridges, `finance_scenario_save` / `finance_scenario_run` when the answer depends on a saved actual/budget/forecast scenario, `drilldown_fact` for source-backed cells from the run, and `save_explanation_draft` for editable commentary with calculation claims tied to real run fields. Continue with SQL/Python for statement layouts, cash-flow reconstruction, disclosure tables, or presentation work outside those contracts. Do not claim an ERP or data-warehouse connection unless this session has configured and named one.
+
 ## Usage
 
 ```

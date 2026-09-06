@@ -121,6 +121,22 @@ const inputs = {
  'analysis-export': {draft: 'draft-1', format: 'xlsx'},
  'analysis-method-save': {analysis: 'analysis-1', name: '经营分析'},
  'analysis-method-apply': {method: 'method-1', bindings: {actual: 'snapshot-2'}, parameters: ['1.23'], question: '下一期'},
+ 'list_finance_context': {},
+ 'finance_context_save': {spec: {bindings: {actual: 'snapshot-1'}, scopes: {actual: {ledger: 'L1', currency: 'CNY', unit: '元'}}}},
+ 'finance_map_save': {spec: {rows: [{account_code: '001', management_account: 'revenue'}]}},
+ 'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},
+ 'explain_variance': {spec: {context_id: 'context-1'}},
+ 'drilldown_fact': {spec: {run_id: 'run-1', row: 0}},
+ 'save_explanation_draft': {spec: {body: '经理判断', claims: [{basis: 'professional_judgment', reason: '客户反馈'}]}},
+ 'finance_scenario_save': {spec: {context_id: 'context-1', kind: 'cash_13_weeks', inputs: {opening_cash: '50'}, label: '基准'}},
+ 'finance_scenario_run': {spec: {scenario_id: 'scenario-1'}},
+ 'finance_source_list': {},
+ 'finance_source_refresh': {spec: {path: '/task/uploads/new.csv', scope: {source_id: 'file', tenant_id: 'T1', ledger_id: 'L1', organization_id: 'O1', period: '2026-09', currency: 'CNY', cutoff_at: '2026-09-06'}}},
+ 'workbook_inspect': {spec: {dataset_id: 'snapshot-1'}},
+ 'workbook_bind': {spec: {dataset_id: 'snapshot-1', source: {kind: 'named_range', name: 'Result'}, fields: [{name: 'amount', policy: 'amount'}]}},
+ 'workbook_read': {spec: {binding_id: 'binding-1'}},
+ 'workbook_preview': {spec: {binding_id: 'binding-1', writes: [{cell: 'A1', field: 'amount', value: '10'}]}},
+ 'workbook_apply': {spec: {patch_id: 'patch-1', resolutions: {A1: 'keep'}}},
 };
 const results = [];
 for (const [name, input] of Object.entries(inputs)) results.push(await tools[name].execute(input, exec));
@@ -132,11 +148,12 @@ process.stdout.write(JSON.stringify(results));
     assert len(rows) == len(direct)
     aliases = {"analysis-jobs": "analysis-job-list", "analysis-job-output": "analysis-job-show"}
     for row, tool in zip(rows, direct):
-        assert row[:5] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", aliases.get(tool, tool)]
+        assert row[:5] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", aliases.get(tool, tool.replace("_", "-"))]
         assert "--task" not in row
     assert rows[4][4:] == ["method-resource", "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
     assert json.loads(rows[5][6])["bindings"] == {"actual": "snapshot-1"}
-    assert rows[-1][5:] == ["--method", "method-1", "--bindings", '{"actual":"snapshot-2"}',
+    method_call = next(row for row in rows if row[4] == "analysis-method-apply")
+    assert method_call[5:] == ["--method", "method-1", "--bindings", '{"actual":"snapshot-2"}',
                             "--parameters", '["1.23"]', "--question", "下一期"]
     for value in result:
         assert json.loads(value["stdout"])["result"]["amount"] == "9007199254740993.01"
@@ -189,7 +206,7 @@ def test_analysis_preset_installs_with_harness_and_wheel_resource():
             "@deepseek-ai/dsh-tool-ask-user"} <= names
     assert not {"finance-skill-foundry-dsh/period-scope", "finance-skill-foundry-dsh/f3-scope"} & names
     mirror = ROOT / "foundry" / "resources" / "dsh-plugin"
-    for relative in ("analysis.js", "analysis-runtime.js", "index.js", "package.json", "presets/analysis/agent.cordis.yml",
+    for relative in ("analysis.js", "analysis-runtime.js", "finance-tools.js", "index.js", "package.json", "presets/analysis/agent.cordis.yml",
                      "presets/analysis/preset.yml"):
         assert (PLUGIN / relative).read_bytes() == (mirror / relative).read_bytes(), relative
 

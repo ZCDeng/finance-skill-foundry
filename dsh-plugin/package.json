@@ -94,7 +94,23 @@
             "analysis-draft",
             "analysis-export",
             "analysis-method-save",
-            "analysis-method-apply"
+            "analysis-method-apply",
+            "list_finance_context",
+            "finance_context_save",
+            "finance_map_save",
+            "run_metric",
+            "explain_variance",
+            "drilldown_fact",
+            "save_explanation_draft",
+            "finance_scenario_save",
+            "finance_scenario_run",
+            "finance_source_list",
+            "finance_source_refresh",
+            "workbook_inspect",
+            "workbook_bind",
+            "workbook_read",
+            "workbook_preview",
+            "workbook_apply"
           ],
           "harnessTools": [
             "skill",
@@ -125,7 +141,17 @@
             "create_goal",
             "update_goal",
             "get_goal",
-            "exit_plan_mode"
+            "exit_plan_mode",
+            "list_finance_context",
+            "finance_context_save",
+            "run_metric",
+            "explain_variance",
+            "drilldown_fact",
+            "finance_scenario_save",
+            "finance_scenario_run",
+            "finance_source_list",
+            "workbook_inspect",
+            "workbook_read"
           ]
         }
       },

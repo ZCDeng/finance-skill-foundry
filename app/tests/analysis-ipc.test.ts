@@ -128,6 +128,70 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.openPath).toHaveBeenCalledWith('/store/artifact.xlsx');
     expect((await invoke(CHANNELS.analysisExport, task, '../escape', 'xlsx')).ok).toBe(false);
   });
+
+  it('allows only bounded finance business commands through one IPC call', async () => {
+    registerIpc({ varRoot: '/store' });
+    await invoke(CHANNELS.financeCall, task, 'list-finance-context');
+    await invoke(CHANNELS.financeCall, task, 'finance-source-list');
+    await invoke(CHANNELS.financeCall, task, 'finance-context-save', {
+      name: '八月经营口径',
+      bindings: { actual: 'b'.repeat(32) },
+      scopes: { actual: { ledger: '总账', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } },
+    });
+    await invoke(CHANNELS.financeCall, task, 'finance-scenario-save', {
+      context_id: 'ctx-a',
+      kind: 'receivables_aging',
+      inputs: { as_of: '2026-08-31', invoices_alias: 'actual' },
+      label: '基准账龄',
+    });
+    await invoke(CHANNELS.financeCall, task, 'explain-variance', {
+      context_id: 'ctx-a',
+      actual_scenario: 'actual',
+      baseline_scenario: 'budget',
+      dimensions: ['organization', 'period'],
+    });
+    await invoke(CHANNELS.financeCall, task, 'workbook-preview', {
+      binding_id: 'binding-a',
+      writes: [{ row: 1, field: 'amount', value: '10.00' }],
+    });
+    await invoke(CHANNELS.financeCall, task, 'drilldown-fact', { run_id: 'run-a', row: 0, limit: 100 });
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
+      'list-finance-context',
+      'finance-source-list',
+      'finance-context-save',
+      'finance-scenario-save',
+      'explain-variance',
+      'workbook-preview',
+      'drilldown-fact',
+    ]);
+    expect(mocks.run.mock.calls[0][2]).toEqual([]);
+    expect(mocks.run.mock.calls[1][2]).toEqual([]);
+    expect(mocks.run.mock.calls[2][2]).toEqual(['--spec', expect.stringContaining('\"bindings\"')]);
+    const varianceSpec = JSON.parse(mocks.run.mock.calls[4][2][1]);
+    expect(varianceSpec.dimensions).toEqual(['organization', 'period']);
+    expect(varianceSpec.dimensions).not.toContain('management_account');
+    expect((await invoke(CHANNELS.financeCall, task, 'dataset-add', { path: '/tmp/secret.csv' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.financeCall, task, 'list-finance-context', { unexpected: true })).ok).toBe(false);
+    expect((await invoke(CHANNELS.financeCall, task, 'run-metric', ['not an object'])).ok).toBe(false);
+    expect(mocks.run).toHaveBeenCalledTimes(7);
+  });
+
+  it('refreshes finance source files only from the native file picker', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/gl.csv'] });
+    await invoke(CHANNELS.financeSourceRefresh, task, {
+      path: '/renderer/secret.csv',
+      scope: { source_id: 'erp', tenant_id: 'demo', ledger_id: 'gl', organization_id: 'east', period: '2026-08', currency: 'CNY', cutoff_at: '2026-08-31' },
+      product: 'kingdee',
+    });
+    const encoded = mocks.run.mock.calls[0][2][1];
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task }, 'finance-source-refresh', ['--spec', expect.any(String)]);
+    expect(encoded).toContain('/chosen/gl.csv');
+    expect(encoded).not.toContain('/renderer/secret.csv');
+    mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/gl.csv'] });
+    expect(await invoke(CHANNELS.financeSourceRefresh, task, { scope: {} })).toEqual({ ok: true, value: { cancelled: true } });
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('embedded workspace IPC', () => {

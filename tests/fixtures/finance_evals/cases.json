@@ -1,0 +1,326 @@
+{
+  "version": "r2-finance-evals-2026-09-06",
+  "currency": "CNY",
+  "unit": "万元",
+  "model_contract": {
+    "provider": "deepseek-official",
+    "model": "deepseek-v4-flash",
+    "reasoning_effort": "max"
+  },
+  "cases": [
+    {
+      "id": "F01_profit_bridge_basic",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "profit_bridge",
+      "question": "请基于已登记的实际和预算资料，用财务口径计算本期利润差异桥。保存可编辑说明，计算数字必须引用真实 run，并下钻利润差异的来源行。不要把算术贡献写成确定业务原因。",
+      "datasets": [
+        {"name": "actual", "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"}, "rows": [
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "120", "source_row": "1", "doc_id": "A-R", "line_id": "1"},
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "70", "source_row": "2", "doc_id": "A-C", "line_id": "2"},
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "20", "source_row": "3", "doc_id": "A-E", "line_id": "3"}]},
+        {"name": "budget", "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget"}, "rows": [
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "100", "source_row": "11", "doc_id": "B-R", "line_id": "1"},
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "60", "source_row": "12", "doc_id": "B-C", "line_id": "2"},
+          {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "15", "source_row": "13", "doc_id": "B-E", "line_id": "3"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "5", "revenue": "20", "cost": "-10", "expense": "-5"}}
+    },
+    {
+      "id": "F02_profit_bridge_dimension_east",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "dimension",
+      "question": "请只分析华东组织的本期实际对预算利润差异桥；资料里还有华南行，不能混到华东。保存说明并下钻华东利润行。",
+      "datasets": [
+        {"name": "regional", "metadata": {"ledger": "region-ledger", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "150", "source_row": "1", "doc_id": "E-A-R", "line_id": "1"},
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "80", "source_row": "2", "doc_id": "E-A-C", "line_id": "2"},
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "30", "source_row": "3", "doc_id": "E-A-E", "line_id": "3"},
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "130", "source_row": "4", "doc_id": "E-B-R", "line_id": "1"},
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "75", "source_row": "5", "doc_id": "E-B-C", "line_id": "2"},
+          {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "22", "source_row": "6", "doc_id": "E-B-E", "line_id": "3"},
+          {"ledger": "region-ledger", "organization": "华南", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "999", "source_row": "7"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "region-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "7", "revenue": "20", "cost": "-5", "expense": "-8"}}
+    },
+    {
+      "id": "F03_missing_budget_as_zero",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "missing",
+      "question": "经理明确说：新开店预算表没有该门店，按零预算处理。请对门店A做实际对预算利润差异桥，保存说明并下钻利润行，正文里要说明这是经理口径而不是系统自动假设。",
+      "datasets": [
+        {"name": "new-store", "metadata": {"ledger": "retail-ledger", "organization": "门店A", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "retail-ledger", "organization": "门店A", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "50", "source_row": "1", "doc_id": "NS-R", "line_id": "1"},
+          {"ledger": "retail-ledger", "organization": "门店A", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "20", "source_row": "2", "doc_id": "NS-C", "line_id": "2"},
+          {"ledger": "retail-ledger", "organization": "门店A", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "10", "source_row": "3", "doc_id": "NS-E", "line_id": "3"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "retail-ledger", "organization": "门店A", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "comparison_status": "assumed_zero", "requires_judgment": true, "claims": {"profit": "20", "revenue": "50", "cost": "-20", "expense": "-10"}}
+    },
+    {
+      "id": "F04_zero_budget_ratio",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "zero_budget",
+      "question": "请计算零预算项目的利润差异桥。实际有收入30、成本10、费用5，预算为0；保存说明并下钻利润来源。百分比不能硬算。",
+      "datasets": [
+        {"name": "zero-budget", "metadata": {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "30", "source_row": "1", "doc_id": "Z-R", "line_id": "1"},
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "10", "source_row": "2", "doc_id": "Z-C", "line_id": "2"},
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "5", "source_row": "3", "doc_id": "Z-E", "line_id": "3"},
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "0", "source_row": "4"},
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "0", "source_row": "5"},
+          {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "0", "source_row": "6"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "project-zero", "organization": "创新项目", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "ratio_status": "baseline_zero", "claims": {"profit": "15", "revenue": "30", "cost": "-10", "expense": "-5"}}
+    },
+    {
+      "id": "F05_wrong_unit_conversion",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "wrong_unit",
+      "question": "资料金额单位是元，但经理报告要求万元。请保存财务口径时把目标单位设为万元，再计算实际对预算利润差异桥，保存说明并下钻利润来源。",
+      "datasets": [
+        {"name": "yuan-actual-budget", "metadata": {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元"}, "rows": [
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "revenue", "amount": "1200000", "source_row": "1", "doc_id": "U-A-R", "line_id": "1"},
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "cost", "amount": "700000", "source_row": "2", "doc_id": "U-A-C", "line_id": "2"},
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "expense", "amount": "200000", "source_row": "3", "doc_id": "U-A-E", "line_id": "3"},
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "management_account": "revenue", "amount": "1000000", "source_row": "4", "doc_id": "U-B-R", "line_id": "1"},
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "management_account": "cost", "amount": "600000", "source_row": "5", "doc_id": "U-B-C", "line_id": "2"},
+          {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "management_account": "expense", "amount": "150000", "source_row": "6", "doc_id": "U-B-E", "line_id": "3"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "unit-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "5", "revenue": "20", "cost": "-10", "expense": "-5"}}
+    },
+    {
+      "id": "F06_duplicate_rows_ignored",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "duplicates",
+      "question": "资料包含一条 source_status=duplicate_pull 的重复收入行。请计算实际对预算利润差异桥，不能把重复拉取行计入结果。保存说明并下钻利润来源。",
+      "datasets": [
+        {"name": "dedupe", "metadata": {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "120", "source_status": "active", "source_row": "1", "doc_id": "D-A-R", "line_id": "1"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "999", "source_status": "duplicate_pull", "source_row": "2", "doc_id": "D-DUP", "line_id": "9"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "70", "source_status": "active", "source_row": "3"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "20", "source_status": "active", "source_row": "4"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "100", "source_row": "5"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "60", "source_row": "6"},
+          {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "15", "source_row": "7"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "dedupe-ledger", "organization": "华北", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "5", "revenue": "20", "cost": "-10", "expense": "-5"}}
+    },
+    {
+      "id": "F07_manager_judgment_separated",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "manager_judgment",
+      "question": "请计算西区利润差异桥。经理补充判断：费用超支主要来自临时活动。保存说明时把这句话标为经理专业判断，计算数字引用真实 run，并下钻利润来源。",
+      "datasets": [
+        {"name": "manager-judgment", "metadata": {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "88", "source_row": "1", "doc_id": "M-A-R", "line_id": "1"},
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "42", "source_row": "2", "doc_id": "M-A-C", "line_id": "2"},
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "16", "source_row": "3", "doc_id": "M-A-E", "line_id": "3"},
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "80", "source_row": "4", "doc_id": "M-B-R", "line_id": "1"},
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "40", "source_row": "5", "doc_id": "M-B-C", "line_id": "2"},
+          {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "10", "source_row": "6", "doc_id": "M-B-E", "line_id": "3"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "events-ledger", "organization": "西区", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "requires_judgment": true, "claims": {"profit": "0", "revenue": "8", "cost": "-2", "expense": "-6"}}
+    },
+    {
+      "id": "F08_drilldown_voucher_available",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "drilldown",
+      "question": "请计算有凭证明细键的数据的利润差异桥，并下钻利润行确认来源行返回 voucher_detail_available。保存说明，数字引用真实 run。",
+      "datasets": [
+        {"name": "voucher", "metadata": {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "70", "source_row": "1", "doc_id": "V-A-R", "line_id": "1"},
+          {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "30", "source_row": "2", "doc_id": "V-A-C", "line_id": "2"},
+          {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "60", "source_row": "3", "doc_id": "V-B-R", "line_id": "1"},
+          {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "25", "source_row": "4", "doc_id": "V-B-C", "line_id": "2"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "voucher-ledger", "organization": "共享中心", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "requires_voucher_drilldown": true, "claims": {"profit": "5", "revenue": "10", "cost": "-5", "expense": "0"}}
+    },
+    {
+      "id": "F09_price_quantity_quantity_then_price",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "price_quantity",
+      "question": "请对商品A做量价拆分，使用 quantity_then_price 方法。保存说明，引用真实 run 的 total_variance、quantity_contribution、price_contribution，并下钻结果行。",
+      "datasets": [
+        {"name": "sku-a", "metadata": {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元"}, "rows": [
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "product": "商品A", "quantity": "10", "price": "10", "source_row": "1", "doc_id": "PQ-B", "line_id": "1"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "product": "商品A", "quantity": "12", "price": "11", "source_row": "2", "doc_id": "PQ-A", "line_id": "1"}]}
+      ],
+      "expected": {"type": "price_quantity", "identity": {"ledger": "commerce", "organization": "电商部", "currency": "CNY", "unit": "元", "product": "商品A"}, "method": "quantity_then_price", "claims": {"total_variance": "32", "quantity_contribution": "20", "price_contribution": "12", "interaction": "0"}}
+    },
+    {
+      "id": "F10_price_quantity_interaction",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "price_quantity",
+      "question": "请对商品A做量价拆分，使用 base_weights_with_interaction 方法并单独列出交互项。保存说明并下钻结果行。",
+      "datasets": [
+        {"name": "sku-a-interaction", "metadata": {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元"}, "rows": [
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "product": "商品A", "quantity": "10", "price": "10", "source_row": "1", "doc_id": "PQ2-B", "line_id": "1"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "product": "商品A", "quantity": "12", "price": "11", "source_row": "2", "doc_id": "PQ2-A", "line_id": "1"}]}
+      ],
+      "expected": {"type": "price_quantity", "identity": {"ledger": "commerce", "organization": "电商部", "currency": "CNY", "unit": "元", "product": "商品A"}, "method": "base_weights_with_interaction", "claims": {"total_variance": "32", "quantity_contribution": "20", "price_contribution": "10", "interaction": "2"}}
+    },
+    {
+      "id": "F11_price_quantity_by_product",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "dimension",
+      "question": "请只对商品B做量价拆分，不要把商品A混进来。使用 quantity_then_price 方法，保存说明并下钻商品B结果行。",
+      "datasets": [
+        {"name": "multi-sku", "metadata": {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元"}, "rows": [
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "product": "商品A", "quantity": "99", "price": "99", "source_row": "1"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "product": "商品A", "quantity": "100", "price": "100", "source_row": "2"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "product": "商品B", "quantity": "20", "price": "5", "source_row": "3", "doc_id": "B-B", "line_id": "1"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "product": "商品B", "quantity": "18", "price": "7", "source_row": "4", "doc_id": "B-A", "line_id": "1"}]}
+      ],
+      "expected": {"type": "price_quantity", "identity": {"ledger": "commerce", "organization": "电商部", "currency": "CNY", "unit": "元", "product": "商品B"}, "method": "quantity_then_price", "claims": {"total_variance": "26", "quantity_contribution": "-10", "price_contribution": "36", "interaction": "0"}}
+    },
+    {
+      "id": "F12_price_quantity_missing_inputs",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "missing",
+      "question": "资料只有金额，没有数量或单价。请尝试量价拆分并保存说明：不能虚构数量或价格；如无法拆分，请保留诊断和下钻可用来源。",
+      "datasets": [
+        {"name": "amount-only", "metadata": {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元"}, "rows": [
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "budget", "product": "商品C", "amount": "100", "source_row": "1"},
+          {"ledger": "commerce", "organization": "电商部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "product": "商品C", "amount": "132", "source_row": "2"}]}
+      ],
+      "expected": {"type": "price_quantity_missing", "diagnostic_code": "price_quantity_missing"}
+    },
+    {
+      "id": "F13_ledger_separation",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "dimension",
+      "question": "请计算账套L1的利润差异桥。资料里有账套L2大额收入，不能跨账套汇总。保存说明并下钻L1利润行。",
+      "datasets": [
+        {"name": "two-ledgers", "metadata": {"period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "L1", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "60", "source_row": "1", "doc_id": "L1AR", "line_id": "1"},
+          {"ledger": "L1", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "30", "source_row": "2"},
+          {"ledger": "L1", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "50", "source_row": "3"},
+          {"ledger": "L1", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "25", "source_row": "4"},
+          {"ledger": "L2", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "999", "source_row": "5"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "L1", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "5", "revenue": "10", "cost": "-5", "expense": "0"}}
+    },
+    {
+      "id": "F14_ratio_cost_rate",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "ratio",
+      "question": "请计算实际口径成本率：成本除以收入。保存说明，计算数字引用真实 run，并下钻成本率结果来源行。",
+      "datasets": [
+        {"name": "ratio-ledger", "metadata": {"ledger": "ratio-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"}, "rows": [
+          {"ledger": "ratio-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "120", "source_row": "1", "doc_id": "RR", "line_id": "1"},
+          {"ledger": "ratio-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "70", "source_row": "2", "doc_id": "RC", "line_id": "2"}]}
+      ],
+      "expected": {"type": "ratio", "identity": {"ledger": "ratio-ledger", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"}, "claims": {"numerator": "70", "denominator": "120", "ratio": "0.5833333333333333333333333333"}}
+    },
+    {
+      "id": "F15_control_totals_currency_split",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "wrong_unit",
+      "question": "请出控制合计，保持币种拆分，不能把CNY和USD相加。保存说明并下钻任一控制合计行。",
+      "datasets": [
+        {"name": "mixed-currency", "metadata": {"ledger": "group", "organization": "总部", "period": "2026-08", "unit": "元"}, "rows": [
+          {"ledger": "group", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "revenue", "amount": "100", "source_row": "1", "doc_id": "CNY", "line_id": "1"},
+          {"ledger": "group", "organization": "总部", "period": "2026-08", "currency": "USD", "unit": "元", "scenario": "actual", "management_account": "revenue", "amount": "9", "source_row": "2", "doc_id": "USD", "line_id": "1"}]}
+      ],
+      "expected": {"type": "control_totals", "currencies": {"CNY": "100", "USD": "9"}}
+    },
+    {
+      "id": "F16_stock_cash_periods",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "cash",
+      "question": "请计算现金余额，cash 是存量科目，不能跨期间相加。保存说明并下钻8月现金行。",
+      "datasets": [
+        {"name": "cash-stock", "metadata": {"ledger": "cash-ledger", "organization": "总部", "currency": "CNY", "unit": "元", "scenario": "actual"}, "rows": [
+          {"ledger": "cash-ledger", "organization": "总部", "period": "2026-07", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "cash", "amount": "100", "source_row": "1", "doc_id": "CASH7", "line_id": "1"},
+          {"ledger": "cash-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual", "management_account": "cash", "amount": "110", "source_row": "2", "doc_id": "CASH8", "line_id": "1"}]}
+      ],
+      "expected": {"type": "account_total", "identity": {"ledger": "cash-ledger", "organization": "总部", "currency": "CNY", "unit": "元", "scenario": "actual"}, "claims": {"2026-07": "100", "2026-08": "110"}, "diagnostic_code": "stock_period_not_summed"}
+    },
+    {
+      "id": "F17_negative_budget_policy",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "negative_budget",
+      "question": "请按 absolute_baseline 政策计算退款收入项目的差异比例。退款收入预算为-10、实际为-5，保存说明并下钻结果行。",
+      "datasets": [
+        {"name": "refunds", "metadata": {"ledger": "refund-ledger", "organization": "客服", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "refund-ledger", "organization": "客服", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "-5", "source_row": "1", "doc_id": "REF-A", "line_id": "1"},
+          {"ledger": "refund-ledger", "organization": "客服", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "-10", "source_row": "2", "doc_id": "REF-B", "line_id": "1"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "refund-ledger", "organization": "客服", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "ratio_status": "absolute_baseline", "claims": {"profit": "5", "revenue": "5", "cost": "0", "expense": "0"}}
+    },
+    {
+      "id": "F18_map_save_management_accounts",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "manager_judgment",
+      "question": "资料只有科目编码，经理确认 6001=收入、6401=成本、6601=费用。请先保存管理科目映射，再计算利润差异桥，保存说明并下钻利润行。",
+      "datasets": [
+        {"name": "mapped-accounts", "metadata": {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "account_code": "6001", "amount": "120", "source_row": "1", "doc_id": "MAP-A-R", "line_id": "1"},
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "account_code": "6401", "amount": "70", "source_row": "2", "doc_id": "MAP-A-C", "line_id": "2"},
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "account_code": "6601", "amount": "20", "source_row": "3", "doc_id": "MAP-A-E", "line_id": "3"},
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "account_code": "6001", "amount": "100", "source_row": "4", "doc_id": "MAP-B-R", "line_id": "1"},
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "account_code": "6401", "amount": "60", "source_row": "5", "doc_id": "MAP-B-C", "line_id": "2"},
+          {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "account_code": "6601", "amount": "15", "source_row": "6", "doc_id": "MAP-B-E", "line_id": "3"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "mapped-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "requires_map_save": true, "claims": {"profit": "5", "revenue": "20", "cost": "-10", "expense": "-5"}}
+    },
+    {
+      "id": "F19_prior_period_comparison",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "profit_bridge",
+      "question": "请比较2026-08实际相对2026-07实际的利润桥，基准是上月实际，不是预算。保存说明并下钻利润来源。",
+      "datasets": [
+        {"name": "month-over-month", "metadata": {"ledger": "mom-ledger", "organization": "总部", "currency": "CNY", "unit": "万元", "scenario": "actual"}, "rows": [
+          {"ledger": "mom-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "current", "management_account": "revenue", "amount": "95", "source_row": "1", "doc_id": "MOM-8R", "line_id": "1"},
+          {"ledger": "mom-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "current", "management_account": "cost", "amount": "44", "source_row": "2", "doc_id": "MOM-8C", "line_id": "2"},
+          {"ledger": "mom-ledger", "organization": "总部", "period": "2026-07", "currency": "CNY", "unit": "万元", "scenario": "prior", "management_account": "revenue", "amount": "90", "source_row": "3", "doc_id": "MOM-7R", "line_id": "1"},
+          {"ledger": "mom-ledger", "organization": "总部", "period": "2026-07", "currency": "CNY", "unit": "万元", "scenario": "prior", "management_account": "cost", "amount": "40", "source_row": "4", "doc_id": "MOM-7C", "line_id": "2"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "mom-ledger", "organization": "总部", "currency": "CNY", "unit": "万元"}, "actual_scenario": "current", "baseline_scenario": "prior", "claims": {"profit": "1", "revenue": "5", "cost": "-4", "expense": "0"}}
+    },
+    {
+      "id": "F20_period_dimension_no_cross_mix",
+      "stage": "stage1-3",
+      "runnable": true,
+      "category": "dimension",
+      "question": "请只计算2026-08期间的利润预算差异桥，资料里有2026-09实际收入，不能混入8月。保存说明并下钻利润行。",
+      "datasets": [
+        {"name": "period-filter", "metadata": {"ledger": "period-ledger", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [
+          {"ledger": "period-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "110", "source_row": "1", "doc_id": "P8AR", "line_id": "1"},
+          {"ledger": "period-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "50", "source_row": "2"},
+          {"ledger": "period-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "100", "source_row": "3"},
+          {"ledger": "period-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "45", "source_row": "4"},
+          {"ledger": "period-ledger", "organization": "总部", "period": "2026-09", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "999", "source_row": "5"}]}
+      ],
+      "expected": {"type": "profit_bridge", "identity": {"ledger": "period-ledger", "organization": "总部", "period": "2026-08", "currency": "CNY", "unit": "万元"}, "claims": {"profit": "5", "revenue": "10", "cost": "-5", "expense": "0"}}
+    },
+    {"id": "F21_stage5_aging_customer_a", "stage": "stage5", "runnable": true, "category": "aging", "question": "请用 finance_scenario_save/run 按客户A出截至2026-09-06的应收账龄。保存说明，open_amount 数字引用真实 run，并下钻31-60天账龄行。", "datasets": [{"name": "invoices", "metadata": {"ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "A-001", "ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "customer": "客户A", "issue_date": "2026-06-15", "due_date": "2026-07-15", "amount": "80"}, {"id": "A-002", "ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "customer": "客户A", "issue_date": "2026-08-10", "due_date": "2026-09-10", "amount": "20"}]}], "expected": {"type": "receivables_aging", "claims": {"CNY_31-60": "80", "CNY_not_due": "20"}}},
+    {"id": "F22_stage5_aging_customer_b", "stage": "stage5", "runnable": true, "category": "aging", "question": "请用情景工具按客户B出截至2026-09-06的30/60/90天应收账龄。保存说明并下钻90+账龄行。", "datasets": [{"name": "invoices", "metadata": {"ledger": "ar-ledger", "organization": "华南", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "B-001", "ledger": "ar-ledger", "organization": "华南", "currency": "CNY", "customer": "客户B", "issue_date": "2026-05-01", "due_date": "2026-05-31", "amount": "35"}, {"id": "B-002", "ledger": "ar-ledger", "organization": "华南", "currency": "CNY", "customer": "客户B", "issue_date": "2026-07-20", "due_date": "2026-07-20", "amount": "65"}]}], "expected": {"type": "receivables_aging", "claims": {"CNY_90+": "35", "CNY_31-60": "65"}}},
+    {"id": "F23_stage5_cash_base", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请用13周现金情景工具计算基础情景，起始日2026-09-24，实际截止2026-09-23，期初现金100。保存说明，引用第1周 closing_cash，并下钻第1周。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-001", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-25", "amount": "60", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-001", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-28", "amount": "45", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "115"}}},
+    {"id": "F24_stage5_cash_stress", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请用13周现金情景工具计算压力情景：期初100，2026-09-25回款25，2026-09-26付款140。保存说明，引用第1周 closing_cash，并下钻第1周。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-STR", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-25", "amount": "25", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-STR", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-26", "amount": "140", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "-15"}}},
+    {"id": "F25_stage5_collection_slip", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请保存一个回款延迟7天的13周现金情景，期初50，2026-09-25计划回款40、2026-09-26计划付款35。保存说明，引用第1周和第2周 closing_cash，并下钻第1周。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "organization": "华东", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-DELAY", "ledger": "cash-plan", "organization": "华东", "currency": "CNY", "date": "2026-09-25", "amount": "40", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "organization": "华东", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-DELAY", "ledger": "cash-plan", "organization": "华东", "currency": "CNY", "date": "2026-09-26", "amount": "35", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "15", "week_2": "55"}}},
+    {"id": "F26_stage5_supplier_payment", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请用13周现金情景工具测算供应商付款前移情景：期初70，9月25日回款30，9月26日付款85。保存说明，引用第1周 closing_cash，并下钻第1周。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "organization": "华北", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-ADV", "ledger": "cash-plan", "organization": "华北", "currency": "CNY", "date": "2026-09-25", "amount": "30", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "organization": "华北", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-ADV", "ledger": "cash-plan", "organization": "华北", "currency": "CNY", "date": "2026-09-26", "amount": "85", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "15"}}},
+    {"id": "F27_stage5_aging_dispute", "stage": "stage5", "runnable": true, "category": "aging", "question": "请用应收账龄情景工具剔除status=disputed的争议款，仅分析active款项，截至2026-08-31。保存说明，引用0-30天 open_amount，并下钻该行。", "datasets": [{"name": "invoices", "metadata": {"ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "C-001", "ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "customer": "客户C", "issue_date": "2026-04-01", "due_date": "2026-04-30", "amount": "45", "status": "disputed"}, {"id": "C-002", "ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "customer": "客户C", "issue_date": "2026-08-01", "due_date": "2026-08-01", "amount": "30", "status": "active"}]}], "expected": {"type": "receivables_aging", "claims": {"CNY_0-30": "30"}}},
+    {"id": "F28_stage5_cash_multi_org", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请只计算华东组织的13周现金情景，资料里还有华南计划，不能混入。期初40，保存说明，引用第1周 closing_cash，并下钻第1周。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-E", "ledger": "cash-plan", "organization": "华东", "currency": "CNY", "date": "2026-09-25", "amount": "30", "status": "planned"}, {"id": "R-S", "ledger": "cash-plan", "organization": "华南", "currency": "CNY", "date": "2026-09-25", "amount": "15", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-E", "ledger": "cash-plan", "organization": "华东", "currency": "CNY", "date": "2026-09-26", "amount": "20", "status": "planned"}, {"id": "P-S", "ledger": "cash-plan", "organization": "华南", "currency": "CNY", "date": "2026-09-26", "amount": "25", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "50"}}},
+    {"id": "F29_stage5_aging_currency", "stage": "stage5", "runnable": true, "category": "aging", "question": "请用应收账龄情景工具按币种拆分截至2026-08-15的客户D账龄，不要把CNY和USD相加。保存说明并下钻CNY行。", "datasets": [{"name": "invoices", "metadata": {"ledger": "ar-ledger", "organization": "总部", "unit": "元"}, "rows": [{"id": "D-CNY", "ledger": "ar-ledger", "organization": "总部", "currency": "CNY", "customer": "客户D", "issue_date": "2026-07-01", "due_date": "2026-07-31", "amount": "100"}, {"id": "D-USD", "ledger": "ar-ledger", "organization": "总部", "currency": "USD", "customer": "客户D", "issue_date": "2026-07-01", "due_date": "2026-07-31", "amount": "20"}]}], "expected": {"type": "receivables_aging", "claims": {"CNY_0-30": "100", "USD_0-30": "20"}}},
+    {"id": "F30_stage5_cash_with_minimum", "stage": "stage5", "runnable": true, "category": "cash_scenario", "question": "请用13周现金情景工具计算最低现金余额约束前的现金结果：期初120，9月25日回款30，9月26日付款100。保存说明，引用第1周 closing_cash，并下钻第1周；最低现金80只能作为管理判断备注。", "datasets": [{"name": "receipts", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "R-MIN", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-25", "amount": "30", "status": "planned"}]}, {"name": "payments", "metadata": {"ledger": "cash-plan", "organization": "总部", "currency": "CNY", "unit": "万元"}, "rows": [{"id": "P-MIN", "ledger": "cash-plan", "organization": "总部", "currency": "CNY", "date": "2026-09-26", "amount": "100", "status": "planned"}]}], "expected": {"type": "cash_13_weeks", "claims": {"week_1": "50"}, "requires_judgment": true}}
+  ]
+}

@@ -18,6 +18,12 @@ argument-hint: "<type> [period]"
 
 Methodology and best practices for account reconciliation, including GL-to-subledger, bank reconciliations, and intercompany. Covers reconciling item categorization, aging analysis, and escalation.
 
+## Foundry analysis mode
+
+Start with `list_finance_context` to identify the registered ledgers, organizations, periods, source snapshots, account maps, and scenario bindings. If GL, bank, subledger, or intercompany files are current task uploads and not yet registered, use `finance_source_refresh` as a file-backed immutable snapshot. Use `file_identity_policy: "snapshot_only"` for ordinary balance or listing files without real document-line identifiers, and use `"business_key"` only for exports with genuine source keys. Bind the published snapshot and explicit scope with `finance_context_save` before relying on it.
+
+Use `run_metric` for control totals, account totals, and ratio checks that fit the finance metric contract. Use `drilldown_fact` only for source-backed cells from a saved run, and `save_explanation_draft` for the reconciliation narrative and exception support. Use `finance_scenario_save` / `finance_scenario_run` when a reconciliation depends on a named scenario such as an aging cut or cash-timing view. Continue with SQL/Python for matching logic, exception aging, many-to-many joins, and reconciliations the finance tools do not model. Do not post entries, initiate payments, or claim actual ERP access unless a configured connector is named in the session.
+
 ## Usage
 
 ```

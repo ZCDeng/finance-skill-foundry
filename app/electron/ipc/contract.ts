@@ -21,6 +21,8 @@ export const CHANNELS = {
   analysisExport: 'analysis:export',
   analysisMethodSave: 'analysis:method-save',
   analysisMethodApply: 'analysis:method-apply',
+  financeCall: 'finance:call',
+  financeSourceRefresh: 'finance:source-refresh',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',

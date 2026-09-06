@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Finance Foundry</title>
+    <link rel="stylesheet" href="/taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Finance Foundry</h1>
+          <div id="host">正在等待 Excel 宿主</div>
+        </div>
+        <details class="tech"><summary>技术信息</summary><div>工作簿标识：<code id="workbookId">尚未注册</code></div></details>
+      </header>
+      <div id="status" class="status" role="status" aria-live="polite">请输入本地桥连接令牌，然后连接工作簿。</div>
+
+      <section>
+        <label for="token">本地桥连接令牌</label>
+        <input id="token" type="password" autocomplete="off" />
+        <div class="row">
+          <button id="saveToken">连接本地桥</button>
+          <button id="refreshContext">刷新上下文</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>管理口径</h2>
+        <div class="grid2">
+          <label>账套 <input id="scopeLedger" placeholder="集团账套" /></label>
+          <label>组织 <input id="scopeOrg" placeholder="总部/事业部" /></label>
+          <label>期间 <input id="scopePeriod" placeholder="2026-08" /></label>
+          <label>币种 <input id="scopeCurrency" value="CNY" /></label>
+          <label>单位 <input id="scopeUnit" value="yuan" /></label>
+          <label>情景 <input id="scopeScenario" value="actual" /></label>
+        </div>
+      </section>
+
+      <section>
+        <h2>绑定 Excel 选区</h2>
+        <label for="bindingName">绑定名称</label>
+        <input id="bindingName" value="actual" />
+        <label for="bindingAlias">财务别名</label>
+        <input id="bindingAlias" value="actual" />
+        <label for="role">用途</label>
+        <select id="role">
+          <option value="input">输入区域</option>
+          <option value="output">输出区域</option>
+        </select>
+        <label for="fieldPreset">字段模板</label>
+        <select id="fieldPreset">
+          <option value="management">按表头识别管理数据</option>
+          <option value="output">指标输出</option>
+          <option value="advanced">高级字段 JSON</option>
+        </select>
+        <div id="advancedFields" hidden>
+          <label for="fieldsJson">字段 JSON</label>
+          <textarea id="fieldsJson" spellcheck="false">[
+  {"name":"management_account","policy":"text"},
+  {"name":"amount","policy":"amount","unit":"CNY"},
+  {"name":"organization","policy":"text"},
+  {"name":"period","policy":"text"}
+]</textarea>
+        </div>
+        <div class="row">
+          <button id="bindSelection">绑定当前选区</button>
+          <button id="importBinding">导入输入快照</button>
+        </div>
+        <label for="bindingList">当前绑定区域</label>
+        <select id="bindingList"></select>
+      </section>
+
+      <section>
+        <h2>指标</h2>
+        <label for="metricMode">指标配置方式</label>
+        <select id="metricMode">
+          <option value="simple">选择器</option>
+          <option value="advanced">高级字段 JSON</option>
+        </select>
+        <div class="grid2">
+          <label>指标类型
+            <select id="metricKind">
+              <option value="account_total">科目合计</option>
+              <option value="management_pnl">管理损益</option>
+              <option value="ratio">比率</option>
+              <option value="control_totals">控制合计</option>
+            </select>
+          </label>
+          <label id="metricAccountsWrap">科目 <input id="metricAccounts" value="revenue" placeholder="revenue,cost" /></label>
+          <label class="span2">维度 <input id="metricDimensions" value="organization,period" placeholder="organization,period,scenario" /></label>
+        </div>
+        <div id="advancedMetric" hidden>
+          <label for="metricJson">指标 JSON</label>
+          <textarea id="metricJson" spellcheck="false">{
+  "metric": {
+    "kind": "account_total",
+    "dimensions": ["organization", "period"],
+    "accounts": ["revenue"]
+  }
+}</textarea>
+        </div>
+        <button id="runMetric">运行指标</button>
+      </section>
+
+      <section>
+        <h2>输出</h2>
+        <label for="runList">运行结果</label>
+        <select id="runList"></select>
+        <div class="row">
+          <button id="previewOutput">预览写入</button>
+          <button id="applyOutput" disabled>应用选中单元格</button>
+        </div>
+        <div id="preview"></div>
+      </section>
+
+      <section>
+        <h2>工作簿</h2>
+        <div class="row">
+          <button id="recalculate">全量重算</button>
+          <button id="saveWorkbook">保存工作簿</button>
+        </div>
+      </section>
+
+      <details class="tech"><summary>运行日志</summary><pre id="log"></pre></details>
+    </main>
+    <script src="/taskpane.js"></script>
+  </body>
+</html>

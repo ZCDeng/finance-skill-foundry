@@ -18,6 +18,12 @@ argument-hint: "<line> vs <base>"
 
 Techniques for decomposing variances, materiality thresholds, narrative generation, waterfall chart methodology, and budget vs actual vs forecast comparisons.
 
+## Foundry analysis mode
+
+Start with `list_finance_context` to see the current source snapshots, scenario bindings, account maps, metric definitions, and available capabilities. For unregistered uploaded budget, actual, forecast, or operational-driver files, use `finance_source_refresh` only as a file snapshot refresh: ordinary files without real document-line identifiers should use `file_identity_policy: "snapshot_only"`, while `"business_key"` is reserved for files with genuine source keys. Bind the published source and scope with `finance_context_save` before running comparisons.
+
+Use `run_metric` to establish actual, baseline, and control totals before explaining the bridge. Use `explain_variance` when the question fits a supported profit bridge or price/quantity decomposition and the current scenario/source versions are explicit. Use `drilldown_fact` to inspect source-backed cells from that run, and `save_explanation_draft` for commentary with calculation claims linked to real `run_id`, `row`, `column`, and `value` fields. Keep using SQL/Python for custom joins, unsupported decompositions, cohort analysis, and data-quality checks; do not force every variance into the specialized tools. Materiality, missing-group treatment, negative budget policy, and narrative judgment remain manager-controlled.
+
 ## Usage
 
 ```

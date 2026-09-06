@@ -19,6 +19,7 @@ from typing import Any
 
 import duckdb
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 
 from foundry.analysis_data import MAX_SOURCE_BYTES, SUPPORTED, json_value, parse_source
 from foundry.analysis_sql import CONFIG, execute_sql, method_template, validate_relationship_contract
@@ -27,6 +28,7 @@ from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
 from foundry.locking import exclusive
 from foundry.task import Task, now_iso
+from foundry.sheet import survives_a_cell, put_number
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
@@ -217,7 +219,8 @@ class AnalysisStore:
     def state(self) -> dict:
         root = self._inside(self.root / "datasets")
         datasets = (
-            [self._read(path) for path in root.glob("*/meta.json")]
+            [record for path in root.glob("*/meta.json")
+             if self._dataset_published(record := self._read(path))]
             if root.exists()
             else []
         )
@@ -288,6 +291,8 @@ class AnalysisStore:
         _assert_id(dataset_id)
         folder = self._inside(self.root / "datasets" / dataset_id)
         metadata = self._read(folder / "meta.json")
+        if not self._dataset_published(metadata):
+            raise FoundryError("source batch is not published; snapshot is unavailable")
         data_path = self._inside(folder / "data.json")
         source_path = self._inside(folder / metadata["source_file"])
         try:
@@ -303,6 +308,18 @@ class AnalysisStore:
             raise FoundryError(
                 "dataset integrity check failed: missing or invalid snapshot"
             ) from exc
+
+    def _dataset_published(self, metadata: dict) -> bool:
+        batch_id = metadata.get("metadata", {}).get("source_refresh", {}).get("source_batch_id")
+        if not batch_id:
+            return True
+        batch_path = self._inside(self.root / "source_batches" / f"{_assert_id(batch_id)}.json")
+        if not batch_path.exists():
+            return False
+        batch = self._read(batch_path)
+        if batch.get("publication_status") != "published" or batch.get("dataset_id") != metadata["id"]:
+            raise FoundryError("source batch publication does not match snapshot")
+        return True
 
     def save_analysis(self, spec: dict) -> dict:
         if not isinstance(spec, dict):
@@ -396,6 +413,12 @@ class AnalysisStore:
         context_revision: int | None = None,
     ) -> dict:
         analysis = self.get_analysis(analysis_id)
+        if analysis.get("engine") == "finance":
+            from foundry.finance_service import FinanceStore
+
+            return FinanceStore(
+                self.task, session_id=session_id, context_revision=context_revision
+            ).run_revision(analysis)
         if analysis.get("engine") in {"python", "shell"}:
             return self.run_script(
                 {
@@ -696,6 +719,7 @@ class AnalysisStore:
                         columns = [c["name"] for c in result["columns"]]
                         _append_excel(target, columns)
                         for row in result["rows"]:
+                            row_start = target.max_row + 1
                             _append_excel(
                                 target,
                                 [
@@ -703,6 +727,22 @@ class AnalysisStore:
                                     for c in columns
                                 ],
                             )
+                            for column_index, column in enumerate(result["columns"], start=1):
+                                value = row.get(column["name"])
+                                numeric_type = str(column.get("type", "")).upper()
+                                if value is None or not numeric_type.startswith(("DECIMAL", "NUMERIC", "INTEGER", "BIGINT", "SMALLINT", "HUGEINT", "DOUBLE", "FLOAT")):
+                                    continue
+                                from decimal import InvalidOperation
+
+                                try:
+                                    number = Decimal(str(value))
+                                except InvalidOperation:
+                                    continue
+                                cell = target.cell(row_start, column_index)
+                                if number.is_finite() and survives_a_cell(number):
+                                    put_number(cell, value)
+                                else:
+                                    cell.comment = Comment("超过 Excel 可安全保留的数值精度，按精确文本保存。", "Foundry")
                         evidence = workbook.create_sheet("Evidence " + str(number))
                         for key in [
                             "id",
@@ -729,8 +769,8 @@ class AnalysisStore:
                                     else str(run.get(key)),
                                 ],
                             )
-                    # Store all supplied text and amounts as literal cells. Excel's
-                    # numeric format has 15 significant digits and '=' is a formula.
+                    # Keep text literal, including identifiers and amounts that
+                    # exceed Excel precision. Safe typed amounts stay numeric.
                     for sheet in workbook:
                         for row in sheet:
                             for cell in row:

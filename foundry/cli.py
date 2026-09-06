@@ -373,10 +373,13 @@ def main(argv: list[str] | None = None) -> int:
     p_smoke = sub.add_parser("host-smoke")
     p_smoke.add_argument("--fixtures", default="")
 
-    from foundry import analysis_cli, analysis_jobs
+    from foundry import analysis_cli, analysis_jobs, excel_bridge, finance_cli, finance_mcp
 
     analysis_cli.add_parsers(sub)
     analysis_jobs.add_parsers(sub)
+    finance_cli.add_parsers(sub)
+    finance_mcp.add_parsers(sub)
+    excel_bridge.add_parsers(sub)
     args = parser.parse_args(argv)
     try:
         # Refuse unknown/mismatched sessions before a store constructor can
@@ -390,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata = task.rename(args.title)
             print(json.dumps({"task_id": task.id, "title": metadata["title"]}, ensure_ascii=False))
             return 0
-        if analysis_jobs.dispatch(args) or analysis_cli.dispatch(args):
+        if finance_mcp.dispatch(args) or analysis_jobs.dispatch(args) or analysis_cli.dispatch(args) or finance_cli.dispatch(args) or excel_bridge.dispatch(args):
             return 0
         store = _store(args)
         tasks = TaskStore(Path(args.var))

@@ -1,0 +1,315 @@
+{
+  "excel_file_roundtrip": {
+    "checks": {
+      "formula_literal": true,
+      "formula_retained": true,
+      "leading_zero": true,
+      "named_range": true,
+      "numeric_amount": true,
+      "precision_text": true,
+      "sum_recalculated": true
+    },
+    "evidence": "build/verification/r2-excel-host/file-roundtrip-evidence.json",
+    "flow": "CUA native open -> Excel calculation -> Cmd-S; reread saved XLSX",
+    "host": "Microsoft Excel",
+    "officejs_verified": true,
+    "sha256": "af9c52574719d7f20e7e06513f779194634912353c2e7c669fb6077eeb63feea",
+    "superseded_by": "docs/finance/r2-excel-host-evidence.json",
+    "version": "16.111.3"
+  },
+  "excel_host": {
+    "boundary": "Requires independent native Excel open/save/reopen observation; file checks alone are insufficient.",
+    "checks": {
+      "chart_preserved": true,
+      "conflict_keep_observed": true,
+      "excel_recalculation": true,
+      "host_recalc_and_save": true,
+      "manager_note_preserved": true,
+      "modified_input": true,
+      "outside_formulas_preserved": true,
+      "refreshed_profit": true,
+      "two_real_imports": true,
+      "two_real_metrics": true
+    },
+    "evidence": "docs/finance/r2-excel-host-evidence.json",
+    "host_event_counts": {
+      "full_recalc": 1,
+      "input_imported": 3,
+      "metric_run": 5,
+      "output_applied": 4,
+      "output_previewed": 7,
+      "workbook_saved": 1
+    },
+    "hosts": [
+      {
+        "excelApi11": true,
+        "excelApi111": true,
+        "host": "Excel",
+        "platform": "Mac",
+        "version": "16.111.802.3"
+      }
+    ],
+    "schema_version": 1,
+    "sha256": "08e0cc8ce1c8e009f1fcf6cb81848c8974b1a155af337f30e5e65dbf4fdc20ed",
+    "status": "passed",
+    "verification_setup_cleanup": {
+      "certificate_cleanup_status": "User trust was removed; remaining untrusted certificate deleted successfully; exact certificate no longer found",
+      "temporary_bridge_stopped": true,
+      "temporary_manifest_removed": true,
+      "temporary_tls_key_and_token_removed": true,
+      "temporary_user_trusted_certificate_removed": true
+    }
+  },
+  "finance_evals_quality_gate": {
+    "attempted_cases": "30/30",
+    "completed_cases": "29/30",
+    "evidence": "docs/finance/r2-finance-evals-evidence.json",
+    "initial_round": "16/27 attempted cases, 26/27 completed in the initial corrected split; F28-F30 were not reached",
+    "release_interpretation": "Real evaluation completed with editable drafts and retained failure evidence; do not mark explanation-quality gate as fully passed.",
+    "report": "docs/finance/r2-finance-evals-report.md",
+    "status": "not_met",
+    "strict_pass_cases": "22/30 cases at least once including retries (22/29 completed cases); not first-pass accuracy",
+    "threshold": "100% numeric-citation match; zero cross-ledger and unsupported-cause violations; at least 90% complete-data calculation/draft/drilldown flows. Quality gate not met."
+  },
+  "financial_acceptance": {
+    "base_cash": "90",
+    "budget_variance": "5",
+    "cases": [
+      "budget_variance",
+      "variance_bridge",
+      "previous_period",
+      "missing_budget",
+      "cross_task_method",
+      "repeat_hash",
+      "background_document",
+      "assumption_revision",
+      "draft_archive_revision",
+      "xlsx_export",
+      "method_reuse",
+      "receivables_aging",
+      "cash_delay_scenario",
+      "task_switch"
+    ],
+    "delayed_cash": "-10",
+    "evidence": "build/verification/financial-acceptance.json",
+    "status": "passed"
+  },
+  "generated_for": "2026-09-06 finance r2 completion audit",
+  "installed_skill_session_a34": {
+    "app_asar_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+    "app_asar_size_bytes": 9032204,
+    "application_version": "0.1.3",
+    "evidence": "docs/finance/r2-skill-session-installed-013-evidence.json",
+    "intermediate_renderer_package_evidence": "build/verification/r2-skill-session-installed-013-retry1",
+    "model": {
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "reasoningEffort": "max"
+    },
+    "note": "Previous A34 pass was against an intermediate renderer package; final UI-fix installation passed once at the final evidence path.",
+    "raw_evidence": "build/verification/r2-skill-session-installed-013-final",
+    "status": "passed"
+  },
+  "mcp_blocker_history": {
+    "claude_cli": {
+      "evidence": "build/finance-mcp-client-verification-claude.json",
+      "status": "blocked: OAuth session expired"
+    },
+    "system_codex_cli": {
+      "evidence": "build/finance-mcp-client-verification-codex.json",
+      "status": "blocked: codex-cli 0.147.0 could not run configured gpt-6-astra"
+    }
+  },
+  "mcp_external_client": {
+    "client_version": "codex-cli 0.153.4",
+    "configured_model": "gpt-6-astra",
+    "configured_model_provider": null,
+    "evidence": "build/finance-mcp-client-verification-codex-app.json",
+    "expected": {
+      "drilldown_count": 3,
+      "evidence_count": 3,
+      "profit": "30",
+      "unit": "万元"
+    },
+    "observed": {
+      "contexts_seen": 1,
+      "drilldown_count": 3,
+      "evidence_count": 3,
+      "profit": "30",
+      "unit": "万元"
+    },
+    "revoked_rejection_seen": true,
+    "revoked_rejection_source": "codex_mcp_startup_event",
+    "status": "passed",
+    "temp_auth_copy_mode": "0o600",
+    "temp_codex_home_mode": "0o700",
+    "temp_config_mode": "0o600",
+    "tools_used": [
+      "list_finance_context",
+      "run_metric",
+      "drilldown_fact"
+    ]
+  },
+  "native_workspace": {
+    "evidence": "build/verification/native-workspace-final.json",
+    "not_tested": [
+      "Physical macOS Chinese IME candidate window",
+      "Real provider admission/streaming",
+      "Screenshots and visual taste verdict",
+      "Permissions requiring external side effects"
+    ],
+    "status": "passed",
+    "scope": "Historical baseline only; final installed UI acceptance is recorded separately."
+  },
+  "packaging": {
+    "status": "passed",
+    "version": "0.1.3",
+    "artifact": "app/release/FA-Foundry-0.1.3-macOS-arm64-r2-20260906-0853.zip",
+    "zip_sha256": "7aa0a4fa34c151ad3bd78335e360ac916f834bba0ea9f2db21fe7364890b6131",
+    "zip_bytes": 497870440,
+    "crc_passed": true,
+    "installed_matches": {
+      "Contents/Resources/app.asar": {
+        "zip_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+        "installed_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+        "matches": true
+      },
+      "Contents/Resources/foundry/foundry": {
+        "zip_sha256": "0f3fc321b6cc8d9d809c4393e0195d0b383aefe3c28c74969cbbaab3c814bc7f",
+        "installed_sha256": "0f3fc321b6cc8d9d809c4393e0195d0b383aefe3c28c74969cbbaab3c814bc7f",
+        "matches": true
+      }
+    },
+    "source_zip_installed_resource_hashes": {
+      "method/CONNECTORS.md": "501120e224b7bf2866dd0d87423953f326ffc37cd2e6c826c3faccb20410828e",
+      "method/FOUNDRY.md": "a1be3b5d87a00e61f9cf6dae2093d714487bd52b9d746de3f822e5024ef13edc",
+      "method/LICENSE": "5d93b2ea703c35c2bad6b966d90fc52c23802a7bb261bc562d3ffae8614cac2b",
+      "method/NOTICE": "e3c065f40a3a79b2346971d01e3eff924e722295b0cacaf5f3c8c690cae1a2a5",
+      "method/README.md": "05e2199206465c1a830f0bea0e6956b21580ae97c8d988be80ba42ae7fe51b96",
+      "method/financial-statements/SKILL.md": "070991730bcb019181cf01ba127815da15865243fe441d30a4ea9f15500cbe94",
+      "method/journal-entry/SKILL.md": "20f0597c2faca18dd97f92ebca6bd8f605288b5b1fa2964f5cf9a1b60d2fe0bf",
+      "method/reconciliation/SKILL.md": "1ff013edcbfa764c946354ec886d2bf492fb189ec5fb811800cf392e3d719f95",
+      "method/variance-analysis/SKILL.md": "b63ca8b5b8d6952ee2e65768429d8ef150cbeccf4a1c47ec5836e660ab45ebeb",
+      "excel-addin/README.md": "b8b4ed94106e8205eb40755b86695e0ef543b1b13ed55ec9bd8f37f9b2f7879a",
+      "excel-addin/icon.png": "9671d358628268d866010a826d963d7bcb684a2c8c601a7f7e5ead271fa739be",
+      "excel-addin/icon.svg": "88e3bed17a6145e9a0689952835c6dd7fdf471769f2776252360a668c6fef093",
+      "excel-addin/manifest.xml": "fa63fc545727e5ecd91ad75a90a053180d4bbcbd94389b65b840637fe7e976f7",
+      "excel-addin/taskpane.css": "d2bfe9f9906f0830d2693c51a74d8cec37d48b62107d7af2f28237c819234aae",
+      "excel-addin/taskpane.html": "5694c64128fb240b1858c08bae55ef656febe0e3fac3568744b32b5f2151760b",
+      "excel-addin/taskpane.js": "2175679ca214bf5d69455f04b19e75840390f0711530caf6be17918c1312055f"
+    },
+    "signed": false,
+    "evidence": "docs/finance/r2-package-final-evidence.json",
+    "final_a34_evidence": "docs/finance/r2-skill-session-installed-013-evidence.json",
+    "intermediate_package_audit": "build/verification/r2-package-audit-013-intermediate.json"
+  },
+  "performance_a25": {
+    "cancellation": {
+      "bounded_under_3_seconds": true,
+      "elapsed_seconds": 0.4129844589915592,
+      "error_code": "timeout",
+      "execution_status": "failed"
+    },
+    "evidence": "docs/finance/r2-performance-optimized-evidence.json",
+    "expected_profit": "250110",
+    "iterations": 5,
+    "median": {
+      "cold_query_seconds": 1.2694935000035912,
+      "hot_query_seconds": 1.1302053749968763,
+      "import_seconds": 2.823913333006203,
+      "process_high_water_mark_rss_bytes": 630751232
+    },
+    "rows": 100000
+  },
+  "redaction": "No grant tokens, auth files, raw signed URLs, or user-home absolute paths are copied here.",
+  "schema_version": 1,
+  "test_totals": {
+    "app_final": {
+      "log": "build/verification/r2-final-app-tests.log",
+      "result": "App tests: 361 passed"
+    },
+    "changed_python_ruff": {
+      "result": "All checks passed: 34 changed Python files",
+      "log": "build/verification/r2-changed-ruff.log"
+    },
+    "dsh_real_load": {
+      "log": "build/verification/r2-real-load.log",
+      "result": "10 passed in 18.69s",
+      "note": "These 10 tests are included in the full Python test count, not additional tests."
+    },
+    "mcp_targeted": {
+      "result": "18 passed in targeted MCP/scenario service verification"
+    },
+    "python_final": {
+      "log": "build/verification/r2-final-pytest.log",
+      "result": "758 passed, 2 skipped in 73.66s",
+      "skips": [
+        "pyarrow optional dependency missing",
+        "data_formulator optional dependency missing"
+      ]
+    }
+  },
+  "workbook_ui": {
+    "checks": [
+      "exact saved title and body",
+      "exact saved version",
+      "every result cell and evidence run ID"
+    ],
+    "evidence": "build/verification/workbook-ui-final.json",
+    "sha256": "e16b166fbd31dcc182d162f89b5f3c0d465ed7325807b7fdb13c234f31851e63",
+    "status": "passed"
+  },
+  "native_ui_final": {
+    "status": "passed",
+    "version": "0.1.3",
+    "app_asar_sha256": "cfd4bed70437c0c387c252515cd91da20ff71f65eb9afaa10f0d386d02de0052",
+    "flow": "CUA: reopen settings -> rerun saved budget bridge -> settings collapse -> four-row first screen -> drilldown profit source rows",
+    "ui_run_id": "81c7974c3dc54eef87b068f4734230ce",
+    "observed_contributions": {
+      "revenue": "20",
+      "cost": "-10",
+      "expense": "-5",
+      "profit": "5"
+    },
+    "drilldown_rows_observed": 6,
+    "screenshot": "build/verification/r2-native-ui-013/after-budget-bridge.jpg",
+    "screenshot_sha256": "a2c5aaad148c4b579384088aac1a7b4cd80040f7e628676e84e2e3c6074de917",
+    "ax_evidence": "build/verification/r2-native-ui-013/after-native-ax.txt",
+    "visual_verdict": {
+      "score": 93,
+      "verdict": "pass",
+      "category_match": true,
+      "differences": [],
+      "suggestions": [],
+      "reasoning": "最终安装版保持持续对话与结果双栏，预算桥四行与关键数字完整出现在首屏；口径、原始字段和来源证据逐步展开，Noto中文清晰。",
+      "threshold": 90,
+      "threshold_passed": true,
+      "next_actions": [],
+      "reference_images": [
+        "build/ui-workspace-review/final/results-1280-window.png"
+      ],
+      "generated_screenshot": "build/verification/r2-native-ui-013/after-budget-bridge.jpg"
+    },
+    "default_launch": {
+      "status": "passed",
+      "version": "0.1.3",
+      "workspace_loaded": true,
+      "harness_loaded": true,
+      "configured_model": "DeepSeek-V4-Flash / Max",
+      "ax_evidence": "build/verification/r2-delivered-default-launch-ax.txt",
+      "ax_evidence_sha256": "4c614040dacdfb9c969e36ce29ca8423df7f5bf37edb972652132ad60f22aea0"
+    },
+    "evidence": "docs/finance/r2-native-ui-final-evidence.json"
+  },
+  "stage4_delivery_scope": {
+    "status": "agreed_scope_passed",
+    "included": [
+      "generic source adapter/transport contract",
+      "local file refresh"
+    ],
+    "not_verified": [
+      "real ERP tenant integration",
+      "named vendor API compatibility without test tenant"
+    ]
+  }
+}
