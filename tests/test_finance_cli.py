@@ -10,6 +10,29 @@ from foundry import finance_cli
 from foundry.task import TaskStore
 
 
+def test_completion_recovery_cli_is_task_editor_only(tmp_path, capsys):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    root = tmp_path / "var"
+    task = TaskStore(root).create(title="恢复正文")
+    task.record_session("assistant", role="analysis")
+    operations = CompletionOperationStore(task, "assistant")
+    operation = operations.begin("human-message")
+    operations.reserve(operation["id"], call_id="interrupted-save", payload={
+        "title": "未保存分析", "body": "待恢复的正文", "run_ids": [],
+    })
+    operations.stop(operation["id"], "cancelled")
+    assert main(["--var", str(root), "--task", task.id, "finance-completion-recoveries"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["recoveries"][0]["body"] == "待恢复的正文"
+    assert "session_id" not in result["recoveries"][0]
+    assert main(["--var", str(root), "--session", "assistant", "finance-completion-recoveries"]) == 3
+    assert "task editor" in capsys.readouterr().err
+    other = TaskStore(root).create(title="另一任务")
+    assert main(["--var", str(root), "--task", other.id, "finance-completion-recoveries"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"recoveries": []}
+
+
 def test_source_refresh_cli_dedupes_and_preserves_old_run(tmp_path, capsys):
     root = tmp_path / "var"
     task = TaskStore(root).create(title="月度刷新")
@@ -144,3 +167,31 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
         "finance_background_list",
     ]
     assert all(call[2]["session_id"] == "manager" for call in calls)
+
+
+def test_completion_runtime_cli_scopes_identity_and_preserves_manual_save(tmp_path, capsys):
+    task = TaskStore(tmp_path / "var").create(title="自动收尾")
+    task.record_session("runtime-one", role="analysis")
+    task.record_session("runtime-other", role="analysis")
+    args = ["--var", str(tmp_path / "var"), "--session", "runtime-one"]
+    assert main([*args, "finance-completion-begin", "--spec", json.dumps({
+        "request_key": "user-event-1", "policy": {"max_repairs": 0, "timeout_seconds": 300},
+    })]) == 0
+    operation = json.loads(capsys.readouterr().out)
+    assert operation["policy"]["max_repairs"] == 0
+    spec = json.dumps({"title": "待核对", "body": "本次判断仍需资料支持。"})
+    bound = [*args, "save-explanation-draft", "--completion-operation", operation["id"],
+             "--completion-call-id", "actual-runtime-call", "--spec", spec]
+    assert main(bound) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["completion_operation"]["status"] == "needs_review"
+    assert main(bound) == 0
+    again = json.loads(capsys.readouterr().out)
+    assert again["id"] == first["id"]
+    assert main(["--var", str(tmp_path / "var"), "--session", "runtime-other",
+                 "finance-completion-status", "--spec", json.dumps({"operation_id": operation["id"]})]) == 3
+    capsys.readouterr()
+    assert main([*args, "save-explanation-draft", "--spec", spec]) == 0
+    manual = json.loads(capsys.readouterr().out)
+    assert manual["id"] != first["id"]
+    assert manual["completion_operation_id"] is None

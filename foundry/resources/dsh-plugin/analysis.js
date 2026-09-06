@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
+import { createCompletionRuntime } from "./completion-runtime.js";
 import { FINANCE_TOOLS } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
@@ -198,18 +199,41 @@ const SPECS = {
 export const name = "finance-skill-foundry-analysis";
 export const inject = ["tools", "subagents"];
 
-export function definitions(runtime) {
+function runtimeParts(runtime) {
+  return typeof runtime === "function" ? { analysis: runtime } : (runtime ?? {});
+}
+
+function foundryArgs(tool, input) {
+  const args = SPECS[tool].argv(input);
+  if (tool !== "save_explanation_draft" || !input?._completion_operation) return args;
+  if (!input?._completion_call_id) throw new Error("save_explanation_draft completion call id is required");
+  const [command, ...rest] = args;
+  return [
+    command,
+    "--completion-operation", String(input._completion_operation),
+    "--completion-call-id", String(input._completion_call_id),
+    ...rest,
+  ];
+}
+
+export function definitions(runtime, invoke = invokeFoundry) {
   const declared = PROFILE.tools;
   if (!Array.isArray(declared) || !declared.length || declared.length !== Object.keys(SPECS).length
       || declared.some((tool) => !Object.hasOwn(SPECS, tool))) {
     throw new Error("analysis tool metadata drifted from package.json");
   }
-  return declared.map((tool) => toolDefinition(tool, {
-    ...SPECS[tool], requireSession: true,
-    execute: (input, exec) => SPECS[tool].runtime
-      ? (runtime ? runtime(tool, input, exec) : Promise.reject(new Error("analysis runtime is unavailable")))
-      : invokeFoundry(SPECS[tool].argv(input), exec),
-  }));
+  const parts = runtimeParts(runtime);
+  return declared.map((tool) => {
+    const run = (input, exec) => SPECS[tool].runtime
+      ? (parts.analysis ? parts.analysis(tool, input, exec) : Promise.reject(new Error("analysis runtime is unavailable")))
+      : invoke(foundryArgs(tool, input), exec);
+    return toolDefinition(tool, {
+      ...SPECS[tool], requireSession: true,
+      execute: (input, exec) => parts.completion
+        ? parts.completion(tool, input, exec, run)
+        : run(input, exec),
+    });
+  });
 }
 
 export function allowlist() {
@@ -217,7 +241,10 @@ export function allowlist() {
 }
 
 export function apply(ctx) {
-  const runtime = createAnalysisRuntime(ctx, PROFILE.childTools);
+  const runtime = {
+    analysis: createAnalysisRuntime(ctx, PROFILE.childTools),
+    completion: createCompletionRuntime(ctx),
+  };
   for (const definition of definitions(runtime)) ctx.tools.register(definition);
   // Restrictions filter inherited tools for actual sessions as well as the
   // standing preset. An empty allowlist would hide this preset's own tools

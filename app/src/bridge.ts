@@ -321,6 +321,7 @@ export type FinanceCommand =
   | 'save-explanation-draft'
   | 'analysis-requirements-save'
   | 'analysis-requirements-list'
+  | 'finance-completion-recoveries'
   | 'prepare-explanation'
   | 'validate-explanation'
   | 'finance-background-save'

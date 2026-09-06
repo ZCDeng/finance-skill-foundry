@@ -774,10 +774,14 @@ describe('analysis workbench', () => {
     await screen.findByText('范围尚未完成：存在需要处理的诊断。');
     fireEvent.click(screen.getByText('诊断 · 1 项'));
     expect(screen.getByText(/control_total_missing/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('结果行来源'), { target: { value: '0' } });
-    fireEvent.click(screen.getByRole('button', { name: '查看来源行' }));
+    const sourceRow = screen.getByLabelText('结果行来源') as HTMLSelectElement;
+    fireEvent.change(sourceRow, { target: { value: '0' } });
+    await waitFor(() => expect(sourceRow.value).toBe('0'));
+    const drilldown = screen.getByRole('button', { name: '查看来源行' }) as HTMLButtonElement;
+    await waitFor(() => expect(drilldown.disabled).toBe(false));
+    fireEvent.click(drilldown);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', { run_id: financeRun.id, row: 0, offset: 0, limit: 100 }));
     expect((await screen.findByRole('alert')).textContent).toBe('source evidence row is invalid');
-    expect(financeCall).toHaveBeenCalledWith(task.id, 'drilldown-fact', { run_id: financeRun.id, row: 0, offset: 0, limit: 100 });
   });
 
   it('shows a manager-first finance budget bridge while keeping raw result fields expandable', async () => {
@@ -947,6 +951,116 @@ describe('analysis workbench', () => {
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
       parent_id: draft.id, body: '经理调整后的判断。', run_ids: [financeRun.id], review_status: 'unreviewed',
     })));
+  });
+
+  it('loads completion recovery payloads into an editable unchecked draft copy', async () => {
+    const financeRun = { ...run, id: 'r-recovered', engine: 'finance' };
+    const oldClaims = [{ basis: 'calculation', run_id: run.id, row: 0, column: 'profit', value: '900719925474099.99' }];
+    const recoveryClaims = [{ basis: 'calculation', run_id: financeRun.id, row: 0, column: 'profit', value: '88' }];
+    const recovery = {
+      operation_id: 'op-1',
+      status: 'failed',
+      revision: 'rev-2',
+      title: '恢复的经营说明',
+      body: '恢复正文 {{fact:fact-recovered}}。',
+      limitations: ['等待销售确认'],
+      run_ids: [financeRun.id],
+      fact_ids: ['fact-recovered'],
+      claims: recoveryClaims,
+      materiality: { absolute: '9000' },
+      requirements_id: 'req-recovered',
+      parent_id: null,
+      updated_at: '2026-09-06T10:00:00Z',
+    };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [
+        recovery,
+        { operation_id: 'op-empty', status: 'failed', body: '' },
+        { operation_id: 'op-running', status: 'running', body: '仍在运行' },
+      ] });
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-recovered', run_id: financeRun.id, row: 0, column: 'profit', label: '恢复利润', display_value: '88' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'save-explanation-draft') return success({ ...draft, ...spec, id: '9'.repeat(32) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [run, financeRun], drafts: [{ ...draft, fact_ids: ['fact-old'], claims: oldClaims, run_ids: [run.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText('可恢复的未保存文稿 · 1 条');
+    fireEvent.click(screen.getByText('可恢复的未保存文稿 · 1 条'));
+    fireEvent.click(screen.getByRole('button', { name: '载入可编辑副本' }));
+    expect((await screen.findByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('恢复正文 {{fact:fact-recovered}}。');
+    expect(screen.getByText(/已载入未保存恢复稿/)).toBeTruthy();
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'prepare-explanation', expect.objectContaining({
+      run_ids: [financeRun.id],
+    })));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', expect.objectContaining({
+      body: '恢复正文 {{fact:fact-recovered}}。',
+      run_ids: [financeRun.id],
+      fact_ids: ['fact-recovered'],
+      claims: recoveryClaims,
+    })));
+    fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+      title: '恢复的经营说明',
+      body: '恢复正文 {{fact:fact-recovered}}。',
+      run_ids: [financeRun.id],
+      fact_ids: ['fact-recovered'],
+      claims: recoveryClaims,
+      materiality: { absolute: '9000' },
+      requirements_id: 'req-recovered',
+      review_status: 'unreviewed',
+    })));
+    const recoverySave = financeCall.mock.calls.find(([, command, spec]) => command === 'save-explanation-draft'
+      && (spec as Record<string, unknown>)?.body === '恢复正文 {{fact:fact-recovered}}。')?.[2] as Record<string, unknown>;
+    expect(recoverySave).not.toHaveProperty('parent_id');
+    expect(recoverySave.fact_ids).not.toContain('fact-old');
+    expect(recoverySave.claims).not.toEqual(oldClaims);
+  });
+
+  it('does not overwrite current unsaved draft input with completion recoveries', async () => {
+    const financeRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [{ operation_id: 'op-1', status: 'awaiting_input', title: '恢复稿', body: '恢复正文' }] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    await screen.findByText('可恢复的未保存文稿 · 1 条');
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '当前经理正在编辑。' } });
+    fireEvent.click(screen.getByText('可恢复的未保存文稿 · 1 条'));
+    expect((screen.getByRole('button', { name: '载入可编辑副本' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('当前经理正在编辑。');
+  });
+
+  it('keeps restored local draft edits stale instead of validating the saved old body on remount', async () => {
+    const financeRun = { ...run, engine: 'finance' };
+    sessionStorage.setItem(`foundry.analysis.working-copy.v1:${task.id}:draft:${draft.id}`, JSON.stringify({
+      title: draft.title,
+      body: '本地恢复的未保存正文。',
+      limitations: draft.limitations.join('\n'),
+      review: draft.review_status,
+      materiality: { absolute: '0', denominator: 'baseline_abs', negativePolicy: 'absolute', relative: '' },
+    }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect((await screen.findByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('本地恢复的未保存正文。');
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+    expect(screen.queryByText(/检查通过/)).toBeNull();
+    expect(financeCall.mock.calls.some(([, command]) => command === 'validate-explanation')).toBe(false);
   });
 
 

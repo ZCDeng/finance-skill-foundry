@@ -132,3 +132,20 @@
 - 新增 tools/report_r4_acceptance.py 旁路汇总器（不改冻结评分器）：固定fixture所选分母、未观察占位、provisional、首次/两轮内receipt声明与独立评分分开、跨chain累计实际尝试、延迟/工具错误/模型重试、单独观察错误与坏记录。最新稿必须匹配receipt的draft id和content hash；不存在绑定时不能冒用旧receipt。7项测试及Ruff通过。
 - 实际macOS AX已读到AXWindow和“应收状态筛选搜索”AXTextField。原IME测试只输入拉丁拼音，不能称中文候选验收；继续使用公开输入源API核验，不修改TCC或安装输入法。
 - 逐项审查发现设计四仍缺产品级持久deadline、可配置自动修复预算和runtime-owned操作身份。现有两轮receipt与提示词不等于harness工程强制；eval 420秒不能算产品超时。最小设计与边界审查保存build/verification/r4-integration/completion-runtime-gap-design.md，待落实可信运行时身份、窄取消和保留草稿。不得因此把目标缩成已有工程测试通过。
+
+
+## 2026-09-07：持久自动收尾、真实取消与正文恢复
+
+- 新增 CompletionOperationStore：按真实用户消息绑定操作，可信callId分配保存尝试；持久截止时间与0..2轮修复预算跨要求变更和重启保留。精确重放返回原稿/回执，过期状态先刷新，迟到结算不能复活已终止操作。
+- 实际analysis插件已组合completion wrapper；私有身份只翻译为CLI flags，不加入模型参数。invokeFoundry在取消时终止真实子进程并等待退出；tools/result之后窄取消保留结果与新用户输入。
+- 真实DSH固定本地适配器测试通过：user/message、save工具、tools/result、needs_review取消与第二条用户消息贯通，不调用付费模型。后端/CLI/原有真实装载组合82项通过。
+- 新增仅任务编辑界面可调用的恢复列表，投影未保存正文及其原始证据；已落稿但尚未结算的记录按operation/call绑定排除。恢复界面只载入可编辑副本，保留当前未保存输入，不继承无关原稿的运行、事实或父稿。
+- 修复恢复副本重新挂载时误用旧稿检查状态；外部依据按后端嵌套合同发送；未知质量状态不显示检查通过。App定向85项通过，独立全套402项通过，应用build通过。
+- 首轮完整回归保留992 passed/2 skipped/2 failed原始日志：随包test.mjs不同步已修复；两项任务历史测试5秒超时。第二轮993 passed/2 skipped/1 failed为来源行按钮启用前点击的测试竞态，已改为等待真实enabled并确认查询调用，未删断言或加大超时。最终完整回归继续进行。
+- 本节源码尚未重包安装；冻结v3候选30例观察保持运行，未覆盖原始结果。新运行时需要新构建上重新验收，8留出/20盲测与经理校准仍未完成。
+
+- 开发态真实Electron恢复入口10项通过：实际CLI种植合成任务/操作、真实IPC读取、浅色/深色/窄屏截图、载入未检查副本、当前未保存输入禁用恢复、零模型请求。根代理实际查看浅色/窄屏/载入截图。证据位于build/verification/r4-integration/completion-runtime-recovery-ui；早期白屏/定位失败属于QA启动问题，保留失败回执后修正devserver加载，未动安装版。
+
+- 第三轮完整回归992 passed/2 skipped/2 failed保留：App任务历史/要求面板在5秒测试预算超时，runner闭流测试250ms启动预算内未写PID但已正确timeout/SIGKILL。外层App全套限2 workers、唯一完整子日志；任务历史助手等待真实菜单/任务按钮，不以“找不到菜单”假定已在历史页；runner将启动预算调整1秒并新增闭流后ready落盘断言，继续校验PID不存在与总时长<3秒。未改产品runner。再次完整回归进行中。
+
+- 最终稳定完整回归994 passed/2 skipped，真实DSH启用；包含App29文件402项通过、真实completion事件链、恢复CLI及资源镜像。日志completion-runtime-full-pytest-stable.log与app-tests唯一子日志保留。Ruff/diff通过；此前失败全部保留。冻结旧候选主集已观察20例，仍运行，不能据此宣称新版模型质量通过。

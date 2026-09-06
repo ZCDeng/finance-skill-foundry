@@ -18,7 +18,7 @@ type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindi
 type MaterialityDenominator = 'baseline_abs' | 'actual_abs' | 'max_abs';
 type MaterialityNegativePolicy = 'absolute' | 'signed';
 type MaterialityEdit = { absolute: string; relative: string; denominator: MaterialityDenominator; negativePolicy: MaterialityNegativePolicy };
-type DraftEdit = { title: string; body: string; limitations: string; review: string; materiality?: MaterialityEdit };
+type DraftEdit = { title: string; body: string; limitations: string; review: string; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
 }
@@ -31,6 +31,10 @@ interface ExplanationQuality {
 interface ExplanationPreparation { facts?: ExplanationFact[]; required_fact_ids?: string[]; diagnostics?: unknown[]; business_contexts?: FinanceBackground[] }
 interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
+}
+interface FinanceCompletionRecovery {
+  operation_id: string; status: string; revision?: string; title?: string; body?: string; limitations?: string[] | string; run_ids?: string[]; fact_ids?: string[];
+  claims?: unknown[]; materiality?: Record<string, unknown>; requirements_id?: string | null; parent_id?: string | null; updated_at?: string;
 }
 type Selection = { analysis?: string; draft?: string };
 export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'methods';
@@ -1062,16 +1066,20 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   onExport(format: 'md' | 'xlsx', spec?: Record<string, unknown>): void; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
 }) {
+  const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
   const [body, setBody] = useState(edit?.body ?? draft?.body ?? '');
   const [limitations, setLimitations] = useState(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
   const [review, setReview] = useState(edit?.review ?? draft?.review_status ?? 'unreviewed');
   const [materiality, setMateriality] = useState<MaterialityEdit>(() => edit?.materiality ?? materialityToEdit(draft?.materiality));
+  const [recovery, setRecovery] = useState<FinanceCompletionRecovery | null>(edit?.recovery ?? null);
   const [editing, setEditing] = useState(!draft || Boolean(edit && (edit.body !== draft.body || edit.title !== draft.title
-    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality))));
-  const [quality, setQuality] = useState<ExplanationQuality | null>((draft?.quality as ExplanationQuality | undefined) ?? null);
-  const [qualityState, setQualityState] = useState<'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'>('idle');
+    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality) || edit.recovery)));
+  const [quality, setQuality] = useState<ExplanationQuality | null>(initialEditUnsaved ? null : (draft?.quality as ExplanationQuality | undefined) ?? null);
+  const [qualityState, setQualityState] = useState<'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'>(initialEditUnsaved ? 'stale' : 'idle');
   const [updatedRequirementsId, setUpdatedRequirementsId] = useState<string | null>(null);
+  const [recoveries, setRecoveries] = useState<FinanceCompletionRecovery[]>([]);
+  const [recoveryError, setRecoveryError] = useState('');
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
@@ -1084,33 +1092,58 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const qualityRequest = useRef(0);
   const factRequest = useRef(0);
   const backgroundRequest = useRef(0);
+  const recoveryRequest = useRef(0);
   const draftRuns = runs.filter((run) => draft?.run_ids.includes(run.id));
   const financeRuns = draftRuns.filter((run) => run.engine === 'finance');
   const primaryFinanceRun = financeRuns[0];
   const defaultScope = firstFinanceScope(primaryFinanceRun);
   const contextId = primaryFinanceRun?.finance_context_id;
-  const citedFactIds = explicitFactIds(draft, body);
+  const effectiveRunIds = recovery?.run_ids ?? draft?.run_ids ?? [];
+  const effectiveClaims = recovery ? (recovery.claims ?? []) : (draft?.claims ?? []);
+  const citedFactIds = explicitFactIds(recovery ? undefined : draft, body, recovery?.fact_ids);
   const boundDatasetIds = Array.from(new Set(draftRuns.flatMap((run) => Object.values(run.bindings ?? {}))));
   const sourceDatasets = datasets.filter((source) => boundDatasetIds.includes(source.id));
-  const materialitySpec = materialityToSpec(materiality);
+  const materialitySpec = recovery?.materiality ?? materialityToSpec(materiality);
   const materialityChanged = !sameMateriality(materiality, draft?.materiality);
   const materialityError = materiality.relative.trim().startsWith('-') ? '相对阈值不能为负数。0.1 表示 10%。' : '';
   const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
-    || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id)));
-  useEffect(() => { onEdit({ title, body, limitations, review, materiality }); }, [title, body, limitations, review, materiality, onEdit]);
+    || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || recovery));
+  useEffect(() => { onEdit({ title, body, limitations, review, materiality, recovery }); }, [title, body, limitations, review, materiality, recovery, onEdit]);
   useEffect(() => {
     setTitle(edit?.title ?? draft?.title ?? '经营分析');
     setBody(edit?.body ?? draft?.body ?? '');
     setLimitations(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
     setReview(edit?.review ?? draft?.review_status ?? 'unreviewed');
     setMateriality(edit?.materiality ?? materialityToEdit(draft?.materiality));
-    setQuality((draft?.quality as ExplanationQuality | undefined) ?? null);
-    setQualityState('idle');
+    setRecovery(edit?.recovery ?? null);
+    const restoredUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
+    setQuality(restoredUnsaved ? null : (draft?.quality as ExplanationQuality | undefined) ?? null);
+    setQualityState(restoredUnsaved ? 'stale' : 'idle');
     setUpdatedRequirementsId(null);
     setFacts([]); setFactDetails({}); setBackgrounds([]); setToolError(''); setBackgroundMessage('');
     setBackgroundScope(scopeToFields(defaultScope)); setScopeJson(JSON.stringify(defaultScope, null, 2));
     qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1;
   }, [draft?.id]);
+  const loadRecoveries = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall) return;
+    const request = ++recoveryRequest.current;
+    setRecoveryError('');
+    try {
+      const answer = await api.financeCall(taskId, 'finance-completion-recoveries');
+      if (request !== recoveryRequest.current) return;
+      const result = unwrap(answer as Answer<{ recoveries?: FinanceCompletionRecovery[] }>);
+      setRecoveries((result.recoveries ?? []).filter(isVisibleRecovery));
+    } catch (failure) {
+      if (request === recoveryRequest.current) {
+        setRecoveries([]);
+        setRecoveryError(failure instanceof Error ? failure.message : String(failure));
+      }
+    }
+  }, [taskId]);
+  useEffect(() => {
+    void loadRecoveries();
+    return () => { recoveryRequest.current += 1; };
+  }, [loadRecoveries]);
   useEffect(() => {
     if (Object.values(backgroundScope).some(Boolean)) return;
     const next = scopeToFields(defaultScope);
@@ -1151,23 +1184,27 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
   }, [draft?.id, taskId]);
   const changed = !draft || title !== draft.title || body !== draft.body || limitations !== draft.limitations.join('\n') || review !== draft.review_status
-    || Boolean(updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || materialityChanged;
+    || Boolean(updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || materialityChanged || Boolean(recovery);
+  const canLoadRecovery = !hasMeaningfulUnsavedDraft(draft, { title, body, limitations, review, materiality, recovery }, materialityChanged);
   function spec(publication: 'draft' | 'archived') {
-    return { title: title.trim(), body, run_ids: draft?.run_ids ?? [], claims: draft?.claims ?? [], ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
-      ...(draft ? { parent_id: draft.id } : {}), ...(updatedRequirementsId ? { requirements_id: updatedRequirementsId } : {}), materiality: materialitySpec, publication_status: publication, review_status: review,
+    const parentId = recovery ? recovery.parent_id : draft?.id;
+    return { title: title.trim(), body, run_ids: effectiveRunIds, claims: effectiveClaims, ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
+      ...(parentId ? { parent_id: parentId } : {}),
+      ...((updatedRequirementsId ?? recovery?.requirements_id) ? { requirements_id: updatedRequirementsId ?? recovery?.requirements_id } : {}),
+      materiality: materialitySpec, publication_status: publication, review_status: review,
       limitations: limitations.split('\n').map((line) => line.trim()).filter(Boolean) };
   }
   async function recheck() {
-    if (!draft) return;
+    if (!draft && !recovery) return;
     const api = bridge(); if (!api?.financeCall) { setQualityState('unavailable'); return; }
     const request = ++qualityRequest.current;
     try {
       setQualityState('checking'); setToolError('');
-      const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids, materiality: materialitySpec }) as Answer<ExplanationPreparation>);
+      const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: effectiveRunIds, materiality: materialitySpec }) as Answer<ExplanationPreparation>);
       if (request !== qualityRequest.current) return;
       setFacts(prepared.facts ?? []);
-      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { draft_id: draft.id, body, run_ids: draft.run_ids, fact_ids: explicitFactIds(draft, body), claims: draft.claims,
-        ...(updatedRequirementsId ? { requirements_id: updatedRequirementsId } : {}), materiality: materialitySpec }) as Answer<ExplanationQuality>);
+      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { ...(recovery ? {} : { draft_id: draft!.id }), body, run_ids: effectiveRunIds, fact_ids: explicitFactIds(recovery ? undefined : draft, body, recovery?.fact_ids), claims: effectiveClaims,
+        ...((updatedRequirementsId ?? recovery?.requirements_id) ? { requirements_id: updatedRequirementsId ?? recovery?.requirements_id } : {}), materiality: materialitySpec }) as Answer<ExplanationQuality>);
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
     } catch (failure) {
@@ -1224,7 +1261,21 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     setMateriality(next);
     markQualityStale();
   }
+  function loadRecovery(next: FinanceCompletionRecovery) {
+    if (!canLoadRecovery) return;
+    setRecovery(next);
+    setTitle(next.title?.trim() || title);
+    setBody(next.body ?? '');
+    setLimitations(Array.isArray(next.limitations) ? next.limitations.join('\n') : textValue(next.limitations ?? ''));
+    if (next.materiality) setMateriality(materialityToEdit(next.materiality));
+    setReview('unreviewed');
+    setEditing(true);
+    markQualityStale();
+  }
   return <div className="analysis-draft">
+    <CompletionRecoveriesPanel recoveries={recoveries} error={recoveryError} disabled={busy || !canLoadRecovery} onRetry={() => void loadRecoveries()} onLoad={loadRecovery} />
+    {recoveries.length > 0 && !canLoadRecovery && <p className="analysis-note">当前有未保存输入；保存或放弃当前修改后再载入恢复稿，避免覆盖你的编辑。</p>}
+    {recovery && <p role="status" className="analysis-message">已载入未保存恢复稿，尚未检查；保存后才会成为新的文稿版本。</p>}
     {bridge()?.financeCall && <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
       onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
       onDiscuss={onDiscussRequirements} />}
@@ -1362,12 +1413,53 @@ function parseObject(value: string, label: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function explicitFactIds(draft: AnalysisDraft | undefined, body: string): string[] {
+function explicitFactIds(draft: AnalysisDraft | undefined, body: string, extraFactIds: string[] = []): string[] {
   const fromDraft = draft?.fact_ids ?? [];
   const fromBody = Array.from(body.matchAll(/\{\{\s*fact:([A-Za-z0-9_.:-]+)\s*\}\}/g), (match) => match[1]);
-  return Array.from(new Set([...fromDraft, ...fromBody].filter(Boolean)));
+  return Array.from(new Set([...fromDraft, ...extraFactIds, ...fromBody].filter(Boolean)));
 }
 
+function isVisibleRecovery(item: FinanceCompletionRecovery): boolean {
+  return ['timed_out', 'cancelled', 'failed', 'needs_review', 'awaiting_input'].includes(item.status)
+    && Boolean(String(item.body ?? item.title ?? '').trim());
+}
+
+function recoveryLimitationsText(value: FinanceCompletionRecovery['limitations']): string {
+  return Array.isArray(value) ? value.filter(Boolean).join('；') : textValue(value ?? '');
+}
+
+function hasMeaningfulUnsavedDraft(draft: AnalysisDraft | undefined, edit: DraftEdit, materialityChanged: boolean): boolean {
+  if (draft) {
+    return draftEditDiffers(draft, edit) || materialityChanged || Boolean(edit.recovery);
+  }
+  return Boolean(edit.body.trim() || edit.limitations.trim() || (edit.title.trim() && edit.title.trim() !== '经营分析') || edit.recovery);
+}
+
+function draftEditDiffers(draft: AnalysisDraft, edit: DraftEdit): boolean {
+  return edit.title !== draft.title || edit.body !== draft.body || edit.limitations !== draft.limitations.join('\n')
+    || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality) || Boolean(edit.recovery);
+}
+
+function recoveryStatusLabel(status: string): string {
+  return ({ timed_out: '超时', cancelled: '已取消', failed: '失败', needs_review: '待审阅', awaiting_input: '等待输入' } as Record<string, string>)[status] ?? status;
+}
+
+function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry, onLoad }: {
+  recoveries: FinanceCompletionRecovery[]; error?: string; disabled: boolean; onRetry(): void; onLoad(recovery: FinanceCompletionRecovery): void;
+}) {
+  if (!recoveries.length && !error) return null;
+  return <details className="analysis-details analysis-recovery-panel">
+    <summary>可恢复的未保存文稿 · {recoveries.length} 条</summary>
+    <p className="analysis-note">这些内容来自已终止但尚未落成文稿版本的操作。载入后只是可编辑副本，需要你检查并保存。</p>
+    {error && <p role="alert" className="analysis-message analysis-message--error">恢复稿读取失败：{error} <button type="button" className="fnd-button" onClick={onRetry}>重试</button></p>}
+    <div className="analysis-history-list">{recoveries.map((item) => <div className="analysis-history-row analysis-history-row--static" key={item.operation_id}>
+      <span>{item.title?.trim() || '未命名恢复稿'}</span>
+      <span>{recoveryStatusLabel(item.status)}{item.updated_at ? ` · ${when(item.updated_at)}` : ''}{item.revision ? ` · ${item.revision}` : ''}</span>
+      <span>{recoveryLimitationsText(item.limitations) || `${item.run_ids?.length ?? 0} 次运行 · ${item.fact_ids?.length ?? 0} 条事实`}</span>
+      <button type="button" className="fnd-button" disabled={disabled} onClick={() => onLoad(item)}>载入可编辑副本</button>
+    </div>)}</div>
+  </details>;
+}
 
 function qualityStateFromResult(value: ExplanationQuality): 'passed' | 'issues' | 'unavailable' {
   if (value.status === 'pass') return 'passed';

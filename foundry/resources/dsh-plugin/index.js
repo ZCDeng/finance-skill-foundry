@@ -90,6 +90,15 @@ function foundry(args, exec, requireSession = false) {
   return result.stdout;
 }
 
+function cancelledFoundryError(cause) {
+  const message = cause instanceof Error ? cause.message : String(cause ?? "operation cancelled");
+  const error = new Error(message || "operation cancelled");
+  error.name = "FoundryCancelled";
+  error.cancelled = true;
+  error.refused = false;
+  return error;
+}
+
 /** Analysis calls must leave the harness event loop free for sibling sessions. */
 export function invokeFoundry(args, exec) {
   if (!sessionOf(exec)) {
@@ -101,11 +110,20 @@ export function invokeFoundry(args, exec) {
   }
   const varRoot = process.env.FOUNDRY_VAR;
   if (!varRoot) return Promise.reject(new Error("FOUNDRY_VAR is required"));
+  if (exec?.signal?.aborted) return Promise.reject(cancelledFoundryError(exec.signal.reason));
   return new Promise((resolve, reject) => {
-    execFile(process.env.FOUNDRY_BIN ?? "foundry", ["--var", varRoot, ...bindingArgs(exec), ...args], {
+    let settled = false;
+    const abort = () => {
+      if (settled) return;
+      child.kill("SIGKILL");
+    };
+    const child = execFile(process.env.FOUNDRY_BIN ?? "foundry", ["--var", varRoot, ...bindingArgs(exec), ...args], {
       encoding: "utf8", timeout: Number(process.env.FOUNDRY_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS),
       killSignal: "SIGKILL", maxBuffer: MAX_BUFFER,
     }, (failure, stdout, stderr) => {
+      settled = true;
+      exec?.signal?.removeEventListener?.("abort", abort);
+      if (exec?.signal?.aborted) return reject(cancelledFoundryError(exec.signal.reason));
       if (!failure) return resolve(stdout);
       const error = new Error(stderr || stdout || failure.message);
       error.name = failure.code === REFUSED ? "FoundryRefusal" : "FoundryError";
@@ -113,6 +131,7 @@ export function invokeFoundry(args, exec) {
       error.refused = failure.code === REFUSED;
       reject(error);
     });
+    exec?.signal?.addEventListener?.("abort", abort, { once: true });
   });
 }
 

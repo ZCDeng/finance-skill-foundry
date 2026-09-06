@@ -647,6 +647,8 @@ class AnalysisStore:
             requirements_id=requirements_id,
             materiality=materiality,
             completion_request_key=spec.get("completion_request_key"),
+            completion_operation_id=spec.get("completion_operation_id"),
+            completion_operation_revision=spec.get("completion_operation_revision"),
             source_read_failures=source_read_failures,
             evidence_appendix=spec.get("evidence_appendix", parent.get("evidence_appendix", "")),
             title=title,

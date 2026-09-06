@@ -144,15 +144,24 @@ else:
 def test_timeout_reaps_process_even_with_closed_streams(workspace: Path, close_streams: bool) -> None:
     result = runner.run_script(workspace, f'''
 import os, time
-open("pid.txt", "w").write(str(os.getpid()))
+with open("pid.txt", "w") as pid_file:
+    pid_file.write(str(os.getpid()))
+    pid_file.flush()
+    os.fsync(pid_file.fileno())
 if {close_streams!r}:
     os.close(1)
     os.close(2)
+with open("ready.txt", "w") as ready_file:
+    ready_file.write("ready")
+    ready_file.flush()
+    os.fsync(ready_file.fileno())
 time.sleep(10)
-''', timeout=0.25)
+''', timeout=1)
     assert result["status"] == "timeout", result
     assert result["exit_code"] == -signal.SIGKILL
-    pid = int((Path(result["workspace"]) / "pid.txt").read_text())
+    scratch = Path(result["workspace"])
+    assert (scratch / "ready.txt").read_text() == "ready"
+    pid = int((scratch / "pid.txt").read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
     assert result["duration_seconds"] < 3

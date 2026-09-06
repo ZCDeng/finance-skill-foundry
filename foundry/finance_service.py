@@ -613,9 +613,81 @@ class FinanceStore:
             visible = [r for r in visible if r.get("context_id") == spec["context_id"]]
         return {"requirements": visible, "current": visible[-1] if visible else None}
 
+    def save_completion_draft(self, operation_id, call_id, spec):
+        """Runtime-only automatic save; ordinary manager saves stay independent."""
+        from foundry.finance_completion_operations import CompletionOperationStore, TERMINAL
+        from foundry.finance_completion import record_completion
+        from foundry.locking import exclusive
+
+        if not self.session_id:
+            raise FoundryError("completion saves require a runtime session")
+        if not isinstance(spec, dict):
+            raise FoundryError("explanation draft spec must be an object")
+        self._reject_completion_authority(spec)
+        # Authorize referenced records before persisting a recoverable payload.
+        from foundry.finance_requirements import latest_requirements
+        requirements = latest_requirements(self.analysis)
+        if requirements:
+            self._authorize(requirements.get("bindings", {}))
+        if spec.get("requirements_id"):
+            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+        for claim in spec.get("claims", []):
+            if isinstance(claim, dict) and claim.get("dataset_id"):
+                self._authorize({"source": claim["dataset_id"]})
+        for run_id in spec.get("run_ids", []):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        if spec.get("parent_id"):
+            parent = self.analysis.get_draft(spec["parent_id"])
+            if parent.get("requirements_id"):
+                self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
+            for claim in parent.get("claims", []):
+                if isinstance(claim, dict) and claim.get("dataset_id"):
+                    self._authorize({"source": claim["dataset_id"]})
+            for run_id in parent.get("run_ids", []):
+                self._authorize(self.analysis.get_run(run_id)["bindings"])
+        operations = CompletionOperationStore(self.task, self.session_id, self.allowed)
+        with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
+            reserved = operations.reserve(operation_id, payload=spec, call_id=call_id)
+            attempt = reserved["attempt"]
+            key = _hash({"operation_id": operation_id, "call_id": call_id})
+            previous = next((row for row in self.analysis._list("drafts")
+                             if row.get("completion_request_key") == key), None)
+            if previous:
+                for run_id in previous.get("run_ids", []):
+                    self._authorize(self.analysis.get_run(run_id)["bindings"])
+                receipt = (self.analysis._get("completions", attempt["completion_id"])
+                           if attempt.get("completion_id") else
+                           record_completion(self.analysis, previous, previous["explanation_check"]))
+                operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
+                return {**previous, "completion": receipt, "completion_operation": operation,
+                        "replayed": True, "validation_basis": "saved_draft_version"}
+
+            def check_deadline():
+                operation = operations.get(operation_id)
+                if operation["status"] in TERMINAL:
+                    raise FoundryError("completion operation stopped: " + str(operation.get("stop_reason")))
+
+            check_deadline()
+            result = self._save_explanation_draft(
+                {**spec, "completion_request_key": key,
+                 "completion_operation_id": operation_id,
+                 "completion_operation_revision": attempt["revision"]},
+                check_deadline=check_deadline,
+            )
+            operation = operations.settle(operation_id, attempt["revision"], result, result["completion"])
+            return {**result, "completion_operation": operation}
+
+    @staticmethod
+    def _reject_completion_authority(spec):
+        forbidden = {"operation_id", "operation_revision", "operation_intent", "operation_payload_hash",
+                     "completion_operation_id", "completion_operation_revision", "completion_request_key"}
+        if forbidden.intersection(spec):
+            raise FoundryError("completion authority must come from the runtime, not draft spec")
+
     def save_explanation_draft(self, spec):
         if not isinstance(spec, dict):
             raise FoundryError("explanation draft spec must be an object")
+        self._reject_completion_authority(spec)
         from foundry.finance_requirements import latest_requirements
         from foundry.finance_completion import record_completion
         from foundry.locking import exclusive
@@ -642,7 +714,8 @@ class FinanceStore:
                         "validation_basis": "saved_draft_version"}
             return self._save_explanation_draft({**spec, "completion_request_key": key})
 
-    def _save_explanation_draft(self, spec):
+    def _save_explanation_draft(self, spec, *, check_deadline=lambda: None):
+        check_deadline()
         parent = (
             self.analysis.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         )
@@ -659,6 +732,7 @@ class FinanceStore:
             if run_ids
             else {"facts": []}
         )
+        check_deadline()
         body = spec.get("body", parent.get("body", ""))
         previous_appendix = parent.get("evidence_appendix", "")
         if previous_appendix and body.endswith(previous_appendix):
@@ -687,6 +761,7 @@ class FinanceStore:
                     try:
                         offset = 0
                         while True:
+                            check_deadline()
                             result = self.drilldown_fact({**{key: location[key] for key in ("run_id", "row", "column")},
                                                          "offset": offset, "limit": 1000})
                             if not result.get("has_more"):
@@ -719,6 +794,7 @@ class FinanceStore:
                         account_map_id=run.get("account_map_id"),
                     )
             claims.append(claim)
+        check_deadline()
         draft = self.analysis.save_draft(
             {
                 **spec,

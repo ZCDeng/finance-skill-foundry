@@ -166,6 +166,92 @@ process.stdout.write(JSON.stringify(results));
         assert value["filed"] == []
 
 
+def test_analysis_save_completion_runtime_uses_begin_bound_save_and_status(tmp_path: Path):
+    result = _node(tmp_path, f"""
+import {{ createCompletionRuntime }} from "{(PLUGIN / "completion-runtime.js").as_uri()}";
+const log = [];
+const deadline = new Date(Date.now() + 60_000).toISOString();
+const invoke = async (args, exec) => {{
+  log.push({{ args, session: exec?.agent?.id ?? null, callId: exec?.callId ?? null, hasSignal: Boolean(exec?.signal) }});
+  if (args[0] === 'finance-completion-begin') return JSON.stringify({{ id: 'a'.repeat(32), deadline_at: deadline, status: 'running' }});
+  if (args[0] === 'finance-completion-status') return JSON.stringify({{ id: 'a'.repeat(32), status: 'complete' }});
+  if (args[0] === 'save-explanation-draft') return JSON.stringify({{ saved: true }});
+  throw new Error('unexpected command ' + args[0]);
+}};
+const ctx = {{ on: () => () => {{}} }};
+const runtime = {{ completion: createCompletionRuntime(ctx, invoke) }};
+const tools = Object.fromEntries(definitions(runtime, invoke).map((d) => [d.name, d]));
+const exec = {{
+  name: 'save_explanation_draft',
+  callId: 'tool-call-7',
+  agent: {{
+    id: 'analysis-session',
+    session: {{ events: [{{ type: 'user/message', seq: 7, data: {{ id: 'msg-7', source: {{ kind: 'user' }}, content: [{{ type: 'text', text: '请完成说明' }}] }} }}] }},
+  }},
+}};
+const output = await tools.save_explanation_draft.execute({{ spec: {{ body: '经理判断', claims: [] }} }}, exec);
+process.stdout.write(JSON.stringify({{ output, log }}));
+""")
+    assert result["output"]["tool"] == "save_explanation_draft"
+    assert json.loads(result["output"]["stdout"]) == {"saved": True}
+    assert [row["args"][0] for row in result["log"]] == [
+        "finance-completion-begin",
+        "save-explanation-draft",
+        "finance-completion-status",
+    ]
+    begin = json.loads(result["log"][0]["args"][2])
+    assert begin["request_key"] == "analysis-session:message:msg-7:seq:7"
+    save = result["log"][1]["args"]
+    assert save == [
+        "save-explanation-draft",
+        "--completion-operation",
+        "a" * 32,
+        "--completion-call-id",
+        "tool-call-7",
+        "--spec",
+        '{"body":"经理判断","claims":[]}',
+    ]
+    status = json.loads(result["log"][2]["args"][2])
+    assert status == {"operation_id": "a" * 32}
+    assert all(row["session"] == "analysis-session" for row in result["log"])
+    assert result["log"][1]["hasSignal"] is True
+
+
+def test_analysis_completion_wrapper_supersedes_on_non_save_tool(tmp_path: Path):
+    result = _node(tmp_path, f"""
+import {{ createCompletionRuntime }} from "{(PLUGIN / "completion-runtime.js").as_uri()}";
+const log = [];
+const deadline = new Date(Date.now() + 60_000).toISOString();
+const invoke = async (args, exec) => {{
+  log.push({{ args, name: exec?.name ?? null, callId: exec?.callId ?? null }});
+  if (args[0] === 'finance-completion-begin') return JSON.stringify({{ id: 'b'.repeat(32), deadline_at: deadline, status: 'running' }});
+  if (args[0] === 'finance-completion-status') return JSON.stringify({{ id: 'b'.repeat(32), status: 'repair_available' }});
+  if (args[0] === 'finance-completion-stop') return JSON.stringify({{ stopped: true }});
+  if (args[0] === 'save-explanation-draft') return JSON.stringify({{ saved: true }});
+  if (args[0] === 'analysis-state') return JSON.stringify({{ state: true }});
+  throw new Error('unexpected command ' + args[0]);
+}};
+const runtime = {{ completion: createCompletionRuntime({{ on: () => () => {{}} }}, invoke) }};
+const tools = Object.fromEntries(definitions(runtime, invoke).map((d) => [d.name, d]));
+const events = [{{ type: 'user/message', seq: 1, data: {{ id: 'msg-1', source: {{ kind: 'user' }}, content: [{{ type: 'text', text: '先保存' }}] }} }}];
+const agent = {{ id: 'analysis-session', session: {{ events }} }};
+await tools.save_explanation_draft.execute({{ spec: {{ body: '草稿', claims: [] }} }}, {{ name: 'save_explanation_draft', callId: 'save-1', agent }});
+events.push({{ type: 'user/message', seq: 2, data: {{ id: 'msg-2', source: {{ kind: 'user' }}, content: [{{ type: 'text', text: '换个问题' }}] }} }});
+const output = await tools['analysis-state'].execute({{}}, {{ name: 'analysis-state', callId: 'state-1', agent }});
+process.stdout.write(JSON.stringify({{ output, log }}));
+""")
+    assert json.loads(result["output"]["stdout"]) == {"state": True}
+    assert [row["args"][0] for row in result["log"]] == [
+        "finance-completion-begin",
+        "save-explanation-draft",
+        "finance-completion-status",
+        "finance-completion-stop",
+        "analysis-state",
+    ]
+    stop = json.loads(result["log"][3]["args"][2])
+    assert stop == {"operation_id": "b" * 32, "reason": "superseded"}
+
+
 def test_analysis_refuses_unbound_calls_and_model_supplied_context(tmp_path: Path):
     result = _node(tmp_path, """
 const tools = Object.fromEntries(definitions().map((d) => [d.name, d]));

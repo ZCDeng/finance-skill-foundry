@@ -43,22 +43,22 @@ function mount(overrides: Partial<Bridge> = {}) {
   render(<App />);
   return api;
 }
-function openTool(name: '任务记录与旧版流程' | '数据台') {
-  fireEvent.click(screen.getByRole('button', { name: '任务工具' }));
-  fireEvent.click(screen.getByRole('button', { name }));
+async function openTool(name: '任务记录与旧版流程' | '数据台') {
+  fireEvent.click(await screen.findByRole('button', { name: '任务工具' }));
+  fireEvent.click(await screen.findByRole('button', { name }));
 }
-function selectTask(row: TaskRow) {
+async function selectTask(row: TaskRow) {
   fireEvent.click(screen.getByRole('button', { name: '工作区' }));
-  fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
-  fireEvent.click(screen.getByRole('button', { name: row.title }));
+  fireEvent.click(await screen.findByRole('button', { name: '展开任务列表' }));
+  fireEvent.click(await screen.findByRole('button', { name: row.title }));
 }
 async function openInitialHistory() {
   await screen.findByRole('heading', { name: a.title });
-  openTool('任务记录与旧版流程');
+  await openTool('任务记录与旧版流程');
 }
 async function openBHistory() {
-  selectTask(b);
-  openTool('任务记录与旧版流程');
+  await selectTask(b);
+  await openTool('任务记录与旧版流程');
   await screen.findByRole('heading', { name: b.title });
 }
 afterEach(() => {
@@ -85,7 +85,7 @@ describe('task history response ownership', () => {
     expect(screen.queryByRole('heading', { name: a.title })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));
-    openTool('数据台');
+    await openTool('数据台');
     expect(await screen.findByText('bbbbbb · locked')).toBeTruthy();
     await act(async () => currentA.resolve(ok(detail(a))));
     expect(screen.getByText('bbbbbb · locked')).toBeTruthy();
@@ -111,7 +111,7 @@ describe('task history response ownership', () => {
     expect(api.task).toHaveBeenCalledTimes(readsBeforeCompletion);
 
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));
-    openTool('数据台');
+    await openTool('数据台');
     expect(screen.getByText('bbbbbb · locked')).toBeTruthy();
   });
 

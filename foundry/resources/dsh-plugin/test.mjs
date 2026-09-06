@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { REFUSED, apply, definitions, f3Denied, inject, readReceipt, registerTools } from "./index.js";
+import { REFUSED, apply, definitions, f3Denied, inject, invokeFoundry, readReceipt, registerTools } from "./index.js";
 
 const ROSTER = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).dsh.foundry.tools;
 
@@ -67,6 +67,7 @@ writeFileSync(
     "#!/usr/bin/env node",
     'import { appendFileSync } from "node:fs";',
     "const args = process.argv.slice(2);",
+    "if (process.env.FOUNDRY_PID_LOG) appendFileSync(process.env.FOUNDRY_PID_LOG, String(process.pid) + '\\n');",
     "appendFileSync(process.env.FOUNDRY_LOG, JSON.stringify(args) + '\\n');",
     "if (process.env.FOUNDRY_FAIL_COMMAND && args.includes(process.env.FOUNDRY_FAIL_COMMAND)) {",
     "  console.error('boom stderr');",
@@ -86,6 +87,7 @@ const oldEnv = {
   FOUNDRY_BIN: process.env.FOUNDRY_BIN,
   FOUNDRY_VAR: process.env.FOUNDRY_VAR,
   FOUNDRY_LOG: process.env.FOUNDRY_LOG,
+  FOUNDRY_PID_LOG: process.env.FOUNDRY_PID_LOG,
   FOUNDRY_FAIL_COMMAND: process.env.FOUNDRY_FAIL_COMMAND,
   FOUNDRY_FAIL_STATUS: process.env.FOUNDRY_FAIL_STATUS,
   FOUNDRY_HANG_COMMAND: process.env.FOUNDRY_HANG_COMMAND,
@@ -103,6 +105,25 @@ const tools = Object.fromEntries(registerTools().map((tool) => [tool.name, tool]
 
 /** One call, with no agent behind it. The registry hands `execute` two arguments. */
 const call = (toolName, input = {}, exec = {}) => tools[toolName].execute(input, exec);
+const asyncCall = (args, exec = { agent: { id: "sess-direct" } }) => invokeFoundry(args, exec);
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitFor(read, message, timeoutMs = 3000) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const value = read();
+    if (value) return value;
+    await delay(25);
+  }
+  throw new Error(message);
+}
+function logLines(path) {
+  try { return readFileSync(path, "utf8").trim().split("\n").filter(Boolean); }
+  catch { return []; }
+}
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
 
 const named = '[{"id":"gl","path":"gl.xlsx"}]';
 await call("create");
@@ -287,6 +308,58 @@ process.env.FOUNDRY_TIMEOUT_MS = "400";
 await assert.rejects(() => call("emit-brief"), /ETIMEDOUT/);
 delete process.env.FOUNDRY_HANG_COMMAND;
 delete process.env.FOUNDRY_TIMEOUT_MS;
+
+{
+  const mark = logLines(log).length;
+  assert.equal(await asyncCall(["emit-brief"]), "ok stdout");
+  const line = JSON.parse(logLines(log).at(-1));
+  assert.deepEqual(line, ["--var", process.env.FOUNDRY_VAR, "--session", "sess-direct", "emit-brief"]);
+  assert.equal(logLines(log).length, mark + 1, "normal async calls still reach foundry once");
+}
+
+{
+  const controller = new AbortController();
+  controller.abort(new Error("already cancelled"));
+  const mark = logLines(log).length;
+  await assert.rejects(
+    () => asyncCall(["emit-brief"], { agent: { id: "sess-preabort" }, signal: controller.signal }),
+    (error) => {
+      assert.equal(error.name, "FoundryCancelled");
+      assert.equal(error.cancelled, true);
+      assert.match(error.message, /already cancelled/);
+      return true;
+    },
+  );
+  assert.equal(logLines(log).length, mark, "pre-aborted async calls must not start foundry");
+}
+
+{
+  const pidLog = join(tmp, "pid.log");
+  process.env.FOUNDRY_PID_LOG = pidLog;
+  process.env.FOUNDRY_HANG_COMMAND = "emit-brief";
+  process.env.FOUNDRY_TIMEOUT_MS = "60000";
+  const controller = new AbortController();
+  const promise = asyncCall(["emit-brief"], { agent: { id: "sess-abort" }, signal: controller.signal });
+  const pid = Number(await waitFor(() => {
+    const value = Number(logLines(pidLog).at(-1));
+    return value && processAlive(value) ? value : null;
+  }, "hanging foundry process did not start and stay alive"));
+  controller.abort(new Error("completion deadline exceeded"));
+  await assert.rejects(
+    () => promise,
+    (error) => {
+      assert.equal(error.name, "FoundryCancelled");
+      assert.equal(error.cancelled, true);
+      assert.equal(error.refused, false);
+      assert.match(error.message, /completion deadline exceeded/);
+      return true;
+    },
+  );
+  await waitFor(() => !processAlive(pid), "aborted foundry process was not terminated");
+  delete process.env.FOUNDRY_PID_LOG;
+  delete process.env.FOUNDRY_HANG_COMMAND;
+  delete process.env.FOUNDRY_TIMEOUT_MS;
+}
 
 process.env.FOUNDRY_BIN = join(tmp, "no-such-foundry");
 await assert.rejects(() => call("lock"), /ENOENT/);

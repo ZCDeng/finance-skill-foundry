@@ -31,15 +31,21 @@ OPERATIONS = {
     "finance-scenario-run": "run_scenario",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
-LIST_COMMANDS = {"list-finance-context", "finance-source-list"}
-COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, "finance-source-refresh"}
+LIST_COMMANDS = {"list-finance-context", "finance-source-list", "finance-completion-recoveries"}
+COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
+COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh"}
 
 
 def add_parsers(sub):
     for command in sorted(LIST_COMMANDS):
         sub.add_parser(command)
     for command in sorted(COMMANDS - LIST_COMMANDS):
-        sub.add_parser(command).add_argument("--spec", required=True)
+        parser = sub.add_parser(command)
+        parser.add_argument("--spec", required=True)
+        if command == "save-explanation-draft":
+            # Runtime-injected CLI coordinates, never model spec fields.
+            parser.add_argument("--completion-operation")
+            parser.add_argument("--completion-call-id")
 
 
 def _refresh_source(context, spec):
@@ -81,7 +87,33 @@ def dispatch(args):
         raise FoundryError("finance analysis requires a task")
     service = FinanceStore(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
                            session_id=context.session_id, context_revision=context.context_revision)
-    if args.cmd == "list-finance-context":
+    if args.cmd == "finance-completion-recoveries":
+        if context.session_id:
+            raise FoundryError("completion recovery requires the task editor")
+        from foundry.finance_completion_operations import list_completion_recoveries
+        result = list_completion_recoveries(context.task)
+    elif args.cmd in COMPLETION_COMMANDS:
+        if not context.session_id:
+            raise FoundryError("completion operations require a registered runtime session")
+        from foundry.finance_completion_operations import CompletionOperationStore
+        operations = CompletionOperationStore(context.task, context.session_id, context.snapshot_ids)
+        spec = _json(args.spec, "completion runtime spec")
+        if args.cmd == "finance-completion-begin":
+            result = operations.begin(spec.get("request_key"), policy=spec.get("policy"))
+        elif args.cmd == "finance-completion-status":
+            result = operations.get(spec.get("operation_id"))
+        else:
+            result = operations.stop(spec.get("operation_id"), spec.get("reason"))
+    elif args.cmd == "save-explanation-draft" and getattr(args, "completion_operation", None):
+        if not context.session_id or not args.completion_call_id:
+            raise FoundryError("runtime completion save requires session and call id")
+        result = service.save_completion_draft(
+            args.completion_operation, args.completion_call_id,
+            _json(args.spec, "finance spec"),
+        )
+    elif args.cmd == "save-explanation-draft" and getattr(args, "completion_call_id", None):
+        raise FoundryError("completion call id requires an operation")
+    elif args.cmd == "list-finance-context":
         result = service.list_finance_context()
     elif args.cmd == "finance-source-list":
         batches = SourceRefreshService(context.task).batches()

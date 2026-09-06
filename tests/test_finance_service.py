@@ -440,3 +440,81 @@ def test_saved_draft_reuses_equivalent_requirement_run_with_actual_checks(financ
     assert draft['explanation_check']['requirements']['provenance']['status'] == 'pass'
     assert draft['completion']['status'] == 'complete'
     assert draft['completion']['reused_run_ids'] == [run['id']]
+
+
+@pytest.mark.parametrize("field", ["operation_id", "operation_intent", "completion_request_key"])
+def test_model_cannot_declare_completion_authority(finance, field):
+    service, _ = finance
+    with pytest.raises(FoundryError, match="authority"):
+        service.save_explanation_draft({"title": "稿", "body": "继续讨论", field: "manager_save"})
+    assert service.analysis.state()["drafts"] == []
+
+
+def test_runtime_completion_save_replays_and_manager_remains_free(finance, monkeypatch):
+    from foundry.finance_completion_operations import CompletionOperationStore
+    service, _ = finance
+    service.session_id = "trusted-test-runtime"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("user-message-1", policy={"max_repairs": 0})
+    spec = {"title": "待核对", "body": "资料有待进一步核查。"}
+    first = service.save_completion_draft(operation["id"], "runtime-call-1", spec)
+    assert first["completion_operation"]["status"] == "needs_review"
+    from foundry import finance_completion
+    with monkeypatch.context() as patch:
+        def no_recalculation(*args, **kwargs):
+            raise AssertionError("settled replay must use its original completion receipt")
+        patch.setattr(finance_completion, "record_completion", no_recalculation)
+        again = service.save_completion_draft(operation["id"], "runtime-call-1", spec)
+    assert again["completion"]["id"] == first["completion"]["id"]
+    assert again["id"] == first["id"]
+    assert again["replayed"] is True
+    with pytest.raises(FoundryError):
+        service.save_completion_draft(operation["id"], "runtime-call-2", {**spec, "body": "自动再修"})
+    manual = service.save_explanation_draft({**spec, "body": "经理补充判断，仍可保存。"})
+    assert manual["id"] != first["id"]
+    assert len(service.analysis.state()["drafts"]) == 2
+
+
+def test_runtime_completion_payload_conflict_and_session_mismatch(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+    service, _ = finance
+    service.session_id = "runtime-a"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message")
+    spec = {"title": "说明", "body": "待核查"}
+    service.save_completion_draft(operation["id"], "call-1", spec)
+    with pytest.raises(FoundryError, match="conflict"):
+        service.save_completion_draft(operation["id"], "call-1", {**spec, "body": "不同正文"})
+    service.session_id = "runtime-b"
+    with pytest.raises(FoundryError, match="session"):
+        service.save_completion_draft(operation["id"], "call-2", spec)
+
+
+def test_completion_deadline_keeps_saved_draft_and_pending_body(finance, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from foundry import finance_completion_operations as module
+    service, context = finance
+    previous = service.save_explanation_draft({"title": "已有成果", "body": "经理原有记录。"})
+    run = service.explain_variance({"context_id": context["id"]})
+    service.session_id = "deadline-runtime"
+    moment = [datetime(2026, 9, 7, tzinfo=timezone.utc)]
+    monkeypatch.setattr(module, "_utc_now", lambda clock: moment[0])
+    operations = module.CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("user-event", policy={"timeout_seconds": 1})
+    prepare = service.prepare_explanation
+
+    def slow_prepare(spec):
+        result = prepare(spec)
+        moment[0] += timedelta(seconds=2)
+        return result
+
+    monkeypatch.setattr(service, "prepare_explanation", slow_prepare)
+    payload = {"title": "正在形成的说明", "body": "这段新正文需要保留。", "run_ids": [run["id"]]}
+    with pytest.raises(FoundryError, match="stopped.*timeout"):
+        service.save_completion_draft(operation["id"], "save-call", payload)
+    stopped = operations.get(operation["id"])
+    assert stopped["status"] == "timed_out"
+    assert stopped["revisions"][0]["payload"]["body"] == payload["body"]
+    assert service.analysis.state()["drafts"][-1]["id"] == previous["id"]
+    manual = service.save_explanation_draft({"title": "经理继续记录", "body": "超时后仍能编辑保存。"})
+    assert manual["id"] != previous["id"]

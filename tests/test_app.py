@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,67 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
 NPX = shutil.which("npx")
+NODE = shutil.which("node")
+APP_LOG_DIR = ROOT / "build" / "verification" / "app-tests"
+
+
+def _summarize_output(text: str, *, head: int = 2000, tail: int = 6000) -> str:
+    if len(text) <= head + tail:
+        return text
+    omitted = len(text) - head - tail
+    return f"{text[:head]}\n\n... <omitted {omitted} chars; full log persisted> ...\n\n{text[-tail:]}"
+
+
+def _available_parallelism() -> str:
+    if NODE is None:
+        return "unknown"
+    result = subprocess.run(
+        [NODE, "-e", "const os=require('node:os'); console.log(os.availableParallelism?.() ?? os.cpus().length)"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+
+
+def _coerce_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _run_logged(name: str, args: list[str], *, timeout: int = 600) -> tuple[subprocess.CompletedProcess[str], Path]:
+    APP_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log = APP_LOG_DIR / f"{name}-{time.time_ns()}.log"
+    try:
+        result = subprocess.run(
+            args,
+            cwd=APP,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        stdout = result.stdout
+        stderr = result.stderr
+        returncode = result.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout = _coerce_output(exc.stdout)
+        stderr = _coerce_output(exc.stderr)
+        returncode = -1
+        stderr += f"\nTimed out after {timeout}s"
+        result = subprocess.CompletedProcess(args, returncode, stdout, stderr)
+    log.write_text(
+        "$ " + " ".join(args) + "\n"
+        + f"cwd={APP}\n"
+        + f"returncode={returncode}\n"
+        + f"availableParallelism={_available_parallelism()}\n"
+        + "\n--- stdout ---\n" + stdout
+        + "\n--- stderr ---\n" + stderr,
+        encoding="utf-8",
+    )
+    return result, log
 
 needs_app = pytest.mark.skipif(
     NPX is None or not (APP / "node_modules").is_dir(),
@@ -25,14 +87,9 @@ needs_app = pytest.mark.skipif(
 
 @needs_app
 def test_app_suite_runs() -> None:
-    result = subprocess.run(
-        [NPX, "vitest", "run"],
-        cwd=APP,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    result, log_path = _run_logged("vitest-run", [NPX, "vitest", "run", "--maxWorkers=2"])
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"full vitest log: {log_path}\n{_summarize_output(output)}"
 
 
 @needs_app
@@ -44,14 +101,9 @@ def test_app_typechecks() -> None:
     emits, so a break there is a build that ships nothing.
     """
     for project in ("tsconfig.json", "tsconfig.electron.json"):
-        result = subprocess.run(
-            [NPX, "tsc", "-p", project, "--noEmit"],
-            cwd=APP,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        assert result.returncode == 0, f"{project}: {result.stdout[-4000:]}"
+        result, log_path = _run_logged(f"tsc-{project.replace('/', '-')}", [NPX, "tsc", "-p", project, "--noEmit"])
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, f"{project}: full tsc log: {log_path}\n{_summarize_output(output)}"
 
 
 def test_the_app_is_a_caller_not_a_mutator() -> None:
