@@ -383,3 +383,35 @@ def test_replay_marks_historical_validation_and_authorizes_original_scope(financ
     with pytest.raises(FoundryError, match='outside'):
         restricted.save_explanation_draft({'parent_id': draft['id']})
     assert draft['requirements_id'] == requirement['id']
+
+
+def test_completion_requests_fresh_run_after_requirements_revision(finance):
+    from foundry.finance_completion import record_completion
+
+    service, context = finance
+    old_run = service.explain_variance({'context_id': context['id']})
+    requirement = service.analysis_requirements_save({
+        'question': '解释利润变化', 'context_id': context['id'],
+        'items': [{'id': 'profit', 'metric': 'profit'}],
+    })
+    quality = {
+        'status': 'pass', 'issues': [], 'checks': {},
+        'requirements': {'requirements_id': requirement['id'],
+                         'coverage': {'status': 'pass'}, 'provenance': {'status': 'pass'}},
+    }
+    draft = {'id': 'a' * 32, 'content_hash': 'old-run-draft', 'run_ids': [old_run['id']]}
+    stopped = record_completion(service.analysis, draft, quality)
+    assert stopped['status'] == 'repair_available'
+    assert stopped['actions'][0]['code'] == 'requirements_run_outdated'
+    assert stopped['actions'][0]['run_ids'] == [old_run['id']]
+    assert stopped['completion_policy_version'] == 2
+    assert record_completion(service.analysis, draft, quality)['id'] == stopped['id']
+
+    fresh_run = service.explain_variance({'context_id': context['id']})
+    assert fresh_run['output_hash'] == old_run['output_hash']
+    fresh = record_completion(service.analysis, {
+        'id': 'b' * 32, 'content_hash': 'fresh-run-draft', 'run_ids': [fresh_run['id']],
+    }, quality)
+    assert fresh['status'] == 'complete'
+    assert fresh['stop_reason'] == 'complete'
+    assert not fresh['actions']

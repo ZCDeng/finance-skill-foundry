@@ -52,6 +52,31 @@ def service(tmp_path):
     return store, context
 
 
+def _ratio_metric_store(tmp_path, rows, *, unit="万元"):
+    task = TaskStore(tmp_path / "ratio-var").create(title="ratio")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "ratio-ledger.json"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    dataset = analysis.add_dataset(path, name="ratio-ledger")
+    store = FinanceStore(task)
+    context = store.save_context(
+        {
+            "bindings": {"actual": dataset["id"]},
+            "scopes": {
+                "actual": {
+                    "ledger": "ratio-ledger",
+                    "organization": "华东",
+                    "period": "2026-08",
+                    "currency": "CNY",
+                    "unit": unit,
+                    "scenario": "actual",
+                }
+            },
+        }
+    )
+    return store, context
+
+
 def test_prepare_explanation_returns_stable_bound_facts_for_successful_runs(service):
     store, context = service
     run = store.explain_variance({"context_id": context["id"]})
@@ -289,6 +314,12 @@ def test_validate_explanation_flags_label_unit_and_direction_mismatch(service):
         "fact_unit_mismatch",
         "fact_direction_mismatch",
     }
+    mismatch = next(issue for issue in check["issues"] if issue["code"] == "fact_label_mismatch")
+    assert mismatch["text"] == "5"
+    assert "成本增加 5 元" in mismatch["body_excerpt"]
+    assert mismatch["expected_metric"] == "cost"
+    assert any("profit" in label for label in mismatch["matched_fact_labels"])
+    assert "profit" in mismatch["matched_fact_metrics"]
 
 
 def test_background_versions_match_scope_and_effective_period(service, tmp_path):
@@ -697,3 +728,403 @@ def test_sql_percentage_points_render_once_and_reject_hundredfold_body(service):
     for body, expected in [('成本率58.33%。', 'pass'), ('成本率5833%。', 'needs_attention')]:
         check = store.validate_explanation({'body': body, 'run_ids': [run['id']], 'fact_ids': [fact['id']]})
         assert check['status'] == expected
+
+
+def test_generic_calculation_row_uses_declared_column_types_for_missing_members(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{
+        "id": "typed-generic",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "ledger", "type": "VARCHAR"},
+                {"name": "organization", "type": "VARCHAR"},
+                {"name": "period", "type": "VARCHAR"},
+                {"name": "account_id", "type": "VARCHAR"},
+                {"name": "display_value", "type": "VARCHAR"},
+                {"name": "period_span", "type": "INTERVAL"},
+                {"name": "geo_point", "type": "POINT"},
+                {"name": "amount", "type": "DECIMAL(18,2)"},
+            ],
+            "rows": [{
+                "ledger": "L1",
+                "organization": "总部",
+                "period": "2026-08",
+                "account_id": "1001",
+                "display_value": "暂无金额",
+                "period_span": None,
+                "geo_point": None,
+                "amount": None,
+                "unit": "万元",
+            }],
+        },
+    }])
+
+    group = payload["evidence_groups"][0]
+    assert group["status"] == "missing_data"
+    assert [(member["column"], member["state"]) for member in group["members"]] == [("amount", "missing")]
+
+
+@pytest.mark.parametrize("identity_type", ["VARCHAR", "INTEGER"])
+def test_typed_identity_columns_do_not_become_amount_facts(service, identity_type):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{
+        "id": "typed-identities",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "ledger", "type": identity_type},
+                {"name": "account_id", "type": identity_type},
+                {"name": "period", "type": "VARCHAR"},
+                {"name": "amount", "type": "DECIMAL(18,2)"},
+                {"name": "numerator_exact", "type": "VARCHAR"},
+                {"name": "denominator_exact", "type": "VARCHAR"},
+                {"name": "ratio_exact", "type": "VARCHAR"},
+            ],
+            "rows": [{
+                "ledger": "202609",
+                "account_id": "1001",
+                "period": "2026-08",
+                "amount": "5",
+                "numerator_exact": "70",
+                "denominator_exact": "120",
+                "ratio_exact": "0.58333333333333333333333333333333333333333333333333333333333333333333333333333333",
+                "unit": "万元",
+            }],
+        },
+    }])
+    by_column = {fact["column"]: fact for fact in payload["facts"]}
+
+    assert set(by_column) == {"amount", "numerator_exact", "denominator_exact", "ratio_exact"}
+    assert by_column["amount"]["display_value"] == "5 万元"
+    assert by_column["numerator_exact"]["display_value"] == "70 万元"
+    assert by_column["denominator_exact"]["display_value"] == "120 万元"
+    assert by_column["ratio_exact"]["display_value"] == "58.33%"
+
+
+def _write_synthetic_run(analysis, run):
+    saved = analysis._write(
+        analysis._object_path("runs", run["id"]),
+        {"task_id": analysis.task.id, **run},
+    )
+    return saved
+
+
+def _synthetic_profit_bridge_run(run_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", rows=None):
+    return {
+        "id": run_id,
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "method": "revenue_minus_cost_minus_expense",
+            "columns": ["metric", "contribution", "actual", "baseline", "unit"],
+            "rows": rows or [
+                {"metric": "revenue", "contribution": "20", "actual": "120", "baseline": "100", "unit": "万元"},
+                {"metric": "cost", "contribution": "-10", "actual": "70", "baseline": "60", "unit": "万元"},
+                {"metric": "expense", "contribution": "-5", "actual": "20", "baseline": "15", "unit": "万元"},
+                {"metric": "profit", "contribution": "5", "actual": "30", "baseline": "25", "unit": "万元"},
+            ],
+        },
+    }
+
+
+def _synthetic_pq_run(run_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"):
+    return {
+        "id": run_id,
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "method": "quantity_then_price",
+            "columns": [
+                "product",
+                "total_variance",
+                "quantity_contribution",
+                "price_contribution",
+                "interaction",
+                "residual",
+                "unit",
+            ],
+            "rows": [{
+                "product": "商品A",
+                "total_variance": "32",
+                "quantity_contribution": "20",
+                "price_contribution": "12",
+                "interaction": "0",
+                "residual": "0",
+                "unit": "元",
+            }],
+        },
+    }
+
+
+def _fact_ids_for_group(prepared, group_type, *, column=None):
+    group = next(group for group in prepared["evidence_groups"] if group["group_type"] == group_type)
+    return [
+        member["fact_id"]
+        for member in group["members"]
+        if member.get("fact_id") and (column is None or member["column"] == column)
+    ]
+
+
+def test_profit_bridge_body_closure_expression_accepts_f13_shape(service):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = _fact_ids_for_group(prepared, "profit_bridge", column="contribution")
+
+    check = store.validate_explanation({
+        "body": "利润桥闭合成立：收入贡献 20 万元、成本利润影响 -10 万元、费用利润影响 -5 万元，合计与利润增加一致（20 − 10 − 5 = 5）。",
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "pass", check["issues"]
+    assert "fact_label_mismatch" not in {issue["code"] for issue in check["issues"]}
+
+
+def test_price_quantity_body_closure_expression_accepts_explicit_bridge(service):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_pq_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = _fact_ids_for_group(prepared, "price_quantity_bridge")
+
+    check = store.validate_explanation({
+        "body": "量价桥闭合：数量贡献 20 元、价格贡献 12 元、交互项 0 元、残差 0 元，等式（20 + 12 + 0 + 0 = 32）。",
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "pass", check["issues"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "利润合计（20 + 10 − 5 = 25）。",
+        "利润合计（20 − 10 − 5 = 6）。",
+        "利润合计（30 + 25 = 5）。",
+    ],
+)
+def test_supported_body_closure_expression_rejects_bad_arithmetic_or_group(service, body):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = [fact["id"] for fact in prepared["facts"]]
+
+    check = store.validate_explanation({
+        "body": body,
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "needs_attention"
+    assert any(issue["code"] == "body_closure_mismatch" for issue in check["issues"])
+
+
+def test_body_closure_expression_requires_all_same_group_members_referenced(service):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = _fact_ids_for_group(prepared, "profit_bridge", column="contribution")
+    incomplete = fact_ids[:1] + fact_ids[2:]
+
+    check = store.validate_explanation({
+        "body": "利润合计（20 − 10 − 5 = 5）。",
+        "run_ids": [run["id"]],
+        "fact_ids": incomplete,
+    })
+
+    assert check["status"] == "needs_attention"
+    assert any(issue["code"] == "body_closure_mismatch" for issue in check["issues"])
+
+
+def test_body_closure_expression_rejects_cross_group_numbers(service):
+    store, _context = service
+    rows = [
+        {"metric": "revenue", "product": "A", "contribution": "20", "actual": "120", "baseline": "100", "unit": "万元"},
+        {"metric": "cost", "product": "A", "contribution": "-10", "actual": "70", "baseline": "60", "unit": "万元"},
+        {"metric": "expense", "product": "A", "contribution": "-5", "actual": "20", "baseline": "15", "unit": "万元"},
+        {"metric": "profit", "product": "A", "contribution": "5", "actual": "30", "baseline": "25", "unit": "万元"},
+        {"metric": "revenue", "product": "B", "contribution": "25", "actual": "145", "baseline": "120", "unit": "万元"},
+        {"metric": "cost", "product": "B", "contribution": "-15", "actual": "95", "baseline": "80", "unit": "万元"},
+        {"metric": "expense", "product": "B", "contribution": "0", "actual": "10", "baseline": "10", "unit": "万元"},
+        {"metric": "profit", "product": "B", "contribution": "10", "actual": "40", "baseline": "30", "unit": "万元"},
+    ]
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run(rows=rows))
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = [fact["id"] for fact in prepared["facts"] if fact["column"] == "contribution"]
+
+    check = store.validate_explanation({
+        "body": "利润合计（20 − 10 − 0 = 10）。",
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "needs_attention"
+    assert any(issue["code"] == "body_closure_mismatch" for issue in check["issues"])
+
+
+@pytest.mark.parametrize("prefix", ["", "利润桥如下。", "利润桥分析："])
+def test_body_closure_expression_does_not_borrow_profit_bridge_for_revenue_target(service, prefix):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = _fact_ids_for_group(prepared, "profit_bridge", column="contribution")
+
+    check = store.validate_explanation({
+        "body": prefix + "收入合计（20 − 10 − 5 = 5）。",
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "needs_attention"
+    codes = {issue["code"] for issue in check["issues"]}
+    assert "body_closure_mismatch" not in codes
+    assert "fact_label_mismatch" in codes
+
+
+def test_body_closure_expression_preserves_fraction_beside_large_integer():
+    from foundry.finance_explanations import _parse_signed_closure_expression
+
+    assert _parse_signed_closure_expression(
+        "1000000000000000000000000000000 + 0.1 - 1000000000000000000000000000000 = 0.1"
+    )["balanced"]
+    assert not _parse_signed_closure_expression(
+        "1000000000000000000000000000000 + 0.1 - 1000000000000000000000000000000 = 0"
+    )["balanced"]
+
+
+def test_body_closure_expression_rejects_larger_unparsed_expression(service):
+    store, _context = service
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run())
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = _fact_ids_for_group(prepared, "profit_bridge", column="contribution")
+
+    check = store.validate_explanation({
+        "body": "利润合计（100 × 20 − 10 − 5 = 5）。",
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "needs_attention"
+    codes = {issue["code"] for issue in check["issues"]}
+    assert "body_closure_mismatch" not in codes
+    assert "uncited_number" in codes
+
+
+def test_run_metric_ratio_builds_closed_ratio_evidence_group(service):
+    store, context = service
+    run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {
+            "kind": "ratio",
+            "dimensions": ["organization", "period"],
+            "numerator_accounts": ["cost"],
+            "denominator_accounts": ["revenue"],
+            "filters": {"scenario": "actual"},
+        },
+    })
+
+    payload = store.prepare_explanation({"run_ids": [run["id"]]})
+    group = payload["evidence_groups"][0]
+    by_column = {member["column"]: member for member in group["members"]}
+
+    assert group["group_type"] == "ratio"
+    assert group["status"] == "complete"
+    assert group["closure"]["status"] == "passed"
+    assert group["closure"]["equation"] == "ratio = numerator / denominator"
+    assert group["closure"]["inputs"] == {"numerator": "70", "denominator": "120"}
+    assert by_column["numerator"]["display_value"] == "70 万元"
+    assert by_column["denominator"]["display_value"] == "120 万元"
+    assert by_column["ratio"]["display_value"] == "58.33%"
+    assert by_column["ratio"]["unit"] == "%"
+
+
+def test_ratio_evidence_group_reports_zero_and_negative_denominators(tmp_path):
+    rows = [
+        {"management_account": "cost", "amount": "70"},
+    ]
+    store, context = _ratio_metric_store(tmp_path, rows)
+    zero_run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {
+            "kind": "ratio",
+            "numerator_accounts": ["cost"],
+            "denominator_accounts": ["revenue"],
+        },
+    })
+    zero_group = store.prepare_explanation({"run_ids": [zero_run["id"]]})["evidence_groups"][0]
+    zero_members = {member["column"]: member for member in zero_group["members"]}
+    assert zero_group["status"] == "not_applicable"
+    assert zero_group["closure"]["denominator_status"] == "zero"
+    assert zero_group["closure"]["expected"] is None
+    assert zero_members["ratio"]["state"] == "not_applicable"
+
+    rows = [
+        {"management_account": "cost", "amount": "70"},
+        {"management_account": "revenue", "amount": "-120"},
+    ]
+    store, context = _ratio_metric_store(tmp_path, rows)
+    negative_run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {
+            "kind": "ratio",
+            "numerator_accounts": ["cost"],
+            "denominator_accounts": ["revenue"],
+        },
+    })
+    negative_group = store.prepare_explanation({"run_ids": [negative_run["id"]]})["evidence_groups"][0]
+    ratio_member = next(member for member in negative_group["members"] if member["column"] == "ratio")
+    assert negative_group["status"] == "complete"
+    assert negative_group["closure"]["denominator_status"] == "negative"
+    assert negative_group["closure"]["expected"] == negative_group["closure"]["actual"]
+    assert ratio_member["display_value"] == "-58.33%"
+    assert ratio_member["unit"] == "%"
+
+
+def test_ratio_evidence_group_flags_missing_and_tampered_ratios(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, context = service
+    missing_payload = prepare_explanation(store.analysis, [{
+        "id": "missing-ratio",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": ["numerator", "denominator", "ratio"],
+            "rows": [{"numerator": None, "denominator": None, "ratio": None, "unit": "万元"}],
+        },
+    }])
+    missing_group = missing_payload["evidence_groups"][0]
+    missing_members = {member["column"]: member for member in missing_group["members"]}
+    assert missing_group["status"] == "missing_data"
+    assert missing_group["closure"]["missing"] == ["numerator", "denominator"]
+    assert missing_members["ratio"]["state"] == "missing"
+
+    run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {
+            "kind": "ratio",
+            "dimensions": ["organization", "period"],
+            "numerator_accounts": ["cost"],
+            "denominator_accounts": ["revenue"],
+            "filters": {"scenario": "actual"},
+        },
+    })
+    tampered = json.loads(json.dumps(run))
+    tampered["id"] = "tampered-ratio"
+    tampered["result"]["rows"][0]["ratio"] = "0.5"
+    tampered["result"]["rows"][0]["ratio_exact"] = "0.5"
+    tampered_payload = prepare_explanation(store.analysis, [tampered])
+    closure = tampered_payload["evidence_groups"][0]["closure"]
+    assert tampered_payload["evidence_groups"][0]["status"] == "closure_mismatch"
+    assert closure["expected"] != closure["actual"]
+    assert closure["actual"] == "0.5"

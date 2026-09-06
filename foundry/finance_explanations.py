@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from calendar import monthrange
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from foundry.analysis import BASIS, _hash, _safe_text
@@ -14,6 +14,7 @@ from foundry.errors import FoundryError
 
 FACT_TOKEN = re.compile(r"\{\{fact:([0-9a-f]{64})\}\}")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![A-Za-z0-9_.])")
+CLOSURE_EXPR = re.compile(r"(?P<expr>[-+]?\d+(?:\.\d+)?(?:\s*[+\-−]\s*\d+(?:\.\d+)?)+\s*=\s*[-+]?\d+(?:\.\d+)?)")
 DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
@@ -36,8 +37,15 @@ MONEY_COLUMNS = {
     "total_variance",
     "residual",
 }
-RATIO_COLUMNS = {"ratio", "cost_rate_pct", "gross_margin_pct"}
+RATIO_COLUMNS = {"ratio", "ratio_exact", "cost_rate_pct", "gross_margin_pct"}
+EXACT_VALUE_COLUMNS = {"numerator_exact", "denominator_exact", "ratio_exact"}
 META_COLUMNS = {
+    "ledger",
+    "organization",
+    "period",
+    "account_id",
+    "account_code",
+    "management_account",
     "scenario",
     "currency",
     "unit",
@@ -46,6 +54,10 @@ META_COLUMNS = {
     "favorability",
     "comparison_status",
     "ratio_status",
+    "display_value",
+    "ratio_display",
+    "numerator_display",
+    "denominator_display",
 }
 METRIC_LABELS = {
     "revenue": "收入",
@@ -246,7 +258,11 @@ def validate_explanation(analysis, spec: dict) -> dict:
             if claim.get("fact_id"):
                 issues.append({"code": "unknown_fact", "severity": "error", "message": "引用的事实不存在于当前成功运行结果。"})
     issues.extend(
-        _fact_context_issues(body, [by_id[f] for f in referenced if f in by_id])
+        _fact_context_issues(
+            body,
+            [by_id[f] for f in referenced if f in by_id],
+            prepared.get("evidence_groups", []),
+        )
     )
     allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
@@ -450,16 +466,14 @@ def _external_reference(spec: dict, parent: dict, basis: str) -> dict | None:
 def _facts_for_run(run: dict, materiality: dict) -> list[dict]:
     result = run.get("result", {})
     rows = result.get("rows", [])
-    columns = [
-        c["name"] if isinstance(c, dict) else str(c)
-        for c in result.get("columns", [])
-    ]
+    column_defs = _column_defs(result)
+    columns = list(column_defs)
     facts: list[dict] = []
     for row_index, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
         for column in columns:
-            if column in META_COLUMNS or column not in row or row.get(column) is None:
+            if not _include_fact_column(row, column, column_defs):
                 continue
             value = row.get(column)
             if not _is_fact_value(value, column):
@@ -724,13 +738,77 @@ def _relative_denominator(row: dict, column: str, denominator: str) -> Decimal |
     return None
 
 
+def _column_defs(result: dict) -> dict[str, dict]:
+    definitions = {}
+    for item in result.get("columns", []):
+        if isinstance(item, dict):
+            name = str(item.get("name", ""))
+            if name:
+                definitions[name] = item
+        else:
+            definitions[str(item)] = {"name": str(item)}
+    return definitions
+
+
+def _column_type(column_defs: dict[str, dict], column: str) -> str:
+    return str(column_defs.get(column, {}).get("type") or "").upper()
+
+
+def _is_decimal_column_type(column_type: str) -> bool:
+    normalized = column_type.split("(", 1)[0].strip().upper()
+    first = normalized.split()[0] if normalized else ""
+    return normalized == "DOUBLE PRECISION" or first in {
+        "BIGINT",
+        "DECIMAL",
+        "DOUBLE",
+        "FLOAT",
+        "HUGEINT",
+        "INT",
+        "INTEGER",
+        "NUMERIC",
+        "REAL",
+        "SMALLINT",
+        "TINYINT",
+        "UBIGINT",
+        "UHUGEINT",
+        "UINTEGER",
+        "USMALLINT",
+        "UTINYINT",
+    }
+
+
+def _include_generic_member(row: dict, column: str, column_defs: dict[str, dict]) -> bool:
+    if column in META_COLUMNS or column not in row:
+        return False
+    column_type = _column_type(column_defs, column)
+    if column_type:
+        return _is_decimal_column_type(column_type)
+    value = row.get(column)
+    if value is None:
+        return column in MONEY_COLUMNS or column in RATIO_COLUMNS
+    return _is_fact_value(value, column)
+
+
+def _include_fact_column(row: dict, column: str, column_defs: dict[str, dict]) -> bool:
+    if column in META_COLUMNS or column not in row or row.get(column) is None:
+        return False
+    column_type = _column_type(column_defs, column)
+    if not column_type:
+        return _is_fact_value(row.get(column), column)
+    if _is_decimal_column_type(column_type):
+        return True
+    return column in (MONEY_COLUMNS | RATIO_COLUMNS | EXACT_VALUE_COLUMNS) and _is_fact_value(row.get(column), column)
+
+
+def _is_ratio_result(columns: list[str]) -> bool:
+    return {"numerator", "denominator", "ratio"} <= set(columns)
+
+
 def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
     result = run.get("result", {})
     rows = result.get("rows", [])
-    columns = [
-        c["name"] if isinstance(c, dict) else str(c)
-        for c in result.get("columns", [])
-    ]
+    column_defs = _column_defs(result)
+    columns = list(column_defs)
     if not isinstance(rows, list):
         return []
     by_cell = {(fact["row"], fact["column"]): fact for fact in facts}
@@ -740,6 +818,20 @@ def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
         and any(isinstance(row, dict) and row.get("metric") for row in rows)
     ):
         return _profit_bridge_groups(run, rows, columns, by_cell)
+    if _is_ratio_result(columns):
+        return [
+            _row_evidence_group(
+                run,
+                index,
+                row,
+                columns,
+                by_cell,
+                group_type="ratio",
+                member_columns=["numerator", "denominator", "ratio"],
+            )
+            for index, row in enumerate(rows)
+            if isinstance(row, dict)
+        ]
     if method in {"quantity_then_price", "base_weights_with_interaction"}:
         return [
             _row_evidence_group(
@@ -773,7 +865,7 @@ def _evidence_groups_for_run(run: dict, facts: list[dict]) -> list[dict]:
             member_columns=[
                 column
                 for column in columns
-                if column not in META_COLUMNS and column in row
+                if _include_generic_member(row, column, column_defs)
             ],
         )
         for index, row in enumerate(rows)
@@ -920,8 +1012,17 @@ def _cell_state(row: dict, column: str, columns: list[str]) -> str:
         return "not_applicable"
     value = row.get(column)
     if value is None:
+        if column == "ratio" and row.get("numerator") is not None and _is_zero(row.get("denominator")):
+            return "not_applicable"
         return "missing"
     return _fact_state(value)
+
+
+def _is_zero(value: Any) -> bool:
+    try:
+        return Decimal(str(value)) == 0
+    except InvalidOperation:
+        return False
 
 
 def _fact_state(value: Any) -> str:
@@ -963,6 +1064,8 @@ def _closure_check(group_type: str, members: list[dict]) -> dict:
         return _profit_bridge_closure(members)
     if group_type == "price_quantity_bridge":
         return _price_quantity_closure(members)
+    if group_type == "ratio":
+        return _ratio_closure(members)
     return {"status": "unsupported", "equation": None, "message": "未声明可复算闭合规则"}
 
 
@@ -997,6 +1100,77 @@ def _profit_bridge_closure(members: list[dict]) -> dict:
         "actual": format(values["profit"], "f"),
         "difference": format(difference, "f"),
         "inputs": {metric: format(value, "f") for metric, value in values.items()},
+    }
+
+
+def _ratio_closure(members: list[dict]) -> dict:
+    by_column = {member.get("column"): member for member in members}
+    numerator = by_column.get("numerator")
+    denominator = by_column.get("denominator")
+    ratio = by_column.get("ratio")
+    missing = [
+        column
+        for column, member in (("numerator", numerator), ("denominator", denominator))
+        if not member or member.get("value") is None
+    ]
+    if missing:
+        return {
+            "status": "missing_data",
+            "equation": "ratio = numerator / denominator",
+            "missing": missing,
+        }
+    amount_consistency = _member_consistency([numerator, denominator])
+    if amount_consistency:
+        return amount_consistency
+    scope_consistency = _scope_consistency([m for m in (numerator, denominator, ratio) if m])
+    if scope_consistency:
+        return scope_consistency
+    numerator_value = Decimal(str(numerator["value"]))
+    denominator_value = Decimal(str(denominator["value"]))
+    inputs = {
+        "numerator": format(numerator_value, "f"),
+        "denominator": format(denominator_value, "f"),
+    }
+    if denominator_value == 0:
+        if ratio and ratio.get("value") is not None:
+            return {
+                "status": "closure_mismatch",
+                "equation": "ratio = numerator / denominator",
+                "expected": None,
+                "actual": str(ratio.get("value")),
+                "difference": None,
+                "inputs": inputs,
+                "denominator_status": "zero",
+            }
+        return {
+            "status": "not_applicable",
+            "equation": "ratio = numerator / denominator",
+            "expected": None,
+            "actual": None,
+            "difference": None,
+            "inputs": inputs,
+            "denominator_status": "zero",
+        }
+    if not ratio or ratio.get("value") is None:
+        return {
+            "status": "missing_data",
+            "equation": "ratio = numerator / denominator",
+            "missing": ["ratio"],
+            "inputs": inputs,
+        }
+    actual = Decimal(str(ratio["value"]))
+    with localcontext() as context:
+        context.prec = max(28, len(actual.as_tuple().digits))
+        expected = numerator_value / denominator_value
+        difference = actual - expected
+    return {
+        "status": "passed" if difference == 0 else "closure_mismatch",
+        "equation": "ratio = numerator / denominator",
+        "expected": format(expected, "f"),
+        "actual": format(actual, "f"),
+        "difference": format(difference, "f"),
+        "inputs": inputs,
+        "denominator_status": "negative" if denominator_value < 0 else "positive",
     }
 
 
@@ -1041,6 +1215,10 @@ def _member_consistency(members: list[dict]) -> dict | None:
             "equation": None,
             "units": sorted(str(unit) for unit in units),
         }
+    return _scope_consistency(members)
+
+
+def _scope_consistency(members: list[dict]) -> dict | None:
     scopes = {
         tuple(sorted((member.get("scope") or {}).items()))
         for member in members
@@ -1119,14 +1297,19 @@ def _closure_label(closure: dict) -> str:
     }.get(str(status), str(status))
 
 
-def _fact_context_issues(body: str, facts: list[dict]) -> list[dict]:
+def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dict] | None = None) -> list[dict]:
     """Match complete numeric tokens to a compatible fact within their clause.
 
     A shared number is not an identity: select by the nearest financial label,
     then validate its unit and change semantics. Never match 5 inside 15.
     """
     issues = []
+    closure_check = _body_closure_check(body, facts, evidence_groups or [])
+    issues.extend(closure_check["issues"])
+    closure_token_positions = closure_check["token_positions"]
     for token in _body_numbers(body):
+        if token["start"] in closure_token_positions:
+            continue
         value = Decimal(_normalize_number(token["text"]))
         candidates = [f for f in facts if _token_matches_fact(token["text"], f)]
         if not candidates:
@@ -1143,7 +1326,18 @@ def _fact_context_issues(body: str, facts: list[dict]) -> list[dict]:
             metric = max(non_profit)[1] if non_profit else None
         labelled = [f for f in candidates if not metric or f['semantics'].get('metric') == metric or f['semantics'].get('metric') not in METRIC_LABELS]
         if not labelled:
-            issues.append({'code': 'fact_label_mismatch', 'severity': 'warning', 'message': '正文指标与同值引用事实不一致。', 'position': start})
+            issues.append({
+                'code': 'fact_label_mismatch',
+                'severity': 'warning',
+                'message': '正文指标与同值引用事实不一致。',
+                'position': start,
+                'text': token['text'],
+                'body_excerpt': _body_excerpt(body, start),
+                'expected_metric': metric,
+                'matched_fact_labels': [str(f.get('label')) for f in candidates],
+                'matched_semantic_roles': [str(f.get('semantics', {}).get('role')) for f in candidates],
+                'matched_fact_metrics': [str(f.get('semantics', {}).get('metric')) for f in candidates],
+            })
             labelled = candidates
         alternatives = []
         for fact in labelled:
@@ -1165,6 +1359,149 @@ def _fact_context_issues(body: str, facts: list[dict]) -> list[dict]:
         # Another fact with the same value and matching label may be the correct reference.
         issues.extend(min(alternatives, key=len) if alternatives else [])
     return issues
+
+
+def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict]) -> dict:
+    token_positions: set[int] = set()
+    issues: list[dict] = []
+    if not facts:
+        return {"token_positions": token_positions, "issues": issues}
+    for match in CLOSURE_EXPR.finditer(body):
+        span_start, span_end = match.span("expr")
+        context = body[max(0, span_start - 40): min(len(body), span_end + 30)]
+        if not any(marker in context for marker in ("闭合", "合计", "等式", "一致")):
+            continue
+        if not _has_closure_expression_boundaries(body, span_start, span_end):
+            continue
+        target_group_types = _closure_target_group_types(body, span_start)
+        if not target_group_types:
+            continue
+        parsed = _parse_signed_closure_expression(match.group("expr"))
+        if not parsed:
+            continue
+        matching_group = (
+            _matching_body_closure_group(parsed, facts, evidence_groups, target_group_types)
+            if parsed["balanced"]
+            else None
+        )
+        if matching_group:
+            for token in _body_numbers(body[span_start:span_end]):
+                token_positions.add(span_start + token["start"])
+            continue
+        issues.append({
+            "code": "body_closure_mismatch",
+            "severity": "warning",
+            "message": "正文闭合算式未能匹配同一完整且已闭合的证据组。",
+            "position": span_start,
+            "text": match.group("expr"),
+            "body_excerpt": _body_excerpt(body, span_start),
+            "target_group_types": sorted(target_group_types),
+        })
+    return {"token_positions": token_positions, "issues": issues}
+
+
+def _has_closure_expression_boundaries(body: str, start: int, end: int) -> bool:
+    before = body[:start].rstrip()[-1:]
+    after = body[end:].lstrip()[:1]
+    valid_before = before in {"", "（", "(", "[", ":", "：", " ", "，", ",", "；", ";", "。", "\n"}
+    valid_after = after in {"", "）", ")", "]", "，", ",", "；", ";", "。", "\n"}
+    return valid_before and valid_after
+
+
+def _closure_target_group_types(body: str, start: int) -> set[str]:
+    prefix = re.split(r"[。；;\n]", body[max(0, start - 80):start])[-1]
+    metric_matches = [
+        (prefix.rfind(label), key)
+        for key, label in METRIC_LABELS.items()
+        if label in prefix
+    ]
+    metric = max(metric_matches)[1] if metric_matches else None
+    if metric in {None, "revenue"} and re.search(r"量价|price[-_ ]?quantity", prefix, re.I):
+        return {"price_quantity_bridge"}
+    if metric == "profit":
+        return {"profit_bridge"}
+    return set()
+
+
+def _parse_signed_closure_expression(expr: str) -> dict | None:
+    normalized = expr.replace("−", "-").replace("－", "-")
+    if re.search(r"[^0-9+\-=.\s]", normalized) or normalized.count("=") != 1:
+        return None
+    left, right = [part.strip() for part in normalized.split("=", 1)]
+    if not left or not right:
+        return None
+    try:
+        rhs = Decimal(right)
+        terms = [
+            Decimal(term.replace(" ", ""))
+            for term in re.findall(r"[+-]?\s*\d+(?:\.\d+)?", left)
+        ]
+    except InvalidOperation:
+        return None
+    if len(terms) < 2:
+        return None
+    with localcontext() as context:
+        # Preserve small fractional terms beside large integers during addition.
+        values = [*terms, rhs]
+        context.prec = max(28, max(v.adjusted() for v in values)
+                           - min(v.as_tuple().exponent for v in values)
+                           + len(str(len(terms))) + 2)
+        balanced = sum(terms) == rhs
+    return {"terms": terms, "rhs": rhs, "balanced": balanced}
+
+
+def _matching_body_closure_group(
+    parsed: dict, facts: list[dict], evidence_groups: list[dict], target_group_types: set[str]
+) -> dict | None:
+    if not target_group_types:
+        return None
+    referenced_ids = {fact.get("id") for fact in facts}
+    for group in evidence_groups:
+        if not isinstance(group, dict) or group.get("status") != "complete":
+            continue
+        if group.get("group_type") not in target_group_types:
+            continue
+        closure = group.get("closure") or {}
+        if closure.get("status") != "passed":
+            continue
+        members = _ordered_closure_members(group)
+        if not members or any(member.get("fact_id") not in referenced_ids for member in members):
+            continue
+        expected_len = 5 if group.get("group_type") == "price_quantity_bridge" else 4
+        if len(members) != expected_len:
+            continue
+        values = [Decimal(str(member["value"])) for member in members]
+        if values[:-1] != parsed["terms"] or values[-1] != parsed["rhs"]:
+            continue
+        return group
+    return None
+
+
+def _ordered_closure_members(group: dict) -> list[dict]:
+    members = group.get("members") or []
+    if group.get("group_type") == "profit_bridge":
+        by_metric = {
+            str(member.get("semantic_role", "")).split(".", 1)[0]: member
+            for member in members
+            if isinstance(member, dict) and member.get("column") == "contribution"
+        }
+        order = ("revenue", "cost", "expense", "profit")
+        return [by_metric[key] for key in order if key in by_metric]
+    if group.get("group_type") == "price_quantity_bridge":
+        by_column = {
+            member.get("column"): member
+            for member in members
+            if isinstance(member, dict)
+        }
+        order = ("quantity_contribution", "price_contribution", "interaction", "residual", "total_variance")
+        return [by_column[key] for key in order if key in by_column]
+    return []
+
+
+def _body_excerpt(body: str, start: int, radius: int = 24) -> str:
+    left = max(0, start - radius)
+    right = min(len(body), start + radius)
+    return body[left:right]
 
 
 def _token_matches_fact(text: str, fact: dict) -> bool:

@@ -1,9 +1,12 @@
 """Task coverage cannot be hidden by narrowing a draft's run list."""
+import json
+
 import pytest
 
 from foundry.analysis import AnalysisStore
 from foundry.analysis import _new
 from foundry.errors import FoundryError
+from foundry.finance_service import FinanceStore
 from foundry.finance_requirements import (
     augment_quality,
     check_requirements,
@@ -382,3 +385,596 @@ def test_new_runs_do_not_reset_same_requirement_repair_budget(analysis, monkeypa
             'content_hash': str(number), 'run_ids': [str(number)*32]}, quality)
     assert receipt['repair_attempts'] == 2
     assert receipt['repair_allowed'] is False
+
+
+def _pq_run(analysis, *, method='base_weights_with_interaction', product='商品A', period='2026-08',
+            binding_value='pq-dataset', scope_alias='pq', total='32', quantity='20', price='10',
+            interaction='2', residual='0', unit='元', currency='CNY', row_updates=None,
+            finance_scope=None, bindings=None, columns=None):
+    row = {
+        'ledger': 'commerce',
+        'organization': '电商部',
+        'currency': currency,
+        'unit': unit,
+        'product': product,
+        'actual': '132',
+        'baseline': '100',
+        'quantity_contribution': quantity,
+        'price_contribution': price,
+        'interaction': interaction,
+        'total_variance': total,
+        'residual': residual,
+        'source_rows': [{'dataset_id': binding_value, 'row_index': 1, 'source_row': 1}],
+    }
+    if row_updates:
+        row.update(row_updates)
+    if columns is None:
+        columns = [
+            'ledger', 'organization', 'currency', 'unit', 'product', 'actual', 'baseline',
+            'quantity_contribution', 'price_contribution', 'interaction', 'total_variance', 'residual',
+        ]
+    record = _new(
+        analysis.task,
+        execution_status='succeeded',
+        output_hash='pq-hash-' + method + '-' + product + '-' + period + '-' + binding_value,
+        bindings=bindings or {scope_alias: binding_value},
+        finance_scope=finance_scope or {
+            scope_alias: {'ledger': 'commerce', 'organization': '电商部', 'period': period,
+                          'currency': currency, 'unit': unit},
+        },
+        result={
+            'domain': 'foundry.finance.variance.v1',
+            'method': method,
+            'columns': columns,
+            'rows': [row],
+        },
+    )
+    return analysis._write(analysis._object_path('runs', record['id']), record)
+
+
+def _pq_claims(run, *, row=0, columns=None):
+    columns = columns or ['total_variance', 'quantity_contribution', 'price_contribution', 'interaction']
+    result_row = run['result']['rows'][row]
+    return [
+        {'basis': 'calculation', 'run_id': run['id'], 'row': row, 'column': column, 'value': result_row[column]}
+        for column in columns
+    ]
+
+
+def _require_pq(analysis, *, method='base_weights_with_interaction', product='商品A', period='2026-08',
+                binding_value='pq-dataset', scope=None, bindings=None, metric='amount', dimensions=None):
+    return save_requirements(analysis, spec(
+        question='量价拆分并下钻结果行',
+        scope=scope or {'ledger': 'commerce', 'organization': '电商部', 'period': period,
+                        'currency': 'CNY', 'unit': '元'},
+        bindings=bindings or {'pq': binding_value},
+        items=[{
+            'id': 'pq_split',
+            'metric': metric,
+            'label': '商品量价拆分：数量效应、价格效应、交互项及总差异',
+            'dimensions': dimensions if dimensions is not None else {'product': product, 'method': method},
+            'requires_drilldown': True,
+        }],
+    ))
+
+
+def test_price_quantity_amount_requirement_matches_verified_closed_f10_shape(analysis):
+    requirement = _require_pq(analysis)
+    run = _pq_run(analysis)
+
+    pending_source = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']],
+                                                   'claims': _pq_claims(run)})
+    assert pending_source['coverage']['status'] == 'pass'
+    assert pending_source['provenance']['status'] == 'needs_attention'
+    assert pending_source['items'][0]['status'] == 'answered'
+    assert {location['column'] for location in pending_source['items'][0]['locations']} == {
+        'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
+    }
+
+    for location in pending_source['items'][0]['locations']:
+        _paged_source(analysis, {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')},
+                      offset=0, read_count=1, total=1, has_more=False)
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run)})
+    assert result['coverage']['status'] == 'pass'
+    assert result['provenance']['status'] == 'pass'
+    assert result['items'][0]['provenance_status'] == 'verified'
+    assert all(location['evidence']['group_type'] == 'price_quantity_bridge' for location in result['items'][0]['locations'])
+
+
+
+
+def test_revenue_price_quantity_requirement_matches_real_service_f11_shape(tmp_path):
+    task = TaskStore(tmp_path / 'var').create(title='真实量价桥')
+    service = FinanceStore(task)
+    bindings = {}
+    rows = [
+        {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+         'scenario': 'budget', 'product': '商品A', 'quantity': '99', 'price': '99', 'source_row': '1'},
+        {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+         'scenario': 'actual', 'product': '商品A', 'quantity': '100', 'price': '100', 'source_row': '2'},
+        {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+         'scenario': 'budget', 'product': '商品B', 'quantity': '20', 'price': '5', 'source_row': '3', 'doc_id': 'B-B', 'line_id': '1'},
+        {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+         'scenario': 'actual', 'product': '商品B', 'quantity': '18', 'price': '7', 'source_row': '4', 'doc_id': 'B-A', 'line_id': '1'},
+    ]
+    path = tmp_path / 'multi-sku.json'
+    path.write_text(json.dumps(rows, ensure_ascii=False))
+    bindings['pq'] = service.analysis.add_dataset(path, name='multi-sku')['id']
+    context = service.save_context({
+        'bindings': bindings,
+        'scopes': {'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+                          'currency': 'CNY', 'unit': '元'}},
+    })
+    requirement = save_requirements(service.analysis, spec(
+        question='只对商品B做收入量价拆分并下钻结果行',
+        scope={'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元'},
+        bindings={'pq': bindings['pq']},
+        items=[{'id': 'revenue_pq', 'metric': 'revenue', 'dimensions': {'product': '商品B'},
+                'requires_drilldown': True}],
+    ))
+
+    run = service.explain_variance({
+        'context_id': context['id'],
+        'kind': 'price_quantity',
+        'method': 'quantity_then_price',
+        'field_map': {'quantity': 'quantity', 'price': 'price'},
+        'dimensions': ['product'],
+        'actual_scenario': 'actual',
+        'baseline_scenario': 'budget',
+        'actual_filters': {'product': '商品B', 'period': '2026-08'},
+        'baseline_filters': {'product': '商品B', 'period': '2026-08'},
+    })
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']],
+                                                   'claims': _pq_claims(run)})
+
+    assert run['execution_status'] == 'succeeded'
+    assert run['result']['method'] == 'quantity_then_price'
+    assert run['result']['rows'][0]['product'] == '商品B'
+    assert run['result']['rows'][0]['total_variance'] == '26'
+    assert result['coverage']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+    assert {location['column'] for location in result['items'][0]['locations']} == {
+        'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
+    }
+
+def test_price_quantity_amount_requirement_with_explicit_method_matches_f11_shape(analysis):
+    requirement = _require_pq(analysis, method='quantity_then_price', product='商品B')
+    run = _pq_run(analysis, method='quantity_then_price', product='商品B', total='26', quantity='-10',
+                  price='36', interaction='0', residual='0')
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run)})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+    interaction = next(location for location in result['items'][0]['locations'] if location['column'] == 'interaction')
+    assert interaction['evidence']['member_state'] == 'observed_zero'
+
+
+def test_price_quantity_amount_requirement_rejects_wrong_method_product_period_and_binding(analysis):
+    requirement = _require_pq(analysis, method='base_weights_with_interaction', product='商品A')
+    wrong_method = _pq_run(analysis, method='quantity_then_price', product='商品A')
+    wrong_product = _pq_run(analysis, method='base_weights_with_interaction', product='商品B')
+    wrong_period = _pq_run(analysis, method='base_weights_with_interaction', product='商品A', period='2026-07')
+    wrong_binding = _pq_run(analysis, method='base_weights_with_interaction', product='商品A',
+                            binding_value='other-dataset')
+
+    for run in (wrong_method, wrong_product, wrong_period, wrong_binding):
+        result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']],
+                                               'claims': _pq_claims(run)})
+        assert result['coverage']['status'] == 'needs_attention'
+        assert result['items'][0]['status'] == 'pending'
+        assert result['items'][0]['locations'] == []
+
+
+def test_price_quantity_amount_requirement_requires_all_required_component_claims(analysis):
+    requirement = _require_pq(analysis)
+    run = _pq_run(analysis)
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run, columns=['quantity_contribution'])})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_price_quantity_amount_requirement_rejects_ordinary_sql_amount(analysis):
+    requirement = _require_pq(analysis)
+    run = _run(analysis, id_suffix='sql-amount', bindings={'pq': 'pq-dataset'}, finance_scope={
+        'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+               'currency': 'CNY', 'unit': '元'},
+    }, result={
+        'method': 'sql',
+        'columns': ['product', 'amount'],
+        'rows': [{'product': '商品A', 'amount': '32'}],
+    })
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': [_claim(run, row=0, column='amount', value='32')]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_price_quantity_amount_requirement_rejects_ambiguous_named_scopes(analysis):
+    requirement = _require_pq(analysis, bindings={'pq': 'pq-dataset', 'other': 'other-dataset'})
+    run = _pq_run(analysis, bindings={'pq': 'pq-dataset', 'other': 'other-dataset'}, finance_scope={
+        'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+               'currency': 'CNY', 'unit': '元'},
+        'other': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+                  'currency': 'CNY', 'unit': '元'},
+    })
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run)})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_revenue_price_quantity_requirement_rejects_currency_and_unit_mismatch(analysis):
+    requirement = _require_pq(analysis, metric='revenue', dimensions={'product': '商品A'})
+    wrong_currency = _pq_run(analysis, currency='USD', finance_scope={
+        'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+               'currency': 'USD', 'unit': '元'},
+    })
+    wrong_unit = _pq_run(analysis, unit='万元', finance_scope={
+        'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+               'currency': 'CNY', 'unit': '万元'},
+    })
+
+    for run in (wrong_currency, wrong_unit):
+        result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']],
+                                               'claims': _pq_claims(run)})
+        assert result['coverage']['status'] == 'needs_attention'
+        assert result['items'][0]['status'] == 'pending'
+        assert result['items'][0]['locations'] == []
+
+
+def test_revenue_price_quantity_requirement_rejects_sql_with_same_columns_without_supported_group(analysis):
+    requirement = _require_pq(analysis, metric='revenue', dimensions={'product': '商品A'})
+    row = {
+        'ledger': 'commerce', 'organization': '电商部', 'currency': 'CNY', 'unit': '元',
+        'product': '商品A', 'actual': '132', 'baseline': '100',
+        'quantity_contribution': '20', 'price_contribution': '10', 'interaction': '2',
+        'total_variance': '32', 'residual': '0',
+        'source_rows': [{'dataset_id': 'pq-dataset', 'row_index': 1, 'source_row': 1}],
+    }
+    run = _run(analysis, id_suffix='sql-pq-shaped', bindings={'pq': 'pq-dataset'}, finance_scope={
+        'pq': {'ledger': 'commerce', 'organization': '电商部', 'period': '2026-08',
+               'currency': 'CNY', 'unit': '元'},
+    }, result={
+        'method': 'sql',
+        'columns': ['ledger', 'organization', 'currency', 'unit', 'product', 'actual', 'baseline',
+                    'quantity_contribution', 'price_contribution', 'interaction', 'total_variance', 'residual'],
+        'rows': [row],
+    })
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run)})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def _cash_stock_service(tmp_path):
+    task = TaskStore(tmp_path / 'var').create(title='现金余额')
+    service = FinanceStore(task)
+    path = tmp_path / 'cash-stock.json'
+    path.write_text(json.dumps([
+        {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-07', 'currency': 'CNY',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'cash', 'amount': '100',
+         'source_row': '1', 'doc_id': 'CASH-202607', 'line_id': '1'},
+        {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'cash', 'amount': '110',
+         'source_row': '2', 'doc_id': 'CASH-202608', 'line_id': '1'},
+        {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'bank', 'amount': '900',
+         'source_row': '3', 'doc_id': 'BANK-202608', 'line_id': '1'},
+    ], ensure_ascii=False))
+    dataset = service.analysis.add_dataset(path, name='cash-stock')
+    context = service.save_context({
+        'bindings': {'actual': dataset['id']},
+        'scopes': {'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'CNY',
+                              'unit': '元', 'scenario': 'actual'}},
+    })
+    return service, context
+
+
+def _cash_requirements(analysis, *, scope=None, metric='cash'):
+    return save_requirements(analysis, spec(
+        question='读取两期现金余额并下钻8月现金行',
+        scope=scope or {'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'CNY',
+                                   'unit': '元', 'scenario': 'actual'}},
+        items=[
+            {'id': 'cash_2026_07', 'metric': metric, 'dimensions': {'period': '2026-07'},
+             'requires_drilldown': True},
+            {'id': 'cash_2026_08', 'metric': metric, 'dimensions': {'period': '2026-08'},
+             'requires_drilldown': True},
+        ],
+    ))
+
+
+def _amount_claim(run, row):
+    return {'basis': 'calculation', 'run_id': run['id'], 'row': row, 'column': 'amount',
+            'value': run['result']['rows'][row]['amount']}
+
+
+def test_account_total_single_cash_stock_amounts_bind_from_real_run_metric_and_sources(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = _cash_requirements(service.analysis)
+    run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+    claims = [_amount_claim(run, 0), _amount_claim(run, 1)]
+
+    pending_source = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                           'run_ids': [run['id']],
+                                                           'claims': claims})
+    assert [row['period'] for row in run['result']['rows']] == ['2026-07', '2026-08']
+    assert [row['amount'] for row in run['result']['rows']] == ['100', '110']
+    assert pending_source['coverage']['status'] == 'pass'
+    assert pending_source['provenance']['status'] == 'needs_attention'
+    assert {item['id']: item['status'] for item in pending_source['items']} == {
+        'cash_2026_07': 'answered',
+        'cash_2026_08': 'answered',
+    }
+
+    for item in pending_source['items']:
+        location = item['locations'][0]
+        service.drilldown_fact({key: location[key] for key in ('run_id', 'row', 'column')})
+
+    sourced = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']],
+                                                    'claims': claims})
+    assert sourced['provenance']['status'] == 'pass'
+    assert all(item['provenance_status'] == 'verified' for item in sourced['items'])
+
+
+
+
+
+def test_account_total_scope_period_can_come_from_real_run_metric_row(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = save_requirements(service.analysis, spec(
+        question='读取8月现金余额，期间由任务范围约束',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-08',
+                          'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_august', 'metric': 'cash', 'requires_drilldown': False}],
+    ))
+    run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']],
+                                                   'claims': [_amount_claim(run, 0), _amount_claim(run, 1)]})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+    assert [(location['row'], location['column']) for location in result['items'][0]['locations']] == [(1, 'amount')]
+
+
+def test_account_total_rejects_scope_period_conflict_between_binding_and_row(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    context = service.save_context({
+        'bindings': context['bindings'],
+        'scopes': {'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-07',
+                              'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}},
+    })
+    requirement = save_requirements(service.analysis, spec(
+        question='读取8月现金余额，绑定却固定7月',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-08',
+                          'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_august', 'metric': 'cash', 'requires_drilldown': False}],
+    ))
+    real_run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+    run = _run(service.analysis, id_suffix='scope-period-conflict', engine='finance',
+               analysis_id=real_run['analysis_id'], finance_context_id=real_run['finance_context_id'],
+               bindings=real_run['bindings'], finance_scope=real_run['finance_scope'], result={
+                   'metric_id': 'account_total',
+                   'columns': ['period', 'scenario', 'currency', 'unit', 'amount'],
+                   'rows': [{'period': '2026-08', 'scenario': 'actual', 'currency': 'CNY',
+                             'unit': '元', 'amount': '110'}],
+               })
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']],
+                                                   'claims': [_amount_claim(run, 0)]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_account_total_single_scope_does_not_satisfy_two_sided_comparison_scope(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = save_requirements(service.analysis, spec(
+        question='读取实际8月并比较7月现金余额',
+        scope={
+            'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-08',
+                       'currency': 'CNY', 'unit': '元', 'scenario': 'actual'},
+            'baseline': {'ledger': 'cash-ledger', 'organization': '总部', 'period': '2026-07',
+                         'currency': 'CNY', 'unit': '元', 'scenario': 'actual'},
+        },
+        items=[{'id': 'cash_comparison', 'metric': 'cash', 'requires_drilldown': False}],
+    ))
+    run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']],
+                                                   'claims': [_amount_claim(run, 1)]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+def test_account_total_rejects_wrong_account_and_multi_account_totals(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    _cash_requirements(service.analysis)
+    wrong_account = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['bank'], 'dimensions': ['period']
+    }})
+    multi_account = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['cash', 'bank'], 'dimensions': ['period']
+    }})
+
+    for run in (wrong_account, multi_account):
+        result = check_requirements(service.analysis, {'run_ids': [run['id']],
+                                                       'claims': [_amount_claim(run, 0)]})
+        assert result['coverage']['status'] == 'needs_attention'
+        assert all(item['status'] == 'pending' for item in result['items'])
+
+
+def test_account_total_rejects_period_currency_and_unit_mismatch(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['cash'], 'account_behavior': {'cash': 'stock'}
+    }})
+    claims = [_amount_claim(run, 0), _amount_claim(run, 1)]
+
+    wrong_period = _cash_requirements(service.analysis, metric='cash')
+    wrong_period = save_requirements(service.analysis, spec(
+        parent_id=wrong_period['id'],
+        question='只读取错误期间现金',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'CNY',
+                          'unit': '元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_2026_09', 'metric': 'cash', 'dimensions': {'period': '2026-09'},
+                'requires_drilldown': True}],
+        change_reason='测试错误期间不应匹配',
+    ))
+    period_result = check_requirements(service.analysis, {'requirements_id': wrong_period['id'],
+                                                          'run_ids': [run['id']], 'claims': claims})
+    assert period_result['items'][0]['status'] == 'pending'
+
+    wrong_currency = save_requirements(service.analysis, spec(
+        parent_id=wrong_period['id'],
+        question='读取USD现金',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'USD',
+                          'unit': '元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_2026_08', 'metric': 'cash', 'dimensions': {'period': '2026-08'},
+                'requires_drilldown': True}],
+        change_reason='测试错误币种不应匹配',
+    ))
+    currency_result = check_requirements(service.analysis, {'requirements_id': wrong_currency['id'],
+                                                            'run_ids': [run['id']], 'claims': claims})
+    assert currency_result['items'][0]['status'] == 'pending'
+
+    wrong_unit = save_requirements(service.analysis, spec(
+        parent_id=wrong_currency['id'],
+        question='读取万元现金',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'CNY',
+                          'unit': '万元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_2026_08', 'metric': 'cash', 'dimensions': {'period': '2026-08'},
+                'requires_drilldown': True}],
+        change_reason='测试错误单位不应匹配',
+    ))
+    unit_result = check_requirements(service.analysis, {'requirements_id': wrong_unit['id'],
+                                                        'run_ids': [run['id']], 'claims': claims})
+    assert unit_result['items'][0]['status'] == 'pending'
+
+
+
+def test_account_total_rejects_sql_engine_even_with_finance_revision_id(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = _cash_requirements(service.analysis)
+    real_run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+    forged = _run(service.analysis, id_suffix='sql-with-finance-revision',
+                  engine='sql', analysis_id=real_run['analysis_id'],
+                  finance_context_id=real_run['finance_context_id'],
+                  bindings=real_run['bindings'], finance_scope=real_run['finance_scope'],
+                  result={
+                      'metric_id': 'account_total',
+                      'method': 'sql',
+                      'columns': ['period', 'scenario', 'currency', 'unit', 'amount'],
+                      'rows': [{'period': '2026-08', 'scenario': 'actual', 'currency': 'CNY',
+                                'unit': '元', 'amount': '110'}],
+                  })
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [forged['id']],
+                                                   'claims': [_amount_claim(forged, 0)]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert all(item['status'] == 'pending' for item in result['items'])
+    assert all(item['locations'] == [] for item in result['items'])
+
+
+def test_account_total_rejects_finance_run_with_revision_binding_mismatch(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = _cash_requirements(service.analysis)
+    real_run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total',
+        'accounts': ['cash'],
+        'account_behavior': {'cash': 'stock'},
+    }})
+    forged = _run(service.analysis, id_suffix='finance-binding-mismatch',
+                  engine='finance', analysis_id=real_run['analysis_id'],
+                  finance_context_id='different-context', bindings={'actual': 'other-dataset'},
+                  finance_scope=real_run['finance_scope'], result={
+                      'metric_id': 'account_total',
+                      'columns': ['period', 'scenario', 'currency', 'unit', 'amount'],
+                      'rows': [{'period': '2026-08', 'scenario': 'actual', 'currency': 'CNY',
+                                'unit': '元', 'amount': '110'}],
+                  })
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [forged['id']],
+                                                   'claims': [_amount_claim(forged, 0)]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert all(item['status'] == 'pending' for item in result['items'])
+    assert all(item['locations'] == [] for item in result['items'])
+
+
+def test_account_total_rejects_ordinary_sql_management_account_amount(analysis):
+    save_requirements(analysis, spec(
+        question='读取现金余额',
+        scope={'source': {'ledger': 'cash-ledger', 'period': '2026-08', 'currency': 'CNY', 'unit': '元'}},
+        items=[{'id': 'cash', 'metric': 'cash', 'requires_drilldown': False}],
+    ))
+    run = _run(analysis, id_suffix='cash-sql', bindings={'source': 'cash-dataset'}, finance_scope={
+        'source': {'ledger': 'cash-ledger', 'period': '2026-08', 'currency': 'CNY', 'unit': '元'},
+    }, result={
+        'method': 'sql',
+        'columns': ['management_account', 'amount'],
+        'rows': [{'management_account': 'cash', 'amount': '110'}],
+    })
+
+    result = check_requirements(analysis, {'run_ids': [run['id']],
+                                           'claims': [_claim(run, row=0, column='amount', value='110')]})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []

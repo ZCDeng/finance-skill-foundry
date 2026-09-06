@@ -22,6 +22,10 @@ METRIC_LABELS = {
     'revenue': ('revenue', '收入'), 'cost': ('cost', '成本'),
     'expense': ('expense', '费用'),
 }
+PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction'}
+PRICE_QUANTITY_REQUIRED_COLUMNS = (
+    'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
+)
 
 
 def latest_requirements(analysis):
@@ -111,12 +115,22 @@ def _scope_matches(run, row, scope):
             else scopes.get('source')
         )
         if isinstance(actual_scope, dict) or isinstance(baseline_scope, dict):
+            actual_candidate = _merge_scope_with_row(actual_scope, row, expected['actual'])
+            baseline_candidate = _merge_scope_with_row(baseline_scope, row, expected['baseline'])
+            baseline_matches = (
+                _scope_dict_matches(baseline_candidate, expected['baseline'])
+                if expected['baseline'] or isinstance(baseline_scope, dict)
+                else True
+            )
             return (
-                _scope_dict_matches(actual_scope, expected['actual'])
-                and _scope_dict_matches(baseline_scope, expected['baseline'])
+                _scope_dict_matches(actual_candidate, expected['actual'])
+                and baseline_matches
             )
         if isinstance(source_scope, dict):
-            return _scope_dict_matches(source_scope, expected['source'])
+            return _scope_dict_matches(_merge_scope_with_row(source_scope, row, expected['source']), expected['source'])
+        bound_scopes = [scope for scope in scopes.values() if isinstance(scope, dict)]
+        if bound_scopes:
+            return _bound_scopes_match(bound_scopes, expected, row)
     return _scope_dict_matches(row, expected['actual']) or (
         isinstance(scopes, dict) and _scope_dict_matches(scopes, expected['source'])
     )
@@ -159,8 +173,38 @@ def _scope_dict_matches(candidate, scope):
     return isinstance(candidate, dict) and all(candidate.get(k) == value for k, value in scope.items())
 
 
-def _matches(item, row, column):
-    if any(row.get(k) != value for k, value in item['dimensions'].items()):
+def _merge_scope_with_row(scope, row, expected):
+    if not isinstance(scope, dict):
+        return scope
+    merged = dict(scope)
+    for key in expected:
+        row_value = row.get(key)
+        if row_value in (None, ''):
+            continue
+        if key in merged and merged[key] != row_value:
+            return {}
+        merged.setdefault(key, row_value)
+    return merged
+
+
+def _bound_scopes_match(candidates, expected, row=None):
+    if len(candidates) != 1:
+        return False
+    candidate = _merge_scope_with_row(candidates[0], row or {}, expected['actual'])
+    if not _scope_dict_matches(candidate, expected['actual']):
+        return False
+    baseline_scope = expected['baseline']
+    if baseline_scope and not _scope_dict_matches(candidates[0], baseline_scope):
+        return False
+    source_scope = expected['source']
+    return not source_scope or _scope_dict_matches(candidate, source_scope)
+
+
+def _matches(item, row, column, run=None):
+    method = item.get('dimensions', {}).get('method')
+    if method is not None and _run_method(run or {}) != method:
+        return False
+    if any(row.get(k) != value for k, value in item['dimensions'].items() if k != 'method'):
         return False
     metric = item['metric']
     aliases = METRIC_LABELS.get(metric, (metric,))
@@ -172,14 +216,49 @@ def _matches(item, row, column):
     }
 
 
+def _run_method(run):
+    return run.get('result', {}).get('method') or run.get('method')
+
+
+def _run_finance_metric(analysis, run):
+    if run.get('engine') != 'finance':
+        return None
+    result = run.get('result', {})
+    if not isinstance(result, dict) or result.get('metric_id') != 'account_total':
+        return None
+    analysis_id = run.get('analysis_id')
+    if not analysis_id:
+        return None
+    try:
+        revision = analysis.get_analysis(analysis_id)
+    except FoundryError:
+        return None
+    if (
+        revision.get('engine') != 'finance'
+        or revision.get('operation') != 'metric'
+        or revision.get('finance_context_id') != run.get('finance_context_id')
+        or revision.get('bindings') != run.get('bindings')
+    ):
+        return None
+    spec = revision.get('finance_spec', {})
+    if not isinstance(spec, dict):
+        return None
+    metric = spec.get('metric')
+    return metric if isinstance(metric, dict) else None
+
+
 def _prepared_evidence(analysis, runs):
     from foundry.finance_explanations import prepare_explanation
 
     prepared = prepare_explanation(analysis, list(runs.values())) if runs else {'evidence_groups': []}
     member_map = {}
+    group_map = {}
     for group in prepared.get('evidence_groups', []):
         if not isinstance(group, dict):
             continue
+        group_key = (group.get('run_id'), group.get('row'))
+        if group_key[0] is not None and group_key[1] is not None:
+            group_map[group_key] = group
         for member in group.get('members', []):
             if not isinstance(member, dict):
                 continue
@@ -194,7 +273,71 @@ def _prepared_evidence(analysis, runs):
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
-    return member_map
+    return {'members': member_map, 'groups': group_map}
+
+
+def _price_quantity_requirement_matches(item, run, row, group):
+    method = item.get('dimensions', {}).get('method')
+    run_method = _run_method(run)
+    metric = item.get('metric')
+    if metric == 'amount':
+        if method not in PRICE_QUANTITY_METHODS:
+            return False
+    elif metric == 'revenue':
+        if method is not None and method not in PRICE_QUANTITY_METHODS:
+            return False
+    else:
+        return False
+    if run_method not in PRICE_QUANTITY_METHODS:
+        return False
+    if method is not None and run_method != method:
+        return False
+    if not isinstance(group, dict) or group.get('group_type') != 'price_quantity_bridge':
+        return False
+    if group.get('status') != 'complete' or (group.get('closure') or {}).get('status') != 'passed':
+        return False
+    if any(row.get(k) != value for k, value in item.get('dimensions', {}).items() if k != 'method'):
+        return False
+    members = _price_quantity_required_members(group)
+    return {member.get('column') for member in members} == set(PRICE_QUANTITY_REQUIRED_COLUMNS)
+
+
+def _price_quantity_required_members(group):
+    if not isinstance(group, dict):
+        return []
+    members = [
+        member for member in group.get('members', [])
+        if isinstance(member, dict) and member.get('column') in PRICE_QUANTITY_REQUIRED_COLUMNS
+    ]
+    complete = []
+    for column in PRICE_QUANTITY_REQUIRED_COLUMNS:
+        matches = [member for member in members if member.get('column') == column]
+        if len(matches) != 1 or matches[0].get('fact_id') is None:
+            return []
+        complete.append(matches[0])
+    return complete
+
+
+def _account_total_requirement_matches(analysis, item, run, row, column):
+    if column != 'amount':
+        return False
+    metric = _run_finance_metric(analysis, run)
+    if not metric or metric.get('kind') != 'account_total':
+        return False
+    accounts = metric.get('accounts')
+    if not isinstance(accounts, list) or len(accounts) != 1:
+        return False
+    if str(accounts[0]) != item.get('metric'):
+        return False
+    return not any(row.get(k) != value for k, value in item.get('dimensions', {}).items())
+
+
+def _account_amount_claim_requires_native_total(item, row, column):
+    return (
+        column == 'amount'
+        and item.get('metric') not in METRIC_LABELS
+        and row.get('management_account') == item.get('metric')
+    )
 
 
 def _location_evidence_status(item, location, member):
@@ -245,21 +388,45 @@ def check_requirements(analysis, spec):
         rows = run.get('result', {}).get('rows', [])
         if index < len(rows) and claim.get('column') in rows[index] and _same_number(rows[index][claim['column']], claim.get('value')):
             claimed.add((run['id'], index, claim['column']))
+    claimed_by_row = {}
+    for run_id, index, column in claimed:
+        claimed_by_row.setdefault((run_id, index), set()).add(column)
     checks = analysis._list('evidence_checks')
     source_failures = _source_read_failures(spec.get('source_read_failures', []))
     items = []
     for item in latest['items']:
         locations = []
         statuses = []
+        processed_groups = set()
         for run_id, index, column in claimed:
             run = runs[run_id]
             if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
                 continue
             row = run['result']['rows'][index]
-            if _matches(item, row, column) and _scope_matches(run, row, latest['scope']):
+            group = evidence['groups'].get((run_id, index))
+            if (
+                _price_quantity_requirement_matches(item, run, row, group)
+                and (run_id, index) not in processed_groups
+                and set(PRICE_QUANTITY_REQUIRED_COLUMNS).issubset(claimed_by_row.get((run_id, index), set()))
+                and _scope_matches(run, row, latest['scope'])
+            ):
+                processed_groups.add((run_id, index))
+                for member in _price_quantity_required_members(group):
+                    location = {'run_id': run_id, 'row': index, 'column': member['column'], 'output_hash': run.get('output_hash')}
+                    status, metadata = _location_evidence_status(
+                        item, location, evidence['members'].get((run_id, index, member['column']))
+                    )
+                    locations.append({**location, 'evidence': metadata, 'status': status})
+                    statuses.append(status)
+                continue
+            account_total_match = _account_total_requirement_matches(analysis, item, run, row, column)
+            generic_match_allowed = not _account_amount_claim_requires_native_total(item, row, column)
+            if (account_total_match and _scope_matches(run, row, latest['scope'])) or (
+                generic_match_allowed and _matches(item, row, column, run) and _scope_matches(run, row, latest['scope'])
+            ):
                 location = {'run_id': run_id, 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
                 status, metadata = _location_evidence_status(
-                    item, location, evidence.get((run_id, index, column))
+                    item, location, evidence['members'].get((run_id, index, column))
                 )
                 locations.append({**location, 'evidence': metadata, 'status': status})
                 statuses.append(status)
