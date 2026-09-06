@@ -149,3 +149,15 @@
 - 第三轮完整回归992 passed/2 skipped/2 failed保留：App任务历史/要求面板在5秒测试预算超时，runner闭流测试250ms启动预算内未写PID但已正确timeout/SIGKILL。外层App全套限2 workers、唯一完整子日志；任务历史助手等待真实菜单/任务按钮，不以“找不到菜单”假定已在历史页；runner将启动预算调整1秒并新增闭流后ready落盘断言，继续校验PID不存在与总时长<3秒。未改产品runner。再次完整回归进行中。
 
 - 最终稳定完整回归994 passed/2 skipped，真实DSH启用；包含App29文件402项通过、真实completion事件链、恢复CLI及资源镜像。日志completion-runtime-full-pytest-stable.log与app-tests唯一子日志保留。Ruff/diff通过；此前失败全部保留。冻结旧候选主集已观察20例，仍运行，不能据此宣称新版模型质量通过。
+
+
+## 2026-09-07：新候选冻结、完整旧观察与真实窗口复查
+
+- 源码21dacf0已与远端main哈希独立核对一致。新后端冻结及隔离runner自检通过；源指纹3830d9bf34abc6ddbd8d49a9b55e9ab597c61fcba029d03c8b87c97f46631855。新候选asar为739ca1cd5f8f5419b3af333830fd3e209841e408afcfcc33814cb05c2e13f629。候选ZIP的CRC通过，SHA256为0335585defbcefd51de3c5ceb97c5f365a792e2e8233e96ab5d12cc2308e3cdc，回执completion-runtime-release-receipt.json。
+- 候选内置DSH/plugin/foundry通过本地确定适配器真实事件验证：user/message、保存、tools/result后needs_review取消、keepInbox与第二条用户消息继续。真实候选恢复UI为10/10通过；合成pending payload仍通过源码Python store准备，后续读取/运行均用候选内置CLI和真实IPC，未调用付费模型。
+- 候选工作台QA失败：自动检查尚在checking时保留原稿已核对分项，脚本过早读到旧状态。源码实际为prepare与validate两项调用；初步关于重复prepare的判断经直接复核不成立。应清除重检期间的过期检查结果并增加pending响应测试，保留有效QA断言。候选标记failed_ui_qa，未安装或作为可交付版本。
+- 旧冻结v3主集已完整结束，selected/attempted均30，completed11，严格评分4/30。固定分母保留13例TRANSPORT连接终止、5例420秒超时及1例ENOBUFS观察错误；错误分类可重叠，不能相加推导解释质量。4条通过也不等于全部两轮内完成。原观察及评分未覆盖。
+- 旁路报告单列provider_terminal_errors、timeout_errors、model_turn_errors和observation_errors；TRANSPORT不再称模型错误，所有执行失败仍排除成功并留在分母。未知代码不推断为provider。后续observer修复有界大输出采样，不改旧冻结文件和原始记录。
+- 无授权HEAD探测：curl与Node fetch均获得DeepSeek HTTP401，证明当时端点可达，不能证明授权请求或持续连接稳定。完整新构建30+8+20、中文候选提交、VoiceOver与经理校准仍待验收。
+
+- 后续观察器与分类器组合回归15项通过，Ruff/node语法/diff检查通过。自动/手动重检开始时清空旧质量结果、不可用路径也清空；新增pending响应与失败回归，完整App复测中。
