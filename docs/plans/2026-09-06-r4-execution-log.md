@@ -233,3 +233,12 @@
 - 二次审查确认上述两项已修，另发现严格四行利润桥沿用通用any来源判断，导致来源pass仍保留三项必需来源动作。root将严格桥限定为四项all来源核验，普通要求保留既有语义。新增实际消费修复动作的闭环回归：部分来源保持pending，全部补齐后pass且无剩余动作。定向74项及Ruff通过；最终含真实DSH完整回归日志`intent-scope-final-full-tests.log`。先前`intent-scope-full-tests.log`为1076 passed/2 skipped，但运行期间代理修订源码，不作为最终同一源码验收。
 - 最终独立复审APPROVE，范围内无剩余阻塞：14项聚焦回归、74项完整要求测试、Ruff/编译通过，独立探针确认部分来源pending、全部执行建议后pass且无剩余动作。控制数逐粒度两侧核对、显式零值，以及同run/row/output_hash的行级来源兼容均已复查。真实模型仍使用未修改的既有冻结集，修复源码尚未进入安装包或新模型验收。
 - root最终同一源码完整回归（真实DSH开启）1082 passed/2 skipped，201.19秒，日志`intent-scope-final-full-tests.log`；两项为既有可选依赖跳过。Ruff、diff及独立审查通过。最终源码文件哈希保存在`intent-scope-final-source-hashes.json`。当前冻结主集已进入F11、全套仍运行；完整模型质量、VoiceOver读出和经理校准仍未验收。
+
+## 2026-09-07：意图匹配补修随包交付
+
+- `287d20eeba77b38c475146ca0e97feafb01fe271`已推送并独立核对远端。后端重新冻结、自检、桌面构建和离线Noto字体检查通过；新源指纹`32c07a25a04e949b986e1623478d647d2c2d35b0bef1409989a01545c52022bb`，backend SHA256 `9a389b3a3791b5618a448df67394263c7f85b09c265b1c16f61804538d38682c`。前端asar维持`98c3dd5b`。
+- 独立QA沿用真实工作台脚本，将初始要求改为严格四行利润桥意图。候选22/22通过，真实save-explanation-draft产生数值/覆盖/来源pass、completion complete、无剩余动作；这不是模型测试。已安装到`/Applications/FA Foundry.app`，候选/安装26127条完整树一致；旧版备份`/tmp/FA-Foundry-before-r4-32c07a25.app`。安装版同一严格链22/22、汇总窗口11/11通过。回执`intent-scope-install-receipt.json`及两组installed-ui目录。
+- 新ZIP `FA-Foundry-0.1.5-macOS-arm64-r4-intent-32c07a25-98c3dd5b.zip`，SHA256 `eb2f5f6a7e2b781449efdbc70e207bfa4c5bb55827e9555d767d94a0f689eb9e`，26128条目CRC通过；归档内源指纹、后端、asar均与安装回执核对。旧70ee3798 ZIP定向移至废纸篓，发布目录只保留新ZIP。冻结评测目录未更改，评分器/材料哈希再核对一致，当前主集仍运行。
+- VoiceOver有界readiness探测3次均超时，真实读出记为skipped、整体incomplete；退出成功并确认恢复关闭。只读原生“旁白实用工具”显示“允许使用AppleScript来控制旁白”值为0，未改变该设置；Apple官方文档将它列为脚本控制开关（https://support.apple.com/en-ae/guide/voiceover/cpvougen/mac）。继续采用实际字幕输出验证路径，不能用应用AX树或跳过状态宣称通过。原探测脚本与回执保存在`native-voiceover-ready-ui`。
+- 后续字幕路径未取得读出证据，原回执保留在`native-voiceover-caption-ui`与`native-voiceover-caption-v2-ui`。更正此前“恢复关闭”的证据边界：pgrep仅证明进程退出，不能证明系统旁白开关关闭。后续NSWorkspace与系统设置曾显示仍启用，已执行恢复；最终`native-voiceover-final-off.json`通过NSWorkspace.shared.isVoiceOverEnabled确认before/after均false。
+- 用户明确“不需要旁白”。据此取消VoiceOver测试及验收门槛，不再继续探测或更改相关设置；普通键盘、焦点和中文输入法仍保留。r4剩余主要验收为同一最终构建的完整模型质量与经理校准，旁白不再计作阻塞。
