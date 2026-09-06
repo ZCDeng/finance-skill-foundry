@@ -213,3 +213,9 @@
 - 已定位并修复 `completion-runtime.js` 非保存工具预清理路径误用严格用户消息检查。读取工具无人类消息时跳过 superseded 清理，保存入口仍要求真实 human user/message；没有伪造预热事件或放宽保存权限。两份插件镜像一致。旧 HEAD 实现对同一调用复现失败；新增单元对照和真实 DSH mounted preset 回归通过：方法资源可读、保存仍拒绝、没有 completion_operations。定向真实 DSH 2项及分析插件/镜像13项通过，完整回归进行中。
 
 - root 完整回归（真实 DSH 开启）1062 passed / 2 skipped，93.41秒，日志 `preflight-resource-full-tests.log`；Ruff/diff通过。开始新的冻结构建，旧失败冻结集不覆盖。
+
+- 修复提交 `05089d9d2cc8abdd8772e0f9c9a4c09ac2d97bdf` 已推送并独立核对远端一致。新冻结源指纹 `70ee3798e32d46763d3a5458755a41fdc5822a2d6f7217ddfa744bdcf7bfd848`；backend 可执行文件与 asar 本身未变化，修复位于随包资源，必须按源指纹/资源内容辨识新构建，不能仅比较二进制或 asar。候选打包与离线 Noto 字体检查通过，暂未替换安装版。
+- 新评测目录 `r4-preflight-fixed-full-20260907` 从新候选复制完整 foundry/dsh。评分器与30/8/20材料逐文件哈希与旧冻结一致；新 wrapper 终态会反映子组失败，不再以总进程 exit 0掩盖失败。已实测完成4项方法预加载并进入F01真实工具调用，固定 deepseek-official / deepseek-v4-flash / max。全套仍在运行，不记作已通过。
+
+- 新候选工作台22/22通过；已替换 `/Applications/FA Foundry.app`，安装前后完整树与候选一致（本轮按目录/文件/符号链接及mode共26127条记录，算法与前轮不同，不直接比较两轮tree值）。安装版汇总窗口11/11通过；安装runtime资源与评测冻结副本及源码字节相同。新包 `FA-Foundry-0.1.5-macOS-arm64-r4-preflight-70ee3798-98c3dd5b.zip`，SHA256 `d72fb8d814414abeb1312bc3867e02098c639c2bc18e8ea7f0dd6b21bef0546a`，CRC通过。上一版ZIP定向移至废纸篓，详见preflight-resource系列回执。
+- 原生IME已有一次真实composition与候选编号提交中文“预期”的证据，但其后完整筛选链失败，最新复测未稳定重现，故仍不宣称原生中文交互链整体验收通过。保留v4及各次回执；根代理收尾恢复本轮最初ABC输入源。VoiceOver和经理校准仍待完成。
