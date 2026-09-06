@@ -716,6 +716,209 @@ def _amount_claim(run, row):
             'value': run['result']['rows'][row]['amount']}
 
 
+def _control_totals_service(tmp_path):
+    task = TaskStore(tmp_path / 'var').create(title='控制合计')
+    service = FinanceStore(task)
+    path = tmp_path / 'control-totals.json'
+    path.write_text(json.dumps([
+        {'ledger': 'control-ledger', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'cash', 'amount': '100',
+         'source_row': '1', 'doc_id': 'CNY-CASH', 'line_id': '1'},
+        {'ledger': 'control-ledger', 'organization': '总部', 'period': '2026-08', 'currency': 'USD',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'cash', 'amount': '10',
+         'source_row': '2', 'doc_id': 'USD-CASH', 'line_id': '1'},
+        {'ledger': 'control-ledger', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY',
+         'unit': '元', 'scenario': 'actual', 'management_account': 'revenue', 'amount': '900',
+         'source_row': '3', 'doc_id': 'CNY-REV', 'line_id': '1'},
+    ], ensure_ascii=False))
+    dataset = service.analysis.add_dataset(path, name='control-totals')
+    context = service.save_context({
+        'bindings': {'actual': dataset['id']},
+        'scopes': {'actual': {'ledger': 'control-ledger', 'organization': '总部',
+                              'period': '2026-08', 'scenario': 'actual'}},
+    })
+    return service, context
+
+
+def _control_requirement(analysis):
+    return save_requirements(analysis, spec(
+        question='核对8月现金控制合计，必须覆盖CNY和USD',
+        scope={'actual': {'ledger': 'control-ledger', 'organization': '总部',
+                          'period': '2026-08', 'scenario': 'actual'}},
+        items=[{'id': 'cash_controls', 'metric': 'control_totals',
+                'dimensions': {'management_account': 'cash'}, 'periods': ['2026-08'],
+                'requires_drilldown': True}],
+    ))
+
+
+def test_control_totals_require_all_matching_currency_rows_and_sources(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = _control_requirement(service.analysis)
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    cash_rows = [index for index, row in enumerate(run['result']['rows']) if row['management_account'] == 'cash']
+    claims = [_amount_claim(run, index) for index in cash_rows]
+
+    pending = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': claims})
+
+    assert [run['result']['rows'][index]['currency'] for index in cash_rows] == ['CNY', 'USD']
+    assert [run['result']['rows'][index]['amount'] for index in cash_rows] == ['100', '10']
+    assert pending['coverage']['status'] == 'needs_attention'
+    assert pending['provenance']['status'] == 'needs_attention'
+    assert pending['items'][0]['status'] == 'pending'
+    assert {location['row'] for location in pending['items'][0]['locations']} == set(cash_rows)
+    assert {location['status'] for location in pending['items'][0]['locations']} == {'pending'}
+
+    for location in pending['items'][0]['locations']:
+        service.drilldown_fact({key: location[key] for key in ('run_id', 'row', 'column')})
+
+    sourced = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': claims})
+    assert sourced['coverage']['status'] == 'pass'
+    assert sourced['provenance']['status'] == 'pass'
+    assert sourced['items'][0]['status'] == 'answered'
+    assert {location['status'] for location in sourced['items'][0]['locations']} == {'answered'}
+
+
+
+def test_control_totals_rejects_context_narrowed_currency_for_broad_requirement(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = _control_requirement(service.analysis)
+    narrow_context = service.save_context({
+        'bindings': context['bindings'],
+        'scopes': {'actual': {'ledger': 'control-ledger', 'organization': '总部',
+                              'period': '2026-08', 'scenario': 'actual', 'currency': 'CNY'}},
+    })
+    narrow = service.run_metric({'context_id': narrow_context['id'], 'metric': {'kind': 'control_totals'}})
+
+    narrow_result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                          'run_ids': [narrow['id']],
+                                                          'claims': [_amount_claim(narrow, 0)]})
+    assert [row['currency'] for row in narrow['result']['rows'] if row['management_account'] == 'cash'] == ['CNY']
+    assert narrow_result['coverage']['status'] == 'needs_attention'
+    assert narrow_result['items'][0]['status'] == 'pending'
+    assert narrow_result['items'][0]['locations'] == []
+
+    broad = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    cash_rows = [index for index, row in enumerate(broad['result']['rows']) if row['management_account'] == 'cash']
+    claims = [_amount_claim(broad, index) for index in cash_rows]
+    pending = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [broad['id']], 'claims': claims})
+    for location in pending['items'][0]['locations']:
+        service.drilldown_fact({key: location[key] for key in ('run_id', 'row', 'column')})
+
+    sourced = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [broad['id']], 'claims': claims})
+    assert [broad['result']['rows'][index]['currency'] for index in cash_rows] == ['CNY', 'USD']
+    assert sourced['coverage']['status'] == 'pass'
+    assert sourced['provenance']['status'] == 'pass'
+    assert sourced['items'][0]['status'] == 'answered'
+
+
+def test_control_totals_rejects_partial_row_claims_and_cross_run_stitching(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = _control_requirement(service.analysis)
+    complete = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    cash_rows = [index for index, row in enumerate(complete['result']['rows']) if row['management_account'] == 'cash']
+
+    partial = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [complete['id']],
+                                                    'claims': [_amount_claim(complete, cash_rows[0])]})
+    assert partial['coverage']['status'] == 'needs_attention'
+    assert partial['items'][0]['status'] == 'pending'
+    assert partial['items'][0]['locations'] == []
+
+    cny_run = _run(service.analysis, id_suffix='control-cny', engine='finance',
+                   analysis_id=complete['analysis_id'], finance_context_id=complete['finance_context_id'],
+                   bindings=complete['bindings'], finance_scope=complete['finance_scope'], result={
+                       'metric_id': 'control_totals',
+                       'columns': complete['result']['columns'],
+                       'rows': [complete['result']['rows'][cash_rows[0]]],
+                   })
+    usd_run = _run(service.analysis, id_suffix='control-usd', engine='finance',
+                   analysis_id=complete['analysis_id'], finance_context_id=complete['finance_context_id'],
+                   bindings=complete['bindings'], finance_scope=complete['finance_scope'], result={
+                       'metric_id': 'control_totals',
+                       'columns': complete['result']['columns'],
+                       'rows': [complete['result']['rows'][cash_rows[1]]],
+                   })
+
+    stitched = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                     'run_ids': [cny_run['id'], usd_run['id']],
+                                                     'claims': [_amount_claim(cny_run, 0), _amount_claim(usd_run, 0)]})
+    assert stitched['coverage']['status'] == 'needs_attention'
+    assert stitched['items'][0]['status'] == 'pending'
+    assert stitched['items'][0]['locations'] == []
+
+
+def test_control_totals_rejects_sql_with_matching_rows_and_finance_revision_id(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = _control_requirement(service.analysis)
+    native = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    sql = _run(service.analysis, id_suffix='sql-control', engine='sql', analysis_id=native['analysis_id'],
+               finance_context_id=native['finance_context_id'], bindings=native['bindings'],
+               finance_scope=native['finance_scope'], result={
+                   'metric_id': 'control_totals',
+                   'method': 'sql',
+                   'columns': native['result']['columns'],
+                   'rows': [row for row in native['result']['rows'] if row['management_account'] == 'cash'],
+               })
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [sql['id']],
+                                                   'claims': [_amount_claim(sql, 0), _amount_claim(sql, 1)]})
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] == 'pending'
+    assert result['items'][0]['locations'] == []
+
+
+def test_account_total_periods_set_requires_all_matching_rows_and_sources(tmp_path):
+    service, context = _cash_stock_service(tmp_path)
+    requirement = save_requirements(service.analysis, spec(
+        question='核对7月和8月现金余额集合',
+        scope={'actual': {'ledger': 'cash-ledger', 'organization': '总部', 'currency': 'CNY',
+                          'unit': '元', 'scenario': 'actual'}},
+        items=[{'id': 'cash_two_periods', 'metric': 'cash', 'periods': ['2026-07', '2026-08'],
+                'requires_drilldown': True}],
+    ))
+    run = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['cash'], 'account_behavior': {'cash': 'stock'}
+    }})
+
+    partial = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': [_amount_claim(run, 0)]})
+    assert partial['coverage']['status'] == 'needs_attention'
+    assert partial['items'][0]['status'] == 'pending'
+
+    claims = [_amount_claim(run, 0), _amount_claim(run, 1)]
+    pending = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': claims})
+    assert pending['coverage']['status'] == 'needs_attention'
+    assert pending['items'][0]['status'] == 'pending'
+    assert {location['row'] for location in pending['items'][0]['locations']} == {0, 1}
+
+    for location in pending['items'][0]['locations']:
+        service.drilldown_fact({key: location[key] for key in ('run_id', 'row', 'column')})
+
+    sourced = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': claims})
+    assert sourced['coverage']['status'] == 'pass'
+    assert sourced['provenance']['status'] == 'pass'
+    assert sourced['items'][0]['status'] == 'answered'
+
+
+def test_price_quantity_metric_name_matches_complete_native_bridge(analysis):
+    requirement = _require_pq(analysis, metric='price_quantity', dimensions={'product': '商品A'})
+    run = _pq_run(analysis)
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                           'run_ids': [run['id']],
+                                           'claims': _pq_claims(run)})
+
+    assert result['coverage']['status'] == 'pass'
+    assert result['items'][0]['status'] == 'answered'
+
+
 def test_account_total_single_cash_stock_amounts_bind_from_real_run_metric_and_sources(tmp_path):
     service, context = _cash_stock_service(tmp_path)
     requirement = _cash_requirements(service.analysis)

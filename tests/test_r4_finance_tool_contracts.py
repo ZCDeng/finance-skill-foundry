@@ -96,6 +96,8 @@ def test_mcp_r4_schema_exposes_requirements_quality_completion_and_aging_section
     requirements = _tool("analysis_requirements_save")
     assert requirements["inputSchema"]["required"] == ["context_id", "question", "items"]
     assert "does not complete the original question" in requirements["description"]
+    assert requirements["inputSchema"]["properties"]["items"]["items"]["properties"]["periods"]["type"] == "array"
+    assert "bound snapshots" in requirements["description"]
 
     scenario = _tool("save_scenario")
     inputs = scenario["inputSchema"]["properties"]["inputs"]["properties"]
@@ -126,6 +128,7 @@ def test_mcp_r4_schema_exposes_requirements_quality_completion_and_aging_section
     assert "repair_allowed" in save_draft["description"]
     assert "no_progress" in save_draft["description"]
     assert "two-repair" in save_draft["description"]
+    assert "verified_input_gap" in save_draft["description"]
 
 
 def test_mcp_requirements_are_bound_to_granted_context(tmp_path: Path):

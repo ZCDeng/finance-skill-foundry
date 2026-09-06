@@ -39,7 +39,15 @@ afterEach(() => {
 
 describe('requirements panel', () => {
   it('loads the current requirements and saves a successor without running analysis', async () => {
-    const saved: AnalysisRequirementsRecord = { ...current, id: 'r-current-002', parent_id: current.id, question: '解释利润和费用变化' };
+    const saved: AnalysisRequirementsRecord = {
+      ...current,
+      id: 'r-current-002',
+      parent_id: current.id,
+      question: '解释利润和费用变化',
+      items: current.items.map((item) => ({ ...item, periods: [] })),
+      removed_item_ids: [],
+      support: null,
+    };
     const onChanged = vi.fn();
     const api = mountBridge({
       financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command) => command === 'analysis-requirements-save'
@@ -201,4 +209,117 @@ describe('requirements panel', () => {
       items: expect.arrayContaining([expect.objectContaining({ id: 'profit' })]),
     }));
   });
+
+  it('preserves item periods when saving a revised requirements version', async () => {
+    const withPeriods: AnalysisRequirementsRecord = {
+      ...current,
+      items: [
+        { ...current.items[0], periods: ['2026-09', '2026-10'] },
+        current.items[1],
+      ],
+    };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...withPeriods, id: 'r-periods-002', parent_id: withPeriods.id, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [withPeriods], current: withPeriods })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    expect(within(profit).getByText('2026-09 ×')).toBeTruthy();
+    fireEvent.change(within(profit).getByLabelText('添加期间 1'), { target: { value: '2026-11' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加期间' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      items: expect.arrayContaining([expect.objectContaining({ id: 'profit', periods: ['2026-09', '2026-10', '2026-11'] })]),
+    })));
+  });
+
+  it('shows requirement support gaps without blocking free editing', async () => {
+    const supported = {
+      ...current,
+      support: { items: [
+        {
+          requirement_item_id: 'profit',
+          status: 'requires_input',
+          canonical_metric: 'profit',
+          next_action: '请补充预算资料。',
+          missing_inputs: [{ dataset_id: 'budget-dataset', alias: '预算表', columns: ['amount', 'period'] }],
+        },
+        { requirement_item_id: 'expense', status: 'unrecognized', canonical_metric: null, next_action: '暂未识别该能力，可继续自由编辑。', missing_inputs: [] },
+      ] },
+    } as unknown as AnalysisRequirementsRecord;
+    const saved: AnalysisRequirementsRecord = { ...supported, id: 'r-support-002', parent_id: supported.id, question: '继续按经理口径解释' };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command) => command === 'analysis-requirements-save'
+        ? ok(saved as unknown as Record<string, unknown>)
+        : ok({ requirements: [supported], current: supported })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    expect(await screen.findByText(/缺少资料：预算表（字段：amount、period）。请补充预算资料。/)).toBeTruthy();
+    expect(screen.getByText(/暂未识别该能力，可继续自由编辑。/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '继续按经理口径解释' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      question: '继续按经理口径解释',
+      items: expect.arrayContaining([expect.objectContaining({ id: 'profit' })]),
+    })));
+  });
+
+  it('marks existing support as pending when the global period changes before saving', async () => {
+    const supported = {
+      ...current,
+      support: { items: [
+        {
+          requirement_item_id: 'profit',
+          status: 'requires_input',
+          canonical_metric: 'profit',
+          next_action: '请补充预算资料。',
+          missing_inputs: [{ dataset_id: 'budget-dataset', alias: '预算表', columns: ['amount'] }],
+        },
+      ] },
+    } as unknown as AnalysisRequirementsRecord;
+    mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async () => ok({ requirements: [supported], current: supported })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    expect(within(profit).getByText(/请补充预算资料。/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-11' } });
+
+    expect(within(profit).queryByText(/请补充预算资料。/)).toBeNull();
+    expect(within(profit).getByText(/条件已修改，保存后重新检查资料匹配。/)).toBeTruthy();
+  });
+
+  it('marks existing support as pending when the metric is changed before saving', async () => {
+    const supported = {
+      ...current,
+      support: { items: [
+        {
+          requirement_item_id: 'profit',
+          status: 'requires_input',
+          canonical_metric: 'profit',
+          next_action: '请补充预算资料。',
+          missing_inputs: [{ dataset_id: 'budget-dataset', alias: '预算表', columns: ['amount'] }],
+        },
+      ] },
+    } as unknown as AnalysisRequirementsRecord;
+    mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async () => ok({ requirements: [supported], current: supported })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    expect(within(profit).getByText(/请补充预算资料。/)).toBeTruthy();
+    fireEvent.click(within(profit).getByRole('button', { name: '指标 1' }));
+    fireEvent.mouseDown(screen.getByRole('option', { name: /收入/ }));
+
+    expect(within(profit).queryByText(/请补充预算资料。/)).toBeNull();
+    expect(within(profit).getByText(/条件已修改，保存后重新检查资料匹配。/)).toBeTruthy();
+  });
+
 });

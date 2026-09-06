@@ -78,6 +78,8 @@ class FinanceStore:
             _assert_id(dataset_id)
 
     def list_finance_context(self):
+        from foundry.finance_requirement_support import metric_catalog
+
         state = self.analysis.state()
         return {
             "task_id": self.task.id,
@@ -91,6 +93,7 @@ class FinanceStore:
             "account_maps": self._list("account_maps"),
             "scenarios": self._list("scenarios"),
             "metric_definitions": self._list("metric_definitions"),
+            "requirement_metric_catalog": metric_catalog(),
             "capabilities": [
                 "metrics",
                 "variance",
@@ -663,14 +666,17 @@ class FinanceStore:
             raise FoundryError("fact_ids must be an array")
         appendix = render_evidence_appendix(prepared)
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
-        if appendix["body"]:
-            rendered = rendered.rstrip() + "\n\n" + appendix["body"]
         # Read actual requested evidence before evaluating the final draft.
         from foundry.finance_requirements import check_requirements
+        from foundry.finance_requirement_support import with_input_gaps, input_gap_appendix
         provisional = check_requirements(self.analysis, {
             "run_ids": run_ids, "claims": claims_for_facts(prepared["facts"], fact_ids),
             "requirements_id": spec.get("requirements_id", parent.get("requirements_id")),
         })
+        provisional = with_input_gaps(self.analysis, provisional)
+        appendix["body"] += input_gap_appendix(provisional)
+        if appendix["body"]:
+            rendered = rendered.rstrip() + "\n\n" + appendix["body"].lstrip()
         source_read_failures = []
         for item in provisional["items"]:
             if item["requires_drilldown"]:

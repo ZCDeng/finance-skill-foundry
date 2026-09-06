@@ -5,11 +5,14 @@ from foundry.analysis import _hash, _new
 from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
-COMPLETION_POLICY_VERSION = 2
+COMPLETION_POLICY_VERSION = 3
 
 
 def record_completion(analysis, draft, quality):
+    from foundry.finance_requirement_support import with_input_gaps
+
     requirements = quality.get('requirements', {})
+    requirements = with_input_gaps(analysis, requirements)
     requirement_id = requirements.get('requirements_id')
     runs = {run_id: analysis.get_run(run_id) for run_id in draft.get('run_ids', [])}
     run_hashes = {run_id: run.get('output_hash') for run_id, run in runs.items()}
@@ -17,6 +20,18 @@ def record_completion(analysis, draft, quality):
     stale_runs = [run_id for run_id, run in runs.items()
                   if requirement and run.get('seq', -1) <= requirement['seq']]
     issues = list(quality.get('issues', []))
+    remaining = {item['id'] for item in requirements.get('items', []) if item['status'] != 'answered'}
+    gaps = {item['id']: item['input_gap'] for item in requirements.get('items', []) if item.get('input_gap')}
+    awaiting_input = (
+        bool(remaining) and remaining <= gaps.keys()
+        and not requirements.get('scope_changed') and not stale_runs
+        and quality.get('checks', {}).get('numbers', {}).get('status') == 'pass'
+        and all(issue.get('code') in {'requirement_unanswered', 'requested_source_missing'}
+                and issue.get('requirement_item_id') in remaining for issue in issues)
+    )
+    if awaiting_input:
+        issues.extend({'code': 'verified_input_gap', 'requirement_item_id': key,
+                       'message': gaps[key]['next_action']} for key in sorted(remaining))
     if stale_runs:
         issues.append({'code': 'requirements_run_outdated', 'run_ids': sorted(stale_runs),
                        'message': '这些运行早于本次要求版本。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
@@ -43,7 +58,7 @@ def record_completion(analysis, draft, quality):
                     and not stale_runs)
         stalled = bool(history) and history[-1].get('issue_fingerprint') == issue_fingerprint and not complete
         exhausted = len(history) >= MAX_REPAIRS
-        status = 'complete' if complete else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available'
+        status = 'complete' if complete else 'awaiting_input' if awaiting_input else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available'
         actions = [{'code': issue.get('code'), 'message': issue.get('message'),
                     **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
                     **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {})}
@@ -55,7 +70,9 @@ def record_completion(analysis, draft, quality):
                       requirements_id=requirement_id, run_hashes=run_hashes, chain_key=chain_key,
                       input_key=input_key, issue_fingerprint=issue_fingerprint,
                       status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
+                      response_status='ended_with_limitations' if awaiting_input else 'complete' if complete else 'needs_review',
+                      original_requirements_completed=bool(requirements.get('original_requirements_completed')) and complete,
                       repair_allowed=status in {'repair_available','needs_requirements'} and not exhausted and not stalled,
-                      stop_reason='complete' if complete else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None,
+                      stop_reason='complete' if complete else 'verified_input_gap' if awaiting_input else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None,
                       actions=actions, checks=quality.get('checks', {}))
         return analysis._write_locked(analysis._object_path('completions', record['id']), record)

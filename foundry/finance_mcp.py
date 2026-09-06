@@ -525,11 +525,11 @@ def _tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "analysis_requirements_save",
-            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question.",
+            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution.",
             "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
                 "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
                 "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
-                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "requires_drilldown": {"type": "boolean"}}},
+                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "requires_drilldown": {"type": "boolean"}}},
                 },
             }},
         },
@@ -668,7 +668,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_explanation_draft",
             "title": "Save finance explanation draft",
-            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. The returned quality and completion record preserve editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow.",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. The returned quality and completion record preserve editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete.",
             "inputSchema": {
                 "type": "object",
                 "required": ["body"],

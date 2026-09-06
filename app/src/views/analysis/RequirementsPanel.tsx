@@ -17,6 +17,25 @@ type RequirementItem = {
   label: string;
   dimensions: Record<string, unknown>;
   requires_drilldown: boolean;
+  periods?: string[];
+};
+
+type RequirementMissingInput = {
+  dataset_id?: string | null;
+  alias?: string | null;
+  columns: string[];
+};
+
+type RequirementSupportItem = {
+  requirement_item_id: string;
+  status: 'requires_execution' | 'requires_input' | 'unrecognized' | 'unverified' | string;
+  canonical_metric?: string | null;
+  next_action?: string | null;
+  missing_inputs?: RequirementMissingInput[];
+};
+
+type RequirementSupport = {
+  items?: RequirementSupportItem[];
 };
 
 export type AnalysisRequirementsRecord = {
@@ -29,6 +48,7 @@ export type AnalysisRequirementsRecord = {
   parent_id?: string | null;
   change_reason?: string;
   removed_item_ids?: string[];
+  support?: RequirementSupport | null;
 };
 
 type RequirementsListPayload = {
@@ -58,6 +78,9 @@ const metricOptions = [
   { value: 'expense', label: '费用', meta: 'expense' },
   { value: 'open_amount', label: '应收余额', meta: '账龄 open_amount' },
   { value: 'closing_cash', label: '期末现金', meta: '13周现金 closing_cash' },
+  { value: 'ratio', label: '比率', meta: 'ratio' },
+  { value: 'control_totals', label: '控制合计', meta: 'control_totals' },
+  { value: 'price_quantity', label: '量价分解', meta: 'price_quantity' },
 ];
 const currencyOptions = [
   { value: 'CNY', label: 'CNY', meta: '人民币' },
@@ -90,6 +113,47 @@ function primaryContextScope(payload: FinanceContextState | null | undefined, se
   return { scope: normalizeScope(firstScope), bindings: context.bindings ?? {} };
 }
 
+function normalizePeriods(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function normalizeMissingInputs(value: unknown): RequirementMissingInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === 'string') return { alias: item.trim(), columns: [] };
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return { columns: [] };
+    const row = item as Record<string, unknown>;
+    return {
+      dataset_id: row.dataset_id == null ? null : String(row.dataset_id).trim(),
+      alias: row.alias == null ? null : String(row.alias).trim(),
+      columns: normalizePeriods(row.columns),
+    };
+  }).filter((item) => Boolean(item.alias || item.dataset_id || item.columns.length));
+}
+
+function formatMissingInput(input: RequirementMissingInput): string {
+  const source = input.alias || input.dataset_id || '未指定资料';
+  return input.columns.length ? `${source}（字段：${input.columns.join('、')}）` : source;
+}
+
+function normalizeSupport(value: unknown): RequirementSupport | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const support = value as { items?: unknown };
+  return {
+    items: Array.isArray(support.items) ? support.items.map((item) => {
+      const row = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : {};
+      return {
+        requirement_item_id: String(row.requirement_item_id ?? ''),
+        status: String(row.status ?? ''),
+        canonical_metric: row.canonical_metric == null ? null : String(row.canonical_metric),
+        next_action: row.next_action == null ? null : String(row.next_action),
+        missing_inputs: normalizeMissingInputs(row.missing_inputs),
+      };
+    }).filter((item) => item.requirement_item_id && item.status) : [],
+  };
+}
+
 function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Partial<AnalysisRequirementsRecord>;
@@ -103,12 +167,14 @@ function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
     parent_id: record.parent_id ?? null,
     change_reason: record.change_reason,
     removed_item_ids: Array.isArray(record.removed_item_ids) ? record.removed_item_ids : [],
+    support: normalizeSupport((record as Record<string, unknown>).support),
     items: Array.isArray(record.items) ? record.items.map((item) => ({
       id: String(item.id),
       metric: String(item.metric ?? ''),
       label: String(item.label ?? item.metric ?? ''),
       dimensions: item.dimensions && typeof item.dimensions === 'object' && !Array.isArray(item.dimensions) ? item.dimensions : {},
       requires_drilldown: item.requires_drilldown === true,
+      periods: normalizePeriods((item as Record<string, unknown>).periods),
     })).filter((item) => item.id && item.metric) : [],
   };
 }
@@ -124,6 +190,26 @@ function nextItemId(items: RequirementItem[]): string {
 
 function itemLabel(metric: string): string {
   return metricOptions.find((option) => option.value === metric)?.label ?? metric;
+}
+
+function itemPeriods(item: RequirementItem): string[] {
+  return normalizePeriods(item.periods);
+}
+
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function equalStringArrays(left: string[] | undefined, right: string[] | undefined): boolean {
+  const leftValues = normalizePeriods(left);
+  const rightValues = normalizePeriods(right);
+  return leftValues.length === rightValues.length && leftValues.every((value, index) => value === rightValues[index]);
 }
 
 function safeJsonObject(text: string): Record<string, unknown> | null {
@@ -236,7 +322,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   const addItem = () => {
     setItems((previous) => {
       const id = nextItemId(previous);
-      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false }];
+      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false, periods: [] }];
     });
   };
   const removeItem = (id: string) => {
@@ -280,6 +366,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
           label: item.label.trim() || itemLabel(item.metric),
           dimensions: pruneScope(item.dimensions as RequirementScope & Record<string, unknown>),
           requires_drilldown: item.requires_drilldown,
+          ...(itemPeriods(item).length ? { periods: itemPeriods(item) } : {}),
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));
@@ -300,6 +387,18 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     } finally {
       setSaving(false);
     }
+  };
+
+  const supportByItem = useMemo(() => new Map((current?.support?.items ?? []).map((item) => [item.requirement_item_id, item])), [current]);
+  const currentItemById = useMemo(() => new Map((current?.items ?? []).map((item) => [item.id, item])), [current]);
+  const supportContextStale = Boolean(current && (canonicalJson(pruneScope(scope)) !== canonicalJson(pruneScope(current.scope)) || canonicalJson(bindings) !== canonicalJson(current.bindings)));
+  const isSupportStale = (item: RequirementItem): boolean => {
+    const savedItem = currentItemById.get(item.id);
+    if (!savedItem) return false;
+    return supportContextStale
+      || savedItem.metric !== item.metric
+      || !equalStringArrays(savedItem.periods, item.periods)
+      || canonicalJson(savedItem.dimensions) !== canonicalJson(item.dimensions);
   };
 
   const discuss = () => onDiscuss?.({ question, scope, items, currentRequirementsId: current?.id, draftRequirementsId });
@@ -332,7 +431,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       </div>
       <div className="analysis-section-heading"><h4>必答指标</h4><button type="button" className="fnd-button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</button></div>
       {items.length ? <div className="analysis-history-list">
-        {items.map((item, index) => <RequirementItemEditor key={item.id} item={item} index={index} onChange={(patch) => setItem(item.id, patch)}
+        {items.map((item, index) => <RequirementItemEditor key={item.id} item={item} index={index} support={supportByItem.get(item.id)} supportStale={isSupportStale(item)} onChange={(patch) => setItem(item.id, patch)}
           onDimensionsValidity={(valid) => setItemDimensionsValidity(item.id, valid)} onRemove={() => removeItem(item.id)} />)}
       </div> : <p className="analysis-note">尚未登记必答指标。至少添加一项，才能让文稿覆盖检查有明确对象。</p>}
       {removedExisting.length ? <TextField label="删除要求的变更原因" value={changeReason} onChange={setChangeReason}
@@ -353,13 +452,23 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   </section>;
 }
 
-function RequirementItemEditor({ item, index, onChange, onDimensionsValidity, onRemove }: {
-  item: RequirementItem; index: number; onChange(patch: Partial<RequirementItem>): void; onDimensionsValidity(valid: boolean): void; onRemove(): void;
+function RequirementItemEditor({ item, index, support, supportStale, onChange, onDimensionsValidity, onRemove }: {
+  item: RequirementItem; index: number; support?: RequirementSupportItem; supportStale: boolean; onChange(patch: Partial<RequirementItem>): void; onDimensionsValidity(valid: boolean): void; onRemove(): void;
 }) {
   const [dimensionsText, setDimensionsText] = useState(() => JSON.stringify(item.dimensions, null, 2));
   const dimensions = safeJsonObject(dimensionsText);
   useEffect(() => setDimensionsText(JSON.stringify(item.dimensions, null, 2)), [item.id, item.dimensions]);
   useEffect(() => onDimensionsValidity(Boolean(dimensions)), [dimensions, onDimensionsValidity]);
+  const [nextPeriod, setNextPeriod] = useState('');
+  const addPeriod = () => {
+    const value = nextPeriod.trim();
+    const periods = itemPeriods(item);
+    if (!value || periods.includes(value)) return;
+    onChange({ periods: [...periods, value] });
+    setNextPeriod('');
+  };
+  const periods = itemPeriods(item);
+  const removePeriod = (period: string) => onChange({ periods: periods.filter((value) => value !== period) });
   return <article className="analysis-history-row analysis-history-row--static" aria-label={`必答指标 ${index + 1}`}>
     <div className="analysis-edit-grid">
       <SearchableSelect label={`指标 ${index + 1}`} value={item.metric} onChange={(value) => onChange({ metric: value, label: item.label || itemLabel(value) })}
@@ -368,6 +477,15 @@ function RequirementItemEditor({ item, index, onChange, onDimensionsValidity, on
       <FieldShell label="指定下钻"><label className="analysis-select-label"><input type="checkbox" checked={item.requires_drilldown}
         onChange={(event) => onChange({ requires_drilldown: event.target.checked })} />需要读取来源行</label></FieldShell>
     </div>
+    <FieldShell label="适用期间">
+      <div className="analysis-actions">
+        <AccountingPeriodInput label={`添加期间 ${index + 1}`} value={nextPeriod} onChange={setNextPeriod} />
+        <button type="button" className="fnd-button" onClick={addPeriod} disabled={!nextPeriod.trim() || periods.includes(nextPeriod.trim())}>添加期间</button>
+      </div>
+      {periods.length ? <div className="analysis-actions" aria-label={`已选期间 ${index + 1}`}>
+        {periods.map((period) => <button key={period} type="button" className="fnd-button" onClick={() => removePeriod(period)}>{period} ×</button>)}
+      </div> : <p className="analysis-note">未指定时沿用上方本期范围；可添加多个会计期间。</p>}
+    </FieldShell>
     <label>维度 JSON<textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;
@@ -376,7 +494,24 @@ function RequirementItemEditor({ item, index, onChange, onDimensionsValidity, on
         if (parsed) onChange({ dimensions: parsed });
       }} /></label>
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
+    {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
     <div className="analysis-actions"><span className="analysis-note">稳定 ID：{item.id}</span>
       <button type="button" className="fnd-button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</button></div>
   </article>;
+}
+
+function RequirementSupportHint({ support, stale }: { support: RequirementSupportItem; stale: boolean }) {
+  if (stale) {
+    return <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />条件已修改，保存后重新检查资料匹配。</p>;
+  }
+  if (support.status === 'requires_execution') {
+    return <p className="analysis-note">{support.next_action || `已识别为 ${support.canonical_metric || '可分析指标'}，保存后可运行分析。`}</p>;
+  }
+  const missing = support.missing_inputs?.length ? `缺少资料：${support.missing_inputs.map(formatMissingInput).join('、')}。` : '';
+  const action = support.next_action || ({
+    requires_input: '请补充这些资料或字段。',
+    unrecognized: '暂未识别这项分析能力，可继续自由编辑。',
+    unverified: '这项要求还没有检查依据，保存后可重新检查。',
+  }[support.status] ?? '保存后重新检查这项要求。');
+  return <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />{missing}{action}</p>;
 }

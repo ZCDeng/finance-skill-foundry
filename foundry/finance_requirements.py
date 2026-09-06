@@ -26,6 +26,17 @@ PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction'
 PRICE_QUANTITY_REQUIRED_COLUMNS = (
     'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
 )
+RESULT_SET_METRICS = {'control_totals'}
+
+
+def _canonical_metric_name(metric):
+    from foundry.finance_requirement_support import canonical_metric
+    return canonical_metric(metric)
+
+
+def _assess_requirement_support(analysis, spec):
+    from foundry.finance_requirement_support import assess_requirement_support
+    return assess_requirement_support(analysis, spec)
 
 
 def latest_requirements(analysis):
@@ -54,12 +65,26 @@ def save_requirements(analysis, spec):
         seen.add(item['id'])
         metric = _safe_text(item.get('metric'), 'requirement metric', required=True, maximum=200)
         dimensions = item.get('dimensions', {})
+        periods = item.get('periods', [])
         if not isinstance(dimensions, dict) or not isinstance(item.get('requires_drilldown', False), bool):
             raise FoundryError('invalid requirement dimensions or drilldown flag')
-        normalized.append({'id': item['id'], 'metric': metric,
+        if isinstance(dimensions.get('period'), (list, tuple, set, frozenset, dict)):
+            raise FoundryError('requirement dimensions.period must be a scalar; use periods for a set')
+        if periods in (None, ''):
+            periods = []
+        if (
+            not isinstance(periods, list)
+            or len(periods) > 120
+            or any(not isinstance(period, str) or not period.strip() for period in periods)
+        ):
+            raise FoundryError('requirement periods must be an array of non-empty strings')
+        normalized_item = {'id': item['id'], 'metric': metric,
                            'label': _safe_text(item.get('label', metric), 'requirement label', maximum=500),
                            'dimensions': dimensions,
-                           'requires_drilldown': item.get('requires_drilldown', False)})
+                           'requires_drilldown': item.get('requires_drilldown', False)}
+        if periods:
+            normalized_item['periods'] = list(dict.fromkeys(periods))
+        normalized.append(normalized_item)
     with exclusive(analysis.task.lock_path, timeout=10):
         parent = latest_requirements(analysis)
         if parent and spec.get('parent_id') != parent['id']:
@@ -73,9 +98,11 @@ def save_requirements(analysis, spec):
         reason = _safe_text(spec.get('change_reason', ''), 'requirements change reason', maximum=2000)
         if removed and not reason.strip():
             raise FoundryError('removing requirements requires a change reason')
+        assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
         record = _new(analysis.task, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
                       items=normalized, parent_id=(parent or {}).get('id'),
                       removed_item_ids=removed, change_reason=reason,
+                      support=_assess_requirement_support(analysis, assessed_spec),
                       content_hash=_hash({'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}))
         return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
 
@@ -206,7 +233,7 @@ def _matches(item, row, column, run=None):
         return False
     if any(row.get(k) != value for k, value in item['dimensions'].items() if k != 'method'):
         return False
-    metric = item['metric']
+    metric = _canonical_metric_name(item['metric'])
     aliases = METRIC_LABELS.get(metric, (metric,))
     labels = [str(row.get(key, '')).lower() for key in ('metric', 'line', 'contribution_line', 'management_account')]
     if column == metric or column in {f'{alias}_{suffix}' for alias in aliases for suffix in ('variance','difference','contribution','change','impact')}:
@@ -224,7 +251,7 @@ def _run_finance_metric(analysis, run):
     if run.get('engine') != 'finance':
         return None
     result = run.get('result', {})
-    if not isinstance(result, dict) or result.get('metric_id') != 'account_total':
+    if not isinstance(result, dict) or result.get('metric_id') not in {'account_total', 'control_totals'}:
         return None
     analysis_id = run.get('analysis_id')
     if not analysis_id:
@@ -244,7 +271,9 @@ def _run_finance_metric(analysis, run):
     if not isinstance(spec, dict):
         return None
     metric = spec.get('metric')
-    return metric if isinstance(metric, dict) else None
+    if not isinstance(metric, dict) or metric.get('kind') != result.get('metric_id'):
+        return None
+    return metric
 
 
 def _prepared_evidence(analysis, runs):
@@ -279,11 +308,11 @@ def _prepared_evidence(analysis, runs):
 def _price_quantity_requirement_matches(item, run, row, group):
     method = item.get('dimensions', {}).get('method')
     run_method = _run_method(run)
-    metric = item.get('metric')
+    metric = _canonical_metric_name(item.get('metric'))
     if metric == 'amount':
         if method not in PRICE_QUANTITY_METHODS:
             return False
-    elif metric == 'revenue':
+    elif metric in {'revenue', 'price_quantity'}:
         if method is not None and method not in PRICE_QUANTITY_METHODS:
             return False
     else:
@@ -335,9 +364,144 @@ def _account_total_requirement_matches(analysis, item, run, row, column):
 def _account_amount_claim_requires_native_total(item, row, column):
     return (
         column == 'amount'
-        and item.get('metric') not in METRIC_LABELS
+        and _canonical_metric_name(item.get('metric')) not in METRIC_LABELS
         and row.get('management_account') == item.get('metric')
     )
+
+
+def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence):
+    kind = _result_set_kind(item)
+    if not kind:
+        return None
+    bases = []
+    for run in runs.values():
+        if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        metric = _run_finance_metric(analysis, run)
+        if not metric or metric.get('kind') != kind:
+            continue
+        if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
+            continue
+        if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
+            continue
+        rows = _result_set_required_rows(item, run, latest['scope'])
+        if rows:
+            bases.append((run, rows))
+    if not bases:
+        return {'locations': [], 'status': 'pending'}
+    max_rows = max(len(rows) for _, rows in bases)
+    for run, rows in bases:
+        if len(rows) != max_rows:
+            continue
+        locations = [
+            {'run_id': run['id'], 'row': index, 'column': 'amount', 'output_hash': run.get('output_hash')}
+            for index, _ in rows
+        ]
+        if not all((run['id'], location['row'], 'amount') in claimed for location in locations):
+            continue
+        if not all(_source_verified(location, checks) for location in locations):
+            return {
+                'locations': [
+                    _result_set_location(location, evidence, 'pending')
+                    for location in locations
+                ],
+                'status': 'pending',
+            }
+        return {
+            'locations': [
+                _result_set_location(location, evidence, 'answered')
+                for location in locations
+            ],
+            'status': 'answered',
+        }
+    return {'locations': [], 'status': 'pending'}
+
+
+def _result_set_kind(item):
+    metric = _canonical_metric_name(item.get('metric'))
+    if metric in RESULT_SET_METRICS:
+        return metric
+    if item.get('periods') and metric not in RESULT_SET_METRICS and metric not in METRIC_LABELS:
+        return 'account_total'
+    return None
+
+
+def _account_total_metric_matches_item(metric, item):
+    accounts = metric.get('accounts')
+    return (
+        isinstance(accounts, list)
+        and len(accounts) == 1
+        and str(accounts[0]) == item.get('metric')
+    )
+
+
+def _run_scope_is_narrower_than_requirement(run, item, scope):
+    scopes = run.get('finance_scope', {})
+    if not isinstance(scopes, dict):
+        return False
+    expected = _comparison_scopes(scope)
+    periods = set(item.get('periods', []))
+    for candidate in scopes.values():
+        if not isinstance(candidate, dict):
+            continue
+        for key, value in candidate.items():
+            if value in (None, ''):
+                continue
+            if key in expected['actual'] or key in expected['source']:
+                expected_value = expected['actual'].get(key, expected['source'].get(key))
+                if expected_value != value:
+                    return True
+                continue
+            if key in item.get('dimensions', {}):
+                if item['dimensions'][key] != value:
+                    return True
+                continue
+            if key == 'period' and periods:
+                if periods == {value}:
+                    continue
+                return True
+            return True
+    return False
+
+
+def _result_set_required_rows(item, run, scope):
+    periods = set(item.get('periods', []))
+    rows = []
+    for index, row in enumerate(run.get('result', {}).get('rows', [])):
+        if not _scope_matches(run, row, scope):
+            continue
+        if not _item_dimensions_match(item, row):
+            continue
+        if periods and row.get('period') not in periods:
+            continue
+        rows.append((index, row))
+    if periods and {row.get('period') for _, row in rows} != periods:
+        return []
+    return rows
+
+
+def _item_dimensions_match(item, row):
+    for key, value in item.get('dimensions', {}).items():
+        if key == 'method':
+            continue
+        if row.get(key) != value:
+            return False
+    return True
+
+
+def _result_set_location(location, evidence, status):
+    member = evidence['members'].get((location['run_id'], location['row'], location['column']))
+    metadata = {}
+    if member:
+        metadata = {
+            'fact_id': member.get('fact_id'),
+            'group_id': member.get('group_id'),
+            'group_type': member.get('group_type'),
+            'group_status': member.get('group_status'),
+            'closure_status': member.get('closure_status'),
+            'member_state': member.get('member_state'),
+        }
+    return {**location, 'evidence': metadata, 'status': status}
 
 
 def _location_evidence_status(item, location, member):
@@ -398,7 +562,15 @@ def check_requirements(analysis, spec):
         locations = []
         statuses = []
         processed_groups = set()
+        result_set = _result_set_requirement_status(analysis, item, latest, runs, claimed, checks, evidence)
+        if result_set is not None:
+            locations = result_set['locations']
+            statuses = [result_set['status']]
+        else:
+            result_set = None
         for run_id, index, column in claimed:
+            if result_set is not None:
+                break
             run = runs[run_id]
             if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
                 continue
@@ -525,6 +697,8 @@ def _location_matches(candidate, expected):
 
 def augment_quality(analysis, spec, quality):
     requirements = check_requirements(analysis, spec)
+    from foundry.finance_requirement_support import with_input_gaps
+    requirements = with_input_gaps(analysis, requirements)
     issues = list(quality.get('issues', []))
     if requirements['scope_changed']:
         issues.append({'code': 'requirements_changed', 'severity': 'warning', 'message': '分析范围已更新，请按当前要求复核文稿。'})

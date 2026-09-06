@@ -39,6 +39,9 @@ MONEY_COLUMNS = {
 }
 RATIO_COLUMNS = {"ratio", "ratio_exact", "cost_rate_pct", "gross_margin_pct"}
 EXACT_VALUE_COLUMNS = {"numerator_exact", "denominator_exact", "ratio_exact"}
+COUNT_COLUMNS = {"row_count"}
+QUANTITY_COLUMNS = {"quantity", "actual_quantity", "baseline_quantity", "quantity_change"}
+UNIT_PRICE_COLUMNS = {"price", "unit_price", "actual_price", "baseline_price", "price_change"}
 META_COLUMNS = {
     "ledger",
     "organization",
@@ -58,6 +61,8 @@ META_COLUMNS = {
     "ratio_display",
     "numerator_display",
     "denominator_display",
+    "quantity_unit",
+    "price_unit",
 }
 METRIC_LABELS = {
     "revenue": "收入",
@@ -478,7 +483,7 @@ def _facts_for_run(run: dict, materiality: dict) -> list[dict]:
             value = row.get(column)
             if not _is_fact_value(value, column):
                 continue
-            fact = _make_fact(run, row_index, row, column, value, materiality)
+            fact = _make_fact(run, row_index, row, column, value, materiality, column_defs)
             facts.append(fact)
     return facts
 
@@ -564,7 +569,15 @@ def _fact_priority(fact: dict) -> int:
     return 3
 
 
-def _make_fact(run: dict, row_index: int, row: dict, column: str, value: Any, materiality: dict) -> dict:
+def _make_fact(
+    run: dict,
+    row_index: int,
+    row: dict,
+    column: str,
+    value: Any,
+    materiality: dict,
+    column_defs: dict[str, dict],
+) -> dict:
     exact = _exact(value)
     fact_id = _hash(
         {
@@ -576,7 +589,7 @@ def _make_fact(run: dict, row_index: int, row: dict, column: str, value: Any, ma
             "value": exact,
         }
     )
-    unit = row.get("unit")
+    unit = _fact_unit(row, column, column_defs)
     display = _display_value(exact, column, unit)
     semantics = _semantics(row, column, exact, materiality)
     refs = row.get("evidence", {}).get(column, row.get("source_rows", []))
@@ -589,7 +602,7 @@ def _make_fact(run: dict, row_index: int, row: dict, column: str, value: Any, ma
         "value": exact,
         "display_value": display,
         "label": _label(row, column),
-        "unit": "%" if column in RATIO_COLUMNS else unit,
+        "unit": unit,
         "scope": run.get("finance_scope", {}),
         "semantics": semantics,
         "state": _fact_state(value),
@@ -604,7 +617,7 @@ def _make_fact(run: dict, row_index: int, row: dict, column: str, value: Any, ma
 
 
 def _semantics(row: dict, column: str, exact: str, materiality: dict) -> dict:
-    role = "ratio" if column in RATIO_COLUMNS else "amount" if column in MONEY_COLUMNS else "value"
+    role = _fact_role(column)
     if column in {"contribution", "profit_impact"}:
         role = "profit_impact"
     try:
@@ -636,17 +649,69 @@ def _semantics(row: dict, column: str, exact: str, materiality: dict) -> dict:
             column not in {"actual", "baseline"}
             and material
             and magnitude != 0
-            and role in {"amount", "ratio", "profit_impact", "value"}
+            and role in {
+                "amount",
+                "ratio",
+                "profit_impact",
+                "count",
+                "quantity",
+                "unit_price",
+                "value",
+            }
         ) or (magnitude == 0 and column in {
-            "contribution", "profit_impact", "total_variance", "interaction", "residual",
+            "contribution",
+            "profit_impact",
+            "total_variance",
+            "interaction",
+            "residual",
         }),
     }
+
+
+def _fact_role(column: str) -> str:
+    if column in RATIO_COLUMNS:
+        return "ratio"
+    if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
+        return "amount"
+    if _is_count_column(column):
+        return "count"
+    if column in QUANTITY_COLUMNS:
+        return "quantity"
+    if column in UNIT_PRICE_COLUMNS:
+        return "unit_price"
+    return "value"
+
+
+def _fact_unit(row: dict, column: str, column_defs: dict[str, dict]) -> Any:
+    if column in RATIO_COLUMNS:
+        return "%"
+    if _is_count_column(column):
+        return row.get(f"{column}_unit") or "条"
+    if column in QUANTITY_COLUMNS:
+        return (
+            row.get(f"{column}_unit")
+            or row.get("quantity_unit")
+            or column_defs.get(column, {}).get("unit")
+        )
+    if column in UNIT_PRICE_COLUMNS:
+        return (
+            row.get(f"{column}_unit")
+            or row.get("price_unit")
+            or column_defs.get(column, {}).get("unit")
+        )
+    if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
+        return row.get("unit")
+    return column_defs.get(column, {}).get("unit")
 
 
 def _display_value(exact: str, column: str, unit: Any) -> str:
     if column in RATIO_COLUMNS:
         try:
-            percent = Decimal(exact) if column.endswith("_pct") else Decimal(exact) * Decimal(100)
+            percent = (
+                Decimal(exact)
+                if column.endswith("_pct")
+                else Decimal(exact) * Decimal(100)
+            )
             return f"{percent.quantize(Decimal('0.01'))}%"
         except InvalidOperation:
             return exact
@@ -665,7 +730,14 @@ def _label(row: dict, column: str) -> str:
 
 
 def _is_fact_value(value: Any, column: str) -> bool:
-    if column in MONEY_COLUMNS or column in RATIO_COLUMNS:
+    if (
+        column in MONEY_COLUMNS
+        or column in RATIO_COLUMNS
+        or column in EXACT_VALUE_COLUMNS
+        or _is_count_column(column)
+        or column in QUANTITY_COLUMNS
+        or column in UNIT_PRICE_COLUMNS
+    ):
         return True
     try:
         return not isinstance(value, bool) and Decimal(str(value)).is_finite()
@@ -777,15 +849,19 @@ def _is_decimal_column_type(column_type: str) -> bool:
     }
 
 
+def _is_count_column(column: str) -> bool:
+    return column in COUNT_COLUMNS or column.endswith("_count")
+
+
 def _include_generic_member(row: dict, column: str, column_defs: dict[str, dict]) -> bool:
     if column in META_COLUMNS or column not in row:
         return False
     column_type = _column_type(column_defs, column)
     if column_type:
-        return _is_decimal_column_type(column_type)
+        return _is_decimal_column_type(column_type) or _is_count_column(column)
     value = row.get(column)
     if value is None:
-        return column in MONEY_COLUMNS or column in RATIO_COLUMNS
+        return column in MONEY_COLUMNS or column in RATIO_COLUMNS or _is_count_column(column)
     return _is_fact_value(value, column)
 
 
@@ -797,7 +873,17 @@ def _include_fact_column(row: dict, column: str, column_defs: dict[str, dict]) -
         return _is_fact_value(row.get(column), column)
     if _is_decimal_column_type(column_type):
         return True
-    return column in (MONEY_COLUMNS | RATIO_COLUMNS | EXACT_VALUE_COLUMNS) and _is_fact_value(row.get(column), column)
+    return (
+        column
+        in (
+            MONEY_COLUMNS
+            | RATIO_COLUMNS
+            | EXACT_VALUE_COLUMNS
+            | QUANTITY_COLUMNS
+            | UNIT_PRICE_COLUMNS
+        )
+        or _is_count_column(column)
+    ) and _is_fact_value(row.get(column), column)
 
 
 def _is_ratio_result(columns: list[str]) -> bool:
@@ -1342,8 +1428,8 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
         alternatives = []
         for fact in labelled:
             found = []
-            unit_match = re.match(r"\s*(亿元|万元|元|%)", body[end:])
-            if unit_match and fact.get('unit') and unit_match[1] != fact['unit']:
+            unit_match = re.match(r"\s*(亿元|万元|元/件|元|%|条|件)", body[end:])
+            if unit_match and unit_match[1] != fact.get('unit'):
                 found.append({'code': 'fact_unit_mismatch', 'severity': 'warning', 'message': '正文单位与引用事实单位不一致。'})
             semantic = fact['semantics']
             if semantic.get('role') == 'profit_impact' or fact['column'] in {'amount_change', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'}:

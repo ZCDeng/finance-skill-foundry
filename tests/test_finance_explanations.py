@@ -808,6 +808,180 @@ def test_typed_identity_columns_do_not_become_amount_facts(service, identity_typ
     assert by_column["ratio_exact"]["display_value"] == "58.33%"
 
 
+def test_control_totals_row_count_keeps_count_unit_and_rejects_money_unit(service):
+    store, context = service
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    row_count = next(fact for fact in prepared["facts"] if fact["column"] == "row_count")
+    amount = next(
+        fact
+        for fact in prepared["facts"]
+        if fact["column"] == "amount" and fact["value"] == "120"
+    )
+
+    assert row_count["value"] == "1"
+    assert row_count["display_value"] == "1 条"
+    assert row_count["unit"] == "条"
+    assert row_count["semantics"]["role"] == "count"
+    assert row_count["source_trace"]["source_row_count"] == 1
+    assert amount["display_value"] == "120 万元"
+    assert amount["unit"] == "万元"
+    assert amount["semantics"]["role"] == "amount"
+
+    good = store.validate_explanation({
+        "body": "控制合计记录数为 1 条。",
+        "run_ids": [run["id"]],
+        "fact_ids": [row_count["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+    bad = store.validate_explanation({
+        "body": "控制合计记录数为 1 元。",
+        "run_ids": [run["id"]],
+        "fact_ids": [row_count["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+
+    assert good["status"] == "pass", good["issues"]
+    assert bad["status"] == "needs_attention"
+    assert any(issue["code"] == "fact_unit_mismatch" for issue in bad["issues"])
+
+
+def test_evidence_appendix_renders_control_count_without_money_unit(service):
+    from foundry.finance_explanations import render_evidence_appendix
+
+    store, context = service
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+
+    appendix = render_evidence_appendix(prepared)
+
+    assert "row_count / actual / 2026-09：1 条（已计算；有来源行）" in appendix["body"]
+    assert "row_count / actual / 2026-09：1 万元" not in appendix["body"]
+
+
+def test_quantity_and_unit_price_do_not_inherit_money_unit_without_explicit_unit(service):
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "cccccccccccccccccccccccccccccccc",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "quantity", "type": "DECIMAL"},
+                {"name": "actual_quantity", "type": "DECIMAL", "unit": "件"},
+                {"name": "unit_price", "type": "DECIMAL"},
+                {"name": "actual_price", "type": "DECIMAL", "unit": "元/件"},
+                {"name": "amount", "type": "DECIMAL"},
+            ],
+            "rows": [{
+                "quantity": "2",
+                "actual_quantity": "3",
+                "unit_price": "9",
+                "actual_price": "10",
+                "amount": "18",
+                "unit": "万元",
+            }],
+        },
+    })
+    payload = store.prepare_explanation({"run_ids": [run["id"]]})
+    facts = {fact["column"]: fact for fact in payload["facts"]}
+
+    assert facts["quantity"]["display_value"] == "2"
+    assert facts["quantity"].get("unit") is None
+    assert facts["quantity"]["semantics"]["role"] == "quantity"
+    assert facts["actual_quantity"]["display_value"] == "3 件"
+    assert facts["actual_quantity"]["unit"] == "件"
+    assert facts["unit_price"]["display_value"] == "9"
+    assert facts["unit_price"].get("unit") is None
+    assert facts["unit_price"]["semantics"]["role"] == "unit_price"
+    assert facts["actual_price"]["display_value"] == "10 元/件"
+    assert facts["actual_price"]["unit"] == "元/件"
+    assert facts["amount"]["display_value"] == "18 万元"
+
+    unknown_quantity = store.validate_explanation({
+        "body": "数量为 2 万元。",
+        "run_ids": [run["id"]],
+        "fact_ids": [facts["quantity"]["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+    quantity_with_unit = store.validate_explanation({
+        "body": "数量为 3 件。",
+        "run_ids": [run["id"]],
+        "fact_ids": [facts["actual_quantity"]["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+    unit_price = store.validate_explanation({
+        "body": "单价为 10 元/件。",
+        "run_ids": [run["id"]],
+        "fact_ids": [facts["actual_price"]["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+
+    assert unknown_quantity["status"] == "needs_attention"
+    assert any(issue["code"] == "fact_unit_mismatch" for issue in unknown_quantity["issues"])
+    assert quantity_with_unit["status"] == "pass", quantity_with_unit["issues"]
+    assert unit_price["status"] == "pass", unit_price["issues"]
+
+
+def test_actual_and_baseline_quantity_share_quantity_unit_without_money_fallback(service):
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "actual_quantity", "type": "DECIMAL"},
+                {"name": "baseline_quantity", "type": "DECIMAL"},
+                {"name": "amount", "type": "DECIMAL"},
+            ],
+            "rows": [{
+                "actual_quantity": "8",
+                "baseline_quantity": "5",
+                "quantity_unit": "件",
+                "amount": "80",
+                "unit": "元",
+            }],
+        },
+    })
+    payload = store.prepare_explanation({"run_ids": [run["id"]]})
+    facts = {fact["column"]: fact for fact in payload["facts"]}
+
+    assert facts["actual_quantity"]["display_value"] == "8 件"
+    assert facts["actual_quantity"]["unit"] == "件"
+    assert facts["actual_quantity"]["semantics"]["role"] == "quantity"
+    assert facts["baseline_quantity"]["display_value"] == "5 件"
+    assert facts["baseline_quantity"]["unit"] == "件"
+    assert facts["baseline_quantity"]["semantics"]["role"] == "quantity"
+    assert facts["amount"]["display_value"] == "80 元"
+
+
+def test_source_row_count_column_is_count_not_money(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{
+        "id": "source-count-run",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "source_row_count", "type": "VARCHAR"},
+                {"name": "amount", "type": "DECIMAL"},
+            ],
+            "rows": [{"source_row_count": "2", "amount": "9", "unit": "元"}],
+        },
+    }])
+    facts = {fact["column"]: fact for fact in payload["facts"]}
+
+    assert facts["source_row_count"]["display_value"] == "2 条"
+    assert facts["source_row_count"]["unit"] == "条"
+    assert facts["source_row_count"]["semantics"]["role"] == "count"
+    assert facts["amount"]["display_value"] == "9 元"
+
+
 def _write_synthetic_run(analysis, run):
     saved = analysis._write(
         analysis._object_path("runs", run["id"]),
