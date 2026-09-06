@@ -9,16 +9,25 @@ import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js'
 import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { DraftBody } from './analysis/DraftBody.js';
+import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
+import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
 type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindings'> & { sql: string };
-type DraftEdit = { title: string; body: string; limitations: string; review: string };
+type MaterialityDenominator = 'baseline_abs' | 'actual_abs' | 'max_abs';
+type MaterialityNegativePolicy = 'absolute' | 'signed';
+type MaterialityEdit = { absolute: string; relative: string; denominator: MaterialityDenominator; negativePolicy: MaterialityNegativePolicy };
+type DraftEdit = { title: string; body: string; limitations: string; review: string; materiality?: MaterialityEdit };
 interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
 }
 interface ExplanationIssue { code?: string; message?: string; severity?: string }
-interface ExplanationQuality { status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[] }
+interface ExplanationQuality {
+  status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[];
+  checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
+  requirements?: { scope_changed?: boolean; items?: { id: string; label: string; status: string; provenance_status: string }[] };
+}
 interface ExplanationPreparation { facts?: ExplanationFact[]; required_fact_ids?: string[]; diagnostics?: unknown[]; business_contexts?: FinanceBackground[] }
 interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
@@ -276,10 +285,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     {!embedded && <header className="analysis-header">
       <div><h2>{task?.title ?? '从一个问题开始'}</h2>
         <p className="analysis-note">{task ? '补充资料、调整口径，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
-      {tasks.length > 0 && <div className="analysis-task-controls"><label className="analysis-task-picker">切换任务<select className="fnd-field"
-        aria-label="切换分析任务" value={task?.id ?? ''} onChange={(event) => onPick(event.target.value)} disabled={busy}>
-        <option value="" disabled>选择任务</option>{tasks.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}
-      </select></label>{task && <button type="button" className="fnd-button" disabled={busy} onClick={() => onPick('')}>新建分析任务</button>}</div>}
+      {tasks.length > 0 && <div className="analysis-task-controls"><SearchableSelect label="切换任务" ariaLabel="切换分析任务"
+        value={task?.id ?? ''} disabled={busy} options={tasks.map((row) => ({ value: row.id, label: row.title, meta: when(row.created_at) }))}
+        onChange={onPick} placeholder="搜索任务" />{task && <button type="button" className="fnd-button" disabled={busy} onClick={() => onPick('')}>新建分析任务</button>}</div>}
     </header>}
     {(!embedded || !task || question) && <form className="analysis-composer" onSubmit={(event) => {
       event.preventDefault(); if ((!task && !question.trim()) || busy) return;
@@ -342,10 +350,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
           {!analysis ? <Empty title="从资料到可检查的结果" body="告诉助手你想比较什么、按什么口径看。计算完成后，在这里查看结果与依据。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
-            <label className="analysis-select-label">分析版本<select className="fnd-field" value={analysis.id}
-              onChange={(event) => setSelectedAnalysis(event.target.value)}>
-              {[...view.analyses].reverse().map((row) => <option key={row.id} value={row.id}>{row.question} · {when(row.created_at)} · {shortSha(row.id)}</option>)}
-            </select></label>
+            <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
+              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `${when(row.created_at)} · ${shortSha(row.id)}` }))}
+              onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
               onOpen={(run, path) => void perform(async (taskId) => {
@@ -403,13 +410,17 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
         </>}
         {view && tab === 'drafts' && <>
-          {view.drafts.length > 0 && <label className="analysis-select-label">文稿版本<select className="fnd-field" value={draft?.id ?? ''}
-            onChange={(event) => setSelectedDraft(event.target.value)}>{[...view.drafts].reverse().map((row) =>
-            <option key={row.id ?? row.title} value={row.id ?? ''}>{row.title} · {STATUS[row.publication_status] ?? row.publication_status} · {when(row.created_at)} · {row.id ? shortSha(row.id) : '未保存'}</option>)}</select></label>}
+          {view.drafts.length > 0 && <div className="analysis-select-label"><SearchableSelect label="文稿版本" value={draft?.id ?? ''}
+            options={[...view.drafts].reverse().map((row) => ({
+              value: row.id ?? '',
+              label: row.title,
+              meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
+            }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /></div>}
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets} onChat={(spec) => void perform(async (taskId) => {
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               await handoff(undefined, id, spec ? { targetTaskId: taskId } : undefined);
             })}
+            onDiscussRequirements={(request) => void handoff(`请围绕以下分析要求继续讨论；未保存的调整仍是讨论草案，请结合当前资料判断可执行性。\n${JSON.stringify(request, null, 2)}`, draft?.id)}
             edit={draftEdits.current.get(draftKey) ?? readCopy<DraftEdit>(draftKey)} onEdit={rememberDraft}
             onSave={(spec) => void perform(async (taskId) => {
               await saveDraft(taskId, spec);
@@ -459,6 +470,31 @@ const scopeFields = [
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
   || source.metadata?.source_file === 'source.xlsx');
+const datasetOptions = (datasets: DatasetSnapshot[]): SelectOption[] => datasets.map((source) => ({
+  value: source.id,
+  label: source.name,
+  meta: [source.source_name ?? source.kind, source.row_count == null ? '' : `${source.row_count} 行`, shortSha(source.id)].filter(Boolean).join(' · '),
+}));
+const runOptions = (runs: AnalysisRun[]): SelectOption[] => runs.filter((row) => row.execution_status === 'succeeded').map((row) => ({
+  value: row.id,
+  label: when(row.created_at),
+  meta: shortSha(row.id),
+}));
+const contextOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.contexts.map((context) => ({
+  value: context.id,
+  label: context.name,
+  meta: Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；') || shortSha(context.id),
+})) ?? [];
+const accountMapOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.account_maps.map((item) => ({
+  value: String(item.id ?? ''),
+  label: textValue(item.name ?? '管理科目映射'),
+  meta: shortSha(String(item.id ?? '')),
+})).filter((item) => item.value) ?? [];
+const aliasOptions = (aliases: string[], context?: FinanceContext): SelectOption[] => aliases.map((alias) => ({
+  value: alias,
+  label: alias,
+  meta: shortSha(context?.bindings[alias] ?? ''),
+}));
 
 function scopeSummary(scope: Record<string, unknown> = {}): string {
   return scopeFields.map(([key, label]) => scope[key] ? `${label} ${textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
@@ -507,22 +543,22 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
     <div className="analysis-section-heading"><div><h3>刷新财务来源</h3>
       <p className="analysis-note">用于 ERP 导出、账套文件和月结快照。刷新会生成新资料版本，旧运行继续引用旧快照。</p></div></div>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-      <label>来源编号<input className="fnd-field" value={scope.source_id} onChange={(event) => setScope({ ...scope, source_id: event.target.value })} /></label>
-      <label>租户/账套<input className="fnd-field" value={scope.tenant_id} onChange={(event) => setScope({ ...scope, tenant_id: event.target.value })} /></label>
-      <label>账簿<input className="fnd-field" value={scope.ledger_id} onChange={(event) => setScope({ ...scope, ledger_id: event.target.value })} /></label>
-      <label>组织<input className="fnd-field" value={scope.organization_id} onChange={(event) => setScope({ ...scope, organization_id: event.target.value })} /></label>
-      <label>期间<input className="fnd-field" value={scope.period} placeholder="2026-08" onChange={(event) => setScope({ ...scope, period: event.target.value })} /></label>
-      <label>截止时间<input className="fnd-field" value={scope.cutoff_at} placeholder="2026-08-31T23:59:59+08:00" onChange={(event) => setScope({ ...scope, cutoff_at: event.target.value })} /></label>
-      <label>币种<input className="fnd-field" value={scope.currency} onChange={(event) => setScope({ ...scope, currency: event.target.value })} /></label>
-      <label>来源产品<input className="fnd-field" value={product} onChange={(event) => setProduct(event.target.value)} /></label>
+      <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
+      <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
+      <TextField label="账簿" value={scope.ledger_id} onChange={(value) => setScope({ ...scope, ledger_id: value })} />
+      <TextField label="组织" value={scope.organization_id} onChange={(value) => setScope({ ...scope, organization_id: value })} />
+      <AccountingPeriodInput label="期间" value={scope.period} onChange={(value) => setScope({ ...scope, period: value })} />
+      <TextField label="截止时间" value={scope.cutoff_at} placeholder="2026-08-31T23:59:59+08:00" onChange={(value) => setScope({ ...scope, cutoff_at: value })} />
+      <TextField label="币种" value={scope.currency} onChange={(value) => setScope({ ...scope, currency: value })} />
+      <TextField label="来源产品" value={product} onChange={setProduct} />
     </div>
     <details className="analysis-details"><summary>高级：来源身份与刷新方式</summary><div className="analysis-edit-grid">
-      <label>版本<input className="fnd-field" value={version} onChange={(event) => setVersion(event.target.value)} /></label>
-      <label>资料名称<input className="fnd-field" value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label>日历<input className="fnd-field" value={scope.calendar} onChange={(event) => setScope({ ...scope, calendar: event.target.value })} /></label>
-      <label>刷新模式<input className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value })} /></label>
-      <label>文件身份策略<select className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
-        <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></label>
+      <TextField label="版本" value={version} onChange={setVersion} />
+      <TextField label="资料名称" value={name} onChange={setName} />
+      <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
+      <TextField label="刷新模式" value={scope.mode} onChange={(value) => setScope({ ...scope, mode: value })} />
+      <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
+        <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>
     <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !ready} onClick={() => void refreshSource()}>
       <RefreshCw size={14} aria-hidden />选择文件并刷新</button></div>
@@ -540,6 +576,8 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   const xlsx = fileDatasets(datasets);
   const [datasetId, setDatasetId] = useState(xlsx[0]?.id ?? '');
   const [inspection, setInspection] = useState<Record<string, unknown> | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [inspectionError, setInspectionError] = useState('');
   const [bindingId, setBindingId] = useState('');
   const [sourceKind, setSourceKind] = useState<'table' | 'named_range' | 'range'>('table');
   const [sourceName, setSourceName] = useState('');
@@ -564,7 +602,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   }, [datasetId, bindingId, writes, runId]);
   useEffect(() => {
     if (!workbookDatasetMounted.current) { workbookDatasetMounted.current = true; return; }
-    workbookRequest.current += 1; setInspection(null); setReadResult(null);
+    workbookRequest.current += 1; setInspection(null); setInspectionError(''); setReadResult(null);
   }, [datasetId]);
   if (!xlsx.length) return null;
   const sourceSpec = () => sourceKind === 'range' ? { kind: 'range', sheet, range } : { kind: sourceKind, name: sourceName };
@@ -575,11 +613,19 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   async function inspect() {
     const request = ++workbookRequest.current;
     try {
-      setError(''); setMessage('');
+      setError(''); setInspectionError(''); setMessage(''); setInspecting(true);
       const result = await call('workbook-inspect', { dataset_id: datasetId });
       if (request !== workbookRequest.current) return;
       setInspection(result); setMessage('已读取工作簿结构。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) {
+      if (request === workbookRequest.current) {
+        const text = failure instanceof Error ? failure.message : String(failure);
+        setInspectionError(text);
+        setError(text);
+      }
+    } finally {
+      if (request === workbookRequest.current) setInspecting(false);
+    }
   }
   async function bind() {
     const request = ++workbookRequest.current;
@@ -634,21 +680,20 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   return <section className="analysis-workbook-panel" aria-label="Excel 协作">
     <div className="analysis-section-heading"><div><h3>Excel 协作</h3><p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p></div></div>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-      <label>工作簿资料<select className="fnd-field" value={datasetId} onChange={(event) => setDatasetId(event.target.value)}>
-        {xlsx.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
-      <label>绑定编号<input className="fnd-field" value={bindingId} onChange={(event) => setBindingId(event.target.value)} placeholder="读取、预览或应用已有绑定" /></label>
-      <label>区域类型<select className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
-        <option value="table">表格</option><option value="named_range">命名区域</option><option value="range">工作表范围</option></select></label>
-      {sourceKind === 'range' ? <><label>工作表<select className="fnd-field" value={sheet} onChange={(event) => setSheet(event.target.value)}>
-        <option value="">输入或选择</option>{sheetNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-        <label>范围<input className="fnd-field" value={range} placeholder="A1:D20" onChange={(event) => setRange(event.target.value)} /></label></>
-        : <label>{sourceKind === 'table' ? '表格名称' : '命名区域'}<input className="fnd-field" list={`workbook-source-${taskId}`} value={sourceName} onChange={(event) => setSourceName(event.target.value)} /></label>}
-      <datalist id={`workbook-source-${taskId}`}>{[...tables, ...names].map((name) => <option key={name} value={name} />)}</datalist>
-      <label>用途<select className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
-        <option value="input">读取输入</option><option value="output">写回输出</option></select></label>
-      <label>校验运行（可选）<select className="fnd-field" value={runId} onChange={(event) => setRunId(event.target.value)}>
-        <option value="">经理直接写入</option>{runs.filter((row) => row.execution_status === 'succeeded').map((row) =>
-          <option key={row.id} value={row.id}>{when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
+      <SearchableSelect label="工作簿资料" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="搜索工作簿名或快照" />
+      <TextField label="绑定编号" value={bindingId} onChange={setBindingId} placeholder="读取、预览或应用已有绑定" />
+      <FieldShell label="区域类型"><select aria-label="区域类型" className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
+        <option value="table">表格</option><option value="named_range">命名区域</option><option value="range">工作表范围</option></select></FieldShell>
+      {sourceKind === 'range' ? <><SearchableSelect label="工作表" value={sheet} options={sheetNames.map((name) => ({ value: name, label: name }))}
+          onChange={setSheet} placeholder={sheetNames.length ? '搜索工作表' : '先检查结构'} allowEmptyLabel="暂不选择"
+          loading={inspecting} loadError={inspectionError} unconfigured={!inspection && !inspectionError && !inspecting}
+          unconfiguredLabel="请先点击“检查结构”，读取工作表后再选择。" />
+        <TextField label="范围" value={range} placeholder="A1:D20" onChange={setRange} /></>
+        : <TextField label={sourceKind === 'table' ? '表格名称' : '命名区域'} value={sourceName} onChange={setSourceName} />}
+      <FieldShell label="用途"><select aria-label="用途" className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+        <option value="input">读取输入</option><option value="output">写回输出</option></select></FieldShell>
+      <SearchableSelect label="校验运行（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
+        placeholder="搜索运行时间或编号" allowEmptyLabel="经理直接写入" />
     </div>
     <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
       <label>字段数组<textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
@@ -698,6 +743,21 @@ function bridgeScenarioLabels(context?: FinanceContext): { actual: string; basel
 
 const bridgeDimensions = ['organization', 'period'];
 
+const agingStatusOptions: SelectOption[] = [
+  { value: 'active', label: '正常应收', meta: '正常、未逾期、open' },
+  { value: 'overdue', label: '逾期应收', meta: '逾期、overdue' },
+  { value: 'disputed', label: '争议应收', meta: '争议、disputed' },
+  { value: 'collection_hold', label: '暂停催收', meta: '暂停催收、hold' },
+  { value: 'written_off', label: '已核销', meta: '核销、writeoff' },
+];
+const agingStatusMapping = {
+  active: ['正常', '未逾期', 'open', 'active'],
+  overdue: ['逾期', 'overdue'],
+  disputed: ['争议', 'disputed'],
+  collection_hold: ['暂停催收', 'hold', 'collection_hold'],
+  written_off: ['核销', '已核销', 'written_off'],
+};
+
 function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void>;
 }) {
@@ -706,6 +766,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   const [budget, setBudget] = useState('');
   const [scope, setScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: 'CNY', unit: '元', scenario: 'actual' });
   const [budgetScope, setBudgetScope] = useState<Record<string, string>>({ scenario: 'budget' });
+  const [comparePeriod, setComparePeriod] = useState('');
   const [contextId, setContextId] = useState('');
   const [mapName, setMapName] = useState('管理科目映射');
   const [mapRows, setMapRows] = useState('[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]');
@@ -717,6 +778,8 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   const [scenarioAsOf, setScenarioAsOf] = useState('');
   const [scenarioStart, setScenarioStart] = useState('');
   const [scenarioCutoff, setScenarioCutoff] = useState('');
+  const [scenarioStatusField, setScenarioStatusField] = useState('invoice_status');
+  const [scenarioStatuses, setScenarioStatuses] = useState<string[]>([]);
   const [openingCash, setOpeningCash] = useState('');
   const [delayDays, setDelayDays] = useState('14');
   const [baselineScenarioId, setBaselineScenarioId] = useState('');
@@ -744,7 +807,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
       setError(''); setMessage('');
       const bindings = { actual, ...(budget ? { budget } : {}) };
-      const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope } } : {}) };
+      const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope, ...(comparePeriod ? { period: comparePeriod } : {}) } } : {}) };
       const context = unwrap(await api.financeCall(taskId, 'finance-context-save', {
         name: `${scope.period || '本期'}${scope.organization ? ` ${scope.organization}` : ''}经营口径`,
         bindings, scopes, ...(accountMapId ? { account_map_id: accountMapId } : {}),
@@ -831,7 +894,9 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         }));
       } else {
         const inputs = scenarioKind === 'receivables_aging'
-          ? { as_of: scenarioAsOf || scope.period || scope.cutoff_at, scope: scenarioScope, invoices_alias: scenarioPrimary, ...(scenarioSecondary ? { activity_alias: scenarioSecondary } : {}) }
+          ? { as_of: scenarioAsOf || scope.period || scope.cutoff_at, scope: scenarioScope, invoices_alias: scenarioPrimary,
+              ...(scenarioSecondary ? { activity_alias: scenarioSecondary } : {}),
+              ...(scenarioStatuses.length ? { status_filter: { field: scenarioStatusField || 'status', include: scenarioStatuses, mapping: agingStatusMapping } } : {}) }
           : { opening_cash: openingCash, start_date: scenarioStart, actual_cutoff: scenarioCutoff, scope: scenarioScope,
               receipts_alias: scenarioPrimary, ...(scenarioSecondary ? { payments_alias: scenarioSecondary } : {}), scenario: { delay_receipts_days: 0 } };
         scenario = unwrap(await api.financeCall(taskId, 'finance-scenario-save', {
@@ -854,15 +919,21 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     onToggle={(event) => setSetupOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary><div className="analysis-section-heading"><h3>财务业务口径</h3><span className="analysis-note">用已登记资料建立范围，结果仍保留 SQL 与脚本高级路径。</span></div></summary>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-      <label>实际资料<select className="fnd-field" value={actual} onChange={(event) => setActual(event.target.value)}>
-        {datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
-      <label>预算资料（可选）<select className="fnd-field" value={budget} onChange={(event) => setBudget(event.target.value)}>
-        <option value="">暂不选择</option>{datasets.filter((source) => source.id !== actual).map((source) =>
-          <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
-      {scopeFields.map(([key, label]) => <label key={key}>{label}<input className="fnd-field" value={scope[key] ?? ''}
-        onChange={(event) => setScope({ ...scope, [key]: event.target.value })} /></label>)}
-      {budget && <label>预算情景名称<input className="fnd-field" value={budgetScope.scenario ?? ''}
-        onChange={(event) => setBudgetScope({ ...budgetScope, scenario: event.target.value })} /></label>}
+      <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
+        setActual(value);
+        if (budget === value) setBudget('');
+      }} placeholder="搜索资料名称、来源或快照" />
+      <SearchableSelect label="预算资料（可选）" value={budget} options={datasetOptions(datasets.filter((source) => source.id !== actual))}
+        onChange={setBudget} placeholder="搜索预算资料" allowEmptyLabel="暂不选择" />
+      {finance?.contexts.length ? <SearchableSelect label="已保存口径" value={contextId} options={contextOptions(finance)}
+        onChange={setContextId} placeholder="搜索口径名称或范围" /> : null}
+      {scopeFields.map(([key, label]) => key === 'period'
+        ? <AccountingPeriodInput key={key} label={label} value={scope[key] ?? ''} onChange={(value) => setScope({ ...scope, [key]: value })} />
+        : <TextField key={key} label={label} value={scope[key] ?? ''} onChange={(value) => setScope({ ...scope, [key]: value })} />)}
+      {budget && <TextField label="预算情景名称" value={budgetScope.scenario ?? ''} onChange={(value) => setBudgetScope({ ...budgetScope, scenario: value })} />}
+      {budget && <AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
+        shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
+        help="快捷项基于实际期间；留空时沿用实际期间，填写后预算桥按该期间保存 baseline 范围。" />}
     </div></fieldset>
     <div className="analysis-actions">
       <button type="button" className="fnd-button" disabled={disabled} onClick={() => void saveContext()}>保存口径</button>
@@ -873,19 +944,27 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     </div>
     {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
       <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-        <label>情景类型<select className="fnd-field" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
-          <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></label>
-        <label>情景名称<input className="fnd-field" value={scenarioLabel} onChange={(event) => setScenarioLabel(event.target.value)} /></label>
-        <label>{scenarioKind === 'receivables_aging' ? '应收/发票资料' : '回款资料'}<select className="fnd-field" value={scenarioPrimary} onChange={(event) => setScenarioPrimary(event.target.value)}>
-          {aliases.map((alias) => <option key={alias} value={alias}>{alias} · {shortSha(selectedContext?.bindings[alias] ?? '')}</option>)}</select></label>
-        <label>{scenarioKind === 'receivables_aging' ? '核销活动（可选）' : '付款资料（可选）'}<select className="fnd-field" value={scenarioSecondary} onChange={(event) => setScenarioSecondary(event.target.value)}>
-          <option value="">暂不选择</option>{aliases.filter((alias) => alias !== scenarioPrimary).map((alias) => <option key={alias} value={alias}>{alias} · {shortSha(selectedContext?.bindings[alias] ?? '')}</option>)}</select></label>
-        {scenarioKind === 'receivables_aging' ? <label>账龄日期<input className="fnd-field" value={scenarioAsOf} placeholder="2026-08-31" onChange={(event) => setScenarioAsOf(event.target.value)} /></label> : <>
-          <label>期初现金<input className="fnd-field" value={openingCash} placeholder="5000000.00" onChange={(event) => setOpeningCash(event.target.value)} /></label>
-          <label>预测开始日<input className="fnd-field" value={scenarioStart} placeholder="2026-09-01" onChange={(event) => setScenarioStart(event.target.value)} /></label>
-          <label>实际截止日<input className="fnd-field" value={scenarioCutoff} placeholder="2026-08-31" onChange={(event) => setScenarioCutoff(event.target.value)} /></label>
+        <FieldShell label="情景类型"><select aria-label="情景类型" className="fnd-field" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
+          <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></FieldShell>
+        <TextField label="情景名称" value={scenarioLabel} onChange={setScenarioLabel} />
+        <SearchableSelect label={scenarioKind === 'receivables_aging' ? '应收/发票资料' : '回款资料'} value={scenarioPrimary}
+          options={aliasOptions(aliases, selectedContext)} onChange={setScenarioPrimary} placeholder="搜索情景别名或资料编号" />
+        <SearchableSelect label={scenarioKind === 'receivables_aging' ? '核销活动（可选）' : '付款资料（可选）'} value={scenarioSecondary}
+          options={aliasOptions(aliases.filter((alias) => alias !== scenarioPrimary), selectedContext)}
+          onChange={setScenarioSecondary} placeholder="搜索情景别名或资料编号" allowEmptyLabel="暂不选择" />
+        {scenarioKind === 'receivables_aging' ? <>
+          <DateInput label="账龄日期" value={scenarioAsOf} onChange={setScenarioAsOf} />
+          <TextField label="状态字段" value={scenarioStatusField} onChange={setScenarioStatusField} help="账龄计算会按这个列名识别发票状态。" />
+          <MultiSelect label="应收状态筛选" values={scenarioStatuses} options={agingStatusOptions} onChange={setScenarioStatuses}
+            placeholder="默认纳入全部状态" help="选择后只纳入这些状态；不选则纳入全部应收记录。" />
+        </> : <>
+          <DecimalInput label="期初现金" value={openingCash} onChange={setOpeningCash} placeholder="5000000.00" unit={scope.unit || '元'} />
+          <DateInput label="预测开始日" value={scenarioStart} onChange={setScenarioStart}
+            help="写入 start_date；通常晚于实际收支截止日。" />
+          <DateInput label="实际收支截止日" value={scenarioCutoff} onChange={setScenarioCutoff}
+            help="写入 actual_cutoff；这是历史实际收支边界，不是预测结束日。" />
         </>}
-        {scenarioKind === 'cash_13_weeks' && <label>回款延迟天数<input className="fnd-field" value={delayDays} onChange={(event) => setDelayDays(event.target.value)} /></label>}
+        {scenarioKind === 'cash_13_weeks' && <DecimalInput label="回款延迟天数" value={delayDays} onChange={setDelayDays} unit="天" />}
       </div></fieldset>
       <div className="analysis-actions">
         <button type="button" className="fnd-button" disabled={busy || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</button>
@@ -902,9 +981,8 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     <details className="analysis-details"><summary>高级：管理科目映射 JSON</summary>
       <p className="analysis-note">引擎识别的管理科目为 revenue（收入）、cost（成本）、expense（费用）；中文科目名请映射到这些标准值。</p>
       <div className="analysis-edit-grid"><label>映射名称<input className="fnd-field" value={mapName} onChange={(event) => setMapName(event.target.value)} /></label>
-        <label>已保存映射<select className="fnd-field" value={accountMapId} onChange={(event) => setAccountMapId(event.target.value)}>
-          <option value="">暂不使用</option>{finance?.account_maps.map((item) => <option key={String(item.id)} value={String(item.id)}>{textValue(item.name ?? '管理科目映射')} · {shortSha(String(item.id ?? ''))}</option>)}
-        </select></label>
+        <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
+          placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" />
         <label>映射行数组<textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
           onChange={(event) => setMapRows(event.target.value)} /></label></div>
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
@@ -952,9 +1030,9 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
       {analysis.relationships?.length > 0 && <p>资料关联：{analysis.relationships.map(textValue).join('；')}</p>}</div>
     {Boolean(analysis.missing_inputs?.length) && <p className="analysis-message">待补资料：{analysis.missing_inputs?.join('、')}</p>}
     <section className="analysis-details"><h4>参数、假设与资料</h4>
-      <fieldset disabled={busy} className="analysis-fieldset"><div className="analysis-edit-grid">{Object.entries(bindings).map(([alias, id]) => <label key={alias}>资料 · {alias}
-        <select className="fnd-field" value={id} onChange={(event) => setBindings({ ...bindings, [alias]: event.target.value })}>
-          {datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>)}
+      <fieldset disabled={busy} className="analysis-fieldset"><div className="analysis-edit-grid">{Object.entries(bindings).map(([alias, id]) =>
+        <SearchableSelect key={alias} label={`资料 · ${alias}`} value={id} options={datasetOptions(datasets)}
+          onChange={(value) => setBindings({ ...bindings, [alias]: value })} placeholder="搜索资料名称、来源或快照" />)}
         {Object.entries(parameters).filter(([key]) => metadataFor(key)?.role === 'business').map(([key, value]) =>
           <ParameterField key={key} metadata={metadataFor(key)!} value={value} onChange={(next) => updateParameter(key, value, next)} />)}
         {assumptions.map((value, index) => <label key={`assumption-${index}`}>假设 · {itemLabel(value, index)}
@@ -962,8 +1040,9 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
       </div>
       <details className="analysis-details"><summary>高级参数与公式常量</summary>
         <p className="analysis-note">未标注业务含义的参数按计算定义中的名称或顺序展示。</p>
-        <div className="analysis-edit-grid">{Object.entries(parameters).filter(([key]) => metadataFor(key)?.role !== 'business').map(([key, value], index) => <label key={key}>参数 · {Array.isArray(parameters) ? itemLabel(value, index) : key}
-          <input className="fnd-field" value={itemValue(value)} onChange={(event) => updateParameter(key, value, event.target.value)} /></label>)}</div>
+        <div className="analysis-edit-grid">{Object.entries(parameters).filter(([key]) => metadataFor(key)?.role !== 'business').map(([key, value], index) =>
+          <TextField key={key} label={`参数 · ${Array.isArray(parameters) ? itemLabel(value, index) : key}`} value={itemValue(value)}
+            onChange={(next) => updateParameter(key, value, next)} />)}</div>
       </details>
       {Array.isArray(parameters) && <button type="button" className="fnd-button" onClick={() => setParameters([...parameters, ''])}>添加计算参数</button>}
       </fieldset>
@@ -977,19 +1056,22 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat }: {
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'md' | 'xlsx', spec?: Record<string, unknown>): void; onChat(spec?: Record<string, unknown>): void;
+  onDiscussRequirements(request: Record<string, unknown>): void;
 }) {
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
   const [body, setBody] = useState(edit?.body ?? draft?.body ?? '');
   const [limitations, setLimitations] = useState(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
   const [review, setReview] = useState(edit?.review ?? draft?.review_status ?? 'unreviewed');
+  const [materiality, setMateriality] = useState<MaterialityEdit>(() => edit?.materiality ?? materialityToEdit(draft?.materiality));
   const [editing, setEditing] = useState(!draft || Boolean(edit && (edit.body !== draft.body || edit.title !== draft.title
-    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status)));
+    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality))));
   const [quality, setQuality] = useState<ExplanationQuality | null>((draft?.quality as ExplanationQuality | undefined) ?? null);
   const [qualityState, setQualityState] = useState<'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'>('idle');
+  const [updatedRequirementsId, setUpdatedRequirementsId] = useState<string | null>(null);
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
@@ -1010,14 +1092,21 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const citedFactIds = explicitFactIds(draft, body);
   const boundDatasetIds = Array.from(new Set(draftRuns.flatMap((run) => Object.values(run.bindings ?? {}))));
   const sourceDatasets = datasets.filter((source) => boundDatasetIds.includes(source.id));
-  useEffect(() => { onEdit({ title, body, limitations, review }); }, [title, body, limitations, review, onEdit]);
+  const materialitySpec = materialityToSpec(materiality);
+  const materialityChanged = !sameMateriality(materiality, draft?.materiality);
+  const materialityError = materiality.relative.trim().startsWith('-') ? '相对阈值不能为负数。0.1 表示 10%。' : '';
+  const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
+    || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id)));
+  useEffect(() => { onEdit({ title, body, limitations, review, materiality }); }, [title, body, limitations, review, materiality, onEdit]);
   useEffect(() => {
     setTitle(edit?.title ?? draft?.title ?? '经营分析');
     setBody(edit?.body ?? draft?.body ?? '');
     setLimitations(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
     setReview(edit?.review ?? draft?.review_status ?? 'unreviewed');
+    setMateriality(edit?.materiality ?? materialityToEdit(draft?.materiality));
     setQuality((draft?.quality as ExplanationQuality | undefined) ?? null);
     setQualityState('idle');
+    setUpdatedRequirementsId(null);
     setFacts([]); setFactDetails({}); setBackgrounds([]); setToolError(''); setBackgroundMessage('');
     setBackgroundScope(scopeToFields(defaultScope)); setScopeJson(JSON.stringify(defaultScope, null, 2));
     qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1;
@@ -1033,12 +1122,18 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     if (!api?.financeCall) { setQualityState('unavailable'); return; }
     const request = ++qualityRequest.current;
     const bgRequest = ++backgroundRequest.current;
+    if (hasUnsavedQualityInputs) {
+      setQuality(null); setQualityState('stale'); setToolError('');
+      void loadBackgrounds(bgRequest, defaultScope);
+      return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
+    }
     setQualityState('checking'); setToolError('');
     void Promise.allSettled([
-      api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids }),
-      api.financeCall(taskId, 'validate-explanation', edit?.body != null && edit.body !== draft.body
-        ? { body: edit.body, run_ids: draft.run_ids, fact_ids: citedFactIds, claims: draft.claims }
-        : { draft_id: draft.id }),
+      api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids, materiality: materialitySpec }),
+      api.financeCall(taskId, 'validate-explanation', edit?.body != null && edit.body !== draft.body || materialityChanged || updatedRequirementsId
+        ? { draft_id: draft.id, body, run_ids: draft.run_ids, fact_ids: citedFactIds, claims: draft.claims,
+          ...(updatedRequirementsId ? { requirements_id: updatedRequirementsId } : {}), materiality: materialitySpec }
+        : { draft_id: draft.id, materiality: materialitySpec }),
     ]).then(([prepared, checked]) => {
       if (request !== qualityRequest.current) return;
       if (prepared.status === 'fulfilled') {
@@ -1055,10 +1150,11 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     void loadBackgrounds(bgRequest, defaultScope);
     return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
   }, [draft?.id, taskId]);
-  const changed = !draft || title !== draft.title || body !== draft.body || limitations !== draft.limitations.join('\n') || review !== draft.review_status;
+  const changed = !draft || title !== draft.title || body !== draft.body || limitations !== draft.limitations.join('\n') || review !== draft.review_status
+    || Boolean(updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || materialityChanged;
   function spec(publication: 'draft' | 'archived') {
     return { title: title.trim(), body, run_ids: draft?.run_ids ?? [], claims: draft?.claims ?? [], ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
-      ...(draft ? { parent_id: draft.id } : {}), publication_status: publication, review_status: review,
+      ...(draft ? { parent_id: draft.id } : {}), ...(updatedRequirementsId ? { requirements_id: updatedRequirementsId } : {}), materiality: materialitySpec, publication_status: publication, review_status: review,
       limitations: limitations.split('\n').map((line) => line.trim()).filter(Boolean) };
   }
   async function recheck() {
@@ -1067,10 +1163,11 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     const request = ++qualityRequest.current;
     try {
       setQualityState('checking'); setToolError('');
-      const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids }) as Answer<ExplanationPreparation>);
+      const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: draft.run_ids, materiality: materialitySpec }) as Answer<ExplanationPreparation>);
       if (request !== qualityRequest.current) return;
       setFacts(prepared.facts ?? []);
-      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { body, run_ids: draft.run_ids, fact_ids: explicitFactIds(draft, body), claims: draft.claims }) as Answer<ExplanationQuality>);
+      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { draft_id: draft.id, body, run_ids: draft.run_ids, fact_ids: explicitFactIds(draft, body), claims: draft.claims,
+        ...(updatedRequirementsId ? { requirements_id: updatedRequirementsId } : {}), materiality: materialitySpec }) as Answer<ExplanationQuality>);
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
     } catch (failure) {
@@ -1115,15 +1212,26 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       setBackgrounds((value) => [saved, ...value.filter((item) => item.id !== saved.id)]);
     } catch (failure) { if (request === backgroundRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
   }
-  function onBodyChange(value: string) {
+  function markQualityStale() {
     qualityRequest.current += 1;
-    setBody(value); setReview('unreviewed'); setQuality(null); setQualityState('stale');
+    setQuality(null); setQualityState('stale');
+  }
+  function onBodyChange(value: string) {
+    markQualityStale();
+    setBody(value); setReview('unreviewed');
+  }
+  function onMaterialityChange(next: MaterialityEdit) {
+    setMateriality(next);
+    markQualityStale();
   }
   return <div className="analysis-draft">
+    {bridge()?.financeCall && <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
+      onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
+      onDiscuss={onDiscussRequirements} />}
     <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
       {draft && <span className="analysis-note">{STATUS[draft.publication_status] ?? draft.publication_status} · {STATUS[draft.review_status] ?? draft.review_status}</span>}
       <div className="analysis-actions"><button type="button" className="fnd-button" aria-pressed={editing} onClick={() => setEditing(!editing)}>{editing ? '阅读文稿' : '编辑文稿'}</button>
-      <button type="button" className="fnd-button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim()))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</button></div></div>
+      <button type="button" className="fnd-button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</button></div></div>
     {editing ? <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <label>文稿标题<input aria-label="文稿标题" className="fnd-field" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
     <label>文稿正文<textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
@@ -1131,6 +1239,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
       onChange={(event) => setLimitations(event.target.value)} /></label><label>我的审阅状态<select aria-label="我的审阅状态" className="fnd-field" value={review}
       onChange={(event) => setReview(event.target.value)}><option value="unreviewed">未阅</option><option value="reviewed">已阅</option><option value="accepted">认可</option></select></label></div>
+    <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset> : <article className="analysis-draft-reading" aria-label="文稿阅读"><h2>{title}</h2><DraftBody body={body} />
       {limitations.trim() && <section><h3>局限与待确认事项</h3><ul>{limitations.split('\n').filter(Boolean).map((line, index) => <li key={index}>{line}</li>)}</ul></section>}</article>}
     {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
@@ -1141,20 +1250,95 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       {draft.claims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</details>}
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
-    <div className="analysis-actions">{changed && <button type="button" className="fnd-go" disabled={busy || !title.trim() || !body.trim()} onClick={() => onSave(spec('draft'))}>保存文稿新版</button>}
-      <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim()} onClick={() => onSave(spec('archived'))}>选定并归档此版</button>
+    <div className="analysis-actions">{changed && <button type="button" className="fnd-go" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</button>}
+      <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</button>
       <details ref={exportMenu} className="analysis-export" onKeyDown={(event) => { if (event.key === 'Escape') {
         event.preventDefault(); if (exportMenu.current) { exportMenu.current.open = false; exportMenu.current.querySelector('summary')?.focus(); }
       } }}><summary>导出</summary><div className="analysis-export-options">
-        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim()} onClick={() => {
+        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => {
           if (exportMenu.current) exportMenu.current.open = false; onExport('md', changed ? spec('draft') : undefined);
         }}>导出文稿<span>Markdown</span></button>
-        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim()} onClick={() => {
+        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => {
           if (exportMenu.current) exportMenu.current.open = false; onExport('xlsx', changed ? spec('draft') : undefined);
         }}>导出工作簿<span>Excel</span></button></div></details></div>
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
     {toolError && <p role="alert" className="analysis-message analysis-message--error">{toolError}</p>}
   </div>;
+}
+
+
+const denominatorOptions: SelectOption[] = [
+  { value: 'baseline_abs', label: '按基准金额', meta: 'baseline_abs' },
+  { value: 'actual_abs', label: '按实际金额', meta: 'actual_abs' },
+  { value: 'max_abs', label: '按较大金额', meta: 'max_abs' },
+];
+const negativePolicyOptions: SelectOption[] = [
+  { value: 'absolute', label: '按绝对值比较', meta: 'absolute' },
+  { value: 'signed', label: '保留正负方向', meta: 'signed' },
+];
+function validDenominator(value: unknown): MaterialityDenominator {
+  return value === 'actual_abs' || value === 'max_abs' ? value : 'baseline_abs';
+}
+
+function validNegativePolicy(value: unknown): MaterialityNegativePolicy {
+  return value === 'signed' ? 'signed' : 'absolute';
+}
+
+function materialityToEdit(value: unknown): MaterialityEdit {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const relativeObject = source.relative && typeof source.relative === 'object' && !Array.isArray(source.relative) ? source.relative as Record<string, unknown> : null;
+  const relativeValue = relativeObject ? relativeObject.threshold ?? relativeObject.value : source.relative;
+  return {
+    absolute: String(source.absolute ?? '0'),
+    relative: relativeValue == null ? '' : String(relativeValue),
+    denominator: validDenominator(relativeObject?.denominator),
+    negativePolicy: validNegativePolicy(relativeObject?.negative_policy),
+  };
+}
+
+function materialityToSpec(value: MaterialityEdit): Record<string, unknown> {
+  const absolute = value.absolute.trim() || '0';
+  const relative = value.relative.trim();
+  return {
+    absolute,
+    ...(relative ? { relative: { threshold: relative, denominator: value.denominator, negative_policy: value.negativePolicy } } : {}),
+  };
+}
+
+function sameMateriality(edit: MaterialityEdit | undefined, saved: unknown): boolean {
+  return JSON.stringify(materialityToSpec(edit ?? materialityToEdit(undefined))) === JSON.stringify(materialityToSpec(materialityToEdit(saved)));
+}
+
+
+function materialityScopeSummary(runs: AnalysisRun[]): string {
+  const groups = Array.from(new Set(runs.flatMap((run) => Object.values(run.finance_scope ?? {}).map((scope) => {
+    const currency = scope.currency ? textValue(scope.currency) : '未注明币种';
+    const unit = scope.unit ? textValue(scope.unit) : '未注明单位';
+    return `${currency}/${unit}`;
+  }))));
+  if (!groups.length) return '按运行结果的原币原单位判断；当前运行未注明币种或单位。';
+  if (groups.length === 1) return `按运行结果原币原单位判断：${groups[0]}。`;
+  return `按每组运行结果的原币原单位判断：${groups.join('；')}。`;
+}
+
+function MaterialityFields({ value, scopeText, error, disabled, onChange }: { value: MaterialityEdit; scopeText: string; error?: string; disabled?: boolean; onChange(value: MaterialityEdit): void }) {
+
+  const set = (patch: Partial<MaterialityEdit>) => onChange({ ...value, ...patch });
+  return <details className="analysis-details" open><summary>重要性阈值</summary>
+    <p className="analysis-note">用于准备可引用事实和重检覆盖范围。相对阈值填 0.1 表示 10%。</p>
+    <div className="analysis-edit-grid">
+      <DecimalInput label="重要性绝对金额" value={value.absolute} onChange={(absolute) => set({ absolute })} placeholder="0"
+        disabled={disabled} help="只填阈值，不做单位换算。" />
+      <FieldShell label="阈值单位"><p className="analysis-note">{scopeText}</p></FieldShell>
+      <DecimalInput label="相对重要性阈值" value={value.relative} onChange={(relative) => set({ relative })} placeholder="0.1" unit="比例"
+        disabled={disabled} help={error || '可选；0.1 = 10%，留空则只使用绝对金额。'} />
+      <SearchableSelect label="相对分母" value={value.denominator} options={denominatorOptions} onChange={(denominator) => set({ denominator: validDenominator(denominator) })}
+        disabled={disabled} />
+      <SearchableSelect label="负数比较规则" value={value.negativePolicy} options={negativePolicyOptions} onChange={(negativePolicy) => set({ negativePolicy: validNegativePolicy(negativePolicy) })}
+        disabled={disabled} />
+    </div>
+    {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
+  </details>;
 }
 
 function firstFinanceScope(run?: AnalysisRun): Record<string, unknown> {
@@ -1237,6 +1421,13 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <button type="button" className="fnd-button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</button></div>
+    {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
+      {([['numbers', '数字与口径'], ['coverage', '问题覆盖'], ['provenance', '来源追溯']] as const).map(([key, label]) => {
+        const result = quality.checks?.[key]?.status;
+        return <div key={key}><dt>{label}</dt><dd>{state === 'stale' ? '改稿后待复核' : result === 'pass' ? '已核对' : result === 'needs_attention' ? '仍有缺口' : '尚未核对'}</dd></div>;
+      })}
+    </dl>}
+    {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
     {quality?.issues?.length ? <ul>{quality.issues.map((issue, index) => <li key={index}>{issue.severity === 'error' ? '需修正' : '请核对'}：{explanationIssueText(issue)}</li>)}</ul> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
@@ -1269,20 +1460,21 @@ function FinanceBackgroundPanel({ background, scope, scopeJson, backgrounds, dat
     <p className="analysis-note">保存业务原因、经理判断或资料来源解释。背景按范围和有效期复用，经理可改适用范围。</p>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
       <label>标题<input className="fnd-field" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })} /></label>
-      <label>依据类型<select className="fnd-field" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
-        <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></select></label>
-      <label>账簿<input aria-label="背景账簿" className="fnd-field" value={scope.ledger ?? ''} onChange={(event) => onScope({ ...scope, ledger: event.target.value })} /></label>
-      <label>组织<input aria-label="背景组织" className="fnd-field" value={scope.organization ?? ''} onChange={(event) => onScope({ ...scope, organization: event.target.value })} /></label>
-      <label>期间<input aria-label="背景期间" className="fnd-field" value={scope.period ?? ''} onChange={(event) => onScope({ ...scope, period: event.target.value })} /></label>
-      <label>币种<input aria-label="背景币种" className="fnd-field" value={scope.currency ?? ''} onChange={(event) => onScope({ ...scope, currency: event.target.value })} /></label>
-      <label>单位<input aria-label="背景单位" className="fnd-field" value={scope.unit ?? ''} onChange={(event) => onScope({ ...scope, unit: event.target.value })} /></label>
-      <label>生效期间<input className="fnd-field" value={background.effective_from} placeholder="2026-09" onChange={(event) => onBackground({ ...background, effective_from: event.target.value })} /></label>
-      <label>失效期间（可选）<input className="fnd-field" value={background.effective_to} onChange={(event) => onBackground({ ...background, effective_to: event.target.value })} /></label>
-      {(background.basis === 'source_fact') && <><label>授权资料<select aria-label="背景授权资料" className="fnd-field" value={background.dataset_id} onChange={(event) => onBackground({ ...background, dataset_id: event.target.value })}>
-        <option value="">选择资料</option>{datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select></label>
-        <label>段落编号<input aria-label="背景段落编号" className="fnd-field" value={background.paragraph} onChange={(event) => onBackground({ ...background, paragraph: event.target.value })} /></label></>}
-      {(background.basis === 'external_reference') && <><label>外部来源<input aria-label="背景外部来源" className="fnd-field" value={background.source} onChange={(event) => onBackground({ ...background, source: event.target.value })} /></label>
-        <label>查询日期<input aria-label="背景查询日期" className="fnd-field" value={background.retrieved_at} placeholder="2026-09-06" onChange={(event) => onBackground({ ...background, retrieved_at: event.target.value })} /></label></>}
+      <FieldShell label="依据类型"><select aria-label="依据类型" className="fnd-field" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
+        <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></select></FieldShell>
+      <TextField label="账簿" ariaLabel="背景账簿" value={scope.ledger ?? ''} onChange={(value) => onScope({ ...scope, ledger: value })} />
+      <TextField label="组织" ariaLabel="背景组织" value={scope.organization ?? ''} onChange={(value) => onScope({ ...scope, organization: value })} />
+      <AccountingPeriodInput label="期间" ariaLabel="背景期间" value={scope.period ?? ''} onChange={(value) => onScope({ ...scope, period: value })} />
+      <TextField label="币种" ariaLabel="背景币种" value={scope.currency ?? ''} onChange={(value) => onScope({ ...scope, currency: value })} />
+      <TextField label="单位" ariaLabel="背景单位" value={scope.unit ?? ''} onChange={(value) => onScope({ ...scope, unit: value })} />
+      <div className="analysis-period-range"><PeriodRangeInput label="适用期间范围" start={background.effective_from} end={background.effective_to}
+        onChange={({ start, end }) => onBackground({ ...background, effective_from: start, effective_to: end })}
+        help="设置这项背景适用的开始与结束期间；结束期间可留空。" /></div>
+      {(background.basis === 'source_fact') && <><SearchableSelect label="授权资料" ariaLabel="背景授权资料" value={background.dataset_id}
+        options={datasetOptions(datasets)} onChange={(value) => onBackground({ ...background, dataset_id: value })} placeholder="搜索授权资料" allowEmptyLabel="选择资料" />
+        <TextField label="段落编号" ariaLabel="背景段落编号" value={background.paragraph} onChange={(value) => onBackground({ ...background, paragraph: value })} inputMode="numeric" /></>}
+      {(background.basis === 'external_reference') && <><TextField label="外部来源" ariaLabel="背景外部来源" value={background.source} onChange={(value) => onBackground({ ...background, source: value })} />
+        <DateInput label="查询日期" ariaLabel="背景查询日期" value={background.retrieved_at} onChange={(value) => onBackground({ ...background, retrieved_at: value })} /></>}
     </div><label>背景正文<textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
     <details className="analysis-details"><summary>高级：补充范围 JSON</summary><textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></fieldset>
     <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</button>
@@ -1329,10 +1521,10 @@ function Method({ method, datasets, taskId, busy, onApply }: {
     && (parameters[index]?.value === '' || parameters[index]?.value == null) && !metadataAt(index)?.constraints?.nullable);
   const update = (index: number, value: unknown) => setParameters(parameters.map((item, at) => at === index ? { ...item, value } : item));
   return <article className="analysis-method"><h3>{method.name}</h3><fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-    {aliases.map((alias) => <label key={alias}>选择 {alias} 资料<select aria-label={`选择 ${alias} 资料`} className="fnd-field" value={bindings[alias] ?? ''}
-      onChange={(event) => setBindings({ ...bindings, [alias]: event.target.value })}>
-      <option value="">请选择本次资料</option>{datasets.map((source) => <option key={source.id} value={source.id}>{source.name} · {shortSha(source.id)}</option>)}</select>
-      {method.input_contracts?.[alias]?.schema?.length ? <span className="analysis-note">所需字段：{method.input_contracts[alias].schema.map((column) => column.name).join('、')}</span> : null}</label>)}
+    {aliases.map((alias) => <SearchableSelect key={alias} label={`选择 ${alias} 资料`} value={bindings[alias] ?? ''}
+      options={datasetOptions(datasets)} onChange={(value) => setBindings({ ...bindings, [alias]: value })}
+      placeholder="搜索本次资料" allowEmptyLabel="请选择本次资料"
+      help={method.input_contracts?.[alias]?.schema?.length ? `所需字段：${method.input_contracts[alias].schema.map((column) => column.name).join('、')}` : undefined} />)}
     </div>
     <div className="analysis-edit-grid">{parameters.map((parameter, index) => {
       const metadata = metadataAt(index);
@@ -1340,8 +1532,10 @@ function Method({ method, datasets, taskId, busy, onApply }: {
     })}</div>
     <details className="analysis-details"><summary>高级参数与公式定义</summary><p className="analysis-note">未提供业务含义的参数按计算定义顺序填写。上次的业务数值不会自动带入。</p>
       {parameters.map((parameter, index) => formula(index) || metadataAt(index)?.role === 'business' ? null : <div className="analysis-edit-grid" key={index}>
-        <label>参数 {index + 1} 的值{contract[index] ? ` · ${typeLabel[contract[index].type] ?? contract[index].type}` : ''}<input className="fnd-field" value={parameter.value == null ? '' : String(parameter.value)} onChange={(event) => update(index, event.target.value)} /></label>
-        {contract.length === 0 && <><label>参数 {index + 1} 的名称（可选）<input className="fnd-field" value={parameter.name} onChange={(event) => setParameters(parameters.map((item, at) => at === index ? { ...item, name: event.target.value } : item))} /></label>
+        <TextField label={`参数 ${index + 1} 的值${contract[index] ? ` · ${typeLabel[contract[index].type] ?? contract[index].type}` : ''}`}
+          value={parameter.value == null ? '' : String(parameter.value)} onChange={(value) => update(index, value)} />
+        {contract.length === 0 && <><TextField label={`参数 ${index + 1} 的名称（可选）`} value={parameter.name}
+          onChange={(value) => setParameters(parameters.map((item, at) => at === index ? { ...item, name: value } : item))} />
           <button type="button" className="fnd-button" onClick={() => setParameters(parameters.filter((_, at) => at !== index))}>移除参数 {index + 1}</button></>}
       </div>)}
       {contract.length === 0 && <button type="button" className="fnd-button" onClick={() => setParameters([...parameters, { name: '', value: '' }])}>添加方法参数</button>}

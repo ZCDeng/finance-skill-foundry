@@ -205,6 +205,8 @@ export function registerIpc(
     'explain-variance',
     'drilldown-fact',
     'save-explanation-draft',
+    'analysis-requirements-save',
+    'analysis-requirements-list',
     'prepare-explanation',
     'validate-explanation',
     'finance-background-save',

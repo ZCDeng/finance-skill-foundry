@@ -279,6 +279,8 @@ export interface AnalysisDraft extends AnalysisObject {
   run_ids: string[];
   claims: unknown[];
   fact_ids?: string[];
+  requirements_id?: string | null;
+  materiality?: Record<string, unknown>;
   quality?: Record<string, unknown>;
   parent_id?: string | null;
   publication_status: string;
@@ -317,6 +319,8 @@ export type FinanceCommand =
   | 'explain-variance'
   | 'drilldown-fact'
   | 'save-explanation-draft'
+  | 'analysis-requirements-save'
+  | 'analysis-requirements-list'
   | 'prepare-explanation'
   | 'validate-explanation'
   | 'finance-background-save'

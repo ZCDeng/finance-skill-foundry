@@ -47,6 +47,10 @@ function openMethods() {
     if (summary.closest('details')) (summary.closest('details') as HTMLDetailsElement).open = true;
   }
 }
+function chooseSearchable(label: string, option: RegExp | string) {
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  fireEvent.mouseDown(screen.getByRole('option', { name: option }));
+}
 const props = { task, tasks: [task], onPick: vi.fn(), onNew: vi.fn(), onChat: vi.fn() };
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); vi.useRealTimers(); sessionStorage.clear(); });
 
@@ -180,9 +184,9 @@ describe('analysis workbench', () => {
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '尚未保存的经营判断。' } });
     openAnalysisEditor();
     fireEvent.change(screen.getByLabelText('参数 · 第 1 项'), { target: { value: '0.93' } });
-    fireEvent.change(screen.getByLabelText('分析版本'), { target: { value: earlier.id } });
+    chooseSearchable('分析版本', /888888888888/);
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.70');
-    fireEvent.change(screen.getByLabelText('分析版本'), { target: { value: analysis.id } });
+    chooseSearchable('分析版本', /dddddddddddd/);
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.93');
     openDraftEditor();
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('尚未保存的经营判断。');
@@ -222,11 +226,16 @@ describe('analysis workbench', () => {
     expect(analysisState).toHaveBeenCalledTimes(1);
     rerender(<Analysis {...props} active />);
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
-    await screen.findByRole('option', { name: /助手新增报告/ });
+    fireEvent.click(screen.getByRole('button', { name: '文稿版本' }));
+    expect(await screen.findByRole('option', { name: /助手新增报告/ })).toBeTruthy();
+    fireEvent.keyDown(screen.getByLabelText('文稿版本搜索'), { key: 'Escape' });
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('返回后还要继续写的判断。');
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.92');
-    expect(screen.getByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('华东利润分析');
+    fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
+    expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
+    fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
     fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
     expect(screen.getByText('助手新加预算')).toBeTruthy();
     rerender(<Analysis {...props} active />);
@@ -281,7 +290,7 @@ describe('analysis workbench', () => {
     openMethods();
     const button = screen.getByRole('button', { name: '用这些资料创建分析' });
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('选择 actual 资料'), { target: { value: source.id } });
+    chooseSearchable('选择 actual 资料', /本月实际/);
     fireEvent.click(button);
     await waitFor(() => expect(analysisMethodApply).toHaveBeenCalledWith(task.id, method.id, { actual: source.id }, []));
   });
@@ -292,7 +301,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, methods: [method] }), analysisMethodApply });
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openMethods();
-    fireEvent.change(screen.getByLabelText('选择 actual 资料'), { target: { value: source.id } });
+    chooseSearchable('选择 actual 资料', /本月实际/);
     fireEvent.click(screen.getByRole('button', { name: '添加方法参数' }));
     fireEvent.change(screen.getByLabelText('参数 1 的值'), { target: { value: '0.8500000000000001' } });
     fireEvent.change(screen.getByLabelText('参数 1 的名称（可选）'), { target: { value: 'rate' } });
@@ -311,7 +320,7 @@ describe('analysis workbench', () => {
     expect(input.value).toBe('');
     expect(screen.queryByRole('button', { name: '添加方法参数' })).toBeNull();
     fireEvent.change(input, { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('选择 actual 资料'), { target: { value: source.id } });
+    chooseSearchable('选择 actual 资料', /本月实际/);
     fireEvent.click(screen.getByRole('button', { name: '用这些资料创建分析' }));
     await waitFor(() => expect(analysisMethodApply).toHaveBeenCalledWith(task.id, method.id, { actual: source.id }, ['华东']));
   });
@@ -427,7 +436,7 @@ describe('analysis workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看失败记录' }));
     expect((await screen.findByRole('alert')).textContent).toBe('缺少成本列');
     expect(screen.queryByRole('table')).toBeNull();
-    expect((screen.getByLabelText('分析版本') as HTMLSelectElement).value).toBe(newer.id);
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('新的成本口径');
   });
 
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {
@@ -485,7 +494,7 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际'); openMethods();
     expect((screen.getByLabelText('回款比例') as HTMLInputElement).value).toBe('');
     expect(screen.queryByLabelText(/参数 2 的值/)).toBeNull();
-    fireEvent.change(screen.getByLabelText('选择 actual 资料'), { target: { value: source.id } });
+    chooseSearchable('选择 actual 资料', /本月实际/);
     expect((screen.getByRole('button', { name: '用这些资料创建分析' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('回款比例'), { target: { value: '85.00000000000001' } });
     fireEvent.click(screen.getByRole('button', { name: '用这些资料创建分析' }));
@@ -519,7 +528,8 @@ describe('analysis workbench', () => {
     expect(analysisState).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(analysisState).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('option', { name: /助手刚完成的报告/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /文稿/ }).textContent).toContain('2');
+    expect(screen.getByRole('button', { name: '文稿版本' }).textContent).toContain('经营简报');
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('仍在编辑。');
     expect(document.activeElement).toBe(input);
     rerender(<Analysis {...props} active={false} />);
@@ -570,11 +580,12 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际'); openDraftEditor();
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: next.body } });
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
-    fireEvent.change(screen.getByLabelText('文稿版本'), { target: { value: other.id } });
+    chooseSearchable('文稿版本', /另一个文稿版本/);
     expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain(other.body);
     await act(async () => finish(success(next)));
-    expect((screen.getByLabelText('文稿版本') as HTMLSelectElement).value).toBe(other.id);
+    expect(screen.getByRole('button', { name: '文稿版本' }).textContent).toContain('另一个文稿版本');
     expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain(other.body);
+    fireEvent.click(screen.getByRole('button', { name: '文稿版本' }));
     expect(screen.getAllByRole('option', { name: /经营简报/ })).toHaveLength(2);
   });
 
@@ -702,14 +713,15 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('财务业务口径');
-    fireEvent.change(screen.getByLabelText('预算资料（可选）'), { target: { value: budgetSource.id } });
+    chooseSearchable('预算资料（可选）', /本月预算/);
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: '对比期间设为实际期间上期' }));
     fireEvent.click(screen.getByText('高级：管理科目映射 JSON'));
     expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('revenue');
     expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('expense');
-    fireEvent.change(screen.getByLabelText('已保存映射'), { target: { value: accountMap.id } });
+    chooseSearchable('已保存映射', /标准管理科目映射/);
     expect(screen.getByText(/当前口径保存时会使用映射/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', { context_id: '4'.repeat(32), metric: { kind: 'management_pnl' } }));
@@ -722,7 +734,7 @@ describe('analysis workbench', () => {
       account_map_id: accountMap.id,
       scopes: expect.objectContaining({
         actual: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-08', scenario: 'actual' }),
-        budget: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-08', scenario: 'budget' }),
+        budget: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-07', scenario: 'budget' }),
       }),
     }));
   });
@@ -737,7 +749,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('财务业务口径');
-    fireEvent.change(screen.getByLabelText('预算资料（可选）'), { target: { value: budgetSource.id } });
+    chooseSearchable('预算资料（可选）', /本月预算/);
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
     fireEvent.click(screen.getByRole('button', { name: '运行预算桥' }));
@@ -854,6 +866,65 @@ describe('analysis workbench', () => {
     expect(within(bridge).getByRole('columnheader', { name: '对照（actual_2025）' })).toBeTruthy();
   });
 
+  it('passes edited materiality to preparation, recheck, and finance draft save', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_scope: { actual: { currency: 'CNY', unit: '元' } } };
+    const financeDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], materiality: {
+      absolute: '5000', relative: { threshold: '0.2', denominator: 'actual_abs', negative_policy: 'signed' },
+    } };
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-profit', run_id: financeRun.id, row: 0, column: 'profit', label: '利润', display_value: '10000' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [], coverage: { required: 1, cited: 1 } });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'save-explanation-draft') return success({ ...financeDraft, ...spec, id: '9'.repeat(32) });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+
+    fireEvent.change(screen.getByLabelText('重要性绝对金额'), { target: { value: '12000.50' } });
+    expect(screen.getByText(/按运行结果原币原单位判断：CNY\/元/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('相对重要性阈值'), { target: { value: '0.1' } });
+    chooseSearchable('相对分母', /按较大金额/);
+    chooseSearchable('负数比较规则', /按绝对值比较/);
+
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'prepare-explanation', expect.objectContaining({
+      materiality: { absolute: '12000.50', relative: { threshold: '0.1', denominator: 'max_abs', negative_policy: 'absolute' } },
+    })));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', expect.objectContaining({
+      materiality: { absolute: '12000.50', relative: { threshold: '0.1', denominator: 'max_abs', negative_policy: 'absolute' } },
+    })));
+    fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+      materiality: { absolute: '12000.50', relative: { threshold: '0.1', denominator: 'max_abs', negative_policy: 'absolute' } },
+    })));
+  });
+
+  it('keeps unsaved materiality edits when switching away from the draft tab', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_scope: { actual: { currency: 'CNY', unit: '元' }, budget: { currency: 'JPY', unit: '千元' } } };
+    const financeDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], materiality: { absolute: '5000' } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [financeDraft] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('重要性绝对金额'), { target: { value: '12345' } });
+    fireEvent.click(screen.getByRole('tab', { name: /分析结果/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
+
+    expect((await screen.findByLabelText('重要性绝对金额') as HTMLInputElement).value).toBe('12,345');
+    expect(screen.getByText(/CNY\/元；JPY\/千元/)).toBeTruthy();
+    expect(screen.getByText(/待重检/)).toBeTruthy();
+  });
+
   it('saves manager edits on finance drafts through the finance draft command', async () => {
     const financeRun = { ...run, engine: 'finance' };
     const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => command === 'list-finance-context'
@@ -876,7 +947,8 @@ describe('analysis workbench', () => {
     const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
     const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
       if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-profit', run_id: financeRun.id, row: 0, column: 'profit', label: '经营利润', display_value: '900719925474099.99', unit: '元', scope: { organization: '华东', period: '2026-09' } }], required_fact_ids: ['fact-profit'], business_contexts: [] });
-      if (command === 'validate-explanation' && spec?.draft_id) return success({ status: 'pass', issues: [], coverage: { required: 1, cited: 1 } });
+      if (command === 'validate-explanation' && spec?.draft_id && !spec?.body) return success({ status: 'pass', issues: [], coverage: { required: 1, cited: 1 },
+        checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'not_assessed' } } });
       if (command === 'validate-explanation') return success({ status: 'issues', issues: [{ severity: 'error', code: 'number_mismatch', message: '正文数字与引用事实不一致' }], coverage: { required: 1, cited: 0 } });
       if (command === 'drilldown-fact') return success({ run_id: financeRun.id, row: 0, rows: [
         { source: { dataset_id: source.id, row_index: 1 }, source_hash: source.source_hash, data: { customer: 'A客户', profit: '900719925474099.99' }, voucher_detail_available: true },
@@ -888,6 +960,9 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     expect(await screen.findByText(/检查通过/)).toBeTruthy();
+    expect(screen.getByText('数字与口径')).toBeTruthy();
+    expect(screen.getByText('来源追溯')).toBeTruthy();
+    expect(screen.getByText('尚未核对')).toBeTruthy();
     fireEvent.click(screen.getByText('可引用事实 · 1 条'));
     expect(screen.getByText(/经营利润 · 900719925474099.99 · 元/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '下钻此事实来源' }));
@@ -981,10 +1056,10 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, drafts: [draft, second] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByText('第二版');
-    fireEvent.change(screen.getByLabelText('文稿版本'), { target: { value: draft.id } });
+    chooseSearchable('文稿版本', /经营简报/);
     await screen.findByText('经营简报');
-    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', { draft_id: draft.id }));
-    fireEvent.change(screen.getByLabelText('文稿版本'), { target: { value: second.id } });
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', expect.objectContaining({ draft_id: draft.id, materiality: { absolute: '0' } })));
+    chooseSearchable('文稿版本', /第二版/);
     await screen.findByText(/第二版需要补引用/);
     await act(async () => resolveFirst(success({ status: 'pass', issues: [] })));
     expect(screen.queryByText(/检查通过/)).toBeNull();
@@ -1010,9 +1085,9 @@ describe('analysis workbench', () => {
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '销售节奏' } });
     fireEvent.change(screen.getByLabelText('背景正文'), { target: { value: '大客户提前下单，收入确认前置。' } });
     fireEvent.change(screen.getByLabelText('依据类型'), { target: { value: 'source_fact' } });
-    fireEvent.change(screen.getByLabelText('背景授权资料'), { target: { value: source.id } });
+    chooseSearchable('背景授权资料', /本月实际/);
     fireEvent.change(screen.getByLabelText('背景段落编号'), { target: { value: '1' } });
-    fireEvent.change(screen.getByLabelText('生效期间'), { target: { value: '2026-09' } });
+    fireEvent.change(screen.getByLabelText('适用期间范围开始'), { target: { value: '2026-09' } });
     fireEvent.click(screen.getByRole('button', { name: '保存背景' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-background-save', expect.objectContaining({
       context_id: 'ctx-a', label: '销售节奏', text: '大客户提前下单，收入确认前置。', basis: 'source_fact',
@@ -1054,7 +1129,7 @@ describe('analysis workbench', () => {
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
-    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-31T23:59:59+08:00' } });
+    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-31' } });
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledWith(task.id, expect.objectContaining({
       product: 'file', version: 'export', file_identity_policy: 'snapshot_only',
@@ -1088,7 +1163,7 @@ describe('analysis workbench', () => {
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-bind', expect.objectContaining({
       source: { kind: 'table', name: 'OutputTable' }, writable: true,
     })));
-    fireEvent.change(screen.getByLabelText('工作簿资料'), { target: { value: refreshedWorkbook.id } });
+    chooseSearchable('工作簿资料', /经理刷新/);
     fireEvent.click(screen.getByRole('button', { name: '读取区域' }));
     await screen.findByText('10.00');
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-read', { binding_id: 'bind-1', dataset_id: refreshedWorkbook.id });
@@ -1117,7 +1192,7 @@ describe('analysis workbench', () => {
     await screen.findByText('Excel 协作');
     fireEvent.change(screen.getByLabelText('绑定编号'), { target: { value: 'bind-1' } });
     fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
-    fireEvent.change(screen.getByLabelText('工作簿资料'), { target: { value: refreshedWorkbook.id } });
+    chooseSearchable('工作簿资料', /经理刷新/);
     await act(async () => resolvePreview(success({ patch_id: 'old-patch', patch: { cells: [
       { cell: 'Z9', field: 'amount', old_value: '1.00', new_value: '2.00', conflict: true },
     ] } })));
@@ -1197,20 +1272,23 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('情景测算');
     fireEvent.change(screen.getByLabelText('账龄日期'), { target: { value: '2026-08-31' } });
+    fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
+    fireEvent.mouseDown(screen.getByRole('option', { name: /争议应收/ }));
     fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-run', { scenario_id: '5'.repeat(32) }));
     expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
-      context_id: context.id, kind: 'receivables_aging', inputs: expect.objectContaining({ as_of: '2026-08-31', invoices_alias: 'actual' }),
+      context_id: context.id, kind: 'receivables_aging', inputs: expect.objectContaining({ as_of: '2026-08-31', invoices_alias: 'actual',
+        status_filter: expect.objectContaining({ field: 'invoice_status', include: ['disputed'] }) }),
     }));
     expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('情景类型'), { target: { value: 'cash_13_weeks' } });
     expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('期初现金'), { target: { value: '5000000.00' } });
     fireEvent.change(screen.getByLabelText('预测开始日'), { target: { value: '2026-09-01' } });
-    fireEvent.change(screen.getByLabelText('实际截止日'), { target: { value: '2026-08-31' } });
+    fireEvent.change(screen.getByLabelText('实际收支截止日'), { target: { value: '2026-08-31' } });
     fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
-      context_id: context.id, kind: 'cash_13_weeks', inputs: expect.objectContaining({ opening_cash: '5000000.00', scenario: { delay_receipts_days: 0 } }),
+      context_id: context.id, kind: 'cash_13_weeks', inputs: expect.objectContaining({ opening_cash: '5000000.00', start_date: '2026-09-01', actual_cutoff: '2026-08-31', scenario: { delay_receipts_days: 0 } }),
     })));
     await waitFor(() => expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: '运行延迟回款子情景' }));

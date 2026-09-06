@@ -162,3 +162,9 @@
 .analysis-fact-list { display: grid; gap: 10px; }
 .analysis-fact-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); padding: 10px 12px; display: grid; gap: 8px; }
 .analysis-background-panel .analysis-history-list { margin-top: 12px; }
+
+.analysis-check-summary { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin: 1rem 0; }
+.analysis-check-summary div { display: grid; gap: .25rem; }
+.analysis-check-summary dt { font-weight: 600; }
+.analysis-check-summary dd { margin: 0; }
+.analysis-period-range { grid-column: 1 / -1; min-width: 0; }

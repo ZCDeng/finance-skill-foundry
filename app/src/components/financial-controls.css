@@ -1,0 +1,450 @@
+.fnd-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fnd-size-small);
+}
+
+.fnd-control__label {
+  color: var(--fnd-ink);
+  line-height: 1.5;
+}
+
+.fnd-control__help,
+.fnd-control__error {
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-label);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.fnd-control__error {
+  color: var(--fnd-mark-outside);
+}
+
+.fnd-control[data-invalid='true'] .fnd-field,
+.fnd-control[data-invalid='true'] .fnd-combobox__button {
+  border-color: var(--fnd-mark-outside-line);
+}
+
+.fnd-period-field,
+.fnd-date-field,
+.fnd-decimal-field,
+.fnd-combobox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.fnd-period-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.fnd-period-field__input {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.fnd-period-field__input .fnd-field {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.fnd-period-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fnd-period-shortcuts .fnd-control-icon {
+  min-width: 0;
+}
+
+.fnd-control-icon--calendar {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.fnd-control-icon {
+  flex: 0 0 auto;
+  height: var(--fnd-button-height);
+  min-width: 42px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface);
+  color: var(--fnd-muted);
+  font: inherit;
+  font-size: var(--fnd-size-label);
+  cursor: pointer;
+  transition: border-color var(--fnd-transition), color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-control-icon:hover:not(:disabled) {
+  border-color: var(--fnd-line-hover);
+  color: var(--fnd-ink);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-control-icon:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.fnd-date-field > svg {
+  position: absolute;
+  left: 10px;
+  color: var(--fnd-muted);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.fnd-date-field .fnd-field {
+  padding-left: 32px;
+}
+
+.fnd-decimal-field .fnd-field {
+  padding-right: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fnd-decimal-field__unit {
+  position: absolute;
+  right: 11px;
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-label);
+  pointer-events: none;
+}
+
+.fnd-combobox__button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: var(--fnd-button-height);
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface);
+  color: var(--fnd-ink);
+  font: inherit;
+  font-size: var(--fnd-size-small);
+  cursor: pointer;
+  transition: border-color var(--fnd-transition), background var(--fnd-transition);
+}
+
+.fnd-combobox__button:hover:not(:disabled) {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-combobox__button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.fnd-combobox__button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fnd-combobox__clear {
+  position: absolute;
+  right: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--fnd-radius-pill);
+  background: transparent;
+  color: var(--fnd-muted);
+  cursor: pointer;
+}
+
+.fnd-combobox__clear:hover:not(:disabled) {
+  color: var(--fnd-ink);
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-combobox__popover {
+  position: fixed;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: min(420px, max(100%, calc(100vw - 48px)));
+  max-width: calc(100vw - 48px);
+  padding: 8px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-menu);
+  background: var(--fnd-surface);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.12);
+}
+
+.fnd-combobox__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fnd-combobox__search > svg {
+  position: absolute;
+  left: 10px;
+  color: var(--fnd-muted);
+  pointer-events: none;
+}
+
+.fnd-combobox__search input {
+  width: 100%;
+  height: var(--fnd-button-height);
+  padding: 0 10px 0 31px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-control);
+  background: var(--fnd-surface);
+  color: var(--fnd-ink);
+  font: inherit;
+  font-size: var(--fnd-size-small);
+}
+
+.fnd-combobox__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.fnd-combobox__list [role='option'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  align-items: center;
+  padding: 8px 9px;
+  border-radius: var(--fnd-radius-menu-item);
+  cursor: pointer;
+}
+
+.fnd-combobox__list [role='option'][data-active='true'] {
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-combobox__list [role='option'][data-disabled='true'] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.fnd-combobox__list span {
+  overflow-wrap: anywhere;
+}
+
+.fnd-combobox__list small {
+  grid-column: 1 / -1;
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-label);
+  line-height: 1.5;
+}
+
+.fnd-combobox__empty,
+.fnd-combobox__state,
+.fnd-combobox__truncated {
+  margin: 8px 0 0;
+  padding: 10px;
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-small);
+  line-height: 1.55;
+}
+
+.fnd-combobox__state[data-state='error'] {
+  color: var(--fnd-mark-outside);
+}
+
+.fnd-combobox__state[data-state='unconfigured'] {
+  background: var(--fnd-surface-strong);
+  border-radius: var(--fnd-radius-menu-item);
+}
+
+.fnd-combobox__truncated {
+  border-top: 1px solid var(--fnd-line);
+  color: var(--fnd-muted);
+}
+
+.fnd-combobox__repair {
+  position: absolute;
+  right: 8px;
+  top: calc(100% + 4px);
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  color: var(--fnd-mark-outside);
+  font: inherit;
+  font-size: var(--fnd-size-label);
+  cursor: pointer;
+}
+
+.fnd-combobox__repair:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+
+.fnd-date-picker {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.fnd-date-picker__popover {
+  position: fixed;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 22;
+  width: min(320px, max(100%, calc(100vw - 48px)));
+  max-width: calc(100vw - 48px);
+  padding: 10px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-menu);
+  background: var(--fnd-surface);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.12);
+}
+
+.fnd-date-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fnd-date-picker__head button,
+.fnd-month-grid button,
+.fnd-day-grid button,
+.fnd-date-field__toggle {
+  border: 1px solid transparent;
+  border-radius: var(--fnd-radius-menu-item);
+  background: transparent;
+  color: var(--fnd-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fnd-date-picker__head button {
+  width: 30px;
+  height: 30px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.fnd-date-picker__head button:hover,
+.fnd-month-grid button:hover,
+.fnd-day-grid button:hover,
+.fnd-month-grid button[aria-pressed='true'],
+.fnd-day-grid button[aria-pressed='true'] {
+  border-color: var(--fnd-line-hover);
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fnd-month-grid button {
+  min-height: 34px;
+}
+
+.fnd-week-grid,
+.fnd-day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.fnd-week-grid {
+  margin-bottom: 4px;
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-label);
+  text-align: center;
+}
+
+.fnd-day-grid button,
+.fnd-day-grid span {
+  min-height: 30px;
+}
+
+.fnd-date-field .fnd-field {
+  padding-right: 32px;
+}
+
+.fnd-date-field__toggle {
+  position: absolute;
+  right: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--fnd-muted);
+}
+
+.fnd-range-field {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+}
+
+.fnd-range-field .fnd-control__help:empty,
+.fnd-range-field .fnd-control__help {
+  min-height: 0;
+}
+
+@media (max-width: 680px) {
+  .fnd-range-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fnd-date-picker__popover:focus {
+  outline: none;
+}
+
+.fnd-month-grid button[data-active='true'],
+.fnd-day-grid button[data-active='true'] {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
+
+
+.fnd-combobox__popover[data-placement='top'],
+.fnd-date-picker__popover[data-placement='top'] {
+  transform-origin: bottom left;
+}
+
+.fnd-combobox__popover[data-align='end'],
+.fnd-date-picker__popover[data-align='end'] {
+  transform-origin: top right;
+}
