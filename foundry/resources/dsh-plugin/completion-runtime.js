@@ -49,6 +49,12 @@ function callIdOf(exec) {
 
 function latestUserRequestKey(exec) {
   const sessionId = sessionIdOf(exec);
+  const requestIdentity = latestUserRequestIdentity(exec);
+  if (!requestIdentity) throw new Error("save_explanation_draft completion requires a human user/message event");
+  return `${sessionId}:${requestIdentity}`;
+}
+
+function latestUserRequestIdentity(exec) {
   const events = exec?.agent?.session?.events;
   if (!Array.isArray(events)) throw new Error("completion runtime requires session events");
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -59,12 +65,11 @@ function latestUserRequestKey(exec) {
     if ((messageId === undefined || messageId === null || !String(messageId).trim()) && !Number.isInteger(seq)) {
       throw new Error("user message event lacks stable id or seq");
     }
-    const identity = messageId !== undefined && messageId !== null && String(messageId).trim()
+    return messageId !== undefined && messageId !== null && String(messageId).trim()
       ? `message:${String(messageId)}:seq:${String(seq)}`
       : `seq:${String(seq)}`;
-    return `${sessionId}:${identity}`;
   }
-  throw new Error("save_explanation_draft completion requires a human user/message event");
+  return null;
 }
 
 function hasAuthorityField(key) {
@@ -243,8 +248,11 @@ function linkRunExec(exec, controller) {
 
 async function stopSupersededForCurrentUser(ctx, invoke, exec, operations) {
   if (!exec?.agent?.id || !Array.isArray(exec?.agent?.session?.events)) return;
-  const requestKey = latestUserRequestKey(exec);
-  await stopSupersededOperations(ctx, invoke, exec, operations, sessionIdOf(exec), requestKey);
+  const requestIdentity = latestUserRequestIdentity(exec);
+  if (!requestIdentity) return;
+  const sessionId = sessionIdOf(exec);
+  const requestKey = `${sessionId}:${requestIdentity}`;
+  await stopSupersededOperations(ctx, invoke, exec, operations, sessionId, requestKey);
 }
 
 export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy = {}) {

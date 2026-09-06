@@ -94,11 +94,27 @@ async function testNonSavePassThrough() {
   assert.equal(log.length, 0);
 }
 
+async function testNonSavePassThroughWithoutHumanUserEvent() {
+  const log = [];
+  const runtime = createCompletionRuntime({}, makeInvoke({ log }));
+  const exec = execFor([runtimeEvent(1), assistant(2)], { name: "method-resource", callId: "resource-1" });
+  const output = await runtime("method-resource", { skill: "financial-statements", resource: "FOUNDRY.md" }, exec, async (input) => JSON.stringify(input));
+  assert.equal(output, JSON.stringify({ skill: "financial-statements", resource: "FOUNDRY.md" }));
+  assert.equal(log.length, 0);
+}
+
 async function testRejectsAuthorityFromTopAndSpec() {
   const runtime = createCompletionRuntime({}, makeInvoke());
   await assert.rejects(() => runtime("save_explanation_draft", { spec: {}, _completion_operation: "evil" }, execFor([user(1, "u1")]), async () => "{}"), /authority field/);
   await assert.rejects(() => runtime("save_explanation_draft", { spec: { completion_operation_id: "evil" } }, execFor([user(1, "u1")]), async () => "{}"), /spec authority field/);
   await assert.rejects(() => runtime("save_explanation_draft", { spec: { _private: true } }, execFor([user(1, "u1")]), async () => "{}"), /spec authority field/);
+}
+
+async function testSaveStillRequiresHumanUserEvent() {
+  const log = [];
+  const runtime = createCompletionRuntime({}, makeInvoke({ log }));
+  await assert.rejects(() => runtime("save_explanation_draft", spec(), execFor([runtimeEvent(1), assistant(2)]), async () => "{}"), /requires a human user\/message event/);
+  assert.equal(log.length, 0);
 }
 
 async function testRequestKeyUsesRealDshUserMessageShape() {
@@ -318,7 +334,9 @@ print(json.dumps({"operation": operation["id"], "status": status["status"], "dra
 }
 
 await testNonSavePassThrough();
+await testNonSavePassThroughWithoutHumanUserEvent();
 await testRejectsAuthorityFromTopAndSpec();
+await testSaveStillRequiresHumanUserEvent();
 await testRequestKeyUsesRealDshUserMessageShape();
 await testPolicyComesOnlyFromThirdArgAndTrustedEnv();
 await testRequiresTrustedCallIdAndDeadline();

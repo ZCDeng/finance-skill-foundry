@@ -91,6 +91,48 @@ export function apply(ctx) {
 }
 """
 
+PREFLIGHT_RESOURCE_PROBE = r"""
+export const name = 'foundry-completion-preflight-probe';
+export const inject = ['tools', 'agentPresets', 'agents'];
+export function apply(ctx) {
+  (async () => {
+    const report = {resource: null, save: null, toolResults: []};
+    await ctx.agentPresets.standingKeyFor('analysis');
+    const handle = await ctx.agents.create({
+      sessionId: 'completion-preflight-real',
+      meta: {cwd: process.env.FOUNDRY_TEST_WORKSPACE, agentPreset: 'analysis'},
+      agentOptions: {provider: 'foundry-preflight-unused', model: 'deterministic'},
+      setup: async (agentCtx) => {
+        await ctx.agentPresets.mount(agentCtx, 'analysis');
+        agentCtx.on('tools/result', (exec, result) => {
+          if (exec.agent.id !== 'completion-preflight-real') return;
+          report.toolResults.push({name: exec.name, callId: exec.callId, isError: result.isError === true});
+        });
+      },
+    });
+    const agent = handle.agent;
+    try {
+      const dispatch = async (name, args, callId) => {
+        const result = await ctx.tools.execute({
+          callId,
+          name,
+          arguments: args,
+          agent,
+          signal: new AbortController().signal,
+        });
+        if (result.isError) return {isError: true, error: result.error};
+        return {isError: false, value: JSON.parse(result.value.stdout)};
+      };
+      report.resource = await dispatch('method-resource', {skill: 'financial-statements', resource: 'FOUNDRY.md'}, 'preflight-resource');
+      report.save = await dispatch('save_explanation_draft', {spec: {title: '无人类事件', body: '不应保存'}}, 'preflight-save');
+      process.stdout.write('FOUNDRY_PREFLIGHT_RESOURCE ' + JSON.stringify(report) + '\n');
+    } finally {
+      await handle.dispose();
+    }
+  })().catch(error => process.stdout.write('FOUNDRY_PREFLIGHT_RESOURCE_ERROR ' + (error.stack ?? error.message) + '\n'));
+}
+"""
+
 
 @needs_dsh
 def test_completion_runtime_uses_real_dsh_events_and_keeps_inbox(tmp_path: Path) -> None:
@@ -169,3 +211,61 @@ def test_completion_runtime_uses_real_dsh_events_and_keeps_inbox(tmp_path: Path)
     operation = json.loads(operations[0].read_text(encoding="utf-8"))
     assert operation["request_key"].startswith("completion-runtime-real:")
     assert operation["status"] == "needs_review"
+
+
+@needs_dsh
+def test_preflight_method_resource_without_human_event_and_save_guard(tmp_path: Path) -> None:
+    home = tmp_path / "dsh-home"
+    _prepare(home, _probe_package(tmp_path / "probe", PREFLIGHT_RESOURCE_PROBE), "web")
+    install_presets(home)
+
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="真实 preflight resource")
+    task.record_session("completion-preflight-real", role="analysis")
+    workspace = task.root / "analysis"
+
+    argv, env, cwd = _dsh_args(home, "--profile", "web", "--no-open")
+    env.update(
+        {
+            "FOUNDRY_VAR": str(var),
+            "FOUNDRY_BIN": str(ROOT / ".venv" / "bin" / "foundry"),
+            "FOUNDRY_TEST_WORKSPACE": str(workspace),
+        }
+    )
+    log = tmp_path / "preflight-resource-real.log"
+    with log.open("wb") as sink:
+        child = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=env, cwd=cwd)
+        try:
+            deadline = time.monotonic() + WEB_SETTLE_SECONDS
+            while time.monotonic() < deadline:
+                output = log.read_text(encoding="utf-8", errors="replace")
+                if "FOUNDRY_PREFLIGHT_RESOURCE " in output or "FOUNDRY_PREFLIGHT_RESOURCE_ERROR " in output:
+                    break
+                time.sleep(0.2)
+        finally:
+            child.terminate()
+            try:
+                child.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
+
+    output = log.read_text(encoding="utf-8", errors="replace")
+    assert "FOUNDRY_PREFLIGHT_RESOURCE_ERROR " not in output, output[-12000:]
+    lines = [line for line in output.splitlines() if line.startswith("FOUNDRY_PREFLIGHT_RESOURCE ")]
+    assert lines, output[-12000:]
+    report = json.loads(lines[-1].split(" ", 1)[1])
+
+    assert report["resource"]["isError"] is False, report
+    resource = report["resource"]["value"]
+    assert resource["resource"] == "FOUNDRY.md"
+    assert resource["skill"] == "financial-statements"
+    assert "save_explanation_draft" in resource["content"]
+
+    assert report["save"]["isError"] is True, report
+    assert "requires a human user/message event" in json.dumps(report["save"]["error"])
+    assert report["toolResults"] == [
+        {"name": "method-resource", "callId": "preflight-resource", "isError": False},
+        {"name": "save_explanation_draft", "callId": "preflight-save", "isError": True},
+    ]
+    assert not (task.root / "analysis" / "completion_operations").exists()

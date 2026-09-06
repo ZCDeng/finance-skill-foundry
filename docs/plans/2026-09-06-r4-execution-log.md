@@ -203,3 +203,13 @@
 - 1e2a18de74238ae6f0137c6364302fbc90b05cf6已推送并独立核对；新候选asar98c3dd5b、backend a02ddbcb，冻结源指纹仍ab66f32d。结构化真实窗口11项通过，原窗口同构建22项通过。原失败证据保留，修复后的QA实际展开来源记录，并核对持久evidence_checks。
 - 已替换/Applications/FA Foundry.app；安装前后完整目录树与候选一致，21499条目，tree daeb8d0656fd667b02506409d3ab101b8fbd3eb2c05e602b2ee68d5e655c8481。旧安装备份/tmp/FA-Foundry-before-r4-98c3dd5b.app。安装版真实汇总窗口11/11通过，来源/剔除/缺失提示可用。安装回执p2-definition-install-receipt.json、窗口回执p2-definition-installed-ui。
 - 新包FA-Foundry-0.1.5-macOS-arm64-r4-p0-p2-ab66f32d-98c3dd5b.zip，SHA256 24fad8be36b200882216d4ada44fbaa49ca35bcd0f0b11fe7b279fcf245dd850，CRC通过26128条目。4个旧ZIP已移入废纸篓，发布目录只保留新ZIP；清理路径回执p2-definition-old-package-cleanup.json。代码/构建/安装验收已前进，但新构建30+8+20、中文候选真实提交、VoiceOver朗读和经理校准仍未完成，r4不标记整体验收通过。
+
+
+## 2026-09-07：冻结全套启动失败的复核
+
+- `r4-p0-p2-full-20260907` 的 runner 已终止，30/8/20 三组子进程均 exit 1。均在预加载 `financial-statements/FOUNDRY.md` 时收到 `save_explanation_draft completion requires a human user/message event`，尚未进入模型案例，passed/completed 均为 null。不能把 wrapper exit 0 当作验收通过，也不把此次启动失败记作模型答题分数。冻结原件、日志、盲测和评分合同保持不变；先修责任层并做无模型真实装载回归，再重新冻结评测。
+- 中文输入法 QA 发现旧脚本空格候选测试前已恢复原输入源，独立 v2 修正了这条测试路径，未覆盖旧脚本和证据。v2 实际安装窗口复测仍失败：TIS 显示 WeType，但物理键只产生 Latin insertText、没有 composition 事件；不能以选择输入源成功代替中文候选提交。已确认输入源恢复 ABC。原始回执 `ime-ax-evidence/ime-ax-1788730397062-failed.json`；继续核对原生焦点和输入路径，未改产品或输入法设置。
+
+- 已定位并修复 `completion-runtime.js` 非保存工具预清理路径误用严格用户消息检查。读取工具无人类消息时跳过 superseded 清理，保存入口仍要求真实 human user/message；没有伪造预热事件或放宽保存权限。两份插件镜像一致。旧 HEAD 实现对同一调用复现失败；新增单元对照和真实 DSH mounted preset 回归通过：方法资源可读、保存仍拒绝、没有 completion_operations。定向真实 DSH 2项及分析插件/镜像13项通过，完整回归进行中。
+
+- root 完整回归（真实 DSH 开启）1062 passed / 2 skipped，93.41秒，日志 `preflight-resource-full-tests.log`；Ruff/diff通过。开始新的冻结构建，旧失败冻结集不覆盖。
