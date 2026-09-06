@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from foundry.analysis import AnalysisStore, _new
+from foundry.task import TaskStore
+
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "tests/fixtures/finance_evals/cases.json"
@@ -254,7 +257,7 @@ def test_score_observation_reports_seen_separately_from_completed(monkeypatch: p
         {"id": "timed", "taskId": "task-timed", "sessionId": "session-timed", "inputSha256": "sha-timed"},
     ]
 
-    def fake_score(_foundry: Path, _var: Path, case: dict[str, object], _row: dict[str, object]) -> dict[str, object]:
+    def fake_score(_foundry: Path, _var: Path, case: dict[str, object], _row: dict[str, object], *, r4: bool = False) -> dict[str, object]:
         if case["id"] == "timed":
             raise AssertionError("timeout retained for review")
         return {"id": case["id"], "status": "passed"}
@@ -280,7 +283,7 @@ def test_score_observation_reports_seen_separately_from_completed(monkeypatch: p
 def test_score_observation_treats_turn_error_as_hard_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     cases = [{"id": "pilot", "taskId": "task-pilot", "sessionId": "session-pilot", "inputSha256": "sha-pilot"}]
 
-    def fake_score(_foundry: Path, _var: Path, _case: dict[str, object], _row: dict[str, object]) -> dict[str, object]:
+    def fake_score(_foundry: Path, _var: Path, _case: dict[str, object], _row: dict[str, object], *, r4: bool = False) -> dict[str, object]:
         raise AssertionError("case has hard turn/runtime errors")
 
     monkeypatch.setattr(verifier, "_score_case", fake_score)
@@ -446,3 +449,205 @@ def test_timeout_is_not_erased_by_late_completed_event() -> None:
 
 def test_cancelled_turn_cannot_be_reported_completed() -> None:
     assert not verifier._case_completed({'completed': True, 'events': [{'type': 'turn/end', 'data': {'reason': {'kind': 'cancelled'}}}]})
+
+
+def test_r4_contract_requires_latest_requirements_quality_and_completion() -> None:
+    draft = {
+        'id': 'draft1',
+        'seq': 30,
+        'requirements_id': 'req2',
+        'content_hash': 'draft-hash',
+        'run_ids': ['run1'],
+        'explanation_check': {
+            'requirements': {
+                'requirements_id': 'req2',
+                'coverage': {'status': 'pass'},
+                'provenance': {'status': 'pass'},
+            },
+        },
+    }
+    state = {
+        'requirements': [{'id': 'req1', 'seq': 5}, {'id': 'req2', 'seq': 10}],
+        'runs': [{'id': 'run1', 'seq': 20, 'execution_status': 'succeeded'}],
+        'completions': [{'draft_id': 'draft1', 'status': 'complete', 'requirements_id': 'req2', 'draft_content_hash': 'draft-hash'}],
+    }
+    verifier._verify_r4_contract(state, draft, {})
+
+    with pytest.raises(AssertionError, match='latest requirements'):
+        verifier._verify_r4_contract(state, {**draft, 'requirements_id': 'req1'}, {})
+    with pytest.raises(AssertionError, match='completion receipt'):
+        verifier._verify_r4_contract({**state, 'completions': []}, draft, {})
+
+
+def test_r4_missing_data_contract_requires_review_stop_and_explicit_limitation() -> None:
+    draft = {
+        'id': 'draft-missing',
+        'seq': 30,
+        'requirements_id': 'req1',
+        'content_hash': 'draft-hash',
+        'run_ids': ['run1'],
+        'limitations': ['资料缺少数量和单价，不能完成量价拆分。'],
+        'explanation_check': {
+            'requirements': {
+                'requirements_id': 'req1',
+                'coverage': {'status': 'needs_attention'},
+                'provenance': {'status': 'needs_attention'},
+            },
+        },
+    }
+    state = {
+        'requirements': [{'id': 'req1', 'seq': 10}],
+        'runs': [{'id': 'run1', 'seq': 20, 'execution_status': 'succeeded'}],
+        'completions': [{
+            'draft_id': 'draft-missing',
+            'status': 'needs_review',
+            'requirements_id': 'req1',
+            'draft_content_hash': 'draft-hash',
+            'repair_allowed': False,
+        }],
+    }
+    verifier._verify_r4_contract(state, draft, {}, allow_missing_data=True)
+
+    with pytest.raises(AssertionError, match='explicit draft limitations'):
+        verifier._verify_r4_contract(state, {**draft, 'limitations': []}, {}, allow_missing_data=True)
+    complete = {**state, 'completions': [{**state['completions'][0], 'status': 'complete'}]}
+    with pytest.raises(AssertionError, match='needs_review'):
+        verifier._verify_r4_contract(complete, draft, {}, allow_missing_data=True)
+
+
+def test_r4_evidence_checks_can_replace_direct_drilldown_only_when_bound_and_paginated() -> None:
+    cells = {'profit': {'run_id': 'run1', 'row': 0, 'column': 'contribution', 'value': '5'}}
+    check = {
+        'status': 'verified',
+        'location': {'run_id': 'run1', 'row': 0, 'column': 'contribution', 'output_hash': 'run-hash'},
+        'source_hashes': {'dataset-a': 'source-hash'},
+        'sources': [{'dataset_id': 'dataset-a', 'row_index': 1}],
+        'total': 1,
+        'offset': 0,
+        'read_count': 1,
+        'has_more': False,
+    }
+    state = {
+        'datasets': [{'id': 'dataset-a', 'source_hash': 'source-hash', 'row_count': 2}],
+        'runs': [{'id': 'run1', 'execution_status': 'succeeded', 'output_hash': 'run-hash', 'bindings': {'actual': 'dataset-a'}}],
+        'evidence_checks': [check],
+    }
+    verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []}, state, cells)
+
+    with pytest.raises(AssertionError, match='r4 evidence_check|traceability'):
+        verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []},
+                                         {**state, 'evidence_checks': [{**check, 'has_more': True}]}, cells)
+    with pytest.raises(AssertionError, match='outside the run bindings'):
+        verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []},
+                                         {**state, 'evidence_checks': [{**check, 'source_hashes': {'dataset-b': 'source-hash'}}]}, cells)
+
+
+def test_r4_evidence_checks_accept_real_analysis_state_dataset_metadata(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / 'var').create(title='r4 proof')
+    analysis = AnalysisStore(task)
+    source = tmp_path / 'actual.json'
+    source.write_text(json.dumps([{'metric': 'profit', 'amount': '5'}, {'metric': 'cost', 'amount': '3'}]), encoding='utf-8')
+    dataset = analysis.add_dataset(source, name='actual')
+    run = analysis._write(analysis._object_path('runs', '1' * 32), _new(
+        task,
+        id='1' * 32,
+        execution_status='succeeded',
+        output_hash='run-hash',
+        bindings={'actual': dataset['id']},
+        result={'columns': ['contribution'], 'rows': [{'contribution': '5'}]},
+    ))
+    analysis._write(analysis._object_path('evidence_checks', '2' * 32), _new(
+        task,
+        id='2' * 32,
+        status='verified',
+        location={'run_id': run['id'], 'row': 0, 'column': 'contribution', 'output_hash': run['output_hash']},
+        source_hashes={dataset['id']: dataset['source_hash']},
+        sources=[{'dataset_id': dataset['id'], 'row_index': 2}],
+        total=1,
+        offset=0,
+        read_count=1,
+        has_more=False,
+    ))
+
+    state = analysis.state()
+    assert state['datasets'][0]['row_count'] == 2
+    assert 'rows' not in state['datasets'][0]
+    cells = {'profit': {'run_id': run['id'], 'row': 0, 'column': 'contribution', 'value': '5'}}
+
+    verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []}, state, cells)
+
+    bad_state = {
+        **state,
+        'evidence_checks': [{**state['evidence_checks'][0], 'sources': [{'dataset_id': dataset['id'], 'row_index': 3}]}],
+    }
+    with pytest.raises(AssertionError, match='outside the bound snapshot rows'):
+        verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []}, bad_state, cells)
+
+
+def test_r4_evidence_checks_reject_forged_empty_or_legacy_proof() -> None:
+    cells = {'profit': {'run_id': 'run1', 'row': 0, 'column': 'contribution', 'value': '5'}}
+    check = {
+        'status': 'verified',
+        'location': {'run_id': 'run1', 'row': 0, 'column': 'contribution', 'output_hash': 'run-hash'},
+        'source_hashes': {'dataset-a': 'source-hash'},
+        'sources': [{'dataset_id': 'dataset-a', 'row_index': 1}],
+        'total': 1,
+        'offset': 0,
+        'read_count': 1,
+        'has_more': False,
+    }
+    state = {
+        'datasets': [{'id': 'dataset-a', 'source_hash': 'source-hash', 'row_count': 1}],
+        'runs': [{'id': 'run1', 'execution_status': 'succeeded', 'output_hash': 'run-hash', 'bindings': {'actual': 'dataset-a'}}],
+        'evidence_checks': [check],
+    }
+
+    rejected_checks = [
+        {**check, 'source_hashes': {}},
+        {**check, 'sources': []},
+        {key: value for key, value in check.items() if key != 'total'},
+        {**check, 'total': 0},
+        {**check, 'read_count': 2},
+    ]
+    for forged in rejected_checks:
+        with pytest.raises(AssertionError, match='r4 evidence_check|traceability'):
+            verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []},
+                                             {**state, 'evidence_checks': [forged]}, cells)
+
+    missing_dataset = {**state, 'datasets': []}
+    with pytest.raises(AssertionError, match='missing bound snapshot|traceability'):
+        verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []},
+                                         missing_dataset, cells)
+
+    missing_hash_for_row = {
+        **state,
+        'datasets': [
+            *state['datasets'],
+            {'id': 'dataset-b', 'source_hash': 'source-hash-b', 'row_count': 1},
+        ],
+        'runs': [{'id': 'run1', 'execution_status': 'succeeded', 'output_hash': 'run-hash', 'bindings': {'actual': 'dataset-a', 'budget': 'dataset-b'}}],
+        'evidence_checks': [{**check, 'sources': [{'dataset_id': 'dataset-b', 'row_index': 1}]}],
+    }
+    with pytest.raises(AssertionError, match='r4 evidence_check|traceability'):
+        verifier._verify_r4_traceability({'question': '请下钻利润行。', 'expected': {}}, {'calls': []},
+                                         missing_hash_for_row, cells)
+
+
+def test_score_observation_can_select_r4_contract_without_changing_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    cases = [{'id': 'case1', 'taskId': 'task1', 'sessionId': 'session1', 'inputSha256': 'sha1'}]
+    seen_contracts = []
+
+    def fake_score(_foundry: Path, _var: Path, case: dict[str, object], _row: dict[str, object], *, r4: bool = False) -> dict[str, object]:
+        seen_contracts.append(r4)
+        return {'id': case['id'], 'status': 'passed'}
+
+    monkeypatch.setattr(verifier, '_score_case', fake_score)
+    legacy = verifier.score_observation(REPO / '.venv/bin/foundry', REPO / 'build/verification/nonexistent-var',
+                                        cases, {'cases': [{'id': 'case1', 'completed': True}]})
+    r4 = verifier.score_observation(REPO / '.venv/bin/foundry', REPO / 'build/verification/nonexistent-var',
+                                    cases, {'cases': [{'id': 'case1', 'completed': True}]},
+                                    scoring_contract=verifier.SCORING_CONTRACT_R4)
+
+    assert legacy['scoring_contract'] == verifier.SCORING_CONTRACT_R3
+    assert r4['scoring_contract'] == verifier.SCORING_CONTRACT_R4
+    assert seen_contracts == [False, True]

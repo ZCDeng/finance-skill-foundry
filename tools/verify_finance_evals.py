@@ -31,6 +31,8 @@ DEFAULT_DSH_ROOT = REPO / "app/extra/dsh"
 DEFAULT_FOUNDRY = REPO / ".venv/bin/foundry"
 DEFAULT_PLUGIN = REPO / "dsh-plugin"
 DEFAULT_CREDENTIALS_HOME = Path("/Users/zcdeng/Library/Application Support/FA Foundry/harness")
+SCORING_CONTRACT_R3 = "r3-final-draft-text-bound-v3"
+SCORING_CONTRACT_R4 = "r4-requirements-evidence-completion-v2"
 CALC_TOOLS = {"run_metric", "explain_variance", "finance_scenario_run", "analysis-run"}
 FORBIDDEN_CAUSAL = re.compile(
     r"(?:导致|归因于|原因是|主要因为|直接造成|caused by|because of|due to|driven by)",
@@ -623,6 +625,190 @@ def _verify_drilldowns_reference_cells(case: dict[str, Any], observed: dict[str,
         raise AssertionError(f"no drilldown_fact call referenced requested drilldown target: {sorted(required_names)}")
 
 
+def _datasets_by_id(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        dataset["id"]: dataset
+        for dataset in state.get("datasets", [])
+        if isinstance(dataset, dict) and isinstance(dataset.get("id"), str)
+    }
+
+
+def _check_bound_sources(check: dict[str, Any], run: dict[str, Any], datasets: dict[str, dict[str, Any]]) -> None:
+    bound = set(run.get("bindings", {}).values())
+    if not bound:
+        raise AssertionError("r4 evidence_check cannot verify a run without bound snapshots")
+    source_hashes = check.get("source_hashes")
+    if not isinstance(source_hashes, dict) or not source_hashes:
+        raise AssertionError("r4 evidence_check source_hashes must be a non-empty object")
+    for dataset_id, source_hash in source_hashes.items():
+        if dataset_id not in bound:
+            raise AssertionError("r4 evidence_check source hash is outside the run bindings")
+        if not isinstance(source_hash, str) or not source_hash:
+            raise AssertionError("r4 evidence_check source hash must be non-empty")
+        dataset = datasets.get(dataset_id)
+        if not dataset:
+            raise AssertionError("r4 evidence_check source hash references a missing bound snapshot")
+        if dataset.get("source_hash") != source_hash:
+            raise AssertionError("r4 evidence_check source hash does not match the bound snapshot")
+    sources = check.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise AssertionError("r4 evidence_check sources must be a non-empty list")
+    if not _has_paging_metadata(check):
+        raise AssertionError("r4 evidence_check must include complete paging metadata")
+    total = check.get("total")
+    offset = check.get("offset")
+    read_count = check.get("read_count")
+    has_more = check.get("has_more")
+    if (
+        isinstance(total, bool)
+        or isinstance(offset, bool)
+        or isinstance(read_count, bool)
+        or not isinstance(total, int)
+        or not isinstance(offset, int)
+        or not isinstance(read_count, int)
+        or not isinstance(has_more, bool)
+    ):
+        raise AssertionError("r4 evidence_check paging metadata has invalid types")
+    if total <= 0 or offset < 0 or read_count <= 0 or offset + read_count > total:
+        raise AssertionError("r4 evidence_check paging metadata is out of bounds")
+    if len(sources) != read_count:
+        raise AssertionError("r4 evidence_check read_count must match sources length")
+    for source in sources:
+        if not isinstance(source, dict):
+            raise AssertionError("r4 evidence_check sources must be objects")
+        dataset_id = source.get("dataset_id")
+        row_index = source.get("row_index")
+        if dataset_id not in bound:
+            raise AssertionError("r4 evidence_check source row is outside the run bindings")
+        if dataset_id not in source_hashes:
+            raise AssertionError("r4 evidence_check source row has no verified source hash")
+        dataset = datasets.get(dataset_id)
+        if not dataset:
+            raise AssertionError("r4 evidence_check source row references a missing bound snapshot")
+        row_count = dataset.get("row_count")
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count <= 0:
+            raise AssertionError("r4 evidence_check bound snapshot row_count must be a positive integer")
+        if isinstance(row_index, bool) or not isinstance(row_index, int) or not 1 <= row_index <= row_count:
+            raise AssertionError("r4 evidence_check source row is outside the bound snapshot rows")
+
+
+def _has_paging_metadata(check: dict[str, Any]) -> bool:
+    return all(key in check for key in ("total", "offset", "read_count", "has_more"))
+
+
+def _r4_evidence_verified_keys(state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> set[tuple[Any, Any, Any]]:
+    runs = {run["id"]: run for run in state.get("runs", []) if isinstance(run, dict) and run.get("execution_status") == "succeeded"}
+    datasets = _datasets_by_id(state)
+    expected = {_cell_key(cell) for cell in cells.values() if not cell.get("synthetic_zero")}
+    matched: dict[tuple[Any, Any, Any], list[dict[str, Any]]] = {key: [] for key in expected}
+    for check in state.get("evidence_checks", []):
+        if not isinstance(check, dict) or check.get("status") != "verified":
+            continue
+        location = check.get("location")
+        if not isinstance(location, dict):
+            continue
+        run = runs.get(location.get("run_id"))
+        if not run or location.get("output_hash") != run.get("output_hash"):
+            continue
+        key = (location.get("run_id"), location.get("row"), location.get("column"))
+        if key not in matched:
+            continue
+        _check_bound_sources(check, run, datasets)
+        matched[key].append(check)
+    verified = set()
+    for key, checks in matched.items():
+        if not checks:
+            continue
+        totals = {check.get("total") for check in checks if isinstance(check.get("total"), int) and not isinstance(check.get("total"), bool)}
+        if len(totals) != 1:
+            continue
+        total = totals.pop()
+        intervals = sorted(
+            (check.get("offset"), check.get("offset") + check.get("read_count"))
+            for check in checks
+            if (
+                isinstance(check.get("offset"), int)
+                and isinstance(check.get("read_count"), int)
+                and check.get("offset") >= 0
+                and check.get("read_count") >= 0
+            )
+        )
+        cursor = 0
+        for start, end in intervals:
+            if start > cursor:
+                break
+            cursor = max(cursor, end)
+            if cursor >= total:
+                break
+        if cursor >= total and any(check.get("has_more") is False for check in checks):
+            verified.add(key)
+    return verified
+
+
+def _verify_r4_traceability(case: dict[str, Any], observed: dict[str, Any], state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> None:
+    direct_error = None
+    try:
+        _verify_drilldowns_reference_cells(case, observed, cells)
+        return
+    except AssertionError as exc:
+        direct_error = exc
+    expected = {_cell_key(cell) for cell in cells.values() if not cell.get("synthetic_zero")}
+    if not expected:
+        return
+    verified = _r4_evidence_verified_keys(state, cells)
+    required_names = _required_drilldown_names(case, cells)
+    required = {_cell_key(cells[name]) for name in required_names}
+    if expected & verified and (not required or required <= verified):
+        return
+    raise AssertionError(f"r4 traceability missing direct drilldown or immutable evidence_checks: {direct_error}")
+
+
+def _verify_r4_contract(
+    state: dict[str, Any],
+    draft: dict[str, Any] | None,
+    cells: dict[str, dict[str, Any]],
+    *,
+    allow_missing_data: bool = False,
+) -> None:
+    if not draft:
+        raise AssertionError("r4 requires a persisted final draft")
+    requirements = [row for row in state.get("requirements", []) if isinstance(row, dict)]
+    if not requirements:
+        raise AssertionError("r4 requires persisted analysis requirements before scoring")
+    current = requirements[-1]
+    if draft.get("requirements_id") != current.get("id"):
+        raise AssertionError("r4 final draft is not bound to the latest requirements version")
+    if not isinstance(current.get("seq"), int) or not isinstance(draft.get("seq"), int) or current["seq"] >= draft["seq"]:
+        raise AssertionError("r4 requirements must be saved before the final draft")
+    runs = {run["id"]: run for run in state.get("runs", []) if isinstance(run, dict)}
+    for run_id in draft.get("run_ids", []):
+        run = runs.get(run_id)
+        if run and isinstance(run.get("seq"), int) and current["seq"] >= run["seq"]:
+            raise AssertionError("r4 requirements must be saved before selected final runs")
+    quality = draft.get("explanation_check", draft.get("quality", {}))
+    requirement_quality = quality.get("requirements", {}) if isinstance(quality, dict) else {}
+    if requirement_quality.get("requirements_id") != current.get("id"):
+        raise AssertionError("r4 quality check did not assess the latest requirements")
+    if not allow_missing_data:
+        if requirement_quality.get("coverage", {}).get("status") != "pass":
+            raise AssertionError("r4 requirement coverage did not pass")
+        if requirement_quality.get("provenance", {}).get("status") != "pass":
+            raise AssertionError("r4 requirement provenance did not pass")
+    completions = [row for row in state.get("completions", []) if isinstance(row, dict) and row.get("draft_id") == draft.get("id")]
+    if not completions:
+        raise AssertionError("r4 requires a persistent completion receipt")
+    receipt = completions[-1]
+    expected_status = "needs_review" if allow_missing_data else "complete"
+    if receipt.get("status") != expected_status or receipt.get("requirements_id") != current.get("id"):
+        raise AssertionError(f"r4 completion receipt is not {expected_status} for the latest requirements")
+    if receipt.get("draft_content_hash") != draft.get("content_hash"):
+        raise AssertionError("r4 completion receipt is not bound to the final draft content hash")
+    if allow_missing_data:
+        if not draft.get("limitations"):
+            raise AssertionError("r4 missing-data cases require explicit draft limitations")
+        if receipt.get("repair_allowed") is not False:
+            raise AssertionError("r4 missing-data cases must stop instead of requesting more blind repairs")
+
 def _verify_canonical_final_text(case: dict[str, Any], observed: dict[str, Any], state: dict[str, Any], cells: dict[str, dict[str, Any]]) -> str:
     draft = _latest_draft(state)
     text = draft.get("body", "") if draft else _final_answer_text(observed)
@@ -755,7 +941,7 @@ def _has_voucher_detail(value: Any) -> bool:
     return False
 
 
-def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[str, Any]) -> dict[str, Any]:
+def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[str, Any], *, r4: bool = False) -> dict[str, Any]:
     hard_errors = _case_hard_errors(observed)
     if hard_errors:
         raise AssertionError(f"case has hard turn/runtime errors: {hard_errors[:3]}")
@@ -785,12 +971,22 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
     if not used & CALC_TOOLS:
         raise AssertionError("no finance calculation tool was used")
     if case["expected"]["type"] not in {"price_quantity_missing"}:
-        if not drilldowns:
+        if not drilldowns and not r4:
             raise AssertionError("no successful drilldown_fact call was observed")
-        _verify_drilldowns_reference_cells(case, observed, cells)
+        if r4:
+            _verify_r4_traceability(case, observed, state, cells)
+        else:
+            _verify_drilldowns_reference_cells(case, observed, cells)
     draft_verified = _verified_draft_cells(state, cells)
     if cells and draft_verified != set(cells):
         raise AssertionError(f"draft did not verify all expected cells: {sorted(set(cells) - draft_verified)}")
+    if r4:
+        _verify_r4_contract(
+            state,
+            _latest_draft(state),
+            cells,
+            allow_missing_data=case["expected"].get("type") == "price_quantity_missing",
+        )
     _verify_canonical_final_text(case, observed, state, cells)
     if case["expected"].get("requires_voucher_drilldown"):
         if not any(_has_voucher_detail(call.get("value")) for call in drilldowns):
@@ -931,7 +1127,7 @@ def _selected_cases_from_observation(source: Path, fixture: dict[str, Any]) -> t
     return selected, session
 
 
-def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, output: Path) -> dict[str, Any]:
+def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, output: Path, *, scoring_contract: str = SCORING_CONTRACT_R3) -> dict[str, Any]:
     source = source.resolve()
     output = output.resolve()
     if source == output:
@@ -947,7 +1143,7 @@ def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, ou
         if source_verification_path.is_file()
         else {}
     )
-    score = score_observation(foundry, var, selected, observed)
+    score = score_observation(foundry, var, selected, observed, scoring_contract=scoring_contract)
     result = {
         **score,
         "fixture_version": fixture["version"],
@@ -979,7 +1175,9 @@ def rescore_observation(foundry: Path, fixture: dict[str, Any], source: Path, ou
     return result
 
 
-def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], observed: dict[str, Any]) -> dict[str, Any]:
+def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], observed: dict[str, Any], *, scoring_contract: str = SCORING_CONTRACT_R3) -> dict[str, Any]:
+    if scoring_contract not in {SCORING_CONTRACT_R3, SCORING_CONTRACT_R4}:
+        raise AssertionError(f"unsupported scoring contract: {scoring_contract}")
     observed_by_id = {row["id"]: row for row in observed.get("cases", [])}
     results = []
     failures = []
@@ -989,7 +1187,7 @@ def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], obs
             failures.append(_failure_record(case, None, "case was selected but no attempt record was observed"))
             continue
         try:
-            results.append(_score_case(foundry, var, case, row))
+            results.append(_score_case(foundry, var, case, row, r4=scoring_contract == SCORING_CONTRACT_R4))
         except Exception as exc:  # retain failure detail for manual review
             failures.append(_failure_record(case, row, str(exc)))
     seen = len(observed.get("cases", []))
@@ -999,7 +1197,7 @@ def score_observation(foundry: Path, var: Path, cases: list[dict[str, Any]], obs
     rate = Decimal(passed) / Decimal(attempted or 1)
     hard_error_count = sum(len(_case_hard_errors(row)) for row in observed.get("cases", []))
     return {
-        "scoring_contract": "r3-final-draft-text-bound-v3",
+        "scoring_contract": scoring_contract,
         "seen": seen,
         "attempted": attempted,
         "completed": completed,
@@ -1027,6 +1225,7 @@ def main() -> int:
     parser.add_argument("--cases-limit", type=int, default=30)
     parser.add_argument("--timeout-seconds", type=int, default=420)
     parser.add_argument("--live", action="store_true", help="invoke the configured model")
+    parser.add_argument("--r4", action="store_true", help="score with the r4 requirements/evidence/completion contract")
     parser.add_argument("--validate-fixture-only", action="store_true")
     parser.add_argument("--compare-verification", action="append", type=Path, default=[], help="compare existing verification.json files without invoking a model")
     parser.add_argument("--rescore-observation", type=Path, help="rescore an existing verification directory without invoking a model or modifying it")
@@ -1042,7 +1241,8 @@ def main() -> int:
 
     fixture = _load_fixture(args.fixture)
     if args.rescore_observation:
-        result = rescore_observation(args.foundry, fixture, args.rescore_observation, args.output)
+        result = rescore_observation(args.foundry, fixture, args.rescore_observation, args.output,
+                                     scoring_contract=SCORING_CONTRACT_R4 if args.r4 else SCORING_CONTRACT_R3)
         print(
             json.dumps(
                 {
@@ -1131,7 +1331,7 @@ def main() -> int:
     }
     final = {
         "status": "running",
-        "scoring_contract": "r3-final-draft-text-bound-v3",
+        "scoring_contract": SCORING_CONTRACT_R4 if args.r4 else SCORING_CONTRACT_R3,
         "fixture_version": fixture["version"],
         "model": selection,
         "method_manifest": manifest,
@@ -1198,7 +1398,8 @@ def main() -> int:
             if observed["model"] != selection:
                 raise AssertionError("actual session changed the configured model")
             _verify_method_loads(observed, manifest)
-            score = score_observation(args.foundry, var, seeded, observed)
+            score = score_observation(args.foundry, var, seeded, observed,
+                                      scoring_contract=SCORING_CONTRACT_R4 if args.r4 else SCORING_CONTRACT_R3)
             final.update(score)
             final["session_evidence_sha256"] = hashlib.sha256((args.output / "session.json").read_bytes()).hexdigest()
             final["raw_session_path"] = str(args.output / "session.json")
