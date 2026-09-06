@@ -171,3 +171,10 @@
 - 最小修复处理中：这两个背景刷新只更新数据，不完成后强制跳页；用户主动保存/运行等有意导航路径保持。新增延迟刷新与用户切页回归，保持原窗口QA断言。证据quality-state-candidate-ui与quality-state-release-receipt.json，旧安装版仍为cee4c26候选。
 
 - 晚到刷新导航修复完成：移除两处刷新后的强制chooseTab，数据刷新本身保留；3项延迟响应覆盖运行后切文稿、资料刷新后切文稿、先切任务再返回旧刷新。完整App29文件407项通过（late-refresh-app-full.log），类型/diff通过。新包需再次构建与原窗口QA复测。
+
+
+- 47137296b7f79a431293dbb9a02522ab466f9b92已推送，git ls-remote独立确认main一致。新候选构建成功，asar70e536f6e4a6525cf27633c045ddb4bf7ce49aa86ca0fcbae367a11e7048898f，后端二进制仍b7a7289d。原workbench脚本全部22项通过，零模型请求；新候选未安装，回执late-refresh-release-receipt.json及late-refresh-candidate-ui保留。
+- P0只读根因核实：旧F04空fact claims直接触发unknown_fact，自动附录无fact成员仍显示已计算是产品诱因，不能将二者混为单一原因；旧F04/F05服务端结果行序号被正文数字扫描误报。开始先回归复现再最小修复，未知引用与篡改金额仍须拒绝。
+
+- 新候选ZIP CRC通过，SHA256 ba66215d073bfb0ef29a47226da75e34f439383c28a25e8f7c77ebc1bd724d6f，26128条目；整体bundle树557244f69b82cb742a7249a8d107754b4cdd1b48b3f028557186b6f01e877afb。此为UI修复候选归档，未安装，不代表新增P0/P1已随包交付。
+- 4713729起跑全量pytest为991 passed/13 skipped（late-refresh-python-full.log）；跳过中11项为未配置DSH路径。使用当前候选真实DSH入口补跑test_real_load与test_completion_runtime_real，11 passed（late-refresh-real-dsh.log），无付费模型。两次运行单独保留，后续P0/P1改变源码后必须重新跑最终完整回归。
