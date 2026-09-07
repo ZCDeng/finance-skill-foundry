@@ -77,7 +77,7 @@ export function Formulator({ running }: { running: LaunchSpec | null }) {
   if (running) return null;
   return (
     <div className="fnd-stack" style={{ gap: 14, paddingTop: 24 }}>
-      <p className="fnd-eyebrow">数据台</p>
+      <h2>数据台</h2>
       <div className="fnd-panel">
         <p>
           Data Formulator 以只读方式挂当前窗口锁后的 catalog, 一个窗口一个租约。它把行拷进自己的

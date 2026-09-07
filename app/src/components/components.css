@@ -8,7 +8,15 @@
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-ink); }
 .fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
 .fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: 13px; font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
-.fnd-head__tab:hover { color: var(--fnd-ink); background: var(--fnd-surface-strong); }
+.fnd-head__tab:hover {
+  color: var(--fnd-ink);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-head__tab:active:not([aria-current='page']) {
+  background: var(--fnd-selection-surface);
+}
+
 .fnd-head__tab[aria-current='page'] { color: var(--fnd-on-selected); background: var(--fnd-selected); }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
@@ -96,13 +104,6 @@
   margin-bottom: 6px;
 }
 
-.fnd-eyebrow {
-  font-size: var(--fnd-size-label);
-  color: var(--fnd-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-
 .fnd-card {
   display: block;
   width: 100%;
@@ -118,6 +119,15 @@
 .fnd-card:hover {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-surface-strong);
+}
+
+.fnd-card:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
+.fnd-card:active:not(:disabled) {
+  background: var(--fnd-selection-surface);
 }
 
 /* -- tables --------------------------------------------------------------- */
@@ -316,8 +326,17 @@
   color: var(--fnd-muted);
 }
 
-.fnd-field:hover {
+.fnd-field:hover:not(:disabled) {
   border-color: var(--fnd-line-hover);
+}
+
+.fnd-field:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.fnd-field[aria-invalid='true'] {
+  border-color: var(--fnd-mark-outside-line);
 }
 
 /*
@@ -326,7 +345,12 @@
  * that already clears WCAG 1.4.11's 3:1 against both surfaces, which is the
  * floor a focus indicator answers to.
  */
-.fnd-field:focus-visible,
+.fnd-field:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+  border-color: var(--fnd-line-hover);
+}
+
 /*
  * A secondary action: outlined, not filled.
  *
@@ -355,9 +379,19 @@
   transition: border-color var(--fnd-transition), background var(--fnd-transition);
 }
 
+.fnd-button svg,
+.fnd-go svg,
+.fnd-primary svg {
+  flex-shrink: 0;
+}
+
 .fnd-button:hover:not(:disabled) {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-surface-strong);
+}
+
+.fnd-button:active:not(:disabled) {
+  background: var(--fnd-selection-surface);
 }
 
 .fnd-button:focus-visible {
@@ -368,6 +402,21 @@
 .fnd-button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.fnd-button[data-tone='danger'] {
+  color: var(--fnd-mark-outside);
+  border-color: var(--fnd-mark-outside-line);
+}
+
+.fnd-button[data-tone='danger']:hover:not(:disabled) {
+  background: var(--fnd-mark-outside-fill);
+}
+
+.fnd-button[aria-busy='true'],
+.fnd-go[aria-busy='true'],
+.fnd-primary[aria-busy='true'] {
+  cursor: progress;
 }
 
 .fnd-go:focus-visible, .fnd-primary:focus-visible {
@@ -390,6 +439,10 @@
   cursor: pointer;
   white-space: nowrap;
   transition: opacity var(--fnd-transition);
+}
+
+.fnd-go:active:not(:disabled), .fnd-primary:active:not(:disabled) {
+  opacity: 0.88;
 }
 
 .fnd-go:disabled, .fnd-primary:disabled {
@@ -431,6 +484,15 @@
   border-color: var(--fnd-line-hover);
 }
 
+.fnd-head__help:active {
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-head__help:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
 /* -- the task bar's own controls ------------------------------------------ */
 
 /*
@@ -455,7 +517,13 @@
   transition: border-color var(--fnd-transition);
 }
 
-.fnd-picker:hover {
+.fnd-picker:hover:not(:disabled) {
+  border-color: var(--fnd-line-hover);
+}
+
+.fnd-picker:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
   border-color: var(--fnd-line-hover);
 }
 
@@ -489,6 +557,15 @@
 .fnd-start:hover:not(:disabled) {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-surface-strong);
+}
+
+.fnd-start:active:not(:disabled) {
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-start:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
 }
 
 /*
@@ -572,7 +649,7 @@
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-container);
   background: var(--fnd-surface);
-  box-shadow: 0 24px 60px -30px rgb(0 0 0 / 45%);
+  box-shadow: var(--fnd-shadow-guide);
   padding: 32px;
   display: flex;
   flex-direction: column;
@@ -685,6 +762,11 @@
 
 .fnd-quiet:hover {
   color: var(--fnd-ink);
+}
+
+.fnd-quiet:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 2px;
 }
 
 /*

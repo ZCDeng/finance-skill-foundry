@@ -126,7 +126,7 @@ export function TaskDetail({
       </div>
 
       <section>
-        <p className="fnd-eyebrow">窗口链</p>
+        <h3>窗口链</h3>
         <ol className="fnd-time" style={{ marginTop: 14 }}>
           {detail.windows.map((row) => (
             <li key={row.window_id} className="fnd-time__item">
@@ -163,17 +163,17 @@ export function TaskDetail({
                       {busy === row.window_id ? ' 正在从锁库写…' : ' 出一份表格'}
                     </button>
                   </div>
-                  <p className="fnd-eyebrow" style={{ marginTop: 14 }}>
+                  <h3 style={{ marginTop: 14 }}>
                     <HardDriveDownload size={12} strokeWidth={1.5} aria-hidden />
                     {' 输入归档'}
-                  </p>
+                  </h3>
                   <div style={{ marginTop: 10 }}>
                     <Inputs window={row} />
                   </div>
-                  <p className="fnd-eyebrow" style={{ marginTop: 20 }}>
+                  <h3 style={{ marginTop: 20 }}>
                     <FileText size={12} strokeWidth={1.5} aria-hidden />
                     {' 交付物版本'}
-                  </p>
+                  </h3>
                   <div className="fnd-tablewrap" style={{ marginTop: 10 }}>
                     <table className="fnd-table">
                       <thead>
@@ -250,10 +250,10 @@ export function TaskDetail({
       </section>
 
       <section>
-        <p className="fnd-eyebrow">
+        <h3>
           <MessageSquareQuote size={12} strokeWidth={1.5} aria-hidden />
           {' 会话'}
-        </p>
+        </h3>
         {detail.sessions.length === 0 ? (
           <p className="fnd-muted" style={{ marginTop: 10 }}>
             还没有会话记在这个任务上。

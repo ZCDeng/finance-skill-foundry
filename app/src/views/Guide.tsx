@@ -131,10 +131,9 @@ export function Guide({
   return (
     <div className="fnd-scrim">
       <div className="fnd-guide">
-        <p className="fnd-eyebrow">怎么用</p>
-        <h3 className="fnd-guide__lede">
+        <h2 className="fnd-guide__lede">
           一个把结账期间当成任务来管的工作台。上面是对话, 下面这三条是进去的路。
-        </h3>
+        </h2>
 
         <ol className="fnd-guide__steps">
           {STEPS.map(({ id, label, hint, Art }, index) => (

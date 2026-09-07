@@ -206,6 +206,7 @@ describe('financial web controls', () => {
     const input = screen.getByLabelText('比例');
     const message = screen.getByText('请输入金额数字，空值与 0 会分开保存。');
     expect(input.getAttribute('aria-describedby')).toBe(message.id);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
   });
 
   it('distinguishes search loading, failed setup, unconfigured and no-match states', () => {

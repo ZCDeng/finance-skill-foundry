@@ -24,6 +24,7 @@ html {
   line-height: var(--fnd-leading-body);
   /* Both fonts provide real weights; never synthesize a missing face. */
   font-synthesis-weight: none;
+  scrollbar-color: var(--fnd-muted) var(--fnd-surface-strong);
 }
 
 body {

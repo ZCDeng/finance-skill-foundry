@@ -826,9 +826,7 @@ describe('finding the export at all', () => {
       />,
     );
     const action = screen.getByRole('button', { name: /出一份表格/ });
-    const archive = [...container.querySelectorAll('p')].find((p) =>
-      p.textContent?.includes('输入归档'),
-    );
+    const archive = screen.getByRole('heading', { name: /输入归档/ });
     expect(archive).toBeTruthy();
     // DOCUMENT_POSITION_FOLLOWING === 4: the archive comes after the button.
     expect(action.compareDocumentPosition(archive!) & 4).toBe(4);
@@ -857,6 +855,14 @@ describe('the export button can be read', () => {
 
   it('says it is disabled while the workbook is being written', () => {
     expect(css).toMatch(/\.fnd-button:disabled \{[^}]*opacity/);
+  });
+
+  it('gives a focused field its own ring instead of button layout', () => {
+    expect(css).toMatch(/\.fnd-field:focus-visible \{/);
+    const block = css.slice(css.indexOf('.fnd-field:focus-visible {'));
+    const body = block.slice(0, block.indexOf('}'));
+    expect(body).toContain('outline: 2px solid var(--fnd-line-hover)');
+    expect(body).not.toContain('cursor: pointer');
   });
 });
 

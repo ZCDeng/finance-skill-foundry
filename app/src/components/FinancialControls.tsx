@@ -20,14 +20,19 @@ type FieldShellProps = {
   children: ReactNode;
 };
 
+function fieldDescribedBy(id: string, ...messages: Array<string | undefined | false>) {
+  return messages.some(Boolean) ? `${id}-description` : undefined;
+}
+
 export function FieldShell({ label, htmlFor, help, error, disabledReason, required, children }: FieldShellProps) {
-  const descriptionId = htmlFor ? `${htmlFor}-description` : undefined;
+  const hasMessage = Boolean(error || disabledReason || help);
+  const descriptionId = htmlFor && hasMessage ? `${htmlFor}-description` : undefined;
   return <div className="fnd-control" data-invalid={error ? 'true' : undefined}>
     {htmlFor
       ? <label className="fnd-control__label" htmlFor={htmlFor}>{label}{required ? <span aria-hidden> *</span> : null}</label>
       : <span className="fnd-control__label">{label}{required ? <span aria-hidden> *</span> : null}</span>}
     {children}
-    {(error || disabledReason || help) && <span id={descriptionId} className={error ? 'fnd-control__error' : 'fnd-control__help'}>
+    {hasMessage && <span id={descriptionId} className={error ? 'fnd-control__error' : 'fnd-control__help'}>
       {error || disabledReason || help}
     </span>}
   </div>;
@@ -39,7 +44,7 @@ export function TextField({ label, value, onChange, placeholder, help, error, di
 }) {
   const id = useId();
   return <FieldShell label={label} htmlFor={id} help={help} error={error}>
-    <input id={id} aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`} className="fnd-field" value={value} placeholder={placeholder}
+    <input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} className="fnd-field" value={value} placeholder={placeholder}
       inputMode={inputMode} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
   </FieldShell>;
 }
@@ -172,7 +177,7 @@ export function AccountingPeriodInput({ label, value, onChange, placeholder = 'Y
   return <FieldShell label={label} htmlFor={id} help={help ?? '会计期间不会转换成某一天。'} error={error}>
     <div className="fnd-date-picker" ref={root}>
       <div className="fnd-period-field">
-        <div className="fnd-period-field__input"><input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`} className="fnd-field" value={draft} placeholder={placeholder}
+        <div className="fnd-period-field__input"><input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '会计期间不会转换成某一天。', error)} aria-invalid={error ? true : undefined} className="fnd-field" value={draft} placeholder={placeholder}
           inputMode="numeric" disabled={disabled} onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
@@ -252,7 +257,7 @@ export function DateInput({ label, value, onChange, placeholder = 'YYYY-MM-DD', 
     <div className="fnd-date-picker" ref={root}>
       <div className="fnd-date-field">
         <CalendarDays size={14} aria-hidden />
-        <input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`} className="fnd-field" value={draft} placeholder={placeholder}
+        <input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '支持未来日期，预算和资金预测会用到。', error)} aria-invalid={error ? true : undefined} className="fnd-field" value={draft} placeholder={placeholder}
           inputMode="numeric" disabled={disabled} onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
@@ -339,7 +344,7 @@ export function DecimalInput({ label, value, onChange, placeholder, unit, help, 
   const error = draft && !decimalLike.test(draft) ? '请输入金额数字，空值与 0 会分开保存。' : '';
   return <FieldShell label={label} htmlFor={id} help={help} error={error}>
     <div className="fnd-decimal-field">
-      <input id={id} aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`} className="fnd-field" value={editing ? draft : formatDecimalText(draft)}
+      <input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} className="fnd-field" value={editing ? draft : formatDecimalText(draft)}
         placeholder={placeholder} inputMode="decimal" disabled={disabled} onFocus={() => { setEditing(true); setDraft(value); }}
         onChange={(event) => {
           const next = event.target.value;
@@ -407,7 +412,7 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
   return <FieldShell label={label} htmlFor={id} help={help}
     error={invalid ? `当前选择已失效：${value}。请清空或重新选择。` : undefined}>
     <div className="fnd-combobox" ref={root}>
-      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`}
+      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, invalid && `当前选择已失效：${value}。请清空或重新选择。`)} aria-invalid={invalid || undefined}
         aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} disabled={disabled}
         onClick={() => setOpen((current) => !current)} onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); }
@@ -456,7 +461,7 @@ export function MultiSelect({ label, values, options, onChange, placeholder = '�
   return <FieldShell label={label} htmlFor={id} help={help}
     error={missing.length ? `部分已选项已失效：${missing.join('、')}。请移除后继续。` : undefined}>
     <div className="fnd-combobox" ref={root}>
-      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" aria-label={ariaLabel ?? label} aria-describedby={`${id}-description`}
+      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, missing.length ? `部分已选项已失效：${missing.join('、')}。请移除后继续。` : undefined)} aria-invalid={missing.length ? true : undefined}
         aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} disabled={disabled}
         onClick={() => setOpen((current) => !current)} onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); }

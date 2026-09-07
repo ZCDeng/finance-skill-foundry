@@ -496,7 +496,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
     {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
     <div className="analysis-actions"><span className="analysis-note">稳定 ID：{item.id}</span>
-      <button type="button" className="fnd-button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</button></div>
+      <button type="button" className="fnd-button" data-tone="danger" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</button></div>
   </article>;
 }
 

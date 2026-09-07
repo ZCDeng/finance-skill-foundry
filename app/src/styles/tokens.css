@@ -40,6 +40,9 @@
   --fnd-line-hover: #a67e3c;
   --fnd-selected: #8a6729;
   --fnd-on-selected: #f9fafb;
+  --fnd-overlay: #00000040;
+  --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 12%);
+  --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 45%);
   --fnd-mark-outside: #8a6729;
   --fnd-mark-outside-line: #a67e3c;
   --fnd-mark-outside-fill: #a67e3c1f;
@@ -62,6 +65,9 @@
     --fnd-accent: #f9fafb;
     --fnd-accent-text: #f9fafb;
     --fnd-on-accent: #1f1f1f;
+    --fnd-overlay: #00000073;
+    --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 40%);
+    --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 70%);
     --fnd-mark-outside: #e2c180;
     --fnd-mark-outside-line: #e2c180;
     --fnd-mark-outside-fill: #e2c1801f;
@@ -83,6 +89,9 @@
   --fnd-accent: #f9fafb;
   --fnd-accent-text: #f9fafb;
   --fnd-on-accent: #1f1f1f;
+  --fnd-overlay: #00000073;
+  --fnd-shadow-menu: 0 16px 34px rgb(0 0 0 / 40%);
+  --fnd-shadow-guide: 0 24px 60px -30px rgb(0 0 0 / 70%);
   --fnd-mark-outside: #e2c180;
   --fnd-mark-outside-line: #e2c180;
   --fnd-mark-outside-fill: #e2c1801f;
