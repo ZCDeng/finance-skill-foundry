@@ -322,6 +322,11 @@
   flex: 0 1 150px;
 }
 
+.fnd-new > [data-slot='input'] {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
 .fnd-field::placeholder {
   color: var(--fnd-muted);
 }
@@ -349,105 +354,6 @@
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;
   border-color: var(--fnd-line-hover);
-}
-
-/*
- * A secondary action: outlined, not filled.
- *
- * This class was used by two screens before it existed anywhere in this file,
- * so both buttons fell through to the user agent's own -- a light box whose
- * text took the inherited ink and vanished into it. `.fnd-go` is the filled
- * primary and would have been wrong here anyway; writing out of the window is
- * something an operator chooses, not the thing the screen is for.
- *
- * Every value comes from the token set, so it is legible in both themes by
- * construction rather than by a second definition under a media query.
- */
-.fnd-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--fnd-button-height);
-  padding: 0 var(--fnd-pad-button-x);
-  border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-control);
-  background: transparent;
-  color: var(--fnd-ink);
-  font-family: inherit;
-  font-size: var(--fnd-size-small);
-  cursor: pointer;
-  transition: border-color var(--fnd-transition), background var(--fnd-transition);
-}
-
-.fnd-button svg,
-.fnd-go svg,
-.fnd-primary svg {
-  flex-shrink: 0;
-}
-
-.fnd-button:hover:not(:disabled) {
-  border-color: var(--fnd-line-hover);
-  background: var(--fnd-surface-strong);
-}
-
-.fnd-button:active:not(:disabled) {
-  background: var(--fnd-selection-surface);
-}
-
-.fnd-button:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
-}
-
-.fnd-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.fnd-button[data-tone='danger'] {
-  color: var(--fnd-mark-outside);
-  border-color: var(--fnd-mark-outside-line);
-}
-
-.fnd-button[data-tone='danger']:hover:not(:disabled) {
-  background: var(--fnd-mark-outside-fill);
-}
-
-.fnd-button[aria-busy='true'],
-.fnd-go[aria-busy='true'],
-.fnd-primary[aria-busy='true'] {
-  cursor: progress;
-}
-
-.fnd-go:focus-visible, .fnd-primary:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
-}
-
-.fnd-go, .fnd-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--fnd-button-height);
-  padding: 0 var(--fnd-pad-button-x);
-  border: 0;
-  border-radius: var(--fnd-radius-control);
-  background: var(--fnd-accent);
-  color: var(--fnd-on-accent);
-  font-family: inherit;
-  font-size: var(--fnd-size-small);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity var(--fnd-transition);
-}
-
-.fnd-go:active:not(:disabled), .fnd-primary:active:not(:disabled) {
-  opacity: 0.88;
-}
-
-.fnd-go:disabled, .fnd-primary:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 /* -- the header's own help ------------------------------------------------ */
@@ -746,27 +652,6 @@
 .fnd-guide__note {
   font-size: var(--fnd-size-small);
   line-height: 20px;
-}
-
-.fnd-quiet {
-  align-self: flex-start;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font-size: var(--fnd-size-small);
-  color: var(--fnd-muted);
-  text-decoration: underline;
-  text-decoration-color: var(--fnd-line);
-  cursor: pointer;
-}
-
-.fnd-quiet:hover {
-  color: var(--fnd-ink);
-}
-
-.fnd-quiet:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 2px;
 }
 
 /*

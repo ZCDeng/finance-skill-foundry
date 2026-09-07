@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { press } from './press.js';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Analysis } from '../src/views/Analysis.js';
@@ -38,8 +39,8 @@ function openAnalysisEditor() {
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
 }
 function exportDraft() {
-  fireEvent.click(screen.getByText('导出', { selector: 'summary' }));
-  fireEvent.click(screen.getByRole('button', { name: /导出文稿/ }));
+  press(screen.getByRole('button', { name: '导出' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /导出文稿/ }));
 }
 function openMethods() {
   fireEvent.click(screen.getByRole('tab', { name: /方法/ }));

@@ -1,6 +1,7 @@
 import { ArrowLeft, Eye, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
 
 import { Reader } from '../components/Reader.js';
+import { Button } from '../components/ui/button.js';
 import {
   type DeliverableRow,
   type TaskRow,
@@ -114,15 +115,13 @@ export function Deliverables({
           */}
         {isWorkbook(open.row) ? null : (
           <div>
-            <button
+            <Button variant="outline"
               type="button"
-              className="fnd-button"
               onClick={() => onExport(open.task, open.row.window_id)}
-              disabled={busy === open.row.window_id}
-            >
+              disabled={busy === open.row.window_id}>
               <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
               {busy === open.row.window_id ? ' 正在从锁库写…' : ' 把这个窗口出成表格'}
-            </button>
+            </Button>
           </div>
         )}
         {/*
@@ -141,21 +140,19 @@ export function Deliverables({
             </p>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {onPreview ? (
-                <button
+                <Button variant="outline"
                   type="button"
-                  className="fnd-button"
                   onClick={() => onPreview(open.task, open.row)}
-                  disabled={previewing === open.row.sha256}
-                >
+                  disabled={previewing === open.row.sha256}>
                   <Eye size={14} strokeWidth={1.5} aria-hidden />
                   {previewing === open.row.sha256 ? ' 正在装进预览…' : ' 在这里预览'}
-                </button>
+                </Button>
               ) : null}
-              <button type="button" className="fnd-button" onClick={onOpenWorkbook}>
+              <Button variant="outline" type="button" onClick={onOpenWorkbook}>
                 <FileSpreadsheet size={14} strokeWidth={1.5} aria-hidden />
                 {' 在表格软件里打开'}
                 <ExternalLink size={12} strokeWidth={1.5} aria-hidden />
-              </button>
+              </Button>
             </div>
           </div>
         ) : open.text === null ? (

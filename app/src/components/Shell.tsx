@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BookOpen } from 'lucide-react';
 import './components.css';
+import { Button } from './ui/button.js';
 
 export type Screen = 'analysis' | 'workbench' | 'formulator' | 'tasks' | 'deliverables';
 export interface ShellProps {
@@ -30,9 +31,9 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
             onClick={() => onScreen('deliverables')}>成果库</button>
         </nav>
         <span className="fnd-head__end">
-          {onGuide ? <button type="button" className="fnd-head__help" onClick={onGuide} aria-label="怎么用" title="怎么用">
+          {onGuide ? <Button type="button" variant="ghost" size="icon" className="fnd-head__help" onClick={onGuide} aria-label="怎么用" title="怎么用">
             <BookOpen size={16} strokeWidth={1.5} aria-hidden />
-          </button> : null}
+          </Button> : null}
         </span>
       </header>
       {strip}

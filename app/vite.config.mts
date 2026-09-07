@@ -1,10 +1,20 @@
 // defineConfig comes from vitest/config (a superset of vite's) so the `test`
 // block below type-checks without a separate vitest.config file.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+const root = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(root, 'src'),
+    },
+  },
   // Packaged builds load the renderer through file://, so asset URLs must be
   // relative rather than rooted at /.
   base: './',
@@ -28,5 +38,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.{ts,tsx}', 'electron/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./tests/setup-jsdom.ts'],
   },
 });

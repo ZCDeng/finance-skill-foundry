@@ -3,6 +3,8 @@ import { X } from 'lucide-react';
 import { shortSha, when, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
+import { Button } from '../../components/ui/button.js';
+import { Input } from '../../components/ui/input.js';
 
 export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -31,7 +33,7 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
   };
   return <div className="analysis-result-area" data-evidence-open={evidence || undefined}>
     {latest && run && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
-      最近一次运行失败，当前保留已成功的结果。<button type="button" className="fnd-button" onClick={() => pick(latest)}>查看失败记录</button></p>}
+      最近一次运行失败，当前保留已成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看失败记录</Button></p>}
     {!run ? <p className="analysis-note">此版本尚未运行。检查口径后即可计算。</p> : <article className="analysis-result">
       <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)}</p></div><RunStatus run={run} /></div>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
@@ -39,21 +41,21 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
-        <span>{output.path}</span><button type="button" className="fnd-button" disabled={busy} aria-label={`打开文件 ${output.path}`}
-          onClick={() => onOpen(run, output.path)}>打开文件</button></div>)}</div>}
+        <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
+          onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}
       <div className="analysis-actions">
-        <button ref={evidenceButton} type="button" className="fnd-button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</button>
-        <button type="button" className="fnd-button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的运行 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</button>
-        {runs.length > 1 && <button type="button" className="fnd-button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</button>}
+        <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
+        <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的运行 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
+        {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
       {analysis.sql && <details className="analysis-details"><summary>保存这次分析方法</summary><form className="analysis-method-form" onSubmit={(event) => {
         event.preventDefault(); if (methodName.trim()) onSaveMethod(analysis.id, methodName.trim());
-      }}><label>方法名称<input className="fnd-field" value={methodName} onChange={(event) => setMethodName(event.target.value)} placeholder={analysis.question} disabled={busy} /></label>
-        <button type="submit" className="fnd-button" disabled={busy || !methodName.trim()}>保存为方法</button></form>
+      }}><label>方法名称<Input className="min-w-0 flex-1" value={methodName} onChange={(event) => setMethodName(event.target.value)} placeholder={analysis.question} disabled={busy}  /></label>
+        <Button variant="outline" type="submit" disabled={busy || !methodName.trim()}>保存为方法</Button></form>
         <p className="analysis-note">保留当前计算方式。下次使用时，重新选择资料和业务参数。</p></details>}
     </article>}
     {run && evidence && <div className="analysis-evidence-anchor"><aside id={`analysis-evidence-${analysis.task_id}`} role="dialog" aria-modal="false" className="analysis-evidence" aria-label="本次计算依据" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeEvidence(); } }}>
-      <div className="analysis-section-heading"><h3>本次计算依据</h3><button ref={closeButton} className="fnd-button" type="button" onClick={closeEvidence} aria-label="关闭计算依据"><X size={16} aria-hidden /></button></div>
+      <div className="analysis-section-heading"><h3>本次计算依据</h3><Button variant="outline" ref={closeButton} type="button" onClick={closeEvidence} aria-label="关闭计算依据"><X size={16} aria-hidden /></Button></div>
       <p className="analysis-note">按实际保存的资料版本和运行记录核对。</p>
       <div className="analysis-evidence-sources">{Object.entries(run.input_hashes ?? {}).map(([id, hash]) => {
         // SQL and script runs store alias -> data_hash. Bindings are immutable
@@ -62,7 +64,7 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
         const source = datasets.find((row) => row.id === datasetId);
         const mismatch = source?.data_hash != null && source.data_hash !== hash;
         return <div key={id}><strong>{source?.name ?? '资料快照'}</strong><p className="analysis-note">{source?.source_name ?? datasetId}</p>
-          {source && <button type="button" className="fnd-button" disabled={busy || mismatch} onClick={() => { if (!mismatch) onSource(source); }}>查看 {source.name}</button>}
+          {source && <Button variant="outline" type="button" disabled={busy || mismatch} onClick={() => { if (!mismatch) onSource(source); }}>查看 {source.name}</Button>}
           {mismatch && <p className="analysis-note">资料摘要与运行记录不一致，暂不可预览。</p>}
           <details className="analysis-details"><summary>资料标识与摘要</summary><p>{datasetId}</p><p>{hash}</p></details></div>;
       })}</div>
@@ -73,7 +75,7 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
       <details className="analysis-details"><summary>运行标识与结果摘要</summary><p>{run.id}</p>{run.output_hash && <p>{run.output_hash}</p>}</details>
     </aside></div>}
     {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
-      <button type="button" className="fnd-button" onClick={() => setComparing(false)}>关闭比较</button></div>
+      <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
       <label className="analysis-select-label">对照运行<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
         <option value="">选择一个已保存的运行</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
           <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · {when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
@@ -338,7 +340,7 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
         <option value="">选择一行查看来源</option>{sourceRows.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
       </select></label><label>来源列（可选）<select className="fnd-field" value={column} onChange={(event) => setColumn(event.target.value)}>
         <option value="">整行来源</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</select></label></div>
-      <button type="button" className="fnd-button" disabled={busy || !target} onClick={() => void open()}>查看来源行</button>
+      <Button variant="outline" type="button" disabled={busy || !target} onClick={() => void open()}>查看来源行</Button>
       {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
       {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>
         {drilldown.rows.map((item, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(item.source)}</summary>

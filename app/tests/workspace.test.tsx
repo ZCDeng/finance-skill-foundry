@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Workspace } from '../src/components/Workspace.js';
 import type { TaskRow } from '../src/bridge.js';
+import { press } from './press.js';
 
 const tasks: TaskRow[] = [
   { id: 'a'.repeat(32), title: '华东利润分析', period: '2026-08', skill_id: null, created_at: '', windows: 0 },
@@ -48,8 +49,8 @@ describe('one task workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
     fireEvent.click(screen.getByRole('button', { name: '方法库' }));
     expect(props.onMethods).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: '任务工具' }));
-    fireEvent.click(screen.getByRole('button', { name: '数据台' }));
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '数据台' }));
     expect(props.onData).toHaveBeenCalledOnce();
   });
 });

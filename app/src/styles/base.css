@@ -1,6 +1,11 @@
 /* Register bundled fonts once; token imports carry no font assets. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@source "../**/*.{ts,tsx}";
 @import './fonts.css';
 @import './tokens.css';
+@import './shadcn-bridge.css';
 
 /*
  * Base layer. Everything below reads tokens.

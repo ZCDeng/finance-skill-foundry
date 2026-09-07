@@ -9,6 +9,7 @@ import {
   MessageSquareQuote,
 } from 'lucide-react';
 
+import { Button } from '../components/ui/button.js';
 import {
   type DeliverableRow,
   type TaskDetail as Detail,
@@ -153,15 +154,13 @@ export function TaskDetail({
                     * scrolls to is an action that does not exist.
                     */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
+                    <Button variant="outline"
                       type="button"
-                      className="fnd-button"
                       onClick={() => onExport(row.window_id)}
-                      disabled={busy === row.window_id}
-                    >
+                      disabled={busy === row.window_id}>
                       <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
                       {busy === row.window_id ? ' 正在从锁库写…' : ' 出一份表格'}
-                    </button>
+                    </Button>
                   </div>
                   <h3 style={{ marginTop: 14 }}>
                     <HardDriveDownload size={12} strokeWidth={1.5} aria-hidden />

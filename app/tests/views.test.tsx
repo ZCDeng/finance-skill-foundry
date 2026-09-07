@@ -801,7 +801,7 @@ describe('finding the export at all', () => {
     // Order is the whole fix, so order is what is asserted -- on the rendered
     // DOM rather than the source, because what went wrong was a position on
     // screen and not a position in a file.
-    const { container } = render(
+    render(
       <TaskDetail
         detail={{
           task: { ...TASK },
@@ -835,26 +835,31 @@ describe('finding the export at all', () => {
 
 describe('the export button can be read', () => {
   /*
-   * It could not. `.fnd-button` was used by two screens and defined nowhere,
-   * so both fell through to the user agent's own button: a light box whose
-   * label took the inherited ink and disappeared into it. The operator
-   * reported seeing a button with no readable text.
+   * Outline actions used to fall through to the user agent when `.fnd-button`
+   * was missing. Thin controls now live on the Button primitive; they still
+   * have to take colour from FA tokens so both themes stay legible.
    */
-  it('is a class this stylesheet actually defines', () => {
-    expect(css).toMatch(/^\.fnd-button \{/m);
+  const button = readFileSync(resolve(process.cwd(), 'src/components/ui/button.tsx'), 'utf8');
+
+  it('skins outline actions with FA tokens rather than a second palette', () => {
+    expect(button).toContain('border-border');
+    expect(button).toContain('bg-transparent');
+    expect(button).toContain('text-foreground');
+    expect(button).toContain('var(--fnd-line-hover)');
+    expect(button).not.toMatch(/#[0-9a-f]{3,8}/i);
   });
 
-  it('takes its colour and its ground from the same token set', () => {
-    const block = css.slice(css.indexOf('.fnd-button {'));
-    const body = block.slice(0, block.indexOf('}'));
-    // A literal colour here is how a button ends up legible in one theme only.
-    expect(body).toContain('color: var(--fnd-ink)');
-    expect(body).toContain('background: transparent');
-    expect(body).not.toMatch(/#[0-9a-f]{3,8}/i);
+  it('does not add a hover fill on the primary action', () => {
+    expect(button).not.toContain('hover:bg-primary/90');
+  });
+
+  it('colours irreversible delete with the mark-outside gold', () => {
+    expect(button).toContain('var(--fnd-mark-outside)');
+    expect(button).not.toContain('bg-destructive text-white');
   });
 
   it('says it is disabled while the workbook is being written', () => {
-    expect(css).toMatch(/\.fnd-button:disabled \{[^}]*opacity/);
+    expect(button).toContain('disabled:opacity-55');
   });
 
   it('gives a focused field its own ring instead of button layout', () => {
@@ -866,11 +871,6 @@ describe('the export button can be read', () => {
   });
 });
 
-/*
- * The complaint this answers: 依然没有找到 univers 和文档展现的入口. The bundle
- * was staged and fenced and nothing in the window used it; a workbook row
- * offered one control, and that control left the window.
- */
 describe('looking at a workbook without leaving the window', () => {
   const BOOK: DeliverableRow = {
     ...ROW,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, MessageSquare, Plus, Save, Trash2 } from 'lucide-react';
 import { bridge, type Answer, type FinanceContextState } from '../../bridge.js';
 import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
+import { Button } from '../../components/ui/button.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -429,7 +430,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
         <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
           options={optionsWithCurrent(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
       </div>
-      <div className="analysis-section-heading"><h4>必答指标</h4><button type="button" className="fnd-button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</button></div>
+      <div className="analysis-section-heading"><h4>必答指标</h4><Button variant="outline" type="button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</Button></div>
       {items.length ? <div className="analysis-history-list">
         {items.map((item, index) => <RequirementItemEditor key={item.id} item={item} index={index} support={supportByItem.get(item.id)} supportStale={isSupportStale(item)} onChange={(patch) => setItem(item.id, patch)}
           onDimensionsValidity={(valid) => setItemDimensionsValidity(item.id, valid)} onRemove={() => removeItem(item.id)} />)}
@@ -446,8 +447,8 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
     {message ? <p role="status" className="analysis-message">{message}</p> : null}
     <div className="analysis-actions">
-      <button type="button" className="fnd-go" disabled={!canSave || saving} onClick={() => void save()}><Save size={14} aria-hidden />保存要求新版</button>
-      <button type="button" className="fnd-button" disabled={saving} onClick={discuss}><MessageSquare size={14} aria-hidden />与助手讨论范围</button>
+      <Button type="button" disabled={!canSave || saving} onClick={() => void save()}><Save size={14} aria-hidden />保存要求新版</Button>
+      <Button variant="outline" type="button" disabled={saving} onClick={discuss}><MessageSquare size={14} aria-hidden />与助手讨论范围</Button>
     </div>
   </section>;
 }
@@ -480,10 +481,10 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     <FieldShell label="适用期间">
       <div className="analysis-actions">
         <AccountingPeriodInput label={`添加期间 ${index + 1}`} value={nextPeriod} onChange={setNextPeriod} />
-        <button type="button" className="fnd-button" onClick={addPeriod} disabled={!nextPeriod.trim() || periods.includes(nextPeriod.trim())}>添加期间</button>
+        <Button variant="outline" type="button" onClick={addPeriod} disabled={!nextPeriod.trim() || periods.includes(nextPeriod.trim())}>添加期间</Button>
       </div>
       {periods.length ? <div className="analysis-actions" aria-label={`已选期间 ${index + 1}`}>
-        {periods.map((period) => <button key={period} type="button" className="fnd-button" onClick={() => removePeriod(period)}>{period} ×</button>)}
+        {periods.map((period) => <Button variant="outline" key={period} type="button" onClick={() => removePeriod(period)}>{period} ×</Button>)}
       </div> : <p className="analysis-note">未指定时沿用上方本期范围；可添加多个会计期间。</p>}
     </FieldShell>
     <label>维度 JSON<textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
@@ -496,7 +497,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
     {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
     <div className="analysis-actions"><span className="analysis-note">稳定 ID：{item.id}</span>
-      <button type="button" className="fnd-button" data-tone="danger" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</button></div>
+      <Button variant="destructive" type="button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</Button></div>
   </article>;
 }
 

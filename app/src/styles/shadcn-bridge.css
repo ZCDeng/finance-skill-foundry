@@ -1,0 +1,56 @@
+/*
+ * shadcn reads --background/--primary/--ring. Those names are aliases of the
+ * FA token set; they must not carry a second palette. Dark and data-theme
+ * continue to flip --fnd-*, and these follow.
+ *
+ * Do not introduce a second `.dark` colour block. Do not assign oklch literals.
+ */
+:root {
+  --background: var(--fnd-bg);
+  --foreground: var(--fnd-ink);
+  --card: var(--fnd-surface);
+  --card-foreground: var(--fnd-ink);
+  --popover: var(--fnd-surface);
+  --popover-foreground: var(--fnd-ink);
+  --primary: var(--fnd-accent);
+  --primary-foreground: var(--fnd-on-accent);
+  --secondary: var(--fnd-surface-strong);
+  --secondary-foreground: var(--fnd-ink);
+  --muted: var(--fnd-surface-strong);
+  --muted-foreground: var(--fnd-muted);
+  --accent: var(--fnd-surface-strong);
+  --accent-foreground: var(--fnd-ink);
+  --destructive: var(--fnd-mark-outside);
+  --destructive-foreground: var(--fnd-on-selected);
+  --border: var(--fnd-line);
+  --input: var(--fnd-line);
+  --ring: var(--fnd-line-hover);
+  --radius: var(--fnd-radius-control);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: var(--fnd-radius-container);
+  --radius-xl: var(--fnd-radius-menu);
+  --font-sans: var(--fnd-font-sans);
+}

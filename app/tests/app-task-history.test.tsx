@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge, TaskDetail, TaskRow } from '../src/bridge.js';
 import { App } from '../src/App.js';
+import { press } from './press.js';
 
 // Keep task selection, history, document reading and the data strip real.
 vi.mock('../src/views/Analysis.js', () => ({ Analysis: () => null }));
@@ -44,8 +45,8 @@ function mount(overrides: Partial<Bridge> = {}) {
   return api;
 }
 async function openTool(name: '任务记录与旧版流程' | '数据台') {
-  fireEvent.click(await screen.findByRole('button', { name: '任务工具' }));
-  fireEvent.click(await screen.findByRole('button', { name }));
+  press(await screen.findByRole('button', { name: '任务工具' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name }));
 }
 async function selectTask(row: TaskRow) {
   fireEvent.click(screen.getByRole('button', { name: '工作区' }));

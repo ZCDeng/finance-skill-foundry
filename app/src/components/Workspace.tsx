@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { BookOpen, Check, Columns2, Ellipsis, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
 import type { TaskRow } from '../bridge.js';
 import './workspace.css';
+import { Button } from './ui/button.js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu.js';
 
 export interface WorkspaceRect { x: number; y: number; width: number; height: number }
 interface Props {
@@ -124,8 +131,8 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
       style={{ '--chat-width': `${chatWidth}px` } as CSSProperties}>
       {overlay ? <button className="workspace-scrim" aria-label="关闭任务列表" onClick={closeSidebar} /> : null}
       <aside ref={sidebarPanel} className="workspace-sidebar" hidden={!sidebar} role={overlay ? 'dialog' : undefined} aria-modal={overlay ? true : undefined} aria-label="财务任务">
-        {overlay ? <button className="workspace-icon" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></button> : null}
-        <button className="fnd-primary workspace-new" onClick={() => { onNew(); if (!wide) closeSidebar(); }}><Plus size={16} aria-hidden />新建任务</button>
+        {overlay ? <Button size="icon" variant="ghost" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></Button> : null}
+        <Button className="workspace-new" onClick={() => { onNew(); if (!wide) closeSidebar(); }}><Plus size={16} aria-hidden />新建任务</Button>
         <label className="workspace-search"><Search size={15} aria-hidden /><input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="workspace-tasklist">
@@ -137,31 +144,36 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
       </aside>
       <section className="workspace-main" aria-label="任务工作区" inert={overlay ? true : undefined}>
         <header className="workspace-header">
-          <button ref={sidebarToggle} className="workspace-icon" aria-label={sidebar ? '收起任务列表' : '展开任务列表'}
+          <Button size="icon" variant="ghost" ref={sidebarToggle} aria-label={sidebar ? '收起任务列表' : '展开任务列表'}
             aria-expanded={sidebar} onClick={() => setSidebar((value) => !value)} title="任务列表">
             {sidebar ? <PanelLeftClose size={18} aria-hidden /> : <PanelLeftOpen size={18} aria-hidden />}
-          </button>
+          </Button>
           <div className="workspace-title">{renaming ? <form className="workspace-rename" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
             <input aria-label="任务名称" autoFocus value={title} maxLength={240} disabled={savingTitle} onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault(); if (event.key === 'Escape') { event.preventDefault(); setRenaming(false); } }} />
-            <button className="workspace-icon" aria-label="保存任务名称" disabled={savingTitle || !title.trim()}><Check size={16} aria-hidden /></button>
-            <button type="button" className="workspace-icon" aria-label="取消改名" onClick={() => setRenaming(false)}><X size={16} aria-hidden /></button>
+            <Button size="icon" variant="ghost" aria-label="保存任务名称" disabled={savingTitle || !title.trim()}><Check size={16} aria-hidden /></Button>
+            <Button size="icon" variant="ghost" type="button" aria-label="取消改名" onClick={() => setRenaming(false)}><X size={16} aria-hidden /></Button>
             {titleError ? <span role="alert">{titleError}</span> : null}
           </form> : <h1 title={task?.title}>{task && onRename ? <button className="workspace-title-button" aria-label={`修改任务名称：${task.title}`}
             onClick={() => { setTitle(task.title); setTitleError(''); setRenaming(true); }}>{task.title}</button> : task?.title ?? '开始一项分析'}</h1>}
           {task?.period && !renaming ? <span>{task.period}</span> : null}</div>
           {task ? <div className="workspace-focus" role="group" aria-label="工作区布局">
-            <button hidden={narrow} className="workspace-icon" aria-label="同时查看" title="同时查看" aria-pressed={effective === 'split'} onClick={() => setFocus(narrow ? 'conversation' : 'split')}><Columns2 size={17} aria-hidden /></button>
-            <button className="workspace-icon" aria-label="对话专注" title="对话专注" aria-pressed={effective === 'conversation'} onClick={() => setFocus('conversation')}><MessageSquare size={17} aria-hidden /></button>
-            <button className="workspace-icon" aria-label="成果专注" title="成果专注" aria-pressed={effective === 'results'} onClick={() => setFocus('results')}><FolderOpen size={17} aria-hidden /></button>
+            <Button size="icon" variant="ghost" hidden={narrow} aria-label="同时查看" title="同时查看" aria-pressed={effective === 'split'} onClick={() => setFocus(narrow ? 'conversation' : 'split')}><Columns2 size={17} aria-hidden /></Button>
+            <Button size="icon" variant="ghost" aria-label="对话专注" title="对话专注" aria-pressed={effective === 'conversation'} onClick={() => setFocus('conversation')}><MessageSquare size={17} aria-hidden /></Button>
+            <Button size="icon" variant="ghost" aria-label="成果专注" title="成果专注" aria-pressed={effective === 'results'} onClick={() => setFocus('results')}><FolderOpen size={17} aria-hidden /></Button>
           </div> : null}
-          <button className="workspace-icon" aria-label="任务工具" title="任务工具" aria-expanded={toolsOpen} onClick={() => setToolsOpen((value) => !value)}><Ellipsis size={19} aria-hidden /></button>
-          {toolsOpen ? <div className="workspace-tools" role="group" aria-label="任务工具菜单">
-            <button onClick={() => { openMethods(); setToolsOpen(false); }}>方法库</button>
-            <button onClick={() => { onData(); setToolsOpen(false); }}>数据台</button>
-            <button onClick={() => { onHistory(); setToolsOpen(false); }}>任务记录与旧版流程</button>
-            <button onClick={() => setToolsOpen(false)}><X size={14} aria-hidden />关闭菜单</button>
-          </div> : null}
+          <DropdownMenu open={toolsOpen} onOpenChange={setToolsOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="icon" variant="ghost" aria-label="任务工具" title="任务工具">
+                <Ellipsis size={19} aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" aria-label="任务工具菜单">
+              <DropdownMenuItem onSelect={() => openMethods()}>方法库</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onData()}>数据台</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onHistory()}>任务记录与旧版流程</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
         <div className="workspace-panes">
           <section className="workspace-conversation" aria-label="持续对话" hidden={!task || effective === 'results'}>

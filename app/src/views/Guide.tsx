@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { PlayCircle } from 'lucide-react';
+import { Button } from '../components/ui/button.js';
+import { Input } from '../components/ui/input.js';
 
 /**
  * What this window is, for someone opening it for the first time.
@@ -166,31 +168,31 @@ export function Guide({
             onStart(title.trim(), period.trim());
           }}
         >
-          <input
-            className="fnd-field"
+          <Input
+            className="min-w-0 flex-1"
             value={title}
             maxLength={120}
             placeholder="任务名, 比如 华东区 8 月回款"
             aria-label="任务名"
             onChange={(event) => setTitle(event.target.value)}
-          />
-          <input
-            className="fnd-field fnd-field--short"
+           />
+          <Input
+            className="fnd-field--short"
             value={period}
             maxLength={32}
             placeholder="期间 2026-08"
             aria-label="期间"
             onChange={(event) => setPeriod(event.target.value)}
-          />
-          <button type="submit" className="fnd-go" disabled={!ready}>
+           />
+          <Button type="submit" disabled={!ready}>
             <PlayCircle size={14} strokeWidth={1.5} aria-hidden />
             建任务并开始本期
-          </button>
+          </Button>
         </form>
 
-        <button type="button" className="fnd-quiet" onClick={onDismiss}>
+        <Button variant="link" type="button" onClick={onDismiss}>
           先看看再说
-        </button>
+        </Button>
       </div>
     </div>
   );

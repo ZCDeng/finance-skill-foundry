@@ -12,6 +12,16 @@ import { DraftBody } from './analysis/DraftBody.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
+import { Button } from '../components/ui/button.js';
+import { Input } from '../components/ui/input.js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu.js';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
 type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindings'> & { sql: string };
@@ -291,7 +301,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         <p className="analysis-note">{task ? '补充资料、调整口径，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
       {tasks.length > 0 && <div className="analysis-task-controls"><SearchableSelect label="切换任务" ariaLabel="切换分析任务"
         value={task?.id ?? ''} disabled={busy} options={tasks.map((row) => ({ value: row.id, label: row.title, meta: when(row.created_at) }))}
-        onChange={onPick} placeholder="搜索任务" />{task && <button type="button" className="fnd-button" disabled={busy} onClick={() => onPick('')}>新建分析任务</button>}</div>}
+        onChange={onPick} placeholder="搜索任务" />{task && <Button variant="outline" type="button" disabled={busy} onClick={() => onPick('')}>新建分析任务</Button>}</div>}
     </header>}
     {(!embedded || !task || question) && <form className="analysis-composer" onSubmit={(event) => {
       event.preventDefault(); if ((!task && !question.trim()) || busy) return;
@@ -301,36 +311,38 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       <textarea id="analysis-question" value={question} onChange={(event) => setQuestion(event.target.value)}
         placeholder="例如：华东本月收入达标，利润为什么没有达标？" rows={2} maxLength={6000} />
       <div className="analysis-composer-actions">
-        <button type="button" className="fnd-button" disabled={busy} onClick={() => {
+        <Button variant="outline" type="button" disabled={busy} onClick={() => {
           if (task) void perform(addFiles); else void create(true);
-        }}><FilePlus2 size={15} aria-hidden />添加资料</button>
+        }}><FilePlus2 size={15} aria-hidden />添加资料</Button>
         <span className="analysis-formats">CSV · XLSX · JSON · Markdown · TXT</span>
-        <button type="submit" className="fnd-go" disabled={busy || (!task && !question.trim())}>
-          {busy ? '正在处理…' : task ? '继续分析' : '开始分析'}<ArrowUp size={15} aria-hidden /></button>
+        <Button type="submit" disabled={busy || (!task && !question.trim())}>
+          {busy ? '正在处理…' : task ? '继续分析' : '开始分析'}<ArrowUp size={15} aria-hidden /></Button>
       </div>
     </form>}
     {!task && <div className="analysis-examples" aria-label="分析示例">{EXAMPLES.map((example) =>
-      <button className="fnd-button" type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}</div>}
+      <Button variant="outline" type="button" key={example} onClick={() => setQuestion(example)}>{example}</Button>)}</div>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {notice && <p role="status" className="analysis-message">{notice}</p>}
     {task && <>
-      <div className="analysis-tabbar"><div className="analysis-tabs" role="tablist" aria-label="任务工作区">
-        {TABS.filter(([id]) => !embedded || id !== 'methods').map(([id, title], index, tabs) => <button key={id} id={`analysis-tab-${id}`} type="button" role="tab"
-          aria-selected={tab === id} aria-controls={`analysis-panel-${id}`} tabIndex={tab === id ? 0 : -1}
-          className="analysis-tab" onClick={() => chooseTab(id)} onKeyDown={(event) => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            event.preventDefault();
-            const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-              : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-            chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
-          }}>{title}<span>{counts[id]}</span></button>)}
-      </div><button type="button" className="fnd-button" disabled={busy || loading} onClick={() => void perform(refresh)}>
-        <RefreshCw size={13} aria-hidden />刷新</button></div>
+      <Tabs value={tab} onValueChange={(value) => chooseTab(value as Tab)} activationMode="manual">
+      <div className="analysis-tabbar"><TabsList variant="line" className="analysis-tabs" aria-label="任务工作区">
+        {TABS.filter(([id]) => !embedded || id !== 'methods').map(([id, title], index, tabs) => (
+          <TabsTrigger key={id} id={`analysis-tab-${id}`} value={id} onClick={() => chooseTab(id)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+              chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
+            }}>{title}<span>{counts[id]}</span></TabsTrigger>
+        ))}
+      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => void perform(refresh)}>
+        <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
         {loading && <p role="status" className="analysis-note">正在读取任务资料与成果…</p>}
         {view && tab === 'datasets' && <>
-          {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><button type="button" className="fnd-button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</button></div>}
+          {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button></div>}
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="无需先准备科目表。也可以先与助手讨论分析口径和所需资料。"
             onChat={() => void chat(question.trim() || undefined)} />}
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
@@ -381,7 +393,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 }) as Answer<FinanceDrilldown>);
               }} />
             {dataset && <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>
-              <button type="button" className="fnd-button" onClick={() => setDataset(null)}>关闭资料预览</button></div>
+              <Button variant="outline" type="button" onClick={() => setDataset(null)}>关闭资料预览</Button></div>
               <DatasetPreview source={dataset.source} content={dataset.content} /></section>}
             {analysis.sql ? <AnalysisEditor key={`${task.id}:${analysis.id}`} analysis={analysis} datasets={view.datasets} busy={busy}
               edit={analysisEdits.current.get(analysisKey) ?? readCopy<AnalysisEdit>(analysisKey)} onEdit={rememberAnalysis}
@@ -408,7 +420,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 <p className="analysis-note">{analysis.engine === 'structured_aggregate' ? '这项分析按已保存的筛选、分组和汇总规则计算，来源与剔除记录可在结果中查看。' : '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。'}</p>
                 {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
                 <details className="analysis-details"><summary>{analysis.engine === 'structured_aggregate' ? '高级：查看汇总规则' : '高级：查看计算脚本'}</summary><pre className="analysis-source-text">{analysis.engine === 'structured_aggregate' ? JSON.stringify(analysis.aggregate_plan, null, 2) : analysis.code}</pre></details>
-                <button type="button" className="fnd-button" disabled={busy} onClick={() => void chat(`请读取${analysis.engine === 'structured_aggregate' ? '结构化汇总' : '脚本'}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</button>
+                <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${analysis.engine === 'structured_aggregate' ? '结构化汇总' : '脚本'}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
               </div>}
 
           </>}
@@ -448,8 +460,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
 }
 
 function Empty({ title, body, onChat }: { title: string; body: string; onChat(): void }) {
-  return <div className="analysis-empty"><h3>{title}</h3><p>{body}</p><button type="button" className="fnd-button" onClick={onChat}>
-    <MessageSquare size={14} aria-hidden />与助手讨论</button></div>;
+  return <div className="analysis-empty"><h3>{title}</h3><p>{body}</p><Button variant="outline" type="button" onClick={onChat}>
+    <MessageSquare size={14} aria-hidden />与助手讨论</Button></div>;
 }
 function DatasetPreview({ source, content }: { source: DatasetSnapshot; content: Record<string, unknown> }) {
   const columns = Array.isArray(content.columns) ? content.columns.map((column: unknown) => typeof column === 'string'
@@ -564,8 +576,8 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
       <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
         <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>
-    <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !ready} onClick={() => void refreshSource()}>
-      <RefreshCw size={14} aria-hidden />选择文件并刷新</button></div>
+    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !ready} onClick={() => void refreshSource()}>
+      <RefreshCw size={14} aria-hidden />选择文件并刷新</Button></div>
     {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
@@ -705,11 +717,11 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
     </div></details></fieldset>
     <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
     <div className="analysis-actions">
-      <button type="button" className="fnd-button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</button>
-      <button type="button" className="fnd-button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</button>
-      <button type="button" className="fnd-button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</button>
-      <button type="button" className="fnd-button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</button>
-      <button type="button" className="fnd-go" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</button>
+      <Button variant="outline" type="button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
+      <Button variant="outline" type="button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</Button>
+      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</Button>
+      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</Button>
+      <Button type="button" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</Button>
     </div>
     {inspection && <details className="analysis-details" open><summary>工作簿结构</summary>
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
@@ -940,11 +952,11 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         help="快捷项基于实际期间；留空时沿用实际期间，填写后预算桥按该期间保存 baseline 范围。" />}
     </div></fieldset>
     <div className="analysis-actions">
-      <button type="button" className="fnd-button" disabled={disabled} onClick={() => void saveContext()}>保存口径</button>
-      <button type="button" className="fnd-go" disabled={disabled} onClick={() => void saveContext('pnl')}>保存并运行 P&L</button>
-      <button type="button" className="fnd-button" disabled={disabled || !budget} onClick={() => void saveContext('bridge')}>运行预算桥</button>
-      {contextId && <button type="button" className="fnd-button" disabled={busy} onClick={() => void runExisting('pnl')}>用已保存口径重跑 P&L</button>}
-      {contextId && <button type="button" className="fnd-button" disabled={busy} onClick={() => void runExisting('bridge')}>用已保存口径运行预算桥</button>}
+      <Button variant="outline" type="button" disabled={disabled} onClick={() => void saveContext()}>保存口径</Button>
+      <Button type="button" disabled={disabled} onClick={() => void saveContext('pnl')}>保存并运行 P&L</Button>
+      <Button variant="outline" type="button" disabled={disabled || !budget} onClick={() => void saveContext('bridge')}>运行预算桥</Button>
+      {contextId && <Button variant="outline" type="button" disabled={busy} onClick={() => void runExisting('pnl')}>用已保存口径重跑 P&L</Button>}
+      {contextId && <Button variant="outline" type="button" disabled={busy} onClick={() => void runExisting('bridge')}>用已保存口径运行预算桥</Button>}
     </div>
     {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
       <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
@@ -971,8 +983,8 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         {scenarioKind === 'cash_13_weeks' && <DecimalInput label="回款延迟天数" value={delayDays} onChange={setDelayDays} unit="天" />}
       </div></fieldset>
       <div className="analysis-actions">
-        <button type="button" className="fnd-button" disabled={busy || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</button>
-        <button type="button" className="fnd-button" disabled={busy || scenarioKind !== 'cash_13_weeks' || !baselineScenarioId} onClick={() => void runScenario(true)}>运行延迟回款子情景</button>
+        <Button variant="outline" type="button" disabled={busy || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</Button>
+        <Button variant="outline" type="button" disabled={busy || scenarioKind !== 'cash_13_weeks' || !baselineScenarioId} onClick={() => void runScenario(true)}>运行延迟回款子情景</Button>
       </div>
       {finance?.scenarios.filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).length ? <div className="analysis-history-list">{[...finance.scenarios].filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).reverse().slice(0, 6).map((scenario) => <button type="button" className="analysis-history-row" key={String(scenario.id)}
         aria-current={scenario.id === baselineScenarioId ? 'true' : undefined} onClick={() => setBaselineScenarioId(String(scenario.id ?? ''))}>
@@ -984,13 +996,13 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；')}</span><span>{shortSha(context.id)}</span></button>)}</div></details> : null}
     <details className="analysis-details"><summary>高级：管理科目映射 JSON</summary>
       <p className="analysis-note">引擎识别的管理科目为 revenue（收入）、cost（成本）、expense（费用）；中文科目名请映射到这些标准值。</p>
-      <div className="analysis-edit-grid"><label>映射名称<input className="fnd-field" value={mapName} onChange={(event) => setMapName(event.target.value)} /></label>
+      <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
           placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" />
         <label>映射行数组<textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
           onChange={(event) => setMapRows(event.target.value)} /></label></div>
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
-      <button type="button" className="fnd-button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</button>
+      <Button variant="outline" type="button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
@@ -1040,7 +1052,7 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
         {Object.entries(parameters).filter(([key]) => metadataFor(key)?.role === 'business').map(([key, value]) =>
           <ParameterField key={key} metadata={metadataFor(key)!} value={value} onChange={(next) => updateParameter(key, value, next)} />)}
         {assumptions.map((value, index) => <label key={`assumption-${index}`}>假设 · {itemLabel(value, index)}
-          <input className="fnd-field" value={itemValue(value)} onChange={(event) => setAssumptions(assumptions.map((item, at) => at === index ? editItem(item, event.target.value) : item))} /></label>)}
+          <Input className="min-w-0 flex-1" value={itemValue(value)} onChange={(event) => setAssumptions(assumptions.map((item, at) => at === index ? editItem(item, event.target.value) : item))}  /></label>)}
       </div>
       <details className="analysis-details"><summary>高级参数与公式常量</summary>
         <p className="analysis-note">未标注业务含义的参数按计算定义中的名称或顺序展示。</p>
@@ -1048,15 +1060,15 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
           <TextField key={key} label={`参数 · ${Array.isArray(parameters) ? itemLabel(value, index) : key}`} value={itemValue(value)}
             onChange={(next) => updateParameter(key, value, next)} />)}</div>
       </details>
-      {Array.isArray(parameters) && <button type="button" className="fnd-button" onClick={() => setParameters([...parameters, ''])}>添加计算参数</button>}
+      {Array.isArray(parameters) && <Button variant="outline" type="button" onClick={() => setParameters([...parameters, ''])}>添加计算参数</Button>}
       </fieldset>
       <p className="analysis-note">修改后保存并重跑会创建新版本，之前的结果仍可查看。</p>
       <p className="analysis-note">参数会传入计算，假设说明用于记录依据；改变计算口径可请助手更新表达式。</p>
-      <button type="button" className="fnd-button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整口径</button>
+      <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整口径</Button>
     </section>
     <details className="analysis-details"><summary>高级：查看或编辑计算 SQL</summary>
       <textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => setSql(event.target.value)} /></details>
-    <div className="analysis-actions"><button type="button" className="fnd-go" disabled={busy || !sql.trim()} onClick={() => onSave(spec())}>保存新版并重跑</button><button type="button" className="fnd-button" disabled={busy} onClick={onRun}>重跑当前已保存版本</button></div>
+    <div className="analysis-actions"><Button type="button" disabled={busy || !sql.trim()} onClick={() => onSave(spec())}>保存新版并重跑</Button><Button variant="outline" type="button" disabled={busy} onClick={onRun}>重跑当前已保存版本</Button></div>
     </details>
   </div>;
 }
@@ -1088,7 +1100,6 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [scopeJson, setScopeJson] = useState('');
   const [backgroundMessage, setBackgroundMessage] = useState('');
   const [toolError, setToolError] = useState('');
-  const exportMenu = useRef<HTMLDetailsElement>(null);
   const qualityRequest = useRef(0);
   const factRequest = useRef(0);
   const backgroundRequest = useRef(0);
@@ -1281,10 +1292,10 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       onDiscuss={onDiscussRequirements} />}
     <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
       {draft && <span className="analysis-note">{STATUS[draft.publication_status] ?? draft.publication_status} · {STATUS[draft.review_status] ?? draft.review_status}</span>}
-      <div className="analysis-actions"><button type="button" className="fnd-button" aria-pressed={editing} onClick={() => setEditing(!editing)}>{editing ? '阅读文稿' : '编辑文稿'}</button>
-      <button type="button" className="fnd-button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</button></div></div>
+      <div className="analysis-actions"><Button variant="outline" type="button" aria-pressed={editing} onClick={() => setEditing(!editing)}>{editing ? '阅读文稿' : '编辑文稿'}</Button>
+      <Button variant="outline" type="button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</Button></div></div>
     {editing ? <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
-    <label>文稿标题<input aria-label="文稿标题" className="fnd-field" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+    <label>文稿标题<Input aria-label="文稿标题" className="min-w-0 flex-1" value={title} onChange={(event) => setTitle(event.target.value)}  /></label>
     <label>文稿正文<textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
       onChange={(event) => onBodyChange(event.target.value)} /></label>
     <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
@@ -1301,17 +1312,21 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       {draft.claims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</details>}
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
-    <div className="analysis-actions">{changed && <button type="button" className="fnd-go" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</button>}
-      <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</button>
-      <details ref={exportMenu} className="analysis-export" onKeyDown={(event) => { if (event.key === 'Escape') {
-        event.preventDefault(); if (exportMenu.current) { exportMenu.current.open = false; exportMenu.current.querySelector('summary')?.focus(); }
-      } }}><summary>导出</summary><div className="analysis-export-options">
-        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => {
-          if (exportMenu.current) exportMenu.current.open = false; onExport('md', changed ? spec('draft') : undefined);
-        }}>导出文稿<span>Markdown</span></button>
-        <button type="button" className="fnd-button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => {
-          if (exportMenu.current) exportMenu.current.open = false; onExport('xlsx', changed ? spec('draft') : undefined);
-        }}>导出工作簿<span>Excel</span></button></div></details></div>
+    <div className="analysis-actions">{changed && <Button type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</Button>}
+      <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)}>导出</Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" collisionPadding={16}>
+          <DropdownMenuItem disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onSelect={() => onExport('md', changed ? spec('draft') : undefined)}>
+            导出文稿<DropdownMenuShortcut>Markdown</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onSelect={() => onExport('xlsx', changed ? spec('draft') : undefined)}>
+            导出工作簿<DropdownMenuShortcut>Excel</DropdownMenuShortcut>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu></div>
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
     {toolError && <p role="alert" className="analysis-message analysis-message--error">{toolError}</p>}
   </div>;
@@ -1451,12 +1466,12 @@ function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry, onLoa
   return <details className="analysis-details analysis-recovery-panel">
     <summary>可恢复的未保存文稿 · {recoveries.length} 条</summary>
     <p className="analysis-note">这些内容来自已终止但尚未落成文稿版本的操作。载入后只是可编辑副本，需要你检查并保存。</p>
-    {error && <p role="alert" className="analysis-message analysis-message--error">恢复稿读取失败：{error} <button type="button" className="fnd-button" onClick={onRetry}>重试</button></p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">恢复稿读取失败：{error} <Button variant="outline" type="button" onClick={onRetry}>重试</Button></p>}
     <div className="analysis-history-list">{recoveries.map((item) => <div className="analysis-history-row analysis-history-row--static" key={item.operation_id}>
       <span>{item.title?.trim() || '未命名恢复稿'}</span>
       <span>{recoveryStatusLabel(item.status)}{item.updated_at ? ` · ${when(item.updated_at)}` : ''}{item.revision ? ` · ${item.revision}` : ''}</span>
       <span>{recoveryLimitationsText(item.limitations) || `${item.run_ids?.length ?? 0} 次运行 · ${item.fact_ids?.length ?? 0} 条事实`}</span>
-      <button type="button" className="fnd-button" disabled={disabled} onClick={() => onLoad(item)}>载入可编辑副本</button>
+      <Button variant="outline" type="button" disabled={disabled} onClick={() => onLoad(item)}>载入可编辑副本</Button>
     </div>)}</div>
   </details>;
 }
@@ -1515,7 +1530,7 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
   const coverage = coverageSummary(quality?.coverage);
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
-      <button type="button" className="fnd-button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</button></div>
+      <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
     {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
       {([['numbers', '数字与口径'], ['coverage', '问题覆盖'], ['provenance', '来源追溯']] as const).map(([key, label]) => {
         const result = quality.checks?.[key]?.status;
@@ -1531,7 +1546,7 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
         <p className="analysis-note">运行 {shortSha(fact.run_id)} · 第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
-        {fact.row != null && <button type="button" className="fnd-button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</button>}
+        {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
@@ -1557,7 +1572,7 @@ function FinanceBackgroundPanel({ background, scope, scopeJson, backgrounds, dat
   return <details className="analysis-details analysis-background-panel"><summary>财务背景与经理判断</summary>
     <p className="analysis-note">保存业务原因、经理判断或资料来源解释。背景按范围和有效期复用，经理可改适用范围。</p>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
-      <label>标题<input className="fnd-field" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })} /></label>
+      <label>标题<Input className="min-w-0 flex-1" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })}  /></label>
       <FieldShell label="依据类型"><select aria-label="依据类型" className="fnd-field" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
         <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></select></FieldShell>
       <TextField label="账簿" ariaLabel="背景账簿" value={scope.ledger ?? ''} onChange={(value) => onScope({ ...scope, ledger: value })} />
@@ -1575,8 +1590,8 @@ function FinanceBackgroundPanel({ background, scope, scopeJson, backgrounds, dat
         <DateInput label="查询日期" ariaLabel="背景查询日期" value={background.retrieved_at} onChange={(value) => onBackground({ ...background, retrieved_at: value })} /></>}
     </div><label>背景正文<textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
     <details className="analysis-details"><summary>高级：补充范围 JSON</summary><textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></fieldset>
-    <div className="analysis-actions"><button type="button" className="fnd-button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</button>
-      <button type="button" className="fnd-button" disabled={busy} onClick={onList}>刷新适用背景</button></div>
+    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</Button>
+      <Button variant="outline" type="button" disabled={busy} onClick={onList}>刷新适用背景</Button></div>
     {message && <p role="status" className="analysis-message">{message}</p>}
     {backgrounds.length > 0 && <div className="analysis-history-list">{backgrounds.map((item, index) => <div className="analysis-history-row analysis-history-row--static" key={item.id ?? index}>
       <span>{textValue(item.label ?? item.basis ?? '财务背景')}</span><span>{textValue(item.text ?? item.paragraph ?? '')}</span>
@@ -1634,15 +1649,15 @@ function Method({ method, datasets, taskId, busy, onApply }: {
           value={parameter.value == null ? '' : String(parameter.value)} onChange={(value) => update(index, value)} />
         {contract.length === 0 && <><TextField label={`参数 ${index + 1} 的名称（可选）`} value={parameter.name}
           onChange={(value) => setParameters(parameters.map((item, at) => at === index ? { ...item, name: value } : item))} />
-          <button type="button" className="fnd-button" onClick={() => setParameters(parameters.filter((_, at) => at !== index))}>移除参数 {index + 1}</button></>}
+          <Button variant="outline" type="button" onClick={() => setParameters(parameters.filter((_, at) => at !== index))}>移除参数 {index + 1}</Button></>}
       </div>)}
-      {contract.length === 0 && <button type="button" className="fnd-button" onClick={() => setParameters([...parameters, { name: '', value: '' }])}>添加方法参数</button>}
+      {contract.length === 0 && <Button variant="outline" type="button" onClick={() => setParameters([...parameters, { name: '', value: '' }])}>添加方法参数</Button>}
       {invalidNames && <p className="analysis-note">具名参数需每项名称完整且不重复。</p>}
       {contract.filter((_, index) => formula(index)).map((entry) => <p key={entry.parameter}>公式常量 {entry.parameter}：{textValue(entry.default)}</p>)}
       <pre className="analysis-source-text">{method.sql}</pre></details>
     </fieldset>
-    <button type="button" className="fnd-button" disabled={busy || missingValues || invalidNames || aliases.some((alias) => !bindings[alias])}
+    <Button variant="outline" type="button" disabled={busy || missingValues || invalidNames || aliases.some((alias) => !bindings[alias])}
       onClick={() => onApply(method.id, bindings, contract.some((_, index) => formula(index))
         ? Object.fromEntries(contract.map((entry, index) => [entry.parameter, parameters[index]?.value]))
-        : named ? Object.fromEntries(parameters.map((parameter) => [parameter.name.trim(), parameter.value])) : parameters.map((parameter) => parameter.value))}>用这些资料创建分析</button></article>;
+        : named ? Object.fromEntries(parameters.map((parameter) => [parameter.name.trim(), parameter.value])) : parameters.map((parameter) => parameter.value))}>用这些资料创建分析</Button></article>;
 }

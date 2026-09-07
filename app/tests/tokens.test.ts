@@ -136,3 +136,16 @@ describe('the five words are legible in both themes', () => {
     expect(contrast(light['--fnd-mark-outside-line'], '#ffffff')).toBeLessThan(4.5);
   });
 });
+
+describe('shadcn aliases', () => {
+  const bridge = readFileSync(fileURLToPath(new URL('../src/styles/shadcn-bridge.css', import.meta.url)), 'utf8');
+
+  it('only aliases FA tokens, with no second palette', () => {
+    const root = block(bridge, ':root');
+    for (const [name, value] of Object.entries(root)) {
+      expect(value, name).toMatch(/^var\(--fnd-/);
+    }
+    expect(bridge).not.toMatch(/(^|\n)\.dark\s*\{/);
+    expect(bridge).not.toContain('oklch(');
+  });
+});
