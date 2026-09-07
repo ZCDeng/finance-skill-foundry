@@ -35,6 +35,7 @@ ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
+SCRIPT_RESULT_PREVIEW_ROWS = 1000
 BASIS = {
     "source_fact",
     "calculation",
@@ -101,6 +102,22 @@ def _append_excel(sheet, row):
     ]
     for index in range(max((len(part) for part in parts), default=1)):
         sheet.append([part[index] if index < len(part) else None for part in parts])
+
+
+def _script_result_path(value: Any) -> str | None:
+    if value is None:
+        return None
+    path = _safe_text(value, "script result_file", required=True, maximum=1000)
+    relative = Path(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise FoundryError("script result_file must be a relative output path")
+    if relative.suffix.casefold() not in {".csv", ".json"}:
+        raise FoundryError("script result_file must be a CSV or JSON table")
+    return relative.as_posix()
+
+
+def _empty_script_result() -> dict:
+    return {"columns": [], "rows": [], "row_count": 0, "truncated": False}
 
 
 class AnalysisStore:
@@ -477,6 +494,7 @@ class AnalysisStore:
                     "question": analysis["question"],
                     "timeout_seconds": analysis["timeout_seconds"],
                     "assumptions": analysis["assumptions"],
+                    "result_file": analysis.get("result_file"),
                 },
                 session_id=session_id,
                 context_revision=context_revision,
@@ -1081,6 +1099,7 @@ class AnalysisStore:
         assumptions = spec.get("assumptions", [])
         if not isinstance(assumptions, list):
             raise FoundryError("script assumptions must be an array")
+        result_file = _script_result_path(spec.get("result_file"))
         timeout = spec.get("timeout_seconds", 30)
         if (
             isinstance(timeout, bool)
@@ -1098,6 +1117,7 @@ class AnalysisStore:
             bindings=bindings,
             parameters=[],
             assumptions=assumptions,
+            result_file=result_file,
             parent_id=None,
             timeout_seconds=timeout,
             relationships=[],
@@ -1151,6 +1171,43 @@ class AnalysisStore:
             outputs.append(
                 {**item, "artifact_path": str(destination.relative_to(self.root))}
             )
+        result = _empty_script_result()
+        result_error = None
+        if succeeded and result_file:
+            try:
+                item = next(
+                    (item for item in outputs if item["path"] == result_file),
+                    None,
+                )
+                if item is None:
+                    raise FoundryError(
+                        "script result_file is not in this run output manifest"
+                    )
+                archived = self._inside(output_root / result_file)
+                data = archived.read_bytes()
+                if _hash_bytes(data) != item["sha256"]:
+                    raise FoundryError("script result_file integrity check failed")
+                parsed = parse_source(data, Path(result_file).suffix.casefold(), {})
+                if parsed.get("kind") != "table":
+                    raise FoundryError("script result_file must be a CSV or JSON table")
+                row_count = parsed["row_count"]
+                rows = parsed["rows"][:SCRIPT_RESULT_PREVIEW_ROWS]
+                result = {
+                    "columns": parsed["schema"],
+                    "rows": rows,
+                    "row_count": row_count,
+                    "truncated": row_count > len(rows),
+                    "result_source": {
+                        "path": result_file,
+                        "sha256": item["sha256"],
+                        "format": Path(result_file).suffix.lstrip(".").casefold(),
+                        "basis": "script_output",
+                        "reproducibility_status": "unverified",
+                    },
+                }
+            except FoundryError as exc:
+                result_error = str(exc)
+                succeeded = False
         output_hash = (
             _hash(
                 {
@@ -1159,6 +1216,7 @@ class AnalysisStore:
                         {k: v for k, v in item.items() if k != "artifact_path"}
                         for item in outputs
                     ],
+                    "result": result,
                 }
             )
             if succeeded
@@ -1195,15 +1253,19 @@ class AnalysisStore:
             outputs=outputs,
             assumptions=assumptions,
             missing_inputs=[],
-            result={"columns": [], "rows": [], "row_count": 0, "truncated": False},
+            result=result,
             warnings=[
                 "Script outputs are retained with code and inputs; reproducibility has not been verified."
             ],
         )
         record["id"] = run_id
         if not succeeded:
-            record["error"] = execution.get("stderr") or execution["status"]
-            record["error_code"] = execution["status"]
+            record["error"] = (
+                result_error or execution.get("stderr") or execution["status"]
+            )
+            record["error_code"] = (
+                "result_file_invalid" if result_error else execution["status"]
+            )
         return self._write(self._object_path("runs", run_id), record)
 
     def output_path(self, run_id: str, output: str) -> dict:

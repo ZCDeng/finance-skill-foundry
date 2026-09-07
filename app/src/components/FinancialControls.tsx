@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, Check, ChevronDown, Search, X } from 'lucide-react';
+import { Input } from './ui/input.js';
 import './financial-controls.css';
 
 export type SelectOption = {
@@ -44,7 +45,7 @@ export function TextField({ label, value, onChange, placeholder, help, error, di
 }) {
   const id = useId();
   return <FieldShell label={label} htmlFor={id} help={help} error={error}>
-    <input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} className="fnd-field" value={value} placeholder={placeholder}
+    <Input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} value={value} placeholder={placeholder}
       inputMode={inputMode} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
   </FieldShell>;
 }
@@ -177,7 +178,7 @@ export function AccountingPeriodInput({ label, value, onChange, placeholder = 'Y
   return <FieldShell label={label} htmlFor={id} help={help ?? '会计期间不会转换成某一天。'} error={error}>
     <div className="fnd-date-picker" ref={root}>
       <div className="fnd-period-field">
-        <div className="fnd-period-field__input"><input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '会计期间不会转换成某一天。', error)} aria-invalid={error ? true : undefined} className="fnd-field" value={draft} placeholder={placeholder}
+        <div className="fnd-period-field__input"><Input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '会计期间不会转换成某一天。', error)} aria-invalid={error ? true : undefined} value={draft} placeholder={placeholder}
           inputMode="numeric" disabled={disabled} onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
@@ -257,7 +258,7 @@ export function DateInput({ label, value, onChange, placeholder = 'YYYY-MM-DD', 
     <div className="fnd-date-picker" ref={root}>
       <div className="fnd-date-field">
         <CalendarDays size={14} aria-hidden />
-        <input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '支持未来日期，预算和资金预测会用到。', error)} aria-invalid={error ? true : undefined} className="fnd-field" value={draft} placeholder={placeholder}
+        <Input ref={inputRef} id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help ?? '支持未来日期，预算和资金预测会用到。', error)} aria-invalid={error ? true : undefined} value={draft} placeholder={placeholder}
           inputMode="numeric" disabled={disabled} onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
@@ -344,7 +345,7 @@ export function DecimalInput({ label, value, onChange, placeholder, unit, help, 
   const error = draft && !decimalLike.test(draft) ? '请输入金额数字，空值与 0 会分开保存。' : '';
   return <FieldShell label={label} htmlFor={id} help={help} error={error}>
     <div className="fnd-decimal-field">
-      <input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} className="fnd-field" value={editing ? draft : formatDecimalText(draft)}
+      <Input id={id} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, error)} aria-invalid={error ? true : undefined} value={editing ? draft : formatDecimalText(draft)}
         placeholder={placeholder} inputMode="decimal" disabled={disabled} onFocus={() => { setEditing(true); setDraft(value); }}
         onChange={(event) => {
           const next = event.target.value;
@@ -526,7 +527,7 @@ function SelectPopover({ popoverRef, label, listId, query, setQuery, result, val
     activeElement?.scrollIntoView?.({ block: 'nearest' });
   }, [activeIndex, activeOptionId]);
   return <div ref={popoverRef} className="fnd-combobox__popover" style={popoverStyle(popoverPosition)} data-placement={popoverPosition?.placement} data-align={popoverPosition?.align}>
-    <div className="fnd-combobox__search"><Search size={14} aria-hidden /><input aria-label={`${label}搜索`} value={query}
+    <div className="fnd-combobox__search"><Search size={14} aria-hidden /><Input aria-label={`${label}搜索`} value={query}
       aria-controls={feedback ? undefined : listId} aria-activedescendant={activeOptionId}
       placeholder={placeholder ?? '搜索名称或编码'} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onChange={(event) => setQuery(event.target.value)} autoFocus onKeyDown={(event) => {

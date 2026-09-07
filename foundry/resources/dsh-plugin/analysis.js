@@ -149,12 +149,12 @@ const SPECS = {
     parameters: object({
       path: string("已加入当前任务工作区的 csv/xlsx/json 表格或 md/txt 背景资料路径"),
       name: string("数据集名称，例如 实际收入、预算、应收明细"),
-      meta: { type: "object", description: "资料元数据：期间、币种、金额单位、粒度等；按源资料填写，不猜测缺失值" },
+      meta: { type: "object", description: "资料元数据：期间、币种、金额单位、粒度等；按源资料填写。XLSX默认多表保留完整工作簿，明确单表可传sheet，或mode=table；mode=workbook强制保留原件目录，不猜表头" },
     }, ["path", "name"]),
     kind: "edit", argv: (input) => ["dataset-add", "--path", input.path, "--name", input.name, "--meta", json(input.meta ?? {})],
   },
   "dataset-read": {
-    description: "读取当前任务已绑定快照的字段、类型和明细，或背景资料的原文与段落来源，用于检查资料与设计联查。正式计算用 analysis-save + analysis-run 固化表达式和结果。stdout 为 JSON。",
+    description: "读取当前任务已绑定快照的字段、类型和明细，或背景资料的原文与段落来源；kind=workbook 返回完整工作簿的工作表目录，不是零行数据表。工作簿需先确定工作表及范围，再用 workbook_inspect/workbook_read 或 analysis-script 读取原始快照。普通表格计算用 analysis-save + analysis-run 固化表达式和结果。stdout 为 JSON。",
     parameters: object({ dataset: string("analysis-state 或 dataset-add 返回的快照 id") }),
     kind: "read", argv: (input) => ["dataset-read", "--dataset", input.dataset],
   },
@@ -169,7 +169,7 @@ const SPECS = {
     kind: "execute", argv: (input) => ["analysis-run", "--analysis", input.analysis],
   },
   "analysis-script": {
-    description: "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。脚本输出尚不自动成为可引用的SQL行列数字，引用前检查实际输出与假设。",
+    description: "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。需要在结果区和文稿中引用数值时，指定 result_file 为脚本写出的 CSV 或 JSON 表格文件；服务校验其清单和摘要后填充 result.rows。金额以精确数字字符串写入；同一数值列只放数字或 null，单位放 unit，解释和小计说明放 note，不把“26 个项目”等文本混入数值列。附来源工作表、单元格、单位；此结果仍为脚本计算，复现与原始行取证不会自动变成已验证。",
     parameters: object({ spec: {
       type: "object", required: ["code", "bindings"],
       properties: {
@@ -177,6 +177,7 @@ const SPECS = {
         language: { type: "string", enum: ["python", "shell"] },
         bindings: { type: "object", additionalProperties: { type: "string" }, description: "本次允许读取的别名到快照id映射" },
         question: string("本次脚本要回答的问题"),
+        result_file: string("可选：当前输出目录中已生成的 CSV/JSON 表格相对路径，例如 result.json；JSON为对象行数组，列名非空唯一，金额使用字符串"),
         assumptions: { type: "array", items: {} },
         timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
       },
@@ -188,6 +189,7 @@ const SPECS = {
     parameters: object({ spec: { type: "object", required: ["code", "bindings"], properties: {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
+      result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串"),
       assumptions: { type: "array", items: {} }, timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
     } } }),
     kind: "execute", argv: (input) => ["analysis-script-start", "--spec", json(input.spec)],

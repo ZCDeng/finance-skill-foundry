@@ -45,11 +45,49 @@ def json_value(value: Any) -> Any:
     return value
 
 
+def _open_xlsx_archive(data: bytes) -> ZipFile:
+    archive = ZipFile(io.BytesIO(data))
+    if sum(i.file_size for i in archive.infolist()) > MAX_SOURCE_BYTES * 4:
+        archive.close()
+        raise FoundryError("workbook expands beyond the source limit")
+    return archive
+
+
+def _xlsx_workbook(data: bytes) -> dict:
+    archive = _open_xlsx_archive(data)
+    try:
+        book = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+        try:
+            sheets = []
+            for sheet in book.worksheets:
+                rows = sheet.max_row or 0
+                columns = sheet.max_column or 0
+                if columns > MAX_COLUMNS or rows > MAX_ROWS + 1:
+                    raise FoundryError("worksheet exceeds row/column limits")
+                sheets.append({"name": sheet.title, "rows": rows, "columns": columns})
+            return {
+                "kind": "workbook",
+                "schema": [],
+                "rows": [],
+                "row_count": 0,
+                "workbook": {"sheets": sheets},
+                "transformation": {
+                    "format": "xlsx",
+                    "basis": "source_fact",
+                    "mode": "workbook_snapshot",
+                    "sheet_count": len(sheets),
+                    "row_locator": "workbook sheet directory; bind a worksheet range before tabular calculation",
+                },
+            }
+        finally:
+            book.close()
+    finally:
+        archive.close()
+
+
 def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    with ZipFile(io.BytesIO(data)) as archive:
-        if sum(i.file_size for i in archive.infolist()) > MAX_SOURCE_BYTES * 4:
-            raise FoundryError("workbook expands beyond the source limit")
+    with _open_xlsx_archive(data) as archive:
         book = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
         try:
             sheet_name = metadata.get("sheet") or book.sheetnames[0]
@@ -158,6 +196,8 @@ def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
             "numeric_parser": "decimal",
             "row_locator": "data row index + 2 (one-based header row)",
         }
+        workbook = None
+        mode = None
         if suffix == ".csv":
             reader = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
             headers = reader.fieldnames or []
@@ -169,6 +209,18 @@ def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
                 if len(rows) > MAX_ROWS:
                     raise FoundryError("dataset exceeds row limit")
         elif suffix == ".xlsx":
+            mode = metadata.get("mode")
+            if mode is not None and mode not in {"table", "workbook"}:
+                raise FoundryError("XLSX mode must be table or workbook")
+            if mode == "workbook":
+                return _xlsx_workbook(data)
+            workbook = _xlsx_workbook(data) if not metadata.get("sheet") else None
+            if (
+                mode != "table"
+                and workbook is not None
+                and workbook["transformation"]["sheet_count"] > 1
+            ):
+                return workbook
             headers, rows, detail = _xlsx(data, metadata)
             transformation.update(detail)
         else:

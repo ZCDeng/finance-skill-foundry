@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 
 from foundry.analysis import AnalysisStore
 from foundry.errors import FoundryError
+from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
 
 
@@ -693,6 +694,104 @@ def test_script_export_includes_code_output_and_hashes(work):
         work.get_run(run["id"])
 
 
+def test_script_result_file_prepares_facts_and_draft_claims(work):
+    run = work.run_script(
+        {
+            "code": (
+                "import json\n"
+                "from pathlib import Path\n"
+                "Path('result.json').write_text(json.dumps([{\n"
+                "  'metric': '归母净利润',\n"
+                "  'amount': '12975.3049',\n"
+                "  'unit': '万元',\n"
+                "  'sheet': '04·合并利润表',\n"
+                "  'cell': 'C39'\n"
+                "}], ensure_ascii=False), encoding='utf-8')\n"
+            ),
+            "bindings": {},
+            "result_file": "result.json",
+        }
+    )
+    if run.get("runner_status") == "unavailable":
+        pytest.skip("OS-isolated runner unavailable")
+
+    assert run["execution_status"] == "succeeded", run
+    assert run["result"]["row_count"] == 1
+    assert run["result"]["rows"][0]["amount"] == "12975.3049"
+    assert run["result"]["result_source"] == {
+        "path": "result.json",
+        "sha256": run["outputs"][0]["sha256"],
+        "format": "json",
+        "basis": "script_output",
+        "reproducibility_status": "unverified",
+    }
+
+    service = FinanceStore(work.task)
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    amount_fact = next(f for f in prepared["facts"] if f["column"] == "amount")
+    draft = service.save_explanation_draft(
+        {
+            "body": "归母净利润为 {{fact:" + amount_fact["id"] + "}}。",
+            "run_ids": [run["id"]],
+            "fact_ids": [amount_fact["id"]],
+            "claims": [
+                {
+                    "basis": "calculation",
+                    "run_id": run["id"],
+                    "row": 0,
+                    "column": "amount",
+                    "value": "12975.3049",
+                }
+            ],
+        }
+    )
+    assert draft["claims"][0]["verification_status"] == "matches_run"
+
+
+@pytest.mark.parametrize(
+    ("result_file", "code", "message"),
+    [
+        ("missing.csv", "print('ok')", "not in this run output manifest"),
+        (
+            "not_table.json",
+            "from pathlib import Path\n"
+            "Path('not_table.json').write_text('{\"note\":\"plain\"}')",
+            "table JSON",
+        ),
+        (
+            "bad.json",
+            "from pathlib import Path\nPath('bad.json').write_text('{bad')",
+            "invalid JSON",
+        ),
+    ],
+)
+def test_script_result_file_failures_do_not_claim_success(
+    work, result_file, code, message
+):
+    run = work.run_script({"code": code, "bindings": {}, "result_file": result_file})
+    if run.get("runner_status") == "unavailable":
+        pytest.skip("OS-isolated runner unavailable")
+    assert run["execution_status"] == "failed", run
+    assert run["result"]["rows"] == []
+    assert message in run["error"]
+
+
+@pytest.mark.parametrize(
+    ("result_file", "message"),
+    [
+        ("../result.csv", "must be a relative output path"),
+        ("notes.txt", "must be a CSV or JSON table"),
+    ],
+)
+def test_script_result_file_rejects_invalid_spec_before_execution(
+    work, result_file, message
+):
+    with pytest.raises(FoundryError, match=message):
+        work.run_script(
+            {"code": "print('ok')", "bindings": {}, "result_file": result_file}
+        )
+
+
 def test_xlsx_long_body_keeps_tail(work):
     body = "a" * 40000 + "MUST_KEEP_TAIL"
     draft = work.save_draft({"body": body})
@@ -710,6 +809,25 @@ def test_script_revision_can_rerun_via_unified_analysis_run(work):
     assert second["stdout"] == first["stdout"]
     assert second["execution_status"] == "succeeded"
     assert second["id"] != first["id"]
+
+
+def test_script_revision_rerun_preserves_result_file_contract(work):
+    first = work.run_script(
+        {
+            "code": (
+                "from pathlib import Path\n"
+                "Path('result.csv').write_text('metric,amount\\nprofit,42\\n')"
+            ),
+            "bindings": {},
+            "result_file": "result.csv",
+        }
+    )
+    if first.get("runner_status") == "unavailable":
+        pytest.skip("OS-isolated runner unavailable")
+    second = work.run_analysis(first["analysis_id"])
+    assert second["execution_status"] == "succeeded", second
+    assert second["result"]["rows"] == [{"metric": "profit", "amount": "42"}]
+    assert second["result"]["result_source"]["path"] == "result.csv"
 
 
 def test_version_order_is_monotonic_not_uuid_order(work, monkeypatch):

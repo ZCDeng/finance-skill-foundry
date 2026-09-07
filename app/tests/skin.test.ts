@@ -2,33 +2,107 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { EDGE, EDGE_HOVER, HARNESS_SKIN, HERO_HEADLINE } from '../electron/harness/skin.js';
+import {
+  COMPOSER_CARD_ATTRIBUTE,
+  DARK_THEME,
+  DSH_DARK_ATTRIBUTE,
+  EDGE,
+  EDGE_LIGHT,
+  HARNESS_SKIN,
+  HERO_HEADLINE,
+  LIGHT_THEME,
+  LINE,
+  LINE_LIGHT,
+  SEND_PRIMARY_CLASS,
+  SEND_TRAILING_CLASS,
+  SETTINGS_CLOSE_CLASS,
+} from '../electron/harness/skin.js';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 const TOKENS = read('../src/styles/tokens.css');
+const LAYOUT = read('../extra/dsh/.foundry-client-stock/layout.js');
+const CONVERSATION = read('../extra/dsh/.foundry-client-stock/conversation.js');
+const SETTINGS = read('../extra/dsh/.foundry-client-stock/settings-general.js');
 const BUNDLE = JSON.parse(read('../../dsh-plugin/package.json')) as {
   dsh?: { client?: { platform?: string; inject?: string[] } };
   exports?: Record<string, unknown>;
 };
 const CLIENT = read('../../dsh-plugin/client.js');
 
+const token = (name: string, mode: 'light' | 'dark') => {
+  const source =
+    mode === 'dark'
+      ? /:root\[data-theme='dark'\]\s*\{(?<body>[^}]+)\}/.exec(TOKENS)?.groups?.body
+      : /:root\s*\{(?<body>[^}]+)\}/.exec(TOKENS)?.groups?.body;
+  expect(source, `no ${mode} token block`).toBeTruthy();
+  const value = new RegExp(`${name}:\\s*([^;]+);`).exec(source!)?.[1]?.trim();
+  expect(value, `no ${mode} ${name}`).toBeTruthy();
+  return value!;
+};
+
 describe('the edge this window draws on the embedded page', () => {
-  it('is the same gold the window uses on its own edges', () => {
+  it('uses the same focus gold the window uses on its own edges', () => {
     // The skin is injected into a document that has never heard of this app's
     // tokens, so the value is a literal there. This is what stops the two
     // drifting into two different golds.
-    const dark = /:root\[data-theme='dark'\][^}]*--fnd-line-hover:\s*([^;]+);/.exec(TOKENS)?.[1];
-    expect(dark, 'no dark --fnd-line-hover').toBeTruthy();
-    expect(EDGE).toBe(dark!.trim());
+    expect(EDGE).toBe(token('--fnd-line-hover', 'dark'));
+    expect(EDGE_LIGHT).toBe(token('--fnd-line-hover', 'light'));
   });
 
-  it('keeps upstream’s change of state, and only takes the hue', () => {
-    // The composer's edge changes colour on hover. Flattening that to one
-    // colour would be this app quietly removing a piece of feedback rather
-    // than restyling it.
-    expect(EDGE_HOVER).not.toBe(EDGE);
-    expect(HARNESS_SKIN).toContain('[class*="_cardWorkspaceTrigger"]:hover');
+  it('uses the same idle line the window uses on its own dark edges', () => {
+    expect(LINE).toBe(token('--fnd-line', 'dark'));
+    expect(LINE_LIGHT).toBe(token('--fnd-line', 'light'));
+  });
+
+  it('keeps the bridge palette pinned to the host semantic tokens', () => {
+    expect(LIGHT_THEME.bg).toBe(token('--fnd-bg', 'light'));
+    expect(LIGHT_THEME.surface).toBe(token('--fnd-surface', 'light'));
+    expect(LIGHT_THEME.surfaceStrong).toBe(token('--fnd-surface-strong', 'light'));
+    expect(LIGHT_THEME.ink).toBe(token('--fnd-ink', 'light'));
+    expect(LIGHT_THEME.muted).toBe(token('--fnd-muted', 'light'));
+    expect(LIGHT_THEME.selected).toBe(token('--fnd-selected', 'light'));
+    expect(LIGHT_THEME.onSelected).toBe(token('--fnd-on-selected', 'light'));
+    expect(LIGHT_THEME.selectionSurface).toBe(token('--fnd-selection-surface', 'light'));
+    expect(DARK_THEME.bg).toBe(token('--fnd-bg', 'dark'));
+    expect(DARK_THEME.surface).toBe(token('--fnd-surface', 'dark'));
+    expect(DARK_THEME.surfaceStrong).toBe(token('--fnd-surface-strong', 'dark'));
+    expect(DARK_THEME.ink).toBe(token('--fnd-ink', 'dark'));
+    expect(DARK_THEME.muted).toBe(token('--fnd-muted', 'dark'));
+    expect(DARK_THEME.selected).toBe(token('--fnd-selected', 'dark'));
+    expect(DARK_THEME.onSelected).toBe(token('--fnd-on-selected', 'dark'));
+    expect(DARK_THEME.selectionSurface).toBe(token('--fnd-selection-surface', 'dark'));
+  });
+
+  it('follows the resolved DSH theme attribute rather than the OS media query', () => {
+    expect(LAYOUT).toContain(`const DARK_ATTRIBUTE = "${DSH_DARK_ATTRIBUTE}"`);
+    expect(LAYOUT).toContain(`body.setAttribute(DARK_ATTRIBUTE, "")`);
+    expect(HARNESS_SKIN).toContain(`body[${DSH_DARK_ATTRIBUTE}]`);
+    expect(HARNESS_SKIN).not.toContain('@media (prefers-color-scheme: dark)');
+  });
+
+  it('keeps idle neutral and only emphasizes interactive states', () => {
+    expect(LINE).not.toBe(EDGE);
+    expect(LINE_LIGHT).not.toBe(EDGE_LIGHT);
+    expect(HARNESS_SKIN).toContain('border-color: var(--foundry-native-line) !important');
+    expect(HARNESS_SKIN).toContain(`[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:hover`);
+    expect(HARNESS_SKIN).toContain(`[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within`);
+  });
+
+  it('bridges upstream DSW business aliases to Foundry semantic colour', () => {
+    for (const alias of [
+      '--dsw-alias-bg-base:var(--foundry-native-bg) !important',
+      '--dsw-specific-input-major:var(--foundry-native-surface) !important',
+      '--dsw-alias-label-primary:var(--foundry-native-ink) !important',
+      '--dsw-alias-label-secondary:var(--foundry-native-muted) !important',
+      '--dsw-alias-border-l2-darkmode-thin:var(--foundry-native-line) !important',
+      '--dsw-alias-state-business-primary:var(--foundry-native-selected) !important',
+      '--dsw-alias-button-info-fill:var(--foundry-native-selected) !important',
+      '--dsw-alias-button-info-hover:var(--foundry-native-focus) !important',
+      '--dsw-static-blue-450:var(--foundry-native-selected) !important',
+    ]) {
+      expect(HARNESS_SKIN).toContain(alias);
+    }
   });
 
   /*
@@ -39,8 +113,15 @@ describe('the edge this window draws on the embedded page', () => {
   it('draws one solid line rather than colouring the dashed one', () => {
     expect(HARNESS_SKIN).toContain('background: transparent !important');
     expect(HARNESS_SKIN).toMatch(
-      /\[class\*="_cardWorkspaceTrigger"\]\s*\{\s*border-color/,
+      /\[data-foundry-frame\]\s*\[data-composer-card\]\s*\{\s*border-color:\s*var\(--foundry-native-line\)/,
     );
+    expect(HARNESS_SKIN).toContain('outline-offset: -1px');
+  });
+
+  it('targets every real composer card through the upstream data attribute', () => {
+    expect(CONVERSATION).toContain(`"${COMPOSER_CARD_ATTRIBUTE}": true`);
+    expect(HARNESS_SKIN).toContain(`[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]`);
+    expect(HARNESS_SKIN).toContain(`[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within`);
   });
 });
 
@@ -52,7 +133,7 @@ describe('how the skin holds on', () => {
    * survives a rebuild.
    */
   it('matches the name someone wrote, never the build hash in front of it', () => {
-    for (const local of ['_cardWorkspaceTrigger', '_headlineText', '_card']) {
+    for (const local of ['_cardWorkspaceTrigger', '_headlineText']) {
       expect(HARNESS_SKIN, local).toContain(`[class*="${local}"]`);
     }
     expect(HARNESS_SKIN, 'a build hash leaked into a selector').not.toMatch(
@@ -60,10 +141,17 @@ describe('how the skin holds on', () => {
     );
   });
 
-  it('leaves the composer card alone where the trigger already owns it', () => {
-    // Both rules would otherwise apply to the same element and the later one
-    // would win by accident rather than by decision.
-    expect(HARNESS_SKIN).toContain('[class*="_card"]:not([class*="_cardWorkspaceTrigger"])');
+  it('does not repaint every upstream card', () => {
+    expect(HARNESS_SKIN).not.toContain('[class*="_card"]:not([class*="_cardWorkspaceTrigger"])');
+    expect(HARNESS_SKIN).not.toContain('[class*="_card"]');
+    expect(HARNESS_SKIN).not.toContain('[class*="_card"]:');
+  });
+
+  it('uses the pinned send-button class rather than a broad primary substring', () => {
+    expect(CONVERSATION).toContain(`"primary": "${SEND_PRIMARY_CLASS}"`);
+    expect(CONVERSATION).toContain(`"trailing": "${SEND_TRAILING_CLASS}"`);
+    expect(HARNESS_SKIN).toContain(`.${SEND_TRAILING_CLASS} > button.${SEND_PRIMARY_CLASS}`);
+    expect(HARNESS_SKIN).not.toContain('[class*="_primary"]');
   });
 
   it('changes how the page looks and nothing about what it does', () => {
@@ -79,6 +167,23 @@ describe('how the skin holds on', () => {
     expect(HARNESS_SKIN).toContain('font-size: 0');
     expect(HARNESS_SKIN).toContain(`content: '${HERO_HEADLINE}'`);
     expect(HERO_HEADLINE).toContain('FA Foundry');
+  });
+
+  it('keeps native details keyboard focus in the same theme bridge', () => {
+    expect(HARNESS_SKIN).toContain('[data-foundry-frame] summary:focus-visible');
+    expect(HARNESS_SKIN).toContain('outline: 2px solid var(--foundry-native-focus) !important');
+    expect(HARNESS_SKIN).toContain('outline-offset: -1px');
+  });
+
+  it('replaces the settings close default focus without adding a second ring', () => {
+    expect(SETTINGS).toContain(`"close": "${SETTINGS_CLOSE_CLASS}"`);
+    expect(SETTINGS).toContain(`.${SETTINGS_CLOSE_CLASS}{`);
+    expect(SETTINGS).not.toContain(`.${SETTINGS_CLOSE_CLASS}:focus-visible`);
+    expect(HARNESS_SKIN).toContain(`.${SETTINGS_CLOSE_CLASS}:focus-visible`);
+    expect(HARNESS_SKIN).toContain('outline: 2px solid var(--foundry-native-focus) !important');
+    expect(HARNESS_SKIN).toContain('outline-offset: -1px');
+    expect(HARNESS_SKIN).toContain('box-shadow: none !important');
+    expect(HARNESS_SKIN).not.toContain('[data-foundry-frame] button:focus-visible');
   });
 });
 

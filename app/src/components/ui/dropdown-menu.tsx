@@ -58,7 +58,7 @@ function DropdownMenuItem({
       data-variant={variant}
       className={cn(
         'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] px-3 py-2',
-        'font-[inherit] text-[length:var(--fnd-size-small)] outline-none select-none',
+        'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
         'data-[inset]:pl-8',
@@ -82,7 +82,7 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
         'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] py-2 pr-2 pl-8',
-        'font-[inherit] text-[length:var(--fnd-size-small)] outline-none select-none',
+        'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
         className,
@@ -114,7 +114,7 @@ function DropdownMenuRadioItem({
       data-slot="dropdown-menu-radio-item"
       className={cn(
         'relative flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] py-2 pr-2 pl-8',
-        'font-[inherit] text-[length:var(--fnd-size-small)] outline-none select-none',
+        'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
         className,
@@ -185,7 +185,7 @@ function DropdownMenuSubTrigger({
       data-inset={inset}
       className={cn(
         'flex cursor-pointer items-center gap-1.5 rounded-[var(--fnd-radius-menu-item)] px-3 py-2',
-        'font-[inherit] text-[length:var(--fnd-size-small)] outline-none select-none',
+        'text-[length:var(--fnd-size-small)] outline-none select-none',
         'focus:bg-[var(--fnd-surface-strong)] data-[state=open]:bg-[var(--fnd-surface-strong)]',
         className,
       )}

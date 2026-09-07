@@ -1,5 +1,4 @@
-@import '../styles/tokens.css';
-
+@layer components {
 /* Application identity stays compact; the task itself owns the workspace header. */
 .fnd-shell { display: flex; flex-direction: column; min-height: 100vh; background: var(--fnd-bg); }
 .fnd-head { display: flex; align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
@@ -19,56 +18,6 @@
 
 .fnd-head__tab[aria-current='page'] { color: var(--fnd-on-selected); background: var(--fnd-selected); }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
-
-/*
- * Button colour lives here, not only in Tailwind utilities. Unlayered
- * `button { color: inherit }` used to paint dark-theme primary labels the same
- * as the inverted accent fill.
- */
-[data-slot='button'][data-variant='default'] {
-  color: var(--fnd-on-accent);
-  background-color: var(--fnd-accent);
-}
-
-[data-slot='button'][data-variant='outline'],
-[data-slot='button'][data-variant='secondary'] {
-  color: var(--fnd-ink);
-}
-
-[data-slot='button'][data-variant='ghost'] {
-  color: var(--fnd-muted);
-}
-
-[data-slot='button'][data-variant='ghost'][aria-pressed='true'],
-[data-slot='button'][data-variant='ghost'][data-state='open'] {
-  color: var(--fnd-ink);
-  background-color: var(--fnd-selection-surface);
-}
-
-[data-slot='button'][data-variant='link'] {
-  color: var(--fnd-muted);
-}
-
-[data-slot='button'][data-variant='destructive'] {
-  color: var(--fnd-mark-outside);
-}
-
-[data-slot='tabs-trigger'] {
-  color: var(--fnd-muted);
-}
-
-[data-slot='tabs-trigger'][data-state='active'] {
-  color: var(--fnd-ink);
-}
-
-[data-slot='button']:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
-}
-
-[data-slot='button'][data-size='icon']:focus-visible {
-  outline-offset: 0;
-}
 
 /* -- the five words ------------------------------------------------------- */
 
@@ -173,7 +122,7 @@
 
 .fnd-card:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .fnd-card:active:not(:disabled) {
@@ -355,7 +304,7 @@
 }
 
 .fnd-field {
-  flex: 1 1 240px;
+  width: 100%;
   min-width: 0;
   height: var(--fnd-button-height);
   padding: 0 12px;
@@ -368,8 +317,10 @@
   transition: border-color var(--fnd-transition);
 }
 
-.fnd-field--short {
-  flex: 0 1 150px;
+textarea.fnd-field {
+  height: auto;
+  min-height: 80px;
+  padding: 8px 12px;
 }
 
 .fnd-new > [data-slot='input'] {
@@ -377,11 +328,15 @@
   min-width: 0;
 }
 
+.fnd-new > .fnd-field--short {
+  flex: 0 1 150px;
+}
+
 .fnd-field::placeholder {
   color: var(--fnd-muted);
 }
 
-.fnd-field:hover:not(:disabled) {
+.fnd-field:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
   border-color: var(--fnd-line-hover);
 }
 
@@ -394,15 +349,11 @@
   border-color: var(--fnd-mark-outside-line);
 }
 
-/*
- * The focus ring is the gold, not the platform's blue: the window draws one
- * accent and a system ring would be the second. `--fnd-line-hover` is the token
- * that already clears WCAG 1.4.11's 3:1 against both surfaces, which is the
- * floor a focus indicator answers to.
- */
-.fnd-field:focus-visible {
+/* The outline overlaps the neutral border: hover + focus paints one edge.
+ * Error colour remains on the field; disabled fields never gain hover paint. */
+.fnd-field:focus-visible:not(:disabled) {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 /* -- the header's own help ------------------------------------------------ */
@@ -445,7 +396,7 @@
 
 .fnd-head__help:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 /* -- the task bar's own controls ------------------------------------------ */
@@ -478,7 +429,7 @@
 
 .fnd-picker:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .fnd-picker:disabled {
@@ -519,7 +470,7 @@
 
 .fnd-start:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 /*
@@ -842,3 +793,5 @@
 .fnd-shell[data-screen='analysis'] .fnd-column, .fnd-shell[data-screen='workbench'] .fnd-column { display: flex; flex: 1; flex-direction: column; padding: 0; max-width: none; min-height: 0; overflow: hidden; }
 .workspace-mount { flex: 1; min-height: 0; height: 100%; }
 .fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }
+
+}

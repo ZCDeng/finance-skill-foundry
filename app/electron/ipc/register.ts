@@ -182,6 +182,20 @@ export function registerIpc(
   // Every analysis operation goes through the same domain CLI as legacy work.
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
     JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
+  const rootAnalysisContext = async (task: string): Promise<{ sessionId?: string; title?: string }> => {
+    const known = await analysisCall(task, 'task-show');
+    const previous = [...(known.sessions ?? [])].reverse().find(
+      (row: { role: string; session_id?: string; parent_session_id?: string }) => row.role === 'analysis' && !row.parent_session_id,
+    );
+    return {
+      sessionId: typeof previous?.session_id === 'string' ? previous.session_id : undefined,
+      title: typeof known.task?.title === 'string' ? known.task.title : undefined,
+    };
+  };
+  const refreshRootAnalysisSession = async (task: string): Promise<void> => {
+    const previous = await rootAnalysisContext(task);
+    if (previous.sessionId) await runFoundry({ ...binding, task, session: previous.sessionId }, 'analysis-refresh');
+  };
   const objectJson = (value: unknown): string => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected an object');
     const text = JSON.stringify(value);
@@ -293,9 +307,17 @@ export function registerIpc(
       });
       if (selected.canceled) return [];
       const rows = [];
+      let failure: unknown;
       for (const file of selected.filePaths) {
-        rows.push(await analysisCall(task, 'dataset-add', ['--path', file, '--name', path.basename(file)]));
+        try {
+          rows.push(await analysisCall(task, 'dataset-add', ['--path', file, '--name', path.basename(file)]));
+        } catch (error) {
+          failure = error;
+          break;
+        }
       }
+      if (rows.length) await refreshRootAnalysisSession(task);
+      if (failure) throw failure;
       return rows;
     }));
 
@@ -369,19 +391,16 @@ export function registerIpc(
         const workspace = ensureTaskWorkspace(harness.userData(), task);
         let workspaceTitle: string | undefined;
         if (intent === 'analysis') {
-          const known = await analysisCall(task, 'task-show');
-          workspaceTitle = typeof known.task?.title === 'string' ? known.task.title : undefined;
-          const previous = [...(known.sessions ?? [])].reverse().find(
-            (row: { role: string; parent_session_id?: string }) => row.role === 'analysis' && !row.parent_session_id,
-          );
-          if (previous) {
+          const previous = await rootAnalysisContext(task);
+          workspaceTitle = previous.title;
+          if (previous.sessionId) {
             // Refresh only this root conversation; an active run keeps its fixed inputs.
-            await runFoundry({ ...binding, task, session: previous.session_id }, 'analysis-refresh');
+            await runFoundry({ ...binding, task, session: previous.sessionId }, 'analysis-refresh');
             const draft = [seed.draftId ? `继续分析文稿 ${objectId(seed.draftId)}，先查看文稿依据。` : '', seed.verbatim ?? ''].filter(Boolean).join('\n');
             const reply = action
-              ? await harness.host.show(previous.session_id, draft || undefined, workspace, workspaceTitle, action)
-              : await harness.host.show(previous.session_id, draft || undefined, workspace, workspaceTitle);
-            return { ...reply, sessionId: previous.session_id, preset: 'analysis' };
+              ? await harness.host.show(previous.sessionId, draft || undefined, workspace, workspaceTitle, action)
+              : await harness.host.show(previous.sessionId, draft || undefined, workspace, workspaceTitle);
+            return { ...reply, sessionId: previous.sessionId, preset: 'analysis' };
           }
         }
         let windowId = seed.windowId;

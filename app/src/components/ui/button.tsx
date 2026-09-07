@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils.js';
 const buttonVariants = cva(
   [
     'inline-flex shrink-0 items-center justify-center gap-1.5',
-    'rounded-[var(--fnd-radius-control)] font-[inherit] text-[length:var(--fnd-size-small)] leading-none whitespace-nowrap',
-    'cursor-pointer outline-none transition-[border-color,background-color,color,opacity] duration-[var(--fnd-transition)]',
+    'rounded-[var(--fnd-radius-control)] text-[length:var(--fnd-size-small)] leading-none whitespace-nowrap',
+    'cursor-pointer transition-[border-color,background-color,color,opacity] duration-(--fnd-duration) ease-(--fnd-easing)',
     'disabled:cursor-default disabled:pointer-events-none',
     'aria-busy:cursor-progress',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0',
@@ -17,34 +17,34 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          'border-0 bg-primary text-primary-foreground disabled:opacity-40 active:enabled:opacity-[0.88]',
+          'border-0 bg-primary text-primary-foreground enabled:active:opacity-[0.88] disabled:opacity-40',
         outline: [
           'border border-border bg-transparent text-foreground',
-          'hover:enabled:border-[var(--fnd-line-hover)] hover:enabled:bg-[var(--fnd-surface-strong)]',
-          'active:enabled:bg-[var(--fnd-selection-surface)]',
+          'enabled:hover:not-focus-visible:border-[var(--fnd-line-hover)] enabled:hover:bg-[var(--fnd-surface-strong)]',
+          'enabled:active:bg-[var(--fnd-selection-surface)]',
           'disabled:opacity-55',
         ].join(' '),
         destructive: [
           'border border-[var(--fnd-mark-outside-line)] bg-transparent text-[var(--fnd-mark-outside)]',
-          'hover:enabled:bg-[var(--fnd-mark-outside-fill)]',
+          'enabled:hover:bg-[var(--fnd-mark-outside-fill)]',
           'disabled:opacity-55',
         ].join(' '),
         ghost: [
           'border-0 bg-transparent text-[var(--fnd-muted)]',
-          'hover:enabled:bg-[var(--fnd-surface-strong)] hover:enabled:text-foreground',
-          'active:enabled:bg-[var(--fnd-selection-surface)]',
+          'enabled:hover:bg-[var(--fnd-surface-strong)] enabled:hover:text-foreground',
+          'enabled:active:bg-[var(--fnd-selection-surface)]',
           'aria-pressed:bg-[var(--fnd-selection-surface)] aria-pressed:text-foreground',
           'data-[state=open]:bg-[var(--fnd-selection-surface)] data-[state=open]:text-foreground',
           'disabled:opacity-45',
         ].join(' '),
         link: [
           'h-auto self-start border-0 bg-transparent p-0 text-[var(--fnd-muted)] underline decoration-[var(--fnd-line)] underline-offset-4',
-          'hover:enabled:text-foreground hover:enabled:no-underline',
+          'enabled:hover:text-foreground enabled:hover:no-underline',
           'disabled:opacity-55',
         ].join(' '),
         secondary: [
           'border-0 bg-secondary text-secondary-foreground',
-          'hover:enabled:bg-[var(--fnd-selection-surface)]',
+          'enabled:hover:bg-[var(--fnd-selection-surface)]',
           'disabled:opacity-55',
         ].join(' '),
       },
@@ -78,7 +78,7 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size }), className)}
+      className={cn(buttonVariants({ variant, size }), variant === 'link' && 'h-auto p-0', className)}
       {...props}
     />
   );

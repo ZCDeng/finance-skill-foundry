@@ -48,7 +48,9 @@
   --fnd-mark-outside-fill: #a67e3c1f;
   --fnd-mark-absent: #6b6b6b;
   --fnd-mark-external: #3a6b8a;
-  --fnd-transition: 180ms ease;
+  --fnd-duration: 180ms;
+  --fnd-easing: ease;
+  --fnd-transition: var(--fnd-duration) var(--fnd-easing);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -99,5 +101,5 @@
   --fnd-mark-external: #96bcd2;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root { --fnd-transition: 0ms; }
+  :root { --fnd-duration: 0ms; }
 }

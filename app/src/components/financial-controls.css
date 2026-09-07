@@ -1,3 +1,4 @@
+@layer components {
 .fnd-control {
   display: flex;
   flex-direction: column;
@@ -77,19 +78,6 @@
   border-color: var(--fnd-accent);
 }
 
-.fnd-control-icon--calendar {
-  position: absolute;
-  right: 4px;
-  top: 3px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  padding: 0;
-}
-
 .fnd-control-icon {
   flex: 0 0 auto;
   height: var(--fnd-button-height);
@@ -104,7 +92,20 @@
   transition: border-color var(--fnd-transition), color var(--fnd-transition), background var(--fnd-transition);
 }
 
-.fnd-control-icon:hover:not(:disabled) {
+.fnd-control-icon--calendar {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.fnd-control-icon:hover:not(:disabled):not(:focus-visible) {
   border-color: var(--fnd-line-hover);
   color: var(--fnd-ink);
   background: var(--fnd-surface-strong);
@@ -112,7 +113,7 @@
 
 .fnd-control-icon:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .fnd-control-icon:disabled {
@@ -165,14 +166,14 @@
   transition: border-color var(--fnd-transition), background var(--fnd-transition);
 }
 
-.fnd-combobox__button:hover:not(:disabled) {
+.fnd-combobox__button:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-surface-strong);
 }
 
 .fnd-combobox__button:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .fnd-combobox__button:disabled {
@@ -433,7 +434,7 @@
 
 .fnd-date-field__toggle:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 .fnd-range-field {
@@ -460,7 +461,7 @@
 .fnd-month-grid button[data-active='true'],
 .fnd-day-grid button[data-active='true'] {
   outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 
@@ -473,4 +474,6 @@
 .fnd-combobox__popover[data-align='end'],
 .fnd-date-picker__popover[data-align='end'] {
   transform-origin: top right;
+}
+
 }

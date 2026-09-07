@@ -99,7 +99,7 @@ def test_workbook_cli_writes_numeric_new_artifact_with_real_run(tmp_path, capsys
     book.defined_names.add(DefinedName("Result", attr_text="'Output'!$A$2"))
     book.save(source)
     store = AnalysisStore(task)
-    dataset = store.add_dataset(source, name="原工作簿")
+    dataset = store.add_dataset(source, name="原工作簿", metadata={"mode": "table"})
     run = store.run_analysis(store.save_analysis({"question": "合计", "bindings": {"input": dataset["id"]}, "sql": "SELECT SUM(amount) AS amount FROM input"})["id"])
     args = ["--var", str(root), "--task", task.id]
 

@@ -1,100 +1,118 @@
 /* Register bundled fonts once; token imports carry no font assets. */
-@layer theme, base, components, utilities;
+@layer theme, base, components, layout, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 @source "../**/*.{ts,tsx}";
 @import './fonts.css';
-@import './tokens.css';
+@import './tokens.css' layer(theme);
 @import './shadcn-bridge.css';
 
 /*
  * Base layer. Everything below reads tokens.
  */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+
+  html {
+    font-family: var(--fnd-font-sans);
+    line-height: var(--fnd-leading-body);
+    /* Both fonts provide real weights; never synthesize a missing face. */
+    font-synthesis-weight: none;
+    scrollbar-color: var(--fnd-muted) var(--fnd-surface-strong);
+  }
+
+  body {
+    background: var(--fnd-bg);
+    color: var(--fnd-ink);
+    font-family: var(--fnd-font-sans);
+    font-size: var(--fnd-size-body);
+    line-height: var(--fnd-leading-body);
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * Every figure in this product sits in a column with other figures -- a
+   * deliverable's byte count, a window's row count, an amount. Proportional digits
+   * would make those columns ragged, so the whole document opts in and nothing has
+   * to remember to.
+   */
+  body {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: 0;
+    margin: 0;
+    font-weight: var(--fnd-weight-strong);
+  }
+
+  h2 {
+    font-family: var(--fnd-font-display);
+    font-size: var(--fnd-size-h2);
+    line-height: 32px;
+  }
+
+  h3 {
+    font-size: var(--fnd-size-h3);
+    line-height: 20px;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  a {
+    color: var(--fnd-ink);
+    text-decoration-color: var(--fnd-accent-text);
+    text-underline-offset: 3px;
+  }
+
+  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--fnd-line-hover);
+    outline-offset: -1px;
+  }
+
+  button {
+    font: inherit;
+  }
+
+  button:not([data-slot]) {
+    color: inherit;
+  }
+
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+    caret-color: var(--fnd-accent-text);
+  }
+
+  ::placeholder {
+    color: var(--fnd-muted);
+    opacity: 1;
+  }
+
+  ::selection {
+    background: var(--fnd-selection-surface);
+    color: var(--fnd-ink);
+  }
+
+  [hidden] {
+    display: none !important;
+  }
 }
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-}
-
-html {
-  font-family: var(--fnd-font-sans);
-  line-height: var(--fnd-leading-body);
-  /* Both fonts provide real weights; never synthesize a missing face. */
-  font-synthesis-weight: none;
-  scrollbar-color: var(--fnd-muted) var(--fnd-surface-strong);
-}
-
-body {
-  background: var(--fnd-bg);
-  color: var(--fnd-ink);
-  font-family: var(--fnd-font-sans);
-  font-size: var(--fnd-size-body);
-  line-height: var(--fnd-leading-body);
-  letter-spacing: 0;
-  -webkit-font-smoothing: antialiased;
-}
-
-/*
- * Every figure in this product sits in a column with other figures -- a
- * deliverable's byte count, a window's row count, an amount. Proportional digits
- * would make those columns ragged, so the whole document opts in and nothing has
- * to remember to.
- */
-body {
-  font-variant-numeric: tabular-nums;
-}
-
-h1,
-h2,
-h3 {
-  letter-spacing: 0;
-  margin: 0;
-  font-weight: var(--fnd-weight-strong);
-}
-
-h2 {
-  font-family: var(--fnd-font-display);
-  font-size: var(--fnd-size-h2);
-  line-height: 32px;
-}
-
-h3 {
-  font-size: var(--fnd-size-h3);
-  line-height: 20px;
-}
-
-p {
-  margin: 0;
-}
-
-a {
-  color: var(--fnd-ink);
-  text-decoration-color: var(--fnd-accent-text);
-}
-
-:where(a, button, input, textarea, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
-  outline-offset: 1px;
-}
-
-button {
-  font: inherit;
-}
-
-button:not([data-slot]) {
-  color: inherit;
-}
-
-input, textarea, select { font: inherit; color: inherit; caret-color: var(--fnd-accent-text); }
-::placeholder { color: var(--fnd-muted); opacity: 1; }
-::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
-a { text-underline-offset: 3px; }
-[hidden] { display: none !important; }

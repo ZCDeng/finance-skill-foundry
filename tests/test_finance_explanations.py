@@ -495,6 +495,14 @@ def test_numeric_tokens_cover_percent_chinese_and_avoid_substrings(service):
     assert checked['status'] == 'pass', checked['issues']
 
 
+def test_numeric_tokens_ignore_spreadsheet_references_but_keep_amounts():
+    from foundry.finance_explanations import _body_numbers
+
+    body = "04·合并利润表 F39=200,000,001 元，与预算本 01!O46 一致；1·revenue 仍为 7 万元；利润7!仍需核对。"
+
+    assert [item["text"] for item in _body_numbers(body)] == ["200,000,001", "1", "7", "7"]
+
+
 def test_source_less_background_stays_with_authorized_context(service):
     store, context = service
     saved = store.finance_background_save({'text': '投放提前', 'basis': 'professional_judgment', 'context_id': context['id'], 'effective_from': '2026-09'})
@@ -872,6 +880,51 @@ def test_generic_calculation_row_uses_declared_column_types_for_missing_members(
     group = payload["evidence_groups"][0]
     assert group["status"] == "missing_data"
     assert [(member["column"], member["state"]) for member in group["members"]] == [("amount", "missing")]
+
+
+def test_generic_value_column_uses_row_unit_without_relaxing_ratio_or_count(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "99999999999999999999999999999999",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "metric", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(38,4)"},
+                {"name": "ratio", "type": "DECIMAL(18,6)"},
+                {"name": "row_count", "type": "INTEGER"},
+                {"name": "unit", "type": "VARCHAR"},
+            ],
+            "rows": [{
+                "metric": "revenue_ytd",
+                "value": "3256440000",
+                "ratio": "0.0398",
+                "row_count": "50",
+                "unit": "元",
+            }],
+        },
+    })
+    prepared = prepare_explanation(store.analysis, [run])
+    facts = {fact["column"]: fact for fact in prepared["facts"]}
+
+    assert facts["value"]["display_value"] == "3256440000 元"
+    assert facts["value"]["unit"] == "元"
+    assert facts["ratio"]["display_value"] == "3.98%"
+    assert facts["ratio"]["unit"] == "%"
+    assert facts["row_count"]["display_value"] == "50 条"
+    assert facts["row_count"]["unit"] == "条"
+
+    checked = store.validate_explanation({
+        "body": "04·合并利润表 C5=3256440000 元；归母净利率 3.98%，城市公司 50 条。",
+        "run_ids": [run["id"]],
+        "fact_ids": [fact["id"] for fact in facts.values()],
+    })
+
+    assert checked["status"] == "pass", checked["issues"]
 
 
 @pytest.mark.parametrize("identity_type", ["VARCHAR", "INTEGER"])

@@ -236,6 +236,91 @@ describe('requirements panel', () => {
     })));
   });
 
+  it('round-trips supported custom requirements without stale choice warnings', async () => {
+    const supportedCustom: AnalysisRequirementsRecord = {
+      ...current,
+      id: 'r-custom-001',
+      question: '核对华宸物业月结套表控制关系',
+      scope: {
+        ledger: 'default',
+        organization: '华宸物业',
+        period: '2026-01至2026-08（月结）及2026全年（BUD/LE）',
+        currency: 'CNY',
+        unit: '元（GL与三大报表）/ 万元（分析表，按各工作表注明）',
+      },
+      items: [
+        { id: 'acct-total', metric: 'account_total', label: '科目合计', dimensions: {}, requires_drilldown: false },
+        { id: 'variance', metric: 'total_variance', label: '总额差异', dimensions: {}, requires_drilldown: true },
+      ],
+      support: { items: [
+        { requirement_item_id: 'acct-total', status: 'requires_execution', canonical_metric: 'account_total', next_action: '已识别控制合计。', missing_inputs: [] },
+        { requirement_item_id: 'variance', status: 'requires_execution', canonical_metric: 'total_variance', next_action: '已识别总额差异。', missing_inputs: [] },
+      ] },
+    };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...supportedCustom, id: 'r-custom-002', parent_id: supportedCustom.id, scope: spec?.scope, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [supportedCustom], current: supportedCustom })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    expect(await screen.findByDisplayValue('2026-01至2026-08（月结）及2026全年（BUD/LE）')).toBeTruthy();
+    expect(screen.getByText(/元（GL与三大报表）\/ 万元（分析表，按各工作表注明）/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '指标 1' }).textContent).toContain('科目合计');
+    expect(screen.getByRole('button', { name: '指标 2' }).textContent).toContain('总额差异');
+    expect(screen.queryByText(/当前选择已失效/)).toBeNull();
+    expect(screen.queryByText(/请输入 YYYY-MM 会计期间/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      scope: expect.objectContaining({
+        period: '2026-01至2026-08（月结）及2026全年（BUD/LE）',
+        unit: '元（GL与三大报表）/ 万元（分析表，按各工作表注明）',
+      }),
+      items: [
+        expect.objectContaining({ id: 'acct-total', metric: 'account_total', label: '科目合计' }),
+        expect.objectContaining({ id: 'variance', metric: 'total_variance', label: '总额差异' }),
+      ],
+    })));
+  });
+
+  it('keeps saved custom period editable until converted to a monthly period', async () => {
+    const supportedCustom: AnalysisRequirementsRecord = {
+      ...current,
+      id: 'r-custom-period-001',
+      scope: {
+        ledger: 'default',
+        organization: '华宸物业',
+        period: '2026-01至2026-08（月结）及2026全年（BUD/LE）',
+        currency: 'CNY',
+        unit: '万元',
+      },
+      items: [{ id: 'acct-total', metric: 'account_total', label: '科目合计', dimensions: {}, requires_drilldown: false }],
+    };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...supportedCustom, id: 'r-custom-period-002', parent_id: supportedCustom.id, scope: spec?.scope, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [supportedCustom], current: supportedCustom })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const period = await screen.findByLabelText('期间');
+    expect(screen.queryByRole('button', { name: '期间打开年月选择' })).toBeNull();
+    fireEvent.change(period, { target: { value: '2026-01至2026-09（月结）及2026全年（BUD/LE）' } });
+    expect(screen.queryByText(/请输入 YYYY-MM 会计期间/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-01至2026-09（月结）及2026全年（BUD/LE，含滚动预测）' } });
+    expect(screen.queryByText(/请输入 YYYY-MM 会计期间/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      scope: expect.objectContaining({ period: '2026-01至2026-09（月结）及2026全年（BUD/LE，含滚动预测）' }),
+    })));
+
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
+    expect(screen.getByRole('button', { name: '期间打开年月选择' })).toBeTruthy();
+  });
+
   it('shows requirement support gaps without blocking free editing', async () => {
     const supported = {
       ...current,

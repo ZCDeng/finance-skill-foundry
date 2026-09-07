@@ -3,6 +3,7 @@ import { BookOpen, Check, Columns2, Ellipsis, FolderOpen, MessageSquare, PanelLe
 import type { TaskRow } from '../bridge.js';
 import './workspace.css';
 import { Button } from './ui/button.js';
+import { Input } from './ui/input.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -133,7 +134,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
       <aside ref={sidebarPanel} className="workspace-sidebar" hidden={!sidebar} role={overlay ? 'dialog' : undefined} aria-modal={overlay ? true : undefined} aria-label="财务任务">
         {overlay ? <Button size="icon" variant="ghost" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></Button> : null}
         <Button className="workspace-new" onClick={() => { onNew(); if (!wide) closeSidebar(); }}><Plus size={16} aria-hidden />新建任务</Button>
-        <label className="workspace-search"><Search size={15} aria-hidden /><input ref={search} type="search" aria-label="搜索任务"
+        <label className="workspace-search"><Search size={15} aria-hidden /><Input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="workspace-tasklist">
           {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
@@ -149,7 +150,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
             {sidebar ? <PanelLeftClose size={18} aria-hidden /> : <PanelLeftOpen size={18} aria-hidden />}
           </Button>
           <div className="workspace-title">{renaming ? <form className="workspace-rename" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
-            <input aria-label="任务名称" autoFocus value={title} maxLength={240} disabled={savingTitle} onChange={(event) => setTitle(event.target.value)}
+            <Input aria-label="任务名称" autoFocus value={title} maxLength={240} disabled={savingTitle} onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault(); if (event.key === 'Escape') { event.preventDefault(); setRenaming(false); } }} />
             <Button size="icon" variant="ghost" aria-label="保存任务名称" disabled={savingTitle || !title.trim()}><Check size={16} aria-hidden /></Button>
             <Button size="icon" variant="ghost" type="button" aria-label="取消改名" onClick={() => setRenaming(false)}><X size={16} aria-hidden /></Button>
@@ -177,7 +178,6 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
         </header>
         <div className="workspace-panes">
           <section className="workspace-conversation" aria-label="持续对话" hidden={!task || effective === 'results'}>
-            <div className="workspace-pane-label">分析助手</div>
             <div className="workspace-native" ref={slot}>{conversation}</div>
           </section>
           <div className="workspace-divider" role="separator" aria-label="调整对话宽度" aria-orientation="vertical"

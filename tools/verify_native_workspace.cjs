@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Packaged native-pane QA. Writes an isolated profile/report; never screenshots or calls a model.
+/** Packaged native-pane QA. Writes an isolated profile/report; never calls a model.
  * PLAYWRIGHT_MODULE=/absolute/path/to/playwright QA_APP=/Applications/.../Contents/MacOS/... node tools/verify_native_workspace.cjs
  * Synthetic fixtures are explicitly labelled. They exercise the shipped renderer and input machine,
  * not real provider admission or an OS input-method implementation.
@@ -16,7 +16,7 @@ const resources = path.resolve(path.dirname(executablePath), '../Resources');
 const appAsarSha256=createHash('sha256').update(fs.readFileSync(path.join(resources,'app.asar'))).digest('hex');
 const bin = process.env.QA_FOUNDRY || path.join(resources, 'foundry/foundry');
 if (!fs.existsSync(bin)) throw new Error('Packaged foundry binary missing: ' + bin);
-const report = {status:'running', qa, executablePath, appAsarSha256, bin, checks:[], fixtures:[], notTested:['Physical macOS Chinese IME candidate window', 'Real provider admission/streaming', 'Screenshots and visual taste verdict', 'Permissions requiring external side effects']};
+const report = {status:'running', qa, executablePath, appAsarSha256, bin, checks:[], fixtures:[], screenshots:[], notTested:['Physical macOS Chinese IME candidate window', 'Real provider admission/streaming', 'Visual taste verdict (review screenshots separately)', 'Permissions requiring external side effects']};
 let app, page, nativeId, revision = 1000000;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function check(name, basis, observed, valid) {
@@ -40,6 +40,10 @@ const native = (fn, arg) => app.evaluate(async ({webContents}, {id,code}) => {
   if(!reply.ok)throw new Error(reply.error);
   return reply.value;
 },{id:nativeId,code:`(async()=>{try{return {ok:true,value:await (${fn.toString()})(${JSON.stringify(arg) ?? 'undefined'})};}catch(error){return {ok:false,error:error.stack||String(error)};}})()`});
+const captureNative = async name => {
+  const png=await app.evaluate(async ({webContents},id)=>(await webContents.fromId(id).capturePage()).toPNG().toString('base64'),nativeId);
+  const file=path.join(qa,name+'.png');fs.writeFileSync(file,Buffer.from(png,'base64'));report.screenshots.push(file);
+};
 const api = (method,args=[]) => page.evaluate(async ({method,args})=>window.foundry[method](...args),{method,args});
 const bounds = () => app.evaluate(({BrowserWindow},id)=>{
   const window=BrowserWindow.getAllWindows()[0];
@@ -162,15 +166,42 @@ const captureContext = `(() => {
   for(const width of [400,460]){
     await layout({x:192,y:110,width,height:700});
     await until(()=>native(()=>window.innerWidth),value=>value===width,'native width');
-    const shell=await native(()=>({width:innerWidth,sidebarWidth:document.querySelector('.pI_x6G_sidebarCol')?.getBoundingClientRect().width,nativeTaskButtons:document.querySelectorAll('[data-foundry-settings] button').length,hero:document.querySelector('[data-foundry-empty]')?.textContent,headline:document.querySelector('[class*="_headlineText"]')?.textContent}));
-    check(`compact_shell_${width}`,'real DOM',shell,shell.width===width&&shell.sidebarWidth<=40&&!shell.headline);
+    const shell=await native(()=>{
+      const styleOf=(selector)=>{const el=document.querySelector(selector);return el?getComputedStyle(el):null;};
+      const rectOf=(selector)=>document.querySelector(selector)?.getBoundingClientRect().toJSON();
+      const center=styleOf('.pI_x6G_centerCol');
+      const details=rectOf('.pI_x6G_detailsCol');
+      const composer=styleOf('[data-composer-card]');
+      const settings=rectOf('.pI_x6G_sidebarCol');
+      return {
+        width:innerWidth,
+        sidebarWidth:document.querySelector('.pI_x6G_sidebarCol')?.getBoundingClientRect().width,
+        settingsTop:settings?.y,
+        centerPaddingTop:center?.paddingTop,
+        detailsTop:details?.y,
+        nativeTaskButtons:document.querySelectorAll('[data-foundry-settings] button').length,
+        hero:document.querySelector('[data-foundry-empty]')?.textContent,
+        headline:document.querySelector('[class*="_headlineText"]')?.textContent,
+        composerBorder:composer?.borderColor,
+      };
+    });
+    check(`compact_shell_${width}`,'real DOM',shell,
+      shell.width===width&&shell.sidebarWidth<=40&&shell.settingsTop<=4&&!shell.headline
+      &&shell.centerPaddingTop==='0px'&&shell.detailsTop===0
+      &&Boolean(shell.composerBorder));
     await native(()=>{const trigger=document.querySelector('[data-foundry-settings] button');if(!trigger)throw new Error('settings trigger absent');trigger.click();});
     const panel=await until(()=>native(()=>{
       const el=document.querySelector('.VOzbGW_panel');if(!el)return null;
       const r=el.getBoundingClientRect();
-      return {x:r.x,y:r.y,width:r.width,height:r.height,viewport:{width:innerWidth,height:innerHeight},direction:getComputedStyle(el).flexDirection,close:el.querySelector('.VOzbGW_close')?.getBoundingClientRect().toJSON()};
+      return {x:r.x,y:r.y,width:r.width,height:r.height,viewport:{width:innerWidth,height:innerHeight},direction:getComputedStyle(el).flexDirection,navDirection:getComputedStyle(el.querySelector('.VOzbGW_navList')).flexDirection,close:el.querySelector('.VOzbGW_close')?.getBoundingClientRect().toJSON()};
     }),Boolean,'settings panel');
-    check(`settings_fits_${width}`,'real native settings slot/render',panel,panel.x>=0&&panel.y>=0&&panel.x+panel.width<=width+1&&panel.y+panel.height<=panel.viewport.height+1&&panel.direction==='column'&&panel.close?.width>0);
+    check(`settings_fits_${width}`,'real native settings slot/render',panel,panel.x>=0&&panel.y>=0&&panel.x+panel.width<=width+1&&panel.y+panel.height<=panel.viewport.height+1&&panel.direction==='column'&&panel.navDirection==='row'&&panel.close?.width>0&&panel.close.y<150);
+    const closeFocus=await native(()=>{
+      const button=document.querySelector('.VOzbGW_close');button.focus();const css=getComputedStyle(button);
+      return {dark:document.body.hasAttribute('data-ds-dark-theme'),outline:css.outlineWidth,offset:css.outlineOffset,color:css.outlineColor};
+    });
+    check(`settings_close_focus_${width}`,'real native settings keyboard focus color',closeFocus,closeFocus.outline==='2px'&&closeFocus.offset==='-1px'&&closeFocus.color===(closeFocus.dark?'rgb(226, 193, 128)':'rgb(166, 126, 60)'));
+    await captureNative(`settings-${width}`);
     await native(()=>document.querySelector('.VOzbGW_close').click());
     await until(()=>native(()=>!document.querySelector('.VOzbGW_panel')),Boolean,'settings closed');
   }
@@ -193,6 +224,40 @@ const captureContext = `(() => {
   for(const width of [400,460]){
     await layout({x:192,y:110,width,height:700});
     await until(()=>native(()=>window.innerWidth),value=>value===width,'details native width');
+    const header=await native(()=>{
+      const header=document.querySelector('.wSkVaW_header'), details=document.querySelector('[data-foundry-session-details]');
+      const title=details?.querySelector('.wSkVaW_titleRow');
+      return {height:header?.getBoundingClientRect().height,open:details?.open,titleVisible:title?.checkVisibility(),summary:details?.querySelector('summary')?.textContent};
+    });
+    check(`compact_header_${width}`,'real native header geometry and collapsed metadata',header,header.height===44&&header.open===false&&header.titleVisible===false&&header.summary==='会话信息');
+    await native(()=>{const summary=document.querySelector('[data-foundry-session-details] summary');summary.focus();summary.click();});
+    const metadata=await native(()=>{
+      const details=document.querySelector('[data-foundry-session-details]'),title=details.querySelector('.wSkVaW_titleRow');
+      return {open:details.open,rect:title.getBoundingClientRect().toJSON(),text:title.innerText,logVisible:Array.from(title.querySelectorAll('button')).some(button=>button.textContent.includes('Session log')&&button.checkVisibility())};
+    });
+    check(`session_metadata_fits_${width}`,'original native lineage/action/log slots inside disclosure',metadata,metadata.open&&metadata.rect.x>=0&&metadata.rect.right<=width&&metadata.logVisible&&metadata.text.includes(taskA));
+    await captureNative(`session-metadata-${width}`);
+    await app.evaluate(({webContents},id)=>{const w=webContents.fromId(id);w.focus();w.sendInputEvent({type:'keyDown',keyCode:'Escape'});w.sendInputEvent({type:'keyUp',keyCode:'Escape'});},nativeId);
+    const metadataClosed=await native(()=>({open:document.querySelector('[data-foundry-session-details]').open,focused:document.activeElement===document.querySelector('[data-foundry-session-details] summary')}));
+    check(`session_metadata_escape_${width}`,'real keyboard dispatch',metadataClosed,!metadataClosed.open&&metadataClosed.focused);
+    for(const scheme of ['light','dark']){
+      await app.evaluate(({nativeTheme},value)=>{nativeTheme.themeSource=value;},scheme);
+      await until(()=>native(()=>document.body.hasAttribute('data-ds-dark-theme')),value=>value===(scheme==='dark'),'resolved DSH theme');
+      const expected=scheme==='dark'
+        ? {background:'rgb(17, 17, 17)',card:'rgb(31, 31, 31)',border:'rgba(255, 255, 255, 0.14)',tab:'rgb(226, 193, 128)',send:'rgb(226, 193, 128)',sendText:'rgb(31, 31, 31)'}
+        : {background:'rgb(255, 255, 255)',card:'rgb(255, 255, 255)',border:'rgba(31, 31, 31, 0.14)',tab:'rgb(138, 103, 41)',send:'rgb(138, 103, 41)',sendText:'rgb(249, 250, 251)'};
+      const palette=await until(()=>native(()=>{
+        const styleOf=selector=>getComputedStyle(document.querySelector(selector));
+        const card=styleOf('[data-composer-card]'),tab=styleOf('.wSkVaW_tabActive'),send=styleOf('.uV2eYG_trailing > button.uV2eYG_primary');
+        return {background:styleOf('.wSkVaW_root').backgroundColor,card:card.backgroundColor,border:card.borderColor,tab:tab.color,send:send.backgroundColor,sendText:send.color};
+      }),value=>Object.keys(expected).every(key=>value[key]===expected[key]),'native palette after theme transition',3000);
+      check(`native_palette_${width}_${scheme}`,'computed native surfaces and controls match host semantic colors',palette,Object.keys(expected).every(key=>palette[key]===expected[key]));
+      await native(()=>document.querySelector('[data-composer-card] textarea').focus());
+      const focus=await native(()=>{const style=getComputedStyle(document.querySelector('[data-composer-card]'));return {outline:style.outlineWidth,offset:style.outlineOffset,color:style.outlineColor,border:style.borderColor};});
+      check(`native_composer_focus_${width}_${scheme}`,'real composer focus style',focus,focus.outline==='2px'&&focus.offset==='-1px'&&focus.color===focus.border&&focus.color===(scheme==='dark'?'rgb(226, 193, 128)':'rgb(166, 126, 60)'));
+      await captureNative(`composer-${width}-${scheme}`);
+      await native(()=>document.querySelector('[data-foundry-session-details] summary').focus());
+    }
     await native(()=>{document.querySelector('[data-composer-card] textarea').focus();window.__qaContext.layout.openDetails();});
     const detail=await until(()=>native(()=>{
       const panel=document.querySelector('.pI_x6G_detailsCol');if(!panel||getComputedStyle(panel).visibility==='hidden')return null;
@@ -264,7 +329,11 @@ const captureContext = `(() => {
   report.status='passed';
 })().catch(async error=>{
   report.status='failed';report.error=error.stack||String(error);
-  if(app&&nativeId)try{report.nativeFailure=await native(()=>({body:document.body.innerText.slice(0,16000),url:location.href}));}catch{}
+  if(app&&nativeId)try{
+    report.nativeFailure=await native(()=>({body:document.body.innerText.slice(0,16000),url:location.href}));
+    const png=await app.evaluate(async ({webContents},id)=>(await webContents.fromId(id).capturePage()).toPNG().toString('base64'),nativeId);
+    report.failureScreenshot=path.join(qa,'native-failure.png');fs.writeFileSync(report.failureScreenshot,Buffer.from(png,'base64'));
+  }catch{}
   process.exitCode=1;
 }).finally(async()=>{
   if(app)try{await app.close();}catch(error){report.status='failed';report.closeError=String(error);process.exitCode=1;}

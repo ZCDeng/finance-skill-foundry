@@ -3,13 +3,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-/*
- * Read off disk, resolved from the working directory rather than from
- * `import.meta.url`. This file runs under jsdom, where that is not a file:
- * URL and `fileURLToPath` throws; and a `?raw` import comes back empty,
- * because the CSS pipeline is stubbed for these tests.
- */
-const css = readFileSync(resolve(process.cwd(), 'src/components/components.css'), 'utf8');
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
@@ -862,22 +855,8 @@ describe('the export button can be read', () => {
     expect(button).toContain('disabled:opacity-55');
   });
 
-  it('gives a focused field its own ring instead of button layout', () => {
-    expect(css).toMatch(/\.fnd-field:focus-visible \{/);
-    const block = css.slice(css.indexOf('.fnd-field:focus-visible {'));
-    const body = block.slice(0, block.indexOf('}'));
-    expect(body).toContain('outline: 2px solid var(--fnd-line-hover)');
-    expect(body).not.toContain('border-color');
-    expect(body).not.toContain('cursor: pointer');
-  });
-
-  it('keeps primary label colour on the unlayered accent fill', () => {
-    expect(css).toContain("[data-slot='button'][data-variant='default']");
-    const start = css.indexOf("[data-slot='button'][data-variant='default']");
-    const body = css.slice(start, css.indexOf('}', start));
-    expect(body).toContain('color: var(--fnd-on-accent)');
-    expect(body).toContain('background-color: var(--fnd-accent)');
-  });
+  // Focus + hover and primary contrast are verified using computed styles in
+  // tools/verify_control_states.cjs. A single CSS rule cannot prove the cascade.
 });
 
 describe('looking at a workbook without leaving the window', () => {

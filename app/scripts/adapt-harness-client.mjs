@@ -49,6 +49,17 @@ export function adaptSource(name, original) {
     }` + source.slice(end);
   }
   if (name === 'conversation') {
+    // Keep the native title/lineage/actions/log slots intact, but put their
+    // existing React tree behind a compact, keyboard-accessible disclosure.
+    source = once(source,
+      'children: !hideChrome && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {',
+      `children: !hideChrome && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("details", {
+        "data-foundry-session-details": true,
+        onKeyDown: event => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } },
+        children: [(0, react_jsx_runtime.jsx)("summary", {children: "会话信息"}), (0, react_jsx_runtime.jsxs)("div", {`);
+    source = once(source,
+      '\t\t\t\t}), tabs.length > 1 && (0, react_jsx_runtime.jsx)("div", {',
+      '\t\t\t\t})] }), tabs.length > 1 && (0, react_jsx_runtime.jsx)("div", {');
     // Observe native admission only after its stale-attempt guard; never alter
     // the transaction, default sink, permissions, queue, or error behavior.
     source = once(source, 'var InputMachine = class {', 'var InputMachine = class {\n      foundryId = crypto.randomUUID();\n      foundryAdmission;');

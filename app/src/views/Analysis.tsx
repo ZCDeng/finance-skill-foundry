@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, FilePlus2, FileSpreadsheet, MessageSquare, Play, RefreshCw } from 'lucide-react';
+import { ArrowUp, ChevronDown, FilePlus2, FileSpreadsheet, MessageSquare, Play, RefreshCw } from 'lucide-react';
 import { bridge, shortSha, when, type Answer, type AnalysisDraft, type AnalysisMethod,
   type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot, type FinanceContext,
   type FinanceContextState, type FinanceDrilldown, type FinanceSourceBatch,
@@ -14,6 +14,7 @@ import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
+import { Textarea } from '../components/ui/textarea.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -308,7 +309,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       if (task) void chat(question.trim() || undefined); else void create();
     }}>
       <label htmlFor="analysis-question" className="analysis-question-label">{task ? '接下来想了解什么？' : '你想分析什么？'}</label>
-      <textarea id="analysis-question" value={question} onChange={(event) => setQuestion(event.target.value)}
+      <Textarea id="analysis-question" className="analysis-question-input" value={question} onChange={(event) => setQuestion(event.target.value)}
         placeholder="例如：华东本月收入达标，利润为什么没有达标？" rows={2} maxLength={6000} />
       <div className="analysis-composer-actions">
         <Button variant="outline" type="button" disabled={busy} onClick={() => {
@@ -320,7 +321,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       </div>
     </form>}
     {!task && <div className="analysis-examples" aria-label="分析示例">{EXAMPLES.map((example) =>
-      <Button variant="outline" type="button" key={example} onClick={() => setQuestion(example)}>{example}</Button>)}</div>}
+      <Button variant="outline" type="button" className="h-auto min-h-8 max-w-full shrink whitespace-normal py-1.5 text-left leading-relaxed" key={example} onClick={() => setQuestion(example)}>{example}</Button>)}</div>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {notice && <p role="status" className="analysis-message">{notice}</p>}
     {task && <>
@@ -342,8 +343,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
         {loading && <p role="status" className="analysis-note">正在读取任务资料与成果…</p>}
         {view && tab === 'datasets' && <>
-          {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button></div>}
+          {embedded && <div className="analysis-section-heading"><h3>任务资料</h3>{view.datasets.length > 0
+            ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>}
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
+            onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
@@ -353,7 +356,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               if (currentTask.current === taskId) setDataset({ source, content });
             })} disabled={busy}>
             <span className="fnd-title">{source.name}</span><span className="analysis-source-meta">
-              {{ table: '数据表', background: '背景资料' }[source.kind] ?? source.kind}{source.row_count != null ? ` · ${source.row_count} 行` : ''} · {when(source.created_at)}</span>
+              {{ table: '数据表', background: '背景资料', workbook: 'Excel 工作簿' }[source.kind] ?? source.kind}{datasetSize(source) ? ` · ${datasetSize(source)}` : ''} · {when(source.created_at)}</span>
             <span className="analysis-note">{['period', 'unit', 'currency'].filter((key) => source.metadata?.[key] != null)
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
@@ -459,16 +462,26 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   </div>;
 }
 
-function Empty({ title, body, onChat }: { title: string; body: string; onChat(): void }) {
-  return <div className="analysis-empty"><h3>{title}</h3><p>{body}</p><Button variant="outline" type="button" onClick={onChat}>
-    <MessageSquare size={14} aria-hidden />与助手讨论</Button></div>;
+function Empty({ title, body, onAddFiles, onChat }: { title: string; body: string; onAddFiles?(): void; onChat(): void }) {
+  return <div className="analysis-empty"><h3>{title}</h3><p>{body}</p><div className="analysis-actions">
+    {onAddFiles ? <Button type="button" onClick={onAddFiles}><FilePlus2 size={14} aria-hidden />添加资料</Button> : null}
+    <Button variant="outline" type="button" onClick={onChat}>
+      <MessageSquare size={14} aria-hidden />与助手讨论</Button>
+  </div></div>;
 }
 function DatasetPreview({ source, content }: { source: DatasetSnapshot; content: Record<string, unknown> }) {
   const columns = Array.isArray(content.columns) ? content.columns.map((column: unknown) => typeof column === 'string'
     ? { name: column } : column as { name: string; type?: string }) : source.schema ?? [];
   const rows = Array.isArray(content.rows) ? content.rows as Record<string, unknown>[] : [];
+  const workbook = content.workbook as { sheets?: { name: string; rows: number; columns: number }[] } | undefined;
   return <article className="analysis-source-preview"><h3>{source.name}</h3>
     <p className="analysis-note">资料版本：{source.id} · 原始摘要：{source.source_hash ?? source.sha256}</p>
+    {source.kind === 'workbook' && <>
+      <p className="analysis-note">已保留完整工作簿及所有工作表。请与助手确定分析范围，封面和标题不会被当作数据表头。</p>
+      {Array.isArray(workbook?.sheets) && <Table caption="工作表目录"
+        columns={[{ name: '工作表' }, { name: '已用行' }, { name: '已用列' }]}
+        rows={workbook.sheets.map((sheet) => ({ 工作表: sheet.name, 已用行: sheet.rows, 已用列: sheet.columns }))} />}
+    </>}
     {columns.length > 0 && <Table columns={columns} rows={rows} caption="资料预览" />}
     {typeof content.text === 'string' && <><pre className="analysis-source-text">{content.text.slice(0, 30000)}</pre>
       {content.text.length > 30000 && <p className="analysis-note">当前显示前 30,000 个字符，助手可以继续读取全文。</p>}</>}
@@ -486,10 +499,13 @@ const scopeFields = [
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
   || source.metadata?.source_file === 'source.xlsx');
+const datasetSize = (source: DatasetSnapshot): string => source.kind === 'workbook'
+  ? typeof source.transformation?.sheet_count === 'number' ? `${source.transformation.sheet_count} 张工作表` : ''
+  : source.row_count == null ? '' : `${source.row_count} 行`;
 const datasetOptions = (datasets: DatasetSnapshot[]): SelectOption[] => datasets.map((source) => ({
   value: source.id,
   label: source.name,
-  meta: [source.source_name ?? source.kind, source.row_count == null ? '' : `${source.row_count} 行`, shortSha(source.id)].filter(Boolean).join(' · '),
+  meta: [source.source_name ?? source.kind, datasetSize(source), shortSha(source.id)].filter(Boolean).join(' · '),
 }));
 const runOptions = (runs: AnalysisRun[]): SelectOption[] => runs.filter((row) => row.execution_status === 'succeeded').map((row) => ({
   value: row.id,
@@ -555,9 +571,10 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   }
   const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
     && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
-  return <section className="analysis-source-refresh" aria-label="刷新财务来源">
-    <div className="analysis-section-heading"><div><h3>刷新财务来源</h3>
-      <p className="analysis-note">刷新生成新资料版本；旧运行仍引用旧快照。</p></div></div>
+  return <details className="analysis-source-refresh" aria-label="刷新财务来源">
+    <summary><span><span className="analysis-source-refresh-title">更新 ERP 来源</span>
+      <span className="analysis-note">已有来源导出变化时，生成新的资料版本；旧运行仍引用旧快照。</span></span>
+      <ChevronDown size={16} aria-hidden /></summary>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
@@ -585,7 +602,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
       </div>)}</div></details>}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </section>;
+  </details>;
 }
 
 function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean }) {
@@ -712,8 +729,8 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
         placeholder="搜索运行时间或编号" allowEmptyLabel="经理直接写入" />
     </div>
     <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
-      <label>字段数组<textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
-      <label>写入数组<textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
+      <label>字段数组<Textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
+      <label>写入数组<Textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
     </div></details></fieldset>
     <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
     <div className="analysis-actions">
@@ -799,12 +816,12 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   const [openingCash, setOpeningCash] = useState('');
   const [delayDays, setDelayDays] = useState('14');
   const [baselineScenarioId, setBaselineScenarioId] = useState('');
-  const hasFinanceResults = runs.some((row) => (row.engine === 'finance' || row.engine === 'structured_aggregate') && row.execution_status === 'succeeded');
-  const [setupOpen, setSetupOpen] = useState(!hasFinanceResults);
+  const hasSuccessfulResults = runs.some((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
+  const [setupOpen, setSetupOpen] = useState(!hasSuccessfulResults);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   useEffect(() => { setActual((value) => value || datasets[0]?.id || ''); }, [datasets]);
-  useEffect(() => { if (hasFinanceResults) setSetupOpen(false); }, [hasFinanceResults]);
+  useEffect(() => { if (hasSuccessfulResults) setSetupOpen(false); }, [hasSuccessfulResults]);
   useEffect(() => {
     let cancelled = false;
     const api = bridge();
@@ -999,7 +1016,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
           placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" />
-        <label>映射行数组<textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
+        <label>映射行数组<Textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
           onChange={(event) => setMapRows(event.target.value)} /></label></div>
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
       <Button variant="outline" type="button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
@@ -1067,7 +1084,7 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
       <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整口径</Button>
     </section>
     <details className="analysis-details"><summary>高级：查看或编辑计算 SQL</summary>
-      <textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => setSql(event.target.value)} /></details>
+      <Textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => setSql(event.target.value)} /></details>
     <div className="analysis-actions"><Button type="button" disabled={busy || !sql.trim()} onClick={() => onSave(spec())}>保存新版并重跑</Button><Button variant="outline" type="button" disabled={busy} onClick={onRun}>重跑当前已保存版本</Button></div>
     </details>
   </div>;
@@ -1100,6 +1117,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [scopeJson, setScopeJson] = useState('');
   const [backgroundMessage, setBackgroundMessage] = useState('');
   const [toolError, setToolError] = useState('');
+  const [requirementsOpen, setRequirementsOpen] = useState(!draft);
   const qualityRequest = useRef(0);
   const factRequest = useRef(0);
   const backgroundRequest = useRef(0);
@@ -1131,6 +1149,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     setQuality(restoredUnsaved ? null : (draft?.quality as ExplanationQuality | undefined) ?? null);
     setQualityState(restoredUnsaved ? 'stale' : 'idle');
     setUpdatedRequirementsId(null);
+    setRequirementsOpen(!draft);
     setFacts([]); setFactDetails({}); setBackgrounds([]); setToolError(''); setBackgroundMessage('');
     setBackgroundScope(scopeToFields(defaultScope)); setScopeJson(JSON.stringify(defaultScope, null, 2));
     qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1;
@@ -1287,18 +1306,22 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <CompletionRecoveriesPanel recoveries={recoveries} error={recoveryError} disabled={busy || !canLoadRecovery} onRetry={() => void loadRecoveries()} onLoad={loadRecovery} />
     {recoveries.length > 0 && !canLoadRecovery && <p className="analysis-note">当前有未保存输入；保存或放弃当前修改后再载入恢复稿，避免覆盖你的编辑。</p>}
     {recovery && <p role="status" className="analysis-message">已载入未保存恢复稿，尚未检查；保存后才会成为新的文稿版本。</p>}
-    {bridge()?.financeCall && <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
-      onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
-      onDiscuss={onDiscussRequirements} />}
+    {bridge()?.financeCall && <details className="analysis-details" open={requirementsOpen}
+      onToggle={(event) => setRequirementsOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary>本次分析要求</summary>
+      <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
+        onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
+        onDiscuss={onDiscussRequirements} />
+    </details>}
     <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
       {draft && <span className="analysis-note">{STATUS[draft.publication_status] ?? draft.publication_status} · {STATUS[draft.review_status] ?? draft.review_status}</span>}
       <div className="analysis-actions"><Button variant="outline" type="button" aria-pressed={editing} onClick={() => setEditing(!editing)}>{editing ? '阅读文稿' : '编辑文稿'}</Button>
       <Button variant="outline" type="button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</Button></div></div>
     {editing ? <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <label>文稿标题<Input aria-label="文稿标题" className="min-w-0 flex-1" value={title} onChange={(event) => setTitle(event.target.value)}  /></label>
-    <label>文稿正文<textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
+    <label>文稿正文<Textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
       onChange={(event) => onBodyChange(event.target.value)} /></label>
-    <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
+    <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<Textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
       onChange={(event) => setLimitations(event.target.value)} /></label><label>我的审阅状态<select aria-label="我的审阅状态" className="fnd-field" value={review}
       onChange={(event) => setReview(event.target.value)}><option value="unreviewed">未阅</option><option value="reviewed">已阅</option><option value="accepted">认可</option></select></label></div>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
@@ -1523,11 +1546,34 @@ function explanationIssueText(issue: ExplanationIssue): string {
   return messages[issue.code ?? ''] ?? textValue(issue.message ?? '请核对这条说明的数字和依据。');
 }
 
+function issueOriginLabel(issue: ExplanationIssue): string {
+  return issue.origin === 'generated_appendix' ? '自动附表' : issue.origin === 'claim_binding' ? '引用绑定' : '文稿';
+}
+
+function issueSeverityLabel(issue: ExplanationIssue): string {
+  return issue.severity === 'error' ? '需修正' : '请核对';
+}
+
+function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: string; severity: string; message: string; issues: ExplanationIssue[] }[] {
+  const groups = new Map<string, { key: string; origin: string; severity: string; message: string; issues: ExplanationIssue[] }>();
+  for (const issue of issues) {
+    const origin = issueOriginLabel(issue);
+    const severity = issueSeverityLabel(issue);
+    const message = explanationIssueText(issue);
+    const key = JSON.stringify([issue.severity ?? '', issue.origin ?? '', issue.code ?? '', message]);
+    const group = groups.get(key) ?? { key, origin, severity, message, issues: [] };
+    group.issues.push(issue);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values());
+}
+
 function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, busy, onRecheck, onOpenFact }: {
   quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
   factDetails: Record<string, FinanceDrilldown>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
+  const issueGroups = groupedIssues(quality?.issues ?? []);
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
@@ -1538,10 +1584,17 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       })}
     </dl>}
     {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
-    {quality?.issues?.length ? <ul>{quality.issues.map((issue, index) => <li key={index}>
-      {issue.origin === 'generated_appendix' ? '自动附表' : issue.origin === 'claim_binding' ? '引用绑定' : '文稿'} · {issue.severity === 'error' ? '需修正' : '请核对'}：{explanationIssueText(issue)}
-      {issue.excerpt && <p className="analysis-note">对应片段：{issue.excerpt}</p>}
-    </li>)}</ul> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
+    {issueGroups.length ? <div>
+      {issueGroups.map((group) => <details className="analysis-details" key={group.key}>
+        <summary>{group.origin} · {group.severity} · {group.issues.length} 条：{group.message}</summary>
+        <ol>{group.issues.map((issue, index) => <li key={index}>
+          <p>问题 {index + 1}{issue.code ? ` · ${issue.code}` : ''}</p>
+          {issue.excerpt && <p className="analysis-note">对应片段：{issue.excerpt}</p>}
+          <details className="analysis-details"><summary>原始问题 {index + 1}</summary>
+            <pre className="analysis-source-text">{JSON.stringify(issue, null, 2)}</pre></details>
+        </li>)}</ol>
+      </details>)}
+    </div> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
@@ -1588,8 +1641,8 @@ function FinanceBackgroundPanel({ background, scope, scopeJson, backgrounds, dat
         <TextField label="段落编号" ariaLabel="背景段落编号" value={background.paragraph} onChange={(value) => onBackground({ ...background, paragraph: value })} inputMode="numeric" /></>}
       {(background.basis === 'external_reference') && <><TextField label="外部来源" ariaLabel="背景外部来源" value={background.source} onChange={(value) => onBackground({ ...background, source: value })} />
         <DateInput label="查询日期" ariaLabel="背景查询日期" value={background.retrieved_at} onChange={(value) => onBackground({ ...background, retrieved_at: value })} /></>}
-    </div><label>背景正文<textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
-    <details className="analysis-details"><summary>高级：补充范围 JSON</summary><textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></fieldset>
+    </div><label>背景正文<Textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
+    <details className="analysis-details"><summary>高级：补充范围 JSON</summary><Textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</Button>
       <Button variant="outline" type="button" disabled={busy} onClick={onList}>刷新适用背景</Button></div>
     {message && <p role="status" className="analysis-message">{message}</p>}

@@ -56,9 +56,9 @@ function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitiv
       data-slot="tabs-trigger"
       className={cn(
         'relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap',
-        'border-0 bg-transparent font-[inherit] text-[length:var(--fnd-size-small)]',
-        'cursor-pointer text-[var(--fnd-muted)] outline-none transition-[color,border-color] duration-[var(--fnd-transition)]',
-        'hover:text-foreground',
+        'border-0 bg-transparent text-[length:var(--fnd-size-small)]',
+        'cursor-pointer text-[var(--fnd-muted)] transition-[color,border-color] duration-(--fnd-duration) ease-(--fnd-easing)',
+        'enabled:hover:text-foreground',
         'disabled:cursor-default disabled:opacity-55',
         'group-data-[variant=line]/tabs-list:rounded-none group-data-[variant=line]/tabs-list:px-0 group-data-[variant=line]/tabs-list:py-3',
         'group-data-[variant=line]/tabs-list:border-b-2 group-data-[variant=line]/tabs-list:border-transparent',

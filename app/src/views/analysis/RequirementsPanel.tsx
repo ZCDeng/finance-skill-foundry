@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, MessageSquare, Plus, Save, Trash2 } from 'lucide-react';
 import { bridge, type Answer, type FinanceContextState } from '../../bridge.js';
-import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
+import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
+import { Textarea } from '../../components/ui/textarea.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -81,6 +82,8 @@ const metricOptions = [
   { value: 'closing_cash', label: '期末现金', meta: '13周现金 closing_cash' },
   { value: 'ratio', label: '比率', meta: 'ratio' },
   { value: 'control_totals', label: '控制合计', meta: 'control_totals' },
+  { value: 'account_total', label: '科目合计', meta: 'account_total' },
+  { value: 'total_variance', label: '总额差异', meta: 'total_variance' },
   { value: 'price_quantity', label: '量价分解', meta: 'price_quantity' },
 ];
 const currencyOptions = [
@@ -227,10 +230,20 @@ function shortId(value?: string | null): string {
   return value ? value.slice(0, 12) : '未保存';
 }
 
-function optionsWithCurrent(options: { value: string; label: string; meta?: string }[], current: unknown) {
+function validAccountingPeriod(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function optionsWithSavedValue(options: SelectOption[], current: unknown, meta = '已保存自定义值'): SelectOption[] {
   const value = String(current ?? '');
   if (!value || options.some((option) => option.value === value)) return options;
-  return [{ value, label: value, meta: '当前口径' }, ...options];
+  return [{ value, label: value, meta }, ...options];
+}
+
+function metricOptionsForItem(item: RequirementItem): SelectOption[] {
+  const option = metricOptions.find((candidate) => candidate.value === item.metric);
+  if (option || !item.metric) return metricOptions;
+  return [{ value: item.metric, label: item.label || item.metric, meta: '已保存自定义指标' }, ...metricOptions];
 }
 
 export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onChanged, onDiscuss }: RequirementsPanelProps) {
@@ -403,6 +416,9 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   };
 
   const discuss = () => onDiscuss?.({ question, scope, items, currentRequirementsId: current?.id, draftRequirementsId });
+  const periodValue = String(scope.period ?? '');
+  const currentSavedPeriod = String(current?.scope.period ?? '');
+  const hasSavedCustomPeriod = Boolean(currentSavedPeriod && !validAccountingPeriod(currentSavedPeriod) && periodValue && !validAccountingPeriod(periodValue));
 
   if (!taskId) {
     return <section className="analysis-definition" aria-label="本次分析要求">
@@ -419,16 +435,19 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     {scopeChangedForDraft ? <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />范围已变：当前要求 {shortId(current?.id)}，这份旧稿绑定的是 {shortId(draftRequirementsId)}。</p> : null}
     {!api?.financeCall ? <p role="alert" className="analysis-message analysis-message--error">当前窗口没有可用的财务分析接口。</p> : null}
     <fieldset className="analysis-fieldset" disabled={loading || saving || !api?.financeCall}>
-      <label>用户问题<textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
+      <label>用户问题<Textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
       <div className="analysis-edit-grid">
         <TextField label="账套" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="ledger 或账套名称" />
         <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)} placeholder="组织名称" />
-        <AccountingPeriodInput label="期间" value={String(scope.period ?? '')} onChange={(value) => setScopeField('period', value)} />
+        {hasSavedCustomPeriod
+          ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+            help="已保存为自定义范围说明；改成 YYYY-MM 后会恢复年月选择。" placeholder="YYYY-MM 或范围说明" />
+          : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)} />}
         <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
-          options={optionsWithCurrent(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
+          options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
         <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
-          options={optionsWithCurrent(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
+          options={optionsWithSavedValue(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
       </div>
       <div className="analysis-section-heading"><h4>必答指标</h4><Button variant="outline" type="button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</Button></div>
       {items.length ? <div className="analysis-history-list">
@@ -473,7 +492,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
   return <article className="analysis-history-row analysis-history-row--static" aria-label={`必答指标 ${index + 1}`}>
     <div className="analysis-edit-grid">
       <SearchableSelect label={`指标 ${index + 1}`} value={item.metric} onChange={(value) => onChange({ metric: value, label: item.label || itemLabel(value) })}
-        options={metricOptions} placeholder="选择指标" />
+        options={metricOptionsForItem(item)} placeholder="选择指标" />
       <TextField label="显示名称" value={item.label} onChange={(value) => onChange({ label: value })} placeholder={itemLabel(item.metric)} />
       <FieldShell label="指定下钻"><label className="analysis-select-label"><input type="checkbox" checked={item.requires_drilldown}
         onChange={(event) => onChange({ requires_drilldown: event.target.checked })} />需要读取来源行</label></FieldShell>
@@ -487,7 +506,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
         {periods.map((period) => <Button variant="outline" key={period} type="button" onClick={() => removePeriod(period)}>{period} ×</Button>)}
       </div> : <p className="analysis-note">未指定时沿用上方本期范围；可添加多个会计期间。</p>}
     </FieldShell>
-    <label>维度 JSON<textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
+    <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;
         setDimensionsText(next);

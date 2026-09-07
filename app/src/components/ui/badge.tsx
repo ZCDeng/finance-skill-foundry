@@ -8,8 +8,7 @@ const badgeVariants = cva(
   [
     'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap',
     'rounded-[var(--fnd-radius-chip)] border px-2.5 py-1',
-    'font-[inherit] text-[length:var(--fnd-size-label)] leading-none',
-    'outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--fnd-line-hover)]',
+    'text-[length:var(--fnd-size-label)] leading-none',
   ].join(' '),
   {
     variants: {

@@ -1,80 +1,159 @@
 /**
- * The few edges of the embedded page this window draws in its own colour.
+ * Native harness theme bridge.
  *
- * Almost nothing belongs here. The page is upstream's, and restyling somebody
- * else's app by selector is a bet that their class names outlive the next
- * version. What earns a place is the seam an operator can see: the composer
- * sits directly under this app's own strips, in this app's own window, and its
- * edge was the one line on screen still drawn in another product's accent.
- *
- * The selectors are substring matches on the CSS-module *local* name rather
- * than the whole class. A build carries `uV2eYG_cardWorkspaceTrigger`, where
- * the prefix is a content hash that moves whenever upstream rebuilds and the
- * half after the underscore is the name someone wrote. Matching the second half
- * survives a rebuild; matching the first would not survive one. Measured on the
- * pinned build: each of these matches exactly one element.
- *
- * The failure mode is the point. If a name does change, the rule stops applying
- * and the page renders exactly as upstream drew it -- a lost accent, not a
- * broken pane. Nothing here changes behaviour, hides a control, or moves
- * anything.
+ * The embedded DSH page owns its behavior and layout. This file only maps the
+ * pinned runtime's theme tokens and a few inspected chrome edges to FA Foundry's
+ * semantic palette.
  */
 
-/**
- * The gold, and the same value the window's own hovered edges use.
- *
- * Taken from `--fnd-line-hover`'s dark answer rather than referenced: this
- * string is injected into a document that has never heard of this app's tokens.
- * `skin.test.ts` holds the two together so a change to the palette cannot leave
- * this one behind.
- */
-export const EDGE = '#e2c180';
+export const LIGHT_THEME = {
+  bg: '#ffffff',
+  surface: '#ffffff',
+  surfaceStrong: '#f7f7f7',
+  ink: '#000000e0',
+  muted: '#00000099',
+  line: '#1f1f1f24',
+  focus: '#a67e3c',
+  selected: '#8a6729',
+  onSelected: '#f9fafb',
+  selectionSurface: '#f5efe3',
+} as const;
 
-/** The same gold, lifted, for the state upstream draws in its own blue. */
-export const EDGE_HOVER = '#f4dda9';
+export const DARK_THEME = {
+  bg: '#111111',
+  surface: '#1f1f1f',
+  surfaceStrong: '#161616',
+  ink: '#f9fafb',
+  muted: '#a6a6a6',
+  line: '#ffffff24',
+  focus: '#e2c180',
+  selected: '#e2c180',
+  onSelected: '#1f1f1f',
+  selectionSurface: '#302b21',
+} as const;
+
+/** The body attribute written by the pinned DSH ThemePresenter for dark mode. */
+export const DSH_DARK_ATTRIBUTE = 'data-ds-dark-theme';
+
+export const COMPOSER_CARD_ATTRIBUTE = 'data-composer-card';
+export const SEND_PRIMARY_CLASS = 'uV2eYG_primary';
+export const SEND_TRAILING_CLASS = 'uV2eYG_trailing';
+export const SETTINGS_CLOSE_CLASS = 'VOzbGW_close';
+
+/** The dark-theme focus gold, matching the host's `--fnd-line-hover`. */
+export const EDGE = DARK_THEME.focus;
+
+/** The light-theme focus gold, matching the host's `--fnd-line-hover`. */
+export const EDGE_LIGHT = LIGHT_THEME.focus;
+
+/** The dark neutral edge used before hover or focus. */
+export const LINE = DARK_THEME.line;
+
+/** The light neutral edge used before hover or focus. */
+export const LINE_LIGHT = LIGHT_THEME.line;
 
 /** What the hero says once its whale has been replaced by this product's mark. */
 export const HERO_HEADLINE = 'FA Foundry harness';
 
-/**
- * The composer's edge, and the hero's line.
- *
- * The edge is solid rather than dashed, and that took two rules because the
- * dashed one is not a border. Upstream draws it as an `::after` inset by a
- * pixel whose background is masked into a dashed rectangle, while the card's
- * own border sits underneath at `transparent`. So the ring's background goes
- * away and the real border underneath is given the colour -- one line, 1px,
- * following the card's own 22px radius, and the hover still changes.
- *
- * Nothing is hidden to do it. The `::after` keeps its box, its mask and its
- * transition; it just stops painting, which is what a transparent background
- * means everywhere else in CSS too.
- *
- * The headline is text, and CSS cannot set text -- so the original is collapsed
- * to nothing and the replacement is drawn as generated content. That is the
- * ugliest thing in this file and it is deliberate: the string lives in the
- * runtime's own `conversation` locale namespace, and that service throws
- * `locale namespace "conversation" already has locale "en"` on a second
- * registration, so there is no supported override to prefer over this.
- */
 export const HARNESS_SKIN = `
-:root { --ds-font-family-base:'Noto Sans SC',sans-serif; --ds-font-family-sans:'Noto Sans SC',sans-serif; }
+:root {
+  --ds-font-family-base:'Noto Sans SC',sans-serif;
+  --ds-font-family-sans:'Noto Sans SC',sans-serif;
+}
+
+body {
+  --foundry-native-bg:${LIGHT_THEME.bg};
+  --foundry-native-surface:${LIGHT_THEME.surface};
+  --foundry-native-surface-strong:${LIGHT_THEME.surfaceStrong};
+  --foundry-native-ink:${LIGHT_THEME.ink};
+  --foundry-native-muted:${LIGHT_THEME.muted};
+  --foundry-native-line:${LIGHT_THEME.line};
+  --foundry-native-focus:${LIGHT_THEME.focus};
+  --foundry-native-selected:${LIGHT_THEME.selected};
+  --foundry-native-on-selected:${LIGHT_THEME.onSelected};
+  --foundry-native-selection-surface:${LIGHT_THEME.selectionSurface};
+}
+
+body[${DSH_DARK_ATTRIBUTE}] {
+  --foundry-native-bg:${DARK_THEME.bg};
+  --foundry-native-surface:${DARK_THEME.surface};
+  --foundry-native-surface-strong:${DARK_THEME.surfaceStrong};
+  --foundry-native-ink:${DARK_THEME.ink};
+  --foundry-native-muted:${DARK_THEME.muted};
+  --foundry-native-line:${DARK_THEME.line};
+  --foundry-native-focus:${DARK_THEME.focus};
+  --foundry-native-selected:${DARK_THEME.selected};
+  --foundry-native-on-selected:${DARK_THEME.onSelected};
+  --foundry-native-selection-surface:${DARK_THEME.selectionSurface};
+}
+
+body {
+  --dsw-alias-bg-base:var(--foundry-native-bg) !important;
+  --dsw-alias-bg-layer-2:var(--foundry-native-surface) !important;
+  --dsw-specific-sidebar-fill:var(--foundry-native-surface-strong) !important;
+  --dsw-specific-input-major:var(--foundry-native-surface) !important;
+  --dsw-specific-selector:var(--foundry-native-surface-strong) !important;
+  --dsw-specific-menu:var(--foundry-native-surface) !important;
+  --dsw-specific-tip:var(--foundry-native-surface) !important;
+  --dsw-specific-bubble:var(--foundry-native-selection-surface) !important;
+  --dsw-alias-label-primary:var(--foundry-native-ink) !important;
+  --dsw-alias-label-secondary:var(--foundry-native-muted) !important;
+  --dsw-alias-label-tertiary:var(--foundry-native-muted) !important;
+  --dsw-alias-label-caption:var(--foundry-native-muted) !important;
+  --dsw-alias-label-primary-dimmed:var(--foundry-native-muted) !important;
+  --dsw-alias-label-primary-bluish:var(--foundry-native-selected) !important;
+  --dsw-alias-border-l1:var(--foundry-native-line) !important;
+  --dsw-alias-border-l2:var(--foundry-native-line) !important;
+  --dsw-alias-border-l2-darkmode-thin:var(--foundry-native-line) !important;
+  --dsw-alias-border-l3:var(--foundry-native-line) !important;
+  --dsw-alias-border-l4:var(--foundry-native-line) !important;
+  --dsw-alias-separator-primary:var(--foundry-native-line) !important;
+  --dsw-alias-interactive-bg-hover:color-mix(in srgb, var(--foundry-native-ink) 8%, transparent) !important;
+  --dsw-alias-interactive-bg-hover-solid:color-mix(in srgb, var(--foundry-native-ink) 8%, var(--foundry-native-bg)) !important;
+  --dsw-alias-button-elevated-fill:var(--foundry-native-surface) !important;
+  --dsw-alias-button-floating-fill:var(--foundry-native-surface) !important;
+  --dsw-alias-button-floating-hover:var(--foundry-native-surface-strong) !important;
+  --dsw-alias-state-business-primary:var(--foundry-native-selected) !important;
+  --dsw-alias-state-business-secondary:var(--foundry-native-focus) !important;
+  --dsw-alias-state-business-tertiary:var(--foundry-native-selection-surface) !important;
+  --dsw-static-blue-450:var(--foundry-native-selected) !important;
+  --dsw-alias-button-info-fill:var(--foundry-native-selected) !important;
+  --dsw-alias-button-info-hover:var(--foundry-native-focus) !important;
+}
+
 body, button, input, textarea, select { font-family:'Noto Sans SC',sans-serif !important; }
 
 [class*="_cardWorkspaceTrigger"]::after {
   background: transparent !important;
 }
 
-[class*="_cardWorkspaceTrigger"] {
-  border-color: ${EDGE} !important;
+[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}] {
+  border-color: var(--foundry-native-line) !important;
 }
 
-[class*="_cardWorkspaceTrigger"]:hover {
-  border-color: ${EDGE_HOVER} !important;
+[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:hover,
+[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within {
+  border-color: var(--foundry-native-focus) !important;
 }
 
-[class*="_card"]:not([class*="_cardWorkspaceTrigger"]) {
-  border-color: ${EDGE} !important;
+[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within {
+  outline: 2px solid var(--foundry-native-focus) !important;
+  outline-offset: -1px;
+}
+
+.${SEND_TRAILING_CLASS} > button.${SEND_PRIMARY_CLASS} {
+  color: var(--foundry-native-on-selected) !important;
+}
+
+[data-foundry-frame] summary:focus-visible {
+  outline: 2px solid var(--foundry-native-focus) !important;
+  outline-offset: -1px;
+}
+
+.${SETTINGS_CLOSE_CLASS}:focus-visible {
+  outline: 2px solid var(--foundry-native-focus) !important;
+  outline-offset: -1px;
+  box-shadow: none !important;
 }
 
 [class*="_headlineText"] {

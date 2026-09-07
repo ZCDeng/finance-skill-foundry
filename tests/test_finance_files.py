@@ -37,7 +37,11 @@ def _source_book(path: Path, *, result: str = "old", amount: str = "10") -> Path
 def files(tmp_path: Path):
     task = TaskStore(tmp_path / "var").create(title="finance files")
     analysis = AnalysisStore(task)
-    dataset = analysis.add_dataset(_source_book(tmp_path / "source.xlsx"), name="source")
+    dataset = analysis.add_dataset(
+        _source_book(tmp_path / "source.xlsx"),
+        name="source",
+        metadata={"mode": "table"},
+    )
     service = FinanceFiles(task)
     return service, analysis, dataset, tmp_path
 
@@ -191,7 +195,11 @@ def test_session_ceiling_and_cross_task_snapshots_are_refused(files, tmp_path: P
     restricted = FinanceFiles(service.task, snapshot_ids=[])
     other_task = TaskStore(tmp_path / "other-var").create(title="other")
     other_analysis = AnalysisStore(other_task)
-    other_dataset = other_analysis.add_dataset(_source_book(tmp_path / "other.xlsx"), name="other")
+    other_dataset = other_analysis.add_dataset(
+        _source_book(tmp_path / "other.xlsx"),
+        name="other",
+        metadata={"mode": "table"},
+    )
 
     with pytest.raises(FoundryError, match="outside this session context"):
         restricted.inspect({"dataset_id": dataset["id"]})
@@ -241,6 +249,7 @@ def test_newer_snapshot_uses_old_baseline_for_conflict_choices(files, tmp_path: 
     newer = analysis.add_dataset(
         _source_book(tmp_path / "newer.xlsx", result="manager edit"),
         name="newer",
+        metadata={"mode": "table"},
     )
 
     patch = service.preview(

@@ -22,6 +22,17 @@ describe('checked native compact adapter', () => {
     expect(columns(width, 280, 0).details).toBe(0);
     expect(source).toContain('actions.closeDetails()');
   });
+  it('wraps the original session title/actions/log tree without replacing native callbacks', () => {
+    const original = stock('conversation');
+    const start = original.indexOf('className: ConversationRoot_module_css_default.titleRow,');
+    const end = original.indexOf('}), tabs.length > 1', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const originalChildren = original.slice(start, end);
+    const adapted = adaptSource('conversation', original);
+    expect(adapted).toContain(originalChildren);
+    expect(adapted).toContain('"data-foundry-session-details": true');
+  });
   it('preserves settings and native composer chain, while removing alternative task navigation', () => {
     const sidebar = adaptSource('sidebar', stock('sidebar'));
     const root = sidebar.slice(sidebar.indexOf('function SidebarRoot('), sidebar.indexOf('\n\t\t//#endregion', sidebar.indexOf('function SidebarRoot(')));

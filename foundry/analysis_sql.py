@@ -506,6 +506,18 @@ def execute_sql(datasets: dict[str, dict], spec: dict) -> dict:
     timer = None
     expired = threading.Event()
     try:
+        non_tables = [
+            f"{alias} ({dataset.get('kind', 'unknown')})"
+            for alias, dataset in datasets.items()
+            if dataset.get("kind") != "table"
+        ]
+        if non_tables:
+            raise FoundryError(
+                "SQL analysis requires table snapshots; "
+                + ", ".join(non_tables)
+                + " must be read with workbook_inspect/workbook_read or analysis-script via FOUNDRY_INPUTS"
+            )
+
         def interrupt():
             expired.set()
             if connection is not None:

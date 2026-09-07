@@ -823,6 +823,8 @@ def _fact_unit(row: dict, column: str, column_defs: dict[str, dict]) -> Any:
         )
     if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
         return row.get("unit")
+    if column == "value" and row.get("unit") not in (None, ""):
+        return row.get("unit")
     return column_defs.get(column, {}).get("unit")
 
 
@@ -1902,8 +1904,23 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
         after = body[match.end() : match.end() + 1]
         if (before and before in "-/年月日") or (after and after in "-/年月日"):
             continue
+        if _is_spreadsheet_reference_number(body, match):
+            continue
         values.append({"text": match.group(0), "start": match.start()})
     return values
+
+
+def _is_spreadsheet_reference_number(body: str, match: re.Match[str]) -> bool:
+    token = match.group(0)
+    if not re.fullmatch(r"\d{1,3}", token):
+        return False
+    after = body[match.end() : match.end() + 1]
+    tail = body[match.end() + 1 :]
+    if after == "!":
+        return bool(re.match(r"\$?[A-Za-z]{1,3}\$?[1-9]\d*\b", tail))
+    if after == "·":
+        return bool(re.match(r"[\u4e00-\u9fff]+", tail))
+    return False
 
 
 def _numbers_from_text(text: str) -> set[str]:

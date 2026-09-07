@@ -48,6 +48,13 @@ function openMethods() {
     if (summary.closest('details')) (summary.closest('details') as HTMLDetailsElement).open = true;
   }
 }
+async function openSourceRefreshDetails() {
+  const heading = await screen.findByText('更新 ERP 来源');
+  const details = heading.closest('details') as HTMLDetailsElement | null;
+  expect(details).toBeTruthy();
+  if (!details!.open) fireEvent.click(heading.closest('summary')!);
+  expect(details!.open).toBe(true);
+}
 function chooseSearchable(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
   fireEvent.mouseDown(screen.getByRole('option', { name: option }));
@@ -64,6 +71,22 @@ const props = { task, tasks: [task], onPick: vi.fn(), onNew: vi.fn(), onChat: vi
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); vi.useRealTimers(); sessionStorage.clear(); });
 
 describe('analysis workbench', () => {
+  it('shows a complete workbook as sheets instead of an empty flat table', async () => {
+    const workbook: DatasetSnapshot = { ...source, name: '月结套表', source_name: '月结.xlsx', kind: 'workbook',
+      schema: [], row_count: 0, transformation: { sheet_count: 2 } };
+    const analysisReadDataset = vi.fn(async () => success({ ...workbook, workbook: { sheets: [
+      { name: '00·封面', rows: 12, columns: 8 }, { name: '04·合并利润表', rows: 40, columns: 7 },
+    ] } }));
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [workbook] }), analysisReadDataset });
+    render(<Analysis {...props} embedded section="materials" />);
+    fireEvent.click(await screen.findByRole('button', { name: /月结套表\s*Excel 工作簿 · 2 张工作表/ }));
+    const directory = await screen.findByRole('table', { name: '工作表目录' });
+    expect(within(directory).getByText('00·封面')).toBeTruthy();
+    expect(within(directory).getByText('04·合并利润表')).toBeTruthy();
+    expect(screen.queryByText(/Excel 工作簿 · 0 行/)).toBeNull();
+    expect(analysisReadDataset).toHaveBeenCalledWith(task.id, workbook.id);
+  });
+
   it('starts from the user question, then opens the created task with that same question', async () => {
     mountBridge();
     let finish!: () => void;
@@ -744,7 +767,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState, financeSourceRefresh, financeCall });
     render(<Analysis {...props} embedded section="results" />);
     fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
-    await screen.findByText('刷新财务来源');
+    await openSourceRefreshDetails();
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
@@ -774,7 +797,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState, financeSourceRefresh, financeCall });
     const { rerender } = render(<Analysis {...props} embedded section="results" tasks={[task, other]} />);
     fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
-    await screen.findByText('刷新财务来源');
+    await openSourceRefreshDetails();
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
@@ -826,6 +849,18 @@ describe('analysis workbench', () => {
         budget: expect.objectContaining({ ledger: '经营总账', organization: '华东', period: '2026-07', scenario: 'budget' }),
       }),
     }));
+  });
+
+  it('folds finance setup by default when an ordinary SQL result already succeeded', async () => {
+    const sqlRun: AnalysisRun = { ...run, engine: 'sql' };
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [sqlRun] }),
+      financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] }) });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('财务业务口径');
+    const setup = screen.getByLabelText('财务分析设置') as HTMLDetailsElement;
+    expect(setup.open).toBe(false);
+    fireEvent.click(screen.getByText('财务业务口径'));
+    expect(setup.open).toBe(true);
   });
 
   it('runs a newly saved budget bridge at organization-period grain without account slicing', async () => {
@@ -1186,13 +1221,76 @@ describe('analysis workbench', () => {
     expect(screen.getByText(/待重检/)).toBeTruthy();
     expect(screen.queryByText(/检查通过/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
-    expect(await screen.findByText(/正文数字与引用事实不一致/)).toBeTruthy();
+    expect(await screen.findByText(/正文数字与引用事实不一致/, { selector: 'summary' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
       body: '利润为 1 元，需要复核。', review_status: 'unreviewed',
     })));
     const saveCall = financeCall.mock.calls.find(([, command]) => command === 'save-explanation-draft');
     expect(saveCall?.[2]).not.toHaveProperty('fact_ids');
+  });
+
+  it('keeps draft requirements collapsed until the manager expands them', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
+    const currentRequirements = {
+      id: 'req-current',
+      question: '解释收入和利润缺口',
+      scope: { organization: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      bindings: {},
+      items: [{ id: 'req_1', metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false }],
+    };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'analysis-requirements-list') return success({ requirements: [currentRequirements], current: currentRequirements });
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id], requirements_id: 'req-current' }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const summary = await screen.findByText('本次分析要求', { selector: 'summary' });
+    const details = summary.closest('details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(await screen.findByLabelText('用户问题')).toBeTruthy();
+    expect((screen.getByLabelText('用户问题') as HTMLTextAreaElement).value).toBe('解释收入和利润缺口');
+  });
+
+  it('groups duplicate quality issues while leaving every source detail expandable', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const duplicateIssues = Array.from({ length: 120 }, (_, index) => ({
+      severity: 'error',
+      code: 'unknown_fact',
+      origin: 'claim_binding',
+      message: '引用已失效',
+      excerpt: `正文片段 ${index + 1}`,
+    }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'issues', issues: duplicateIssues, coverage: { required: 120, cited: 0 } });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    expect(await screen.findByText(/需要复核/)).toBeTruthy();
+    const issueSummary = screen.getByText(/引用绑定 · 需修正 · 120 条/, { selector: 'summary' });
+    expect(issueSummary.textContent).toContain('引用已不属于当前计算结果');
+    const grouped = issueSummary.closest('details') as HTMLDetailsElement;
+    expect(grouped.open).toBe(false);
+    fireEvent.click(issueSummary);
+    expect(grouped.open).toBe(true);
+    expect(await screen.findByText('对应片段：正文片段 1')).toBeTruthy();
+    expect(screen.getByText('对应片段：正文片段 120')).toBeTruthy();
+    const firstRawSummary = screen.getByText('原始问题 1', { selector: 'summary' });
+    const firstRaw = firstRawSummary.closest('details') as HTMLDetailsElement;
+    fireEvent.click(firstRawSummary);
+    expect(firstRaw.open).toBe(true);
+    expect(within(firstRaw).getByText(/"message": "引用已失效"/)).toBeTruthy();
+    expect(screen.queryByText(/当前文稿数字、单位和引用未发现问题/)).toBeNull();
   });
 
   it('saves only explicitly cited finance facts and does not promote prepared facts automatically', async () => {
@@ -1349,10 +1447,10 @@ describe('analysis workbench', () => {
     await screen.findByText('经营简报');
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', expect.objectContaining({ draft_id: draft.id, materiality: { absolute: '0' } })));
     chooseSearchable('文稿版本', /第二版/);
-    await screen.findByText(/第二版需要补引用/);
+    await screen.findByText(/第二版需要补引用/, { selector: 'summary' });
     await act(async () => resolveFirst(success({ status: 'pass', issues: [] })));
     expect(screen.queryByText(/检查通过/)).toBeNull();
-    expect(screen.getByText(/第二版需要补引用/)).toBeTruthy();
+    expect(screen.getByText(/第二版需要补引用/, { selector: 'summary' })).toBeTruthy();
   });
 
   it('saves finance background with editable scope and lists applicability', async () => {
@@ -1414,7 +1512,7 @@ describe('analysis workbench', () => {
     const financeSourceRefresh = vi.fn(async () => success({ dataset_id: '8'.repeat(32), effective_dataset_id: '8'.repeat(32) }));
     mountBridge({ analysisState: async () => success(initial), financeCall, financeSourceRefresh });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('刷新财务来源');
+    await openSourceRefreshDetails();
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
@@ -1427,6 +1525,22 @@ describe('analysis workbench', () => {
     expect(screen.getByText(/已发布新来源快照/)).toBeTruthy();
     fireEvent.click(screen.getByText(/来源刷新批次/));
     expect(screen.getByText(/沿用/)).toBeTruthy();
+  });
+
+  it('keeps ERP source refresh behind an on-demand disclosure in the materials empty state', async () => {
+    const emptyState: AnalysisState = { ...initial, datasets: [], analyses: [], runs: [], drafts: [] };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list'
+      ? success({ batches: [] })
+      : success({ task_id: task.id, datasets: [], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] }));
+    mountBridge({ analysisState: async () => success(emptyState), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    expect(await screen.findByRole('heading', { name: '把手头的资料加进来' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '添加资料' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /与助手讨论/ })).toBeTruthy();
+    const details = screen.getByText('更新 ERP 来源').closest('details') as HTMLDetailsElement | null;
+    expect(details).toBeTruthy();
+    expect(details!.open).toBe(false);
+    expect(screen.getByLabelText('账簿').closest('details')).toBe(details);
   });
 
   it('inspects, binds, previews and applies an Excel collaboration workbook', async () => {

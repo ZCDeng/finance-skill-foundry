@@ -43,7 +43,47 @@ describe('analysis IPC task and session binding', () => {
     ]);
     mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/actual.csv'] });
     expect(await invoke(CHANNELS.analysisAddFiles, task)).toEqual({ ok: true, value: [] });
-    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['dataset-add', 'task-show']);
+  });
+
+  it('refreshes the existing root analysis session after native material import', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/月结.xlsx', '/chosen/预算.xlsx'] });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [
+          { role: 'analysis', session_id: 'older' },
+          { role: 'analysis', session_id: 'root' },
+          { role: 'analysis', session_id: 'child', parent_session_id: 'root' },
+        ] })
+      : JSON.stringify({ id: `${command}-ok` }));
+    const result = await invoke(CHANNELS.analysisAddFiles, task);
+    expect(result.ok).toBe(true);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
+      'dataset-add',
+      'dataset-add',
+      'task-show',
+      'analysis-refresh',
+    ]);
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
+  });
+
+  it('syncs successful native imports before returning a later file failure', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/月结.xlsx', '/chosen/broken.xlsx'] });
+    mocks.run.mockImplementation(async (_binding, command, args) => {
+      if (command === 'dataset-add' && args?.includes('/chosen/broken.xlsx')) throw new Error('column names must be nonempty and unique');
+      if (command === 'task-show') return JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] });
+      return JSON.stringify({ id: 'first-dataset' });
+    });
+    const result = await invoke(CHANNELS.analysisAddFiles, task);
+    expect(result).toEqual({ ok: false, refused: false, message: 'column names must be nonempty and unique' });
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
+      'dataset-add',
+      'dataset-add',
+      'task-show',
+      'analysis-refresh',
+    ]);
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
   });
 
   it('registers a conversation before exposing it and does not create a legacy window', async () => {

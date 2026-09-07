@@ -210,6 +210,7 @@ export interface DatasetSnapshot extends AnalysisObject {
   metadata: Record<string, unknown>;
   schema?: { name: string; type: string }[];
   row_count?: number;
+  transformation?: { sheet_count?: number; [key: string]: unknown };
   filename?: string;
 }
 export type AnalysisScalar = string | number | boolean | null;
