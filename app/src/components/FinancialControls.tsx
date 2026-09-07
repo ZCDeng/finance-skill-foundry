@@ -189,9 +189,9 @@ export function AccountingPeriodInput({ label, value, onChange, placeholder = 'Y
           }} />
           <button type="button" className="fnd-control-icon fnd-control-icon--calendar" disabled={disabled} onClick={() => setOpen((current) => !current)} aria-label={`${label}打开年月选择`}><CalendarDays size={14} aria-hidden /></button></div>
         <div className="fnd-period-shortcuts">
-          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(previousPeriod(baseShortcut))} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上期` : '上期'}`}>上期</button>
-          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(lastYearPeriod(baseShortcut))} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上年同期` : '上年同期'}`}>上年同期</button>
-          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(currentPeriod())} aria-label={`${label}设为本期`}>本期</button>
+          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(previousPeriod(baseShortcut))} aria-pressed={value === previousPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上期` : '上期'}`}>上期</button>
+          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(lastYearPeriod(baseShortcut))} aria-pressed={value === lastYearPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上年同期` : '上年同期'}`}>上年同期</button>
+          <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(currentPeriod())} aria-pressed={value === currentPeriod()} aria-label={`${label}设为本期`}>本期</button>
         </div>
       </div>
       {open ? floatingPortal(<div ref={popoverRef} className="fnd-date-picker__popover" role="dialog" aria-label={`${label}年月选择`} tabIndex={-1}

@@ -12,7 +12,6 @@ function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
         'transition-[border-color] duration-[var(--fnd-transition)] outline-none',
         'placeholder:text-muted-foreground',
         'hover:enabled:border-[var(--fnd-line-hover)]',
-        'focus-visible:border-[var(--fnd-line-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--fnd-line-hover)]',
         'disabled:cursor-default disabled:opacity-55',
         'aria-invalid:border-[var(--fnd-mark-outside-line)]',
         className,

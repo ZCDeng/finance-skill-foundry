@@ -9,7 +9,6 @@ const buttonVariants = cva(
     'inline-flex shrink-0 items-center justify-center gap-1.5',
     'rounded-[var(--fnd-radius-control)] font-[inherit] text-[length:var(--fnd-size-small)] leading-none whitespace-nowrap',
     'cursor-pointer outline-none transition-[border-color,background-color,color,opacity] duration-[var(--fnd-transition)]',
-    'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--fnd-line-hover)]',
     'disabled:cursor-default disabled:pointer-events-none',
     'aria-busy:cursor-progress',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0',
@@ -34,7 +33,8 @@ const buttonVariants = cva(
           'border-0 bg-transparent text-[var(--fnd-muted)]',
           'hover:enabled:bg-[var(--fnd-surface-strong)] hover:enabled:text-foreground',
           'active:enabled:bg-[var(--fnd-selection-surface)]',
-          'aria-pressed:bg-[var(--fnd-selection-surface)] aria-pressed:text-[var(--fnd-accent-text)]',
+          'aria-pressed:bg-[var(--fnd-selection-surface)] aria-pressed:text-foreground',
+          'data-[state=open]:bg-[var(--fnd-selection-surface)] data-[state=open]:text-foreground',
           'disabled:opacity-45',
         ].join(' '),
         link: [

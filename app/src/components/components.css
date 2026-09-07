@@ -20,6 +20,56 @@
 .fnd-head__tab[aria-current='page'] { color: var(--fnd-on-selected); background: var(--fnd-selected); }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
+/*
+ * Button colour lives here, not only in Tailwind utilities. Unlayered
+ * `button { color: inherit }` used to paint dark-theme primary labels the same
+ * as the inverted accent fill.
+ */
+[data-slot='button'][data-variant='default'] {
+  color: var(--fnd-on-accent);
+  background-color: var(--fnd-accent);
+}
+
+[data-slot='button'][data-variant='outline'],
+[data-slot='button'][data-variant='secondary'] {
+  color: var(--fnd-ink);
+}
+
+[data-slot='button'][data-variant='ghost'] {
+  color: var(--fnd-muted);
+}
+
+[data-slot='button'][data-variant='ghost'][aria-pressed='true'],
+[data-slot='button'][data-variant='ghost'][data-state='open'] {
+  color: var(--fnd-ink);
+  background-color: var(--fnd-selection-surface);
+}
+
+[data-slot='button'][data-variant='link'] {
+  color: var(--fnd-muted);
+}
+
+[data-slot='button'][data-variant='destructive'] {
+  color: var(--fnd-mark-outside);
+}
+
+[data-slot='tabs-trigger'] {
+  color: var(--fnd-muted);
+}
+
+[data-slot='tabs-trigger'][data-state='active'] {
+  color: var(--fnd-ink);
+}
+
+[data-slot='button']:focus-visible {
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
+}
+
+[data-slot='button'][data-size='icon']:focus-visible {
+  outline-offset: 0;
+}
+
 /* -- the five words ------------------------------------------------------- */
 
 .fnd-marks {
@@ -353,7 +403,6 @@
 .fnd-field:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;
-  border-color: var(--fnd-line-hover);
 }
 
 /* -- the header's own help ------------------------------------------------ */
@@ -430,7 +479,6 @@
 .fnd-picker:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;
-  border-color: var(--fnd-line-hover);
 }
 
 .fnd-picker:disabled {

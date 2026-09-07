@@ -578,13 +578,13 @@ export function App() {
             setTasks((rows) => rows.map((row) => row.id === id ? { ...row, title: result.value.title } : row));
           } : undefined}
           onLayout={onWorkspaceLayout}
-          conversation={guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>在对话中提出问题或添加资料。右侧查看计算结果、调整口径和编辑文稿，点击依据可以继续追问。</p><p>导出保留当前版本，归档由你决定。</p><Button onClick={() => setAsked(false)}>继续工作</Button></div>
+          conversation={guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>提问或添加资料，右侧查看结果和文稿。</p><Button variant="outline" onClick={() => setAsked(false)}>继续工作</Button></div>
             : conversationProblem ? <div className="workspace-connection" role="alert"><h2>对话暂时中断</h2><p>{conversationProblem}</p>
-              <p className="fnd-muted">右侧资料与成果仍可继续使用。</p><Button disabled={opening}
+              <Button variant="outline" disabled={opening}
                 onClick={() => { setConversationProblem(null); void chatAnalysis().catch(() => undefined); }}>重新连接</Button></div>
             : failed ? <div className="workspace-connection"><WiringTrouble status={status} /></div>
             : !ready || opening ? <div className="workspace-connection"><Booting /></div>
-            : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
+            : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button variant="outline" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
           <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
             task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis} />

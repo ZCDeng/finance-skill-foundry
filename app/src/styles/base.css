@@ -81,12 +81,15 @@ a {
 }
 
 :where(a, button, input, textarea, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--fnd-accent-text);
-  outline-offset: 2px;
+  outline: 2px solid var(--fnd-line-hover);
+  outline-offset: 1px;
 }
 
 button {
   font: inherit;
+}
+
+button:not([data-slot]) {
   color: inherit;
 }
 
@@ -94,5 +97,4 @@ input, textarea, select { font: inherit; color: inherit; caret-color: var(--fnd-
 ::placeholder { color: var(--fnd-muted); opacity: 1; }
 ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 a { text-underline-offset: 3px; }
-:where(button, a, input, textarea, select, [tabindex]):focus-visible { outline-color: var(--fnd-line-hover); }
 [hidden] { display: none !important; }

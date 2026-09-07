@@ -343,7 +343,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {loading && <p role="status" className="analysis-note">正在读取任务资料与成果…</p>}
         {view && tab === 'datasets' && <>
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3><Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button></div>}
-          {!view.datasets.length && <Empty title="把手头的资料加进来" body="无需先准备科目表。也可以先与助手讨论分析口径和所需资料。"
+          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
             onChat={() => void chat(question.trim() || undefined)} />}
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
@@ -364,7 +364,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
             onRefresh={() => refresh(task.id)} />}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
-          {!analysis ? <Empty title="从资料到可检查的结果" body="告诉助手你想比较什么、按什么口径看。计算完成后，在这里查看结果与依据。"
+          {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `${when(row.created_at)} · ${shortSha(row.id)}` }))}
@@ -557,7 +557,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
     && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
   return <section className="analysis-source-refresh" aria-label="刷新财务来源">
     <div className="analysis-section-heading"><div><h3>刷新财务来源</h3>
-      <p className="analysis-note">用于 ERP 导出、账套文件和月结快照。刷新会生成新资料版本，旧运行继续引用旧快照。</p></div></div>
+      <p className="analysis-note">刷新生成新资料版本；旧运行仍引用旧快照。</p></div></div>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
@@ -1605,8 +1605,7 @@ function Methods({ state, busy, onApply }: {
   onApply(methodId: string, bindings: Record<string, string>, parameters: unknown[] | Record<string, unknown>): void;
 }) {
   return <div className="fnd-stack"><h3>方法库</h3>
-    <p className="analysis-note">选择已保存的分析方式，填写本次资料与业务参数。有效的分析方式可以在结果中保存。</p>
-    {state.methods.length === 0 && <p className="analysis-note">还没有保存的方法。先完成一次分析，再决定是否复用。</p>}
+    <p className="analysis-note">{state.methods.length === 0 ? '完成一次分析后，可把有效做法保存在这里。' : '选用已保存的做法，并填写本次资料与参数。'}</p>
     {state.methods.map((method) => <Method key={`${state.task_id}:${method.id}`} taskId={state.task_id} method={method} datasets={state.datasets} busy={busy} onApply={onApply} />)}
   </div>;
 }

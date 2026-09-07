@@ -867,7 +867,16 @@ describe('the export button can be read', () => {
     const block = css.slice(css.indexOf('.fnd-field:focus-visible {'));
     const body = block.slice(0, block.indexOf('}'));
     expect(body).toContain('outline: 2px solid var(--fnd-line-hover)');
+    expect(body).not.toContain('border-color');
     expect(body).not.toContain('cursor: pointer');
+  });
+
+  it('keeps primary label colour on the unlayered accent fill', () => {
+    expect(css).toContain("[data-slot='button'][data-variant='default']");
+    const start = css.indexOf("[data-slot='button'][data-variant='default']");
+    const body = css.slice(start, css.indexOf('}', start));
+    expect(body).toContain('color: var(--fnd-on-accent)');
+    expect(body).toContain('background-color: var(--fnd-accent)');
   });
 });
 

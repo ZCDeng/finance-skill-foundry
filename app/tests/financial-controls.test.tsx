@@ -25,6 +25,13 @@ describe('financial web controls', () => {
     expect(screen.getByText('请输入 YYYY-MM 会计期间。')).toBeTruthy();
   });
 
+  it('marks the matching period shortcut as pressed', () => {
+    const now = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    render(<AccountingPeriodInput label="期间" value={now} onChange={() => {}} />);
+    expect(screen.getByRole('button', { name: '期间设为本期' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: '期间设为上期' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('validates calendar dates without converting them to timestamps', () => {
     const onChange = vi.fn();
     render(<DateInput label="截止日期" value="2026-08-31" onChange={onChange} />);

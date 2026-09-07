@@ -65,6 +65,16 @@
 
 .fnd-period-shortcuts .fnd-control-icon {
   min-width: 0;
+  width: 100%;
+  padding: 0 6px;
+  color: var(--fnd-ink);
+  background: var(--fnd-surface-strong);
+}
+
+.fnd-period-shortcuts .fnd-control-icon[aria-pressed='true'] {
+  background: var(--fnd-accent);
+  color: var(--fnd-on-accent);
+  border-color: var(--fnd-accent);
 }
 
 .fnd-control-icon--calendar {
@@ -163,7 +173,6 @@
 .fnd-combobox__button:focus-visible {
   outline: 2px solid var(--fnd-line-hover);
   outline-offset: 1px;
-  border-color: var(--fnd-line-hover);
 }
 
 .fnd-combobox__button:disabled {
