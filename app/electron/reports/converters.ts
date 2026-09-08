@@ -31,6 +31,8 @@ export { documentFromMarkdown, documentToMarkdown, renderReportHtml };
 
 const TWIP_PER_MM = 56.6929133858;
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
+const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+
 const HEADING_LEVELS = {
   1: HeadingLevel.HEADING_1,
   2: HeadingLevel.HEADING_2,
@@ -65,7 +67,7 @@ export async function exportDocx(doc: ReportDocument, title: string, fontData?: 
     new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: metadata ? 120 : 360 } }),
     ...(metadata ? [new Paragraph({ keepNext: true, spacing: { after: 360 }, children: [new TextRun({ text: metadata, size: 20, color: '696760' })] })] : []),
     new TableOfContents('目录', { hyperlink: true, headingStyleRange: '1-2' }),
-    ...nodesToDocx(doc.content),
+    ...nodesToDocx(doc.content, collectNoteIds(doc.content)),
   ];
   const document = new Document({
     creator: 'FA Foundry',
@@ -258,7 +260,7 @@ function elementToNode(node: any, context: ImportContext): ReportNode | ReportNo
     return table ? tableFromElement(table, context, tableAttrsFromFigure(node, source)) : undefined;
   }
   if (tag === 'aside' && hasClass(node, 'report-note')) {
-    const noteId = String(node.querySelector('sup')?.textContent ?? '').replace(/[\s[\]]/g, '') || '1';
+    const noteId = noteIdFromReportNote(node) || '1';
     const noteContent = Array.from(node.querySelectorAll('p')) as any[];
     return {
       type: 'reportNote',
@@ -284,8 +286,9 @@ function elementToNode(node: any, context: ImportContext): ReportNode | ReportNo
     return src ? { type: 'image', attrs: { source_id: source.id, src, alt: String(node.getAttribute('alt') ?? ''), title: String(node.getAttribute('title') ?? '') } } : undefined;
   }
   if (tag === 'table') return tableFromElement(node, context);
-  if (tag === 'sup' && /^\s*\[?\d+\]?\s*$/.test(String(node.textContent ?? ''))) {
-    return { type: 'text', text: String(node.textContent ?? '') };
+  if (tag === 'sup') {
+    const noteRef = noteRefIdFromElement(node);
+    return noteRef ? { type: 'text', text: `[^${noteRef}]` } : { type: 'text', text: String(node.textContent ?? '') };
   }
   return childrenToNodes(node, context);
 }
@@ -306,6 +309,8 @@ function inlineNode(node: any, context: ImportContext): ReportNode | ReportNode[
   const tag = String(node.localName ?? node.tagName ?? '').toLowerCase();
   if (tag === 'script' || tag === 'style' || tag === 'iframe' || tag === 'object') return undefined;
   if (tag === 'br') return { type: 'hardBreak' };
+  const noteRef = noteRefIdFromElement(node);
+  if (noteRef) return { type: 'text', text: `[^${noteRef}]` };
   if (tag === 'img') {
     const src = resolveImageSrc(String(node.getAttribute('src') ?? ''), context);
     return src ? { type: 'image', attrs: { source_id: context.source.id, src, alt: String(node.getAttribute('alt') ?? '') } } : undefined;
@@ -322,10 +327,40 @@ function markForElement(tag: string, node: any) {
   if (tag === 'u') return { type: 'underline' };
   if (tag === 'code') return { type: 'code' };
   if (tag === 'a') {
+    if (noteRefIdFromElement(node)) return undefined;
     const href = String(node.getAttribute('href') ?? '');
     return safeHref(href) ? { type: 'link', attrs: { href } } : undefined;
   }
   return undefined;
+}
+
+function noteIdFromReportNote(node: any): string {
+  const dataId = safeNoteId(node.getAttribute?.('data-note-id'));
+  if (dataId) return dataId;
+  const anchorId = String(node.getAttribute?.('id') ?? '');
+  if (anchorId.startsWith('note-')) {
+    const id = safeNoteId(anchorId.slice(5));
+    if (id) return id;
+  }
+  return safeNoteId(String(node.querySelector?.('sup')?.textContent ?? '').replace(/[\s[\]]/g, ''));
+}
+
+function noteRefIdFromElement(node: any): string {
+  const dataId = safeNoteId(node.getAttribute?.('data-report-note-ref'));
+  if (dataId) return dataId;
+  const descendant = node.querySelector?.('[data-report-note-ref]');
+  const descendantId = safeNoteId(descendant?.getAttribute?.('data-report-note-ref'));
+  if (descendantId) return descendantId;
+  const tag = String(node.localName ?? node.tagName ?? '').toLowerCase();
+  if (tag !== 'sup') return '';
+  const text = String(node.textContent ?? '').trim();
+  const match = text.match(/^\[?([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]?$/);
+  return match ? safeNoteId(match[1]) : '';
+}
+
+function safeNoteId(value: unknown): string {
+  const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim().slice(0, 64) : '';
+  return NOTE_ID_PATTERN.test(text) ? text : '';
 }
 
 function tableFromElement(table: any, context: ImportContext, inheritedAttrs: Record<string, unknown> = {}): ReportNode {
@@ -371,19 +406,30 @@ function hasClass(node: any, className: string): boolean {
   return String(node.getAttribute?.('class') ?? '').split(/\s+/).includes(className);
 }
 
+function hasSemanticNoteRef(node: any): boolean {
+  if (safeNoteId(node?.getAttribute?.('data-report-note-ref'))) return true;
+  return Boolean(node?.querySelector?.('[data-report-note-ref]'));
+}
+
 function noteFromParagraph(node: any, context: ImportContext): ReportNode | undefined {
   const { source } = context;
-  const firstElement = Array.from(node.childNodes ?? []).find((child: any) => child.nodeType === 1);
+  const firstElement = Array.from(node.childNodes ?? []).find((child: any) => child.nodeType === 1 || String(child.textContent ?? '').trim());
+  if ((firstElement as any)?.nodeType !== 1) return undefined;
   const tag = String((firstElement as any)?.localName ?? (firstElement as any)?.tagName ?? '').toLowerCase();
-  if (tag !== 'sup') return undefined;
-  const rawId = String((firstElement as any).textContent ?? '').replace(/[\s[\]]/g, '');
+  if (tag !== 'sup' || hasSemanticNoteRef(firstElement)) return undefined;
+  const rawId = safeNoteId(String((firstElement as any).textContent ?? '').replace(/[\s[\]]/g, ''));
   if (!rawId) return undefined;
-  const content = inlineChildren(node, context).filter((child, index) => index > 0 || textContent(child).replace(/[\s[\]]/g, '') !== rawId);
-  return {
-    type: 'reportNote',
-    attrs: { source_id: source.id, id: rawId },
-    content: [{ type: 'paragraph', content: content.length > 0 ? content : [{ type: 'text', text: '' }] }],
-  };
+  let skippedLabel = false;
+  const content = inlineChildren(node, context).filter((child) => {
+    if (skippedLabel) return true;
+    const normalized = textContent(child).replace(/[\s[\]^]/g, '');
+    if (normalized === rawId) {
+      skippedLabel = true;
+      return false;
+    }
+    return true;
+  });
+  return { type: 'reportNote', attrs: { source_id: source.id, id: rawId }, content: [{ type: 'paragraph', content: content.length > 0 ? content : [{ type: 'text', text: '' }] }] };
 }
 
 function numberFromAttr(value: string | null): number | undefined {
@@ -439,20 +485,20 @@ async function importPdfjs(): Promise<{ getDocument: (options: Record<string, un
   return import('pdfjs-dist/legacy/build/pdf.mjs');
 }
 
-function nodesToDocx(nodes: ReportNode[]): Array<Paragraph | Table> {
-  return nodes.flatMap((node) => nodeToDocx(node));
+function nodesToDocx(nodes: ReportNode[], noteIds: Set<string>): Array<Paragraph | Table> {
+  return nodes.flatMap((node) => nodeToDocx(node, noteIds));
 }
 
-function nodeToDocx(node: ReportNode): Array<Paragraph | Table> {
+function nodeToDocx(node: ReportNode, noteIds: Set<string>): Array<Paragraph | Table> {
   switch (node.type) {
     case 'heading': {
       const level = Math.max(1, Math.min(6, Number(node.attrs?.level ?? 1))) as keyof typeof HEADING_LEVELS;
-      return [new Paragraph({ heading: HEADING_LEVELS[level], keepNext: true, children: inlineToDocxRuns(node.content ?? []) })];
+      return [new Paragraph({ heading: HEADING_LEVELS[level], keepNext: true, children: inlineToDocxRuns(node.content ?? [], {}, noteIds) })];
     }
     case 'paragraph':
-      return [new Paragraph({ children: inlineToDocxRuns(node.content ?? []) })];
+      return [new Paragraph({ children: inlineToDocxRuns(node.content ?? [], {}, noteIds) })];
     case 'blockquote':
-      return [new Paragraph({ indent: { left: 360 }, border: { left: { style: BorderStyle.SINGLE, size: 6, color: 'B78A38' } }, children: inlineToDocxRuns(flatInline(node.content ?? [])) })];
+      return [new Paragraph({ indent: { left: 360 }, border: { left: { style: BorderStyle.SINGLE, size: 6, color: 'B78A38' } }, children: inlineToDocxRuns(flatInline(node.content ?? []), {}, noteIds) })];
     case 'codeBlock':
       return [new Paragraph({ children: [new TextRun({ text: textContent(node), font: 'Menlo', size: 18 })] })];
     case 'horizontalRule':
@@ -462,14 +508,14 @@ function nodeToDocx(node: ReportNode): Array<Paragraph | Table> {
       return (node.content ?? []).map((item) => new Paragraph({
         bullet: node.type === 'bulletList' ? { level: 0 } : undefined,
         numbering: node.type === 'orderedList' ? { reference: 'foundry-numbering', level: 0 } : undefined,
-        children: inlineToDocxRuns(flatInline(item.content ?? [])),
+        children: inlineToDocxRuns(flatInline(item.content ?? []), {}, noteIds),
       }));
     case 'table':
-      return tableBlockToDocx(node);
+      return tableBlockToDocx(node, noteIds);
     case 'image':
       return imageToDocx(node);
     case 'reportNote':
-      return [new Paragraph({ style: 'Normal', children: [new TextRun({ text: `[${String(node.attrs?.id ?? '')}] `, superScript: true, size: 18 }), ...inlineToDocxRuns(flatInline(node.content ?? []), { size: 18 })] })];
+      return [new Paragraph({ style: 'Normal', children: [new TextRun({ text: `[${String(node.attrs?.id ?? '')}] `, superScript: true, size: 18 }), ...inlineToDocxRuns(flatInline(node.content ?? []), { size: 18 }, noteIds)] })];
     case 'reportPageBreak':
       return [new Paragraph({ pageBreakBefore: true })];
     default:
@@ -477,17 +523,17 @@ function nodeToDocx(node: ReportNode): Array<Paragraph | Table> {
   }
 }
 
-function tableBlockToDocx(table: ReportNode): Array<Paragraph | Table> {
+function tableBlockToDocx(table: ReportNode, noteIds: Set<string>): Array<Paragraph | Table> {
   const lead: Paragraph[] = [];
   if (table.attrs?.caption) {
     lead.push(new Paragraph({ keepNext: true, spacing: { before: 160, after: 80 }, children: [new TextRun({ text: String(table.attrs.caption), bold: true, size: 20 })] }));
   }
   const meta = [table.attrs?.period, table.attrs?.currency, table.attrs?.unit].filter(Boolean).map(String).join(' / ');
   if (meta) lead.push(new Paragraph({ keepNext: true, spacing: { after: 60 }, children: [new TextRun({ text: meta, size: 18, color: '696760' })] }));
-  return [...lead, tableToDocx(table)];
+  return [...lead, tableToDocx(table, noteIds)];
 }
 
-function tableToDocx(table: ReportNode): Table {
+function tableToDocx(table: ReportNode, noteIds: Set<string>): Table {
   const rows = table.content ?? [];
   const splitTables = splitWideTable(rows);
   if (splitTables.length > 1) {
@@ -496,14 +542,14 @@ function tableToDocx(table: ReportNode): Table {
       layout: TableLayoutType.AUTOFIT,
       rows: splitTables.flatMap((group, index) => [
         ...(index === 0 ? [] : [new TableRow({ children: [new TableCell({ columnSpan: Math.max(1, group[0]?.content?.length ?? 1), children: [new Paragraph({ text: '续表', keepNext: true })] })] })]),
-        ...group.map((row, rowIndex) => rowToDocx(row, rowIndex === 0)),
+        ...group.map((row, rowIndex) => rowToDocx(row, rowIndex === 0, noteIds)),
       ]),
     });
   }
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     layout: TableLayoutType.AUTOFIT,
-    rows: rows.map((row, index) => rowToDocx(row, index === 0)),
+    rows: rows.map((row, index) => rowToDocx(row, index === 0, noteIds)),
   });
 }
 
@@ -533,7 +579,7 @@ function expandRowCells(row: ReportNode): ReportNode[] {
   return cells;
 }
 
-function rowToDocx(row: ReportNode, header: boolean): TableRow {
+function rowToDocx(row: ReportNode, header: boolean, noteIds: Set<string>): TableRow {
   return new TableRow({
     tableHeader: header,
     cantSplit: true,
@@ -543,7 +589,7 @@ function rowToDocx(row: ReportNode, header: boolean): TableRow {
       margins: { top: 100, bottom: 100, left: 120, right: 120 },
       children: [new Paragraph({
         alignment: cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(textContent(cell).trim()) ? AlignmentType.RIGHT : AlignmentType.LEFT,
-        children: inlineToDocxRuns(flatInline(cell.content ?? []), { size: 18, bold: header || cell.type === 'tableHeader' }),
+        children: inlineToDocxRuns(flatInline(cell.content ?? []), { size: 18, bold: header || cell.type === 'tableHeader' }, noteIds),
       })],
     })),
   });
@@ -561,11 +607,12 @@ function imageToDocx(node: ReportNode): Paragraph[] {
   })];
 }
 
-function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?: boolean } = {}): Array<TextRun | ExternalHyperlink> {
+function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?: boolean } = {}, noteIds: Set<string> = new Set()): Array<TextRun | ExternalHyperlink> {
   return nodes.flatMap((node) => {
     if (node.type === 'text') {
       const marks = node.marks ?? [];
       const link = marks.find((mark) => mark.type === 'link' && safeHref(String(mark.attrs?.href ?? '')));
+      const runs = textRunsWithNoteRefs(node, defaults, noteIds);
       const run = new TextRun({
         text: node.text ?? '',
         size: defaults.size ?? 22,
@@ -575,12 +622,54 @@ function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?:
         underline: marks.some((mark) => mark.type === 'underline') ? {} : undefined,
         font: marks.some((mark) => mark.type === 'code') ? 'Menlo' : 'Noto Sans SC',
       });
-      return link ? [new ExternalHyperlink({ link: String(link.attrs?.href), children: [run] })] : [run];
+      if (link) return [new ExternalHyperlink({ link: String(link.attrs?.href), children: [run] })];
+      if (marks.some((mark) => mark.type === 'code')) return [run];
+      return runs;
     }
     if (node.type === 'hardBreak') return [new TextRun({ text: '\n' })];
     if (node.type === 'image') return [];
-    return inlineToDocxRuns(node.content ?? [], defaults);
+    return inlineToDocxRuns(node.content ?? [], defaults, noteIds);
   });
+}
+
+function collectNoteIds(nodes: ReportNode[] = []): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: ReportNode) => {
+    if (node.type === 'reportNote') {
+      const id = safeNoteId(node.attrs?.id);
+      if (id) ids.add(id);
+      return;
+    }
+    for (const child of node.content ?? []) visit(child);
+  };
+  for (const node of nodes) visit(node);
+  return ids;
+}
+
+function textRunsWithNoteRefs(node: ReportNode, defaults: { size?: number; bold?: boolean }, noteIds: Set<string>): TextRun[] {
+  const text = node.text ?? '';
+  const marks = node.marks ?? [];
+  const runs: TextRun[] = [];
+  const base = {
+    size: defaults.size ?? 22,
+    bold: defaults.bold || marks.some((mark) => mark.type === 'bold'),
+    italics: marks.some((mark) => mark.type === 'italic'),
+    strike: marks.some((mark) => mark.type === 'strike'),
+    underline: marks.some((mark) => mark.type === 'underline') ? {} : undefined,
+    font: 'Noto Sans SC',
+  };
+  let lastIndex = 0;
+  const pattern = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const id = safeNoteId(match[1]);
+    if (!id || !noteIds.has(id)) continue;
+    if (index > lastIndex) runs.push(new TextRun({ ...base, text: text.slice(lastIndex, index) }));
+    runs.push(new TextRun({ ...base, text: `[${id}]`, superScript: true, size: Math.max(16, defaults.size ?? 18) }));
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < text.length || runs.length === 0) runs.push(new TextRun({ ...base, text: text.slice(lastIndex) }));
+  return runs;
 }
 
 function flatInline(nodes: ReportNode[]): ReportNode[] {

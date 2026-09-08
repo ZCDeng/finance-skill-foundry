@@ -85,6 +85,65 @@ def test_structured_report_document_projects_body_and_hashes_document(tmp_path: 
     assert "document" not in same_text
 
 
+
+
+def test_python_projection_preserves_legal_footnote_refs_and_escapes_plain_brackets(tmp_path: Path) -> None:
+    doc = {
+        "schema_version": 1,
+        "template_version": "annual-v1",
+        "metadata": {},
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "正文引用 [^1] 和未知引用 [^missing]，普通[预算]仍是字面。",
+                    }
+                ],
+            },
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "链接形式保留字面 ",
+                    },
+                    {
+                        "type": "text",
+                        "text": "[^1]",
+                        "marks": [{"type": "link", "attrs": {"href": "https://example.com"}}],
+                    },
+                    {
+                        "type": "text",
+                        "text": "。",
+                    },
+                ],
+            },
+            {
+                "type": "reportNote",
+                "attrs": {"id": "1"},
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "金额来自总账。"}]}
+                ],
+            },
+        ],
+    }
+
+    markdown = report_document_markdown(doc)
+
+    assert "正文引用 [^1] 和未知引用 [^missing]" in markdown
+    assert r"普通\[预算\]仍是字面" in markdown
+    assert r"[\[^1\]](https://example.com)" in markdown
+    assert "[^1]: 金额来自总账。" in markdown
+
+    saved = _store(tmp_path).save_draft({"title": "附注文稿", "document": doc})
+
+    assert "正文引用 [^1]" in saved["body"]
+    assert r"普通\[预算\]仍是字面" in saved["body"]
+    assert "[^1]: 金额来自总账。" in saved["body"]
+
+
 def test_python_projection_matches_renderer_markdown_rules_for_marks_notes_and_tables() -> None:
     doc = {
         "schema_version": 1,

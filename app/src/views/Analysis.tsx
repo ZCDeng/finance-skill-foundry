@@ -9,6 +9,7 @@ import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js'
 import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
+import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
@@ -30,6 +31,7 @@ interface ExplanationFact {
 interface ExplanationIssue { code?: string; message?: string; severity?: string; origin?: string; excerpt?: string }
 interface ExplanationQuality {
   status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[];
+  readability?: { status: 'clear' | 'suggestions'; issues: { code: string; message: string; position?: number }[] };
   checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
   requirements?: { scope_changed?: boolean; items?: { id: string; label: string; status: string; provenance_status: string }[] };
 }
@@ -57,12 +59,19 @@ type Props = {
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
-function readableDraftParts(body: string, appendix?: string): { body: string; appendix?: string } {
+function appendixMarkdownVariants(appendix?: string): string[] {
   const cleanAppendix = appendix?.trim();
-  if (!cleanAppendix) return { body };
+  if (!cleanAppendix) return [];
+  const canonicalAppendix = documentToMarkdown(documentFromMarkdown(cleanAppendix)).trim();
+  return Array.from(new Set([cleanAppendix, canonicalAppendix]));
+}
+function readableDraftParts(body: string, appendix?: string): { body: string; appendix?: string } {
+  const variants = appendixMarkdownVariants(appendix);
+  if (!variants.length) return { body };
   const trimmedBody = body.trimEnd();
-  if (!trimmedBody.endsWith(cleanAppendix)) return { body };
-  return { body: trimmedBody.slice(0, trimmedBody.length - cleanAppendix.length).trimEnd(), appendix: cleanAppendix };
+  const matchedAppendix = variants.find((candidate) => trimmedBody.endsWith(candidate));
+  if (!matchedAppendix) return { body };
+  return { body: trimmedBody.slice(0, trimmedBody.length - matchedAppendix.length).trimEnd(), appendix: variants[0] };
 }
 const metricLabel = (value: unknown): string => {
   if (value && typeof value === 'object' && 'name' in value && 'expression' in value
@@ -1603,6 +1612,11 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       })}
     </dl>}
     {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
+    {quality?.readability?.issues.length && state !== 'stale' ? <section className="analysis-details" aria-label="正文阅读建议">
+      <h4>正文阅读建议</h4>
+      <p className="analysis-note">可用“整理段落”预览分段，再将比较数据、完整公式和来源附注分别组织。</p>
+      <ul>{quality.readability.issues.map((issue, index) => <li key={`${issue.code}-${issue.position ?? index}`}>{issue.message}</li>)}</ul>
+    </section> : null}
     {issueGroups.length ? <div>
       {issueGroups.map((group) => <details className="analysis-details" key={group.key}>
         <summary>{group.origin} · {group.severity} · {group.issues.length} 条：{group.message}</summary>

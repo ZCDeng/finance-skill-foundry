@@ -28,6 +28,8 @@
 .report-prosemirror h2 { font-size: 21px; line-height: 30px; margin: 32px 0 12px; }
 .report-prosemirror h3 { font-size: 18px; line-height: 28px; margin: 28px 0 10px; }
 .report-prosemirror p { margin: 0; white-space: pre-wrap; }
+.report-prosemirror > p + p { margin-top: 16px; }
+.report-prosemirror li p + p, .report-prosemirror td p + p, .report-prosemirror th p + p { margin-top: 8px; }
 .report-prosemirror ul, .report-prosemirror ol { padding-left: 24px; margin: 0; }
 .report-prosemirror li + li { margin-top: 6px; }
 .report-prosemirror table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; line-height: 22px; font-variant-numeric: tabular-nums; margin: 16px 0; }
@@ -35,6 +37,12 @@
 .report-prosemirror th { color: var(--fnd-muted); font-weight: var(--fnd-weight-strong); }
 .report-prosemirror img { max-width: 100%; height: auto; display: block; }
 .report-note { border-left: 2px solid var(--fnd-line); padding-left: 12px; color: var(--fnd-muted); }
+.report-reading .report-note, .report-prosemirror .report-note { margin: 16px 0 0; padding: 12px 0 0; border: 0; border-top: 1px solid var(--fnd-line); border-left: 0; color: var(--fnd-muted); font-size: 14px; line-height: 24px; }
+.report-reading .report-note { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; align-items: start; }
+.report-reading .report-note sup { color: var(--fnd-accent); font-size: 11px; line-height: 1; vertical-align: super; font-weight: var(--fnd-weight-strong); }
+.report-reading .report-note p, .report-prosemirror .report-note p { margin: 0; }
+.report-reading .report-note p + p, .report-prosemirror .report-note p + p { margin-top: 8px; }
+.report-note-ref { color: inherit; opacity: .82; font-size: 11px; line-height: 1; vertical-align: super; font-weight: var(--fnd-weight-strong); text-decoration: none; }
 .report-page-break { border: 0; border-top: 1px dashed var(--fnd-line); margin: 28px 0; }
 .report-page-break::after { content: '分页'; color: var(--fnd-muted); font-size: 12px; padding-left: 8px; }
 .report-reading { max-width: 42em; padding: 24px 0 32px; font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); color: var(--fnd-ink); overflow-wrap: anywhere; }
@@ -43,6 +51,8 @@
 .report-reading h3 { font-size: 18px; line-height: 28px; margin: 28px 0 10px; }
 .report-reading h4 { font-size: 16px; line-height: 28px; margin: 24px 0 8px; }
 .report-reading p { margin: 0 0 18px; white-space: pre-wrap; }
+.report-reading td p, .report-reading th p { margin: 0; }
+.report-reading td p + p, .report-reading th p + p, .report-reading li p + p { margin-top: 8px; }
 .report-reading ul, .report-reading ol { margin: 0 0 20px; padding-left: 24px; }
 .report-reading li + li { margin-top: 6px; }
 .report-reading table { width: 100%; border-collapse: collapse; margin: 18px 0 24px; font-size: 14px; line-height: 22px; font-variant-numeric: tabular-nums; }
@@ -76,6 +86,8 @@
 .report-inline-popover { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-source-preview { padding: 12px 16px; border: 1px dashed var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-source-preview .report-reading { padding: 0; }
+.report-reflow-preview { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px dashed var(--fnd-line); border-radius: 10px; background: var(--fnd-surface); }
+.report-reflow-preview .report-reading { padding: 0; }
 .report-outline__sections { display: flex; flex-direction: column; gap: 8px; }
 .report-outline__sections summary { cursor: pointer; color: var(--fnd-ink); font-weight: var(--fnd-weight-strong); }
 }
@@ -88,5 +100,5 @@
 @media (max-width: 900px) { .report-info-fields > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .report-info-fields > div { grid-template-columns: minmax(0, 1fr); } }
 @layer layout {
-.report-prosemirror .report-note::before { content: attr(data-note-id); display: inline-flex; margin-right: 8px; color: var(--fnd-muted); font-size: 12px; vertical-align: super; }
+.report-prosemirror .report-note::before { content: attr(data-note-id); display: inline-flex; margin-right: 8px; color: var(--fnd-accent); font-size: 11px; line-height: 1; vertical-align: super; font-weight: var(--fnd-weight-strong); }
 }

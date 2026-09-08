@@ -588,7 +588,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "prepare_explanation",
             "title": "Prepare finance explanation facts",
-            "description": "Prepare stable fact ids, exact values, display values, scopes, semantics, diagnostics, evidence_groups and automatic supporting tables from granted successful finance runs. Call this after successful runs that answer the registered requirements.",
+            "description": "Prepare stable fact ids, exact values, display values, scopes, semantics, diagnostics, evidence_groups, automatic supporting tables, and writing_guidance from granted successful finance runs. Call this after successful runs that answer the registered requirements; draft with short conclusions, bullet/table drivers, independent formulas, and chapter-end footnotes.",
             "inputSchema": {
                 "type": "object",
                 "required": ["run_ids"],
@@ -602,7 +602,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "validate_explanation",
             "title": "Validate finance explanation draft",
-            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. It does not approve the draft.",
+            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. It also returns independent readability suggestions for dense paragraphs or inline formula stacking. It does not approve the draft.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -668,7 +668,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_explanation_draft",
             "title": "Save finance explanation draft",
-            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. The returned quality and completion record preserve editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete.",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. Keep {{fact:FACT_ID}} where each number appears; use chapter-end footnotes such as [^1] for source locations, not as numeric placeholders. The returned quality keeps finance checks separate from readability suggestions, and completion preserves editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete.",
             "inputSchema": {
                 "type": "object",
                 "required": ["body"],

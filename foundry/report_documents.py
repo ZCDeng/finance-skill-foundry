@@ -49,6 +49,7 @@ NODE_TYPES = {
 MARK_TYPES = {"bold", "italic", "strike", "code", "link", "underline"}
 INLINE_TYPES = {"text", "hardBreak", "image"}
 TEXT_ALIGN = {"left", "center", "right", "justify"}
+NOTE_REF = re.compile(r"\[\^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}\]")
 
 
 def _text(value: Any, label: str, *, required: bool = False, maximum: int = 1000) -> str:
@@ -317,8 +318,12 @@ def _render_inline(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         node_type = node["type"]
         if node_type == "text":
-            text = _escape_markdown_text(node.get("text", ""))
-            for mark in node.get("marks", []):
+            marks = node.get("marks", [])
+            if any(mark["type"] == "link" for mark in marks):
+                text = _escape_markdown_literal(node.get("text", ""))
+            else:
+                text = _escape_markdown_text(node.get("text", ""))
+            for mark in marks:
                 if mark["type"] == "bold":
                     text = f"**{text}**"
                 elif mark["type"] == "code":
@@ -346,6 +351,17 @@ def _table_cell_markdown(value: str) -> str:
 
 
 def _escape_markdown_text(value: str) -> str:
+    parts: list[str] = []
+    last = 0
+    for match in NOTE_REF.finditer(value):
+        parts.append(_escape_markdown_literal(value[last:match.start()]))
+        parts.append(match.group(0))
+        last = match.end()
+    parts.append(_escape_markdown_literal(value[last:]))
+    return "".join(parts)
+
+
+def _escape_markdown_literal(value: str) -> str:
     return re.sub(r"([\\`*\[\]\(\)])", r"\\\1", value)
 
 

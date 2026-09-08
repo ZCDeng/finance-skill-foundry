@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Analysis } from '../src/views/Analysis.js';
 import { DraftBody } from '../src/views/analysis/DraftBody.js';
+import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
 import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, TaskRow } from '../src/bridge.js';
 
 const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period: null, skill_id: null, created_at: '2026-09-05T00:00:00Z', windows: 0 };
@@ -669,6 +670,40 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe(body);
   });
 
+  it('folds a canonical regenerated evidence appendix suffix', async () => {
+    const appendix = '## 计算依据附录\n本月利润来自系统证据。';
+    const canonicalAppendix = documentToMarkdown(documentFromMarkdown(appendix)).trim();
+    const body = `# 经营结论
+本月经营利润为 250 万元。
+
+${canonicalAppendix}`;
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [{ ...draft, body, evidence_appendix: appendix }] }) });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const reading = await screen.findByRole('article', { name: '文稿阅读' });
+    const main = reading.querySelector('.analysis-draft-main') as HTMLElement;
+    expect(within(main).getByText('本月经营利润为 250 万元。')).toBeTruthy();
+    expect(within(main).queryByRole('heading', { name: '计算依据附录' })).toBeNull();
+    const fold = within(reading).getByText('系统生成计算依据附录').closest('details') as HTMLDetailsElement;
+    expect(fold).toBeTruthy();
+    fold.open = true;
+    expect(within(fold).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+  });
+
+  it('keeps a tampered canonical appendix visible inline', async () => {
+    const appendix = '## 计算依据附录\n本月利润来自系统证据。';
+    const canonicalAppendix = documentToMarkdown(documentFromMarkdown(appendix)).trim();
+    const body = `# 经营结论
+本月经营利润为 250 万元。
+
+${canonicalAppendix} 已改写`;
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [{ ...draft, body, evidence_appendix: appendix }] }) });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const reading = await screen.findByRole('article', { name: '文稿阅读' });
+    expect(within(reading).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+    expect(within(reading).getByText(/本月利润来自系统证据。 已改写/)).toBeTruthy();
+    expect(within(reading).queryByText('系统生成计算依据附录')).toBeNull();
+  });
+
   it('keeps a similar appendix marker inline when it is not the exact stored suffix', async () => {
     const appendix = '## 计算依据附录\n| 项目 | 金额 |\n| --- | ---: |\n| 经营利润 | 250 |';
     const body = '# 经营结论\n本月经营利润为 250 万元。\n\n## 计算依据附录\n经理手工改写过的依据。';
@@ -1230,7 +1265,6 @@ describe('analysis workbench', () => {
     expect(financeCall.mock.calls.some(([, command]) => command === 'validate-explanation')).toBe(false);
   });
 
-
   it('auto-checks finance drafts, marks edits stale, rechecks current body, and still saves quality warnings', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a',
       finance_scope: { actual: { ledger: '总账', organization: '华东', period: '2026-09', currency: 'CNY', unit: '元' } } };
@@ -1299,6 +1333,28 @@ describe('analysis workbench', () => {
     expect(details.open).toBe(true);
     expect(await screen.findByLabelText('用户问题')).toBeTruthy();
     expect((screen.getByLabelText('用户问题') as HTMLTextAreaElement).value).toBe('解释收入和利润缺口');
+  });
+
+  it('shows paragraph advice separately from passed financial checks and clears it after edits', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [],
+        checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } },
+        readability: { status: 'suggestions', issues: [{ code: 'dense_paragraph', message: '这一段包含多个主题，建议分段。', position: 12 }] },
+      });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const advice = await screen.findByRole('region', { name: '正文阅读建议' });
+    expect(within(advice).getByText('这一段包含多个主题，建议分段。')).toBeTruthy();
+    expect(screen.getByText('当前文稿数字、单位和引用未发现问题。')).toBeTruthy();
+    expect(within(screen.getByLabelText('分项核对状态')).getAllByText('已核对')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '修改后的短结论。' } });
+    expect(screen.queryByRole('region', { name: '正文阅读建议' })).toBeNull();
   });
 
   it('groups duplicate quality issues while leaving every source detail expandable', async () => {

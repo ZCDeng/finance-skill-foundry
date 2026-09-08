@@ -99,6 +99,8 @@ def test_prepare_explanation_returns_stable_bound_facts_for_successful_runs(serv
     assert profit["id"] in prepared["required_fact_ids"]
     assert prepared["evidence_groups"][0]["group_type"] == "profit_bridge"
     assert prepared["evidence_groups"][0]["status"] == "complete"
+    assert prepared["writing_guidance"]["schema_version"] == 1
+    assert "{{fact:FACT_ID}}" in " ".join(prepared["writing_guidance"]["rules"])
 
 
 def test_save_explanation_draft_renders_fact_templates_and_refreshes_checks(service):
@@ -1536,3 +1538,116 @@ def test_ratio_evidence_group_flags_missing_and_tampered_ratios(service):
     assert tampered_payload["evidence_groups"][0]["status"] == "closure_mismatch"
     assert closure["expected"] != closure["actual"]
     assert closure["actual"] == "0.5"
+
+
+def test_validate_explanation_returns_readability_suggestions_without_failing_finance_status(service):
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = [
+        fact["id"]
+        for fact in prepared["facts"]
+        if fact["column"] == "contribution"
+    ]
+
+    body = (
+        "利润桥闭合成立：收入贡献 20 万元、成本利润影响 -10 万元、费用利润影响 -5 万元，"
+        "合计与利润增加一致（20 − 10 − 5 = 5）；本段随后又把结论、数据、条件、原因、行动和证据说明继续压在一起，"
+        "读者需要在同一段里同时判断经营节奏、费用使用、收入确认和后续复核安排。"
+        "虽然管理层仍需补充业务证据，但当前文字没有把结论短段、驱动条列、公式和附注拆开。"
+    )
+    check = store.validate_explanation({
+        "body": body,
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "pass", check["issues"]
+    assert check["readability"]["status"] == "suggestions"
+    assert {issue["code"] for issue in check["readability"]["issues"]} >= {
+        "dense_paragraph",
+        "inline_formula",
+    }
+    assert not check["issues"]
+
+
+def test_validate_explanation_accepts_short_sections_standalone_formula_and_notes(service):
+    store, context = service
+    run = store.explain_variance({"context_id": context["id"]})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    fact_ids = [
+        fact["id"]
+        for fact in prepared["facts"]
+        if fact["column"] == "contribution"
+    ]
+
+    body = (
+        "结论：利润超预算5万元，主要由收入因素抵消成本费用因素。[^1]\n\n"
+        "- 收入贡献20万元。\n"
+        "- 成本利润影响 -10万元。\n"
+        "- 费用利润影响 -5万元。\n\n"
+        "利润合计：20 − 10 − 5 = 5。\n\n"
+        "[^1]: 金额来自本次成功运行结果；业务原因仍需管理层证据。"
+    )
+    check = store.validate_explanation({
+        "body": body,
+        "run_ids": [run["id"]],
+        "fact_ids": fact_ids,
+    })
+
+    assert check["status"] == "pass", check["issues"]
+    assert check["readability"] == {"status": "clear", "issues": []}
+
+
+def test_structured_generated_appendix_canonical_markdown_stays_trusted(service):
+    from foundry.report_documents import report_document_from_markdown_body
+
+    store, context = service
+    run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {"kind": "control_totals"},
+    })
+    document = report_document_from_markdown_body("控制合计见计算依据。")
+
+    draft = store.save_explanation_draft({
+        "title": "结构化控制合计",
+        "document": document,
+        "run_ids": [run["id"]],
+    })
+
+    assert draft["evidence_appendix"] not in draft["body"]
+    assert "### 结果行 2" in draft["body"]
+    assert draft["explanation_check"]["status"] == "pass", draft["explanation_check"]["issues"]
+
+    checked = store.validate_explanation({"draft_id": draft["id"]})
+
+    assert checked["status"] == "pass", checked["issues"]
+    assert checked["readability"] == {"status": "clear", "issues": []}
+
+
+def test_structured_generated_appendix_canonical_markdown_tamper_stays_untrusted(service):
+    from foundry.report_documents import report_document_from_markdown_body
+
+    store, context = service
+    run = store.run_metric({
+        "context_id": context["id"],
+        "metric": {"kind": "control_totals"},
+    })
+    document = report_document_from_markdown_body("控制合计见计算依据。")
+    draft = store.save_explanation_draft({
+        "title": "结构化控制合计",
+        "document": document,
+        "run_ids": [run["id"]],
+    })
+    tampered = store.analysis.save_draft({
+        "parent_id": draft["id"],
+        "body": draft["body"].replace("120 万元", "121 万元", 1),
+    })
+
+    assert tampered["explanation_check"]["status"] == "needs_attention"
+    assert any(
+        issue["code"] == "uncited_number"
+        and issue.get("text") == "121"
+        and issue.get("origin") == "manager_body"
+        for issue in tampered["explanation_check"]["issues"]
+    )

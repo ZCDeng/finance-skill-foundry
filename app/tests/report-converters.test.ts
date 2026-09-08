@@ -150,6 +150,26 @@ describe('report document converters', () => {
     expect(JSON.stringify(result.document)).not.toContain('remote.example');
   });
 
+  it('renders matching footnote references as safe anchors and restores them from HTML import', async () => {
+    const doc = documentFromMarkdown('正文引用 [^n1]，未知引用 [^missing]，代码 `[^n1]` 和链接 [^n1](https://example.com) 不应误转。\n\n[^n1]: 附注正文保留。');
+    const html = renderReportHtml(doc, '附注报告');
+
+    expect(html).toContain('data-report-note-ref="n1"');
+    expect(html).toContain('href="#note-n1"');
+    expect(html).toContain('id="note-n1"');
+    expect(html).toContain('data-note-id="n1"');
+    expect(html).toContain('未知引用 [^missing]');
+    expect(html).toContain('<code>[^n1]</code>');
+    expect(html).toContain('href="https://example.com"');
+
+    const imported = await importReport(Buffer.from(html), 'html', { ...source, format: 'html', name: 'notes.html' });
+    const markdown = documentToMarkdown(imported.document!);
+
+    expect(markdown).toContain('正文引用 [^n1]');
+    expect(markdown).toContain('未知引用 [^missing]');
+    expect(markdown).toContain('[^n1]: 附注正文保留。');
+  });
+
   it('round-trips formal HTML structure with captions, units, notes and PNG images', async () => {
     const doc = documentFromMarkdown('# 图文表报告\n\n正文引用 [^n1]。');
     doc.metadata = { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' };
@@ -214,7 +234,7 @@ describe('report document converters', () => {
     const doc: ReportDocument = documentFromMarkdown([
       '# 经营与预算分析',
       '',
-      '预算差异为 -98,765.43 元。',
+      '预算差异为 -98,765.43 元。正文引用 [^n1]。',
       '',
       '[^n1]: Word 回读附注。',
       '',
@@ -239,6 +259,7 @@ describe('report document converters', () => {
     expect(documentXml).toContain('<w:tblHeader/>');
     expect(documentXml).toContain('经营与预算分析');
     expect(documentXml).toContain('-98,765.43');
+    expect(documentXml).toContain('<w:vertAlign w:val="superscript"/>');
     expect(documentXml).toContain('续表');
     expect(footerXml).toContain('PAGE');
     expect(numberingXml).toContain('%1.');
@@ -247,6 +268,7 @@ describe('report document converters', () => {
     expect(imported.needsReview).toBe(true);
     expect(imported.warnings.join('\n')).toContain('Word 导入采用语义转换');
     expect(documentToMarkdown(imported.document!)).toContain('-98,765.43');
+    expect(documentToMarkdown(imported.document!)).toContain('[^n1]');
     expect(documentToMarkdown(imported.document!)).toContain('[^n1]: Word 回读附注。');
   });
 

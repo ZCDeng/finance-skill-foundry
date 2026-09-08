@@ -20,6 +20,20 @@ DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 EVIDENCE_APPENDIX_RENDER_VERSION = 1
+WRITING_GUIDANCE = {
+    "schema_version": 1,
+    "summary": (
+        "管理层财务文稿应先给短结论，再用比较表或条列承接驱动；"
+        "完整公式独立成段，来源定位用章节末附注。"
+    ),
+    "rules": [
+        "每段只写一个主题，开头用一到两个短段说明结论和重大财务影响。",
+        "把 {{fact:FACT_ID}} 保留在对应数字、公式或表格位置；它是数值占位符，不是引用编号。",
+        "多个驱动、条件或不确定性使用条列或比较表，条件贴近相关判断。",
+        "完整公式、桥接计算和口径说明独立成段或小表，不塞进长句。",
+        "来源定位使用章节末附注 [^n]；不得补造原因、行动、空值或未授权来源。",
+    ],
+}
 
 MONEY_COLUMNS = {
     "amount",
@@ -103,6 +117,7 @@ def prepare_explanation(
         "diagnostics": diagnostics,
         "business_contexts": backgrounds or [],
         "materiality": materiality,
+        "writing_guidance": WRITING_GUIDANCE,
     }
 
 
@@ -426,10 +441,12 @@ def validate_explanation(analysis, spec: dict) -> dict:
             )
     status = "pass" if not issues else "needs_attention"
     issues = _locate_issues(issues, generated_regions)
+    readability = _readability_suggestions(body, generated_regions)
     return {
         "schema_version": 1,
         "status": status,
         "issues": [issue for issue in issues if issue],
+        "readability": readability,
         "coverage": {
             "referenced_fact_count": len(referenced),
             "available_fact_count": len(facts),
@@ -1787,16 +1804,37 @@ def _trusted_generated_appendix_regions(
         return []
     if appendix != rebuilt:
         return []
-    start = body.rfind(rebuilt)
+    rendered = rebuilt
+    start = body.rfind(rendered)
     if start < 0:
-        return []
+        canonical = _canonical_report_markdown(rebuilt)
+        if not canonical:
+            return []
+        rendered = canonical
+        start = body.rfind(rendered)
+        if start < 0:
+            return []
     return [
         {
             "section": "generated_appendix",
             "start": start,
-            "end": start + len(rebuilt),
+            "end": start + len(rendered),
         }
     ]
+
+
+def _canonical_report_markdown(markdown: str) -> str | None:
+    try:
+        from foundry.report_documents import (
+            report_document_from_markdown_body,
+            report_document_markdown,
+        )
+
+        return report_document_markdown(report_document_from_markdown_body(markdown))
+    except FoundryError:
+        return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | None:
@@ -1828,6 +1866,141 @@ def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | N
         return ""
 
 
+def _readability_suggestions(body: str, generated_regions: list[dict]) -> dict:
+    issues: list[dict] = []
+    for block in _manager_readability_blocks(body, generated_regions):
+        text = block["text"]
+        stripped = text.strip()
+        if _is_dense_finance_paragraph(stripped):
+            issues.append({
+                "code": "dense_paragraph",
+                "severity": "suggestion",
+                "message": "这一段同时承载结论、多个数据或条件，建议拆成短结论、条列/比较表和独立附注。",
+                "position": block["start"] + text.find(stripped),
+            })
+        if _has_inline_formula_stack(stripped):
+            match = CLOSURE_EXPR.search(stripped)
+            position = block["start"] + (
+                match.start("expr") if match else text.find(stripped)
+            )
+            issues.append({
+                "code": "inline_formula",
+                "severity": "suggestion",
+                "message": "完整公式与叙述挤在同一段，建议把公式独立成段或小表，并把条件贴近相关判断。",
+                "position": position,
+            })
+    located = _locate_issues(issues, generated_regions)
+    return {
+        "status": "suggestions" if located else "clear",
+        "issues": located,
+    }
+
+
+def _manager_readability_blocks(body: str, generated_regions: list[dict]) -> list[dict]:
+    blocks: list[dict] = []
+    in_code = False
+    index = 0
+    current: list[str] = []
+    current_start: int | None = None
+    for line in body.splitlines(keepends=True):
+        raw = line.rstrip("\n")
+        stripped = raw.strip()
+        line_start = index
+        line_end = index + len(line)
+        index = line_end
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            if current and current_start is not None:
+                blocks.append({"text": "".join(current), "start": current_start})
+                current = []
+                current_start = None
+            in_code = not in_code
+            continue
+        if in_code or _span_in_generated_region(
+            (line_start, line_end), generated_regions
+        ):
+            if current and current_start is not None:
+                blocks.append({"text": "".join(current), "start": current_start})
+                current = []
+                current_start = None
+            continue
+        if not stripped:
+            if current and current_start is not None:
+                blocks.append({"text": "".join(current), "start": current_start})
+                current = []
+                current_start = None
+            continue
+        if _is_readability_exempt_line(stripped):
+            if current and current_start is not None:
+                blocks.append({"text": "".join(current), "start": current_start})
+                current = []
+                current_start = None
+            continue
+        if current_start is None:
+            current_start = line_start
+        current.append(line)
+    if current and current_start is not None:
+        blocks.append({"text": "".join(current), "start": current_start})
+    return blocks
+
+
+def _span_in_generated_region(
+    span: tuple[int, int], generated_regions: list[dict]
+) -> bool:
+    return any(
+        _overlaps(span, (region["start"], region["end"]))
+        for region in generated_regions
+    )
+
+
+def _is_readability_exempt_line(stripped: str) -> bool:
+    return (
+        stripped.startswith(("|", ">", "#", "[^"))
+        or bool(re.match(r"^(?:[-*+] |\d+[.)] )", stripped))
+    )
+
+
+def _is_dense_finance_paragraph(text: str) -> bool:
+    if len(text) < 160:
+        return False
+    if not re.search(r"[\u4e00-\u9fff]", text):
+        return False
+    sentence_boundaries = len(re.findall(r"[。；;！!？?]", text))
+    if sentence_boundaries < 2:
+        return False
+    number_count = len(_body_numbers(text))
+    fact_count = len(FACT_TOKEN.findall(text))
+    finance_markers = sum(
+        1
+        for marker in (
+            "结论",
+            "收入",
+            "成本",
+            "费用",
+            "利润",
+            "现金",
+            "预算",
+            "同比",
+            "环比",
+            "公式",
+            "原因",
+            "行动",
+            "证据",
+        )
+        if marker in text
+    )
+    return (number_count + fact_count) >= 3 and finance_markers >= 3
+
+
+def _has_inline_formula_stack(text: str) -> bool:
+    match = CLOSURE_EXPR.search(text)
+    if not match:
+        return False
+    before = text[:match.start("expr")].strip()
+    after = text[match.end("expr"):].strip()
+    prose_chars = len(re.findall(r"[\u4e00-\u9fffA-Za-z]", before + after))
+    return len(text) >= 80 and prose_chars >= 24
+
+
 def _locate_issues(issues: list[dict], generated_regions: list[dict]) -> list[dict]:
     return [
         _locate_issue(issue, generated_regions)
@@ -1855,7 +2028,11 @@ def _locate_issue(issue: dict, generated_regions: list[dict]) -> dict:
 
 
 def _origin_for_position(position: int, generated_regions: list[dict]) -> str:
-    return "generated_appendix" if _region_for_position(position, generated_regions) else "manager_body"
+    return (
+        "generated_appendix"
+        if _region_for_position(position, generated_regions)
+        else "manager_body"
+    )
 
 
 def _region_for_position(position: int, generated_regions: list[dict]) -> dict | None:
@@ -1881,11 +2058,18 @@ def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[
     appendix = render_evidence_appendix(prepared).get("body", "")
     if not appendix:
         return []
-    start = body.rfind(appendix)
+    rendered = appendix
+    start = body.rfind(rendered)
     if start < 0:
-        return []
+        canonical = _canonical_report_markdown(appendix)
+        if not canonical:
+            return []
+        rendered = canonical
+        start = body.rfind(rendered)
+        if start < 0:
+            return []
     spans = []
-    for match in re.finditer(r"(?m)^### 结果行 (?P<number>\d+)$", appendix):
+    for match in re.finditer(r"(?m)^### 结果行 (?P<number>\d+)$", rendered):
         number_span = match.span("number")
         spans.append((start + number_span[0], start + number_span[1]))
     return spans
@@ -1893,6 +2077,14 @@ def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[
 
 def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = None) -> list[dict]:
     ignored_spans = ignored_spans or []
+    footnote_spans = [
+        match.span() for match in re.finditer(r"\[\^\d+\]", body)
+    ]
+    footnote_definition_spans = [
+        match.span("number")
+        for match in re.finditer(r"(?m)^\[\^(?P<number>\d+)\]:", body)
+    ]
+    ignored_spans = ignored_spans + footnote_spans + footnote_definition_spans
     date_spans = [match.span() for match in DATE_SPAN.finditer(body)]
     values = []
     for match in NUMBER.finditer(body):

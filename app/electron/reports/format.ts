@@ -2,6 +2,8 @@ import type { ReportDocument, ReportMark, ReportNode } from './model.js';
 
 const EMPTY_METADATA = { company: '', period: '', currency: '', unit: '' };
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
+const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
 
 type RenderOptions = { fontDataUrl?: string; print?: boolean };
 
@@ -132,6 +134,7 @@ export function documentToMarkdown(doc: ReportDocument): string {
 
 export function renderReportHtml(doc: ReportDocument, title: string, options: RenderOptions = {}): string {
   const css = reportCss(options);
+  const noteIds = collectNoteIds(doc.content);
   const toc = normalizeBlocks(doc.content)
     .filter((node) => node.type === 'heading' && Number(node.attrs?.level ?? 1) <= 2)
     .map((node, index) => {
@@ -144,9 +147,9 @@ export function renderReportHtml(doc: ReportDocument, title: string, options: Re
   const body = normalizeBlocks(doc.content).map((node) => {
     if (node.type === 'heading') {
       sectionIndex += 1;
-      return nodeToHtml(node, sectionIndex);
+      return nodeToHtml(node, sectionIndex, noteIds);
     }
-    return nodeToHtml(node, sectionIndex);
+    return nodeToHtml(node, sectionIndex, noteIds);
   }).join('\n');
   return `<!doctype html>
 <html lang="zh-CN">
@@ -371,17 +374,17 @@ function flatInline(nodes: ReportNode[]): ReportNode[] {
   return nodes.flatMap((node) => node.type === 'paragraph' ? (node.content ?? []) : [node]);
 }
 
-function nodeToHtml(node: ReportNode, sectionIndex: number): string {
+function nodeToHtml(node: ReportNode, sectionIndex: number, noteIds: Set<string> = new Set()): string {
   const attrs = sourceAttrs(node);
   switch (node.type) {
     case 'heading': {
       const level = Math.max(1, Math.min(6, Number(node.attrs?.level ?? 1)));
-      return `<h${level} id="section-${sectionIndex}"${attrs}>${inlineToHtml(node.content ?? [])}</h${level}>`;
+      return `<h${level} id="section-${sectionIndex}"${attrs}>${inlineToHtml(node.content ?? [], noteIds)}</h${level}>`;
     }
     case 'paragraph':
-      return `<p${attrs}>${inlineToHtml(node.content ?? [])}</p>`;
+      return `<p${attrs}>${inlineToHtml(node.content ?? [], noteIds)}</p>`;
     case 'blockquote':
-      return `<blockquote${attrs}>${inlineToHtml(flatInline(node.content ?? []))}</blockquote>`;
+      return `<blockquote${attrs}>${inlineToHtml(flatInline(node.content ?? []), noteIds)}</blockquote>`;
     case 'codeBlock':
       return `<pre${attrs}><code>${escapeHtml(textContent(node))}</code></pre>`;
     case 'horizontalRule':
@@ -389,25 +392,25 @@ function nodeToHtml(node: ReportNode, sectionIndex: number): string {
     case 'bulletList':
     case 'orderedList': {
       const tag = node.type === 'orderedList' ? 'ol' : 'ul';
-      return `<${tag}${attrs}>${(node.content ?? []).map((item) => `<li>${(item.content ?? []).map((child) => nodeToHtml(child, sectionIndex)).join('')}</li>`).join('')}</${tag}>`;
+      return `<${tag}${attrs}>${(node.content ?? []).map((item) => `<li>${(item.content ?? []).map((child) => nodeToHtml(child, sectionIndex, noteIds)).join('')}</li>`).join('')}</${tag}>`;
     }
     case 'table':
-      return tableToHtml(node, attrs);
+      return tableToHtml(node, attrs, noteIds);
     case 'image':
       return imageToHtml(node, attrs);
     case 'reportNote':
-      return `<aside class="report-note"${attrs}><sup>${escapeHtml(String(node.attrs?.id ?? ''))}</sup>${(node.content ?? []).map((child) => nodeToHtml(child, sectionIndex)).join('')}</aside>`;
+      return reportNoteToHtml(node, attrs, sectionIndex, noteIds);
     case 'reportPageBreak':
       return '<div class="report-page-break" aria-hidden="true"></div>';
     default:
-      return inlineToHtml(node.content ?? []);
+      return inlineToHtml(node.content ?? [], noteIds);
   }
 }
 
-function inlineToHtml(nodes: ReportNode[]): string {
+function inlineToHtml(nodes: ReportNode[], noteIds: Set<string> = new Set()): string {
   return nodes.map((node) => {
     if (node.type === 'text') {
-      let html = escapeHtml(node.text ?? '');
+      let html = textToHtml(node, noteIds);
       for (const mark of node.marks ?? []) {
         if (mark.type === 'bold') html = `<strong>${html}</strong>`;
         if (mark.type === 'italic') html = `<em>${html}</em>`;
@@ -422,20 +425,70 @@ function inlineToHtml(nodes: ReportNode[]): string {
     }
     if (node.type === 'hardBreak') return '<br>';
     if (node.type === 'image') return imageToHtml(node, '');
-    return inlineToHtml(node.content ?? []);
+    return inlineToHtml(node.content ?? [], noteIds);
   }).join('');
 }
 
-function tableToHtml(table: ReportNode, attrs: string): string {
+function reportNoteToHtml(node: ReportNode, attrs: string, sectionIndex: number, noteIds: Set<string>): string {
+  const id = safeNoteId(node.attrs?.id);
+  const noteAttrs = `${attrs}${id ? ` id="note-${escapeAttribute(id)}" data-note-id="${escapeAttribute(id)}"` : ''}`;
+  const label = id || attrText(node.attrs?.id, 64);
+  return `<aside class="report-note"${noteAttrs}><sup>${escapeHtml(label)}</sup>${(node.content ?? []).map((child) => nodeToHtml(child, sectionIndex, noteIds)).join('')}</aside>`;
+}
+
+function textToHtml(node: ReportNode, noteIds: Set<string>): string {
+  const text = node.text ?? '';
+  const marks = node.marks ?? [];
+  if (marks.some((mark) => mark.type === 'code' || mark.type === 'link')) return escapeHtml(text);
+  return escapeHtmlWithNoteRefs(text, noteIds);
+}
+
+function escapeHtmlWithNoteRefs(text: string, noteIds: Set<string>): string {
+  let rendered = '';
+  let lastIndex = 0;
+  NOTE_REF_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(NOTE_REF_PATTERN)) {
+    const index = match.index ?? 0;
+    const id = safeNoteId(match[1]);
+    if (!id || !noteIds.has(id)) continue;
+    rendered += escapeHtml(text.slice(lastIndex, index));
+    const safeId = escapeAttribute(id);
+    rendered += `<sup class="report-note-ref" data-report-note-ref="${safeId}"><a href="#note-${safeId}" aria-label="查看附注 ${safeId}">[${escapeHtml(id)}]</a></sup>`;
+    lastIndex = index + match[0].length;
+  }
+  rendered += escapeHtml(text.slice(lastIndex));
+  return rendered;
+}
+
+function collectNoteIds(nodes: ReportNode[] = []): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: ReportNode) => {
+    if (node.type === 'reportNote') {
+      const id = safeNoteId(node.attrs?.id);
+      if (id) ids.add(id);
+      return;
+    }
+    for (const child of node.content ?? []) visit(child);
+  };
+  for (const node of nodes) visit(node);
+  return ids;
+}
+
+function safeNoteId(value: unknown): string {
+  const text = attrText(value, 64).trim();
+  return NOTE_ID_PATTERN.test(text) ? text : '';
+}
+
+function tableToHtml(table: ReportNode, attrs: string, noteIds: Set<string>): string {
   const rows = (table.content ?? []).filter((row) => row.type === 'tableRow');
   const rowGroups = splitWideRows(rows);
   if (rowGroups.length > 1) {
-    return `<div class="wide-table-group"${attrs}>${rowGroups.map((group, index) => tableRowsToHtml(table, group, index > 0)).join('')}</div>`;
+    return `<div class="wide-table-group"${attrs}>${rowGroups.map((group, index) => tableRowsToHtml(table, group, index > 0, noteIds)).join('')}</div>`;
   }
-  return tableRowsToHtml(table, rows, false, attrs);
+  return tableRowsToHtml(table, rows, false, noteIds, attrs);
 }
 
-function tableRowsToHtml(table: ReportNode, rows: ReportNode[], continuation: boolean, attrs = ''): string {
+function tableRowsToHtml(table: ReportNode, rows: ReportNode[], continuation: boolean, noteIds: Set<string>, attrs = ''): string {
   const captionText = attrText(table.attrs?.caption, 300);
   const caption = captionText ? `<caption>${escapeHtml(captionText)}</caption>` : '';
   const unit = [table.attrs?.period, table.attrs?.currency, table.attrs?.unit].map((value) => attrText(value, 120)).filter(Boolean).join(' / ');
@@ -445,7 +498,7 @@ function tableRowsToHtml(table: ReportNode, rows: ReportNode[], continuation: bo
       const textAlign = cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(textContent(cell).trim()) ? 'right' : 'left';
       const colspan = numberAttr('colspan', cell.attrs?.colspan);
       const rowspan = numberAttr('rowspan', cell.attrs?.rowspan);
-      return `<${tag} class="${textAlign === 'right' ? 'num' : 'text'}"${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0)).join('')}</${tag}>`;
+      return `<${tag} class="${textAlign === 'right' ? 'num' : 'text'}"${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0, noteIds)).join('')}</${tag}>`;
     }).join('');
     return `<tr>${cells}</tr>`;
   });
@@ -509,7 +562,17 @@ function tableCellMarkdown(value: string): string {
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*[\]()])/g, '\\$1');
+  let escaped = '';
+  let lastIndex = 0;
+  NOTE_REF_PATTERN.lastIndex = 0;
+  for (const match of value.matchAll(NOTE_REF_PATTERN)) {
+    const index = match.index ?? 0;
+    escaped += value.slice(lastIndex, index).replace(/([\\`*[\]()])/g, '\\$1');
+    escaped += match[0];
+    lastIndex = index + match[0].length;
+  }
+  escaped += value.slice(lastIndex).replace(/([\\`*[\]()])/g, '\\$1');
+  return escaped;
 }
 
 function unescapeMarkdown(value: string): string {
@@ -604,6 +667,7 @@ th{font-weight:700;text-align:left;border-top:1px solid var(--report-line);backg
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .report-image img{max-width:100%;height:auto;display:block}
 .report-note{padding-top:10px;border-top:1px solid var(--report-line);color:var(--report-muted);font-size:14px;line-height:24px}
+.report-note-ref{font-size:.75em;line-height:0;vertical-align:super;margin:0 1px}.report-note-ref a{text-decoration:none;color:var(--report-accent)}
 .report-page-break{break-after:page;height:0}
 .report-shell.is-print{width:210mm;min-height:297mm;max-width:none;margin:24px auto;padding:20mm;background:#fff;color:#111;box-shadow:0 20px 60px rgba(0,0,0,.16)}
 .report-shell.is-print .report-cover,.report-shell.is-print .report-toc,.report-shell.is-print .report-body{max-width:none}

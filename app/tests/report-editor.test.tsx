@@ -2,12 +2,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { ReportEditor } from '../src/views/analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
 import type { Answer } from '../src/bridge.js';
-import type { ReportDocument, ReportImportResult, ReportSource } from '../electron/reports/model.js';
+import type { ReportDocument, ReportImportResult, ReportNode, ReportSource } from '../electron/reports/model.js';
 
 const pdfjsMock = vi.hoisted(() => ({
   getDocument: vi.fn(),
@@ -47,6 +48,54 @@ function mount(props: Partial<React.ComponentProps<typeof ReportEditor>> = {}): 
   };
   render(<ReportEditor taskId={taskId} title="经营分析" body="# 管理摘要\n正文\n" limitations="" review="reviewed" busy={false} initialMode="edit" {...handlers} {...props} />);
   return handlers;
+}
+
+function mountStateful(initial: Partial<React.ComponentProps<typeof ReportEditor>> = {}): HandlerMocks & { current: () => { title: string; body: string; document?: ReportDocument; review: string } } {
+  const handlers: HandlerMocks = {
+    onTitle: vi.fn(),
+    onBody: vi.fn(),
+    onDocument: vi.fn(),
+    onLimitations: vi.fn(),
+    onReview: vi.fn(),
+    onExport: vi.fn(),
+  };
+  const state = {
+    title: initial.title ?? '经营分析',
+    body: initial.body ?? '# 管理摘要\n正文\n',
+    document: initial.document,
+    review: initial.review ?? 'reviewed',
+  };
+  function Harness() {
+    const [title, setTitle] = useState(state.title);
+    const [body, setBody] = useState(state.body);
+    const [document, setDocument] = useState<ReportDocument | undefined>(state.document);
+    const [review, setReview] = useState(state.review);
+    state.title = title;
+    state.body = body;
+    state.document = document;
+    state.review = review;
+    return (
+      <ReportEditor
+        taskId={taskId}
+        title={title}
+        body={body}
+        limitations={initial.limitations ?? ''}
+        review={review}
+        busy={initial.busy ?? false}
+        initialMode={initial.initialMode ?? 'edit'}
+        appendix={initial.appendix}
+        document={document}
+        onTitle={(value) => { handlers.onTitle(value); setTitle(value); }}
+        onBody={(value) => { handlers.onBody(value); setBody(value); }}
+        onDocument={(value) => { handlers.onDocument(value); setDocument(value); }}
+        onLimitations={handlers.onLimitations}
+        onReview={(value) => { handlers.onReview(value); setReview(value); }}
+        onExport={handlers.onExport}
+      />
+    );
+  }
+  render(<Harness />);
+  return { ...handlers, current: () => ({ ...state }) };
 }
 
 describe('report editor workspace', () => {
@@ -121,6 +170,52 @@ describe('report editor workspace', () => {
     const fold = within(reading).getByText('系统生成计算依据附录').closest('details') as HTMLDetailsElement;
     fold.open = true;
     expect(within(fold).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+  });
+
+  it('folds a canonical appendix suffix while preserving rich main content', () => {
+    const appendix = '## 计算依据附录\n金额来自系统证据。';
+    const appendixDoc = documentFromMarkdown(appendix);
+    const document: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '', period: '', currency: '', unit: '' },
+      content: [
+        { type: 'heading', attrs: { level: 1, source_id: source.id }, content: [{ type: 'text', text: '管理摘要' }] },
+        { type: 'image', attrs: { source_id: source.id, src: png1x1, alt: '趋势图' } },
+        ...appendixDoc.content,
+      ],
+    };
+    mount({ initialMode: 'read', document, body: documentToMarkdown(document), appendix });
+    const reading = screen.getByRole('article', { name: '文稿阅读' });
+    const main = reading.querySelector('.analysis-draft-main') as HTMLElement;
+
+    expect(within(main).getByAltText('趋势图')).toBeTruthy();
+    expect(within(main).queryByRole('heading', { name: '计算依据附录' })).toBeNull();
+    expect(within(reading).getByText('系统生成计算依据附录')).toBeTruthy();
+  });
+
+  it('keeps a structurally tampered appendix visible even when the body has the stored suffix', () => {
+    const appendix = '## 计算依据附录\n金额来自系统证据。';
+    const tamperedAppendixDoc = documentFromMarkdown('## 计算依据附录\n金额来自经理改写。');
+    const body = `# 管理摘要
+正文
+
+${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
+    const document: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '', period: '', currency: '', unit: '' },
+      content: [
+        { type: 'heading', attrs: { level: 1, source_id: source.id }, content: [{ type: 'text', text: '管理摘要' }] },
+        ...tamperedAppendixDoc.content,
+      ],
+    };
+    mount({ initialMode: 'read', document, body, appendix });
+    const reading = screen.getByRole('article', { name: '文稿阅读' });
+
+    expect(within(reading).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+    expect(within(reading).getByText('金额来自经理改写。')).toBeTruthy();
+    expect(within(reading).queryByText('系统生成计算依据附录')).toBeNull();
   });
 
   it('keeps markdown source edits recoverable until explicitly adopted', async () => {
@@ -219,6 +314,77 @@ describe('report editor workspace', () => {
     expect(within(preview).getByRole('heading', { level: 3, name: '04·合并利润表 A1:F12' })).toBeTruthy();
   });
 
+  it('previews, cancels, adopts, undoes and redoes deterministic paragraph reflow', async () => {
+    const longParagraph = '管理层摘要显示，本期收入为1,234.50万元；预算为1,000.00万元，差异为234.50万元。现金流判断继续引用银行流水与应收明细，保持事实占位符 FACT-AR-001 和附注引用 [^1] 的原始顺序，不把未确认回款自动视为已收，也不补造管理层行动。后续说明只保留原始证据顺序，币种、期间、负号和单位都不改变。财务负责人补充说明，本段只做结构整理，不新增原因、行动或结论。';
+    const original: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      sources: [source],
+      content: [
+        { type: 'heading', attrs: { level: 1, source_id: source.id }, content: [{ type: 'text', text: '管理摘要' }] },
+        { type: 'paragraph', attrs: { source_id: source.id, sheet: '摘要', range: 'A1:D9' }, content: [{ type: 'text', text: longParagraph }] },
+        { type: 'table', attrs: { source_id: source.id, sheet: '利润表', range: 'A1:C3', caption: '利润表', period: '2026-08', currency: 'CNY', unit: '万元' }, content: [
+          { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+          { type: 'tableRow', content: [cell('tableCell', '合并金额', { colspan: 2, source_id: source.id, range: 'A2:B2' })] },
+        ] },
+        { type: 'image', attrs: { source_id: source.id, src: png1x1, alt: '现金流趋势图' } },
+        { type: 'reportNote', attrs: { id: '1' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '附注仍在章节末。' }] }] },
+      ],
+    };
+    const handlers = mountStateful({ document: original, body: documentToMarkdown(original), initialMode: 'read' });
+
+    fireEvent.click(screen.getByRole('button', { name: '整理段落' }));
+    const previewRegion = screen.getByRole('region', { name: '段落整理预览' });
+    expect(previewRegion.textContent).toContain('只按完整句、分号和已有换行拆段');
+    expect(previewRegion.textContent).toContain('本次会整理 1 段，新增 4 个段落。');
+    expect(handlers.current().document).toEqual(original);
+    expect(handlers.onDocument).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消整理' }));
+    expect(screen.queryByRole('region', { name: '段落整理预览' })).toBeNull();
+    expect(handlers.current().document).toEqual(original);
+
+    fireEvent.click(screen.getByRole('button', { name: '整理段落' }));
+    fireEvent.click(screen.getByRole('button', { name: '采用整理' }));
+
+    await waitFor(() => expect(handlers.onDocument).toHaveBeenCalled());
+    const adopted = handlers.current().document as ReportDocument;
+    expect(handlers.current().review).toBe('unreviewed');
+    expect(sourceParagraphs(adopted).map(textContent).join('')).toBe(longParagraph);
+    expect(sourceParagraphs(adopted)).toHaveLength(5);
+    expect(sourceParagraphs(adopted).every((node) => node.attrs?.source_id === source.id && node.attrs?.sheet === '摘要' && node.attrs?.range === 'A1:D9')).toBe(true);
+    expect(JSON.stringify(adopted)).toContain('"colspan":2');
+    expect(JSON.stringify(adopted)).toContain('现金流趋势图');
+    expect(JSON.stringify(adopted)).toContain('reportNote');
+
+    await waitFor(() => expect((screen.getByRole('button', { name: '撤销' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(sourceParagraphs(handlers.current().document as ReportDocument)).toHaveLength(1));
+    expect(sourceParagraphs(handlers.current().document as ReportDocument).map(textContent).join('')).toBe(longParagraph);
+
+    await waitFor(() => expect((screen.getByRole('button', { name: '重做' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '重做' }));
+    await waitFor(() => expect(sourceParagraphs(handlers.current().document as ReportDocument)).toHaveLength(5));
+  });
+
+  it('disables paragraph reflow for source mode, busy and empty reports without mutating content', () => {
+    const document = documentFromMarkdown('# 管理摘要\n正文。\n');
+    const sourceHandlers = mountStateful({ document, body: documentToMarkdown(document) });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Markdown 源码' }));
+    expect((screen.getByRole('button', { name: '整理段落' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(sourceHandlers.current().document).toEqual(document);
+    cleanup();
+
+    mount({ busy: true });
+    expect((screen.getByRole('button', { name: '整理段落' }) as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+
+    mount({ body: '', document: { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [] } });
+    expect((screen.getByRole('button', { name: '整理段落' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('uses inline link controls and exposes cancellable report progress', async () => {
     const prompt = vi.spyOn(window, 'prompt').mockImplementation(() => 'https://bad.example');
     let progress!: (value: { task: string; phase: string }) => void;
@@ -265,6 +431,16 @@ function validateWithPython(document: ReportDocument): { document: ReportDocumen
 
 function cell(type: 'tableHeader' | 'tableCell', text: string, attrs: Record<string, unknown> = {}) {
   return { type, attrs: { source_id: source.id, ...attrs }, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
+}
+
+
+function sourceParagraphs(document: ReportDocument): ReportNode[] {
+  return document.content.filter((node) => node.type === 'paragraph' && node.attrs?.sheet === '摘要' && node.attrs?.range === 'A1:D9');
+}
+
+function textContent(node: ReportNode): string {
+  if (node.type === 'text') return node.text ?? '';
+  return (node.content ?? []).map(textContent).join('');
 }
 
 const png1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';

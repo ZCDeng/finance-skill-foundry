@@ -29,6 +29,7 @@ import {
   Redo2,
   Rows3,
   Scissors,
+  Sparkles,
   Trash2,
   SplitSquareHorizontal,
   Table2,
@@ -54,6 +55,10 @@ import type {
   ReportNode,
   ReportSource,
 } from "../../../electron/reports/model.js";
+import {
+  reflowReportParagraphs,
+  type ReportParagraphReflowResult,
+} from "../../../electron/reports/readability.js";
 import {
   documentFromMarkdown,
   documentToMarkdown,
@@ -236,7 +241,9 @@ function cleanEditorNode(node: ReportNode): ReportNode {
   const attrs = cleanEditorRecord(node.attrs);
   if (attrs) next.attrs = attrs;
   const marks = node.marks?.map((mark) => {
-    const cleanMark: NonNullable<ReportNode["marks"]>[number] = { type: mark.type };
+    const cleanMark: NonNullable<ReportNode["marks"]>[number] = {
+      type: mark.type,
+    };
     const markAttrs = cleanEditorRecord(mark.attrs);
     if (markAttrs) cleanMark.attrs = markAttrs;
     return cleanMark;
@@ -246,7 +253,9 @@ function cleanEditorNode(node: ReportNode): ReportNode {
   return next;
 }
 
-function cleanEditorRecord(attrs: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function cleanEditorRecord(
+  attrs: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
   if (!attrs) return undefined;
   const entries = Object.entries(attrs).flatMap(([key, value]) => {
     if (value == null) return [];
@@ -254,10 +263,18 @@ function cleanEditorRecord(attrs: Record<string, unknown> | undefined): Record<s
       const cleanArray = value.filter((item) => item != null);
       return cleanArray.length ? [[key, cleanArray] as const] : [];
     }
-    if (key === "page" || key === "sheet" || key === "range") return [[key, String(value)] as const];
+    if (key === "page" || key === "sheet" || key === "range")
+      return [[key, String(value)] as const];
     return [[key, value] as const];
   });
   return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function sameEditorContent(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(cleanEditorNodes((left ?? []) as ReportNode[])) ===
+    JSON.stringify(cleanEditorNodes((right ?? []) as ReportNode[]))
+  );
 }
 
 function reportHeadings(
@@ -280,32 +297,43 @@ function reportHeadings(
   });
 }
 
-function exactAppendixDocument(
+function appendixMarkdownVariants(appendix?: string): string[] {
+  const cleanAppendix = appendix?.trim();
+  if (!cleanAppendix) return [];
+  const canonicalAppendix = documentToMarkdown(documentFromMarkdown(cleanAppendix)).trim();
+  return Array.from(new Set([cleanAppendix, canonicalAppendix]));
+}
+
+function exactAppendixResult(
   document: ReportDocument,
   body: string,
   appendix: string | undefined,
   preserveStructured: boolean,
-): ReportDocument {
-  const cleanAppendix = appendix?.trim();
-  if (!cleanAppendix) return document;
+): { document: ReportDocument; folded: boolean } {
+  const appendixVariants = appendixMarkdownVariants(appendix);
+  if (!appendixVariants.length) return { document, folded: false };
   const trimmedBody = body.trimEnd();
-  if (!trimmedBody.endsWith(cleanAppendix)) return document;
+  const matchedAppendix = appendixVariants.find((candidate) => trimmedBody.endsWith(candidate));
+  if (!matchedAppendix) return { document, folded: false };
   for (let index = document.content.length - 1; index >= 0; index -= 1) {
     const suffix = {
       ...document,
       metadata: { company: "", period: "", currency: "", unit: "" },
       content: document.content.slice(index),
     };
-    if (documentToMarkdown(suffix).trim() === cleanAppendix)
-      return { ...document, content: document.content.slice(0, index) };
+    if (appendixVariants.includes(documentToMarkdown(suffix).trim()))
+      return { document: { ...document, content: document.content.slice(0, index) }, folded: true };
   }
   return preserveStructured
-    ? document
-    : documentFromMarkdown(
-        trimmedBody
-          .slice(0, trimmedBody.length - cleanAppendix.length)
-          .trimEnd(),
-      );
+    ? { document, folded: false }
+    : {
+        document: documentFromMarkdown(
+          trimmedBody
+            .slice(0, trimmedBody.length - matchedAppendix.length)
+            .trimEnd(),
+        ),
+        folded: true,
+      };
 }
 
 function sourceLabel(format: ExportFormat): string {
@@ -396,6 +424,9 @@ export function ReportEditor({
   } | null>(null);
   const [reportPhase, setReportPhase] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [reflowPreview, setReflowPreview] =
+    useState<ReportParagraphReflowResult | null>(null);
+  const [, setEditorRevision] = useState(0);
   const changeMode = (next: ReportMode) => {
     setLocalMode(next);
     onMode?.(next);
@@ -407,12 +438,15 @@ export function ReportEditor({
     () => document ?? documentFromMarkdown(mainMarkdown),
     [document, mainMarkdown],
   );
-  const isEmptyDocument = workingDocument.content.length === 0 || documentToMarkdown(workingDocument).trim() === "";
-  const readingDocument = useMemo(
+  const isEmptyDocument =
+    workingDocument.content.length === 0 ||
+    documentToMarkdown(workingDocument).trim() === "";
+  const readingResult = useMemo(
     () =>
-      exactAppendixDocument(workingDocument, body, appendix, Boolean(document)),
+      exactAppendixResult(workingDocument, body, appendix, Boolean(document)),
     [appendix, body, document, workingDocument],
   );
+  const readingDocument = readingResult.document;
   const headings = useMemo(
     () => reportHeadings(readingDocument),
     [readingDocument],
@@ -448,6 +482,7 @@ export function ReportEditor({
       onBody(documentToMarkdown(next));
       onReview("unreviewed");
     },
+    onTransaction: () => setEditorRevision((value) => value + 1),
   });
 
   useEffect(() => {
@@ -462,6 +497,8 @@ export function ReportEditor({
 
   useEffect(() => {
     if (!editor || editor.isFocused) return;
+    if (sameEditorContent(editor.getJSON().content, workingDocument.content))
+      return;
     editorReady.current = false;
     editor.commands.setContent(
       { type: "doc", content: workingDocument.content },
@@ -528,16 +565,34 @@ export function ReportEditor({
     onReview("unreviewed");
   };
 
-  const updateMetadata = (key: keyof ReportDocument["metadata"], value: string) => {
-    commitDocument({ ...workingDocument, metadata: { ...workingDocument.metadata, [key]: value } });
+  const updateMetadata = (
+    key: keyof ReportDocument["metadata"],
+    value: string,
+  ) => {
+    commitDocument({
+      ...workingDocument,
+      metadata: { ...workingDocument.metadata, [key]: value },
+    });
   };
 
   const insertManagementTemplate = () => {
-    const sections = ["报告信息", "管理摘要", "经营与预算分析", "现金流与周转", "风险及行动", "财务表格", "口径与证据附注"];
+    const sections = [
+      "报告信息",
+      "管理摘要",
+      "经营与预算分析",
+      "现金流与周转",
+      "风险及行动",
+      "财务表格",
+      "口径与证据附注",
+    ];
     commitDocument({
       ...workingDocument,
       content: sections.flatMap((text) => [
-        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text }] },
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: [{ type: "text", text }],
+        },
         { type: "paragraph", content: [] },
       ]),
     });
@@ -606,6 +661,40 @@ export function ReportEditor({
     setReportPhase("");
   };
 
+  const openReflowPreview = () => {
+    setToolError("");
+    const result = reflowReportParagraphs(workingDocument);
+    if (!result.changedParagraphs) {
+      setToolError("当前文稿没有可安全拆分的长段落。");
+      return;
+    }
+    setReflowPreview(result);
+  };
+
+  const cancelReflowPreview = () => setReflowPreview(null);
+
+  const applyReflowPreview = () => {
+    if (!reflowPreview) return;
+    const next = reflowPreview.document;
+    setReflowPreview(null);
+    setSourceMode(false);
+    changeMode("edit");
+    if (editor) {
+      editorReady.current = true;
+      const nextDoc = editor.schema.nodeFromJSON({
+        type: "doc",
+        content: next.content,
+      });
+      editor.view.dispatch(
+        editor.state.tr
+          .replaceWith(0, editor.state.doc.content.size, nextDoc.content)
+          .scrollIntoView(),
+      );
+    } else {
+      commitDocument(next);
+    }
+  };
+
   const handleExport = async (format: ExportFormat) => {
     setExporting(true);
     setReportPhase(`导出 ${sourceLabel(format)}`);
@@ -648,8 +737,14 @@ export function ReportEditor({
       if (result.cancelled) return;
       const refreshingExistingSource = Boolean(options?.sourceId);
       setImportPreview(result);
-      setImportSheet(refreshingExistingSource ? (options?.sheet ?? importSheet) : (result.sheets?.[0] ?? ""));
-      setImportRange(refreshingExistingSource ? (options?.range ?? importRange) : "");
+      setImportSheet(
+        refreshingExistingSource
+          ? (options?.sheet ?? importSheet)
+          : (result.sheets?.[0] ?? ""),
+      );
+      setImportRange(
+        refreshingExistingSource ? (options?.range ?? importRange) : "",
+      );
       if (result.source?.format === "pdf" && api.reportSource) {
         try {
           const source = unwrap(
@@ -699,8 +794,22 @@ export function ReportEditor({
   };
 
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('foundry:workspace-native-cover', { detail: { open: Boolean(importPreview) } }));
-    return () => { window.dispatchEvent(new CustomEvent('foundry:workspace-native-cover', { detail: { open: false } })); };
+    setReflowPreview(null);
+  }, [body, document, sourceMode]);
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("foundry:workspace-native-cover", {
+        detail: { open: Boolean(importPreview) },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("foundry:workspace-native-cover", {
+          detail: { open: false },
+        }),
+      );
+    };
   }, [importPreview]);
 
   const insertImage = async (file: File | undefined) => {
@@ -792,6 +901,17 @@ export function ReportEditor({
                 <Upload size={14} aria-hidden />
                 导入
               </Button>
+              {mode !== "print" && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={busy || sourceMode || isEmptyDocument}
+                  onClick={openReflowPreview}
+                >
+                  <Sparkles size={14} aria-hidden />
+                  整理段落
+                </Button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -823,6 +943,44 @@ export function ReportEditor({
             </div>
           </div>
 
+          {reflowPreview && (
+            <section
+              className="report-reflow-preview"
+              aria-label="段落整理预览"
+            >
+              <div className="analysis-section-heading">
+                <div>
+                  <h3>段落整理预览</h3>
+                  <p className="analysis-note">
+                    只按完整句、分号和已有换行拆段；文字、数字、引用和顺序保持不变。
+                    本次会整理 {reflowPreview.changedParagraphs} 段，新增{" "}
+                    {reflowPreview.addedParagraphs} 个段落。
+                  </p>
+                </div>
+                <div className="analysis-actions">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={cancelReflowPreview}
+                  >
+                    取消整理
+                  </Button>
+                  <Button type="button" onClick={applyReflowPreview}>
+                    采用整理
+                  </Button>
+                </div>
+              </div>
+              <ReportReading
+                title={title}
+                body={documentToMarkdown(reflowPreview.document)}
+                document={reflowPreview.document}
+                limitations={limitations}
+                appendix={undefined}
+                preserveStructured
+              />
+            </section>
+          )}
+
           {mode === "edit" && (
             <fieldset className="report-editor-panel" disabled={busy}>
               <label>
@@ -836,13 +994,57 @@ export function ReportEditor({
               <details className="report-info-fields">
                 <summary>报告信息</summary>
                 <div>
-                  <label>公司<Input aria-label="报告公司" value={workingDocument.metadata.company} onChange={(event) => updateMetadata("company", event.target.value)} /></label>
-                  <label>期间<Input aria-label="报告期间" value={workingDocument.metadata.period} onChange={(event) => updateMetadata("period", event.target.value)} /></label>
-                  <label>币种<Input aria-label="报告币种" value={workingDocument.metadata.currency} onChange={(event) => updateMetadata("currency", event.target.value)} /></label>
-                  <label>单位<Input aria-label="报告单位" value={workingDocument.metadata.unit} onChange={(event) => updateMetadata("unit", event.target.value)} /></label>
+                  <label>
+                    公司
+                    <Input
+                      aria-label="报告公司"
+                      value={workingDocument.metadata.company}
+                      onChange={(event) =>
+                        updateMetadata("company", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    期间
+                    <Input
+                      aria-label="报告期间"
+                      value={workingDocument.metadata.period}
+                      onChange={(event) =>
+                        updateMetadata("period", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    币种
+                    <Input
+                      aria-label="报告币种"
+                      value={workingDocument.metadata.currency}
+                      onChange={(event) =>
+                        updateMetadata("currency", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    单位
+                    <Input
+                      aria-label="报告单位"
+                      value={workingDocument.metadata.unit}
+                      onChange={(event) =>
+                        updateMetadata("unit", event.target.value)
+                      }
+                    />
+                  </label>
                 </div>
               </details>
-              {isEmptyDocument && <Button variant="outline" type="button" onClick={insertManagementTemplate}>插入经营分析模板</Button>}
+              {isEmptyDocument && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={insertManagementTemplate}
+                >
+                  插入经营分析模板
+                </Button>
+              )}
               <div
                 className="report-editor-toolbar"
                 aria-label="文稿编辑工具栏"
@@ -1140,7 +1342,8 @@ export function ReportEditor({
               ) : (
                 <>
                   <EditorContent editor={editor} />
-                  <label className="report-source-compat">Markdown 源码快速编辑
+                  <label className="report-source-compat">
+                    Markdown 源码快速编辑
                     <Textarea
                       aria-label="文稿正文"
                       rows={6}
@@ -1185,6 +1388,7 @@ export function ReportEditor({
               limitations={limitations}
               appendix={appendix}
               preserveStructured={Boolean(document)}
+              appendixFolded={readingResult.folded}
             />
           )}
           {mode === "print" && (
@@ -1267,6 +1471,7 @@ function ReportReading({
   limitations,
   appendix,
   preserveStructured = true,
+  appendixFolded,
 }: {
   title: string;
   body: string;
@@ -1274,16 +1479,16 @@ function ReportReading({
   limitations: string;
   appendix?: string;
   preserveStructured?: boolean;
+  appendixFolded?: boolean;
 }) {
-  const html = useMemo(() => {
-    const display = exactAppendixDocument(
-      document,
-      body,
-      appendix,
-      preserveStructured,
-    );
-    return reportArticleFragment(renderReportHtml(display, title));
-  }, [body, document, title, appendix, preserveStructured]);
+  const appendixResult = useMemo(
+    () => exactAppendixResult(document, body, appendix, preserveStructured),
+    [body, document, appendix, preserveStructured],
+  );
+  const html = useMemo(
+    () => reportArticleFragment(renderReportHtml(appendixResult.document, title)),
+    [appendixResult.document, title],
+  );
   const appendixHtml = useMemo(
     () =>
       appendix
@@ -1303,7 +1508,7 @@ function ReportReading({
         className="analysis-draft-main"
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {appendix && (
+      {appendix && (appendixFolded ?? appendixResult.folded) && (
         <details className="analysis-details analysis-appendix-fold">
           <summary>系统生成计算依据附录</summary>
           <div dangerouslySetInnerHTML={{ __html: appendixHtml }} />
@@ -1453,7 +1658,8 @@ function pdfDataFromDataUrl(dataUrl: string): Uint8Array {
   try {
     const binary = atob(dataUrl.slice(prefix.length));
     const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    for (let index = 0; index < binary.length; index += 1)
+      bytes[index] = binary.charCodeAt(index);
     return bytes;
   } catch {
     throw new Error("PDF_SOURCE_INVALID");
@@ -1461,27 +1667,49 @@ function pdfDataFromDataUrl(dataUrl: string): Uint8Array {
 }
 
 function pdfPreviewErrorMessage(failure: unknown): string {
-  if (failure instanceof Error && failure.name === "RenderingCancelledException") return "";
+  if (
+    failure instanceof Error &&
+    failure.name === "RenderingCancelledException"
+  )
+    return "";
   return "PDF 原页暂时无法预览，可继续使用已提取的草稿内容。";
 }
 
 function PdfComparison({ dataUrl }: { dataUrl: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const pdfRef = useRef<{ numPages: number; getPage(page: number): Promise<any>; destroy?(): Promise<void> | void } | null>(null);
-  const renderTaskRef = useRef<{ cancel(): void; promise: Promise<unknown> } | null>(null);
+  const pdfRef = useRef<{
+    numPages: number;
+    getPage(page: number): Promise<any>;
+    destroy?(): Promise<void> | void;
+  } | null>(null);
+  const renderTaskRef = useRef<{
+    cancel(): void;
+    promise: Promise<unknown>;
+  } | null>(null);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    let loadingTask: { promise: Promise<any>; destroy?(): Promise<void> | void } | null = null;
+    let loadingTask: {
+      promise: Promise<any>;
+      destroy?(): Promise<void> | void;
+    } | null = null;
     const load = async () => {
       try {
-        setError('');
-        const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString();
-        loadingTask = pdfjs.getDocument({ data: pdfDataFromDataUrl(dataUrl), isEvalSupported: false } as Parameters<typeof pdfjs.getDocument>[0] & { isEvalSupported: boolean });
+        setError("");
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.mjs",
+          import.meta.url,
+        ).toString();
+        loadingTask = pdfjs.getDocument({
+          data: pdfDataFromDataUrl(dataUrl),
+          isEvalSupported: false,
+        } as Parameters<typeof pdfjs.getDocument>[0] & {
+          isEvalSupported: boolean;
+        });
         const pdf = await loadingTask.promise;
         if (cancelled) {
           await pdf.destroy?.();
@@ -1509,7 +1737,7 @@ function PdfComparison({ dataUrl }: { dataUrl: string }) {
     let cancelled = false;
     const render = async () => {
       try {
-        setError('');
+        setError("");
         const pdf = pdfRef.current;
         if (!pdf) return;
         renderTaskRef.current?.cancel();
@@ -1517,11 +1745,15 @@ function PdfComparison({ dataUrl }: { dataUrl: string }) {
         if (cancelled) return;
         const viewport = pdfPage.getViewport({ scale: 0.8 });
         const canvas = canvasRef.current;
-        const context = canvas?.getContext('2d');
+        const context = canvas?.getContext("2d");
         if (!canvas || !context) return;
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        const task = pdfPage.render({ canvas, canvasContext: context, viewport });
+        const task = pdfPage.render({
+          canvas,
+          canvasContext: context,
+          viewport,
+        });
         renderTaskRef.current = task;
         await task.promise;
       } catch (failure) {
@@ -1541,13 +1773,33 @@ function PdfComparison({ dataUrl }: { dataUrl: string }) {
       <div className="analysis-section-heading">
         <h4>PDF 原页对照</h4>
         <div className="analysis-actions">
-          <Button variant="outline" type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</Button>
-          <span className="analysis-note">{page}/{pages}</span>
-          <Button variant="outline" type="button" disabled={page >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))}>下一页</Button>
+          <Button
+            variant="outline"
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+          >
+            上一页
+          </Button>
+          <span className="analysis-note">
+            {page}/{pages}
+          </span>
+          <Button
+            variant="outline"
+            type="button"
+            disabled={page >= pages}
+            onClick={() => setPage((value) => Math.min(pages, value + 1))}
+          >
+            下一页
+          </Button>
         </div>
       </div>
       <canvas ref={canvasRef} aria-label="PDF 原页画布" />
-      {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+      {error && (
+        <p role="alert" className="analysis-message analysis-message--error">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
