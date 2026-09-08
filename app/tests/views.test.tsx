@@ -323,10 +323,10 @@ describe('the analysis report page', () => {
     await waitFor(() => expect(reportPreview).toHaveBeenCalledWith(TASK.id, expect.objectContaining({ content: expect.any(Array) }), '经营简报'));
     expect(screen.getByTitle('正式预览')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
     expect(screen.getByLabelText('可视化文稿编辑器')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '阅读文稿' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^阅读$/ }));
     expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain('利润改善。');
   });
 });

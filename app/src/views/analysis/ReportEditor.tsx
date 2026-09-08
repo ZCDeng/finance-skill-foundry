@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Image } from "@tiptap/extension-image";
@@ -369,6 +369,9 @@ export function ReportEditor({
   review,
   document,
   busy,
+  toolbarLabel = "文稿",
+  status,
+  assistantAction,
   initialMode = "read",
   mode: controlledMode,
   onMode,
@@ -387,6 +390,9 @@ export function ReportEditor({
   review: string;
   document?: ReportDocument;
   busy: boolean;
+  toolbarLabel?: string;
+  status?: string;
+  assistantAction?: ReactNode;
   initialMode?: ReportMode;
   mode?: ReportMode;
   onMode?(value: ReportMode): void;
@@ -844,33 +850,11 @@ export function ReportEditor({
         </div>
       )}
       <div className="report-shell">
-        <aside className="report-outline" aria-label="文稿目录">
-          <div className="report-outline__head">
-            <BookOpen size={15} aria-hidden />
-            <span>目录</span>
+        <div className="report-toolbar" role="group" aria-label="文稿工具栏">
+          <div className="report-context">
+            <h3>{toolbarLabel}</h3>
+            {status && <span className="report-status">{status}</span>}
           </div>
-          {headings.length ? (
-            <details open className="report-outline__sections">
-              <summary>章节目录</summary>
-              <nav>
-                {headings.map((item) => (
-                  <a
-                    key={item.id}
-                    href={`#${item.id}`}
-                    style={{
-                      paddingLeft: `${Math.max(0, item.level - 1) * 12}px`,
-                    }}
-                  >
-                    {item.text}
-                  </a>
-                ))}
-              </nav>
-            </details>
-          ) : (
-            <p className="analysis-note">添加一、二级标题后生成目录。</p>
-          )}
-        </aside>
-        <div className="report-main">
           <div className="report-topbar">
             <div className="report-modes" role="tablist" aria-label="文稿模式">
               {(
@@ -893,7 +877,8 @@ export function ReportEditor({
             </div>
             <div className="report-actions">
               <Button
-                variant="outline"
+                variant="ghost"
+                size="sm"
                 type="button"
                 disabled={busy || importing}
                 onClick={() => void importReport()}
@@ -903,7 +888,8 @@ export function ReportEditor({
               </Button>
               {mode !== "print" && (
                 <Button
-                  variant="outline"
+                  variant="ghost"
+                  size="sm"
                   type="button"
                   disabled={busy || sourceMode || isEmptyDocument}
                   onClick={openReflowPreview}
@@ -916,6 +902,7 @@ export function ReportEditor({
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
+                    size="sm"
                     type="button"
                     disabled={busy || !title.trim() || !body.trim()}
                   >
@@ -940,8 +927,33 @@ export function ReportEditor({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              {assistantAction && <span className="report-assistant-action">{assistantAction}</span>}
             </div>
           </div>
+        </div>
+        <aside className="report-outline" aria-label="文稿目录">
+          <details open className="report-outline__sections">
+            <summary><BookOpen size={15} aria-hidden /><span>目录</span></summary>
+            {headings.length ? (
+              <nav>
+                {headings.map((item) => (
+                  <a
+                    key={item.id}
+                    href={`#${item.id}`}
+                    style={{
+                      paddingLeft: `${Math.max(0, item.level - 1) * 12}px`,
+                    }}
+                  >
+                    {item.text}
+                  </a>
+                ))}
+              </nav>
+            ) : (
+              <p className="analysis-note">添加一、二级标题后生成目录。</p>
+            )}
+          </details>
+        </aside>
+        <div className="report-main">
 
           {reflowPreview && (
             <section

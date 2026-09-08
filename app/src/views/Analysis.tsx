@@ -1333,11 +1333,12 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
         onDiscuss={onDiscussRequirements} />
     </details>}
-    <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
-      {draft && <span className="analysis-note">{STATUS[draft.publication_status] ?? draft.publication_status} · {STATUS[draft.review_status] ?? draft.review_status}</span>}
-      <div className="analysis-actions"><Button variant="outline" type="button" aria-pressed={reportMode === 'edit'} onClick={() => setReportMode(reportMode === 'edit' ? 'read' : 'edit')}>{reportMode === 'edit' ? '阅读文稿' : '编辑文稿'}</Button>
-      <Button variant="outline" type="button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</Button></div></div>
     <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} title={title} body={body} appendix={reading.appendix}
+      toolbarLabel={draft ? '文稿' : '写下判断与建议'}
+      status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status}` : undefined}
+      assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
+        disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
+        onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
       limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
       onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)} />
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>

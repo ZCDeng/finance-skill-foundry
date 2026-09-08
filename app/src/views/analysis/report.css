@@ -1,8 +1,12 @@
 @layer layout {
 .report-workspace { display: flex; flex-direction: column; gap: 18px; min-width: 0; container: report-workspace / inline-size; }
-.report-shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; min-width: 0; width: 100%; max-width: calc(200px + 32px + 56rem); margin-inline: auto; }
+.report-shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px 32px; align-items: start; min-width: 0; width: 100%; max-width: calc(200px + 32px + 56rem); margin-inline: auto; }
+.report-toolbar { grid-column: 1 / -1; display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 12px 32px; padding-bottom: 12px; border-bottom: 1px solid var(--fnd-line); min-width: 0; }
+.report-context { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.report-context h3 { margin: 0; font-size: 16px; line-height: 24px; font-weight: var(--fnd-weight-strong); }
+.report-status { color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 22px; }
+.report-assistant-action { display: inline-flex; padding-left: 10px; border-left: 1px solid var(--fnd-line); }
 .report-outline { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; padding: 14px 0; min-width: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-.report-outline__head { display: flex; align-items: center; gap: 8px; font-weight: var(--fnd-weight-strong); color: var(--fnd-ink); }
 .report-outline nav { display: flex; flex-direction: column; gap: 2px; }
 .report-outline a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 5px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .report-outline a:hover, .report-outline a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
@@ -11,7 +15,7 @@
 .report-modes { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-modes button { border: 0; border-radius: 6px; background: transparent; color: var(--fnd-muted); font: inherit; font-size: var(--fnd-size-small); padding: 7px 12px; cursor: pointer; }
 .report-modes button[aria-selected='true'] { background: var(--fnd-ink); color: var(--fnd-bg); }
-.report-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.report-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .report-editor-panel { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .report-editor-panel > label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .report-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
@@ -71,10 +75,13 @@
 .report-pdf-compare h4 { margin: 0; font-size: 15px; }
 .report-pdf-compare canvas { max-width: 100%; align-self: center; background: white; }
 @container report-workspace (max-width: 960px) {
-  .report-shell { grid-template-columns: minmax(0, 1fr); }
+  .report-shell, .report-toolbar { grid-template-columns: minmax(0, 1fr); }
   .report-outline { position: static; border-bottom: 1px solid var(--fnd-line); padding-bottom: 14px; }
   .report-outline nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }
+}
+@container report-workspace (max-width: 760px) {
+  .report-topbar { align-items: flex-start; flex-direction: column; }
 }
 @container report-workspace (max-width: 680px) {
   .report-reading, .report-prosemirror { max-width: none; padding: 18px 16px; }
@@ -91,6 +98,7 @@
 .report-reflow-preview .report-reading { padding: 0; }
 .report-outline__sections { display: flex; flex-direction: column; gap: 8px; }
 .report-outline__sections summary { cursor: pointer; color: var(--fnd-ink); font-weight: var(--fnd-weight-strong); }
+.report-outline__sections summary svg { display: inline-block; margin-right: 8px; vertical-align: -2px; }
 }
 @layer layout {
 .report-info-fields { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; background: var(--fnd-surface); }
