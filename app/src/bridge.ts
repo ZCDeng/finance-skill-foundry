@@ -281,6 +281,8 @@ export interface AnalysisRun extends AnalysisObject {
 export interface AnalysisDraft extends AnalysisObject {
   title: string;
   body: string;
+  evidence_appendix?: string;
+  evidence_appendix_meta?: Record<string, unknown>;
   run_ids: string[];
   claims: unknown[];
   fact_ids?: string[];

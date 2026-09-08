@@ -132,7 +132,10 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
       style={{ '--chat-width': `${chatWidth}px` } as CSSProperties}>
       {overlay ? <button className="workspace-scrim" aria-label="关闭任务列表" onClick={closeSidebar} /> : null}
       <aside ref={sidebarPanel} className="workspace-sidebar" hidden={!sidebar} role={overlay ? 'dialog' : undefined} aria-modal={overlay ? true : undefined} aria-label="财务任务">
-        {overlay ? <Button size="icon" variant="ghost" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></Button> : null}
+        <div className="workspace-sidebar-header">
+          <h2>任务</h2>
+          {overlay ? <Button size="icon" variant="ghost" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></Button> : null}
+        </div>
         <Button className="workspace-new" onClick={() => { onNew(); if (!wide) closeSidebar(); }}><Plus size={16} aria-hidden />新建任务</Button>
         <label className="workspace-search"><Search size={15} aria-hidden /><Input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
@@ -141,7 +144,9 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
             onClick={() => pick(row.id)}><span>{row.title}</span>{row.period ? <small>{row.period}</small> : null}</button>)}
           {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : '从一个问题开始第一项分析'}</p> : null}
         </div>
-        <button className="workspace-library" onClick={() => { openMethods(); if (!wide) closeSidebar(); }}><BookOpen size={16} aria-hidden />方法库</button>
+        <div className="workspace-sidebar-footer">
+          <button className="workspace-library" onClick={() => { openMethods(); if (!wide) closeSidebar(); }}><BookOpen size={16} aria-hidden />方法库</button>
+        </div>
       </aside>
       <section className="workspace-main" aria-label="任务工作区" inert={overlay ? true : undefined}>
         <header className="workspace-header">

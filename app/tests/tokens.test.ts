@@ -92,6 +92,15 @@ describe('the five words are legible in both themes', () => {
   const light = block(TOKENS, ':root');
   const dark = block(TOKENS, ":root[data-theme='dark']");
 
+  it('keeps restrained keyboard focus distinguishable on every workspace surface', () => {
+    for (const table of [light, dark]) {
+      for (const ground of ['--fnd-bg', '--fnd-surface', '--fnd-surface-strong', '--fnd-selection-surface']) {
+        expect(contrast(table['--fnd-focus'], table[ground]), `${ground} focus contrast`).toBeGreaterThanOrEqual(3);
+      }
+      expect(table['--fnd-line-hover']).not.toBe(table['--fnd-focus']);
+    }
+  });
+
   it('clears 4.5:1 for every mark that is text', () => {
     const cases: [string, Record<string, string>, string[]][] = [
       ['light', light, ['#ffffff', '#f7f7f7']],

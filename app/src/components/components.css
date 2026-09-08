@@ -6,7 +6,7 @@
 .fnd-head__logo { width: 18.5px; height: 24px; flex: 0 0 auto; background: url('../assets/mark.png') center / contain no-repeat; }
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-ink); }
 .fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
-.fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: 13px; font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
+.fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
 .fnd-head__tab:hover {
   color: var(--fnd-ink);
   background: var(--fnd-surface-strong);
@@ -16,7 +16,7 @@
   background: var(--fnd-selection-surface);
 }
 
-.fnd-head__tab[aria-current='page'] { color: var(--fnd-on-selected); background: var(--fnd-selected); }
+.fnd-head__tab[aria-current='page'] { color: var(--fnd-ink); background: var(--fnd-selection-surface); }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
 /* -- the five words ------------------------------------------------------- */
@@ -121,7 +121,7 @@
 }
 
 .fnd-card:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -145,7 +145,7 @@
 .fnd-table th,
 .fnd-table td {
   text-align: left;
-  padding: 9px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--fnd-line);
   vertical-align: top;
 }
@@ -153,7 +153,7 @@
 .fnd-table th {
   color: var(--fnd-muted);
   font-weight: var(--fnd-weight-strong);
-  border-bottom-color: var(--fnd-ink);
+  border-bottom-color: var(--fnd-line-hover);
 }
 
 .fnd-table tbody tr:last-child td {
@@ -313,7 +313,7 @@
   background: var(--fnd-surface);
   color: var(--fnd-ink);
   font-family: inherit;
-  font-size: var(--fnd-size-small);
+  font-size: var(--fnd-size-body);
   transition: border-color var(--fnd-transition);
 }
 
@@ -352,7 +352,7 @@ textarea.fnd-field {
 /* The outline overlaps the neutral border: hover + focus paints one edge.
  * Error colour remains on the field; disabled fields never gain hover paint. */
 .fnd-field:focus-visible:not(:disabled) {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -395,7 +395,7 @@ textarea.fnd-field {
 }
 
 .fnd-head__help:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -428,7 +428,7 @@ textarea.fnd-field {
 }
 
 .fnd-picker:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -469,7 +469,7 @@ textarea.fnd-field {
 }
 
 .fnd-start:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 

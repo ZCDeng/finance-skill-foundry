@@ -13,10 +13,11 @@ export const LIGHT_THEME = {
   ink: '#000000e0',
   muted: '#00000099',
   line: '#1f1f1f24',
-  focus: '#a67e3c',
+  lineHover: '#1f1f1f66',
+  focus: '#8a6729',
   selected: '#8a6729',
   onSelected: '#f9fafb',
-  selectionSurface: '#f5efe3',
+  selectionSurface: '#efefed',
 } as const;
 
 export const DARK_THEME = {
@@ -26,10 +27,11 @@ export const DARK_THEME = {
   ink: '#f9fafb',
   muted: '#a6a6a6',
   line: '#ffffff24',
-  focus: '#e2c180',
+  lineHover: '#ffffff59',
+  focus: '#bfa36c',
   selected: '#e2c180',
   onSelected: '#1f1f1f',
-  selectionSurface: '#302b21',
+  selectionSurface: '#292929',
 } as const;
 
 /** The body attribute written by the pinned DSH ThemePresenter for dark mode. */
@@ -40,10 +42,10 @@ export const SEND_PRIMARY_CLASS = 'uV2eYG_primary';
 export const SEND_TRAILING_CLASS = 'uV2eYG_trailing';
 export const SETTINGS_CLOSE_CLASS = 'VOzbGW_close';
 
-/** The dark-theme focus gold, matching the host's `--fnd-line-hover`. */
+/** The dark-theme focus gold, matching the host's `--fnd-focus`. */
 export const EDGE = DARK_THEME.focus;
 
-/** The light-theme focus gold, matching the host's `--fnd-line-hover`. */
+/** The light-theme focus gold, matching the host's `--fnd-focus`. */
 export const EDGE_LIGHT = LIGHT_THEME.focus;
 
 /** The dark neutral edge used before hover or focus. */
@@ -51,6 +53,12 @@ export const LINE = DARK_THEME.line;
 
 /** The light neutral edge used before hover or focus. */
 export const LINE_LIGHT = LIGHT_THEME.line;
+
+/** The dark neutral edge used for hover affordance. */
+export const LINE_HOVER = DARK_THEME.lineHover;
+
+/** The light neutral edge used for hover affordance. */
+export const LINE_HOVER_LIGHT = LIGHT_THEME.lineHover;
 
 /** What the hero says once its whale has been replaced by this product's mark. */
 export const HERO_HEADLINE = 'FA Foundry harness';
@@ -68,6 +76,7 @@ body {
   --foundry-native-ink:${LIGHT_THEME.ink};
   --foundry-native-muted:${LIGHT_THEME.muted};
   --foundry-native-line:${LIGHT_THEME.line};
+  --foundry-native-line-hover:${LIGHT_THEME.lineHover};
   --foundry-native-focus:${LIGHT_THEME.focus};
   --foundry-native-selected:${LIGHT_THEME.selected};
   --foundry-native-on-selected:${LIGHT_THEME.onSelected};
@@ -81,6 +90,7 @@ body[${DSH_DARK_ATTRIBUTE}] {
   --foundry-native-ink:${DARK_THEME.ink};
   --foundry-native-muted:${DARK_THEME.muted};
   --foundry-native-line:${DARK_THEME.line};
+  --foundry-native-line-hover:${DARK_THEME.lineHover};
   --foundry-native-focus:${DARK_THEME.focus};
   --foundry-native-selected:${DARK_THEME.selected};
   --foundry-native-on-selected:${DARK_THEME.onSelected};
@@ -105,8 +115,8 @@ body {
   --dsw-alias-border-l1:var(--foundry-native-line) !important;
   --dsw-alias-border-l2:var(--foundry-native-line) !important;
   --dsw-alias-border-l2-darkmode-thin:var(--foundry-native-line) !important;
-  --dsw-alias-border-l3:var(--foundry-native-line) !important;
-  --dsw-alias-border-l4:var(--foundry-native-line) !important;
+  --dsw-alias-border-l3:var(--foundry-native-line-hover) !important;
+  --dsw-alias-border-l4:var(--foundry-native-line-hover) !important;
   --dsw-alias-separator-primary:var(--foundry-native-line) !important;
   --dsw-alias-interactive-bg-hover:color-mix(in srgb, var(--foundry-native-ink) 8%, transparent) !important;
   --dsw-alias-interactive-bg-hover-solid:color-mix(in srgb, var(--foundry-native-ink) 8%, var(--foundry-native-bg)) !important;
@@ -121,7 +131,14 @@ body {
   --dsw-alias-button-info-hover:var(--foundry-native-focus) !important;
 }
 
-body, button, input, textarea, select { font-family:'Noto Sans SC',sans-serif !important; }
+body, button, input, textarea, select {
+  font-family:'Noto Sans SC',sans-serif !important;
+}
+
+body, button, input, select {
+  font-size:14px;
+  line-height:22px;
+}
 
 [class*="_cardWorkspaceTrigger"]::after {
   background: transparent !important;
@@ -129,16 +146,19 @@ body, button, input, textarea, select { font-family:'Noto Sans SC',sans-serif !i
 
 [data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}] {
   border-color: var(--foundry-native-line) !important;
+  box-shadow: none !important;
 }
 
-[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:hover,
+[data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:hover {
+  border-color: var(--foundry-native-line-hover) !important;
+}
+
 [data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within {
   border-color: var(--foundry-native-focus) !important;
 }
 
 [data-foundry-frame] [${COMPOSER_CARD_ATTRIBUTE}]:focus-within {
-  outline: 2px solid var(--foundry-native-focus) !important;
-  outline-offset: -1px;
+  outline: none !important;
 }
 
 .${SEND_TRAILING_CLASS} > button.${SEND_PRIMARY_CLASS} {
@@ -146,12 +166,13 @@ body, button, input, textarea, select { font-family:'Noto Sans SC',sans-serif !i
 }
 
 [data-foundry-frame] summary:focus-visible {
-  outline: 2px solid var(--foundry-native-focus) !important;
+  outline: 1px solid var(--foundry-native-focus) !important;
   outline-offset: -1px;
+  box-shadow: none !important;
 }
 
 .${SETTINGS_CLOSE_CLASS}:focus-visible {
-  outline: 2px solid var(--foundry-native-focus) !important;
+  outline: 1px solid var(--foundry-native-focus) !important;
   outline-offset: -1px;
   box-shadow: none !important;
 }

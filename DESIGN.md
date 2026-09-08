@@ -1,7 +1,7 @@
 ---
 name: FA Foundry
 description: 以任务、持续对话与真实成果组织的财务经理工作台。
-colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#f5efe3', fnd-line-hover: '#a67e3c', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#302b21', fnd-line-hover-dark: '#e2c180', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f'}
+colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f'}
 typography:
   headline: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 24px, fontWeight: 600, lineHeight: 32px}
   task-title: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 20px, fontWeight: 600, lineHeight: 28px}
@@ -9,16 +9,16 @@ typography:
   body: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 14px, lineHeight: 22px, letterSpacing: '0'}
   small: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 13px}
   label: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 12px}
-  document: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 16px, lineHeight: 1.85}
-  composer: {fontFamily: '''Noto Sans SC'', sans-serif', fontSize: 15px, lineHeight: 1.6}
+  document: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 16px, lineHeight: 28px}
+  composer: {fontFamily: '''Noto Sans SC'', sans-serif', fontSize: 16px, lineHeight: 28px}
   brand: {fontFamily: '''Asap Sharp'', ''Noto Sans SC'', sans-serif', fontSize: 22px, fontWeight: 700, lineHeight: 1}
 rounded: {control: 8px, container: 12px, chip: 30px, mark: 6px, menu: 10px}
-spacing: {control-gap: 6px, compact: 8px, small: 12px, grid-gap: 16px, workspace-gap: 20px, gutter: 24px, section-gap: 32px}
+spacing: {control-gap: 8px, compact: 8px, small: 12px, grid-gap: 20px, workspace-gap: 20px, gutter: 24px, section-gap: 32px}
 components:
-  button-primary: {backgroundColor: '{colors.fnd-accent}', textColor: '{colors.fnd-on-accent}', typography: '{typography.small}', rounded: '{rounded.control}', padding: 0 14px, height: 32px}
-  button-secondary: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.small}', rounded: '{rounded.control}', padding: 0 14px, height: 32px}
-  input: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.small}', rounded: '{rounded.control}', padding: 0 12px, height: 32px}
-  nav-current: {backgroundColor: '{colors.fnd-selected}', textColor: '{colors.fnd-on-selected}', typography: '{typography.small}', rounded: '{rounded.control}', padding: 0 16px, height: 32px}
+  button-primary: {backgroundColor: '{colors.fnd-accent}', textColor: '{colors.fnd-on-accent}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
+  button-secondary: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
+  input: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 12px, height: 36px}
+  nav-current: {backgroundColor: '{colors.fnd-selection-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 16px, height: 32px}
   chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.chip}', padding: 4px 10px}
   card: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 18px 20px}
   workspace-tab: {backgroundColor: transparent, textColor: '{colors.fnd-muted}', typography: '{typography.small}', padding: 12px 0}
@@ -32,7 +32,7 @@ components:
 
 沿用 FA 标识、中性色与金色定位。业务问题、计算值与文稿承担主要层级；财务经理可以持续讨论并查看成果，专业判断和方法复用保留为用户可控动作。此名称概括已有产品定位，未新增品牌概念、comp 承诺或长期工作流偏好。
 
-本记录合并既有设计约定，描述 2026-09-06 的实际界面。样式来源为 [tokens](app/src/styles/tokens.css)、[base](app/src/styles/base.css)、[公共控件](app/src/components/components.css)、[工作区](app/src/components/Workspace.tsx)和[成果样式](app/src/views/analysis.css)；产品事实见 [PRODUCT.md](PRODUCT.md)。
+本记录合并既有设计约定，描述 2026-09-08 的实际界面。样式来源为 [tokens](app/src/styles/tokens.css)、[base](app/src/styles/base.css)、[公共控件](app/src/components/components.css)、[工作区](app/src/components/Workspace.tsx)和[成果样式](app/src/views/analysis.css)；产品事实见 [PRODUCT.md](PRODUCT.md)。
 
 **Key Characteristics:**
 
@@ -43,9 +43,9 @@ components:
 
 ## Colors
 
-主操作使用 `fnd-accent/on-accent` 的中性反差；当前导航使用 `fnd-selected/on-selected`，成果页签用金色下划线。`fnd-line-hover` 用于悬停边界与通用焦点，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
+主操作使用 `fnd-accent/on-accent` 的中性反差；当前导航使用中性选择底色与正文色，成果页签用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
 
-前置 YAML 的 `-dark` 项是同名 CSS token 的深色覆盖值。壳跟随系统主题；原生对话在自身主题完成解析后，通过 DSW 语义别名映射同一套底色、文字、边界和金色强调色。原生 composer 默认中性边界，仅在 hover/focus 时强调。历史标记保留原有金色、灰色、蓝色语义，FA 图形保持自身颜色。
+前置 YAML 的 `-dark` 项是同名 CSS token 的深色覆盖值。壳跟随系统主题；原生对话在自身主题完成解析后，通过 DSW 语义别名映射同一套底色、文字、边界和金色强调色。原生 composer 默认中性边界，悬停保持中性色，仅在聚焦时使用 1px 金色边界。历史标记保留原有金色、灰色、蓝色语义，FA 图形保持自身颜色。
 
 **The Location Rule.** 金色服务于当前位置、选择和焦点；主操作使用既有中性反差，数值与业务状态保留文字。
 
@@ -53,17 +53,17 @@ components:
 
 Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳和原生客户端离线打包，真实变量字重 100–900，关闭合成字重；不依赖 localhost 或远程字体。Asap Sharp 仅用于品牌字。见[字体来源与许可](app/src/assets/fonts/noto-sans-sc/README.md)。
 
-任务标题 20px，窄窗为 18px；结果标题 20px，文稿标题 24px。操作/数据使用 `small`，普通正文使用 `body`，标签使用 `label`；文稿阅读为 `document`（最大 72ch），原生输入为 `composer`。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
+任务标题 20px，窄窗为 18px；结果与文稿标题 24px，文稿章节 20px。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。文稿最大宽度 42em，段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
 
 **The Real Weight Rule.** 中文强调使用已打包的真实字重；数据保留原有精度、负号、零和缺值，不借排版制造业务含义。
 
 ## Layout
 
-工作区铺满窗口，不受普通页面 1200px 上限约束；应用顶栏 56px，任务栏最小 60px。当前桌面最小窗口宽度为 1080px。初次挂载在 ≥1360px 默认显示 192px 任务栏；1101–1359px 默认收起，打开时为 240px 模态抽屉；≤1100px 将默认并排状态显示为成果专注，并保留对话/成果切换。
+工作区铺满窗口，不受普通页面 1200px 上限约束；应用顶栏 56px，任务栏最小 64px。当前桌面最小窗口宽度为 1080px。初次挂载在 ≥1360px 默认显示 256px 任务栏；1101–1359px 默认收起，打开时为 288px 模态抽屉；≤1100px 将默认并排状态显示为成果专注，并保留对话/成果切换。
 
 进入窄布局收起任务栏，放大后保留收起状态，不承诺 1440px 自动展开。专注选择按任务保留。对话默认 420px，可调 400–640px；7px 分隔条支持拖动、左右键每次 20px、Home/End 到边界，双击恢复默认值。
 
-对话与成果独立滚动，成果区 scrollTop 按任务保留；资料、结果、文稿复用该成果滚动容器，不承诺按三个页签分别恢复滚动。成果左右留白通常 24px，窄窗 16px。依据抽屉最大 340px，结果容器 ≤620px 时局部覆盖；比较为两列，≤680px 逻辑视口回退单列。这些 CSS 回退不构成移动端交付承诺。
+对话与成果独立滚动，成果区 scrollTop 按任务保留；资料、结果、文稿复用该成果滚动容器，不承诺按三个页签分别恢复滚动。成果留白为顶部 24px、左右 24px、底部 32px，窄窗左右保留 20px；原生对话采用相同字号与边缘留白。侧栏以标题、搜索、两行任务项和固定底部入口组织，任务名称 14px、期间 12px。依据抽屉最大 340px，结果容器 ≤620px 时局部覆盖；比较为两列，≤680px 逻辑视口回退单列。这些 CSS 回退不构成移动端交付承诺。
 
 ## Elevation & Depth
 
@@ -77,15 +77,15 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Components
 
-**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 32px，长示例允许换行增高。次操作/输入悬停为金色边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-mark-outside`。通用焦点外框 2px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-mark-outside` 金，不是红）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
+**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-mark-outside`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-mark-outside` 金，不是红）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
 
 **导航与焦点。** 顶层为工作区/成果库，方法库、数据台、历史任务从次级入口可达。资料/结果/文稿用带计数的 tablist，支持左右键、Home/End 与 roving tabindex。任务抽屉聚焦搜索、限制 Tab、使主工作区 inert；Escape 关闭并返回开关。图标动作有名称和状态，分隔条提供方向与数值。
 
 **持续对话。** 任务切换和隐藏/显示保留会话与未发送草稿；完整问题按准确任务转交，实际接收成功才确认提交，受阻时保留问题并允许重试，同一动作不重复发送。400/460px 设置与工具详情已有验收；这不等于未来客户端版本无需适配。
 
-**结果与依据。** 先展示运行问题、日期、四项独立状态和真实结果；定义、历史及方法保存按需展开。失败明确说明当前保留的是历史成功结果。表格具备 caption、列标题、可聚焦横向滚动区，每页最多 100 行，截断明确提示，缺值显示“—”。依据按本次运行绑定定位确切快照；非模态 dialog 打开聚焦关闭按钮，Escape 返回触发按钮。参数/假设优先用保存版本的元数据；比较并列保存运行及原行序，不推断主键或差额。
+**结果与依据。** 先展示运行问题、日期、四项独立状态和真实结果；定义、历史及方法保存按需展开。失败明确说明当前保留的是历史成功结果。表格使用中性横线与 10px 以上单元格内边距。Python/shell 结果包含明确的 label/value/unit 字段，且其余列仅为 metric、wb、sheet、cell、note、check 等已知依据字段时，先显示项目、数值、单位，完整原始列通过“完整明细”展开；额外数值列或未知字段继续默认显示全表。不改变精度、行序、缺值或财务专用展示。表格具备 caption、列标题、可聚焦横向滚动区，每页最多 100 行，截断明确提示，缺值显示“—”。依据按本次运行绑定定位确切快照；非模态 dialog 打开聚焦关闭按钮，Escape 返回触发按钮。参数/假设优先用保存版本的元数据；比较并列保存运行及原行序，不推断主键或差额。
 
-**文稿与方法。** 文稿支持 Markdown 阅读和独立编辑。工作副本按任务/版本使用会话级存储恢复，正式保存生成新版本；交给助手或导出前先保存改动。改正文不替换已引用的历史运行，导出、归档与经理认可分别操作。方法保存是折叠的可选动作，复用重新选择资料与参数；未来领域入口随实际能力出现。
+**文稿与方法。** 文稿支持 Markdown 阅读和独立编辑，借鉴 Kami 的行长、章节留白与轻表格规范。仅当已保存的计算依据与正文末尾完全匹配时，阅读区将该附录折叠，编辑和导出仍保留完整正文；旧版和不匹配内容直接呈现。工作副本按任务/版本使用会话级存储恢复，正式保存生成新版本；交给助手或导出前先保存改动。改正文不替换已引用的历史运行，导出、归档与经理认可分别操作。方法保存是折叠的可选动作，复用重新选择资料与参数；未来领域入口随实际能力出现。
 
 **验证边界。** 已核对最终整窗图与[流程](build/ui-workspace-review/final/verification.json)、[比较补拍](build/ui-workspace-review/final/comparison-recapture.json)、[原生检查](build/verification/native-workspace-final.json)、[产物记录](build/verification/ui-final-artifacts.json)：26 项原生检查和 6 项界面流程通过，资料为合成 fixture，真实 provider 调用为 0。真实模型接收/流式响应、物理 macOS 中文候选窗、完整屏幕阅读器流程未验收。[最终 ship](docs/reviews/2026-09-06-ui-finish-review.md)仅覆盖 F1–F4 修复评分；详细实现与限制见 [UI 实施记录](docs/plans/2026-09-06-ui-execution-log.md)。
 
@@ -99,6 +99,6 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## 样式级联与来源披露（2026-09-08）
 
-宿主按 `theme → base → components → layout → utilities` 排序：token 提供颜色，base 提供继承和可访问焦点，组件持有控件状态，页面持有排版，显式 utilities 用于局部组件变体。禁止在层外增加控件颜色/字体/焦点补丁。Input、Textarea 与财务字段共用 `fnd-field`；复合年月、日期和金额仅增加自己的布局及业务行为。年月内嵌图标为 26×26px，位于 32px 输入内部。
+宿主按 `theme → base → components → layout → utilities` 排序：token 提供颜色，base 提供继承和可访问焦点，组件持有控件状态，页面持有排版，显式 utilities 用于局部组件变体。禁止在层外增加控件颜色/字体/焦点补丁。Input、Textarea 与财务字段共用 `fnd-field`；复合年月、日期和金额仅增加自己的布局及业务行为。年月内嵌图标为 26×26px，垂直居中于 36px 输入内部。
 
 空资料页优先展示添加资料与讨论入口。“更新 ERP 来源”默认折叠，展开后显示原有刷新表单，保留填写内容及新旧快照语义。

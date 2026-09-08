@@ -53,4 +53,14 @@ describe('one task workspace', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '数据台' }));
     expect(props.onData).toHaveBeenCalledOnce();
   });
+
+  it('renders the task drawer as a titled navigation surface with a separate library footer', () => {
+    render(<Workspace {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    const sidebar = screen.getByRole('dialog', { name: '财务任务' });
+    expect(screen.getByRole('heading', { name: '任务' })).toBeTruthy();
+    expect(sidebar.querySelector('.workspace-search input')).toBe(screen.getByRole('searchbox', { name: '搜索任务' }));
+    expect(sidebar.querySelector('.workspace-sidebar-footer .workspace-library')).toBe(screen.getByRole('button', { name: '方法库' }));
+  });
+
 });

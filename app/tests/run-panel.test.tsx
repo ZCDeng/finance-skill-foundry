@@ -29,6 +29,22 @@ function structuredRun(overrides: Partial<AnalysisRun> = {}): AnalysisRun {
   }, ...overrides };
 }
 
+function scriptResultRun(overrides: Partial<AnalysisRun> = {}): AnalysisRun {
+  return { ...baseRun, engine: 'python', result: {
+    columns: [
+      { name: 'metric', type: 'VARCHAR' }, { name: 'label', type: 'VARCHAR' }, { name: 'value', type: 'DECIMAL' },
+      { name: 'unit', type: 'VARCHAR' }, { name: 'wb', type: 'VARCHAR' }, { name: 'sheet', type: 'VARCHAR' },
+      { name: 'cell', type: 'VARCHAR' }, { name: 'note', type: 'VARCHAR' }, { name: 'check', type: 'VARCHAR' },
+    ],
+    rows: [
+      { metric: 'gross_margin_rate', label: '综合毛利率', value: '0.123456789012345678901234567890', unit: '%', wb: 'actual.xlsx', sheet: '利润表', cell: 'G12', note: 'displayvalue: 12.35%', check: 'ok' },
+      { metric: 'adjustment', label: '调整项', value: null, unit: '元', wb: 'actual.xlsx', sheet: '调整', cell: 'B2', note: '未填', check: 'review' },
+    ],
+    row_count: 2,
+    truncated: true,
+  }, ...overrides };
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
@@ -118,5 +134,92 @@ describe('RunPanel structured aggregate results', () => {
     await screen.findByRole('region', { name: '计算结果' });
     expect(screen.queryByText(/来源可追溯/)).toBeNull();
     expect(screen.queryByLabelText('结果行来源')).toBeNull();
+  });
+
+  it('summarizes exact script result fields first and keeps all original columns in full details', async () => {
+    render(<RunPanel {...props} runs={[scriptResultRun()]} />);
+    const summary = await screen.findByRole('region', { name: '计算结果' });
+    expect(within(summary).getByRole('columnheader', { name: '项目' })).toBeTruthy();
+    expect(within(summary).getByRole('columnheader', { name: '数值' })).toBeTruthy();
+    expect(within(summary).getByRole('columnheader', { name: '单位' })).toBeTruthy();
+    expect(within(summary).queryByRole('columnheader', { name: 'metric' })).toBeNull();
+    expect(within(summary).queryByRole('columnheader', { name: 'wb' })).toBeNull();
+    expect(within(summary).getByRole('cell', { name: '0.123456789012345678901234567890' }).className).toContain('analysis-number');
+    expect(within(summary).getByRole('cell', { name: '—' })).toBeTruthy();
+    expect(screen.getByText('2 行 · 当前为截断预览')).toBeTruthy();
+
+    const full = screen.getByText('完整明细 · 9 列').closest('details') as HTMLDetailsElement;
+    expect(full.open).toBe(false);
+    fireEvent.click(screen.getByText('完整明细 · 9 列'));
+    const details = screen.getByRole('region', { name: '完整明细' });
+    expect(within(details).getByRole('columnheader', { name: 'metric' })).toBeTruthy();
+    expect(within(details).getByRole('columnheader', { name: 'check' })).toBeTruthy();
+    expect(within(details).getAllByRole('cell', { name: 'actual.xlsx' })).toHaveLength(2);
+    expect(within(details).getByRole('cell', { name: 'displayvalue: 12.35%' })).toBeTruthy();
+  });
+
+  it('keeps SQL and missing-field runs on the full table fallback', async () => {
+    const sqlRun = scriptResultRun({ engine: 'sql' });
+    const missingField = scriptResultRun({ id: 'f'.repeat(32), engine: 'python', result: {
+      ...scriptResultRun().result!,
+      columns: [{ name: 'label', type: 'VARCHAR' }, { name: 'value', type: 'DECIMAL' }],
+      rows: [{ label: '综合毛利率', value: '0.12' }],
+      row_count: 1,
+      truncated: false,
+    } });
+
+    const { rerender } = render(<RunPanel {...props} runs={[sqlRun]} />);
+    let table = await screen.findByRole('region', { name: '计算结果' });
+    expect(within(table).getByRole('columnheader', { name: 'metric' })).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: 'label' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: '项目' })).toBeNull();
+    expect(screen.queryByText(/完整明细/)).toBeNull();
+
+    rerender(<RunPanel {...props} runs={[missingField]} />);
+    table = await screen.findByRole('region', { name: '计算结果' });
+    expect(within(table).getByRole('columnheader', { name: 'label' })).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: 'value' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: '项目' })).toBeNull();
+    expect(screen.queryByText(/完整明细/)).toBeNull();
+  });
+
+  it('keeps multi-value and unknown script result columns on the full table fallback', async () => {
+    const multiValue = scriptResultRun({ id: '1'.repeat(32), result: {
+      ...scriptResultRun().result!,
+      columns: [
+        { name: 'label', type: 'VARCHAR' }, { name: 'value', type: 'DECIMAL' }, { name: 'unit', type: 'VARCHAR' },
+        { name: 'v2', type: 'DECIMAL' }, { name: 'v3', type: 'DECIMAL' },
+      ],
+      rows: [{ label: '欠费/坏账/净额', value: '100.00', unit: '元', v2: '30.00', v3: '70.00' }],
+      row_count: 1,
+      truncated: false,
+    } });
+    const unknown = scriptResultRun({ id: '2'.repeat(32), result: {
+      ...scriptResultRun().result!,
+      columns: [
+        { name: 'label', type: 'VARCHAR' }, { name: 'value', type: 'DECIMAL' }, { name: 'unit', type: 'VARCHAR' },
+        { name: 'scenario_value', type: 'DECIMAL' },
+      ],
+      rows: [{ label: '敏感性结果', value: '100.00', unit: '元', scenario_value: '88.00' }],
+      row_count: 1,
+      truncated: false,
+    } });
+
+    const { rerender } = render(<RunPanel {...props} runs={[multiValue]} />);
+    let table = await screen.findByRole('region', { name: '计算结果' });
+    expect(within(table).getByRole('columnheader', { name: 'label' })).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: 'v2' })).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: 'v3' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '30.00' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '70.00' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: '项目' })).toBeNull();
+    expect(screen.queryByText(/完整明细/)).toBeNull();
+
+    rerender(<RunPanel {...props} runs={[unknown]} />);
+    table = await screen.findByRole('region', { name: '计算结果' });
+    expect(within(table).getByRole('columnheader', { name: 'scenario_value' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '88.00' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: '项目' })).toBeNull();
+    expect(screen.queryByText(/完整明细/)).toBeNull();
   });
 });

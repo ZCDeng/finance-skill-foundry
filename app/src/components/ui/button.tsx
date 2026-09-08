@@ -6,8 +6,8 @@ import { cn } from '@/lib/utils.js';
 
 const buttonVariants = cva(
   [
-    'inline-flex shrink-0 items-center justify-center gap-1.5',
-    'rounded-[var(--fnd-radius-control)] text-[length:var(--fnd-size-small)] leading-none whitespace-nowrap',
+    'inline-flex shrink-0 items-center justify-center gap-2',
+    'rounded-[var(--fnd-radius-control)] text-[length:var(--fnd-size-body)] leading-none whitespace-nowrap',
     'cursor-pointer transition-[border-color,background-color,color,opacity] duration-(--fnd-duration) ease-(--fnd-easing)',
     'disabled:cursor-default disabled:pointer-events-none',
     'aria-busy:cursor-progress',
@@ -49,9 +49,9 @@ const buttonVariants = cva(
         ].join(' '),
       },
       size: {
-        default: 'h-8 px-3.5',
+        default: 'h-[var(--fnd-button-height)] px-3.5',
         sm: 'h-8 px-2.5',
-        lg: 'h-8 px-3.5',
+        lg: 'h-[var(--fnd-button-height)] px-3.5',
         icon: 'size-8 rounded-[6px] p-0',
       },
     },

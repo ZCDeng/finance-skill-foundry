@@ -159,7 +159,8 @@ async function main() {
       await page.evaluate((nextTheme) => { document.documentElement.dataset.theme = nextTheme; }, theme);
       await waitTransition();
       const neutral = await color(await token('--fnd-line'));
-      const gold = await color(await token('--fnd-line-hover'));
+      const hover = await color(await token('--fnd-line-hover'));
+      const focus = await color(await token('--fnd-focus'));
       const invalid = await color(await token('--fnd-mark-outside-line'));
       const ink = await color(await token('--fnd-ink'));
       const muted = await color(await token('--fnd-muted'));
@@ -180,14 +181,14 @@ async function main() {
         await waitTransition();
         const hovered = await read(selector);
         check(`${theme} ${name} default neutral border`, sameColor(before.borderColor, neutral), { before, expected: neutral });
-        check(`${theme} ${name} hover allowed accent or neutral`, sameColor(hovered.borderColor, neutral) || sameColor(hovered.borderColor, gold), { hovered, neutral, gold });
+        check(`${theme} ${name} hover remains neutral`, sameColor(hovered.borderColor, neutral) || sameColor(hovered.borderColor, hover), { hovered, neutral, hover });
       }
 
       for (const [name, selector] of fields.slice(0, 3)) {
         const reachedByTab = await tabTo(selector);
         await waitTransition();
         const keyboard = await read(selector);
-        check(`${theme} ${name} keyboard focus has one inset ring`, reachedByTab && keyboard.outlineStyle !== 'none' && keyboard.outlineWidth === '2px' && keyboard.outlineOffset === '-1px' && sameColor(keyboard.borderColor, neutral), { reachedByTab, keyboard, neutral });
+        check(`${theme} ${name} keyboard focus has one inset focus stroke`, reachedByTab && keyboard.outlineStyle !== 'none' && keyboard.outlineWidth === '1px' && sameColor(keyboard.outlineColor, focus) && keyboard.outlineOffset === '-1px' && sameColor(keyboard.borderColor, neutral), { reachedByTab, keyboard, neutral });
 
         await page.locator('body').click({ position: { x: 4, y: 4 } });
         await page.locator(selector).click();
@@ -198,7 +199,7 @@ async function main() {
         await page.hover(selector);
         await waitTransition();
         const hoverFocus = await read(selector);
-        check(`${theme} ${name} hover+focus keeps neutral border`, sameColor(hoverFocus.borderColor, neutral), { hoverFocus, neutral, gold });
+        check(`${theme} ${name} hover+focus keeps neutral border`, sameColor(hoverFocus.borderColor, neutral), { hoverFocus, neutral, focus });
       }
 
       const invalidSelectors = [
@@ -232,10 +233,10 @@ async function main() {
       const toggle = await read('button[aria-label="日期打开日期选择"]');
       check(`${theme} date toggle contained`, toggle.top >= date.top && toggle.bottom <= date.bottom && toggle.right <= date.right + 1, { date, toggle });
       const decimal = await read('input[aria-label="金额"]');
-      check(`${theme} decimal keeps field geometry`, decimal.height === 32 && sameColor(decimal.borderColor, neutral), { decimal, neutral });
+      check(`${theme} decimal keeps field geometry`, decimal.height === 36 && sameColor(decimal.borderColor, neutral), { decimal, neutral });
 
       const primary = await read('button[aria-label="primary action"]');
-      check(`${theme} button typography remains 13px`, primary.fontSize === '13px' && primary.lineHeight === '13px', primary);
+      check(`${theme} button typography remains 14px`, primary.fontSize === '14px' && primary.lineHeight === '14px', primary);
       check(`${theme} primary button uses token colours`, sameColor(primary.color, onAccent) && sameColor(primary.backgroundColor, accent), { primary, onAccent, accent });
 
       for (const [name, selector] of [

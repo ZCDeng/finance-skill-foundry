@@ -3,6 +3,7 @@ import { press } from './press.js';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Analysis } from '../src/views/Analysis.js';
+import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import type { Answer, AnalysisDraft, AnalysisRevision, AnalysisRun, AnalysisState, Bridge, DatasetSnapshot, TaskRow } from '../src/bridge.js';
 
 const task: TaskRow = { id: 'a'.repeat(32), title: '华东经营分析', period: null, skill_id: null, created_at: '2026-09-05T00:00:00Z', windows: 0 };
@@ -635,6 +636,48 @@ describe('analysis workbench', () => {
     expect(within(reading).getByRole('cell', { name: '250' }).querySelector('strong')).toBeTruthy();
     expect(reading.querySelector('img, script')).toBeNull();
     expect(within(reading).getByText('<img src=x onerror="alert(1)">')).toBeTruthy();
+  });
+
+  it('normalizes draft heading depth without reading headings inside code fences or raw HTML', () => {
+    const body = '```md\n# 代码里的标题\n```\n\n## 经营结论\n### 主要驱动\n<img src=x onerror="alert(1)">';
+    const view = render(<DraftBody body={body} />);
+    expect(screen.getByRole('heading', { name: '经营结论' }).tagName).toBe('H3');
+    expect(screen.getByRole('heading', { name: '主要驱动' }).tagName).toBe('H4');
+    expect(screen.getByText('# 代码里的标题').tagName).toBe('CODE');
+    expect(document.querySelector('img, script')).toBeNull();
+    expect(screen.getByText('<img src=x onerror="alert(1)">')).toBeTruthy();
+
+    view.rerender(<DraftBody body={'# 一级结论\n## 二级说明'} />);
+    expect(screen.getByRole('heading', { name: '一级结论' }).tagName).toBe('H3');
+    expect(screen.getByRole('heading', { name: '二级说明' }).tagName).toBe('H4');
+  });
+
+  it('folds only the exact stored evidence appendix suffix while preserving the draft body for editing', async () => {
+    const appendix = '## 计算依据附录\n| 项目 | 金额 |\n| --- | ---: |\n| 经营利润 | 250 |';
+    const body = `# 经营结论\n本月经营利润为 250 万元。\n\n${appendix}`;
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [{ ...draft, body, evidence_appendix: appendix }] }) });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const reading = await screen.findByRole('article', { name: '文稿阅读' });
+    const main = reading.querySelector('.analysis-draft-main') as HTMLElement;
+    expect(within(main).getByText('本月经营利润为 250 万元。')).toBeTruthy();
+    expect(within(main).queryByRole('heading', { name: '计算依据附录' })).toBeNull();
+    const fold = within(reading).getByText('系统生成计算依据附录').closest('details') as HTMLDetailsElement;
+    expect(fold).toBeTruthy();
+    fold.open = true;
+    expect(within(fold).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe(body);
+  });
+
+  it('keeps a similar appendix marker inline when it is not the exact stored suffix', async () => {
+    const appendix = '## 计算依据附录\n| 项目 | 金额 |\n| --- | ---: |\n| 经营利润 | 250 |';
+    const body = '# 经营结论\n本月经营利润为 250 万元。\n\n## 计算依据附录\n经理手工改写过的依据。';
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [{ ...draft, body, evidence_appendix: appendix }] }) });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const reading = await screen.findByRole('article', { name: '文稿阅读' });
+    expect(within(reading).getByRole('heading', { name: '计算依据附录' })).toBeTruthy();
+    expect(within(reading).getByText('经理手工改写过的依据。')).toBeTruthy();
+    expect(within(reading).queryByText('系统生成计算依据附录')).toBeNull();
   });
 
   it('names populated draft controls explicitly without including their contents', async () => {

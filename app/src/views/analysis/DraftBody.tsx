@@ -23,9 +23,28 @@ const heading = /^(#{1,6})\s+(.+?)(?:\s+#+)?$/;
 const bullet = /^\s*([-+*]|\d+[.)])\s+(.+)$/;
 const fence = /^\s*(`{3,}|~{3,})/;
 const isTableDivider = (line = '') => cells(line).length > 0 && cells(line).every((cell) => /^:?-{3,}:?$/.test(cell));
+const clampHeadingLevel = (level: number) => Math.min(6, Math.max(3, level));
+
+function topHeadingDepth(lines: string[]): number {
+  let top = 7;
+  for (let index = 0; index < lines.length;) {
+    const codeFence = lines[index].match(fence);
+    if (codeFence) {
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith(codeFence[1])) index += 1;
+      if (index < lines.length) index += 1;
+      continue;
+    }
+    const title = lines[index].match(heading);
+    if (title) top = Math.min(top, title[1].length);
+    index += 1;
+  }
+  return top === 7 ? 1 : top;
+}
 
 export function DraftBody({ body }: { body: string }) {
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
+  const topDepth = topHeadingDepth(lines);
   const blocks: ReactNode[] = [];
   for (let index = 0; index < lines.length;) {
     const line = lines[index];
@@ -33,8 +52,8 @@ export function DraftBody({ body }: { body: string }) {
     if (!line.trim()) { index += 1; continue; }
     const title = line.match(heading);
     if (title) {
-      // The document already has a title at h2; preserve the internal hierarchy.
-      blocks.push(createElement(`h${Math.min(6, title[1].length + 2)}`, { key }, inline(title[2])));
+      const level = clampHeadingLevel(3 + title[1].length - topDepth);
+      blocks.push(createElement(`h${level}`, { key }, inline(title[2])));
       index += 1; continue;
     }
     const codeFence = line.match(fence);

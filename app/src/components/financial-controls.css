@@ -2,7 +2,7 @@
 .fnd-control {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--fnd-space-control);
   min-width: 0;
   font-size: var(--fnd-size-small);
 }
@@ -44,7 +44,7 @@
 .fnd-period-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
+  gap: var(--fnd-space-control);
 }
 
 .fnd-period-field__input {
@@ -61,7 +61,7 @@
 .fnd-period-shortcuts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: var(--fnd-space-control);
 }
 
 .fnd-period-shortcuts .fnd-control-icon {
@@ -95,7 +95,8 @@
 .fnd-control-icon--calendar {
   position: absolute;
   right: 4px;
-  top: 3px;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -112,7 +113,7 @@
 }
 
 .fnd-control-icon:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -161,7 +162,7 @@
   background: var(--fnd-surface);
   color: var(--fnd-ink);
   font: inherit;
-  font-size: var(--fnd-size-small);
+  font-size: var(--fnd-size-body);
   cursor: pointer;
   transition: border-color var(--fnd-transition), background var(--fnd-transition);
 }
@@ -172,7 +173,7 @@
 }
 
 .fnd-combobox__button:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
@@ -244,7 +245,7 @@
   background: var(--fnd-surface);
   color: var(--fnd-ink);
   font: inherit;
-  font-size: var(--fnd-size-small);
+  font-size: var(--fnd-size-body);
 }
 
 .fnd-combobox__list {
@@ -391,7 +392,7 @@
 .fnd-month-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  gap: var(--fnd-space-control);
 }
 
 .fnd-month-grid button {
@@ -433,19 +434,14 @@
 }
 
 .fnd-date-field__toggle:focus-visible {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 
 .fnd-range-field {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  gap: 10px;
-}
-
-.fnd-range-field .fnd-control__help:empty,
-.fnd-range-field .fnd-control__help {
-  min-height: 0;
+  gap: var(--fnd-space-content);
 }
 
 @media (max-width: 680px) {
@@ -460,7 +456,7 @@
 
 .fnd-month-grid button[data-active='true'],
 .fnd-day-grid button[data-active='true'] {
-  outline: 2px solid var(--fnd-line-hover);
+  outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
 }
 

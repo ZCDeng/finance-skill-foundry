@@ -12,6 +12,8 @@ import {
   HERO_HEADLINE,
   LIGHT_THEME,
   LINE,
+  LINE_HOVER,
+  LINE_HOVER_LIGHT,
   LINE_LIGHT,
   SEND_PRIMARY_CLASS,
   SEND_TRAILING_CLASS,
@@ -24,6 +26,7 @@ const TOKENS = read('../src/styles/tokens.css');
 const LAYOUT = read('../extra/dsh/.foundry-client-stock/layout.js');
 const CONVERSATION = read('../extra/dsh/.foundry-client-stock/conversation.js');
 const SETTINGS = read('../extra/dsh/.foundry-client-stock/settings-general.js');
+const COMPACT = read('../harness-client/compact.css');
 const BUNDLE = JSON.parse(read('../../dsh-plugin/package.json')) as {
   dsh?: { client?: { platform?: string; inject?: string[] } };
   exports?: Record<string, unknown>;
@@ -42,12 +45,14 @@ const token = (name: string, mode: 'light' | 'dark') => {
 };
 
 describe('the edge this window draws on the embedded page', () => {
-  it('uses the same focus gold the window uses on its own edges', () => {
+  it('uses the same focus gold and neutral hover the window uses on its own edges', () => {
     // The skin is injected into a document that has never heard of this app's
     // tokens, so the value is a literal there. This is what stops the two
     // drifting into two different golds.
-    expect(EDGE).toBe(token('--fnd-line-hover', 'dark'));
-    expect(EDGE_LIGHT).toBe(token('--fnd-line-hover', 'light'));
+    expect(EDGE).toBe(token('--fnd-focus', 'dark'));
+    expect(EDGE_LIGHT).toBe(token('--fnd-focus', 'light'));
+    expect(LINE_HOVER).toBe(token('--fnd-line-hover', 'dark'));
+    expect(LINE_HOVER_LIGHT).toBe(token('--fnd-line-hover', 'light'));
   });
 
   it('uses the same idle line the window uses on its own dark edges', () => {
@@ -96,6 +101,7 @@ describe('the edge this window draws on the embedded page', () => {
       '--dsw-alias-label-primary:var(--foundry-native-ink) !important',
       '--dsw-alias-label-secondary:var(--foundry-native-muted) !important',
       '--dsw-alias-border-l2-darkmode-thin:var(--foundry-native-line) !important',
+      '--dsw-alias-border-l3:var(--foundry-native-line-hover) !important',
       '--dsw-alias-state-business-primary:var(--foundry-native-selected) !important',
       '--dsw-alias-button-info-fill:var(--foundry-native-selected) !important',
       '--dsw-alias-button-info-hover:var(--foundry-native-focus) !important',
@@ -115,7 +121,8 @@ describe('the edge this window draws on the embedded page', () => {
     expect(HARNESS_SKIN).toMatch(
       /\[data-foundry-frame\]\s*\[data-composer-card\]\s*\{\s*border-color:\s*var\(--foundry-native-line\)/,
     );
-    expect(HARNESS_SKIN).toContain('outline-offset: -1px');
+    expect(HARNESS_SKIN).toContain('box-shadow: none !important');
+    expect(HARNESS_SKIN).toContain('outline: none !important');
   });
 
   it('targets every real composer card through the upstream data attribute', () => {
@@ -171,7 +178,7 @@ describe('how the skin holds on', () => {
 
   it('keeps native details keyboard focus in the same theme bridge', () => {
     expect(HARNESS_SKIN).toContain('[data-foundry-frame] summary:focus-visible');
-    expect(HARNESS_SKIN).toContain('outline: 2px solid var(--foundry-native-focus) !important');
+    expect(HARNESS_SKIN).toContain('outline: 1px solid var(--foundry-native-focus) !important');
     expect(HARNESS_SKIN).toContain('outline-offset: -1px');
   });
 
@@ -180,10 +187,27 @@ describe('how the skin holds on', () => {
     expect(SETTINGS).toContain(`.${SETTINGS_CLOSE_CLASS}{`);
     expect(SETTINGS).not.toContain(`.${SETTINGS_CLOSE_CLASS}:focus-visible`);
     expect(HARNESS_SKIN).toContain(`.${SETTINGS_CLOSE_CLASS}:focus-visible`);
-    expect(HARNESS_SKIN).toContain('outline: 2px solid var(--foundry-native-focus) !important');
+    expect(HARNESS_SKIN).toContain('outline: 1px solid var(--foundry-native-focus) !important');
     expect(HARNESS_SKIN).toContain('outline-offset: -1px');
     expect(HARNESS_SKIN).toContain('box-shadow: none !important');
     expect(HARNESS_SKIN).not.toContain('[data-foundry-frame] button:focus-visible');
+  });
+});
+
+describe('native compact reading rhythm', () => {
+  it('keeps native chrome at 14px and prose at 16px/28px', () => {
+    expect(COMPACT).toContain('[data-foundry-frame] .wSkVaW_root { --dsh-composer-side-clearance:24px; font-size:14px; line-height:22px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] [data-composer-card] { border-radius:12px; font-size:16px; line-height:28px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] textarea { font-size:16px; line-height:28px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] .gdEzaW_bubble { line-height:28px; }');
+  });
+
+  it('gives panes at least 20px gutters and scroll content breathing room', () => {
+    expect(COMPACT).toContain('[data-foundry-frame] .wSkVaW_scrollBody { padding:0 0 32px; box-sizing:border-box; }');
+    expect(COMPACT).toContain('[data-foundry-frame] .Md3f7G_scroll { padding:24px 24px 32px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] .wSkVaW_composerHero { padding-bottom:24px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] .wSkVaW_root { --dsh-composer-side-clearance:20px; }');
+    expect(COMPACT).toContain('[data-foundry-frame] .Md3f7G_scroll { padding-left:20px; padding-right:20px; }');
   });
 });
 

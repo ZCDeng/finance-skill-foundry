@@ -99,11 +99,45 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
 function RunResultTable({ run }: { run: AnalysisRun }) {
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;
   if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} />;
+  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} />;
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p></>;
 }
 
 type SourceDrilldownSection = 'rows' | 'detail_rows' | 'excluded_detail_rows';
+
+const scriptSummaryKeys = ['label', 'value', 'unit'] as const;
+const scriptSummaryAllowedColumns = new Set(['label', 'value', 'unit', 'metric', 'wb', 'sheet', 'cell', 'note', 'check']);
+const scriptSummaryLabels: Record<(typeof scriptSummaryKeys)[number], string> = {
+  label: '项目',
+  value: '数值',
+  unit: '单位',
+};
+
+function columnType(run: AnalysisRun, name: string): string {
+  return run.result?.columns.find((column) => column.name === name)?.type ?? 'VARCHAR';
+}
+
+function isScriptSummaryRun(run: AnalysisRun): boolean {
+  if (run.engine !== 'python' && run.engine !== 'shell') return false;
+  const names = run.result?.columns.map((column) => column.name) ?? [];
+  if (names.some((name) => !scriptSummaryAllowedColumns.has(name))) return false;
+  const set = new Set(names);
+  return scriptSummaryKeys.every((name) => set.has(name));
+}
+
+function ScriptSummaryTable({ run }: { run: AnalysisRun }) {
+  const result = run.result!;
+  const columns = scriptSummaryKeys.map((name) => ({ name: scriptSummaryLabels[name], type: columnType(run, name) }));
+  const rows = result.rows.map((row) => Object.fromEntries(scriptSummaryKeys.map((name) => [scriptSummaryLabels[name], row[name]])));
+  return <section className="analysis-script-summary">
+    <Table key={`${run.id}:summary`} columns={columns} rows={rows} caption="计算结果" />
+    <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
+    <details className="analysis-details"><summary>完整明细 · {result.columns.length} 列</summary>
+      <Table key={`${run.id}:full`} columns={result.columns} rows={result.rows} caption="完整明细" />
+    </details>
+  </section>;
+}
 
 const structuredAggregateHiddenColumns = new Set(['result_key', 'source_rows', 'excluded_source_rows', 'provenance_status']);
 

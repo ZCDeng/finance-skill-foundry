@@ -63,6 +63,13 @@ type Props = {
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
+function readableDraftParts(body: string, appendix?: string): { body: string; appendix?: string } {
+  const cleanAppendix = appendix?.trim();
+  if (!cleanAppendix) return { body };
+  const trimmedBody = body.trimEnd();
+  if (!trimmedBody.endsWith(cleanAppendix)) return { body };
+  return { body: trimmedBody.slice(0, trimmedBody.length - cleanAppendix.length).trimEnd(), appendix: cleanAppendix };
+}
 const metricLabel = (value: unknown): string => {
   if (value && typeof value === 'object' && 'name' in value && 'expression' in value
     && typeof value.name === 'string' && typeof value.expression === 'string') {
@@ -1137,6 +1144,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const materialityError = materiality.relative.trim().startsWith('-') ? '相对阈值不能为负数。0.1 表示 10%。' : '';
   const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
     || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || recovery));
+  const reading = readableDraftParts(body, draft?.evidence_appendix);
   useEffect(() => { onEdit({ title, body, limitations, review, materiality, recovery }); }, [title, body, limitations, review, materiality, recovery, onEdit]);
   useEffect(() => {
     setTitle(edit?.title ?? draft?.title ?? '经营分析');
@@ -1325,7 +1333,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       onChange={(event) => setLimitations(event.target.value)} /></label><label>我的审阅状态<select aria-label="我的审阅状态" className="fnd-field" value={review}
       onChange={(event) => setReview(event.target.value)}><option value="unreviewed">未阅</option><option value="reviewed">已阅</option><option value="accepted">认可</option></select></label></div>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
-    </fieldset> : <article className="analysis-draft-reading" aria-label="文稿阅读"><h2>{title}</h2><DraftBody body={body} />
+    </fieldset> : <article className="analysis-draft-reading" aria-label="文稿阅读"><h2>{title}</h2><div className="analysis-draft-main"><DraftBody body={reading.body} /></div>
+      {reading.appendix && <details className="analysis-details analysis-appendix-fold"><summary>系统生成计算依据附录</summary><DraftBody body={reading.appendix} /></details>}
       {limitations.trim() && <section><h3>局限与待确认事项</h3><ul>{limitations.split('\n').filter(Boolean).map((line, index) => <li key={index}>{line}</li>)}</ul></section>}</article>}
     {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
