@@ -24,6 +24,11 @@ COMMANDS = {
     "analysis-refresh",
     "analysis-script",
     "analysis-output",
+    "report-draft-read",
+    "report-source-add",
+    "report-source-read",
+    "report-xlsx-read",
+    "report-export-register",
 }
 
 
@@ -44,10 +49,24 @@ def add_parsers(sub):
     p = sub.add_parser("analysis-run")
     p.add_argument("--analysis", required=True)
     p = sub.add_parser("analysis-draft")
-    p.add_argument("--spec", required=True)
+    _spec_arg(p)
     p = sub.add_parser("analysis-export")
     p.add_argument("--draft", required=True)
     p.add_argument("--format", choices=["md", "xlsx"], default="md")
+    p = sub.add_parser("report-draft-read")
+    p.add_argument("--draft", required=True)
+    p = sub.add_parser("report-source-add")
+    p.add_argument("--path", required=True)
+    p = sub.add_parser("report-source-read")
+    p.add_argument("--source", required=True)
+    p = sub.add_parser("report-xlsx-read")
+    p.add_argument("--source", required=True)
+    p.add_argument("--sheet")
+    p.add_argument("--range")
+    p = sub.add_parser("report-export-register")
+    p.add_argument("--draft", required=True)
+    p.add_argument("--format", choices=["md", "xlsx", "docx", "pdf", "html"], required=True)
+    p.add_argument("--path", required=True)
     p = sub.add_parser("analysis-method-save")
     p.add_argument("--analysis", required=True)
     p.add_argument("--name", required=True)
@@ -68,6 +87,26 @@ def _json(value, label):
     if not isinstance(result, dict):
         raise FoundryError(f"{label} must be a JSON object")
     return result
+
+
+def _spec_arg(parser):
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--spec")
+    group.add_argument("--spec-file")
+
+
+def _json_spec(args, label):
+    if getattr(args, "spec_file", None):
+        path = Path(args.spec_file).expanduser()
+        if not path.is_file() or path.is_symlink():
+            raise FoundryError(f"{label} spec file must be a regular file")
+        if path.stat().st_size > MAX_SPEC_FILE_BYTES:
+            raise FoundryError(f"{label} spec file exceeds 32 MiB")
+        return _json(path.read_text(encoding="utf-8"), label)
+    return _json(args.spec, label)
+
+
+MAX_SPEC_FILE_BYTES = 32 * 1024 * 1024
 
 
 def _bound(context, bindings):
@@ -209,7 +248,7 @@ def dispatch(args) -> bool:
             context_revision=context.context_revision,
         )
     elif args.cmd == "analysis-draft":
-        spec = _json(args.spec, "draft spec")
+        spec = _json_spec(args, "draft spec")
         parent = service.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         for run_id in [
             *parent.get("run_ids", []),
@@ -225,6 +264,16 @@ def dispatch(args) -> bool:
         for run_id in draft["run_ids"]:
             _bound(context, service.get_run(run_id)["bindings"])
         result = service.export_draft(args.draft, args.format)
+    elif args.cmd == "report-draft-read":
+        result = service.get_draft(args.draft)
+    elif args.cmd == "report-source-add":
+        result = service.add_report_source(_uploaded_path(context, args.path))
+    elif args.cmd == "report-source-read":
+        result = service.read_report_source(args.source)
+    elif args.cmd == "report-xlsx-read":
+        result = service.read_report_xlsx(args.source, sheet=args.sheet, range_ref=getattr(args, "range"))
+    elif args.cmd == "report-export-register":
+        result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path))
     elif args.cmd == "analysis-output":
         run = service.get_run(args.run)
         _bound(context, run["bindings"])

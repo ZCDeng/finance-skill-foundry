@@ -41,6 +41,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
   const setFocus = (value: Focus) => setFocusByTask((held) => ({ ...held, [task?.id ?? '']: value }));
   const [chatWidth, setChatWidth] = useState(420);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [nativeCovered, setNativeCovered] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState('');
@@ -96,8 +97,14 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
     return () => window.removeEventListener('keydown', escape);
   }, [overlay, toolsOpen, closeSidebar]);
 
+  useEffect(() => {
+    const cover = (event: Event) => setNativeCovered(Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open));
+    window.addEventListener('foundry:workspace-native-cover', cover);
+    return () => window.removeEventListener('foundry:workspace-native-cover', cover);
+  }, []);
+
   useLayoutEffect(() => {
-    if (!active || !task || effective === 'results' || overlay || toolsOpen || dragging) {
+    if (!active || !task || effective === 'results' || overlay || toolsOpen || nativeCovered || dragging) {
       onLayout(null); return;
     }
     let scheduled = 0;
@@ -112,7 +119,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
     window.addEventListener('resize', resize);
     measure();
     return () => { observer?.disconnect(); window.removeEventListener('resize', resize); cancelAnimationFrame(scheduled); };
-  }, [active, task?.id, effective, overlay, toolsOpen, dragging, sidebar, chatWidth, onLayout]);
+  }, [active, task?.id, effective, overlay, toolsOpen, nativeCovered, dragging, sidebar, chatWidth, onLayout]);
 
   const openMethods = () => { setFocus(narrow ? 'results' : 'split'); onMethods(); };
   const pick = (id: string) => { onPick(id); if (!wide) closeSidebar(); setToolsOpen(false); };

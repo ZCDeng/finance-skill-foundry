@@ -83,7 +83,9 @@ describe('the policy itself', () => {
   it('opens nothing extra in the packaged policy', () => {
     // The dev additions describe the dev server. A packaged window loads from
     // file:// and must never see them.
-    expect(CSP_HEADER_VALUE).not.toContain('unsafe-inline');
+    expect(CSP_HEADER_VALUE.split('; ').find((value) => value.startsWith('script-src'))).toBe("script-src 'self'");
+    expect(CSP_HEADER_VALUE).toContain("object-src 'none'");
+    expect(CSP_HEADER_VALUE).toContain("img-src 'self' data:");
     expect(CSP_HEADER_VALUE).not.toContain('ws://');
     expect(DEV_CSP_HEADER_VALUE).toContain('unsafe-inline');
   });

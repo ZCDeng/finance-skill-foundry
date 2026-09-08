@@ -30,6 +30,12 @@ electronLanguages:
 # `npm run package` checks for it first and stops, because packaging without it
 # produces an app whose workbench never starts and says nothing about why.
 extraResources:
+  - from: src/assets/fonts/noto-sans-sc
+    to: fonts
+    filter:
+      - 'NotoSansSC-report.ttf'
+      - 'report-font.json'
+      - 'OFL.txt'
   # `node_modules` is named on its own line. electron-builder skips a directory
   # by that name inside extraResources unless it is asked for explicitly, and the
   # failure is quiet: the bundle builds, `dsh/` arrives holding only the pin

@@ -63,6 +63,7 @@ export function foundryArgs(binding: Binding, command: string, rest: readonly st
 export interface FoundryEnv {
   bin?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 /** Run one call and hand back its stdout, or throw a refusal apart from a failure. */
@@ -78,7 +79,7 @@ export function runFoundry(
     execFile(
       bin,
       argv,
-      { timeout: env.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: 'utf8' },
+      { timeout: env.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: 'utf8', signal: env.signal },
       (error, stdout, stderr) => {
         if (!error) return resolve(stdout);
         // A refusal is a state the operator acts on ("this window is not

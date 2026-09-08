@@ -85,6 +85,7 @@ function names(): Map<number, string[]> {
   return out;
 }
 function manifest() { return JSON.parse(readFileSync(resolve(ASSETS, 'noto-sans-sc/manifest.json'), 'utf8')); }
+function reportFontManifest() { return JSON.parse(readFileSync(resolve(ASSETS, 'noto-sans-sc/report-font.json'), 'utf8')); }
 function usedCharacters(): Set<number> {
   const used = new Set<number>();
   const walk = (dir: string) => {
@@ -121,8 +122,11 @@ describe('offline font resources', () => {
       expect(CSS).toContain(license.split('\n').map((line) => line.trimEnd()).join('\n'));
     }
     const named = new Set(FACES.map((face) => resolve(STYLES, face.url!)));
+    const reportFont = reportFontManifest();
+    expect(reportFont.source_sha256).toBe(createHash('sha256').update(readFileSync(FONT)).digest('hex'));
+    expect(createHash('sha256').update(readFileSync(resolve(ASSETS, 'noto-sans-sc', reportFont.file))).digest('hex')).toBe(reportFont.sha256);
     for (const family of ['asap-sharp', 'noto-sans-sc']) for (const name of readdirSync(resolve(ASSETS, family))) {
-      if (/\.(woff2?|ttf|otf)$/.test(name)) expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
+      if (/\.(woff2?|ttf|otf)$/.test(name) && name !== reportFont.file) expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
     }
   });
 

@@ -11,6 +11,11 @@
  * check is about bounds and control characters rather than quoting.
  */
 export const CHANNELS = {
+  reportImport: 'report:import',
+  reportSource: 'report:source',
+  reportPreview: 'report:preview',
+  reportCancel: 'report:cancel',
+  reportProgress: 'report:progress',
   analysisOpenOutput: 'analysis:open-output',
   analysisState: 'analysis:state',
   analysisAddFiles: 'analysis:add-files',

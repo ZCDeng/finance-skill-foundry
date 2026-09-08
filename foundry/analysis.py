@@ -29,10 +29,12 @@ from foundry.fsutil import write_json_atomic
 from foundry.locking import exclusive
 from foundry.task import Task, now_iso
 from foundry.sheet import survives_a_cell, put_number
+from foundry.report_documents import report_document_excel_rows
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions"}
+REPORT_EXPORT_FORMATS = {"md", "xlsx", "docx", "pdf", "html"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
@@ -595,6 +597,21 @@ class AnalysisStore:
     def get_draft(self, draft_id: str) -> dict:
         return self._get("drafts", draft_id)
 
+    def _registered_report_source_ids(self) -> set[str]:
+        return set(self._registered_report_sources())
+
+    def _registered_report_sources(self) -> dict[str, dict]:
+        root = self._inside(self.root / "report_sources")
+        sources = {}
+        for path in root.glob("*.json"):
+            if ID.fullmatch(path.stem):
+                try:
+                    record = self._read(path)
+                except FoundryError:
+                    continue
+                sources[record["id"]] = self._report_source_public(record)
+        return sources
+
     def save_draft(self, spec: dict) -> dict:
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
@@ -605,7 +622,24 @@ class AnalysisStore:
             required=True,
             maximum=1000,
         )
-        body = _safe_text(spec.get("body", parent.get("body", "")), "draft body")
+        document = None
+        if spec.get("document") is not None:
+            from foundry.report_documents import report_document_markdown, validate_report_document
+
+            report_sources = self._registered_report_sources()
+            document = validate_report_document(
+                spec["document"],
+                registered_source_ids=set(report_sources),
+            )
+            if document.get("sources"):
+                document["sources"] = [report_sources[source["id"]] for source in document["sources"]]
+            projected = report_document_markdown(document)
+            body = _safe_text(projected, "draft body")
+        elif "body" not in spec and parent.get("document") is not None:
+            document = parent["document"]
+            body = _safe_text(parent.get("body", ""), "draft body")
+        else:
+            body = _safe_text(spec.get("body", parent.get("body", "")), "draft body")
         body_template = spec.get("body_template")
         if body_template is not None:
             body_template = _safe_text(body_template, "draft body_template")
@@ -739,6 +773,7 @@ class AnalysisStore:
             evidence_appendix_meta=evidence_appendix_meta,
             title=title,
             body=body,
+            **({"document": document} if document is not None else {}),
             **({"body_template": body_template} if body_template is not None else {}),
             run_ids=list(runs),
             fact_ids=fact_ids,
@@ -762,6 +797,7 @@ class AnalysisStore:
                     "materiality": materiality,
                     "body": body,
                     "body_template": body_template,
+                    "document": document,
                     "run_ids": list(runs),
                     "fact_ids": fact_ids,
                     "claims": claims,
@@ -770,6 +806,117 @@ class AnalysisStore:
             ),
         )
         return self._write(self._object_path("drafts", record["id"]), record)
+
+    def add_report_source(self, path: Path) -> dict:
+        from foundry.report_documents import check_report_source_bytes, report_format_for_path
+
+        source = Path(path).expanduser()
+        if not source.is_file() or source.is_symlink():
+            raise FoundryError("report source must be a regular file")
+        fmt = report_format_for_path(source)
+        data = source.read_bytes()
+        check_report_source_bytes(data, fmt)
+        digest = _hash_bytes(data)
+        record = _new(
+            self.task,
+            name=source.name,
+            format=fmt,
+            sha256=digest,
+            bytes=len(data),
+            source_file="source" + source.suffix.casefold(),
+            imported_review_trust="not_trusted",
+        )
+        with exclusive(self.task.lock_path, timeout=10):
+            root = self._inside(self.root / "report_sources" / record["id"])
+            root.mkdir(parents=True, exist_ok=False)
+            archived = self._inside(root / record["source_file"])
+            archived.write_bytes(data)
+            written = self._write_locked(self._inside(self.root / "report_sources" / (record["id"] + ".json")), record)
+        return {"source": self._report_source_public(written), "path": str(archived.resolve())}
+
+    def _report_source_path(self, source_id: str) -> Path:
+        return self._inside(self.root / "report_sources" / (_assert_id(source_id) + ".json"))
+
+    def _report_source_public(self, record: dict) -> dict:
+        return {
+            "id": record["id"],
+            "name": record["name"],
+            "sha256": record["sha256"],
+            "format": record["format"],
+        }
+
+    def read_report_source(self, source_id: str) -> dict:
+        record = self._read(self._report_source_path(source_id))
+        path = self._inside(self.root / "report_sources" / record["id"] / record["source_file"])
+        data = path.read_bytes()
+        if _hash_bytes(data) != record["sha256"]:
+            raise FoundryError("report source integrity check failed")
+        return {"source": self._report_source_public(record), "path": str(path.resolve())}
+
+    def read_report_xlsx(self, source_id: str, *, sheet: str | None = None, range_ref: str | None = None) -> dict:
+        from foundry.report_documents import report_document_from_xlsx
+
+        resolved = self.read_report_source(source_id)
+        if resolved["source"]["format"] != "xlsx":
+            raise FoundryError("report xlsx read requires an XLSX source")
+        return report_document_from_xlsx(
+            Path(resolved["path"]).read_bytes(),
+            resolved["source"],
+            sheet=sheet,
+            range_ref=range_ref,
+        )
+
+    def register_report_export(self, draft_id: str, format: str, path: Path) -> dict:
+        if format not in REPORT_EXPORT_FORMATS:
+            raise FoundryError("report export format must be md, xlsx, docx, pdf or html")
+        draft = self.get_draft(draft_id)
+        template_version = (draft.get("document") or {}).get("template_version")
+        source = Path(path).expanduser()
+        if not source.is_file() or source.is_symlink():
+            raise FoundryError("report export source must be a regular file")
+        data = source.read_bytes()
+        if len(data) > MAX_SOURCE_BYTES:
+            raise FoundryError("report export exceeds 32 MiB limit")
+        digest = _hash_bytes(data)
+        target = self._inside(self.root / "exports" / "registered" / f"{draft_id}.{format}")
+        manifest_path = self._inside(target.with_suffix(target.suffix + ".meta.json"))
+        with exclusive(self.task.lock_path, timeout=10):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                manifest = self._read(manifest_path)
+                if manifest.get("sha256") != _hash_bytes(target.read_bytes()) or manifest.get("content_hash") != draft["content_hash"]:
+                    raise FoundryError("report export integrity check failed; archived bytes differ from their receipt")
+                if manifest.get("format") != format or manifest.get("template_version") != template_version:
+                    raise FoundryError("report export receipt does not match the requested format/template")
+                digest = manifest["sha256"]
+            else:
+                temporary = self._inside(target.with_name("." + uuid.uuid4().hex + ".tmp"))
+                try:
+                    temporary.write_bytes(data)
+                    temporary.replace(target)
+                    manifest = _new(
+                        self.task,
+                        draft_id=draft_id,
+                        format=format,
+                        sha256=digest,
+                        bytes=len(data),
+                        content_hash=draft["content_hash"],
+                        template_version=template_version,
+                        source_sha256=digest,
+                    )
+                    manifest["_integrity_hash"] = _hash(manifest)
+                    write_json_atomic(manifest_path, manifest)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        return {
+            "task_id": self.task.id,
+            "draft_id": draft_id,
+            "format": format,
+            "path": str(target.resolve()),
+            "sha256": digest,
+            "content_hash": draft["content_hash"],
+            "publication_status": draft["publication_status"],
+        }
 
     def export_draft(self, draft_id: str, format: str = "md") -> dict:
         draft = self.get_draft(draft_id)
@@ -864,6 +1011,11 @@ class AnalysisStore:
                         ["Reproducibility", draft["reproducibility_status"]],
                     ]:
                         _append_excel(sheet, row)
+                    if draft.get("document"):
+                        for sheet_name, rows in report_document_excel_rows(draft["document"], draft).items():
+                            structured_sheet = workbook.create_sheet(sheet_name)
+                            for row in rows:
+                                _append_excel(structured_sheet, row)
                     for number, run in enumerate(runs, start=1):
                         target = workbook.create_sheet("Result " + str(number))
                         result = run.get("result") or {"columns": [], "rows": []}

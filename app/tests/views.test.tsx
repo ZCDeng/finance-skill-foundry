@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Chip, Marks } from '../src/components/Chip.js';
 import { Reader } from '../src/components/Reader.js';
@@ -11,9 +11,10 @@ import { WiringTrouble } from '../src/views/Workbench.js';
 import { Deliverables } from '../src/views/Deliverables.js';
 import { Tasks } from '../src/views/Tasks.js';
 import { TaskDetail } from '../src/views/TaskDetail.js';
-import { type DeliverableRow, type TaskRow, isWorkbook } from '../src/bridge.js';
+import { Analysis } from '../src/views/Analysis.js';
+import { type Answer, type AnalysisDraft, type AnalysisState, type Bridge, type DeliverableRow, type TaskRow, isWorkbook } from '../src/bridge.js';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Partial<Bridge> }).foundry; vi.clearAllMocks(); });
 
 const TASK: TaskRow = {
   id: 'a'.repeat(32),
@@ -34,6 +35,16 @@ const ROW: DeliverableRow = {
   session_id: 'sess-leader',
   at: '2026-08-30T06:22:07Z',
 };
+
+
+const success = <T,>(value: T): Answer<T> => ({ ok: true, value });
+function installEditorGeometryPolyfill() {
+  Element.prototype.getClientRects = vi.fn(() => ({ length: 1, item: () => null, [0]: new DOMRect(0, 0, 120, 24) } as unknown as DOMRectList));
+  Element.prototype.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 120, 24));
+  Range.prototype.getClientRects = vi.fn(() => ({ length: 1, item: () => null, [0]: new DOMRect(0, 0, 120, 24) } as unknown as DOMRectList));
+  Range.prototype.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 120, 24));
+  window.scrollBy = vi.fn();
+}
 
 describe('the task list', () => {
   const noop = () => {};
@@ -278,6 +289,45 @@ describe('the shell', () => {
       </Shell>,
     );
     expect(container.querySelector('.fnd-head__help')).toBeNull();
+  });
+});
+
+
+describe('the analysis report page', () => {
+  it('keeps print preview as a real third mode between edit and read', async () => {
+    installEditorGeometryPolyfill();
+    const draft: AnalysisDraft = {
+      task_id: TASK.id,
+      schema_version: 1,
+      created_at: TASK.created_at,
+      id: 'f'.repeat(32),
+      title: '经营简报',
+      body: '# 管理摘要\n利润改善。\n',
+      run_ids: [],
+      claims: [],
+      publication_status: 'archived',
+      review_status: 'accepted',
+      limitations: [],
+    };
+    const state: AnalysisState = { task_id: TASK.id, datasets: [], analyses: [], runs: [], drafts: [draft], methods: [] };
+    const reportPreview = vi.fn(async () => success({ html: '<html><body><main>正式预览内容</main></body></html>' }));
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = {
+      analysisState: vi.fn(async () => success(state)),
+      reportPreview,
+    };
+
+    render(<Analysis task={TASK} tasks={[TASK]} embedded section="drafts" onPick={() => {}} onNew={() => {}} onChat={() => {}} />);
+
+    expect(await screen.findByRole('article', { name: '文稿阅读' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: '打印预览' }));
+    await waitFor(() => expect(reportPreview).toHaveBeenCalledWith(TASK.id, expect.objectContaining({ content: expect.any(Array) }), '经营简报'));
+    expect(screen.getByTitle('正式预览')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑文稿' }));
+    expect(screen.getByLabelText('可视化文稿编辑器')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '阅读文稿' }));
+    expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain('利润改善。');
   });
 });
 

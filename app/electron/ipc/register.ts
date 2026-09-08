@@ -19,6 +19,8 @@ import type { UniverPreviewHost } from '../univer.js';
 import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
 import * as path from 'node:path';
+import type { ReportHost } from '../reports/host.js';
+import { withDraftSpec } from '../reports/input.js';
 
 /**
  * What a handler hands back.
@@ -182,6 +184,21 @@ export function registerIpc(
   // Every analysis operation goes through the same domain CLI as legacy work.
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
     JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
+  let reportHost: Promise<ReportHost> | undefined;
+  const reports = () => reportHost ??= import('../reports/host.js').then(({ ReportHost }) => new ReportHost(binding,
+    (task, phase) => panes?.window()?.webContents.send(CHANNELS.reportProgress, { task, phase })));
+  ipcMain.handle(CHANNELS.reportImport, (_event, task: unknown, options?: unknown) => answer(async () =>
+    (await reports()).import(taskId(task), options as import('../reports/model.js').ReportImportOptions)));
+  ipcMain.handle(CHANNELS.reportSource, (_event, task: unknown, source: unknown) => answer(async () =>
+    (await reports()).source(taskId(task), source)));
+  ipcMain.handle(CHANNELS.reportPreview, (_event, task: unknown, document: unknown, title: unknown) => answer(async () =>
+    (await reports()).preview(taskId(task), document, title)));
+  ipcMain.handle(CHANNELS.reportCancel, (_event, task: unknown) => answer(async () =>
+    (await reports()).cancel(taskId(task))));
+  const draftCall = async (rawTask: unknown, command: string, spec: unknown) => {
+    const task = taskId(rawTask);
+    return withDraftSpec(spec, (args) => analysisCall(task, command, args));
+  };
   const rootAnalysisContext = async (task: string): Promise<{ sessionId?: string; title?: string }> => {
     const known = await analysisCall(task, 'task-show');
     const previous = [...(known.sessions ?? [])].reverse().find(
@@ -241,6 +258,7 @@ export function registerIpc(
         if (spec !== undefined && spec !== null) throw new Error('finance command does not take a spec');
         return analysisCall(task, name);
       }
+      if (name === 'save-explanation-draft') return draftCall(task, name, spec);
       return analysisCall(task, name, ['--spec', objectJson(spec)]);
     }));
   ipcMain.handle(CHANNELS.financeSourceRefresh, (_e, rawTask: unknown, rawSpec: unknown) =>
@@ -273,7 +291,7 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.analysisRun, (_e, task: unknown, id: unknown) =>
     answer(() => analysisCall(task, 'analysis-run', ['--analysis', objectId(id)])));
   ipcMain.handle(CHANNELS.analysisDraft, (_e, task: unknown, spec: unknown) =>
-    answer(() => analysisCall(task, 'analysis-draft', ['--spec', objectJson(spec)])));
+    answer(() => draftCall(task, 'analysis-draft', spec)));
   ipcMain.handle(CHANNELS.analysisMethodSave, (_e, task: unknown, id: unknown, name: unknown) =>
     answer(() => analysisCall(task, 'analysis-method-save', [
       '--analysis', objectId(id), '--name', lineOf(name, 'method name', 120),
@@ -289,14 +307,9 @@ export function registerIpc(
     }));
   ipcMain.handle(CHANNELS.analysisExport, (_e, task: unknown, id: unknown, rawFormat: unknown) =>
     answer(async () => {
-      if (rawFormat !== 'md' && rawFormat !== 'xlsx') throw new Error('unsupported export format');
-      const result = await analysisCall(task, 'analysis-export', ['--draft', objectId(id), '--format', rawFormat]);
-      // The domain service resolves the archived path, never the renderer.
-      if (typeof result.path === 'string') {
-        const trouble = await shell.openPath(result.path);
-        if (trouble) return { ...result, open_error: trouble };
-      }
-      return result;
+      const taskKey = taskId(task), draft = objectId(id);
+      if (!['md', 'xlsx', 'docx', 'pdf', 'html'].includes(String(rawFormat))) throw new Error('unsupported export format');
+      return (await reports()).export(taskKey, draft, rawFormat);
     }));
   ipcMain.handle(CHANNELS.analysisAddFiles, (_e, rawTask: unknown) =>
     answer(async () => {

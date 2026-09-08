@@ -11,6 +11,15 @@ import { contextBridge, ipcRenderer } from 'electron';
  * the suite instead of failing at runtime in a packaged build.
  */
 const api = {
+  reportImport: (task: string, options?: unknown) => ipcRenderer.invoke('report:import', task, options),
+  reportSource: (task: string, sourceId: string) => ipcRenderer.invoke('report:source', task, sourceId),
+  reportPreview: (task: string, document: unknown, title: string) => ipcRenderer.invoke('report:preview', task, document, title),
+  reportCancel: (task: string) => ipcRenderer.invoke('report:cancel', task),
+  onReportProgress: (cb: (progress: { task: string; phase: string }) => void) => {
+    const relay = (_event: unknown, progress: { task: string; phase: string }) => cb(progress);
+    ipcRenderer.on('report:progress', relay);
+    return () => { ipcRenderer.off('report:progress', relay); };
+  },
   analysisOpenOutput: (task: string, runId: string, output: string) => ipcRenderer.invoke('analysis:open-output', task, runId, output),
   analysisState: (task: string) => ipcRenderer.invoke('analysis:state', task),
   analysisAddFiles: (task: string) => ipcRenderer.invoke('analysis:add-files', task),

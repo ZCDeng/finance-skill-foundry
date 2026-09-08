@@ -92,6 +92,11 @@ export interface HarnessStatus {
 }
 
 export interface Bridge {
+  reportImport?(task: string, options?: import('../electron/reports/model').ReportImportOptions): Promise<Answer<import('../electron/reports/model').ReportImportResult>>;
+  reportSource?(task: string, sourceId: string): Promise<Answer<{ source: import('../electron/reports/model').ReportSource; data_base64: string }>>;
+  reportPreview?(task: string, document: import('../electron/reports/model').ReportDocument, title: string): Promise<Answer<{ html: string }>>;
+  reportCancel?(task: string): Promise<Answer<{ cancelled: boolean; finishing?: boolean }>>;
+  onReportProgress?(cb: (progress: { task: string; phase: string }) => void): () => void;
   analysisOpenOutput?(task: string, runId: string, output: string): Promise<Answer<Record<string, unknown>>>;
   analysisState?(task: string): Promise<Answer<AnalysisState>>;
   analysisAddFiles?(task: string): Promise<Answer<DatasetSnapshot[]>>;
@@ -99,7 +104,7 @@ export interface Bridge {
   analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
   analysisDraft?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisDraft>>;
-  analysisExport?(task: string, id: string, format: 'md' | 'xlsx'): Promise<Answer<Record<string, unknown>>>;
+  analysisExport?(task: string, id: string, format: import('../electron/reports/model').ReportFormat): Promise<Answer<Record<string, unknown>>>;
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
@@ -279,6 +284,7 @@ export interface AnalysisRun extends AnalysisObject {
   };
 }
 export interface AnalysisDraft extends AnalysisObject {
+  document?: import('../electron/reports/model').ReportDocument;
   title: string;
   body: string;
   evidence_appendix?: string;

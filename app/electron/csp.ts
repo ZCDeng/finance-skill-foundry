@@ -5,9 +5,9 @@
  * cannot end up without one because a document loaded by a path that skipped the
  * meta tag.
  *
- * `default-src 'none'` and then only what this app actually serves. There is no
- * `img-src` beyond `'self'` because nothing here renders a bitmap: a foundry
- * deliverable is markdown. `font-src 'self'` is required rather than optional --
+ * Imported document images and print fonts are validated local data URLs.
+ * Rich-text table widths/alignment require style attributes; arbitrary scripts,
+ * navigation and network requests remain forbidden. `font-src` is required --
  * the two bundled faces would otherwise fall through to the `'none'` default and
  * be blocked in the packaged app only, where no dev server is serving a laxer
  * policy to hide it.
@@ -17,10 +17,13 @@
  */
 export const CSP_DIRECTIVES = [
   "default-src 'none'",
-  "img-src 'self'",
-  "font-src 'self'",
-  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
   "script-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-src 'self' blob: data:",
+  "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
 ] as const;
@@ -39,7 +42,6 @@ export const CSP_HEADER_VALUE = CSP_DIRECTIVES.join('; ');
  */
 export const DEV_CSP_DIRECTIVES = CSP_DIRECTIVES.map((directive) => {
   if (directive.startsWith('script-src')) return `${directive} 'unsafe-inline'`;
-  if (directive.startsWith('style-src')) return `${directive} 'unsafe-inline'`;
   if (directive.startsWith('default-src')) return `${directive}; connect-src 'self' ws://localhost:5273`;
   return directive;
 });

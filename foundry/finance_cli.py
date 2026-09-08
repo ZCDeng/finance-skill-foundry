@@ -41,7 +41,12 @@ def add_parsers(sub):
         sub.add_parser(command)
     for command in sorted(COMMANDS - LIST_COMMANDS):
         parser = sub.add_parser(command)
-        parser.add_argument("--spec", required=True)
+        if command == "save-explanation-draft":
+            from foundry.analysis_cli import _spec_arg
+
+            _spec_arg(parser)
+        else:
+            parser.add_argument("--spec", required=True)
         if command == "save-explanation-draft":
             # Runtime-injected CLI coordinates, never model spec fields.
             parser.add_argument("--completion-operation")
@@ -109,7 +114,7 @@ def dispatch(args):
             raise FoundryError("runtime completion save requires session and call id")
         result = service.save_completion_draft(
             args.completion_operation, args.completion_call_id,
-            _json(args.spec, "finance spec"),
+            _json_spec(args, "finance spec"),
         )
     elif args.cmd == "save-explanation-draft" and getattr(args, "completion_call_id", None):
         raise FoundryError("completion call id requires an operation")
@@ -126,6 +131,14 @@ def dispatch(args):
         files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None)
         result = getattr(files, FILE_OPERATIONS[args.cmd])(_json(args.spec, "workbook spec"))
     else:
-        result = getattr(service, OPERATIONS[args.cmd])(_json(args.spec, "finance spec"))
+        result = getattr(service, OPERATIONS[args.cmd])(
+            _json_spec(args, "finance spec") if args.cmd == "save-explanation-draft" else _json(args.spec, "finance spec")
+        )
     print(json.dumps(json_value(result), ensure_ascii=False, allow_nan=False))
     return True
+
+
+def _json_spec(args, label):
+    from foundry.analysis_cli import _json_spec as read_json_spec
+
+    return read_json_spec(args, label)

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
-  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), workspace: vi.fn(),
+  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: any) => mocks.handlers.set(name, handler) },
@@ -12,6 +12,7 @@ vi.mock('../electron/foundry.js', async (original) => ({
   ...await original<typeof import('../electron/foundry.js')>(), runFoundry: mocks.run,
 }));
 vi.mock('../electron/harness/workspace.js', () => ({ ensureTaskWorkspace: mocks.workspace }));
+vi.mock('../electron/reports/host.js', () => ({ ReportHost: class { export = mocks.reportExport; } }));
 import { registerIpc } from '../electron/ipc/register.js';
 import { CHANNELS } from '../electron/ipc/contract.js';
 
@@ -158,15 +159,18 @@ describe('analysis IPC task and session binding', () => {
     expect(host.show).toHaveBeenCalledWith('legacy', '', '/workspace/task-a');
   });
 
-  it('exports the domain resolved file and keeps an opener error recoverable', async () => {
+  it('routes all document formats to the task-bound native export host', async () => {
     registerIpc({ varRoot: '/store' });
-    mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/artifact.xlsx', sha256: 'hash' }));
-    mocks.openPath.mockResolvedValue('No application can open this file');
-    const result = await invoke(CHANNELS.analysisExport, task, 'draft-a', 'xlsx');
-    expect(result.ok).toBe(true);
-    expect(result.value.open_error).toBeTruthy();
-    expect(mocks.openPath).toHaveBeenCalledWith('/store/artifact.xlsx');
+    mocks.reportExport.mockResolvedValue({ path: '/chosen/report.xlsx', sha256: 'hash' });
+    for (const format of ['md', 'xlsx', 'docx', 'pdf', 'html']) {
+      const result = await invoke(CHANNELS.analysisExport, task, 'draft-a', format);
+      expect(result.ok).toBe(true);
+      expect(mocks.reportExport).toHaveBeenLastCalledWith(task, 'draft-a', format);
+    }
+    expect((await invoke(CHANNELS.analysisExport, task, 'draft-a', 'exe')).ok).toBe(false);
     expect((await invoke(CHANNELS.analysisExport, task, '../escape', 'xlsx')).ok).toBe(false);
+    expect(mocks.reportExport).toHaveBeenCalledTimes(5);
+    expect(mocks.openPath).not.toHaveBeenCalled();
   });
 
   it('allows only bounded finance business commands through one IPC call', async () => {

@@ -1,0 +1,327 @@
+import JSZip from 'jszip';
+import { describe, expect, it } from 'vitest';
+import { documentFromMarkdown, documentToMarkdown, exportDocx, importReport, renderReportHtml } from '../electron/reports/converters.js';
+import type { ReportDocument, ReportNode, ReportSource } from '../electron/reports/model.js';
+
+const source: ReportSource = {
+  id: 'source-a',
+  name: 'monthly-report.md',
+  sha256: 'a'.repeat(64),
+  format: 'md',
+};
+const png1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+
+describe('report document converters', () => {
+  it('keeps financial text, notes and tables stable through Markdown projection', () => {
+    const markdown = [
+      '# 华宸物业月结分析',
+      '',
+      '收入为 **1,234,567.89** 元，空值保持为 -。',
+      '',
+      '| 项目 | 本期 | 上期 |',
+      '| --- | --- | --- |',
+      '| 经营收入 | 1,234,567.89 | -98,765.43 |',
+      '| 空值 | - |  |',
+      '',
+      '[^1]: 金额来自总账，不四舍五入。',
+    ].join('\n');
+
+    const doc = documentFromMarkdown(markdown);
+    const projected = documentToMarkdown(doc);
+
+    expect(projected).toContain('1,234,567.89');
+    expect(projected).toContain('-98,765.43');
+    expect(projected).toContain('| 经营收入 | 1,234,567.89 | -98,765.43 |');
+    expect(projected).toContain('[^1]: 金额来自总账，不四舍五入。');
+  });
+
+  it('preserves nested lists and escaped Markdown table delimiters', () => {
+    const markdown = [
+      '# 转义测试',
+      '',
+      '1. 一级\\*事项\\*',
+      '   - 二级项目 A\\|B',
+      '   - 二级项目 C',
+      '2. 第二项',
+      '',
+      '| 项目 | 说明 |',
+      '| --- | --- |',
+      '| 现金\\|银行 | 保留\\*星号\\*与 1,000.00 |',
+    ].join('\n');
+
+    const doc = documentFromMarkdown(markdown);
+    const projected = documentToMarkdown(doc);
+
+    expect(projected).toContain('1. 一级\\*事项\\*');
+    expect(projected).toContain('  - 二级项目 A|B');
+    expect(projected).toContain('  - 二级项目 C');
+    expect(projected).toContain('| 现金\\|银行 | 保留\\*星号\\*与 1,000.00 |');
+    expect(documentToMarkdown(documentFromMarkdown(projected))).toBe(projected);
+  });
+
+  it('projects and imports document/table metadata using the backend Markdown contract', () => {
+    const doc = documentFromMarkdown('# 管理摘要\n\n正文。');
+    doc.metadata = { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' };
+    doc.content.push({
+      type: 'table',
+      attrs: { caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元' },
+      content: [
+        { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+        { type: 'tableRow', content: [cell('tableCell', '利润'), cell('tableCell', '5.00', { textAlign: 'right' })] },
+      ],
+    });
+
+    const markdown = documentToMarkdown(doc);
+    const imported = documentFromMarkdown(markdown);
+    const html = renderReportHtml(imported, '经营分析报告');
+
+    expect(markdown).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
+    expect(markdown).toContain('表题：利润预算差异；期间：2026-08；币种：CNY；单位：万元\n\n| 项目 | 金额 |');
+    expect(imported.metadata).toEqual({ company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' });
+    expect(imported.content.find((node) => node.type === 'table')?.attrs).toMatchObject({ caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元' });
+    expect(html).not.toContain('企业：华宸物业');
+    expect(html).not.toContain('表题：利润预算差异');
+  });
+
+  it('projects merged Markdown table cells as a rectangular degradation', () => {
+    const doc = documentFromMarkdown('# 合并表\n');
+    doc.content.push({
+      type: 'table',
+      content: [
+        { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+        { type: 'tableRow', content: [cell('tableCell', '合并行', { colspan: 2 })] },
+      ],
+    });
+
+    expect(documentToMarkdown(doc)).toContain('| 合并行 |  |');
+  });
+
+  it('renders formal HTML with offline print layout and safe links only', () => {
+    const doc = documentFromMarkdown([
+      '# 管理摘要',
+      '',
+      '### 三级指标不进目录',
+      '',
+      '[官网](https://example.com) [危险链接](javascript:alert(1))',
+      '',
+      '| 项目 | 一月 | 二月 | 三月 | 四月 | 五月 | 六月 | 七月 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| 应收账款 | 1,000.00 | 2,000.00 | 3,000.00 | 4,000.00 | 5,000.00 | 6,000.00 | 7,000.00 |',
+    ].join('\n'));
+
+    const html = renderReportHtml(doc, '经营分析报告', { print: true });
+
+    expect(html).toContain('@page{size:A4;margin:20mm}');
+    expect(html).toContain("default-src 'none'");
+    expect(html).toContain('img-src data:');
+    expect(html).toContain('font-src data:');
+    expect(html).toContain('.report-shell.is-print{width:auto;min-height:0;max-width:none;margin:0;padding:0;background:#fff;box-shadow:none}');
+    expect(html).toContain('max-width:42em');
+    expect(html).toContain('width:210mm');
+    expect(html).toContain('font-size:11pt');
+    expect(html).toContain('href="https://example.com"');
+    expect(html).not.toContain('javascript:alert');
+    expect(html).toContain('<thead>');
+    expect(html).toContain('class="num"');
+    expect(html).toContain('wide-table-group');
+    expect(html).toContain('续表');
+    expect(html.match(/<nav[\s\S]*<\/nav>/)?.[0]).not.toContain('三级指标不进目录');
+  });
+
+  it('imports HTML inertly and preserves source anchors without trusting executable content', async () => {
+    const html = Buffer.from(`
+      <article>
+        <h1 onclick="steal()">月结报告</h1>
+        <script>window.evil = true</script>
+        <p>收入 <strong>3,456.70</strong> 元 <a href="javascript:bad()">坏链接</a></p>
+        <table><tr><th>项目</th><th>金额</th></tr><tr><td>现金</td><td style="text-align:right">3,456.70</td></tr></table>
+        <img src="https://remote.example/a.png">
+      </article>
+    `);
+
+    const result = await importReport(html, 'html', { ...source, format: 'html', name: 'unsafe.html' });
+
+    expect(result.needsReview).toBe(true);
+    expect(result.warnings.join('\n')).toContain('脚本');
+    expect(result.warnings.join('\n')).toContain('事件处理属性');
+    expect(documentToMarkdown(result.document!)).toContain('3,456.70');
+    expect(JSON.stringify(result.document)).toContain('"source_id":"source-a"');
+    expect(JSON.stringify(result.document)).not.toContain('javascript:bad');
+    expect(JSON.stringify(result.document)).not.toContain('remote.example');
+  });
+
+  it('round-trips formal HTML structure with captions, units, notes and PNG images', async () => {
+    const doc = documentFromMarkdown('# 图文表报告\n\n正文引用 [^n1]。');
+    doc.metadata = { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' };
+    doc.sources = [{ ...source, format: 'html', name: 'report.html' }];
+    doc.content.push({
+      type: 'table',
+      attrs: { source_id: source.id, caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元', sheet: '月结', range: 'A1:C2' },
+      content: [
+        { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+        { type: 'tableRow', content: [cell('tableCell', '利润'), cell('tableCell', '5.00', { textAlign: 'right' })] },
+      ],
+    });
+    doc.content.push({ type: 'image', attrs: { source_id: source.id, src: png1x1, alt: '趋势图', title: '经营趋势' } });
+    doc.content.push({ type: 'reportNote', attrs: { id: 'n1', source_id: source.id }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '附注正文保留。' }] }] });
+
+    const html = renderReportHtml(doc, '图文表报告', { print: true });
+    const imported = await importReport(Buffer.from(html), 'html', { ...source, format: 'html', name: 'roundtrip.html' });
+    const importedJson = JSON.stringify(imported.document);
+    const table = imported.document!.content.find((node) => node.type === 'table')!;
+    const image = imported.document!.content.find((node) => node.type === 'image')!;
+    const note = imported.document!.content.find((node) => node.type === 'reportNote')!;
+
+    expect(table.attrs).toMatchObject({ caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元' });
+    expect(documentToMarkdown(doc)).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
+    expect(documentToMarkdown(doc)).toContain('表题：利润预算差异；期间：2026-08；币种：CNY；单位：万元');
+    expect(image.attrs).toMatchObject({ src: png1x1, alt: '趋势图' });
+    expect(note.attrs).toMatchObject({ id: 'n1', source_id: 'source-a' });
+    expect(documentToMarkdown(imported.document!)).toContain('[^n1]: 附注正文保留。');
+    expect(importedJson).not.toContain('data:image/gif');
+  });
+
+  it('resolves Markdown and HTML image resources only from provided safe data URLs', async () => {
+    const md = Buffer.from('# 图片导入\n\n![本地图](charts/trend.png)\n\n![缺失](charts/missing.png)');
+    const html = Buffer.from('<article><p><img src="images/a.png" alt="HTML图"></p><p><img src="file:///tmp/b.png" alt="不可信"></p><p><a href="./images/a.png">本地链接不替换</a></p></article>');
+
+    const mdResult = await importReport(md, 'md', source, { 'charts/trend.png': png1x1 });
+    const htmlResult = await importReport(html, 'html', { ...source, format: 'html', name: 'images.html' }, { 'images/a.png': png1x1 });
+
+    expect(JSON.stringify(mdResult.document)).toContain(png1x1);
+    expect(JSON.stringify(mdResult.document)).not.toContain('charts/trend.png');
+    expect(JSON.stringify(mdResult.document)).not.toContain('charts/missing.png');
+    expect(mdResult.warnings.join('\n')).toContain('charts/missing.png');
+    expect(mdResult.needsReview).toBe(true);
+
+    expect(JSON.stringify(htmlResult.document)).toContain(png1x1);
+    expect(JSON.stringify(htmlResult.document)).not.toContain('file:///tmp/b.png');
+    expect(JSON.stringify(htmlResult.document)).toContain('./images/a.png');
+    expect(htmlResult.warnings.join('\n')).toContain('file:///tmp/b.png');
+  });
+
+  it('imports PDF text conservatively and marks it for review', async () => {
+    const pdf = minimalPdf('Revenue 1234.50 CNY');
+    const result = await importReport(pdf, 'pdf', { ...source, format: 'pdf', name: 'report.pdf' });
+
+    expect(result.needsReview).toBe(true);
+    expect(result.warnings.join('\n')).toContain('复杂表格');
+    expect(documentToMarkdown(result.document!)).toContain('1234.50 CNY');
+    expect(JSON.stringify(result.document)).toContain('"page":1');
+  });
+
+  it('exports DOCX with A4 margins, repeated table headers, footer page numbers and exact numbers', async () => {
+    const doc: ReportDocument = documentFromMarkdown([
+      '# 经营与预算分析',
+      '',
+      '预算差异为 -98,765.43 元。',
+      '',
+      '[^n1]: Word 回读附注。',
+      '',
+      '1. 跟进现金回款',
+      '',
+      '| 项目 | 一月 | 二月 | 三月 | 四月 | 五月 | 六月 | 七月 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| 收入 | 1.00 | 2.00 | 3.00 | 4.00 | 5.00 | 6.00 | 7.00 |',
+    ].join('\n'));
+    doc.metadata = { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' };
+
+    const buffer = await exportDocx(doc, '经营分析报告');
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('string');
+    const footerXml = await zip.file('word/footer1.xml')!.async('string');
+    const numberingXml = await zip.file('word/numbering.xml')!.async('string');
+
+    expect(documentXml).toContain('w:w="11906"');
+    expect(documentXml).toContain('w:h="16838"');
+    expect(documentXml).toContain('w:top="1134"');
+    expect(documentXml).toContain('华宸物业 / 2026-08 / CNY / 万元');
+    expect(documentXml).toContain('<w:tblHeader/>');
+    expect(documentXml).toContain('经营与预算分析');
+    expect(documentXml).toContain('-98,765.43');
+    expect(documentXml).toContain('续表');
+    expect(footerXml).toContain('PAGE');
+    expect(numberingXml).toContain('%1.');
+
+    const imported = await importReport(buffer, 'docx', { ...source, format: 'docx', name: 'roundtrip.docx' });
+    expect(imported.needsReview).toBe(true);
+    expect(imported.warnings.join('\n')).toContain('Word 导入采用语义转换');
+    expect(documentToMarkdown(imported.document!)).toContain('-98,765.43');
+    expect(documentToMarkdown(imported.document!)).toContain('[^n1]: Word 回读附注。');
+  });
+
+  it('embeds provided Noto Sans SC font data in DOCX exports', async () => {
+    const doc = documentFromMarkdown('# 字体嵌入\n\n正文。');
+    const buffer = await exportDocx(doc, '字体报告', new Uint8Array([0, 1, 2, 3, 4, 5]));
+    const zip = await JSZip.loadAsync(buffer);
+    const fontTable = await zip.file('word/fontTable.xml')!.async('string');
+    const fontRels = await zip.file('word/_rels/fontTable.xml.rels')!.async('string');
+
+    expect(fontTable).toContain('Noto Sans SC');
+    expect(fontTable).toContain('fontKey');
+    expect(fontRels).toContain('font');
+  });
+
+  it('exports merged cells, captions and PNG images to DOCX without silently segmenting the merge', async () => {
+    const doc: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      sources: [source],
+      content: [
+        { type: 'table', attrs: { caption: '合并宽表', period: '2026-08', currency: 'CNY', unit: '万元' }, content: [
+          { type: 'tableRow', content: ['项目', '一月', '二月', '三月', '四月', '五月', '六月'].map((text) => cell('tableHeader', text)) },
+          { type: 'tableRow', content: [
+            cell('tableCell', '合并单元格', { colspan: 2 }),
+            cell('tableCell', '1.00'), cell('tableCell', '2.00'), cell('tableCell', '3.00'), cell('tableCell', '4.00'), cell('tableCell', '5.00'),
+          ] },
+        ] },
+        { type: 'image', attrs: { src: png1x1, alt: '趋势图' } },
+      ],
+    };
+
+    const buffer = await exportDocx(doc, '合并宽表报告');
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('string');
+    const relationships = await zip.file('word/_rels/document.xml.rels')!.async('string');
+
+    expect(documentXml).toContain('合并宽表');
+    expect(documentXml).toContain('2026-08 / CNY / 万元');
+    expect(documentXml).toContain('合并单元格');
+    expect(documentXml).toContain('续表');
+    expect(relationships).toContain('image');
+  });
+});
+
+function minimalPdf(text: string): Buffer {
+  const escaped = text.replace(/[()\\]/g, '\\$&');
+  const stream = `BT /F1 18 Tf 72 760 Td (${escaped}) Tj ET`;
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    `5 0 obj\n<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream\nendobj\n`,
+  ];
+  let output = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(output));
+    output += object;
+  }
+  const xref = Buffer.byteLength(output);
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let index = 1; index < offsets.length; index += 1) {
+    output += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+  }
+  output += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(output);
+}
+
+function cell(type: 'tableHeader' | 'tableCell', text: string, attrs: Record<string, unknown> = {}): ReportNode {
+  return {
+    type,
+    attrs,
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  };
+}

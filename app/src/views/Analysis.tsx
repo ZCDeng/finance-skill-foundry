@@ -8,20 +8,13 @@ import './analysis.css';
 import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
-import { DraftBody } from './analysis/DraftBody.js';
+import { ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
 import { Textarea } from '../components/ui/textarea.js';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-} from '../components/ui/dropdown-menu.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
@@ -29,7 +22,8 @@ type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindi
 type MaterialityDenominator = 'baseline_abs' | 'actual_abs' | 'max_abs';
 type MaterialityNegativePolicy = 'absolute' | 'signed';
 type MaterialityEdit = { absolute: string; relative: string; denominator: MaterialityDenominator; negativePolicy: MaterialityNegativePolicy };
-type DraftEdit = { title: string; body: string; limitations: string; review: string; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
+type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
+type ReportMode = 'read' | 'edit' | 'print';
 interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
 }
@@ -451,12 +445,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onSave={(spec) => void perform(async (taskId) => {
               await saveDraft(taskId, spec);
               if (currentTask.current === taskId) setNotice('已保存为新的文稿版本。');
-            })} onExport={(format, spec) => void perform(async (taskId) => {
+            })} onExport={(format, spec) => perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisExport) throw new Error('此版本暂不支持导出文稿。');
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               if (!id) throw new Error('请先写下文稿内容。');
-              const result = unwrap(await api.analysisExport(taskId, id, format));
-              if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'md' ? '文稿' : '工作簿'}${result.path ? `：${textValue(result.path)}` : '。'}`);
+              const exportDraftFile = api.analysisExport as (task: string, id: string, nextFormat: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx') => Promise<Answer<Record<string, unknown>>>;
+              const result = unwrap(await exportDraftFile(taskId, id, format));
+              if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'xlsx' ? '工作簿' : sourceFormatLabel(format)}${result.path ? `：${textValue(result.path)}` : '。'}`);
             })} />
         </>}
         {view && tab === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
@@ -1099,18 +1094,19 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
 function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
-  onExport(format: 'md' | 'xlsx', spec?: Record<string, unknown>): void; onChat(spec?: Record<string, unknown>): void;
+  onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
   const [body, setBody] = useState(edit?.body ?? draft?.body ?? '');
+  const [document, setDocument] = useState<ReportDraftDocument | undefined>(() => edit?.document ?? richDraftDocument(draft));
   const [limitations, setLimitations] = useState(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
   const [review, setReview] = useState(edit?.review ?? draft?.review_status ?? 'unreviewed');
   const [materiality, setMateriality] = useState<MaterialityEdit>(() => edit?.materiality ?? materialityToEdit(draft?.materiality));
   const [recovery, setRecovery] = useState<FinanceCompletionRecovery | null>(edit?.recovery ?? null);
-  const [editing, setEditing] = useState(!draft || Boolean(edit && (edit.body !== draft.body || edit.title !== draft.title
-    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality) || edit.recovery)));
+  const [reportMode, setReportMode] = useState<ReportMode>(() => (!draft || Boolean(edit && (edit.body !== draft.body || edit.title !== draft.title
+    || edit.limitations !== draft.limitations.join('\n') || edit.review !== draft.review_status || !sameDocument(edit.document, richDraftDocument(draft)) || !sameMateriality(edit.materiality, draft.materiality) || edit.recovery))) ? 'edit' : 'read');
   const [quality, setQuality] = useState<ExplanationQuality | null>(initialEditUnsaved ? null : (draft?.quality as ExplanationQuality | undefined) ?? null);
   const [qualityState, setQualityState] = useState<'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'>(initialEditUnsaved ? 'stale' : 'idle');
   const [updatedRequirementsId, setUpdatedRequirementsId] = useState<string | null>(null);
@@ -1145,10 +1141,11 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
     || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || recovery));
   const reading = readableDraftParts(body, draft?.evidence_appendix);
-  useEffect(() => { onEdit({ title, body, limitations, review, materiality, recovery }); }, [title, body, limitations, review, materiality, recovery, onEdit]);
+  useEffect(() => { onEdit({ title, body, limitations, review, document, materiality, recovery }); }, [title, body, limitations, review, document, materiality, recovery, onEdit]);
   useEffect(() => {
     setTitle(edit?.title ?? draft?.title ?? '经营分析');
     setBody(edit?.body ?? draft?.body ?? '');
+    setDocument(edit?.document ?? richDraftDocument(draft));
     setLimitations(edit?.limitations ?? draft?.limitations.join('\n') ?? '');
     setReview(edit?.review ?? draft?.review_status ?? 'unreviewed');
     setMateriality(edit?.materiality ?? materialityToEdit(draft?.materiality));
@@ -1158,6 +1155,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     setQualityState(restoredUnsaved ? 'stale' : 'idle');
     setUpdatedRequirementsId(null);
     setRequirementsOpen(!draft);
+    setReportMode(!draft || restoredUnsaved ? 'edit' : 'read');
     setFacts([]); setFactDetails({}); setBackgrounds([]); setToolError(''); setBackgroundMessage('');
     setBackgroundScope(scopeToFields(defaultScope)); setScopeJson(JSON.stringify(defaultScope, null, 2));
     qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1;
@@ -1221,12 +1219,12 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     void loadBackgrounds(bgRequest, defaultScope);
     return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
   }, [draft?.id, taskId]);
-  const changed = !draft || title !== draft.title || body !== draft.body || limitations !== draft.limitations.join('\n') || review !== draft.review_status
+  const changed = !draft || title !== draft.title || body !== draft.body || !sameDocument(document, richDraftDocument(draft)) || limitations !== draft.limitations.join('\n') || review !== draft.review_status
     || Boolean(updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || materialityChanged || Boolean(recovery);
   const canLoadRecovery = !hasMeaningfulUnsavedDraft(draft, { title, body, limitations, review, materiality, recovery }, materialityChanged);
   function spec(publication: 'draft' | 'archived') {
     const parentId = recovery ? recovery.parent_id : draft?.id;
-    return { title: title.trim(), body, run_ids: effectiveRunIds, claims: effectiveClaims, ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
+    return { title: title.trim(), body, ...(document ? { document } : richDraftDocument(draft) ? { document: null } : {}), run_ids: effectiveRunIds, claims: effectiveClaims, ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
       ...(parentId ? { parent_id: parentId } : {}),
       ...((updatedRequirementsId ?? recovery?.requirements_id) ? { requirements_id: updatedRequirementsId ?? recovery?.requirements_id } : {}),
       materiality: materialitySpec, publication_status: publication, review_status: review,
@@ -1295,6 +1293,10 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     markQualityStale();
     setBody(value); setReview('unreviewed');
   }
+  function onDocumentChange(value: ReportDraftDocument | undefined) {
+    markQualityStale();
+    setDocument(value);
+  }
   function onMaterialityChange(next: MaterialityEdit) {
     setMateriality(next);
     markQualityStale();
@@ -1304,10 +1306,11 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     setRecovery(next);
     setTitle(next.title?.trim() || title);
     setBody(next.body ?? '');
+    setDocument(richRecoveryDocument(next));
     setLimitations(Array.isArray(next.limitations) ? next.limitations.join('\n') : textValue(next.limitations ?? ''));
     if (next.materiality) setMateriality(materialityToEdit(next.materiality));
     setReview('unreviewed');
-    setEditing(true);
+    setReportMode('edit');
     markQualityStale();
   }
   return <div className="analysis-draft">
@@ -1323,19 +1326,14 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     </details>}
     <div className="analysis-section-heading"><h3>{draft ? '文稿' : '写下判断与建议'}</h3>
       {draft && <span className="analysis-note">{STATUS[draft.publication_status] ?? draft.publication_status} · {STATUS[draft.review_status] ?? draft.review_status}</span>}
-      <div className="analysis-actions"><Button variant="outline" type="button" aria-pressed={editing} onClick={() => setEditing(!editing)}>{editing ? '阅读文稿' : '编辑文稿'}</Button>
+      <div className="analysis-actions"><Button variant="outline" type="button" aria-pressed={reportMode === 'edit'} onClick={() => setReportMode(reportMode === 'edit' ? 'read' : 'edit')}>{reportMode === 'edit' ? '阅读文稿' : '编辑文稿'}</Button>
       <Button variant="outline" type="button" disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))} onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}>{draft ? '围绕此稿继续分析' : '请助手整理文稿'}</Button></div></div>
-    {editing ? <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
-    <label>文稿标题<Input aria-label="文稿标题" className="min-w-0 flex-1" value={title} onChange={(event) => setTitle(event.target.value)}  /></label>
-    <label>文稿正文<Textarea aria-label="文稿正文" rows={14} value={body} placeholder="写下你的判断，或请助手根据分析结果整理初稿。"
-      onChange={(event) => onBodyChange(event.target.value)} /></label>
-    <div className="analysis-edit-grid"><label>局限与待确认事项（每行一项）<Textarea aria-label="局限与待确认事项（每行一项）" rows={3} value={limitations}
-      onChange={(event) => setLimitations(event.target.value)} /></label><label>我的审阅状态<select aria-label="我的审阅状态" className="fnd-field" value={review}
-      onChange={(event) => setReview(event.target.value)}><option value="unreviewed">未阅</option><option value="reviewed">已阅</option><option value="accepted">认可</option></select></label></div>
+    <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} title={title} body={body} appendix={reading.appendix}
+      limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
+      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)} />
+    <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
-    </fieldset> : <article className="analysis-draft-reading" aria-label="文稿阅读"><h2>{title}</h2><div className="analysis-draft-main"><DraftBody body={reading.body} /></div>
-      {reading.appendix && <details className="analysis-details analysis-appendix-fold"><summary>系统生成计算依据附录</summary><DraftBody body={reading.appendix} /></details>}
-      {limitations.trim() && <section><h3>局限与待确认事项</h3><ul>{limitations.split('\n').filter(Boolean).map((line, index) => <li key={index}>{line}</li>)}</ul></section>}</article>}
+    </fieldset>
     {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
@@ -1345,20 +1343,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
     <div className="analysis-actions">{changed && <Button type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</Button>}
-      <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)}>导出</Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" collisionPadding={16}>
-          <DropdownMenuItem disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onSelect={() => onExport('md', changed ? spec('draft') : undefined)}>
-            导出文稿<DropdownMenuShortcut>Markdown</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onSelect={() => onExport('xlsx', changed ? spec('draft') : undefined)}>
-            导出工作簿<DropdownMenuShortcut>Excel</DropdownMenuShortcut>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu></div>
+      <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</Button></div>
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
     {toolError && <p role="alert" className="analysis-message analysis-message--error">{toolError}</p>}
   </div>;
@@ -1484,7 +1469,32 @@ function hasMeaningfulUnsavedDraft(draft: AnalysisDraft | undefined, edit: Draft
 
 function draftEditDiffers(draft: AnalysisDraft, edit: DraftEdit): boolean {
   return edit.title !== draft.title || edit.body !== draft.body || edit.limitations !== draft.limitations.join('\n')
-    || edit.review !== draft.review_status || !sameMateriality(edit.materiality, draft.materiality) || Boolean(edit.recovery);
+    || edit.review !== draft.review_status || !sameDocument(edit.document, richDraftDocument(draft)) || !sameMateriality(edit.materiality, draft.materiality) || Boolean(edit.recovery);
+}
+
+function richDraftDocument(draft: AnalysisDraft | undefined): ReportDraftDocument | undefined {
+  const value = (draft as (AnalysisDraft & { document?: unknown }) | undefined)?.document;
+  return isReportDocument(value) ? value : undefined;
+}
+
+function richRecoveryDocument(recovery: FinanceCompletionRecovery): ReportDraftDocument | undefined {
+  const value = (recovery as FinanceCompletionRecovery & { document?: unknown }).document;
+  return isReportDocument(value) ? value : undefined;
+}
+
+function isReportDocument(value: unknown): value is ReportDraftDocument {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && (value as { schema_version?: unknown }).schema_version === 1
+    && (value as { template_version?: unknown }).template_version === 'annual-v1'
+    && Array.isArray((value as { content?: unknown }).content));
+}
+
+function sameDocument(left?: ReportDraftDocument, right?: ReportDraftDocument): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function sourceFormatLabel(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx'): string {
+  return ({ docx: 'Word', pdf: 'PDF', html: 'HTML', md: '文稿', xlsx: '工作簿' } as Record<typeof format, string>)[format];
 }
 
 function recoveryStatusLabel(status: string): string {

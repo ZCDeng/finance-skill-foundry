@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from decimal import localcontext
 
 from foundry.analysis import AnalysisStore, _assert_id, _hash, _new, _safe_text
@@ -27,6 +28,25 @@ COLLECTIONS = {
     "metric_definitions",
     "backgrounds",
 }
+
+
+def _render_fact_template_in_document(document: dict, facts: list[dict]) -> tuple[dict, list[str]]:
+    rendered = copy.deepcopy(document)
+    used: list[str] = []
+
+    def visit(node: dict) -> None:
+        if node.get("type") == "text":
+            text, fact_ids = render_fact_template(str(node.get("text", "")), facts)
+            node["text"] = text
+            used.extend(fact_ids)
+        for child in node.get("content", []) or []:
+            if isinstance(child, dict):
+                visit(child)
+
+    for item in rendered.get("content", []) or []:
+        if isinstance(item, dict):
+            visit(item)
+    return rendered, used
 
 
 class FinanceStore:
@@ -740,11 +760,27 @@ class FinanceStore:
             else {"facts": []}
         )
         check_deadline()
-        body = spec.get("body", parent.get("body", ""))
+        document = None
+        if spec.get("document") is not None:
+            from foundry.report_documents import report_document_markdown, validate_report_document
+
+            document = validate_report_document(
+                spec["document"],
+                registered_source_ids=self.analysis._registered_report_source_ids(),
+            )
+            body = report_document_markdown(document)
+        else:
+            body = spec.get("body", parent.get("body", ""))
         previous_appendix = parent.get("evidence_appendix", "")
         if previous_appendix and body.endswith(previous_appendix):
             body = body[:-len(previous_appendix)].rstrip()
-        rendered, template_fact_ids = render_fact_template(body, prepared["facts"])
+        if document is not None:
+            from foundry.report_documents import report_document_markdown
+
+            document, template_fact_ids = _render_fact_template_in_document(document, prepared["facts"])
+            rendered = report_document_markdown(document)
+        else:
+            rendered, template_fact_ids = render_fact_template(body, prepared["facts"])
         explicit_fact_ids = spec.get("fact_ids", parent.get("fact_ids", []))
         if not isinstance(explicit_fact_ids, list):
             raise FoundryError("fact_ids must be an array")
@@ -765,6 +801,14 @@ class FinanceStore:
         )
         if appendix["body"]:
             rendered = rendered.rstrip() + "\n\n" + appendix["body"].lstrip()
+            if document is not None:
+                from foundry.report_documents import (
+                    append_markdown_blocks,
+                    report_document_markdown,
+                )
+
+                document = append_markdown_blocks(document, appendix["body"])
+                rendered = report_document_markdown(document)
         source_read_failures = []
         for item in provisional["items"]:
             if item["requires_drilldown"]:
@@ -806,20 +850,20 @@ class FinanceStore:
                     )
             claims.append(claim)
         check_deadline()
-        draft = self.analysis.save_draft(
-            {
-                **spec,
-                "body": rendered,
-                "evidence_appendix": appendix["body"],
-                "evidence_appendix_meta": appendix_meta,
-                "materiality": prepared.get("materiality", {}),
-                "source_read_failures": source_read_failures,
-                **({"body_template": body} if template_fact_ids else {}),
-                "run_ids": run_ids,
-                "fact_ids": fact_ids,
-                "claims": claims,
-            }
-        )
+        save_spec = {
+            **spec,
+            "body": rendered,
+            **({"document": document} if document is not None else {}),
+            "evidence_appendix": appendix["body"],
+            "evidence_appendix_meta": appendix_meta,
+            "materiality": prepared.get("materiality", {}),
+            "source_read_failures": source_read_failures,
+            **({"body_template": body} if template_fact_ids else {}),
+            "run_ids": run_ids,
+            "fact_ids": fact_ids,
+            "claims": claims,
+        }
+        draft = self.analysis.save_draft(save_spec)
 
         from foundry.finance_completion import record_completion
 

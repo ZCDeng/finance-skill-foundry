@@ -1,5 +1,16 @@
 # Noto Sans SC — FA Foundry offline font
 
+## Editable Word reports
+
+`NotoSansSC-report.ttf` is the full 400-weight static instance of the same
+approved WOFF2, used only for DOCX embedding. It retains every glyph and the
+original license/name tables; OS/2 `fsType=0` permits editable embedding.
+`report-font.json` records its source and output SHA-256. Regenerate offline
+with `python3 app/scripts/build-report-font.py` (fontTools 4.63.0). The packaged
+app includes this TTF and OFL beside the runtime. The DOCX writer embeds it using
+OOXML font relationships; reader support for embedded fonts varies. The UI
+continues to use the full variable WOFF2 and real weights.
+
 The interface and embedded conversation use **Noto Sans SC**, the Simplified
 Chinese regional font. Asap Sharp remains available separately for branding.
 Nothing in this font delivery depends on a system installation or a local font
