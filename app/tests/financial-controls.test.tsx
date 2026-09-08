@@ -207,6 +207,27 @@ describe('financial web controls', () => {
     expect(onChange).toHaveBeenLastCalledWith('actual-erp');
   });
 
+  it('keeps compact version summaries searchable by full metadata and restores keyboard focus', () => {
+    const onChange = vi.fn();
+    render(<SearchableSelect label="文稿版本" compact triggerText="09-08 22:55" value="v2" onChange={onChange} options={[
+      { value: 'v1', label: '经营简报', meta: '草稿 · 2026-09-08 20:00 · old-revision' },
+      { value: 'v2', label: '经营简报', meta: '草稿 · 2026-09-08 22:55 · current-revision' },
+    ]} />);
+    const trigger = screen.getByRole('button', { name: '文稿版本' });
+    expect(trigger.textContent).toContain('文稿版本');
+    expect(trigger.textContent).toContain('09-08 22:55');
+    expect(trigger.textContent).not.toContain('current-revision');
+    expect(trigger.title).toContain('current-revision');
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const search = screen.getByLabelText('文稿版本搜索');
+    fireEvent.change(search, { target: { value: 'old-revision' } });
+    expect(screen.getByRole('option', { name: /2026-09-08 20:00/ })).toBeTruthy();
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('v1');
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('links help and validation copy to the active input for assistive technology', () => {
     render(<DecimalInput label="比例" value="abc" onChange={() => undefined} help="0.1 代表 10%" />);
 

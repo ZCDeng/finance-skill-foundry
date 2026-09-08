@@ -11,6 +11,14 @@ export const STOCK = {
   conversation: 'fe448ef7e0b1f3e7713dadfc7eff56b9f80d103a2111dfe69c1735ffd0196d61',
   'settings-general': '9298ac5b087056555498550e0e0e6dd9d3202dce48bb07b2a2c4bfeed1d63da5',
   sidebar: '719693c401e7175e73f50e8021d918b2829a602fbd09761a6ef39d055c53460a',
+  'session-log-export': '480dc31686b80f1310f3dddd0e746c5f0ce6785cd6201e6815a35e1a8292db12',
+};
+const CLIENT_TARGETS = {
+  layout: 'node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js',
+  conversation: 'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  'settings-general': 'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js',
+  sidebar: 'node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js',
+  'session-log-export': 'node_modules/@deepseek-ai/dsh-session-log-export/lib/client.js',
 };
 function once(source, old, next) {
   if (source.split(old).length !== 2) throw new Error('client adapter anchor drift: ' + old.slice(0, 80));
@@ -56,10 +64,10 @@ export function adaptSource(name, original) {
       `children: !hideChrome && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("details", {
         "data-foundry-session-details": true,
         onKeyDown: event => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } },
-        children: [(0, react_jsx_runtime.jsx)("summary", {children: "会话信息"}), (0, react_jsx_runtime.jsxs)("div", {`);
+        children: [(0, react_jsx_runtime.jsx)("summary", {children: "对话工具"}), (0, react_jsx_runtime.jsxs)("div", {"data-foundry-session-panel": true, children: [(0, react_jsx_runtime.jsx)("p", {"data-foundry-session-help": true, children: "查看当前对话与分析方式，必要时导出排查日志。"}), (0, react_jsx_runtime.jsxs)("div", {`);
     source = once(source,
       '\t\t\t\t}), tabs.length > 1 && (0, react_jsx_runtime.jsx)("div", {',
-      '\t\t\t\t})] }), tabs.length > 1 && (0, react_jsx_runtime.jsx)("div", {');
+      '\t\t\t\t})] })] }), tabs.length > 1 && (0, react_jsx_runtime.jsx)("div", {');
     // Observe native admission only after its stale-attempt guard; never alter
     // the transaction, default sink, permissions, queue, or error behavior.
     source = once(source, 'var InputMachine = class {', 'var InputMachine = class {\n      foundryId = crypto.randomUUID();\n      foundryAdmission;');
@@ -74,6 +82,14 @@ export function adaptSource(name, original) {
     source = once(source, '"placeholder.hero": "描述你想要构建的内容"', '"placeholder.hero": "描述你想分析的财务问题"');
     source = once(source, '"placeholder.hero": "Describe what you want to build"', '"placeholder.hero": "Describe your financial question"');
   }
+  if (name === 'session-log-export') {
+    source = once(source,
+      'className: HeaderAction_module_css_default.sessionLogButton,\n\t\t\t\tdisabled: busy,',
+      'className: HeaderAction_module_css_default.sessionLogButton,\n\t\t\t\ttitle: "下载当前对话的排查日志",\n\t\t\t\t"aria-label": "导出排查日志",\n\t\t\t\tdisabled: busy,');
+    source = once(source,
+      'children: [(0, react_jsx_runtime.jsx)("span", { children: "Session log" }),',
+      'children: [(0, react_jsx_runtime.jsx)("span", { children: "导出排查日志" }),');
+  }
   return source;
 }
 export function adaptClient(stage, {check = false} = {}) {
@@ -81,7 +97,7 @@ export function adaptClient(stage, {check = false} = {}) {
   const manifestPath = join(originals, 'manifest.json');
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
   for (const name of Object.keys(STOCK)) {
-    const target = join(stage, 'node_modules/@deepseek-ai/dsh-client-ui-' + name + '/lib/client.js');
+    const target = join(stage, CLIENT_TARGETS[name]);
     const saved = join(originals, name + '.js');
     const current = readFileSync(target, 'utf8');
     const original = digest(current) === STOCK[name] ? current : readFileSync(saved, 'utf8');

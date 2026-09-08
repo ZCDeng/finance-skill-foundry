@@ -14,6 +14,7 @@ export type SelectOption = {
 type FieldShellProps = {
   label: string;
   htmlFor?: string;
+  hideLabel?: boolean;
   help?: string;
   error?: string;
   disabledReason?: string;
@@ -25,13 +26,13 @@ function fieldDescribedBy(id: string, ...messages: Array<string | undefined | fa
   return messages.some(Boolean) ? `${id}-description` : undefined;
 }
 
-export function FieldShell({ label, htmlFor, help, error, disabledReason, required, children }: FieldShellProps) {
+export function FieldShell({ label, htmlFor, hideLabel, help, error, disabledReason, required, children }: FieldShellProps) {
   const hasMessage = Boolean(error || disabledReason || help);
   const descriptionId = htmlFor && hasMessage ? `${htmlFor}-description` : undefined;
   return <div className="fnd-control" data-invalid={error ? 'true' : undefined}>
-    {htmlFor
+    {!hideLabel && (htmlFor
       ? <label className="fnd-control__label" htmlFor={htmlFor}>{label}{required ? <span aria-hidden> *</span> : null}</label>
-      : <span className="fnd-control__label">{label}{required ? <span aria-hidden> *</span> : null}</span>}
+      : <span className="fnd-control__label">{label}{required ? <span aria-hidden> *</span> : null}</span>)}
     {children}
     {hasMessage && <span id={descriptionId} className={error ? 'fnd-control__error' : 'fnd-control__help'}>
       {error || disabledReason || help}
@@ -85,7 +86,7 @@ const daysInMonth = (year: number, month: number) => new Date(year, month, 0).ge
 
 type FloatingPosition = { top: number; left: number; width: number; maxHeight: number; placement: 'top' | 'bottom'; align: 'start' | 'end' };
 
-function useFixedPopover(open: boolean, anchor: RefObject<HTMLElement | null>, maxWidth: number, estimatedHeight: number): FloatingPosition | null {
+function useFixedPopover(open: boolean, anchor: RefObject<HTMLElement | null>, maxWidth: number, estimatedHeight: number, minWidth = 220): FloatingPosition | null {
   const [position, setPosition] = useState<FloatingPosition | null>(null);
   useEffect(() => {
     if (!open) { setPosition(null); return undefined; }
@@ -97,7 +98,7 @@ function useFixedPopover(open: boolean, anchor: RefObject<HTMLElement | null>, m
       const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
       const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
       const boundedMax = Math.max(220, Math.min(maxWidth, viewportWidth - margin * 2));
-      const width = Math.max(Math.min(rect.width || boundedMax, boundedMax), Math.min(220, boundedMax));
+      const width = Math.max(Math.min(rect.width || boundedMax, boundedMax), Math.min(minWidth, boundedMax));
       const spaceBelow = viewportHeight - rect.bottom - margin;
       const spaceAbove = rect.top - margin;
       const placement = spaceBelow < estimatedHeight && spaceAbove > spaceBelow ? 'top' : 'bottom';
@@ -117,7 +118,7 @@ function useFixedPopover(open: boolean, anchor: RefObject<HTMLElement | null>, m
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
     };
-  }, [anchor, estimatedHeight, maxWidth, open]);
+  }, [anchor, estimatedHeight, maxWidth, minWidth, open]);
   return position;
 }
 
@@ -380,8 +381,8 @@ type SelectBaseProps = {
 type FilteredOptions = { options: SelectOption[]; total: number; truncated: boolean };
 type SelectFeedback = { kind: 'loading' | 'error' | 'unconfigured'; message: string } | null;
 
-export function SearchableSelect({ label, value, options, onChange, placeholder = '搜索名称或编码', emptyLabel = '无匹配结果', disabled, help, allowEmptyLabel, ariaLabel, clearable, loading, loadError, unconfigured, unconfiguredLabel, maxOptions = 80, truncatedLabel }: SelectBaseProps & {
-  value: string; onChange(value: string): void;
+export function SearchableSelect({ label, value, options, onChange, placeholder = '搜索名称或编码', emptyLabel = '无匹配结果', disabled, help, allowEmptyLabel, ariaLabel, clearable, loading, loadError, unconfigured, unconfiguredLabel, maxOptions = 80, truncatedLabel, compact = false, triggerText }: SelectBaseProps & {
+  value: string; onChange(value: string): void; compact?: boolean; triggerText?: string;
 }) {
   const id = useId();
   const listId = `${id}-listbox`;
@@ -395,7 +396,7 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
   const selected = options.find((option) => option.value === value);
   const invalid = Boolean(value && !selected);
   const filtered = useMemo(() => filterOptions(options, query, allowEmptyLabel, maxOptions), [allowEmptyLabel, maxOptions, options, query]);
-  const popoverPosition = useFixedPopover(open, triggerRef, 420, 360);
+  const popoverPosition = useFixedPopover(open, triggerRef, 420, 360, compact ? 360 : 220);
   const close = (focusTrigger = false) => {
     setOpen(false);
     setQuery('');
@@ -410,16 +411,17 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
   };
   const feedback = selectFeedback(loading, loadError, unconfigured, unconfiguredLabel);
   const visibleLabel = selected ? [selected.label, selected.meta].filter(Boolean).join(' · ') : invalid ? `已失效：${value}` : allowEmptyLabel && !value ? allowEmptyLabel : '';
-  return <FieldShell label={label} htmlFor={id} help={help}
+  return <FieldShell label={label} htmlFor={id} help={help} hideLabel={compact}
     error={invalid ? `当前选择已失效：${value}。请清空或重新选择。` : undefined}>
-    <div className="fnd-combobox" ref={root}>
-      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, invalid && `当前选择已失效：${value}。请清空或重新选择。`)} aria-invalid={invalid || undefined}
+    <div className={`fnd-combobox${compact ? ' fnd-combobox--compact' : ''}`} ref={root}>
+      <button ref={triggerRef} id={id} type="button" className="fnd-combobox__button" title={compact ? visibleLabel : undefined} aria-label={ariaLabel ?? label} aria-describedby={fieldDescribedBy(id, help, invalid && `当前选择已失效：${value}。请清空或重新选择。`)} aria-invalid={invalid || undefined}
         aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} disabled={disabled}
         onClick={() => setOpen((current) => !current)} onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); }
           if (event.key === 'Escape') { event.preventDefault(); close(true); }
         }}>
-        <span>{visibleLabel || placeholder}</span><ChevronDown size={14} aria-hidden />
+        {compact && <span className="fnd-combobox__prefix">{label}</span>}
+        <span>{invalid ? visibleLabel : triggerText ?? (visibleLabel || placeholder)}</span><ChevronDown size={14} aria-hidden />
       </button>
       {open && floatingPortal(<SelectPopover popoverRef={popoverRef} label={label} listId={listId} query={query} setQuery={setQuery} result={filtered} value={value}
         activeIndex={activeIndex} setActiveIndex={setActiveIndex} composing={composing} feedback={feedback} emptyLabel={emptyLabel}

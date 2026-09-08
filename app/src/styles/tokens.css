@@ -5,6 +5,7 @@
   --fnd-surface-strong: #f7f7f7;
   --fnd-ink: #000000e0;
   --fnd-muted: #00000099;
+  --fnd-disclosure: #426786;
   --fnd-line: #1f1f1f24;
   --fnd-accent: #1f1f1f;
   --fnd-accent-text: #1f1f1f;
@@ -66,6 +67,7 @@
     --fnd-surface-strong: #161616;
     --fnd-ink: #f9fafb;
     --fnd-muted: #a6a6a6;
+    --fnd-disclosure: #a4bfd5;
     --fnd-line: #ffffff24;
     --fnd-selection-surface: #292929;
     --fnd-line-hover: #ffffff59;
@@ -91,6 +93,7 @@
   --fnd-surface-strong: #161616;
   --fnd-ink: #f9fafb;
   --fnd-muted: #a6a6a6;
+  --fnd-disclosure: #a4bfd5;
   --fnd-line: #ffffff24;
   --fnd-selection-surface: #292929;
   --fnd-line-hover: #ffffff59;

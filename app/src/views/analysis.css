@@ -60,7 +60,9 @@
 .analysis-status { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 .analysis-status span + span { border-left: 1px solid var(--fnd-line); padding-left: 12px; }
 .analysis-details { font-size: var(--fnd-size-small); line-height: 1.7; overflow-wrap: anywhere; }
-.analysis-details summary { cursor: pointer; color: var(--fnd-muted); padding: 4px 0; }
+.analysis-details > summary { cursor: pointer; color: var(--fnd-disclosure); padding: 5px 8px; border-radius: 6px; width: fit-content; max-width: 100%; font-weight: var(--fnd-weight-strong); }
+.analysis-details > summary:hover { background: var(--fnd-selection-surface); }
+.analysis-details > summary:focus-visible { outline: 1px solid var(--fnd-disclosure); outline-offset: 2px; }
 .analysis-details[open] > summary { margin-bottom: 0; }
 .analysis-details[open] > summary + * { margin-top: 14px; }
 .analysis-details > :not(summary) + :not(summary) { margin-top: 12px; }
@@ -74,6 +76,15 @@
 .analysis-code { font-family: ui-monospace, monospace; }
 .analysis-draft textarea { line-height: 1.8; padding: 12px; resize: vertical; }
 .analysis-draft { display: flex; flex-direction: column; gap: 18px; }
+.analysis-draft-navigation { width: 100%; max-width: calc(200px + 32px + 56rem); margin-inline: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; }
+.analysis-version-picker { grid-column: 2; grid-row: 1; max-width: 100%; }
+.analysis-requirements { grid-column: 1; grid-row: 1; min-width: 0; }
+.analysis-draft-navigation[data-expanded='true'] .analysis-requirements { grid-column: 1 / -1; grid-row: 2; }
+@media (max-width: 600px) {
+  .analysis-draft-navigation { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .analysis-version-picker { grid-column: 1; grid-row: 2; }
+  .analysis-draft-navigation[data-expanded='true'] .analysis-requirements { grid-row: 3; }
+}
 .analysis-method-form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 8px 0 14px; }
 .analysis-method-form label { flex: 1 1 220px; }
 @media (max-width: 680px) {

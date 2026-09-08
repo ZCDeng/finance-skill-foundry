@@ -568,7 +568,7 @@ describe('analysis workbench', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(analysisState).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('tab', { name: /文稿/ }).textContent).toContain('2');
-    expect(screen.getByRole('button', { name: '文稿版本' }).textContent).toContain('经营简报');
+    expect(screen.getByRole('button', { name: '文稿版本' }).getAttribute('title')).toContain('经营简报');
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('仍在编辑。');
     expect(document.activeElement).toBe(input);
     rerender(<Analysis {...props} active={false} />);
@@ -622,7 +622,7 @@ describe('analysis workbench', () => {
     chooseSearchable('文稿版本', /另一个文稿版本/);
     expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain(other.body);
     await act(async () => finish(success(next)));
-    expect(screen.getByRole('button', { name: '文稿版本' }).textContent).toContain('另一个文稿版本');
+    expect(screen.getByRole('button', { name: '文稿版本' }).getAttribute('title')).toContain('另一个文稿版本');
     expect(screen.getByRole('article', { name: '文稿阅读' }).textContent).toContain(other.body);
     fireEvent.click(screen.getByRole('button', { name: '文稿版本' }));
     expect(screen.getAllByRole('option', { name: /经营简报/ })).toHaveLength(2);

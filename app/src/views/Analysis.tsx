@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ChevronDown, FilePlus2, FileSpreadsheet, MessageSquare, Play, RefreshCw } from 'lucide-react';
 import { bridge, shortSha, when, type Answer, type AnalysisDraft, type AnalysisMethod,
   type AnalysisRevision, type AnalysisRun, type AnalysisState, type DatasetSnapshot, type FinanceContext,
@@ -439,13 +439,14 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
         </>}
         {view && tab === 'drafts' && <>
-          {view.drafts.length > 0 && <div className="analysis-select-label"><SearchableSelect label="文稿版本" value={draft?.id ?? ''}
-            options={[...view.drafts].reverse().map((row) => ({
-              value: row.id ?? '',
-              label: row.title,
-              meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
-            }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /></div>}
-          <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets} onChat={(spec) => void perform(async (taskId) => {
+          <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets}
+            versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
+              triggerText={draft ? when(draft.created_at) : '选择文稿'}
+              options={[...view.drafts].reverse().map((row) => ({
+                value: row.id ?? '', label: row.title,
+                meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
+              }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /> : undefined}
+            onChat={(spec) => void perform(async (taskId) => {
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               await handoff(undefined, id, spec ? { targetTaskId: taskId } : undefined);
             })}
@@ -1100,11 +1101,12 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements }: {
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
+  versionPicker?: ReactNode;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
@@ -1326,13 +1328,16 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <CompletionRecoveriesPanel recoveries={recoveries} error={recoveryError} disabled={busy || !canLoadRecovery} onRetry={() => void loadRecoveries()} onLoad={loadRecovery} />
     {recoveries.length > 0 && !canLoadRecovery && <p className="analysis-note">当前有未保存输入；保存或放弃当前修改后再载入恢复稿，避免覆盖你的编辑。</p>}
     {recovery && <p role="status" className="analysis-message">已载入未保存恢复稿，尚未检查；保存后才会成为新的文稿版本。</p>}
-    {bridge()?.financeCall && <details className="analysis-details" open={requirementsOpen}
+    <div className="analysis-draft-navigation" data-expanded={bridge()?.financeCall && requirementsOpen ? 'true' : undefined}>
+    {versionPicker && <div className="analysis-version-picker">{versionPicker}</div>}
+    {bridge()?.financeCall && <details className="analysis-details analysis-requirements" open={requirementsOpen}
       onToggle={(event) => setRequirementsOpen((event.currentTarget as HTMLDetailsElement).open)}>
       <summary>本次分析要求</summary>
       <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
         onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
         onDiscuss={onDiscussRequirements} />
     </details>}
+    </div>
     <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} title={title} body={body} appendix={reading.appendix}
       toolbarLabel={draft ? '文稿' : '写下判断与建议'}
       status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status}` : undefined}

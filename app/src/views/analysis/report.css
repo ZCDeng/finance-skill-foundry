@@ -97,12 +97,14 @@
 .report-reflow-preview { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px dashed var(--fnd-line); border-radius: 10px; background: var(--fnd-surface); }
 .report-reflow-preview .report-reading { padding: 0; }
 .report-outline__sections { display: flex; flex-direction: column; gap: 8px; }
-.report-outline__sections summary { cursor: pointer; color: var(--fnd-ink); font-weight: var(--fnd-weight-strong); }
+.report-outline__sections summary { cursor: pointer; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); border-radius: 6px; width: fit-content; max-width: 100%; padding: 4px 6px; }
+.report-outline__sections summary:hover, .report-info-fields summary:hover { background: var(--fnd-selection-surface); }
+.report-outline__sections summary:focus-visible, .report-info-fields summary:focus-visible { outline: 1px solid var(--fnd-disclosure); outline-offset: 2px; }
 .report-outline__sections summary svg { display: inline-block; margin-right: 8px; vertical-align: -2px; }
 }
 @layer layout {
 .report-info-fields { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; background: var(--fnd-surface); }
-.report-info-fields summary { cursor: pointer; color: var(--fnd-ink); font-weight: var(--fnd-weight-strong); }
+.report-info-fields summary { cursor: pointer; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); border-radius: 6px; width: fit-content; max-width: 100%; padding: 4px 6px; }
 .report-info-fields > div { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
 .report-info-fields label, .report-source-compat { display: flex; flex-direction: column; gap: 8px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 }

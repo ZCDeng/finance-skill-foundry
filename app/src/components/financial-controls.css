@@ -189,6 +189,17 @@
   white-space: nowrap;
 }
 
+.fnd-control:has(> .fnd-combobox--compact) { width: fit-content; max-width: 100%; }
+.fnd-combobox--compact .fnd-combobox__button {
+  height: 32px; padding: 0 8px; border-color: transparent; background: transparent;
+  color: var(--fnd-muted); font-size: var(--fnd-size-small);
+}
+.fnd-combobox--compact .fnd-combobox__button:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
+  border-color: transparent; background: var(--fnd-selection-surface); color: var(--fnd-ink);
+}
+.fnd-combobox--compact .fnd-combobox__prefix { flex: none; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); }
+.fnd-combobox--compact .fnd-combobox__button > svg { flex: none; color: var(--fnd-disclosure); }
+
 .fnd-combobox__clear {
   position: absolute;
   right: 25px;
