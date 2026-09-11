@@ -204,6 +204,9 @@ describe('analysis IPC task and session binding', () => {
     await invoke(CHANNELS.financeCall, task, 'validate-explanation', { draft_id: 'draft-a' });
     await invoke(CHANNELS.financeCall, task, 'finance-background-save', { text: '销售提前确认', basis: 'professional_judgment', scope: { ledger: '总账' }, effective_from: '2026-08' });
     await invoke(CHANNELS.financeCall, task, 'finance-background-list', { scope: { ledger: '总账' }, as_of: '2026-08' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-save', { context_id: 'ctx-a', label: '总部费用调整', amount: '5', profit_impact: '5' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-list', { context_id: 'ctx-a' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-confirm', { id: 'adj-a' });
     expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
       'list-finance-context',
       'finance-source-list',
@@ -217,6 +220,9 @@ describe('analysis IPC task and session binding', () => {
       'validate-explanation',
       'finance-background-save',
       'finance-background-list',
+      'finance-adjustment-save',
+      'finance-adjustment-list',
+      'finance-adjustment-confirm',
     ]);
     expect(mocks.run.mock.calls[0][2]).toEqual([]);
     expect(mocks.run.mock.calls[1][2]).toEqual([]);
@@ -230,7 +236,7 @@ describe('analysis IPC task and session binding', () => {
     const backgroundListSpec = JSON.parse(mocks.run.mock.calls[11][2][1]);
     expect(backgroundListSpec.scope).toEqual({ ledger: '总账' });
     expect((await invoke(CHANNELS.financeCall, task, 'run-metric', ['not an object'])).ok).toBe(false);
-    expect(mocks.run).toHaveBeenCalledTimes(12);
+    expect(mocks.run).toHaveBeenCalledTimes(15);
   });
 
   it('refreshes finance source files only from the native file picker', async () => {

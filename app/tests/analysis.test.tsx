@@ -1609,6 +1609,67 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText('季节性')).toBeTruthy();
     expect(screen.getByText(/账簿 总账 · 组织 华东 · 期间 2026-09/)).toBeTruthy();
   });
+
+  it('confirms a pending management adjustment from the results sidebar without auto-rerunning', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const pending = { id: 'adj-pending', label: '总部费用调整', include_in_management_pnl: false, amount: '5', profit_impact: '5' };
+    const confirmed = { ...pending, id: 'adj-confirmed', parent_id: pending.id, include_in_management_pnl: true };
+    let included = false;
+    const confirmGate = deferred<Answer<Record<string, unknown>>>();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-adjustment-list') return success({ adjustments: included ? [confirmed] : [pending] });
+      if (command === 'finance-adjustment-confirm') return confirmGate.promise;
+      if (command === 'run-metric') return success({ ...run, engine: 'finance', finance_context_id: context.id });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success(initial), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByRole('heading', { name: '考核调整' });
+    expect(screen.getByText(/总部费用调整/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '确认纳入' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: '确认中…' }) as HTMLButtonElement).disabled).toBe(true));
+    expect(financeCall.mock.calls.some(([, command]) => command === 'run-metric')).toBe(false);
+    included = true;
+    await act(async () => confirmGate.resolve(success(confirmed)));
+    await waitFor(() => expect(screen.getByText('已确认纳入考核。')).toBeTruthy());
+    expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-adjustment-confirm', { id: pending.id });
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toEqual([]);
+    expect(screen.queryByRole('button', { name: '确认纳入' })).toBeNull();
+    const checkbox = screen.getByRole('checkbox', { name: '总部费用调整' });
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '重算' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', {
+      context_id: context.id, metric: { kind: 'management_pnl' }, adjustment_ids: [confirmed.id],
+    }));
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: '重算' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', {
+      context_id: context.id, metric: { kind: 'management_pnl' }, adjustment_ids: [],
+    }));
+  });
+
+  it('keeps a pending adjustment unincluded when confirm fails', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const pending = { id: 'adj-pending', label: '总部费用调整', include_in_management_pnl: false };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-adjustment-list') return success({ adjustments: [pending] });
+      if (command === 'finance-adjustment-confirm') return { ok: false as const, refused: true, message: '当前会话无权确认该调整' };
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success(initial), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByRole('button', { name: '确认纳入' });
+    fireEvent.click(screen.getByRole('button', { name: '确认纳入' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('当前会话无权确认该调整');
+    expect((screen.getByRole('button', { name: '确认纳入' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('checkbox', { name: '总部费用调整' })).toBeNull();
+    expect(financeCall.mock.calls.some(([, command]) => command === 'run-metric')).toBe(false);
+  });
+
   it('refreshes finance source files through the native bridge and keeps duplicate batches visible', async () => {
     const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list'
       ? success({ batches: [{ id: '7'.repeat(32), created_at: task.created_at, source_name: '金蝶导出', dataset_id: null, effective_dataset_id: source.id, row_count: 1, publication_status: 'published' }] })

@@ -28,6 +28,9 @@ OPERATIONS = {
     "save-explanation-draft": "save_explanation_draft",
     "finance-background-save": "finance_background_save",
     "finance-background-list": "finance_background_list",
+    "finance-adjustment-save": "finance_adjustment_save",
+    "finance-adjustment-list": "finance_adjustment_list",
+    "finance-adjustment-confirm": "finance_adjustment_confirm",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }

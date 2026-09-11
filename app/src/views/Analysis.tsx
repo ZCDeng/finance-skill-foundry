@@ -805,6 +805,88 @@ const agingStatusMapping = {
   written_off: ['核销', '已核销', 'written_off'],
 };
 
+type FinanceAdjustment = {
+  id: string;
+  label?: string;
+  include_in_management_pnl?: boolean;
+  note?: string;
+  amount?: string;
+  profit_impact?: string;
+  parent_id?: string | null;
+};
+
+function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
+  taskId: string; contextId: string; busy: boolean; onRefresh(): Promise<void> | void;
+}) {
+  const [rows, setRows] = useState<FinanceAdjustment[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [pendingId, setPendingId] = useState('');
+  const [rerunning, setRerunning] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall || !contextId) return;
+    const listed = unwrap(await api.financeCall(taskId, 'finance-adjustment-list', { context_id: contextId }) as Answer<{ adjustments?: FinanceAdjustment[] }>);
+    const next = listed.adjustments ?? [];
+    setRows(next);
+    setSelected((current) => {
+      const nextSelected: Record<string, boolean> = {};
+      for (const row of next.filter((item) => item.include_in_management_pnl)) {
+        nextSelected[row.id] = current[row.id] !== false;
+      }
+      return nextSelected;
+    });
+  }, [taskId, contextId]);
+  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  const pending = rows.filter((row) => !row.include_in_management_pnl);
+  const confirmed = rows.filter((row) => row.include_in_management_pnl);
+  const locked = busy || Boolean(pendingId) || rerunning;
+  async function confirm(id: string) {
+    const api = bridge(); if (!api?.financeCall) return;
+    setPendingId(id); setError(''); setMessage('');
+    try {
+      unwrap(await api.financeCall(taskId, 'finance-adjustment-confirm', { id }));
+      setMessage('已确认纳入考核。');
+      await load();
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setPendingId('');
+    }
+  }
+  async function rerun() {
+    const api = bridge(); if (!api?.financeCall) return;
+    setRerunning(true); setError(''); setMessage('');
+    const ids = confirmed.filter((row) => selected[row.id] !== false).map((row) => row.id);
+    try {
+      unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' }, adjustment_ids: ids }));
+      setMessage(ids.length ? '已按勾选调整重算考核利润。' : '已无调整重跑账面利润。');
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setRerunning(false);
+    }
+  }
+  if (!contextId) return null;
+  return <aside className="analysis-details analysis-adjustment-panel" aria-label="考核调整">
+    <div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">确认后才会进入下一次管理损益。</span></div>
+    {pending.length ? <ul className="analysis-history-list">{pending.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
+      <span>{row.label || '调整'} · pending</span>
+      <Button type="button" disabled={locked} onClick={() => void confirm(row.id)}>{pendingId === row.id ? '确认中…' : '确认纳入'}</Button>
+    </li>)}</ul> : <p className="analysis-note">没有待确认的调整。</p>}
+    {confirmed.length ? <div className="analysis-fieldset analysis-adjustment-rerun" aria-label="重算">
+      <p className="analysis-note">重算</p>
+      {confirmed.map((row) => <label key={row.id}><input type="checkbox" checked={selected[row.id] !== false}
+        onChange={(event) => setSelected((value) => ({ ...value, [row.id]: event.target.checked }))} />{row.label || row.id}</label>)}
+      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? '重算中…' : '重算'}</Button>
+    </div> : null}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </aside>;
+}
+
 function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void>;
 }) {
@@ -962,7 +1044,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     }
   }
   const disabled = busy || !actual;
-  return <details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
+  return <><details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
     onToggle={(event) => setSetupOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary><div className="analysis-section-heading"><h3>财务业务口径</h3><span className="analysis-note">用已登记资料建立范围，结果仍保留 SQL 与脚本高级路径。</span></div></summary>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
@@ -1037,7 +1119,9 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     </details>
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </details>;
+  </details>
+  {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={busy} onRefresh={onRefresh} /> : null}
+  </>;
 }
 function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave, onChat }: {
   analysis: AnalysisRevision; datasets: DatasetSnapshot[]; busy: boolean;

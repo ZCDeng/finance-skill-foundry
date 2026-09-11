@@ -207,3 +207,6 @@
 .analysis-check-summary dd { margin: 0; }
 .analysis-period-range { grid-column: 1 / -1; min-width: 0; }
 }
+
+.analysis-adjustment-panel { margin-top: 16px; padding: 12px 8px; }
+.analysis-adjustment-rerun label { display: flex; gap: 8px; align-items: center; color: var(--fnd-ink); }

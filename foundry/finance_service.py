@@ -27,6 +27,7 @@ COLLECTIONS = {
     "scenarios",
     "metric_definitions",
     "backgrounds",
+    "adjustments",
 }
 
 
@@ -419,6 +420,8 @@ class FinanceStore:
                         if revision["operation"] == "variance"
                         else evaluate_metric(normalized, spec.get("metric", {}))
                     )
+                    if revision["operation"] != "variance":
+                        calculated = self._apply_named_adjustments(calculated, spec, context)
             if (
                 not isinstance(calculated, dict)
                 or not isinstance(calculated.get("columns"), list)
@@ -975,6 +978,71 @@ class FinanceStore:
                 superseded.add(parent_id)
                 parent_id = by_id[parent_id].get("parent_id")
         return {"schema_version": 1, "business_contexts": [r for r in rows if r["id"] not in superseded]}
+
+    def finance_adjustment_save(self, spec):
+        from foundry.finance_adjustments import normalize_adjustment, reject_overlapping_save
+
+        if not isinstance(spec, dict):
+            raise FoundryError("finance adjustment spec must be an object")
+        context = self._read("contexts", spec["context_id"]) if spec.get("context_id") else None
+        if context is None:
+            raise FoundryError("finance adjustment spec requires context_id")
+        bindings = spec.get("bindings")
+        if bindings is None:
+            bindings = context["bindings"]
+        if not isinstance(bindings, dict) or not bindings:
+            raise FoundryError("adjustment bindings are required")
+        self._authorize(bindings)
+        self._authorize(context["bindings"])
+        fields = normalize_adjustment(spec, context=context, bindings=bindings)
+        reject_overlapping_save(fields, [row for row in self._list("adjustments") if row.get("context_id") == context["id"]])
+        return self._write("adjustments", **fields)
+
+    def finance_adjustment_list(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("finance adjustment list spec must be an object")
+        context_id = spec.get("context_id")
+        rows = [
+            row
+            for row in self._list("adjustments")
+            if not context_id or row.get("context_id") == context_id
+        ]
+        return {"schema_version": 1, "adjustments": rows}
+
+    def finance_adjustment_confirm(self, spec):
+        from foundry.finance_adjustments import normalize_adjustment, reject_overlapping_save
+
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError("finance adjustment confirm requires id")
+        pending = self._read("adjustments", spec["id"])
+        if pending.get("include_in_management_pnl") is True:
+            return pending
+        context = self._read("contexts", pending["context_id"])
+        payload = {
+            **pending,
+            "context_id": pending["context_id"],
+            "parent_id": pending["id"],
+            "include_in_management_pnl": False,
+        }
+        fields = normalize_adjustment(payload, context=context, bindings=pending["bindings"])
+        fields["include_in_management_pnl"] = True
+        reject_overlapping_save(
+            {**fields, "parent_id": pending["id"]},
+            [row for row in self._list("adjustments") if row.get("context_id") == context["id"]],
+        )
+        return self._write("adjustments", **fields)
+
+    def _apply_named_adjustments(self, calculated, spec, context):
+        from foundry.finance_adjustments import apply_to_metric, run_period, select_applied
+
+        named = spec.get("adjustment_ids") or []
+        if not isinstance(named, list):
+            raise FoundryError("adjustment_ids must be a list")
+        if not named:
+            return calculated
+        records = [row for row in self._list("adjustments") if row.get("context_id") == context["id"]]
+        applied = select_applied(named, records, period=run_period(context))
+        return apply_to_metric(calculated, applied)
 
     def _background_scope_bindings(self, scope, context=None):
         contexts = [context] if context else self._list("contexts")

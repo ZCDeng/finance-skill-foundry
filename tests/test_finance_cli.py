@@ -150,6 +150,18 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
             calls.append(("finance_background_list", spec, self.kwargs))
             return {"ok": "list"}
 
+        def finance_adjustment_save(self, spec):
+            calls.append(("finance_adjustment_save", spec, self.kwargs))
+            return {"ok": "adj-save"}
+
+        def finance_adjustment_list(self, spec):
+            calls.append(("finance_adjustment_list", spec, self.kwargs))
+            return {"ok": "adj-list"}
+
+        def finance_adjustment_confirm(self, spec):
+            calls.append(("finance_adjustment_confirm", spec, self.kwargs))
+            return {"ok": "adj-confirm"}
+
     monkeypatch.setattr(finance_cli, "FinanceStore", FakeFinanceStore)
     args = ["--var", str(root), "--session", "manager"]
     for command, payload, expected in [
@@ -157,6 +169,9 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
         ("validate-explanation", {"body": "收入 10", "run_ids": ["r1"]}, "validate"),
         ("finance-background-save", {"text": "客户流失", "basis": "professional_judgment"}, "save"),
         ("finance-background-list", {"as_of": "2026-09"}, "list"),
+        ("finance-adjustment-save", {"context_id": "ctx-a", "label": "总部费用调整", "amount": "5", "profit_impact": "5"}, "adj-save"),
+        ("finance-adjustment-list", {"context_id": "ctx-a"}, "adj-list"),
+        ("finance-adjustment-confirm", {"id": "adj-a"}, "adj-confirm"),
     ]:
         assert main([*args, command, "--spec", json.dumps(payload)]) == 0
         assert json.loads(capsys.readouterr().out) == {"ok": expected}
@@ -165,6 +180,9 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
         "validate_explanation",
         "finance_background_save",
         "finance_background_list",
+        "finance_adjustment_save",
+        "finance_adjustment_list",
+        "finance_adjustment_confirm",
     ]
     assert all(call[2]["session_id"] == "manager" for call in calls)
 
