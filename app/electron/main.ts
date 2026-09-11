@@ -163,6 +163,8 @@ let formulator: FormulatorHost | null = null;
 let onTop = '';
 /** The read-only workbook look, present only when this build carries the Univer bundle. */
 let preview: UniverPreviewHost | null = null;
+/** What `registerIpc` hands back: the locator scratch it fenced, to be removed on the way out. */
+let ipc: { shutdown(): void } | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -298,7 +300,7 @@ void app.whenReady().then(() => {
         : stagedBundleDir(here, 'dsh-univer-office'),
     });
     preview = look;
-    registerIpc(
+    ipc = registerIpc(
       { varRoot: varRoot() },
       {
         host,
@@ -352,7 +354,7 @@ void app.whenReady().then(() => {
       }
     })();
   } else {
-    registerIpc({ varRoot: varRoot() });
+    ipc = registerIpc({ varRoot: varRoot() });
   }
   createWindow();
   app.on('activate', () => {
@@ -375,6 +377,9 @@ async function shutDown(): Promise<void> {
   // The gateway is a child and dies with a kill, but its page has to go first
   // so a view is never left pointed at a server this process no longer runs.
   if (window) preview?.close(window);
+  // The scratch copies a locator preview was fenced to are this process's to
+  // remove, and this is the last moment it can.
+  ipc?.shutdown();
   if (formulator?.running() && window) {
     try {
       await formulator.stop({ varRoot: varRoot() }, window);

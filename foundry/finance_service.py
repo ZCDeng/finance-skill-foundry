@@ -61,12 +61,14 @@ class FinanceStore:
         self.session_id = session_id
         self.context_revision = context_revision
 
-    def _path(self, kind, object_id):
+    def _folder(self, kind):
         if kind not in COLLECTIONS:
             raise FoundryError("unknown finance collection")
-        folder = "charts" if kind == "charts" else f"finance/{kind}"
+        return "charts" if kind == "charts" else f"finance/{kind}"
+
+    def _path(self, kind, object_id):
         return self.analysis._inside(
-            self.analysis.root / folder / f"{_assert_id(object_id)}.json"
+            self.analysis.root / self._folder(kind) / f"{_assert_id(object_id)}.json"
         )
 
     def _read(self, kind, object_id):
@@ -79,8 +81,7 @@ class FinanceStore:
         return self.analysis._write(self._path(collection, record["id"]), record)
 
     def _list(self, kind):
-        folder = "charts" if kind == "charts" else f"finance/{kind}"
-        root = self.analysis._inside(self.analysis.root / folder)
+        root = self.analysis._inside(self.analysis.root / self._folder(kind))
         records = [self.analysis._read(path) for path in root.glob("*.json")]
         visible = []
         for record in records:
@@ -296,6 +297,7 @@ class FinanceStore:
                 "finance metric spec requires context_id or definition_id"
             )
         context = self._read("contexts", spec["context_id"])
+        self._validate_adjustment_ids(spec, context)
         revision = self._save_revision(context, "metric", spec)
         return self.run_revision(revision)
 
@@ -422,8 +424,9 @@ class FinanceStore:
                         if revision["operation"] == "variance"
                         else evaluate_metric(normalized, spec.get("metric", {}))
                     )
-                    if revision["operation"] != "variance":
-                        calculated = self._apply_named_adjustments(calculated, spec, context)
+                    calculated = self._apply_named_adjustments(
+                        calculated, spec, context, operation=revision["operation"]
+                    )
             if (
                 not isinstance(calculated, dict)
                 or not isinstance(calculated.get("columns"), list)
@@ -897,12 +900,16 @@ class FinanceStore:
             self._authorize(run["bindings"])
             runs.append(run)
         backgrounds = self._backgrounds_for_runs(runs)
-        return prepare_explanation_payload(
+        payload = prepare_explanation_payload(
             self.analysis,
             runs,
             backgrounds=backgrounds,
             materiality=spec.get("materiality") or {},
         )
+        from foundry.finance_locators import record_fact_index
+
+        record_fact_index(self, payload.get("facts") or [])
+        return payload
 
     def validate_explanation(self, spec):
         if not isinstance(spec, dict):
@@ -1002,13 +1009,15 @@ class FinanceStore:
     def finance_adjustment_list(self, spec):
         if not isinstance(spec, dict):
             raise FoundryError("finance adjustment list spec must be an object")
+        from foundry.finance_adjustments import mark_superseded
+
         context_id = spec.get("context_id")
         rows = [
             row
             for row in self._list("adjustments")
             if not context_id or row.get("context_id") == context_id
         ]
-        return {"schema_version": 1, "adjustments": rows}
+        return {"schema_version": 1, "adjustments": mark_superseded(rows)}
 
     def finance_adjustment_confirm(self, spec):
         from foundry.finance_adjustments import normalize_adjustment, reject_overlapping_save
@@ -1033,17 +1042,37 @@ class FinanceStore:
         )
         return self._write("adjustments", **fields)
 
-    def _apply_named_adjustments(self, calculated, spec, context):
-        from foundry.finance_adjustments import apply_to_metric, run_period, select_applied
+    def _validate_adjustment_ids(self, spec, context):
+        """Refuse a bad adjustment request before a revision is recorded."""
+        named = spec.get("adjustment_ids") or []
+        if not isinstance(named, list) or any(not isinstance(item, str) for item in named):
+            raise FoundryError("adjustment_ids must be a list of adjustment ids")
+        if not named:
+            return
+        metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+        kind = metric.get("kind") or metric.get("type") or "management_pnl"
+        if kind != "management_pnl":
+            raise FoundryError("adjustment_ids apply only to run_metric(kind=management_pnl)")
+        known = {row["id"] for row in self._list("adjustments") if row.get("context_id") == context["id"]}
+        unknown = [item for item in named if item not in known]
+        if unknown:
+            raise FoundryError(f"unknown adjustment ids: {', '.join(unknown)}")
+
+    def _apply_named_adjustments(self, calculated, spec, context, *, operation):
+        from foundry.finance_adjustments import apply_to_metric, run_periods, select_applied
 
         named = spec.get("adjustment_ids") or []
-        if not isinstance(named, list):
-            raise FoundryError("adjustment_ids must be a list")
+        if not isinstance(named, list) or any(not isinstance(item, str) for item in named):
+            raise FoundryError("adjustment_ids must be a list of adjustment ids")
         if not named:
             return calculated
+        metric = spec.get("metric") if isinstance(spec.get("metric"), dict) else {}
+        kind = metric.get("kind") or metric.get("type") or "management_pnl"
+        if operation != "metric" or kind != "management_pnl":
+            raise FoundryError("adjustment_ids apply only to run_metric(kind=management_pnl)")
         records = [row for row in self._list("adjustments") if row.get("context_id") == context["id"]]
-        applied = select_applied(named, records, period=run_period(context))
-        return apply_to_metric(calculated, applied)
+        applied, ignored = select_applied(named, records, periods=run_periods(context, calculated))
+        return apply_to_metric(calculated, applied, ignored)
 
     def _background_scope_bindings(self, scope, context=None):
         contexts = [context] if context else self._list("contexts")
@@ -1118,9 +1147,13 @@ class FinanceStore:
 
         if not isinstance(spec, dict):
             raise FoundryError("template publish spec must be an object")
+        from foundry.report_templates import TEMPLATE_MAX_BYTES
+
         source = Path(spec.get("path", ""))
         if not source.is_file() or source.is_symlink():
             raise FoundryError("company template must be a regular file")
+        if source.stat().st_size > TEMPLATE_MAX_BYTES:
+            raise FoundryError("company template exceeds the 25 MiB limit")
         data = source.read_bytes()
         kind = reject_pptx(source, data)
         label = _safe_text(spec.get("label") or source.stem, "template label", required=True, maximum=300)
@@ -1155,11 +1188,12 @@ class FinanceStore:
     def report_template_apply(self, spec):
         from foundry.report_documents import validate_report_document
         from foundry.report_templates import (
-            G1_EXCEL_VALUES,
             apply_excel_named_ranges,
             bundled_document,
             bundled_excel_bytes,
             metadata_from_scope,
+            named_range_names,
+            values_from_run,
         )
 
         if not isinstance(spec, dict):
@@ -1171,14 +1205,22 @@ class FinanceStore:
             context = self._read("contexts", spec["context_id"])
             scope = self._primary_scope(context.get("scopes")) or scope
         metadata = metadata_from_scope(scope)
+        filled: list[str] = []
+        unfilled: list[str] = []
         if record.get("kind") == "excel":
+            if "values" in spec:
+                raise FoundryError("excel template values come from run_id, not the caller")
             data = bundled_excel_bytes(template_id) if record.get("origin") == "bundled" else (
                 self._template_root() / f"{record['id']}.bin"
             ).read_bytes()
-            values = spec.get("values")
-            if values is None and record.get("origin") == "bundled" and template_id == "management-brief-xlsx-v1":
-                values = G1_EXCEL_VALUES
-            applied = apply_excel_named_ranges(data, values) if values else data
+            applied = data
+            if spec.get("run_id"):
+                run = self.analysis.get_run(spec["run_id"])
+                self._authorize(run.get("bindings") or {})
+                values, unfilled = values_from_run(run, named_range_names(data))
+                if values:
+                    applied = apply_excel_named_ranges(data, values)
+                    filled = sorted(values)
             source = self._report_source_from_bytes(applied, ".xlsx")
             document = validate_report_document(
                 {
@@ -1216,7 +1258,13 @@ class FinanceStore:
                 registered_source_ids={source["id"]},
             )
         draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
-        return {"draft": draft, "template_id": template_id, "kind": record.get("kind")}
+        return {
+            "draft": draft,
+            "template_id": template_id,
+            "kind": record.get("kind"),
+            "filled_named_ranges": filled,
+            "unfilled_named_ranges": unfilled,
+        }
 
     def chart_deliverable_save(self, spec):
         from foundry.chart_deliverables import normalize_chart
@@ -1274,11 +1322,17 @@ class FinanceStore:
         else:
             authorize_workbook(self, spec, context)
         instruction = _safe_text(
-            spec.get("instruction") or "改成开票口径",
+            spec.get("instruction"),
             "circle-select instruction",
             required=True,
             maximum=200,
         )
+        selection = {"kind": kind, "range": range_text.strip()}
+        if kind == "draft_table":
+            selection["draft_id"] = str(spec["draft_id"])
+            selection["block_id"] = str(spec["block_id"]).strip()
+        else:
+            selection["binding_id"] = str(spec["binding_id"])
         child = self.save_context(
             {
                 "parent_id": context["id"],
@@ -1294,6 +1348,7 @@ class FinanceStore:
             "question": (latest or {}).get("question") or instruction,
             "items": (latest or {}).get("items") or [],
             "change_reason": instruction,
+            "selection": selection,
         }
         if latest:
             req_spec["parent_id"] = latest["id"]

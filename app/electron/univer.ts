@@ -235,6 +235,53 @@ export function seedAppearance(value: 'light' | 'dark'): string {
   return `(() => { try { localStorage.setItem(${JSON.stringify(APPEARANCE_KEY)}, ${JSON.stringify(value)}); } catch {} })()`;
 }
 
+/** What a locator preview asks the viewer to put in front: a sheet by name, and one A1 range on it. */
+export interface PreviewHighlight {
+  sheet?: string;
+  range?: string;
+}
+
+/** How long the highlight waits for the viewer to expose its workbook before giving up quietly. */
+const HIGHLIGHT_WAIT_MS = 15_000;
+
+/**
+ * The script that selects the cited cell once the viewer is up.
+ *
+ * The viewer publishes its facade as `window.univerAPI` after the unit has
+ * loaded (read from the bundle's own `loadSheetAsync` path), so this polls
+ * for the workbook rather than assuming it. Both names are JSON-encoded into
+ * the script: a sheet called `'); alert(1); ('` is a string, not code. A
+ * highlight that cannot be applied leaves the workbook as it opened; it never
+ * fails the preview.
+ */
+export function highlightScript(highlight: PreviewHighlight): string {
+  const sheet = JSON.stringify(highlight.sheet ?? '');
+  const range = JSON.stringify(highlight.range ?? '');
+  return [
+    '(() => {',
+    `  const sheetName = ${sheet}; const a1 = ${range}; const deadline = Date.now() + ${HIGHLIGHT_WAIT_MS};`,
+    '  const tick = () => {',
+    '    try {',
+    '      const api = window.univerAPI;',
+    '      const book = api && typeof api.getActiveWorkbook === "function" ? api.getActiveWorkbook() : null;',
+    '      if (book) {',
+    '        let sheet = sheetName && typeof book.getSheetByName === "function" ? book.getSheetByName(sheetName) : null;',
+    '        if (sheet && typeof book.setActiveSheet === "function") book.setActiveSheet(sheet);',
+    '        if (!sheet && typeof book.getActiveSheet === "function") sheet = book.getActiveSheet();',
+    '        if (sheet && a1 && typeof sheet.getRange === "function") {',
+    '          const range = sheet.getRange(a1);',
+    '          if (range && typeof range.activate === "function") range.activate();',
+    '        }',
+    '        return;',
+    '      }',
+    '    } catch {}',
+    '    if (Date.now() < deadline) setTimeout(tick, 200);',
+    '  };',
+    '  tick();',
+    '})()',
+  ].join('\n');
+}
+
 /** Everything sqlite may have left beside a container. */
 function removeContainer(file: string): void {
   for (const suffix of ['', '-wal', '-shm', '-journal']) {
@@ -485,6 +532,8 @@ export class UniverPreviewHost {
        * the version instead. Absent, the digest stands.
        */
       label?: string;
+      /** The sheet and cell to put in front once the viewer is up. Absent, the workbook opens as imported. */
+      highlight?: PreviewHighlight;
     },
   ): Promise<PreviewSpec> {
     if (!target.file.startsWith(`${target.allowedRoot}${path.sep}`)) {
@@ -545,6 +594,16 @@ export class UniverPreviewHost {
       await this.pane.attach(window, `${origin}/${APPEARANCE_SEED_PATH}`);
       await this.pane.run(seedAppearance('dark'));
       await this.pane.load(viewerUrl(origin, file));
+      if (target.highlight && (target.highlight.sheet || target.highlight.range)) {
+        // Best effort, after the page is loaded: the cited cell is what the
+        // operator came for, but a viewer that cannot select it is still a
+        // viewer showing the right workbook.
+        try {
+          await this.pane.run(highlightScript(target.highlight));
+        } catch {
+          // The workbook is up; the selection is a convenience on top of it.
+        }
+      }
       const spec = { task: target.task, sha256: target.sha256, origin };
       this.spec = spec;
       this.pane.place(window, true);

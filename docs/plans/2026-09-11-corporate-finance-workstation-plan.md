@@ -35,7 +35,7 @@ acceptance: docs/plans/2026-09-11-corporate-finance-workstation-test-spec.md
 ## 2. 用户路径（完成后应如此）
 
 1. 经理丢入金蝶/用友/Excel 导出，问「这批资料能不能出管理损益」。助手**可以**加载 `setup` 并调用 `finance_readiness`，给出账套/期间/币种、能算什么、缺什么，不猜 ERP 已连接。经理直接要数字时，仍可走已有映射与 `run_metric`。
-2. 能算则走关账包：映射、管理损益、对账或分录草稿。点文稿里的「费用 −5」打开**授权预览副本**对应区域并高亮，而不是只看到 run 的行列号，也不得把账套原件路径交给模型。
+2. 就绪因 `mapping_incomplete` 挡住时，先走关账包做映射（`finance_map_save`），**不**要求 `can_run` 已含 `management_pnl`。能算则走关账包：管理损益、对账或分录草稿。点文稿里的「费用 −5」打开**授权预览副本**对应区域并高亮，而不是只看到 run 的行列号，也不得把账套原件路径交给模型。
 3. 经理说「总部费用 5 不进考核利润」。保存调整项（附注、有效期）；默认 `include_in_management_pnl=false`。经理在结果区确认纳入后，新 run 利润 35，旧 run 仍为 30。总部费用调整与 G1 费用贡献 −5 不是同一条样本。
 4. 出经营简报时套**已发布**的本公司 Word/Excel 模板（随包简报只是夹具），页眉带账套、组织、期间、单位。
 5. 需要看桥或现金时，用差异包/现金包；拨假设生成子情景。圈选报告表或绑定区域「改成开票口径」生成新 revision，而不是另开一轮无记录的聊天。
@@ -75,7 +75,7 @@ preview_available: bool
 - `fact_id` / `run_id` 不属于当前任务或授权快照时返回 `locator_forbidden`，不得打开、不得静默落到别的任务文件。
 - 点击响应：`locator_unavailable` → 只展示快照行、不高亮；`locator_forbidden` → 行内「无权打开」、不导航、不回退成无定位预览；`preview_available=false` → 行内「该页未归档」+ 快照行、不高亮页。
 - `drilldown_fact` 继续返回快照行。新增只读 `open_source_locator`，参数**仅** `{fact_id}` 或 `{run_id,row,column}`，禁止 `dataset_id` / 本机路径 / URL 入参。
-- 返回给模型与渲染器的定位不得含本机路径、`file://` 或 Univer/PDF 网关 URL。
+- 返回给模型与渲染器的定位不得含本机路径、`file://` 或 Univer/PDF 网关 URL。定位专用 IPC 的**成功回包**（不只 locator 对象）同样路径无关：在交给渲染器之前剥掉 `origin`、`file`、`allowedRoot`、`file://` 以及 Univer/PDF 网关 URL。主进程可在进程内保留 origin，仅用于放置 WebContentsView。
 - 预览副本是 ephemeral scratch（与现有 `artifacts/preview/` 同寿命），**不得** `register_bytes` 进成果目录，不得出现在成果列表。主进程用定位专用 IPC 打开，**不得**走现有成果 `preview:open` / `deliverable-path`。XLSX：把授权 dataset 的归档字节拷到以 `source_hash` 命名的 scratch 目录，`allowedRoot` 仅该目录，再调用 Univer 预览宿主对副本做导入。PDF 且 `preview_available=true` 时复用现有 pdfjs ReportSource 预览，不走 Univer。禁止把 `analysis/` 整树当作预览根。`passage` 有上限。
 
 ### 4.2 ReadinessReport
@@ -93,8 +93,8 @@ erp_connected: false   # 除非会话具名且已授权的适配器
 
 - `diagnostics` 与 `blocked.reason` 只用稳定的 finance_model 代码和文案。不得含异常原文、文件系统路径、网关 URL、主机名、租户连接细节或 transport 载荷。内部 `finance_readiness` 工具结果同样剥离，不只 MCP 错误通道。
 - 无授权 dataset：`can_run: []`，`blocked` 含一条 `{capability: management_pnl, missing_fields: ["dataset"], reason: no_dataset}`（其余能力同样不得列入 `can_run`），`erp_connected: false`。
-- 缺期间或币种列入 `blocked`，不得静默填「本月」或 CNY。
-- 多工作表只提议，不自动合并。`kind=workbook` 不得只走「默认空 rows」的规范化；必须按表检查（现有工作簿检查或逐表试解析）。只有空壳工作簿时不得把 `management_pnl` 列入 `can_run`。
+- 缺期间或币种列入 `blocked`，不得静默填「本月」或 CNY。标题或表头出现「人民币」视为已声明币种（`proposed_scope.currency=人民币`），不得改写成 CNY；「不得静默填 CNY」只适用于没有任何币种标记的资料。
+- 多工作表只提议，不自动合并。`kind=workbook` 不得只走「默认空 rows」的规范化；必须按表检查（现有工作簿检查或逐表试解析）。只有空壳工作簿时不得把 `management_pnl` 列入 `can_run`。`management_pnl` 列入 `can_run` 仅当至少一张 `sheet_candidate`（或 `kind=table`）自身同时具备期间、币种与映射覆盖；收入/成本与费用分在不同表、单表无法闭合损益的，只报告候选表，不得跨表并账户来宣称能算。
 - `can_run` 含 `management_pnl` 的前提是：期间/币种可声明，**且**科目映射已覆盖该能力所需账户。半映射或未映射 → 该能力进 `blocked`（`reason=mapping_incomplete`），禁止「字段在就能算」。
 - 若对金蝶/用友风格表头做了身份识别且失败：即使映射覆盖账户，`management_pnl` 仍进 `blocked`（`reason=identity_failed`）。G1 等不宣称 ERP 身份的通用文件仍按期间/币种+映射决定 `can_run`（CF01）。
 - 表头/标题身份：至少一份金蝶或用友风格表头夹具（身份在标题或表头，不在英文字段名）。G1 合成样只证明合同，不得单独当作 ERP 导出已识别的出口证据。
@@ -113,8 +113,8 @@ bindings   # 所属 context/run 的 snapshot 顶格，必填
 
 合同：
 
-- `amount` 是调整幅度（正数表示剔除或加入的规模）；`profit_impact` 是对管理利润的有符号影响。B04：账面 `source_total=30`，剔除总部费用后 `profit_impact=+5`，`adjusted_total=35`。结果里既有 `profit` 列（考核/调整后）也有 `source_total`；禁止只留一个含义不明的 `profit`。
-- `run_metric(kind=management_pnl)` 只应用调用方**点名**的 adjustment ids，且这些项 `include_in_management_pnl=true`，且 `effective_period` 与本次 run 的期间键匹配。YTD/多月 run 只把各月调整应用到对应月份。禁止隐式「当前口径全部启用」。
+- `amount` 是调整幅度（正数表示剔除或加入的规模）；`profit_impact` 是对管理利润的有符号影响。B04：账面 `source_total=30`，剔除总部费用后 `profit_impact=+5`，`adjusted_total=35`。结果里既有 `source_total` 也有 `adjusted_total`；禁止只留一个含义不明的 `profit`。
+- `run_metric(kind=management_pnl)` 只应用调用方**点名**的 adjustment ids，且这些项 `include_in_management_pnl=true`，且 `effective_period` 与本次 run 的期间键匹配。YTD/多月 run 只把各月调整应用到对应月份。禁止隐式「当前口径全部启用」。点名了不存在的 id 直接报错；点名但未确认、已被后续 revision 替代、或 `effective_period` 不在本次 run 期间集合内的 id，记入结果 `ignored_adjustments`（带 reason）并出 warning 诊断，不静默丢弃。`finance_adjustment_list` 给已被替代的行（pending 或已确认）打 `superseded_by`，UI 两个列表都不显示这些行。`adjustment_ids` 只接受 `run_metric(kind=management_pnl)`，其它指标带此参数直接拒绝。祖先判断沿 `parent_id` 链传递，不只看直接子项。
 - `finance_adjustment_save` 默认不暴露给模型；若内部可写，保存后仅记录且 `include_in_management_pnl=false`。须经理在 UI 确认 `include` 才进入后续 `run_metric`。确认是把 include 置 true 的唯一动作。
 - `parent_id` 表示对重叠调整的**替代**：账户重叠仅当 `parent_id` 指向那条被替代行才允许保存；`parent_id` 不指向重叠账户则拒绝。`run_metric` 只应用被点名的叶子，忽略已点名的祖先，避免双计。
 - 多笔不重叠的调整按保存顺序应用。同一账户且 `effective_period` 重叠、又无合法 `parent_id` 时拒绝保存。不同月份同一账户可以并存，无需 `parent_id`。
@@ -139,12 +139,12 @@ method/
   packs.json              # 声明哪些 id 是路由包
 ```
 
-`foundry/method_skills.py` 增加 `BUNDLED_PACKS = ("setup", "close", "bva", "cash")`。`bundled_skill_dirs()` / `bundled_skill_files()` / `bundled_skill_manifest()["ids"]` 以及 dsh-plugin `methodSkills.ids` **仍只**覆盖四项方法技能，不得并进包 id（包 SKILL 没有 FOUNDRY.md 运行时备注，并进去会打实现有测试）。另增 `bundled_pack_dirs()` / `bundled_pack_manifest()` 扫描一级包目录。`packs.json` 与 `BUNDLED_PACKS` 是角色包注册表；`setup` 固定登记在 `BUNDLED_PACKS`，不另开第三套注册表。捆绑技能提供方对包目录的发现走包清单（或与方法根并列的一级 `SKILL.md`），不是改 `bundled_skill_dirs()` 的返回值。包 SKILL 只写：何时用、建议先调 `finance_readiness`、再 load 哪些已有技能、标准产出。canonical、`foundry/resources/method/`、安装包三处同步。不写入 `var/skills/`。
+`foundry/method_skills.py` 增加 `BUNDLED_PACKS = ("setup", "close", "bva", "cash")`。`BUNDLED_IDS` 仅含四项方法技能 id（与 `bundled_skill_manifest()["ids"]` 一致），不得并入包 id。`bundled_skill_dirs()` / `bundled_skill_files()` / `bundled_skill_manifest()["ids"]` 以及 dsh-plugin `methodSkills.ids` **仍只**覆盖四项方法技能，不得并进包 id（包 SKILL 没有 FOUNDRY.md 运行时备注，并进去会打实现有测试）。另增 `bundled_pack_dirs()` / `bundled_pack_manifest()` 扫描一级包目录。`packs.json` 与 `BUNDLED_PACKS` 是角色包注册表；`setup` 固定登记在 `BUNDLED_PACKS`，不另开第三套注册表。捆绑技能提供方对包目录的发现走包清单（或与方法根并列的一级 `SKILL.md`），不是改 `bundled_skill_dirs()` 的返回值。包 SKILL 只写：何时用、建议先调 `finance_readiness`、再 load 哪些已有技能、标准产出。canonical、`foundry/resources/method/`、安装包三处同步。不写入 `var/skills/`。
 
 | 包 | 入口技能 | 组合已有能力 | 标准产出 |
 |---|---|---|---|
 | `setup` | `setup` | `finance_readiness` | 就绪报告 |
-| `close` | `close` | 报表、对账、分录草稿、可选差异 | 管理损益、勾稽、分录草稿 |
+| `close` | `close` | 映射（`finance_map_save`）、报表、对账、分录草稿、可选差异 | 管理损益、勾稽、分录草稿 |
 | `bva` | `bva` | `variance-analysis`、`explain_variance` | 闭合利润桥或量价桥 |
 | `cash` | `cash` | `finance_scenario_save/run`（账龄、13 周现金） | 账龄表或 13 周现金 |
 
@@ -156,8 +156,9 @@ method/
 
 - `template_id`：内置夹具 `management-brief-v1`（经营简报）与 `variance-note-v1`（差异说明），用于测试。CF-2「像本公司文件」的出口还要求任务或应用资源里至少一份**经理经原生文件选择器发布**的 Word 或 Excel 快照；随包皮肤不得单独关闭该出口。
 - 页眉/封面字段来自当前 finance scope：账套、组织、期间、币种、单位。扩展 metadata 白名单为 `ledger`（账套）、`organization`（组织），并改 Python 与 Electron 页眉标签表（`DOCUMENT_METADATA_LABELS` / `EMPTY_METADATA` / `ReportDocument.metadata`）。旧稿 `company` 仍可读；缺项显示「未声明」，不编造。`template_id` 不当页眉字段。
-- Excel 模板走已有 `workbook_bindings`：命名区写入 run 数值，普通金额可 SUM。
-- 模板是任务或应用资源中的不可变快照。助手不能用任意路径覆盖。发布必须走与「添加分析文件」相同的原生选择器。
+- Excel 套用针对已发布模板快照字节写命名区（现有 openpyxl），普通金额可 SUM。不得把模板 `dataset-add` 进分析资料，也不得把模板快照当成 dataset 去做 `workbook_bindings`。命名区数值只来自 `run_id` 指向的已授权 run（命名区名匹配结果列或 metric 名，忽略大小写），调用方直接传 `values` 一律拒绝；没有 `run_id` 只套皮不写数，随包 Excel 夹具同样不写任何常量。返回 `filled_named_ranges` / `unfilled_named_ranges`。发布快照单文件上限 25 MiB。
+- 模板是任务或应用资源中的不可变快照。助手不能用任意路径覆盖。发布必须走与「添加分析文件」相同的原生选择器，但**不得**调用分析资料的 `dataset-add`。主进程另开模板发布 IPC（与 `analysisAddFiles` 并列），不接收渲染器路径；写入当前任务的不可变模板快照。
+- `report_template_list` / `report_template_apply` 先授权当前任务/会话。list 只返回 `template_id`、label、kind，不得含路径、快照字节或 URL。任务内已发布快照对其它任务不可见；apply 只在当前任务写新草稿。
 - UI：文稿「套用公司模板」打开已发布模板列表（含空态「暂无已发布模板」）。现有「插入经营分析模板」降为本地草稿脚手架或移除，不得与已发布模板并列成两套入口。套用生成新草稿，不改旧稿字节。
 - PPTX 仍排除。
 
@@ -174,7 +175,7 @@ method/
 
 MCP：默认**不**把本表任何新工具（含只读 locator/list/template/chart）加入对外方法，直到为每个参数写完 grant：fact → `run.finance_context_id` 与 snapshot 顶格；adjustment/chart/template 同理。`prepare_explanation` 的 `source_trace` 不得含路径或网关 URL。撤销 grant 后拒绝。CF-1/CF-2 出口不依赖 MCP。
 
-`charts` 是 FinanceStore 集合（与 `adjustments` 一样持久化 `bindings`，打开/列表先授权）。磁盘表示写在 `analysis/charts/`，不另建第二套权威存储。归档图**不是**文稿成果；不得把预览 scratch 登记进图表集合。
+`charts` 是 FinanceStore 集合（与 `adjustments` 一样持久化 `bindings`）。save/open/list 都先授权该 run 的 context；空 bindings 对会话不可见；`run_id` 与 snapshot hash 必须落在该记录 bindings 内。磁盘表示写在 `analysis/charts/`，不另建第二套权威存储。归档图**不是**文稿成果；不得把预览 scratch 登记进图表集合。
 
 ## 5. 实施顺序
 
@@ -199,19 +200,19 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 - 新增 `foundry/finance_readiness.py`：对已授权 dataset 做就绪汇总。工作簿必须按表检查，不得只调用一次默认空表的 `normalize_finance_dataset`。输出 `proposed_scope` / `can_run` / `blocked`，遵守 §4.2（空资料、映射不全、表头身份夹具）。
 - `FinanceStore.finance_readiness`；CLI `finance-readiness`。
 - `dsh-plugin/finance-tools.js` 与 `foundry/resources/dsh-plugin/finance-tools.js` 同步只读工具。
-- `method/setup/SKILL.md`：建议先 readiness，再决定是否 `finance_source_refresh` / `finance_context_save`。禁止把占位 `~~erp` 说成已连接。
+- `method/setup/SKILL.md`：建议先 readiness；若 `blocked.reason=mapping_incomplete` 再 `finance_map_save`，然后决定是否 `finance_source_refresh` / `finance_context_save`。禁止把占位 `~~erp` 说成已连接。
 - 分析 preset 的 persona：资料未绑定口径时**建议** setup / readiness；**禁止**把未跑 setup 写成硬错误或拒绝 `run_metric`。
 
 **1b 原文定位**
 
 - `foundry/analysis_data.py` 的 xlsx 解析必须持久化表头单元格 → Excel 列字母映射（用单元格坐标，不用表头序号；使用区域不从 A 列起时序号会错）。`finance_model.py` 把 `dataset_id`、`sheet`、`source_row` 与该映射写入 `source_locator.excel_range`。不得把现有 sheet/`source_row_numbers` 当成已有列信息。G1 XLSX 夹具必须让记下的区域与高亮单元格一致；多表工作簿须先选定可映射表（或 `kind=table`），空 `rows` 的 workbook 快照不能作为 CF06 费用定位来源。
 - `foundry/finance_explanations.py` 把 locator 纳入 `source_trace`；`prepare_explanation` 对可定位事实设 `preview_available`，且 locator 无路径。
-- `FinanceStore.open_source_locator`：校验授权后返回定位与不透明句柄（无路径）。Electron 走 §4.1 的定位专用 IPC + ephemeral scratch，高亮 `excel_range` 或页。文稿点击只传 fact/run 单元格，由主进程解析。
-- 文稿数字点击走 locator；run 表点击仍可下钻快照行。两种入口都不得打开任务外文件。
+- `FinanceStore.open_source_locator`：校验授权后返回定位与不透明句柄（无路径）。Electron 走 §4.1 的定位专用 IPC + ephemeral scratch，高亮 `excel_range` 或页。文稿点击只传 fact/run 单元格，由主进程解析。定位预览在**分析屏**打开现有工作区预览窗格（可盖住原生聊天，但不离开草稿/结果页）；关闭预览恢复原分析布局。
+- 主入口：渲染后的文稿正文里绑定 `fact_id` 的数字（表格单元格与行内值）可点，调用 `open_source_locator`。引用事实面板是同一事实的次入口。run 表下钻仍只走结果路径。两种入口都不得打开任务外文件。
 
 **1c 关账包**
 
-- `method/packs.json`、`method/close/SKILL.md`（一级目录）。
+- `method/packs.json`、`method/close/SKILL.md`（一级目录）。`close` SKILL 写明：`mapping_incomplete` 时先 `finance_map_save`，再管理损益。
 - `method_skills.bundled_pack_manifest()` / `bundled_pack_dirs()` 覆盖包 id；`bundled_skill_dirs()` 仍只含四项方法。干净 DSH 目录可发现 `setup` 与 `close`。
 - 安装版复验：新会话问「这批资料能不能出管理损益」，**可以**加载 setup 或 close，再计算 G1；未走包时四项技能仍能算出 G1。
 
@@ -226,15 +227,15 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 - `evaluate_metric` / `run_metric` 只应用点名且已确认 include、且期间匹配的调整；结果行区分 `source_total` 与 `adjusted_total`。
 - 固定样本对齐工作台 B04：账面利润 30，剔除总部费用 5 后管理利润 35。总部费用调整与 G1 费用 −5 分夹具。
 - 文稿必须同时能引用调整前与调整后；调整原因默认 `professional_judgment` 或 `user_assumption`。
-- UI：已保存未确认的调整出现在结果侧栏，pending 标记；「确认纳入」是把 `include_in_management_pnl` 置 true 的唯一控件。重算/run_metric 列出已确认调整的勾选（默认全选），只把勾选的 id 传给 `run_metric`；全不选则无调整重跑。未确认 id 不得进入重算。
+- UI：已保存未确认的调整出现在结果侧栏，pending 标记；「确认纳入」是把 `include_in_management_pnl` 置 true 的唯一控件。每条 pending 行：确认按钮在 save/include IPC 进行中禁用；失败行内报错且 `include` 仍为 false；成功去掉 pending 标记、移入已确认列表，**不**自动重跑。同一侧栏下方「重算」块列出已确认调整的勾选（默认全选），只把勾选的 id 传给 `run_metric`；全不选则无调整重跑。未确认 id 不得进入重算。
 - 结果区成对展示账面与考核。文稿引用选择器按「账面 / 考核」分组；有调整时默认筛选考核，可显式切到账面引用调整前数字。
 
 **2b 公司模板**
 
 - 内置两份夹具进 `foundry/resources/templates/`（`template_id`，文稿仍 `annual-v1`）。
 - `report_documents.validate_report_document` 保留顶层 `template_id`；页眉字段来自 scope（`ledger`/`organization` 进白名单与标签表）。
-- Excel：`tests/fixtures/` 放一份命名区模板，绑定 run 后 SUM 与 G1 一致。
-- UI：见 §4.5；套用已发布模板生成新草稿。出口另需一份经理发布的本公司文件快照。
+- Excel：`tests/fixtures/` 放一份命名区模板，对已发布快照字节写入 G1 后 SUM 一致（不是把模板当 dataset 绑定）。
+- UI：见 §4.5；套用已发布模板生成新草稿。出口另需一份经理经模板发布 IPC（非分析资料添加）发布的本公司文件快照。
 
 **2c 差异包与现金包**
 
@@ -247,7 +248,7 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 
 **3a 可归档交互图**
 
-- `chart_deliverable_save` 写入 FinanceStore `charts` 集合；磁盘文件在 `analysis/charts/`。记录系列、筛选、`run_id`、snapshot hash、假设、`bindings`。打开/列表先授权。不得把 locator scratch 登记为图表或文稿成果。
+- `chart_deliverable_save` 写入 FinanceStore `charts` 集合；磁盘文件在 `analysis/charts/`。记录系列、筛选、`run_id`、snapshot hash、假设、`bindings`。save/open/list 先授权该 run 的 context；空 bindings 不可见；`run_id` 与 snapshot hash 必须落在 bindings 内。窄会话或外任务不得 list/open/save 该图。不得把 locator scratch 登记为图表或文稿成果。
 - 打开图表必须复现原 run；改假设走子情景 + 新图表版本。CF28 用现有 G3 现金延迟样本（回款晚 14 天），不另造假设夹具。
 - Data Formulator 仍可当探索器；本阶段出口是 Foundry 归档，不把 Formulator 进程当作成果。
 - 不做 Codex Sites 式托管 URL。
@@ -255,6 +256,7 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 **3b 圈选改口径**
 
 - 文稿表或 Excel 绑定区：选中单元格/列，发出「改成开票口径」等指令。
+- 圈选 IPC 只接受当前任务内的选择句柄（文稿块 id + 单元格/列范围，或已有 workbook binding 的 range），不得传入路径、`dataset_id` 或外任务 `parent_id`。新 finance context 必须复制父 context 的 `bindings`，不得抬高 snapshot 顶格。未授权选择直接拒绝，不保存。`instruction` 必填，服务端不默认「改成开票口径」。圈选的选区（`kind`、`draft_id` 或 `binding_id`、`block_id`、`range`）写入新 requirements 记录的 `selection` 字段，revision 能回答「改的是哪张表哪一列」。
 - 服务生成 `analysis_requirements_save`（`parent_id` + `change_reason`）和新 finance context/filters，不静默改旧 run。
 - 无定位的纯聊天改口径保持原路径。
 
@@ -273,12 +275,12 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 | 定位 | `foundry/finance_model.py`、`foundry/finance_explanations.py`、`foundry/analysis_data.py`（xlsx 表头→列字母映射）、定位专用 IPC、文稿阅读视图 |
 | 调整项 | `foundry/finance_adjustments.py`（新）、`foundry/finance_metrics.py`、`foundry/finance_service.py` |
 | 模板 | `foundry/report_documents.py`（扩展 template_id 与 metadata，不改 annual-v1）、`foundry/resources/templates/`（新）、`foundry/finance_files.py` |
-| 包 | `foundry/method_skills.py`、`method/setup/`、`method/close/`、`method/bva/`、`method/cash/`、`packs.json`、资源镜像、`dsh-plugin/presets/analysis/agent.cordis.yml` |
+| 包 | `foundry/method_skills.py`、`method/setup/`、`method/close/`、`method/bva/`、`method/cash/`、`method/packs.json`、资源镜像、`dsh-plugin/presets/analysis/agent.cordis.yml` |
 | 工具 | `dsh-plugin/finance-tools.js` 与 `foundry/resources/dsh-plugin/finance-tools.js` |
 | 图表 | `foundry/chart_deliverables.py`（新）、分析成果列表 |
 | 圈选 | 文稿编辑器选择 → IPC → `analysis_requirements_save`；Excel 绑定已有 range |
 | 测试 | `tests/test_finance_readiness.py`、`tests/test_finance_locators.py`、`tests/test_finance_adjustments.py`、`tests/test_method_packs.py`、`tests/test_report_templates.py`、`tests/test_workbook_bindings.py`（CF17）、`tests/test_report_documents.py`（CF34 回归）、`tests/test_chart_deliverables.py`、评测 fixture |
-| 验收器 | `tools/verify_analysis_workbench.py` 增加就绪/定位/模板步骤；安装版脚本复用现有 Playwright 入口 |
+| 验收器 | CLI/G1 就绪仍走 `tools/verify_analysis_workbench.py`。CF12/CF13/CF13b 的 loader 与模型会话证明走 `tools/verify_method_skill_session.py`（扩展 `EXPECTED_CELLS` / `verify_loaded_resources`，核对工具记录含 `finance_readiness` 与 `can_run`/`blocked`）。CF07 走现有 Electron source-locator 测试 + r2 同款安装版收据；不新增 Playwright 入口 |
 
 镜像规则与 r2 相同：改 plugin/method/工具合同必须同步 `foundry/resources/`。
 
@@ -369,3 +371,27 @@ CF-3 交互图归档 + 圈选改口径 + 表附注评测
 - **Method packs lack Methods-tab grouping and missing-pack affordance** — 角色包 (P2, design-lens, confidence 75)
 
   方法页是否把角色包与单项技能分组、缺包时如何提示，属信息架构，未决。
+
+- **B04 HQ exclusion needs UI confirm, not speech** — 用户路径 / 调整项 (P1, product-lens, feasibility, confidence 75)
+
+  工作台 B04 是经理说「总部费用不进考核」后利润变为 35，但本计划把 include 唯一动作写成结果区「确认纳入」，且保存不对模型暴露。按第二轮已写入的确认控件做，口述不再单独过关；是否改回「口述即确认」，仍待产品拍板。
+
+- **Confirm does not apply unnamed run_metric** — 调整项 / run_metric (P1, adversarial, confidence 75)
+
+  经理确认 include 后，聊天或 CLI 未点名调整 id 的 `run_metric` 仍可能得到账面 30。UI 默认全选会盖住这条。省略 id 视为全部已确认项，还是继续「禁止隐式全部启用」，未决。
+
+- **CF-3 chart store and viewer unspecified** — 可归档交互图 (P1, feasibility, confidence 75)
+
+  图表既写进财务存储集合、又落在 `analysis/charts/`，应用里没有图表库且禁止新依赖。磁盘路径、用哪套列表打开、无新依赖时如何复现系列，未决。
+
+- **ReadinessReport can_run exceeds phased exits** — 就绪报告 (P1, scope-guardian, confidence 75)
+
+  就绪枚举含对账/账龄/13 周现金，但 CF-1 出口只验收管理损益与勾稽。是把未测能力从 CF-1 合同里拿掉，还是 CF-2 补验收行，未决。
+
+- **CF24 tests bridge math not routing** — CF-2 验收 (P2, scope-guardian, confidence 75)
+
+  差异包合同是路由包装，验收却要求 G1 桥仍闭合 +5。失败会被当成包缺陷。是否改成只测发现与路由引用，未决。
+
+- **Scratch copies lack close-time deletion** — 原文定位预览 (P1, security-lens, confidence 75)
+
+  定位预览把账套副本拷到 `artifacts/preview/`，关闭时是否立即删掉 digest 目录并关掉表格网关，还是与现有预览目录同寿命、等任务清理，未决。

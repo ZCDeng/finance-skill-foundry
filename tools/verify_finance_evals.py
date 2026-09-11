@@ -271,6 +271,14 @@ def _find_expected_cells_inner(state: dict[str, Any], case: dict[str, Any]) -> d
     )}
     expected = case["expected"]
     kind = expected["type"]
+    if kind == "table_note":
+        cells = {}
+        for run, index, row in _matching_rows(state, case):
+            if _equal(row.get("profit"), expected["claims"]["profit"]):
+                cells["profit"] = {"run_id": run["id"], "row": index, "column": "profit", "value": row["profit"]}
+        if "profit" not in cells:
+            raise AssertionError("table-note case did not compute the table profit")
+        return cells
     if kind == "price_quantity_missing":
         diagnostics = [
             diag
@@ -1303,7 +1311,11 @@ def _score_case(foundry: Path, var: Path, case: dict[str, Any], observed: dict[s
             cells,
             allow_missing_data=allow_missing_data,
         )
-    _verify_canonical_final_text(case, observed, state, cells)
+    final_text = _verify_canonical_final_text(case, observed, state, cells)
+    if case["expected"]["type"] == "table_note":
+        score_table_note_text(case, final_text)
+    if case["expected"].get("require_real_zero"):
+        require_real_zero_cell(cells, "expense")
     if case["expected"].get("requires_voucher_drilldown"):
         if not any(_has_voucher_detail(call.get("value")) for call in drilldowns):
             raise AssertionError("voucher drilldown case did not return voucher_detail_available")
@@ -1543,6 +1555,8 @@ def main() -> int:
     parser.add_argument("--live", action="store_true", help="invoke the configured model")
     parser.add_argument("--r4", action="store_true", help="score with the r4 requirements/evidence/completion contract")
     parser.add_argument("--validate-fixture-only", action="store_true")
+    parser.add_argument("--suite", choices=["default", "table_note"], default="default",
+                        help="table_note runs the table+footnote cases and scores the final text with score_table_note_text")
     parser.add_argument("--compare-verification", action="append", type=Path, default=[], help="compare existing verification.json files without invoking a model")
     parser.add_argument("--rescore-observation", type=Path, help="rescore an existing verification directory without invoking a model or modifying it")
     args = parser.parse_args()
@@ -1555,7 +1569,10 @@ def main() -> int:
         print(json.dumps({"status": comparison["status"], "output": str(args.output / "comparison.json")}, ensure_ascii=False))
         return 0 if comparison["status"] == "passed" else 1
 
-    fixture = _load_fixture(args.fixture)
+    if args.suite == "table_note":
+        fixture = load_table_note_fixture(TABLE_NOTE_FIXTURE if args.fixture == DEFAULT_FIXTURE else args.fixture)
+    else:
+        fixture = _load_fixture(args.fixture)
     if args.rescore_observation:
         result = rescore_observation(args.foundry, fixture, args.rescore_observation, args.output,
                                      scoring_contract=SCORING_CONTRACT_R4 if args.r4 else SCORING_CONTRACT_R3)

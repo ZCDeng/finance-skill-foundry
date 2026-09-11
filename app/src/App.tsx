@@ -600,13 +600,15 @@ export function App() {
           <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
             task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
             onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
+              // The locator answer carries no origin. Where the viewer is
+              // comes from `previewStatus`, as it does for every other preview.
               void (async () => {
-                let origin = spec.origin;
-                if (!origin && api.previewStatus) {
+                let origin = '';
+                if (api.previewStatus) {
                   const status = await api.previewStatus();
-                  if (status.ok) origin = status.value.running?.origin || origin;
+                  if (status.ok) origin = status.value.running?.origin ?? '';
                 }
-                setPreview({ ...spec, origin: origin || '' });
+                setPreview({ ...spec, origin });
                 setLocatorPreview(true);
               })();
             } : undefined} />

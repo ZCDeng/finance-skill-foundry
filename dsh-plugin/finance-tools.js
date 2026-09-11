@@ -145,9 +145,10 @@ export const FINANCE_TOOLS = {
     context_id: contextId,
   }, ["context_id"]),
   report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
-  report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。不覆盖旧稿。发布模板仍由经理点选。", {
+  report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。Excel 模板的命名区数值只能来自 run_id 指向的已授权 run（命名区名匹配结果列或 metric 名），不接受调用方直接给数字；没有 run_id 就只套皮不写数。不覆盖旧稿。发布模板仍由经理点选。", {
     template_id: text("report_template_list 返回的 template_id"),
     context_id: contextId,
+    run_id: text("可选：为 Excel 命名区取数的已授权 run"),
     scope: financeScope,
   }, ["template_id"]),
 };

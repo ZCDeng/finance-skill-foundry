@@ -173,7 +173,18 @@ export interface PreviewSpec {
   excel_range?: string;
 }
 
-export interface SourceLocatorResult extends Partial<PreviewSpec> {
+/**
+ * What a locator preview names once Univer is up: the task and the digest,
+ * and the cell the operator asked about. No origin: the renderer reads that
+ * from `previewStatus`, the same way every other preview does.
+ */
+export type LocatorPreviewSpec = Omit<PreviewSpec, 'origin'>;
+
+/**
+ * What `sourceLocatorOpen` answers. Path-free by construction on the main
+ * side, and origin-free by type here: nothing in it says where a server is.
+ */
+export interface SourceLocatorResult extends Partial<LocatorPreviewSpec> {
   status: 'ok' | 'locator_unavailable' | 'locator_forbidden' | string;
   locator?: Record<string, unknown>;
   preview?: { available?: boolean; handle?: string };
@@ -341,7 +352,6 @@ export type FinanceCommand =
   | 'run-metric'
   | 'explain-variance'
   | 'drilldown-fact'
-  | 'open-source-locator'
   | 'save-explanation-draft'
   | 'analysis-requirements-save'
   | 'analysis-requirements-list'

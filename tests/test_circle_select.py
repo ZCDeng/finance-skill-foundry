@@ -87,6 +87,23 @@ def test_cf30_draft_table_circle_select_writes_new_requirements(tmp_path: Path) 
     )
     assert revised["requirements"]["parent_id"] == original["id"]
     assert revised["requirements"]["change_reason"] == "改成开票口径"
+    assert revised["requirements"]["selection"] == {
+        "kind": "draft_table",
+        "range": "A:A",
+        "draft_id": draft["id"],
+        "block_id": "tbl-expense",
+    }
+    with pytest.raises(FoundryError, match="instruction"):
+        service.analysis_circle_select(
+            {
+                "kind": "draft_table",
+                "draft_id": draft["id"],
+                "block_id": "tbl-expense",
+                "range": "A:A",
+                "context_id": revised["context"]["id"],
+                "parent_id": revised["requirements"]["id"],
+            }
+        )
     assert revised["context"]["parent_id"] == context["id"]
     assert revised["context"]["bindings"] == context["bindings"]
     assert revised["context"]["id"] != context["id"]
@@ -171,6 +188,7 @@ def test_cf31_workbook_binding_circle_select_copies_parent_bindings(tmp_path: Pa
         }
     )
     assert revised["requirements"]["parent_id"] == original["id"]
+    assert revised["requirements"]["selection"] == {"kind": "workbook", "range": "A:A", "binding_id": binding["id"]}
     assert revised["context"]["bindings"] == widened["bindings"]
     assert set(revised["context"]["bindings"].values()) == set(widened["bindings"].values())
     outsider = service.save_context(

@@ -66,8 +66,11 @@ def test_cf16_management_brief_keeps_annual_v1_and_hashes_template_id(tmp_path: 
     assert "template_id" in first["document"]
 
 
+G1_EXCEL_VALUES = {"Profit": "30", "Volume": "20", "Price": "-10", "Mix": "-5"}
+
+
 def test_cf17_excel_named_ranges_write_g1_amounts_as_summable_numbers() -> None:
-    data = apply_excel_named_ranges(excel_brief_template_bytes())
+    data = apply_excel_named_ranges(excel_brief_template_bytes(), G1_EXCEL_VALUES)
     workbook = load_workbook(io.BytesIO(data))
     sheet = workbook["Brief"]
     assert sheet["B2"].value == Decimal("30")
@@ -115,7 +118,7 @@ def test_cf18f_foreign_task_cannot_list_or_apply_published_snapshot(tmp_path: Pa
     for row in listed:
         blob = " ".join(row.values())
         assert "http" not in blob
-        assert "/" not in blob or row["kind"] in {"word", "excel"}
+        assert "/" not in blob
         assert "path" not in row
         assert "bytes" not in row
     other = FinanceStore(TaskStore(tmp_path / "var").create(title="外任务"))
@@ -162,6 +165,82 @@ def test_published_word_apply_cites_snapshot_bytes(tmp_path: Path) -> None:
     assert sources[0]["format"] == "docx"
     assert "已套用已发布公司模板" in applied["draft"]["body"]
     assert "账套：service-co" in applied["draft"]["body"]
+
+
+def _g1_run(service: FinanceStore, tmp_path: Path):
+    import csv
+
+    fixtures = Path(__file__).parent / "fixtures" / "finance_baseline" / "scenarios"
+    with (fixtures / "service_ledger.csv").open(encoding="utf-8-sig", newline="") as handle:
+        rows = [
+            row
+            for row in csv.DictReader(handle)
+            if row["period"] == "2026-08" and row["organization"] == "华东" and row["scenario"] == "actual"
+        ]
+    path = tmp_path / "g1.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    dataset = service.analysis.add_dataset(path, name="g1")
+    context = service.save_context({"bindings": {"actual": dataset["id"]}, "scopes": {"actual": SCOPE}})
+    return service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+
+
+def _source_workbook_cells(service: FinanceStore, draft: dict) -> dict[str, object]:
+    source_id = draft["document"]["sources"][0]["id"]
+    record = service.analysis._read(service.analysis.root / "report_sources" / (source_id + ".json"))
+    data = (service.analysis.root / "report_sources" / record["id"] / record["source_file"]).read_bytes()
+    workbook = load_workbook(io.BytesIO(data))
+    sheet = workbook.active
+    cells = {name: sheet[name].value for name in ("B2", "B3", "B4", "B5", "B6")}
+    workbook.close()
+    return cells
+
+
+def test_bundled_excel_apply_without_run_writes_no_fixture_numbers(tmp_path: Path) -> None:
+    service, _task = _finance(tmp_path)
+    applied = service.report_template_apply({"template_id": "management-brief-xlsx-v1", "scope": SCOPE})
+    cells = _source_workbook_cells(service, applied["draft"])
+    assert cells["B2"] in (0, 0.0, None)
+    assert cells["B3"] in (0, 0.0, None)
+    assert applied["filled_named_ranges"] == []
+
+
+def test_published_excel_apply_fills_named_ranges_from_authorized_run(tmp_path: Path) -> None:
+    service, task = _finance(tmp_path)
+    run = _g1_run(service, tmp_path)
+    published_path = tmp_path / "company.xlsx"
+    published_path.write_bytes(excel_brief_template_bytes())
+    datasets_before = len(service.analysis.state()["datasets"])
+    published = service.report_template_publish({"path": str(published_path), "label": "本公司Excel"})
+    applied = service.report_template_apply(
+        {"template_id": published["template_id"], "scope": SCOPE, "run_id": run["id"]}
+    )
+    assert applied["filled_named_ranges"] == ["Profit"]
+    assert set(applied["unfilled_named_ranges"]) == {"Volume", "Price", "Mix", "Total"}
+    cells = _source_workbook_cells(service, applied["draft"])
+    assert Decimal(str(cells["B2"])) == Decimal("30")
+    assert cells["B6"] == "=SUM(B2:B5)"
+    assert len(service.analysis.state()["datasets"]) == datasets_before
+    with pytest.raises(FoundryError, match="run_id"):
+        service.report_template_apply(
+            {"template_id": published["template_id"], "scope": SCOPE, "values": {"Profit": "999"}}
+        )
+    narrow = FinanceStore(task, snapshot_ids=set())
+    with pytest.raises(FoundryError):
+        narrow.report_template_apply({"template_id": published["template_id"], "run_id": run["id"]})
+
+
+def test_publish_rejects_oversized_template(tmp_path: Path, monkeypatch) -> None:
+    from foundry import report_templates
+
+    service, _task = _finance(tmp_path)
+    source = tmp_path / "big.xlsx"
+    source.write_bytes(excel_brief_template_bytes())
+    monkeypatch.setattr(report_templates, "TEMPLATE_MAX_BYTES", 16)
+    with pytest.raises(FoundryError, match="limit"):
+        service.report_template_publish({"path": str(source), "label": "太大"})
 
 
 def test_excel_apply_unwraps_report_source_and_keeps_published_amounts(tmp_path: Path) -> None:

@@ -1552,7 +1552,7 @@ export function ReportEditor({
         />
       )}
       {circleMessage && <p role="status" className="report-status">{circleMessage}</p>}
-          {toolError && (
+      {toolError && (
         <p role="alert" className="analysis-message analysis-message--error">
           {toolError}
         </p>
@@ -1807,7 +1807,15 @@ function pdfPreviewErrorMessage(failure: unknown): string {
   return "PDF 原页暂时无法预览，可继续使用已提取的草稿内容。";
 }
 
-export function PdfComparison({ dataUrl }: { dataUrl: string }) {
+/**
+ * The archived PDF beside the draft, one page at a time.
+ *
+ * `page` is where to open: a locator names the page it cited, and a viewer
+ * that always opened on page 1 was showing the operator the cover of a
+ * document they asked about page 7 of. Clamped to the document once it is
+ * loaded; absent, page 1.
+ */
+export function PdfComparison({ dataUrl, page: initialPage }: { dataUrl: string; page?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<{
     numPages: number;
@@ -1849,7 +1857,7 @@ export function PdfComparison({ dataUrl }: { dataUrl: string }) {
         }
         pdfRef.current = pdf;
         setPages(pdf.numPages);
-        setPage(1);
+        setPage(Math.min(Math.max(1, initialPage ?? 1), pdf.numPages || 1));
       } catch (failure) {
         const message = pdfPreviewErrorMessage(failure);
         if (!cancelled && message) setError(message);
@@ -1863,7 +1871,7 @@ export function PdfComparison({ dataUrl }: { dataUrl: string }) {
       void pdfRef.current?.destroy?.();
       pdfRef.current = null;
     };
-  }, [dataUrl]);
+  }, [dataUrl, initialPage]);
 
   useEffect(() => {
     let cancelled = false;

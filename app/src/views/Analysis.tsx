@@ -56,7 +56,7 @@ type Props = {
   onPick(id: string): void;
   onNew(question: string): void | Promise<string | void>;
   onChat(question?: string, draftId?: string, options?: AnalysisChatOptions): void | Promise<void>;
-  onLocatorPreview?(preview: import('../bridge.js').PreviewSpec): void;
+  onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
@@ -823,6 +823,8 @@ type FinanceAdjustment = {
   amount?: string;
   profit_impact?: string;
   parent_id?: string | null;
+  /** The newer row that replaced this one. A superseded row, pending or confirmed, is history, not a choice. */
+  superseded_by?: string | null;
 };
 
 function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
@@ -848,8 +850,9 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     });
   }, [taskId, contextId]);
   useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
-  const confirmed = rows.filter((row) => row.include_in_management_pnl);
-  const pending = rows.filter((row) => !row.include_in_management_pnl && !confirmed.some((item) => item.parent_id === row.id));
+  const current = rows.filter((row) => !row.superseded_by);
+  const confirmed = current.filter((row) => row.include_in_management_pnl);
+  const pending = current.filter((row) => !row.include_in_management_pnl && !confirmed.some((item) => item.parent_id === row.id));
   const locked = busy || Boolean(pendingId) || rerunning;
   async function confirm(id: string) {
     const api = bridge(); if (!api?.financeCall) return;
@@ -1266,7 +1269,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
   versionPicker?: ReactNode;
-  onLocatorPreview?(preview: import('../bridge.js').PreviewSpec): void;
+  onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
   onAppliedDraft?(draft: AnalysisDraft): void;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
@@ -1287,7 +1290,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
   const [locatorNotice, setLocatorNotice] = useState<Record<string, string>>({});
-  const [locatorPdf, setLocatorPdf] = useState<{ factId: string; dataUrl: string } | null>(null);
+  const [locatorPdf, setLocatorPdf] = useState<{ factId: string; dataUrl: string; page?: number } | null>(null);
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
   const [background, setBackground] = useState({ label: '', text: '', basis: 'professional_judgment', effective_from: '', effective_to: '', dataset_id: '', paragraph: '', source: '', retrieved_at: '' });
   const [backgroundScope, setBackgroundScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: '', unit: '' });
@@ -1457,32 +1460,32 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         return;
       }
       if (located.viewer === 'univer' && located.sha256 && located.task) {
-        let origin = typeof located.origin === 'string' ? located.origin : '';
-        if (!origin && api.previewStatus) {
-          const status = unwrap(await api.previewStatus() as Answer<{ running?: { origin?: string } | null }>);
-          origin = status.running?.origin ?? '';
-        }
-        onLocatorPreview?.({ task: located.task, sha256: located.sha256, origin, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
+        onLocatorPreview?.({ task: located.task, sha256: located.sha256, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
         return;
       }
       if (located.viewer === 'pdf') {
-        const sourceId = typeof located.locator?.dataset_id === 'string' ? located.locator.dataset_id : '';
-        if (!api.reportSource || !sourceId) {
+        // A locator names a dataset, not a report source. The archived page
+        // is the report source whose bytes hash to the locator's source; a
+        // draft that imported no such file has no page to show.
+        const sourceHash = typeof located.locator?.source_hash === 'string' ? located.locator.source_hash : '';
+        const archived = sourceHash ? document?.sources?.find((item) => item.sha256 === sourceHash) : undefined;
+        if (!api.reportSource || !archived) {
           setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
           await openFact(fact);
           return;
         }
-        const payload = unwrap(await api.reportSource(taskId, sourceId) as Answer<{ data_base64?: string }>);
+        const payload = unwrap(await api.reportSource(taskId, archived.id) as Answer<{ data_base64?: string }>);
         if (!payload.data_base64) {
           setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
           await openFact(fact);
           return;
         }
-        setLocatorPdf({ factId: fact.id, dataUrl: `data:application/pdf;base64,${payload.data_base64}` });
+        const page = typeof located.locator?.page === 'number' && Number.isInteger(located.locator.page) && located.locator.page > 0 ? located.locator.page : undefined;
+        setLocatorPdf({ factId: fact.id, dataUrl: `data:application/pdf;base64,${payload.data_base64}`, ...(page ? { page } : {}) });
         return;
       }
       await openFact(fact);
-    } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === factRequest.current) setToolError(locatorFailureText(failure)); }
   }
   async function loadBackgrounds(request = ++backgroundRequest.current, scopeOverride?: Record<string, unknown>) {
     const api = bridge(); if (!api?.financeCall) return;
@@ -1820,9 +1823,22 @@ function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: strin
   return Array.from(groups.values());
 }
 
+/** Main answers a failed locator open with a code, not a sentence; the sentence is written here. */
+const LOCATOR_FAILURES: Record<string, string> = {
+  locator_forbidden: '无权打开',
+  locator_unavailable: '原文定位暂不可用',
+  preview_unavailable: '预览暂不可用',
+  locator_error: '原文定位失败',
+};
+
+function locatorFailureText(failure: unknown): string {
+  const message = failure instanceof Error ? failure.message : String(failure);
+  return LOCATOR_FAILURES[message] ?? message;
+}
+
 function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
   quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
-  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
+  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string; page?: number } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
   const issueGroups = groupedIssues(quality?.issues ?? []);
@@ -1859,7 +1875,7 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
         <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
         {locatorNotice[fact.id] ? <p className="analysis-note" role="status">{locatorNotice[fact.id]}</p> : null}
-        {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} /> : null}
+        {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} page={locatorPdf.page} /> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}

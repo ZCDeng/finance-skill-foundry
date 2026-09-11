@@ -30,142 +30,104 @@ ERP_HEADER_MARKERS = frozenset(
 ERP_TITLE_MARKERS = ("金蝶", "用友", "KIS", "U8")
 _PERIOD_IN_TITLE = re.compile(r"(20\d{2})[-./年](\d{1,2})")
 _CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
-_PATH_RE = re.compile(r"(?i)(/Users/|/home/|[A-Z]:\\|\\\\|file://|\.xlsx|\.csv)")
-_URL_RE = re.compile(r"(?i)https?://|wss?://")
-_HOST_RE = re.compile(r"(?i)\b(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)\b")
-_FORBIDDEN_SCOPE = frozenset({"本月", "CNY"})
+# Diagnostics are fixed finance_model codes and text; this only guards against a
+# path, URL, or host slipping into the message text. Business values in
+# proposed_scope and sheet_candidates are never rewritten.
+_LEAK_RE = re.compile(r"(?i)(/Users/|/home/|/tmp/|[A-Z]:\\|\\\\|file://|https?://|wss?://|localhost|\d{1,3}(?:\.\d{1,3}){3})")
+SILENT_PERIOD = "本月"
 AMOUNT_EXTRA = ("借方", "贷方")
 
 
 def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     del spec
-    datasets = _authorized_tables(store)
+    diagnostics: list[dict] = []
+    datasets = _authorized_tables(store, diagnostics)
     if not datasets:
-        return _sanitize(
-            {
-                "proposed_scope": {key: "" for key in SCOPE_KEYS},
-                "can_run": [],
-                "blocked": [
-                    {
-                        "capability": "management_pnl",
-                        "missing_fields": ["dataset"],
-                        "reason": "no_dataset",
-                    }
-                ],
-                "file_identity_policy": "snapshot_only",
-                "diagnostics": [
-                    _diag("error", "no_dataset", "no authorized finance dataset")
-                ],
-                "erp_connected": False,
-                "sheet_candidates": [],
-                "merged_sheets": False,
-            }
+        return _report(
+            proposed_scope={key: "" for key in SCOPE_KEYS},
+            can_run=[],
+            blocked=[_blocked("management_pnl", ["dataset"], "no_dataset")],
+            policy="snapshot_only",
+            diagnostics=[*diagnostics, _diag("error", "no_dataset", "no authorized finance dataset")],
+            sheet_candidates=[],
         )
 
+    code_map = _account_code_map(store)
     probes: list[dict[str, Any]] = []
     sheet_candidates: list[dict[str, Any]] = []
-    diagnostics: list[dict] = []
     for dataset in datasets:
-        probes.extend(_probes_for_dataset(store, dataset, sheet_candidates, diagnostics))
+        probes.extend(_probes_for_dataset(store, dataset, sheet_candidates, diagnostics, code_map))
 
     proposed_scope = _proposed_scope(probes)
-    mapped_accounts = _management_accounts(store, probes)
-    period = proposed_scope.get("period") or ""
-    currency = proposed_scope.get("currency") or ""
+    missing_scope = [key for key in ("period", "currency") if not proposed_scope.get(key)]
     identity_failed = any(
-        probe.get("identity_attempted") and not probe.get("identity_ok") for probe in probes
+        probe["identity_attempted"] and not probe["identity_ok"] for probe in probes
     )
-    mapping_complete = PNL_ACCOUNTS <= mapped_accounts
-    has_amount = any(_has_amount(probe) for probe in probes)
-    has_rows = any(probe.get("rows") for probe in probes)
+    has_amount_rows = any(probe["has_amount"] and probe["rows"] for probe in probes)
 
     can_run: list[str] = []
     blocked: list[dict[str, Any]] = []
 
-    missing_scope = [key for key in ("period", "currency") if not proposed_scope.get(key)]
-    pnl_missing = list(missing_scope)
-    if not mapping_complete:
-        pnl_missing.append("management_account")
-
     if identity_failed:
-        blocked.append(
-            {
-                "capability": "management_pnl",
-                "missing_fields": missing_scope or ["period", "currency"],
-                "reason": "identity_failed",
-            }
-        )
+        blocked.append(_blocked("management_pnl", missing_scope or ["period", "currency"], "identity_failed"))
         diagnostics.append(
             _diag("error", "identity_failed", "header identity did not declare period and currency")
         )
     elif missing_scope:
-        blocked.append(
-            {
-                "capability": "management_pnl",
-                "missing_fields": missing_scope,
-                "reason": "missing_scope",
-            }
-        )
+        blocked.append(_blocked("management_pnl", missing_scope, "missing_scope"))
         diagnostics.append(_diag("error", "missing_scope", "period or currency is not declared"))
-    elif any(_pnl_sheet_ready(store, probe) for probe in probes):
+    elif any(_pnl_sheet_ready(probe, code_map) for probe in probes):
         can_run.append("management_pnl")
-    elif not mapping_complete:
-        blocked.append(
-            {
-                "capability": "management_pnl",
-                "missing_fields": ["management_account"],
-                "reason": "mapping_incomplete",
-            }
-        )
-        diagnostics.append(
-            _diag("error", "mapping_incomplete", "management accounts are not fully mapped")
-        )
     else:
-        blocked.append(
-            {
-                "capability": "management_pnl",
-                "missing_fields": ["management_account"],
-                "reason": "mapping_incomplete",
-            }
-        )
+        blocked.append(_blocked("management_pnl", ["management_account"], "mapping_incomplete"))
         diagnostics.append(
             _diag("error", "mapping_incomplete", "management accounts are not fully mapped on one sheet")
         )
 
     if missing_scope:
-        blocked.append(
-            {
-                "capability": "control_totals",
-                "missing_fields": missing_scope,
-                "reason": "missing_scope",
-            }
-        )
-    elif has_amount and has_rows:
+        blocked.append(_blocked("control_totals", missing_scope, "missing_scope"))
+    elif has_amount_rows:
         can_run.append("control_totals")
 
     if _aging_ready(probes) and not missing_scope:
         can_run.append("receivables_aging")
 
+    with_rows = [probe for probe in probes if probe["rows"]]
     policy = (
         "business_key"
-        if probes and all(_has_business_keys(probe) for probe in probes if probe.get("rows"))
+        if with_rows and all(_has_business_keys(probe) for probe in with_rows)
         else "snapshot_only"
     )
-    report = {
+    return _report(
+        proposed_scope=proposed_scope,
+        can_run=[name for name in CAPABILITY_ORDER if name in can_run],
+        blocked=blocked,
+        policy=policy,
+        diagnostics=diagnostics,
+        sheet_candidates=sheet_candidates,
+    )
+
+
+def _report(*, proposed_scope, can_run, blocked, policy, diagnostics, sheet_candidates) -> dict[str, Any]:
+    return {
         "proposed_scope": proposed_scope,
-        "can_run": [name for name in CAPABILITY_ORDER if name in can_run],
+        "can_run": can_run,
         "blocked": blocked,
         "file_identity_policy": policy,
-        "diagnostics": diagnostics,
+        "diagnostics": [_sanitize_diagnostic(item) for item in diagnostics],
+        # No adapter is ever named on a file-first session; a live ledger link
+        # must come from a session-scoped, authorized adapter, which does not exist yet.
         "erp_connected": False,
         "sheet_candidates": sheet_candidates,
         "merged_sheets": False,
     }
-    del pnl_missing
-    return _sanitize(report)
 
 
-def _authorized_tables(store) -> list[dict]:
+def _blocked(capability: str, missing_fields: list[str], reason: str) -> dict[str, Any]:
+    return {"capability": capability, "missing_fields": list(missing_fields), "reason": reason}
+
+
+def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
     state = store.analysis.state()
     records = [
         row
@@ -174,11 +136,28 @@ def _authorized_tables(store) -> list[dict]:
     ]
     tables = []
     for record in records:
-        dataset = store.analysis.read_dataset(record["id"])
+        try:
+            dataset = store.analysis.read_dataset(record["id"])
+        except FoundryError:
+            # A snapshot that fails its integrity check is reported by code only;
+            # the exception text never reaches the report.
+            diagnostics.append(_diag("error", "dataset_unreadable", "dataset snapshot could not be read"))
+            continue
         if dataset.get("kind") == "background":
             continue
         tables.append(dataset)
     return tables
+
+
+def _account_code_map(store) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for record in store._list("account_maps"):
+        for item in record.get("rows") or []:
+            code = str(item.get("account_code") or "").strip()
+            account = str(item.get("management_account") or "").strip()
+            if code and account:
+                mapping[code] = account
+    return mapping
 
 
 def _probes_for_dataset(
@@ -186,9 +165,10 @@ def _probes_for_dataset(
     dataset: dict,
     sheet_candidates: list[dict[str, Any]],
     diagnostics: list[dict],
+    code_map: dict[str, str],
 ) -> list[dict[str, Any]]:
     if _is_workbook_shell(dataset):
-        return _workbook_probes(store, dataset, sheet_candidates, diagnostics)
+        return _workbook_probes(store, dataset, sheet_candidates, diagnostics, code_map)
     rows = list(dataset.get("rows") or [])
     headers = _headers_of(dataset, rows)
     return [_probe(headers, rows, sheet=str(dataset.get("transformation", {}).get("sheet") or ""))]
@@ -207,6 +187,7 @@ def _workbook_probes(
     dataset: dict,
     sheet_candidates: list[dict[str, Any]],
     diagnostics: list[dict],
+    code_map: dict[str, str],
 ) -> list[dict[str, Any]]:
     try:
         data = _source_bytes(store, dataset)
@@ -228,7 +209,7 @@ def _workbook_probes(
         headers = _headers_of(parsed, rows)
         probe = _probe(headers, rows, sheet=name)
         probes.append(probe)
-        sheet_candidates.append({"sheet": name, "mappable": _pnl_sheet_ready(store, probe)})
+        sheet_candidates.append({"sheet": name, "mappable": _pnl_sheet_ready(probe, code_map)})
     if not probes:
         probes.append(_probe([], [], sheet=""))
     return probes
@@ -259,26 +240,21 @@ def _headers_of(dataset: dict, rows: list[dict]) -> list[str]:
 
 def _probe(headers: list[str], rows: list[dict], *, sheet: str) -> dict[str, Any]:
     fmap = _field_map({})
-    period_values = _declared_values(rows, fmap, "period")
-    currency_values = _declared_values(rows, fmap, "currency")
     title = _title_blob(headers, rows)
-    extracted_period = _period_from_title(title)
-    extracted_currency = _currency_from_title(title)
     attempted = _identity_attempted(headers, title)
-    period = _first(period_values) or extracted_period
-    currency = _first(currency_values) or extracted_currency
-    identity_ok = bool(period and currency)
+    period = _first(_declared_values(rows, fmap, "period")) or _period_from_title(title)
+    currency = _first(_declared_values(rows, fmap, "currency")) or _currency_from_title(title)
     return {
         "sheet": sheet,
         "headers": headers,
         "rows": rows,
-        "period": period if period not in _FORBIDDEN_SCOPE else period,
+        "period": period,
         "currency": currency,
         "ledger": _first(_declared_values(rows, fmap, "ledger")),
         "organization": _first(_declared_values(rows, fmap, "organization")),
         "unit": _first(_declared_values(rows, fmap, "unit")),
         "identity_attempted": attempted,
-        "identity_ok": identity_ok if attempted else True,
+        "identity_ok": bool(period and currency) if attempted else True,
         "doc_id": bool(_declared_values(rows, fmap, "doc_id")),
         "line_id": bool(_declared_values(rows, fmap, "line_id")),
         "due_date": any(str(row.get("due_date") or "").strip() for row in rows),
@@ -323,14 +299,16 @@ def _currency_from_title(title: str) -> str:
 
 
 def _declared_values(rows: list[dict], fmap: dict, canonical: str) -> list[str]:
+    """Distinct declared values in source order. A literal 本月 period is not a declaration."""
     values: list[str] = []
     for row in rows:
         raw = _read(row, fmap, canonical)
         text = str(raw).strip() if raw is not None else ""
-        if text and text not in values:
-            if canonical in {"period", "currency"} and text in _FORBIDDEN_SCOPE and canonical == "period":
-                continue
-            values.append(text)
+        if not text or text in values:
+            continue
+        if canonical == "period" and text == SILENT_PERIOD:
+            continue
+        values.append(text)
     return values
 
 
@@ -349,8 +327,6 @@ def _proposed_scope(probes: list[dict[str, Any]]) -> dict[str, str]:
         found: list[str] = []
         for probe in probes:
             value = str(probe.get(key) or "").strip()
-            if key == "period" and value == "本月":
-                continue
             if not value or value in found:
                 continue
             found.append(value)
@@ -358,78 +334,40 @@ def _proposed_scope(probes: list[dict[str, Any]]) -> dict[str, str]:
     return scope
 
 
-def _management_accounts(store, probes: list[dict[str, Any]]) -> set[str]:
-    accounts: set[str] = set()
-    codes: set[str] = set()
-    for probe in probes:
-        accounts.update(probe.get("management_accounts") or ())
-        codes.update(probe.get("account_codes") or ())
-    for record in store._list("account_maps"):
-        for item in record.get("rows") or []:
-            code = str(item.get("account_code") or "").strip()
-            account = str(item.get("management_account") or "").strip()
-            if code in codes and account:
-                accounts.add(account)
+def _accounts_for_probe(probe: dict[str, Any], code_map: dict[str, str]) -> set[str]:
+    accounts = set(probe["management_accounts"])
+    for code in probe["account_codes"]:
+        account = code_map.get(code)
+        if account:
+            accounts.add(account)
     return accounts
 
 
-def _accounts_for_probe(store, probe: dict[str, Any]) -> set[str]:
-    accounts = {value for value in (probe.get("management_accounts") or ()) if value}
-    codes = {value for value in (probe.get("account_codes") or ()) if value}
-    for record in store._list("account_maps"):
-        for item in record.get("rows") or []:
-            code = str(item.get("account_code") or "").strip()
-            account = str(item.get("management_account") or "").strip()
-            if code in codes and account:
-                accounts.add(account)
-    return accounts
-
-
-def _pnl_sheet_ready(store, probe: dict[str, Any]) -> bool:
-    if not probe.get("rows"):
+def _pnl_sheet_ready(probe: dict[str, Any], code_map: dict[str, str]) -> bool:
+    """One sheet must close the P&L on its own: period, currency, and every P&L account."""
+    if not probe["rows"]:
         return False
     return bool(
-        probe.get("period")
-        and probe.get("currency")
-        and PNL_ACCOUNTS <= _accounts_for_probe(store, probe)
+        probe["period"]
+        and probe["currency"]
+        and PNL_ACCOUNTS <= _accounts_for_probe(probe, code_map)
     )
-
-
-def _sheet_mappable(probe: dict[str, Any]) -> bool:
-    return bool(
-        probe.get("period")
-        and probe.get("currency")
-        and PNL_ACCOUNTS <= set(probe.get("management_accounts") or ())
-    )
-
-
-def _has_amount(probe: dict[str, Any]) -> bool:
-    return bool(probe.get("has_amount"))
 
 
 def _has_business_keys(probe: dict[str, Any]) -> bool:
-    return bool(probe.get("doc_id") and probe.get("line_id"))
+    return bool(probe["doc_id"] and probe["line_id"])
 
 
 def _aging_ready(probes: list[dict[str, Any]]) -> bool:
     return any(
-        probe.get("due_date") and (probe.get("has_amount") or "accounts_receivable" in (probe.get("management_accounts") or ()))
+        probe["due_date"] and (probe["has_amount"] or "accounts_receivable" in probe["management_accounts"])
         for probe in probes
     )
 
 
-def _sanitize(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _sanitize(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_sanitize(item) for item in value]
-    if isinstance(value, str):
-        if _URL_RE.search(value) or (_PATH_RE.search(value) and "/" in value):
-            return "[redacted]"
-        if _HOST_RE.search(value) and "." in value and " " not in value:
-            return "[redacted]"
-        for marker in ERP_TITLE_MARKERS:
-            if marker in value:
-                value = value.replace(marker, "")
-        return value
-    return value
+def _sanitize_diagnostic(item: dict) -> dict:
+    clean = dict(item)
+    message = str(clean.get("message") or "")
+    if _LEAK_RE.search(message):
+        clean["message"] = "[redacted]"
+    return clean

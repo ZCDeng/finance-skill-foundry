@@ -258,6 +258,20 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run).toHaveBeenCalledTimes(19);
   });
 
+  it('does not reach open-source-locator through the generic finance channel', async () => {
+    registerIpc({ varRoot: '/store' });
+    const result = await invoke(CHANNELS.financeCall, task, 'open-source-locator', { fact_id: 'fact-a' });
+    expect(result).toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it('treats a template picker that returned no file as cancelled', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: [] });
+    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: { cancelled: true } });
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
   it('refreshes finance source files only from the native file picker', async () => {
     registerIpc({ varRoot: '/store' });
     mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/gl.csv'] });

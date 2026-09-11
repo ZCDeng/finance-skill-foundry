@@ -162,3 +162,44 @@ def test_chart_save_ignores_caller_series_and_rejects_scratch_text(tmp_path: Pat
         service.chart_deliverable_save(
             {"run_id": run["id"], "label": "artifacts/preview/abc/sheet.xlsx"}
         )
+
+
+def test_charts_and_locator_scratch_never_enter_the_deliverable_history(tmp_path: Path) -> None:
+    import csv
+
+    from foundry.finance_locators import stage_source_locator_preview
+
+    task = TaskStore(tmp_path / "csvtask").create(title="图表与预览")
+    service = FinanceStore(task)
+    rows = [
+        {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "120"},
+        {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "70"},
+        {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "20"},
+    ]
+    source = tmp_path / "g1.csv"
+    with source.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    dataset = service.analysis.add_dataset(source, name="g1")
+    context = service.save_context(
+        {
+            "bindings": {"actual": dataset["id"]},
+            "scopes": {"actual": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"}},
+        }
+    )
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    before = len(task.deliverables())
+    saved = service.chart_deliverable_save({"run_id": run["id"], "label": "利润图"})
+    scratch = stage_source_locator_preview(service, {"run_id": run["id"], "row": 0, "column": "expense"})
+    assert scratch.is_file()
+    assert len(task.deliverables()) == before
+    listed = service.chart_deliverable_list({})["charts"]
+    assert [row["id"] for row in listed] == [saved["id"]]
+    persisted = service._read("charts", saved["id"])
+    assert set(persisted["bindings"].values()) == {dataset["id"]}
+    assert persisted["run_id"] == run["id"]
+    assert persisted["snapshot_hashes"] == run["input_hashes"]
+    blob = json.dumps(listed, ensure_ascii=False)
+    assert str(scratch) not in blob
+    assert "artifacts/preview" not in blob

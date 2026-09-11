@@ -150,9 +150,9 @@ def test_cf20_unconfirmed_named_id_does_not_adjust(tmp_path):
     )
     row = rerun["result"]["rows"][0]
     assert Decimal(str(row.get("source_total", row["profit"]))) == Decimal("30")
-    assert row.get("adjusted_total") in (None, row.get("source_total"), row["profit"]) or Decimal(
-        str(row.get("adjusted_total"))
-    ) == Decimal("30")
+    assert "adjusted_total" not in row
+    assert rerun["result"]["ignored_adjustments"] == [{"id": saved["id"], "reason": "not_confirmed"}]
+    assert any(diag["code"] == "adjustment_not_confirmed" for diag in rerun["result"]["diagnostics"])
 
 
 def test_cf22_locator_must_sit_in_record_bindings(tmp_path):
@@ -214,6 +214,111 @@ def test_effective_period_mismatch_is_ignored(tmp_path):
     )
     row = rerun["result"]["rows"][0]
     assert Decimal(str(row.get("source_total", row["profit"]))) == Decimal("30")
+    assert "adjusted_total" not in row
+    ignored = rerun["result"]["ignored_adjustments"]
+    assert ignored[0]["id"] == confirmed["id"]
+    assert ignored[0]["reason"] == "period_not_in_run"
+
+
+def test_unknown_adjustment_id_fails_loudly(tmp_path):
+    service, context, _dataset = _finance(tmp_path)
+    with pytest.raises(FoundryError, match="unknown adjustment ids"):
+        service.run_metric(
+            {
+                "context_id": context["id"],
+                "metric": {"kind": "management_pnl"},
+                "adjustment_ids": ["0" * 32],
+            }
+        )
+
+
+def test_confirmed_but_unnamed_adjustment_is_not_applied(tmp_path):
+    service, context, dataset = _finance(tmp_path)
+    saved = service.finance_adjustment_save(_hq_spec(context["id"], dataset["id"]))
+    service.finance_adjustment_confirm({"id": saved["id"]})
+    rerun = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    row = rerun["result"]["rows"][0]
+    assert Decimal(str(row["profit"])) == Decimal("30")
+    assert "adjusted_total" not in row
+
+
+def test_named_ancestor_of_a_confirmed_revision_is_not_double_counted(tmp_path):
+    service, context, dataset = _finance(tmp_path)
+    pending = service.finance_adjustment_save(_hq_spec(context["id"], dataset["id"]))
+    first = service.finance_adjustment_confirm({"id": pending["id"]})
+    revision = service.finance_adjustment_save(
+        _hq_spec(context["id"], dataset["id"], parent_id=first["id"], amount="7", profit_impact="7")
+    )
+    final = service.finance_adjustment_confirm({"id": revision["id"]})
+    rerun = service.run_metric(
+        {
+            "context_id": context["id"],
+            "metric": {"kind": "management_pnl"},
+            "adjustment_ids": [first["id"], final["id"]],
+        }
+    )
+    row = rerun["result"]["rows"][0]
+    assert Decimal(str(row["source_total"])) == Decimal("30")
+    assert Decimal(str(row["adjusted_total"])) == Decimal("37")
+    assert row["applied_adjustment_ids"] == [final["id"]]
+    assert rerun["result"]["ignored_adjustments"] == [{"id": first["id"], "reason": "superseded"}]
+    listed = {row["id"]: row for row in service.finance_adjustment_list({"context_id": context["id"]})["adjustments"]}
+    assert listed[pending["id"]]["superseded_by"] == first["id"]
+    assert listed[first["id"]]["superseded_by"] == revision["id"]
+    assert listed[revision["id"]]["superseded_by"] == final["id"]
+    assert "superseded_by" not in listed[final["id"]]
+
+
+def test_adjustments_are_rejected_outside_management_pnl(tmp_path):
+    service, context, dataset = _finance(tmp_path)
+    saved = service.finance_adjustment_save(_hq_spec(context["id"], dataset["id"]))
+    confirmed = service.finance_adjustment_confirm({"id": saved["id"]})
+    with pytest.raises(FoundryError, match="management_pnl"):
+        service.run_metric(
+            {
+                "context_id": context["id"],
+                "metric": {"kind": "control_totals"},
+                "adjustment_ids": [confirmed["id"]],
+            }
+        )
+
+
+def test_parent_id_must_point_at_the_overlapped_row(tmp_path):
+    service, context, dataset = _finance(tmp_path)
+    hq = service.finance_adjustment_save(_hq_spec(context["id"], dataset["id"]))
+    other = service.finance_adjustment_save(
+        _hq_spec(context["id"], dataset["id"], label="研发补贴", accounts=["研发补贴"])
+    )
+    with pytest.raises(FoundryError, match="parent_id"):
+        service.finance_adjustment_save(
+            _hq_spec(context["id"], dataset["id"], parent_id=other["id"], amount="4", profit_impact="4")
+        )
+    assert hq["id"] != other["id"]
+
+
+def test_multi_month_adjustments_apply_to_their_own_month_rows():
+    from foundry.finance_adjustments import apply_to_metric, run_periods, select_applied
+
+    july = {"id": "adj-07", "include_in_management_pnl": True, "effective_period": "2026-07", "profit_impact": "5", "accounts": ["hq"]}
+    august = {"id": "adj-08", "include_in_management_pnl": True, "effective_period": "2026-08", "profit_impact": "3", "accounts": ["hq"]}
+    result = {
+        "columns": ["period", "profit"],
+        "rows": [
+            {"period": "2026-07", "profit": "10"},
+            {"period": "2026-08", "profit": "30"},
+        ],
+    }
+    periods = run_periods({"scopes": {"actual": {"period": "2026-07"}}}, result)
+    assert periods == {"2026-07", "2026-08"}
+    applied, ignored = select_applied(["adj-07", "adj-08"], [july, august], periods=periods)
+    assert ignored == []
+    adjusted = apply_to_metric(result, applied)
+    by_period = {row["period"]: row for row in adjusted["rows"]}
+    assert Decimal(by_period["2026-07"]["adjusted_total"]) == Decimal("15")
+    assert by_period["2026-07"]["applied_adjustment_ids"] == ["adj-07"]
+    assert Decimal(by_period["2026-08"]["adjusted_total"]) == Decimal("33")
+    assert by_period["2026-08"]["applied_adjustment_ids"] == ["adj-08"]
+    assert len(adjusted["rows"]) == 2
 
 
 def test_narrow_session_cannot_list_wide_adjustment(tmp_path):

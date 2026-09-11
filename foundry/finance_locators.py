@@ -6,8 +6,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from foundry.analysis import _hash
+from foundry.analysis import _hash, _new
 from foundry.errors import FoundryError
+from foundry.locking import exclusive
 from foundry.task import sha256_bytes
 
 
@@ -21,6 +22,10 @@ KIND_BY_SUFFIX = {
 }
 PATH_MARKERS = ("/", "\\", "file://", "http://", "https://")
 FORBIDDEN_ARGS = {"dataset_id", "path", "url", "file", "allowedRoot", "preview_path"}
+DEFAULT_AMOUNT_ALIASES = ("amount", "金额")
+DEBIT_CREDIT_ALIASES = ("借方", "贷方", "debit", "credit")
+DIGEST = re.compile(r"^[0-9a-f]{64}$")
+FACT_ID = re.compile(r"^[0-9a-f]{16,64}$")
 
 
 def build_source_locator(
@@ -29,6 +34,8 @@ def build_source_locator(
     *,
     field: str = "amount",
     report_source_ids: set[str] | None = None,
+    aliases: tuple[str, ...] | list[str] | None = None,
+    row: dict | None = None,
 ) -> dict[str, Any]:
     transformation = dataset.get("transformation") or {}
     suffix = Path(str(dataset.get("source_file") or "")).suffix.lower()
@@ -46,7 +53,9 @@ def build_source_locator(
     if kind == "xlsx":
         sheet = str(transformation.get("sheet") or "")
         locator["sheet"] = sheet
-        letter = _column_letter_for_field(transformation.get("header_columns"), field)
+        letter = _column_letter_for_field(
+            transformation.get("header_columns"), _alias_candidates(field, aliases), row
+        )
         if letter and sheet:
             locator["excel_range"] = f"{sheet}!{letter}{source_row}"
     if kind == "pdf":
@@ -71,30 +80,86 @@ def open_source_locator(store, spec: dict | None) -> dict[str, Any]:
     raise FoundryError("open_source_locator arguments must be fact_id or run_id,row,column")
 
 
-def _column_letter_for_field(header_columns: Any, field: str) -> str:
+def _alias_candidates(field: str, aliases: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    """Header names that may hold the located amount, most specific first."""
+    ordered: list[str] = []
+    for name in (field, *(aliases or ()), *DEFAULT_AMOUNT_ALIASES, *DEBIT_CREDIT_ALIASES):
+        text = str(name or "").strip()
+        if text and text not in ordered:
+            ordered.append(text)
+    return tuple(ordered)
+
+
+def _column_letter_for_field(header_columns: Any, candidates: tuple[str, ...], row: dict | None) -> str:
     if not isinstance(header_columns, dict):
         return ""
-    aliases = (field, "amount", "金额")
-    for alias in aliases:
-        letter = str(header_columns.get(alias) or "").strip()
+    present: list[tuple[str, str]] = []
+    for name in candidates:
+        letter = str(header_columns.get(name) or "").strip()
         if letter.isalpha():
-            return letter.upper()
-    return ""
+            present.append((name, letter.upper()))
+    if not present:
+        return ""
+    if isinstance(row, dict):
+        # A debit/credit export has one populated side per line; point at it.
+        for name, letter in present:
+            if row.get(name) not in (None, ""):
+                return letter
+    return present[0][1]
+
+
+def fact_index_dir(store) -> Path:
+    return store.analysis._inside(store.analysis.root / "finance" / "fact_index")
+
+
+def record_fact_index(store, facts: list[dict]) -> None:
+    """Remember which run a prepared fact came from so a click does not rescan every run."""
+    entries: dict[str, str] = {}
+    for fact in facts:
+        fact_id = str(fact.get("id") or "")
+        run_id = str(fact.get("run_id") or "")
+        if FACT_ID.fullmatch(fact_id) and run_id:
+            entries[fact_id] = run_id
+    if not entries:
+        return
+    root = fact_index_dir(store)
+    root.mkdir(parents=True, exist_ok=True)
+    with exclusive(store.task.lock_path, timeout=10):
+        for fact_id, run_id in entries.items():
+            path = root / f"{fact_id}.json"
+            if path.exists():
+                continue
+            store.analysis._write_locked(path, _new(store.task, fact_id=fact_id, run_id=run_id))
+
+
+def _indexed_run_id(store, fact_id: str) -> str:
+    path = fact_index_dir(store) / f"{fact_id}.json"
+    if not path.is_file():
+        return ""
+    try:
+        return str(store.analysis._read(path).get("run_id") or "")
+    except FoundryError:
+        return ""
 
 
 def _open_fact(store, fact_id: Any) -> dict[str, Any]:
-    if not isinstance(fact_id, str) or not fact_id:
+    if not isinstance(fact_id, str) or not FACT_ID.fullmatch(fact_id):
         return {"status": "locator_forbidden"}
-    for run in store.analysis.state().get("runs") or []:
+    run_ids = [run["id"] for run in reversed(store.analysis.state().get("runs") or [])]
+    indexed = _indexed_run_id(store, fact_id)
+    if indexed in run_ids:
+        run_ids.remove(indexed)
+        run_ids.insert(0, indexed)
+    for run_id in run_ids:
         try:
-            self_run = store.analysis.get_run(run["id"])
-            store._authorize(self_run.get("bindings") or {})
+            run = store.analysis.get_run(run_id)
+            store._authorize(run.get("bindings") or {})
         except FoundryError:
             continue
-        fact = _fact_on_run(self_run, fact_id)
+        fact = _fact_on_run(run, fact_id)
         if fact is None:
             continue
-        return _payload_from_fact(store, self_run, fact)
+        return _payload_from_fact(store, run, fact)
     return {"status": "locator_forbidden"}
 
 
@@ -106,11 +171,16 @@ def _open_run_cell(store, spec: dict) -> dict[str, Any]:
         return {"status": "locator_forbidden"}
     index = spec.get("row")
     column = spec.get("column")
+    if column is not None and not isinstance(column, str):
+        raise FoundryError("open_source_locator column must be a string")
     rows = run.get("result", {}).get("rows") or []
     if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(rows):
         return {"status": "locator_unavailable"}
     row = rows[index]
-    refs = row.get("evidence", {}).get(column, row.get("source_rows", [])) if column else row.get("source_rows", [])
+    if not isinstance(row, dict):
+        return {"status": "locator_unavailable"}
+    evidence = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
+    refs = evidence.get(column, row.get("source_rows", [])) if column else row.get("source_rows", [])
     locator = _locator_from_refs(refs)
     if not locator:
         return {"status": "locator_unavailable"}
@@ -182,9 +252,6 @@ def _sanitize_locator(locator: dict[str, Any]) -> dict[str, Any]:
             continue
         clean[key] = value
     return clean
-
-
-DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 def stage_source_locator_preview(store, spec: dict | None) -> Path:

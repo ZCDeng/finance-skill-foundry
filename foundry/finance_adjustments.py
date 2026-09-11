@@ -7,8 +7,12 @@ from typing import Any
 
 from foundry.analysis import _safe_text
 from foundry.errors import FoundryError
+from foundry.finance_model import _diag
 
 ALLOWED_BASIS = {"user_assumption", "professional_judgment", "source_fact"}
+IGNORE_NOT_CONFIRMED = "not_confirmed"
+IGNORE_SUPERSEDED = "superseded"
+IGNORE_PERIOD = "period_not_in_run"
 
 
 def normalize_adjustment(spec: dict, *, context: dict, bindings: dict) -> dict:
@@ -64,8 +68,11 @@ def reject_overlapping_save(record: dict, existing: list[dict]) -> None:
     accounts = set(record["accounts"])
     period = record["effective_period"]
     parent_id = record.get("parent_id")
+    # A row that a newer row already replaced no longer occupies its accounts;
+    # only the live head of each parent_id chain can conflict.
+    superseded = {row["parent_id"] for row in existing if isinstance(row.get("parent_id"), str)}
     for row in existing:
-        if row.get("id") == record.get("id"):
+        if row.get("id") == record.get("id") or row.get("id") in superseded:
             continue
         if row.get("effective_period") != period:
             continue
@@ -76,73 +83,98 @@ def reject_overlapping_save(record: dict, existing: list[dict]) -> None:
         raise FoundryError("overlapping adjustment accounts require a parent_id on the replaced row")
 
 
+def mark_superseded(records: list[dict]) -> list[dict]:
+    """Annotate every row that a newer row replaced through parent_id."""
+    replaced: dict[str, str] = {}
+    for row in records:
+        parent_id = row.get("parent_id")
+        if isinstance(parent_id, str) and parent_id:
+            replaced[parent_id] = row["id"]
+    marked = []
+    for row in records:
+        child = replaced.get(row["id"])
+        marked.append({**row, "superseded_by": child} if child else {k: v for k, v in row.items() if k != "superseded_by"})
+    return marked
+
+
+def _ancestor_ids(row: dict, by_id: dict[str, dict]) -> set[str]:
+    seen: set[str] = set()
+    parent_id = row.get("parent_id")
+    while isinstance(parent_id, str) and parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent_id = (by_id.get(parent_id) or {}).get("parent_id")
+    return seen
+
+
 def select_applied(
     named_ids: list[str],
     records: list[dict],
     *,
-    period: str | None,
-) -> list[dict]:
+    periods: set[str] | None,
+) -> tuple[list[dict], list[dict]]:
+    """Return (applied, ignored). Unknown ids fail loudly; skipped ids carry a reason."""
     by_id = {row["id"]: row for row in records}
-    named = [by_id[item] for item in named_ids if item in by_id]
-    named_set = {row["id"] for row in named}
-    applied = []
+    unknown = [str(item) for item in named_ids if item not in by_id]
+    if unknown:
+        raise FoundryError(f"unknown adjustment ids: {', '.join(unknown)}")
+    named = [by_id[item] for item in dict.fromkeys(named_ids)]
+    confirmed_named = [row for row in named if row.get("include_in_management_pnl")]
+    superseded = set()
+    for row in confirmed_named:
+        superseded |= _ancestor_ids(row, by_id)
+    applied: list[dict] = []
+    ignored: list[dict] = []
     for row in named:
         if not row.get("include_in_management_pnl"):
+            ignored.append({"id": row["id"], "reason": IGNORE_NOT_CONFIRMED})
             continue
-        if period and row.get("effective_period") != period:
+        if row["id"] in superseded:
+            ignored.append({"id": row["id"], "reason": IGNORE_SUPERSEDED})
             continue
-        if any(child.get("parent_id") == row["id"] and child["id"] in named_set for child in named):
+        period = str(row.get("effective_period") or "")
+        if periods is not None and period not in periods:
+            ignored.append({"id": row["id"], "reason": IGNORE_PERIOD, "effective_period": period})
             continue
         applied.append(row)
-    return applied
+    return applied, ignored
 
 
-def apply_to_metric(result: dict, adjustments: list[dict]) -> dict:
+def apply_to_metric(result: dict, adjustments: list[dict], ignored: list[dict] | None = None) -> dict:
+    ignored = list(ignored or [])
     if not adjustments:
-        return result
-    impact = sum((_dec(row.get("profit_impact")) for row in adjustments), Decimal("0"))
-    columns = list(result.get("columns") or [])
-    for name in ("source_total", "adjusted_total"):
-        if name not in columns:
-            columns.append(name)
-    ids = [item["id"] for item in adjustments]
-    periods = {str(row.get("effective_period") or "") for row in adjustments}
-    period = next(iter(periods)) if len(periods) == 1 else ""
-
-    def source_of(row: dict) -> Decimal:
-        return _dec(row.get("profit") or row.get("source_total") or "0")
-
-    def matches_period(row: dict) -> bool:
-        row_period = str(row.get("period") or "").strip()
-        return not (period and row_period and row_period != period)
+        if not ignored:
+            return result
+        return _annotate_ignored(result, ignored)
 
     raw_rows = list(result.get("rows") or [])
-    matching = [row for row in raw_rows if isinstance(row, dict) and matches_period(row)]
-    target = None
-    if len(matching) == 1:
-        target = matching[0]
-    elif len(matching) > 1:
-        untitled = [row for row in matching if not str(row.get("organization") or "").strip()]
-        if untitled:
-            target = untitled[0]
+    row_records = [row for row in raw_rows if isinstance(row, dict)]
 
-    rows = []
-    for row in raw_rows:
-        if not isinstance(row, dict):
-            rows.append(row)
+    by_period: dict[str, list[dict]] = {}
+    for row in adjustments:
+        by_period.setdefault(str(row.get("effective_period") or ""), []).append(row)
+
+    impact_by_row: dict[int, Decimal] = {}
+    ids_by_row: dict[int, list[str]] = {}
+    synthetic: list[dict] = []
+    for period, group in by_period.items():
+        impact = sum((_dec(row.get("profit_impact")) for row in group), Decimal("0"))
+        ids = [row["id"] for row in group]
+        matching = [row for row in row_records if _matches_period(row, period)]
+        target = None
+        if len(matching) == 1:
+            target = matching[0]
+        elif len(matching) > 1:
+            untitled = [row for row in matching if not str(row.get("organization") or "").strip()]
+            if untitled:
+                target = untitled[0]
+        if target is not None:
+            key = id(target)
+            impact_by_row[key] = impact_by_row.get(key, Decimal("0")) + impact
+            ids_by_row.setdefault(key, []).extend(ids)
             continue
-        source = source_of(row)
-        hit = target is not None and row is target
-        rows.append(
-            {
-                **row,
-                "source_total": _money(source),
-                "adjusted_total": _money(source + (impact if hit else Decimal("0"))),
-                "applied_adjustment_ids": ids if hit else [],
-            }
-        )
-    if matching and target is None:
-        source_sum = sum((source_of(row) for row in matching), Decimal("0"))
+        if not matching:
+            continue
+        source_sum = sum((_source_of(row) for row in matching), Decimal("0"))
         extra: dict[str, Any] = {
             "source_total": _money(source_sum),
             "adjusted_total": _money(source_sum + impact),
@@ -150,15 +182,69 @@ def apply_to_metric(result: dict, adjustments: list[dict]) -> dict:
         }
         if period:
             extra["period"] = period
-        rows.append(extra)
-    return {**result, "columns": columns, "rows": rows}
+        synthetic.append(extra)
+
+    rows = []
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            rows.append(row)
+            continue
+        source = _source_of(row)
+        impact = impact_by_row.get(id(row), Decimal("0"))
+        rows.append(
+            {
+                **row,
+                "source_total": _money(source),
+                "adjusted_total": _money(source + impact),
+                "applied_adjustment_ids": list(ids_by_row.get(id(row), [])),
+            }
+        )
+    rows.extend(synthetic)
+
+    columns = list(result.get("columns") or [])
+    for name in ("source_total", "adjusted_total"):
+        if name not in columns:
+            columns.append(name)
+    updated = {**result, "columns": columns, "rows": rows, "applied_adjustment_ids": [row["id"] for row in adjustments]}
+    return _annotate_ignored(updated, ignored) if ignored else updated
 
 
-def run_period(context: dict) -> str | None:
+def _annotate_ignored(result: dict, ignored: list[dict]) -> dict:
+    diagnostics = list(result.get("diagnostics") or [])
+    for item in ignored:
+        diagnostics.append(
+            _diag(
+                "warning",
+                f"adjustment_{item['reason']}",
+                f"adjustment {item['id']} was named but not applied: {item['reason']}",
+            )
+        )
+    return {**result, "diagnostics": diagnostics, "ignored_adjustments": ignored}
+
+
+def _matches_period(row: dict, period: str) -> bool:
+    row_period = str(row.get("period") or "").strip()
+    return not (period and row_period and row_period != period)
+
+
+def _source_of(row: dict) -> Decimal:
+    for key in ("profit", "source_total"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return _dec(value)
+    return Decimal("0")
+
+
+def run_periods(context: dict, result: dict | None = None) -> set[str] | None:
+    """Periods a run covers: every row period plus the context scope period."""
+    periods: set[str] = set()
+    for row in (result or {}).get("rows") or []:
+        if isinstance(row, dict) and str(row.get("period") or "").strip():
+            periods.add(str(row["period"]).strip())
     for scope in (context.get("scopes") or {}).values():
         if isinstance(scope, dict) and scope.get("period"):
-            return str(scope["period"])
-    return None
+            periods.add(str(scope["period"]).strip())
+    return periods or None
 
 
 def _dec(value: Any) -> Decimal:

@@ -1226,3 +1226,26 @@ def test_table_note_reconciling_bridge_still_closes() -> None:
     }
     cells = verifier._find_expected_cells({"runs": [run], "drafts": []}, case)
     assert {name: cell["value"] for name, cell in cells.items()} == case["expected"]["claims"]
+
+
+def test_verifier_main_runs_the_table_note_suite(tmp_path, monkeypatch, capsys) -> None:
+    import json
+    import sys
+
+    output = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["verify_finance_evals.py", "--suite", "table_note", "--output", str(output), "--validate-fixture-only"])
+    assert verifier.main() == 0
+    summary = json.loads((output / "fixture-summary.json").read_text(encoding="utf-8"))
+    assert summary["total_cases"] == 3
+    assert {case_id.split("_")[0] for case_id in summary["selected_cases"]} == {"TN01", "TN02", "TN03"}
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["status"] == "fixture-valid"
+
+
+def test_table_note_scoring_is_wired_into_case_scoring() -> None:
+    import inspect
+
+    source = inspect.getsource(verifier._score_case)
+    assert "score_table_note_text(case, final_text)" in source
+    assert 'require_real_zero_cell(cells, "expense")' in source
+    dispatch = inspect.getsource(verifier._find_expected_cells_inner)
+    assert 'kind == "table_note"' in dispatch

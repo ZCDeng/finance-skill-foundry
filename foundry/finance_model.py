@@ -86,7 +86,7 @@ def normalize_finance_dataset(
             continue
         source_status = _source_status(raw, canonical)
         source_row = _physical_source_row(dataset, canonical.get("source_row"), index)
-        locator = _row_locator(dataset, source_row)
+        locator = _row_locator(dataset, source_row, field_map, raw)
         source_ref = {
             "dataset_id": str(dataset.get("id") or dataset.get("dataset_id") or ""),
             "row_index": index,
@@ -574,10 +574,17 @@ def _physical_source_row(dataset: dict, declared: Any, index: int) -> int:
     return _source_row(declared, index)
 
 
-def _row_locator(dataset: dict, source_row: int) -> dict:
+def _row_locator(dataset: dict, source_row: int, field_map: dict, raw: dict) -> dict:
     from foundry.finance_locators import build_source_locator
 
-    return build_source_locator(dataset, source_row)
+    # The located column follows the same aliases normalization read the amount
+    # from (policy.field_map included), so a Kingdee 借方/贷方 export still highlights.
+    return build_source_locator(
+        dataset,
+        source_row,
+        aliases=tuple(field_map.get("amount", ())),
+        row=raw if isinstance(raw, dict) else None,
+    )
 
 
 def _source_row(value: Any, index: int) -> int:

@@ -213,7 +213,7 @@ def test_cf10f_foreign_or_unauthorized_locator_is_forbidden(tmp_path):
     assert by_run["status"] == "locator_forbidden"
     assert by_fact["status"] == "locator_forbidden"
     blob = str(by_run) + str(by_fact)
-    assert "/" not in blob or "locator_forbidden" in blob
+    assert "/" not in blob
     assert dataset["id"] not in str(by_run.get("locator") or {})
 
     other = TaskStore(tmp_path / "other").create(title="外人")
@@ -275,3 +275,133 @@ def test_stage_preview_copies_xlsx_into_digest_scratch_not_analysis(tmp_path):
             service, {"run_id": run["id"], "row": 0, "column": "expense", "path": str(path)}
         )
 
+
+
+def test_legacy_run_file_without_locator_is_unavailable(tmp_path):
+    from foundry.analysis import _new
+
+    path = _expense_xlsx(tmp_path / "g1.xlsx")
+    service, context, _dataset = _finance(tmp_path, path, metadata={"sheet": "费用", "mode": "table"})
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    stripped_rows = []
+    for row in run["result"]["rows"]:
+        stripped_rows.append(
+            {
+                **row,
+                "source_rows": [
+                    {key: value for key, value in ref.items() if key != "source_locator"}
+                    for ref in row.get("source_rows", [])
+                ],
+                "evidence": {
+                    column: [
+                        {key: value for key, value in ref.items() if key != "source_locator"}
+                        for ref in refs
+                    ]
+                    for column, refs in row.get("evidence", {}).items()
+                },
+            }
+        )
+    legacy = _new(service.task, **{key: value for key, value in run.items() if key not in {"id", "task_id", "schema_version", "created_at", "seq", "_integrity_hash"}})
+    legacy["result"] = {**run["result"], "rows": stripped_rows}
+    service.analysis._write(service.analysis._object_path("runs", legacy["id"]), legacy)
+    opened = service.open_source_locator({"run_id": legacy["id"], "row": 0, "column": "expense"})
+    assert opened["status"] == "locator_unavailable"
+
+
+def test_prepared_fact_index_opens_without_rescanning_and_source_trace_is_path_free(tmp_path):
+    import json
+
+    from foundry.finance_locators import fact_index_dir
+
+    path = _expense_xlsx(tmp_path / "g1.xlsx")
+    service, context, _dataset = _finance(tmp_path, path, metadata={"sheet": "费用", "mode": "table"})
+    run = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    prepared = service.prepare_explanation({"run_ids": [run["id"]]})
+    blob = json.dumps(prepared["facts"], ensure_ascii=False)
+    assert str(tmp_path) not in blob
+    assert "file://" not in blob
+    assert "/Users" not in blob
+    fact = next(item for item in prepared["facts"] if item.get("column") == "expense")
+    assert fact["source_trace"]["preview_available"] is True
+    assert fact["source_trace"]["source_locator"]["excel_range"] == "费用!D18"
+    index_file = fact_index_dir(service) / f"{fact['id']}.json"
+    assert index_file.is_file()
+    assert service.analysis._read(index_file)["run_id"] == run["id"]
+
+    calls = []
+    original = service.analysis.get_run
+
+    def counting(run_id):
+        calls.append(run_id)
+        return original(run_id)
+
+    service.analysis.get_run = counting
+    opened = service.open_source_locator({"fact_id": fact["id"]})
+    assert opened["status"] == "ok"
+    assert opened["locator"]["excel_range"] == "费用!D18"
+    assert calls == [run["id"]]
+
+    index_file.unlink()
+    fallback = service.open_source_locator({"fact_id": fact["id"]})
+    assert fallback["status"] == "ok"
+    assert service.open_source_locator({"fact_id": "not-a-fact"})["status"] == "locator_forbidden"
+
+
+def test_policy_field_map_alias_locates_the_mapped_amount_column(tmp_path):
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "费用"
+    sheet["C1"] = "发生额"
+    sheet["D1"] = "period"
+    sheet["E1"] = "currency"
+    sheet["F1"] = "unit"
+    sheet["G1"] = "management_account"
+    sheet["C2"] = 20
+    sheet["D2"] = "2026-08"
+    sheet["E2"] = "CNY"
+    sheet["F2"] = "万元"
+    sheet["G2"] = "expense"
+    path = tmp_path / "alias.xlsx"
+    book.save(path)
+    service, _context, dataset = _finance(tmp_path, path, metadata={"sheet": "费用", "mode": "table"})
+    loaded = service.analysis.read_dataset(dataset["id"])
+    result = normalize_finance_dataset(loaded, SCOPE, policy={"field_map": {"amount": "发生额"}})
+    expense = next(row for row in result["rows"] if row["management_account"] == "expense")
+    assert expense["source_locator"]["excel_range"] == "费用!C2"
+
+
+def test_debit_credit_export_points_at_the_populated_side():
+    dataset = {
+        "id": "snap",
+        "source_hash": "abc",
+        "source_file": "source.xlsx",
+        "transformation": {
+            "format": "xlsx",
+            "sheet": "余额表",
+            "header_columns": {"科目名称": "A", "借方": "C", "贷方": "D"},
+        },
+    }
+    credit = build_source_locator(dataset, 7, row={"科目名称": "主营业务收入", "借方": None, "贷方": 120})
+    debit = build_source_locator(dataset, 8, row={"科目名称": "管理费用", "借方": 20, "贷方": None})
+    assert credit["excel_range"] == "余额表!D7"
+    assert debit["excel_range"] == "余额表!C8"
+
+
+def test_duplicate_headers_keep_both_columns_addressable(tmp_path):
+    from foundry.analysis_data import parse_source
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "明细"
+    sheet["C1"] = "金额"
+    sheet["D1"] = "金额"
+    sheet["E1"] = "科目"
+    sheet["C2"] = 1
+    sheet["D2"] = 2
+    sheet["E2"] = "x"
+    path = tmp_path / "dup.xlsx"
+    book.save(path)
+    parsed = parse_source(path.read_bytes(), ".xlsx", {"sheet": "明细", "mode": "table"})
+    columns = parsed["transformation"]["header_columns"]
+    assert columns == {"金额": "C", "金额 (2)": "D", "科目": "E"}
+    assert parsed["rows"][0] == {"金额": "1", "金额 (2)": "2", "科目": "x"}

@@ -21,12 +21,7 @@ PUBLIC_FIELDS = ("template_id", "label", "kind")
 WORD_KINDS = {"word"}
 EXCEL_KINDS = {"excel"}
 ALLOWED_SUFFIX = {".docx": "word", ".xlsx": "excel"}
-G1_EXCEL_VALUES = {
-    "Profit": "30",
-    "Volume": "20",
-    "Price": "-10",
-    "Mix": "-5",
-}
+TEMPLATE_MAX_BYTES = 25 * 1024 * 1024
 
 
 def bundled_template_dir() -> Path:
@@ -61,8 +56,54 @@ def excel_brief_template_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def apply_excel_named_ranges(data: bytes, values: dict[str, str] | None = None) -> bytes:
-    payload = dict(G1_EXCEL_VALUES if values is None else values)
+def named_range_names(data: bytes) -> list[str]:
+    try:
+        workbook = load_workbook(io.BytesIO(data), read_only=False)
+    except Exception as exc:
+        raise FoundryError("excel template snapshot is not a readable workbook") from exc
+    try:
+        return [str(name) for name in workbook.defined_names.keys()]
+    finally:
+        workbook.close()
+
+
+def values_from_run(run: dict, names: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Map named ranges onto one authorized run row; unmatched names stay unfilled."""
+    result = run.get("result") if isinstance(run.get("result"), dict) else {}
+    rows = [row for row in (result.get("rows") or []) if isinstance(row, dict)]
+    if not rows:
+        raise FoundryError("run has no result rows to fill the template")
+    lookup: dict[str, Any] = {}
+    for row in rows:
+        metric = str(row.get("metric") or "").strip()
+        if metric:
+            for key in ("contribution", "amount", "value", "variance"):
+                if row.get(key) not in (None, ""):
+                    lookup.setdefault(metric.casefold(), row[key])
+                    break
+    total = rows[0] if len(rows) == 1 else next(
+        (row for row in rows if not str(row.get("organization") or "").strip()), rows[0]
+    )
+    for key, value in total.items():
+        lookup.setdefault(str(key).casefold(), value)
+    values: dict[str, str] = {}
+    unfilled: list[str] = []
+    for name in names:
+        value = lookup.get(name.casefold())
+        if value in (None, "") or isinstance(value, (dict, list, bool)):
+            unfilled.append(name)
+            continue
+        try:
+            values[name] = format(Decimal(str(value)), "f")
+        except (InvalidOperation, ValueError):
+            unfilled.append(name)
+    return values, unfilled
+
+
+def apply_excel_named_ranges(data: bytes, values: dict[str, str]) -> bytes:
+    if not isinstance(values, dict) or not values:
+        raise FoundryError("excel template values must come from an authorized run")
+    payload = dict(values)
     try:
         workbook = load_workbook(io.BytesIO(data))
     except Exception as exc:

@@ -227,3 +227,98 @@ def test_blank_first_xlsx_row_still_reads_headers(tmp_path):
     analysis.add_dataset(path, name="blank-first")
     report = store.finance_readiness({})
     assert "management_pnl" in report["can_run"]
+
+
+def test_cf02c_missing_currency_is_blocked_not_filled_with_cny(tmp_path):
+    import json
+
+    task, analysis, store = _task(tmp_path)
+    rows = []
+    for row in _csv_rows("service_ledger.csv"):
+        dropped = dict(row)
+        dropped.pop("currency", None)
+        rows.append(dropped)
+    names = [key for key in rows[0] if key != "currency"]
+    analysis.add_dataset(_write_csv(tmp_path / "no-currency.csv", rows, fieldnames=names), name="no-currency")
+    report = store.finance_readiness({})
+    assert "management_pnl" not in report["can_run"]
+    assert any(
+        row["capability"] == "management_pnl" and row["missing_fields"] == ["currency"] and row["reason"] == "missing_scope"
+        for row in report["blocked"]
+    )
+    assert report["proposed_scope"]["currency"] == ""
+    assert "CNY" not in json.dumps(report, ensure_ascii=False)
+
+
+def test_empty_workbook_shells_cannot_run_management_pnl(tmp_path):
+    book = Workbook()
+    first = book.active
+    first.title = "封面"
+    second = book.create_sheet("空表")
+    second.append(["period", "currency", "unit", "management_account", "amount"])
+    path = tmp_path / "empty.xlsx"
+    book.save(path)
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="empty-shell")
+    report = store.finance_readiness({})
+    assert report["can_run"] == []
+    assert any(row["capability"] == "management_pnl" for row in report["blocked"])
+    assert all(candidate["mappable"] is False for candidate in report["sheet_candidates"])
+
+
+def test_business_values_are_reported_verbatim(tmp_path):
+    import json
+
+    rows = []
+    for row in _csv_rows("service_ledger.csv"):
+        changed = dict(row)
+        changed["period"] = "2026.09"
+        changed["organization"] = "用友网络科技股份有限公司"
+        changed["ledger"] = "KIS账套001"
+        rows.append(changed)
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(_write_csv(tmp_path / "dotted.csv", rows), name="dotted")
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["period"] == "2026.09"
+    assert report["proposed_scope"]["organization"] == "用友网络科技股份有限公司"
+    assert report["proposed_scope"]["ledger"] == "KIS账套001"
+    assert "[redacted]" not in json.dumps(report, ensure_ascii=False)
+    assert "management_pnl" in report["can_run"]
+
+
+def test_parse_failure_diagnostic_carries_no_path_or_exception_text(tmp_path):
+    import json
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "损益"
+    sheet.append(["period", "currency", "unit", "management_account", "amount"])
+    sheet.append(["2026-08", "CNY", "万元", "revenue", 120])
+    path = tmp_path / "broken.xlsx"
+    book.save(path)
+    _task_obj, analysis, store = _task(tmp_path)
+    dataset = analysis.add_dataset(path, name="broken")
+    stored = analysis.root / "datasets" / dataset["id"] / "source.xlsx"
+    stored.write_bytes(b"not a workbook at all")
+    report = store.finance_readiness({})
+    blob = json.dumps(report, ensure_ascii=False)
+    assert "management_pnl" not in report["can_run"]
+    assert any(diag["code"] in {"parse_failed", "dataset_unreadable"} for diag in report["diagnostics"])
+    for marker in (str(tmp_path), "/Users", "Traceback", "file://", "http", "Error"):
+        assert marker not in blob
+
+
+def test_kingdee_header_with_covered_mapping_still_fails_identity(tmp_path):
+    path = tmp_path / "kingdee-mapped.csv"
+    path.write_text(
+        "科目名称,借方,贷方,管理科目\n主营业务收入,0,120,revenue\n主营业务成本,70,0,cost\n管理费用,20,0,expense\n",
+        encoding="utf-8",
+    )
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="kingdee-mapped")
+    report = store.finance_readiness({})
+    assert "management_pnl" not in report["can_run"]
+    blocked = next(row for row in report["blocked"] if row["capability"] == "management_pnl")
+    assert blocked["reason"] == "identity_failed"
+    assert set(blocked["missing_fields"]) == {"period", "currency"}
+    assert "management_account" not in blocked["missing_fields"]

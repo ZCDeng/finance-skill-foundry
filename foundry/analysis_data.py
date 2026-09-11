@@ -146,6 +146,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
             source_row_numbers = []
             headers = None
             header_columns = {}
+            column_names = {}
             for number, cells in enumerate(sheet.iter_rows(), start=1):
                 if number > MAX_ROWS + 1:
                     raise FoundryError("dataset exceeds row limit")
@@ -163,11 +164,19 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                         letter = _column_letter(cell)
                         if not letter:
                             continue
-                        ordered.append(name)
-                        header_columns[name] = letter
+                        # Duplicate header text keeps both columns addressable
+                        # instead of silently dropping the earlier one.
+                        unique = name
+                        suffix = 2
+                        while unique in header_columns:
+                            unique = f"{name} ({suffix})"
+                            suffix += 1
+                        ordered.append(unique)
+                        header_columns[unique] = letter
                     if not ordered:
                         continue
                     headers = ordered
+                    column_names = {col: key for key, col in header_columns.items()}
                     continue
                 row = {name: None for name in headers}
                 nonempty = False
@@ -178,7 +187,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                         else raw_cells.get(getattr(cell, "coordinate", ""), cell.value)
                     )
                     letter = _column_letter(cell)
-                    name = next((key for key, col in header_columns.items() if col == letter), None)
+                    name = column_names.get(letter)
                     if name is None:
                         continue
                     if raw is not None:
