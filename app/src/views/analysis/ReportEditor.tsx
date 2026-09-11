@@ -362,6 +362,8 @@ function formatWarnings(warnings: string[]): string {
 
 export function ReportEditor({
   taskId,
+  draftId,
+  contextId,
   title,
   body,
   appendix,
@@ -384,6 +386,8 @@ export function ReportEditor({
   onAppliedDraft,
 }: {
   taskId: string;
+  draftId?: string;
+  contextId?: string;
   title: string;
   body: string;
   appendix?: string;
@@ -422,6 +426,9 @@ export function ReportEditor({
   const [noteId, setNoteId] = useState("1");
   const [noteText, setNoteText] = useState("");
   const [toolError, setToolError] = useState("");
+  const [circleMessage, setCircleMessage] = useState("");
+  const [circleBusy, setCircleBusy] = useState(false);
+
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState<ReportImportResult | null>(
     null,
@@ -495,6 +502,32 @@ export function ReportEditor({
     },
     onTransaction: () => setEditorRevision((value) => value + 1),
   });
+
+  async function circleSelect() {
+    const api = bridge();
+    if (!api?.financeCall) return;
+    setCircleBusy(true);
+    setToolError("");
+    setCircleMessage("");
+    try {
+      if (!draftId) throw new Error("请先保存文稿再圈选改口径。");
+      if (!contextId) throw new Error("请先保存财务口径。");
+      const caption = editor?.getAttributes("table")?.caption;
+      unwrap(await api.financeCall(taskId, "analysis-circle-select", {
+        kind: "draft_table",
+        draft_id: draftId,
+        block_id: caption || "0",
+        range: "selection",
+        instruction: "改成开票口径",
+        context_id: contextId,
+      }) as Answer<Record<string, unknown>>);
+      setCircleMessage("已按圈选生成开票口径修订。");
+    } catch (failure) {
+      setToolError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setCircleBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!editor) return;
@@ -1239,6 +1272,13 @@ export function ReportEditor({
                 {editor?.isActive("table") && (
                   <>
                     <IconButton
+                      label="改成开票口径"
+                      disabled={circleBusy || busy || !draftId || !contextId}
+                      onClick={() => void circleSelect()}
+                    >
+                      <Scissors size={15} />
+                    </IconButton>
+                    <IconButton
                       label="合并单元格"
                       disabled={!editor?.can().mergeCells()}
                       onClick={() => editor?.chain().focus().mergeCells().run()}
@@ -1508,7 +1548,8 @@ export function ReportEditor({
           onApply={applyImport}
         />
       )}
-      {toolError && (
+      {circleMessage && <p role="status" className="report-status">{circleMessage}</p>}
+          {toolError && (
         <p role="alert" className="analysis-message analysis-message--error">
           {toolError}
         </p>

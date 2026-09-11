@@ -162,6 +162,22 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
             calls.append(("finance_adjustment_confirm", spec, self.kwargs))
             return {"ok": "adj-confirm"}
 
+        def chart_deliverable_save(self, spec):
+            calls.append(("chart_deliverable_save", spec, self.kwargs))
+            return {"ok": "chart-save"}
+
+        def chart_deliverable_list(self, spec):
+            calls.append(("chart_deliverable_list", spec, self.kwargs))
+            return {"ok": "chart-list"}
+
+        def chart_deliverable_open(self, spec):
+            calls.append(("chart_deliverable_open", spec, self.kwargs))
+            return {"ok": "chart-open"}
+
+        def analysis_circle_select(self, spec):
+            calls.append(("analysis_circle_select", spec, self.kwargs))
+            return {"ok": "circle"}
+
     monkeypatch.setattr(finance_cli, "FinanceStore", FakeFinanceStore)
     args = ["--var", str(root), "--session", "manager"]
     for command, payload, expected in [
@@ -172,6 +188,10 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
         ("finance-adjustment-save", {"context_id": "ctx-a", "label": "总部费用调整", "amount": "5", "profit_impact": "5"}, "adj-save"),
         ("finance-adjustment-list", {"context_id": "ctx-a"}, "adj-list"),
         ("finance-adjustment-confirm", {"id": "adj-a"}, "adj-confirm"),
+        ("chart-deliverable-save", {"run_id": "run-a"}, "chart-save"),
+        ("chart-deliverable-list", {"run_id": "run-a"}, "chart-list"),
+        ("chart-deliverable-open", {"id": "chart-a"}, "chart-open"),
+        ("analysis-circle-select", {"kind": "draft_table", "draft_id": "draft-a", "range": "A:A"}, "circle"),
     ]:
         assert main([*args, command, "--spec", json.dumps(payload)]) == 0
         assert json.loads(capsys.readouterr().out) == {"ok": expected}
@@ -183,6 +203,10 @@ def test_explanation_quality_cli_commands_route_to_finance_service(tmp_path, cap
         "finance_adjustment_save",
         "finance_adjustment_list",
         "finance_adjustment_confirm",
+        "chart_deliverable_save",
+        "chart_deliverable_list",
+        "chart_deliverable_open",
+        "analysis_circle_select",
     ]
     assert all(call[2]["session_id"] == "manager" for call in calls)
 

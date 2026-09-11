@@ -427,6 +427,46 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     fireEvent.click(screen.getByRole('button', { name: '取消转换' }));
     await waitFor(() => expect(reportCancel).toHaveBeenCalledWith(taskId));
   });
+
+  it('records a draft table circle-select as an invoice-basis revision', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'analysis-circle-select') return success({ id: 'req-new', change_reason: '改成开票口径' });
+      return success({});
+    });
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall };
+    const document: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      sources: [source],
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '管理摘要' }] },
+        { type: 'table', attrs: { caption: '利润表' }, content: [
+          { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+          { type: 'tableRow', content: [cell('tableCell', '收入'), cell('tableCell', '30')] },
+        ] },
+      ],
+    };
+    mount({
+      document,
+      body: documentToMarkdown(document),
+      draftId: 'f'.repeat(32),
+      contextId: 'ctx-a',
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    fireEvent.click(screen.getByRole('button', { name: '插入表格' }));
+    const circle = await screen.findByRole('button', { name: '改成开票口径' });
+    expect((circle as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(circle);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(taskId, 'analysis-circle-select', expect.objectContaining({
+      kind: 'draft_table',
+      draft_id: 'f'.repeat(32),
+      instruction: '改成开票口径',
+      context_id: 'ctx-a',
+    })));
+    expect(await screen.findByText('已按圈选生成开票口径修订。')).toBeTruthy();
+  });
+
 });
 
 

@@ -87,6 +87,11 @@ export const FINANCE_TOOLS = {
     description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["finance-readiness"],
   },
+  chart_deliverable_save: specTool("chart-deliverable-save", "把当前任务已授权 run 的结果系列归档为图表成果。写入 FinanceStore charts 与 analysis/charts，绑定 run_id 与 snapshot hash。不得传入路径、预览句柄或 dataset_id。打开归档图复现原值，不重跑。改假设走子情景后再归档新版本。", {
+    run_id: runId,
+    parent_id: text("可选父图表版本"),
+    label: text("图表名称"),
+  }, ["run_id"]),
   finance_context_save: specTool("finance-context-save", "建立不可变财务口径：bindings 为别名到现有快照 ID；scopes 按别名声明 ledger/organization/period/currency/unit/scenario，值来自资料或经理明确口径，不能猜测。policy.field_map 可映射中文列名。管理科目用 revenue/cost/expense；余额也可分析，缺少凭证时不虚构分录链接。修改科目映射或口径生成新版本。", {
     name: text("财务口径名称"), bindings: { type: "object", additionalProperties: { type: "string" } },
     scopes: { type: "object", additionalProperties: { type: "object" } }, policies: { type: "object", additionalProperties: { type: "object" } },

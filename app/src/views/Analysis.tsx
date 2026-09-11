@@ -372,7 +372,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} />
+          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={view.runs.find((run) => run.finance_context_id)?.finance_context_id} />
         </>}
         {view && tab === 'results' && <>
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
@@ -620,7 +620,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   </details>;
 }
 
-function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean }) {
+function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; contextId?: string }) {
   const xlsx = fileDatasets(datasets);
   const [datasetId, setDatasetId] = useState(xlsx[0]?.id ?? '');
   const [inspection, setInspection] = useState<Record<string, unknown> | null>(null);
@@ -654,7 +654,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   }, [datasetId]);
   if (!xlsx.length) return null;
   const sourceSpec = () => sourceKind === 'range' ? { kind: 'range', sheet, range } : { kind: sourceKind, name: sourceName };
-  async function call(command: 'workbook-inspect' | 'workbook-bind' | 'workbook-read' | 'workbook-preview' | 'workbook-apply', spec: Record<string, unknown>) {
+  async function call(command: 'workbook-inspect' | 'workbook-bind' | 'workbook-read' | 'workbook-preview' | 'workbook-apply' | 'analysis-circle-select', spec: Record<string, unknown>) {
     const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持 Excel 协作。');
     return unwrap(await api.financeCall(taskId, command, spec));
   }
@@ -685,6 +685,14 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
       if (request !== workbookRequest.current) return;
       setBindingId(String(result.id ?? '')); setPreview(null); setResolutions({}); setMessage('已保存 Excel 区域绑定。');
     } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function circleSelect() {
+    try {
+      setError(''); setMessage('');
+      if (!contextId) throw new Error('请先保存财务口径。');
+      await call('analysis-circle-select', { kind: 'workbook', binding_id: bindingId, range: range || sourceName || 'A:A', instruction: '改成开票口径', context_id: contextId });
+      setMessage('已按圈选生成开票口径修订。');
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   async function read() {
     const request = ++workbookRequest.current;
@@ -751,6 +759,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
       <Button variant="outline" type="button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</Button>
+      <Button variant="outline" type="button" disabled={busy || !bindingId || !contextId} onClick={() => void circleSelect()}>改成开票口径</Button>
       <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</Button>
       <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</Button>
       <Button type="button" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</Button>
@@ -883,6 +892,68 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
         onChange={(event) => setSelected((value) => ({ ...value, [row.id]: event.target.checked }))} />{row.label || row.id}</label>)}
       <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? '重算中…' : '重算'}</Button>
     </div> : null}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </aside>;
+}
+
+
+type FinanceChart = {
+  id: string;
+  label?: string;
+  run_id?: string;
+  content_hash?: string;
+  series?: { columns?: unknown[]; rows?: Record<string, unknown>[] };
+};
+
+function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
+  taskId: string; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void> | void;
+}) {
+  const [charts, setCharts] = useState<FinanceChart[]>([]);
+  const [opened, setOpened] = useState<FinanceChart | null>(null);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
+  const latest = [...runs].reverse().find((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall) return;
+    const listed = unwrap(await api.financeCall(taskId, 'chart-deliverable-list', {}) as Answer<{ charts?: FinanceChart[] }>);
+    setCharts(listed.charts ?? []);
+  }, [taskId]);
+  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  async function archive() {
+    const api = bridge(); if (!api?.financeCall || !latest) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      unwrap(await api.financeCall(taskId, 'chart-deliverable-save', { run_id: latest.id }));
+      setMessage('已归档当前结果图。');
+      await load();
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setPending(false); }
+  }
+  async function open(id: string) {
+    const api = bridge(); if (!api?.financeCall) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      const record = unwrap(await api.financeCall(taskId, 'chart-deliverable-open', { id }) as Answer<FinanceChart>);
+      setOpened(record);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setPending(false); }
+  }
+  const rows = opened?.series?.rows ?? [];
+  const columns = rows[0] ? Object.keys(rows[0]) : [];
+  return <aside className="analysis-details analysis-chart-panel" aria-label="归档图">
+    <div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">绑定原 run，不重跑。</span></div>
+    <Button type="button" disabled={busy || pending || !latest} onClick={() => void archive()}>{pending ? '归档中…' : '归档当前结果图'}</Button>
+    {charts.length ? <ul className="analysis-history-list">{charts.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
+      <span>{row.label || row.id}</span>
+      <Button type="button" disabled={busy || pending} onClick={() => void open(row.id)}>打开</Button>
+    </li>)}</ul> : <p className="analysis-note">还没有归档图。</p>}
+    {opened && columns.length ? <table className="analysis-table"><thead><tr>{columns.map((name) => <th key={name}>{name}</th>)}</tr></thead>
+      <tbody>{rows.map((row, index) => <tr key={index}>{columns.map((name) => <td key={name}>{textValue(row[name])}</td>)}</tr>)}</tbody></table> : null}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   </aside>;
@@ -1122,6 +1193,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   </details>
   {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={busy} onRefresh={onRefresh} /> : null}
+  {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={busy} onRefresh={onRefresh} /> : null}
   </>;
 }
 function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave, onChat }: {
@@ -1460,7 +1532,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         onDiscuss={onDiscussRequirements} />
     </details>}
     </div>
-    <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} title={title} body={body} appendix={reading.appendix}
+    <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} draftId={draft?.id} contextId={contextId} title={title} body={body} appendix={reading.appendix}
       toolbarLabel={draft ? '文稿' : '写下判断与建议'}
       status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status}` : undefined}
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}

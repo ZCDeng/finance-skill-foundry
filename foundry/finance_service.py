@@ -28,6 +28,7 @@ COLLECTIONS = {
     "metric_definitions",
     "backgrounds",
     "adjustments",
+    "charts",
 }
 
 
@@ -63,8 +64,9 @@ class FinanceStore:
     def _path(self, kind, object_id):
         if kind not in COLLECTIONS:
             raise FoundryError("unknown finance collection")
+        folder = "charts" if kind == "charts" else f"finance/{kind}"
         return self.analysis._inside(
-            self.analysis.root / "finance" / kind / f"{_assert_id(object_id)}.json"
+            self.analysis.root / folder / f"{_assert_id(object_id)}.json"
         )
 
     def _read(self, kind, object_id):
@@ -77,17 +79,17 @@ class FinanceStore:
         return self.analysis._write(self._path(collection, record["id"]), record)
 
     def _list(self, kind):
-        root = self.analysis._inside(self.analysis.root / "finance" / kind)
+        folder = "charts" if kind == "charts" else f"finance/{kind}"
+        root = self.analysis._inside(self.analysis.root / folder)
         records = [self.analysis._read(path) for path in root.glob("*.json")]
-        return sorted(
-            [
-                r
-                for r in records
-                if self.allowed is None
-                or set(r.get("bindings", {}).values()) <= self.allowed
-            ],
-            key=lambda r: r["seq"],
-        )
+        visible = []
+        for record in records:
+            bindings = record.get("bindings", {})
+            if kind == "charts" and not bindings:
+                continue
+            if self.allowed is None or set(bindings.values()) <= self.allowed:
+                visible.append(record)
+        return sorted(visible, key=lambda r: r["seq"])
 
     def _authorize(self, bindings):
         if not isinstance(bindings, dict) or any(
@@ -1200,6 +1202,88 @@ class FinanceStore:
             }
         draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
         return {"draft": draft, "template_id": template_id, "kind": record.get("kind")}
+
+    def chart_deliverable_save(self, spec):
+        from foundry.chart_deliverables import normalize_chart
+
+        if not isinstance(spec, dict) or not spec.get("run_id"):
+            raise FoundryError("chart save requires run_id")
+        run = self.analysis.get_run(spec["run_id"])
+        self._authorize(run.get("bindings", {}))
+        if spec.get("parent_id"):
+            parent = self._read("charts", spec["parent_id"])
+            self._authorize(parent.get("bindings", {}))
+        return self._write("charts", **normalize_chart(spec, run=run))
+
+    def chart_deliverable_open(self, spec):
+        from foundry.chart_deliverables import verify_snapshots
+
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError("chart open requires id")
+        record = self._read("charts", spec["id"])
+        if not record.get("bindings"):
+            raise FoundryError("chart bindings are required")
+        verify_snapshots(self, record)
+        return record
+
+    def chart_deliverable_list(self, spec):
+        spec = spec or {}
+        if spec and not isinstance(spec, dict):
+            raise FoundryError("chart list spec must be an object")
+        rows = self._list("charts")
+        if isinstance(spec, dict) and spec.get("run_id"):
+            rows = [row for row in rows if row.get("run_id") == spec["run_id"]]
+        return {"charts": rows}
+
+    def analysis_circle_select(self, spec):
+        from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
+        from foundry.finance_requirements import latest_requirements
+
+        reject_forbidden_spec(spec)
+        kind = spec.get("kind")
+        if kind not in {"draft_table", "workbook"}:
+            raise FoundryError("circle-select kind must be draft_table or workbook")
+        range_text = spec.get("range")
+        if not isinstance(range_text, str) or not range_text.strip():
+            raise FoundryError("circle-select requires a range")
+        if not spec.get("context_id"):
+            raise FoundryError("circle-select requires context_id")
+        context = self._read("contexts", spec["context_id"])
+        latest = latest_requirements(self.analysis)
+        if spec.get("parent_id") and (not latest or spec["parent_id"] != latest["id"]):
+            raise FoundryError("circle-select parent_id must be the latest requirements version")
+        if kind == "draft_table":
+            if not spec.get("draft_id"):
+                raise FoundryError("draft table circle-select requires draft_id")
+            match_draft_table(self.analysis.get_draft(spec["draft_id"]), spec)
+        else:
+            authorize_workbook(self, spec, context)
+        instruction = _safe_text(
+            spec.get("instruction") or "改成开票口径",
+            "circle-select instruction",
+            required=True,
+            maximum=200,
+        )
+        child = self.save_context(
+            {
+                "parent_id": context["id"],
+                "name": context.get("name") or "财务分析口径",
+                "bindings": context["bindings"],
+                "scopes": context.get("scopes") or {},
+                "policies": context.get("policies") or {},
+                "account_map_id": context.get("account_map_id"),
+            }
+        )
+        req_spec = {
+            "context_id": child["id"],
+            "question": (latest or {}).get("question") or instruction,
+            "items": (latest or {}).get("items") or [],
+            "change_reason": instruction,
+        }
+        if latest:
+            req_spec["parent_id"] = latest["id"]
+        return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
+
 
 
 def _dedupe_explanation_claims(claims):

@@ -34,6 +34,10 @@ OPERATIONS = {
     "report-template-list": "report_template_list",
     "report-template-publish": "report_template_publish",
     "report-template-apply": "report_template_apply",
+    "chart-deliverable-save": "chart_deliverable_save",
+    "chart-deliverable-open": "chart_deliverable_open",
+    "chart-deliverable-list": "chart_deliverable_list",
+    "analysis-circle-select": "analysis_circle_select",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }

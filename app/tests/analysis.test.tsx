@@ -1967,4 +1967,59 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText(/已定位到费用来源行/)).toBeTruthy();
   });
 
+  it('archives the current result chart and reopens the stored series without rerunning', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: context.id };
+    const listed = { id: 'chart-1', label: '管理口径损益', run_id: financeRun.id, series: { columns: ['profit'], rows: [{ profit: '30' }] } };
+    let saved = false;
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-adjustment-list') return success({ adjustments: [] });
+      if (command === 'chart-deliverable-list') return success({ charts: saved ? [listed] : [] });
+      if (command === 'chart-deliverable-save') { saved = true; return success(listed); }
+      if (command === 'chart-deliverable-open') return success(listed);
+      if (command === 'run-metric') return success(financeRun);
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByRole('heading', { name: '归档图' });
+    fireEvent.click(screen.getByRole('button', { name: '归档当前结果图' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-save', { run_id: financeRun.id }));
+    expect(await screen.findByText('已归档当前结果图。')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: '打开' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-open', { id: listed.id }));
+    expect(screen.getByText('30')).toBeTruthy();
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toEqual([]);
+  });
+
+  it('records a workbook circle-select as an invoice-basis revision', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id } };
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: context.id };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'workbook-inspect') return success({ sheet_names: ['Sheet1'], tables: ['OutputTable'], named_ranges: [], unsupported_features: [] });
+      if (command === 'workbook-bind') return success({ id: 'bind-1' });
+      if (command === 'analysis-circle-select') return success({ id: 'req-new', change_reason: '改成开票口径' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
+    await screen.findByText(/工作表：Sheet1/);
+    fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存绑定' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-bind', expect.objectContaining({
+      source: { kind: 'table', name: 'OutputTable' },
+    })));
+    fireEvent.click(screen.getByRole('button', { name: '改成开票口径' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'analysis-circle-select', expect.objectContaining({
+      kind: 'workbook', binding_id: 'bind-1', instruction: '改成开票口径', context_id: context.id,
+    })));
+    expect(await screen.findByText('已按圈选生成开票口径修订。')).toBeTruthy();
+  });
+
+
 });

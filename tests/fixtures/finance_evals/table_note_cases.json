@@ -1,0 +1,99 @@
+{
+  "version": "table-note-2026-09-11",
+  "suite": "table_note",
+  "scoring_contract": "r3-final-draft-text-bound-v3",
+  "currency": "CNY",
+  "unit": "万元",
+  "cases": [
+    {
+      "id": "TN01_footnote_changes_meaning",
+      "stage": "table-note",
+      "runnable": true,
+      "category": "table_note",
+      "question": "表内利润 30，脚注写「含一次性补贴 8」。请写最终稿：8 必须标为附注或调整，不得把 30 写成经常性利润。",
+      "datasets": [
+        {
+          "name": "actual",
+          "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"},
+          "rows": [
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "100", "source_row": "1"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "50", "source_row": "2"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "20", "source_row": "3"}
+          ]
+        }
+      ],
+      "expected": {
+        "type": "table_note",
+        "identity": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元"},
+        "claims": {"profit": "30", "one_off": "8"},
+        "one_off_markers": ["附注", "调整", "一次性"],
+        "forbidden_labels": ["经常性利润"]
+      }
+    },
+    {
+      "id": "TN02_reconciling_table_must_close",
+      "stage": "table-note",
+      "runnable": true,
+      "category": "table_note",
+      "question": "调节表必须闭合：收入 +20、成本 −10、费用 −5，利润差异 5。",
+      "datasets": [
+        {
+          "name": "actual",
+          "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"},
+          "rows": [
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "120", "source_row": "1"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "70", "source_row": "2"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "20", "source_row": "3"}
+          ]
+        },
+        {
+          "name": "budget",
+          "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget"},
+          "rows": [
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "100", "source_row": "11"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "60", "source_row": "12"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "15", "source_row": "13"}
+          ]
+        }
+      ],
+      "expected": {
+        "type": "profit_bridge",
+        "identity": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元"},
+        "claims": {"profit": "5", "revenue": "20", "cost": "-10", "expense": "-5"}
+      }
+    },
+    {
+      "id": "TN03_expense_flat_zero_must_cite_real_cell",
+      "stage": "table-note",
+      "runnable": true,
+      "category": "table_note",
+      "question": "费用持平（贡献 0）必须引用真实零值单元格，评分器不得补造。",
+      "datasets": [
+        {
+          "name": "actual",
+          "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual"},
+          "rows": [
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "revenue", "amount": "100", "source_row": "1"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "cost", "amount": "60", "source_row": "2"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "actual", "management_account": "expense", "amount": "15", "source_row": "3"}
+          ]
+        },
+        {
+          "name": "budget",
+          "metadata": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget"},
+          "rows": [
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "revenue", "amount": "100", "source_row": "11"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "cost", "amount": "60", "source_row": "12"},
+            {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元", "scenario": "budget", "management_account": "expense", "amount": "15", "source_row": "13"}
+          ]
+        }
+      ],
+      "expected": {
+        "type": "profit_bridge",
+        "identity": {"ledger": "service-co", "organization": "华东", "period": "2026-08", "currency": "CNY", "unit": "万元"},
+        "claims": {"profit": "0", "revenue": "0", "cost": "0", "expense": "0"},
+        "require_real_zero": true
+      }
+    }
+  ]
+}

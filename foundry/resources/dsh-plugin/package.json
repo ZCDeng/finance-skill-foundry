@@ -97,6 +97,7 @@
             "analysis-method-apply",
             "list_finance_context",
             "finance_readiness",
+            "chart_deliverable_save",
             "finance_context_save",
             "finance_map_save",
             "run_metric",

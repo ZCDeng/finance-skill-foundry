@@ -1728,5 +1728,55 @@ def main() -> int:
     return 0 if final["status"] == "passed" else 1
 
 
+TABLE_NOTE_FIXTURE = REPO / "tests/fixtures/finance_evals/table_note_cases.json"
+
+
+def load_table_note_fixture(path: Path = TABLE_NOTE_FIXTURE) -> dict[str, Any]:
+    fixture = json.loads(path.read_text(encoding="utf-8"))
+    if fixture.get("suite") != "table_note":
+        raise AssertionError("table-note fixture must declare suite=table_note")
+    if fixture.get("scoring_contract") != SCORING_CONTRACT_R3:
+        raise AssertionError("table-note fixture must use r3-final-draft-text-bound-v3")
+    cases = fixture.get("cases") or []
+    if len(cases) < 3:
+        raise AssertionError("table-note fixture must include footnote, reconciling table, and zero-expense cases")
+    ids = [case["id"] for case in cases]
+    if len(set(ids)) != len(ids):
+        raise AssertionError("table-note case ids must be unique")
+    return fixture
+
+
+def score_table_note_text(case: dict[str, Any], text: str) -> None:
+    expected = case.get("expected") or {}
+    if expected.get("type") != "table_note":
+        raise AssertionError("score_table_note_text requires expected.type=table_note")
+    if not isinstance(text, str) or not text.strip():
+        raise AssertionError("table-note draft text is empty")
+    for label in expected.get("forbidden_labels") or []:
+        if label in text:
+            raise AssertionError(f"table-note draft used forbidden label {label}")
+    claims = expected.get("claims") or {}
+    profit = str(claims.get("profit", ""))
+    one_off = str(claims.get("one_off", ""))
+    if profit and profit not in text.replace(",", ""):
+        raise AssertionError("table-note draft omitted the table profit figure")
+    if one_off and one_off not in text.replace(",", ""):
+        raise AssertionError("table-note draft omitted the footnote amount")
+    markers = expected.get("one_off_markers") or []
+    if one_off and markers and not any(marker in text for marker in markers):
+        raise AssertionError("table-note draft did not label the footnote amount as 附注/调整")
+
+
+def require_real_zero_cell(cells: dict[str, dict[str, Any]], name: str = "expense") -> None:
+    cell = cells.get(name)
+    if not cell:
+        raise AssertionError(f"missing real {name} cell")
+    if cell.get("synthetic_zero"):
+        raise AssertionError("scorer must not invent a synthetic zero cell")
+    if _dec(cell.get("value")) != Decimal("0"):
+        raise AssertionError(f"{name} cell is not a real zero")
+
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
