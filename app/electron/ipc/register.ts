@@ -14,7 +14,9 @@ import {
   listTasks,
   readDeliverable,
   showTask,
+  sourceLocatorPreviewFile,
 } from '../reads.js';
+import { locatorArgs, pathFreePayload, previewFence } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
 import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
@@ -235,6 +237,7 @@ export function registerIpc(
     'run-metric',
     'explain-variance',
     'drilldown-fact',
+    'open-source-locator',
     'save-explanation-draft',
     'analysis-requirements-save',
     'analysis-requirements-list',
@@ -467,6 +470,50 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.formulatorStatus, () =>
     answer(async () => ({ running: panes.formulator.running() })),
+  );
+
+  /**
+   * Open an authorized source cell on digest scratch.
+   *
+   * Not preview:open and not deliverable-path. The renderer names a fact or a
+   * run cell; the path never crosses the boundary, and Univer is fenced to
+   * artifacts/preview/<source_hash>/ rather than the analysis tree.
+   */
+  ipcMain.handle(
+    CHANNELS.sourceLocatorOpen,
+    (_event, task: unknown, spec: unknown) =>
+      answer(async () => {
+        const window = panes?.window();
+        if (!window || !panes?.preview) throw new FoundryFailure('no window to show the preview in', null);
+        const id = taskId(task);
+        const args = locatorArgs(spec);
+        const payload = pathFreePayload(await analysisCall(id, 'open-source-locator', ['--spec', JSON.stringify(args)]));
+        if (String(payload.status ?? '') !== 'ok') return payload;
+        const locator = (payload.locator ?? {}) as Record<string, unknown>;
+        const preview = (payload.preview ?? {}) as Record<string, unknown>;
+        const available = Boolean(preview.available ?? locator.preview_available);
+        const kind = String(locator.kind ?? '');
+        if (!available) return payload;
+        if (kind === 'pdf') return { ...payload, viewer: 'pdf' };
+        if (kind !== 'xlsx' && kind !== 'csv') return { ...payload, viewer: 'snapshot' };
+        const file = await sourceLocatorPreviewFile({ ...binding, task: id }, args as Record<string, unknown>);
+        const digest = String(locator.source_hash ?? '');
+        const fence = previewFence(file, digest);
+        const opened = await panes.preview.open(window, {
+          task: id,
+          sha256: digest,
+          file: fence.file,
+          allowedRoot: fence.allowedRoot,
+          label: String(locator.excel_range || locator.sheet || '授权预览'),
+        });
+        return {
+          ...payload,
+          viewer: 'univer',
+          task: opened.task,
+          sha256: opened.sha256,
+          origin: opened.origin,
+        };
+      }),
   );
 
   /**

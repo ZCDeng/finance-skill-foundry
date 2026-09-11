@@ -39,7 +39,7 @@ LIST_COMMANDS = {
     "finance-readiness",
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
-COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh"}
+COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file"}
 
 
 def add_parsers(sub):
@@ -135,6 +135,10 @@ def dispatch(args):
         result = {"batches": batches}
     elif args.cmd == "finance-source-refresh":
         result = _refresh_source(context, _json(args.spec, "source refresh spec"))
+    elif args.cmd == "source-locator-preview-file":
+        from foundry.finance_locators import stage_source_locator_preview
+        print(stage_source_locator_preview(service, _json(args.spec, "finance spec")))
+        return True
     elif args.cmd in FILE_OPERATIONS:
         files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None)
         result = getattr(files, FILE_OPERATIONS[args.cmd])(_json(args.spec, "workbook spec"))

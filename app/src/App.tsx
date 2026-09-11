@@ -74,6 +74,7 @@ export function App() {
   /** The workbook on screen in the Univer viewer, and the digest being put up. */
   const [preview, setPreview] = useState<PreviewSpec | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [locatorPreview, setLocatorPreview] = useState(false);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
@@ -236,6 +237,10 @@ export function App() {
     let live = true;
     const revision = ++layoutRevision.current;
     const show = async () => {
+      if (inWorkspace && locatorPreview && preview) {
+        await api?.paneVisible?.('preview');
+        return;
+      }
       if (inWorkspace) {
         if (!nativeRect || !ready || guide || conversationProblem || opening || session?.taskId !== current) {
           await api?.paneVisible?.(''); return;
@@ -245,6 +250,10 @@ export function App() {
         if (layout && !layout.ok) { setConversationProblem(layout.message); return; }
         await api?.paneVisible?.('workbench');
       } else {
+        if (!problem && locatorPreview && preview) {
+          await api?.paneVisible?.('preview');
+          return;
+        }
         const shown = !problem && screen === 'formulator' && formulator ? 'formulator'
           : !problem && (screen === 'deliverables' || screen === 'tasks') && preview ? 'preview' : '';
         await api?.paneVisible?.(shown);
@@ -252,7 +261,7 @@ export function App() {
     };
     void show().catch((error: unknown) => { if (live) setConversationProblem(error instanceof Error ? error.message : '对话布局暂未就绪，请重试。'); });
     return () => { live = false; };
-  }, [api, inWorkspace, nativeRect, ready, guide, conversationProblem, opening, session, current, screen, problem, formulator, preview]);
+  }, [api, inWorkspace, nativeRect, ready, guide, conversationProblem, opening, session, current, screen, problem, formulator, preview, locatorPreview]);
 
   /**
    * Take the preview down, gateway and all.
@@ -264,9 +273,10 @@ export function App() {
   const closePreview = useCallback(() => {
     if (!api?.previewClose) {
       setPreview(null);
+      setLocatorPreview(false);
       return;
     }
-    void api.previewClose().then((a) => take(a, () => setPreview(null)));
+    void api.previewClose().then((a) => take(a, () => { setPreview(null); setLocatorPreview(false); }));
   }, [api, take]);
 
   /**
@@ -301,6 +311,7 @@ export function App() {
   useEffect(() => {
     if (!preview) return;
     const still =
+      (locatorPreview && screen === 'analysis') ||
       (screen === 'deliverables' && opened?.row.sha256 === preview.sha256) ||
       (screen === 'tasks' && open === preview.task);
     if (!still) closePreview();
@@ -545,7 +556,7 @@ export function App() {
         setScreen(next);
       }}
       onGuide={inWorkspace && bound ? () => setAsked(true) : undefined}
-      covered={preview !== null && (screen === 'deliverables' || screen === 'tasks')}
+      covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={
         screen === 'formulator' ? (
           <DataBar
@@ -556,7 +567,7 @@ export function App() {
             onLaunch={launchFormulator}
             onStop={stopFormulator}
           />
-        ) : preview && (screen === 'deliverables' || screen === 'tasks') ? (
+        ) : preview && (screen === 'deliverables' || screen === 'tasks' || locatorPreview) ? (
           <PreviewBar
             preview={preview}
             task={tasks.find((row) => row.id === preview.task) ?? null}
@@ -587,7 +598,8 @@ export function App() {
             : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button variant="outline" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
           <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
-            task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis} />
+            task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
+            onLocatorPreview={api.sourceLocatorOpen ? (spec) => { setPreview(spec); setLocatorPreview(true); } : undefined} />
         </Workspace>
       </div>
       {screen === 'tasks' && open === null ? (

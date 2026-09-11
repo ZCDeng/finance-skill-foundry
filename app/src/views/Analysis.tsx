@@ -56,6 +56,7 @@ type Props = {
   onPick(id: string): void;
   onNew(question: string): void | Promise<string | void>;
   onChat(question?: string, draftId?: string, options?: AnalysisChatOptions): void | Promise<void>;
+  onLocatorPreview?(preview: import('../bridge.js').PreviewSpec): void;
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
@@ -97,7 +98,7 @@ function unwrap<T>(answer: Answer<T>): T {
 }
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
   const [tab, setTab] = useState<Tab>('datasets');
   const [question, setQuestionState] = useState(() => readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
@@ -440,6 +441,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets}
+            onLocatorPreview={onLocatorPreview}
             versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
               triggerText={draft ? when(draft.created_at) : '选择文稿'}
               options={[...view.drafts].reverse().map((row) => ({
@@ -1101,12 +1103,13 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker }: {
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
   versionPicker?: ReactNode;
+  onLocatorPreview?(preview: import('../bridge.js').PreviewSpec): void;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
@@ -1125,6 +1128,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [recoveryError, setRecoveryError] = useState('');
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
+  const [locatorNotice, setLocatorNotice] = useState<Record<string, string>>({});
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
   const [background, setBackground] = useState({ label: '', text: '', basis: 'professional_judgment', effective_from: '', effective_to: '', dataset_id: '', paragraph: '', source: '', retrieved_at: '' });
   const [backgroundScope, setBackgroundScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: '', unit: '' });
@@ -1267,6 +1271,38 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       if (request === factRequest.current) setFactDetails((value) => ({ ...value, [fact.id]: result }));
     } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
   }
+  async function openLocator(fact: ExplanationFact) {
+    const api = bridge();
+    const request = ++factRequest.current;
+    try {
+      setToolError('');
+      setLocatorNotice((value) => ({ ...value, [fact.id]: '' }));
+      if (!api?.sourceLocatorOpen) {
+        await openFact(fact);
+        return;
+      }
+      const located = unwrap(await api.sourceLocatorOpen(taskId, { fact_id: fact.id }));
+      if (request !== factRequest.current) return;
+      if (located.status === 'locator_forbidden') {
+        setLocatorNotice((value) => ({ ...value, [fact.id]: '无权打开' }));
+        return;
+      }
+      if (located.status === 'locator_unavailable') {
+        await openFact(fact);
+        return;
+      }
+      if (located.preview?.available === false) {
+        setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+        await openFact(fact);
+        return;
+      }
+      if (located.viewer === 'univer' && located.origin && located.sha256 && located.task) {
+        onLocatorPreview?.({ task: located.task, sha256: located.sha256, origin: located.origin, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
+      } else {
+        await openFact(fact);
+      }
+    } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+  }
   async function loadBackgrounds(request = ++backgroundRequest.current, scopeOverride?: Record<string, unknown>) {
     const api = bridge(); if (!api?.financeCall) return;
     try {
@@ -1349,7 +1385,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
+    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
@@ -1602,9 +1638,9 @@ function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: strin
   return Array.from(groups.values());
 }
 
-function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, busy, onRecheck, onOpenFact }: {
+function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, busy, onRecheck, onOpenFact, onOpenLocator }: {
   quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
-  factDetails: Record<string, FinanceDrilldown>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void;
+  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
   const issueGroups = groupedIssues(quality?.issues ?? []);
@@ -1638,7 +1674,9 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
         <p className="analysis-note">运行 {shortSha(fact.run_id)} · 第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
+        <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
+        {locatorNotice[fact.id] ? <p className="analysis-note" role="status">{locatorNotice[fact.id]}</p> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}

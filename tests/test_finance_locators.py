@@ -8,7 +8,7 @@ from openpyxl import Workbook
 
 from foundry.analysis import AnalysisStore
 from foundry.errors import FoundryError
-from foundry.finance_locators import build_source_locator
+from foundry.finance_locators import build_source_locator, stage_source_locator_preview
 from foundry.finance_model import normalize_finance_dataset
 from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
@@ -252,3 +252,26 @@ def test_open_source_locator_rejects_path_arguments(tmp_path):
         )
     with pytest.raises(FoundryError):
         service.open_source_locator({"path": str(path)})
+
+
+def test_stage_preview_copies_xlsx_into_digest_scratch_not_analysis(tmp_path):
+    path = _expense_xlsx(tmp_path / "g1.xlsx")
+    service, context, dataset = _finance(tmp_path, path, metadata={"sheet": "费用", "mode": "table"})
+    run = service.run_metric(
+        {"context_id": context["id"], "metric": {"kind": "management_pnl"}}
+    )
+    dest = stage_source_locator_preview(
+        service, {"run_id": run["id"], "row": 0, "column": "expense"}
+    )
+    digest = dataset["source_hash"]
+    scratch = service.task.artifacts_dir / "preview" / digest
+    assert dest.parent == scratch
+    assert dest.name == f"{digest}.xlsx"
+    assert dest.read_bytes() == path.read_bytes()
+    assert scratch.resolve() not in service.analysis.root.resolve().parents
+    assert service.analysis.root.resolve() not in dest.resolve().parents
+    with pytest.raises(FoundryError):
+        stage_source_locator_preview(
+            service, {"run_id": run["id"], "row": 0, "column": "expense", "path": str(path)}
+        )
+

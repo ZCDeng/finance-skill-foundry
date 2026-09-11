@@ -50,8 +50,11 @@ const api = {
   formulatorLaunch: () => ipcRenderer.invoke('formulator:launch'),
   formulatorStop: () => ipcRenderer.invoke('formulator:stop'),
   formulatorStatus: () => ipcRenderer.invoke('formulator:status'),
+  sourceLocatorOpen: (task: string, spec: unknown) =>
+    ipcRenderer.invoke('source-locator:open', task, spec),
   previewOpen: (task: string, sha: string, ext: string) =>
     ipcRenderer.invoke('preview:open', task, sha, ext),
+
   previewClose: () => ipcRenderer.invoke('preview:close'),
   previewStatus: () => ipcRenderer.invoke('preview:status'),
   harnessLayout: (layout: unknown) => ipcRenderer.invoke('harness:layout', layout),

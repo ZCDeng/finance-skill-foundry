@@ -1833,4 +1833,77 @@ ${canonicalAppendix} 已改写`;
       parent_id: '7'.repeat(32), changes: { scenario: expect.objectContaining({ delay_receipts_days: 14 }) },
     })));
   });
+
+  it('opens a cited fact through the dedicated locator channel, not deliverable preview', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
+    const sourceLocatorOpen = vi.fn(async () => success({
+      status: 'ok',
+      viewer: 'univer' as const,
+      task: task.id,
+      sha256: source.source_hash,
+      origin: 'http://127.0.0.1:9081',
+      locator: { kind: 'xlsx', excel_range: '费用!D18', preview_available: true },
+      preview: { available: true, handle: 'h'.repeat(64) },
+    }));
+    const onLocatorPreview = vi.fn();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-expense', run_id: financeRun.id, row: 0, column: 'expense', label: '费用', display_value: '20' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [], coverage: { required: 1, cited: 1 } });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall, sourceLocatorOpen });
+    render(<Analysis {...props} embedded section="drafts" onLocatorPreview={onLocatorPreview} />);
+    fireEvent.click(await screen.findByText('可引用事实 · 1 条'));
+    fireEvent.click(screen.getByRole('button', { name: '打开原文定位' }));
+    await waitFor(() => expect(sourceLocatorOpen).toHaveBeenCalledWith(task.id, { fact_id: 'fact-expense' }));
+    expect(onLocatorPreview).toHaveBeenCalledWith(expect.objectContaining({ origin: 'http://127.0.0.1:9081', excel_range: '费用!D18' }));
+    expect(financeCall.mock.calls.some(([, command]) => command === 'drilldown-fact')).toBe(false);
+  });
+
+  it('shows 无权打开 without navigating when the locator is forbidden', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
+    const sourceLocatorOpen = vi.fn(async () => success({ status: 'locator_forbidden' }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-expense', run_id: financeRun.id, row: 0, column: 'expense', label: '费用', display_value: '20' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'drilldown-fact') return success({ run_id: financeRun.id, row: 0, rows: [], total: 0, offset: 0, has_more: false, message: '来源行' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall, sourceLocatorOpen });
+    render(<Analysis {...props} embedded section="drafts" />);
+    fireEvent.click(await screen.findByText('可引用事实 · 1 条'));
+    fireEvent.click(screen.getByRole('button', { name: '打开原文定位' }));
+    expect(await screen.findByText('无权打开')).toBeTruthy();
+    expect(financeCall.mock.calls.some(([, command]) => command === 'drilldown-fact')).toBe(false);
+  });
+
+  it('keeps the snapshot row when a locator is unavailable or the page was not archived', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
+    const sourceLocatorOpen = vi.fn(async () => success({
+      status: 'ok',
+      locator: { kind: 'pdf', preview_available: false },
+      preview: { available: false, handle: 'h'.repeat(64) },
+    }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-expense', run_id: financeRun.id, row: 0, column: 'expense', label: '费用', display_value: '20' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'drilldown-fact') return success({ run_id: financeRun.id, row: 0, rows: [
+        { source: { dataset_id: source.id, row_index: 1 }, source_hash: source.source_hash, data: { expense: '20' }, voucher_detail_available: false },
+      ], total: 1, offset: 0, has_more: false, message: '已定位到费用来源行' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall, sourceLocatorOpen });
+    render(<Analysis {...props} embedded section="drafts" />);
+    fireEvent.click(await screen.findByText('可引用事实 · 1 条'));
+    fireEvent.click(screen.getByRole('button', { name: '打开原文定位' }));
+    expect(await screen.findByText('该页未归档')).toBeTruthy();
+    expect(await screen.findByText(/已定位到费用来源行/)).toBeTruthy();
+  });
+
 });

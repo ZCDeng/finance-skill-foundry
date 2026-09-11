@@ -108,6 +108,7 @@ export interface Bridge {
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  sourceLocatorOpen?(task: string, spec: { fact_id: string } | { run_id: string; row: number; column?: string }): Promise<Answer<SourceLocatorResult>>;
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
@@ -168,6 +169,14 @@ export interface PreviewSpec {
   sha256: string;
   /** The viewer origin, so the strip can say where it is looking. */
   origin: string;
+  excel_range?: string;
+}
+
+export interface SourceLocatorResult extends Partial<PreviewSpec> {
+  status: 'ok' | 'locator_unavailable' | 'locator_forbidden' | string;
+  locator?: Record<string, unknown>;
+  preview?: { available?: boolean; handle?: string };
+  viewer?: 'univer' | 'pdf' | 'snapshot';
 }
 
 /** What `launch-formulator` reports back. */
@@ -331,6 +340,7 @@ export type FinanceCommand =
   | 'run-metric'
   | 'explain-variance'
   | 'drilldown-fact'
+  | 'open-source-locator'
   | 'save-explanation-draft'
   | 'analysis-requirements-save'
   | 'analysis-requirements-list'

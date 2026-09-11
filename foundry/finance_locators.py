@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from foundry.analysis import _hash
 from foundry.errors import FoundryError
+from foundry.task import sha256_bytes
 
 
 KIND_BY_SUFFIX = {
@@ -180,3 +182,48 @@ def _sanitize_locator(locator: dict[str, Any]) -> dict[str, Any]:
             continue
         clean[key] = value
     return clean
+
+
+DIGEST = re.compile(r"^[0-9a-f]{64}$")
+
+
+def stage_source_locator_preview(store, spec: dict | None) -> Path:
+    """Copy authorized source bytes into digest-named scratch. Path stays in-process."""
+    payload = open_source_locator(store, spec)
+    if payload.get("status") != "ok":
+        raise FoundryError(str(payload.get("status") or "locator_unavailable"))
+    locator = payload.get("locator") or {}
+    if not locator.get("preview_available"):
+        raise FoundryError("preview_unavailable")
+    kind = locator.get("kind")
+    if kind not in {"xlsx", "csv"}:
+        raise FoundryError("preview_unavailable")
+    dataset_id = str(locator.get("dataset_id") or "")
+    digest = str(locator.get("source_hash") or "")
+    if not dataset_id or not DIGEST.fullmatch(digest):
+        raise FoundryError("locator_forbidden")
+    data, suffix = _authorized_source_bytes(store, dataset_id, digest)
+    dest_dir = store.task.artifacts_dir / "preview" / digest
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{digest}{suffix}"
+    dest.write_bytes(data)
+    resolved = dest.resolve()
+    scratch = dest_dir.resolve()
+    analysis_root = store.analysis.root.resolve()
+    if analysis_root == resolved or analysis_root in resolved.parents:
+        raise FoundryError("locator_forbidden")
+    if resolved.parent != scratch:
+        raise FoundryError("locator_forbidden")
+    return dest
+
+
+def _authorized_source_bytes(store, dataset_id: str, digest: str) -> tuple[bytes, str]:
+    folder = store.analysis._inside(store.analysis.root / "datasets" / dataset_id)
+    metadata = store.analysis._read(folder / "meta.json")
+    source_file = str(metadata.get("source_file") or "")
+    source_path = store.analysis._inside(folder / source_file)
+    data = source_path.read_bytes()
+    if sha256_bytes(data) != digest or str(metadata.get("source_hash") or "") != digest:
+        raise FoundryError("locator_forbidden")
+    suffix = Path(source_file).suffix.lower() or ".xlsx"
+    return data, suffix
