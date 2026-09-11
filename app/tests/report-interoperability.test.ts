@@ -22,7 +22,7 @@ describe('report interoperability acceptance fixtures', () => {
     const markdown = documentToMarkdown(document);
 
     expect(markdown).toContain('华宸物业2026年8月月结与预算执行分析');
-    expect(markdown).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：元/万元');
+    expect(markdown).toContain('账套：未声明；组织：未声明；企业：华宸物业；期间：2026-08；币种：CNY；单位：元/万元');
     expect(markdown).toContain('表题：长表跨页压力测试；期间：2026-08；单位：元/万元');
     for (const amount of expectedAmounts) expect(markdown).toContain(amount);
     for (const marker of requiredMarkers) expect(markdown).toContain(marker);
@@ -53,7 +53,7 @@ describe('report interoperability acceptance fixtures', () => {
     const degraded = documentFromMarkdown(markdown);
     const projected = documentToMarkdown(degraded);
 
-    expect(projected).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：元/万元');
+    expect(projected).toContain('账套：未声明；组织：未声明；企业：华宸物业；期间：2026-08；币种：CNY；单位：元/万元');
     expect(projected).toContain('表题：长表跨页压力测试；期间：2026-08；单位：元/万元');
     expect(projected).toContain('| 序号 | 指标 | 本期金额 | 累计金额 | 说明 |');
     expect(projected).toContain('| LT-ROW-120 | 跨页收入项目 120 | 120,120.0120 | 12000,500.00 | PDF-END-MARKER-001 |');

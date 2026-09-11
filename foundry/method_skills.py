@@ -12,6 +12,7 @@ BUNDLED_IDS = (
     "variance-analysis",
     "journal-entry",
 )
+BUNDLED_PACKS = ("setup", "close", "bva", "cash")
 
 METHOD_RESOURCE_NAMES = ("FOUNDRY.md", "CONNECTORS.md", "NOTICE", "LICENSE")
 
@@ -61,6 +62,44 @@ def bundled_skill_manifest() -> dict[str, object]:
         "source": "repo" if root == Path(__file__).resolve().parents[1] / "method" else "package",
         "skills": skills,
         "missing": missing,
+    }
+
+
+def bundled_pack_dirs() -> dict[str, Path]:
+    root = method_root()
+    return {pack_id: root / pack_id for pack_id in BUNDLED_PACKS}
+
+
+def bundled_pack_files() -> dict[str, Path]:
+    return {pack_id: path / "SKILL.md" for pack_id, path in bundled_pack_dirs().items()}
+
+
+def bundled_pack_manifest() -> dict[str, object]:
+    root = method_root()
+    packs: list[dict[str, object]] = []
+    missing: list[str] = []
+    for pack_id, path in bundled_pack_files().items():
+        item: dict[str, object] = {
+            "id": pack_id,
+            "dir": str(path.parent),
+            "file": str(path),
+            "exists": path.is_file(),
+        }
+        if path.is_file():
+            item["sha256"] = _sha256(path)
+            item["bytes"] = path.stat().st_size
+        else:
+            missing.append(pack_id)
+        packs.append(item)
+    registry = root / "packs.json"
+    return {
+        "root": str(root),
+        "ids": list(BUNDLED_PACKS),
+        "exists": root.is_dir() and not missing and registry.is_file(),
+        "source": "repo" if root == Path(__file__).resolve().parents[1] / "method" else "package",
+        "packs": packs,
+        "missing": missing,
+        "registry": str(registry) if registry.is_file() else None,
     }
 
 

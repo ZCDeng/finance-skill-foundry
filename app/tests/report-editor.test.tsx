@@ -242,12 +242,35 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     fireEvent.change(screen.getByLabelText('报告公司'), { target: { value: '华宸物业' } });
     expect((handlers.onDocument.mock.calls.at(-1)?.[0] as ReportDocument).metadata.company).toBe('华宸物业');
 
-    fireEvent.click(screen.getByRole('button', { name: '插入经营分析模板' }));
+    fireEvent.click(screen.getByRole('button', { name: '插入空白提纲' }));
     const next = handlers.onDocument.mock.calls.at(-1)?.[0] as ReportDocument;
     expect(next.content.filter((node) => node.type === 'heading').map((node) => node.content?.[0]?.text)).toEqual([
       '报告信息', '管理摘要', '经营与预算分析', '现金流与周转', '风险及行动', '财务表格', '口径与证据附注',
     ]);
     expect(documentToMarkdown(next)).not.toContain('自动');
+  });
+
+  it('applies a listed company template as a new draft and does not keep the local outline entry', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'report-template-list') return success({ templates: [{ template_id: 'management-brief-v1', label: '经营简报', kind: 'word' }] });
+      if (command === 'report-template-apply') return success({
+        draft: {
+          id: 'n'.repeat(32),
+          title: '经营简报',
+          document: { schema_version: 1, template_version: 'annual-v1', template_id: 'management-brief-v1', metadata: { company: '', period: '2026-08', currency: 'CNY', unit: '万元' }, content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '经营简报' }] }] },
+        },
+      });
+      return success({});
+    });
+    const onAppliedDraft = vi.fn();
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall };
+    const handlers = mount({ body: '', document: { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [] }, onAppliedDraft, contextId: 'ctx-a' });
+    fireEvent.click(screen.getByRole('button', { name: '套用公司模板' }));
+    await screen.findByRole('button', { name: '经营简报 · word' });
+    fireEvent.click(screen.getByRole('button', { name: '经营简报 · word' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(taskId, 'report-template-apply', { template_id: 'management-brief-v1', context_id: 'ctx-a' }));
+    expect(onAppliedDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'n'.repeat(32) }));
+    expect(handlers.onDocument).not.toHaveBeenCalled();
   });
 
   it('loads PDF comparison from decoded data and does not leak data URLs in errors', async () => {
@@ -404,6 +427,70 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     fireEvent.click(screen.getByRole('button', { name: '取消转换' }));
     await waitFor(() => expect(reportCancel).toHaveBeenCalledWith(taskId));
   });
+
+  it('records a draft table circle-select as an invoice-basis revision', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'analysis-circle-select') return success({ id: 'req-new', change_reason: '改成开票口径' });
+      return success({});
+    });
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall };
+    const document: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      sources: [source],
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '管理摘要' }] },
+        { type: 'table', attrs: { caption: '利润表' }, content: [
+          { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+          { type: 'tableRow', content: [cell('tableCell', '收入'), cell('tableCell', '30')] },
+        ] },
+      ],
+    };
+    mount({
+      document,
+      body: documentToMarkdown(document),
+      draftId: 'f'.repeat(32),
+      contextId: 'ctx-a',
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    fireEvent.click(screen.getByText('收入'));
+    const circle = await screen.findByRole('button', { name: '改成开票口径' });
+    expect((circle as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(circle);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(taskId, 'analysis-circle-select', expect.objectContaining({
+      kind: 'draft_table',
+      draft_id: 'f'.repeat(32),
+      block_id: '利润表',
+      instruction: '改成开票口径',
+      context_id: 'ctx-a',
+    })));
+    expect(await screen.findByText('已按圈选生成开票口径修订。')).toBeTruthy();
+  });
+
+  it('refuses circle-select until the selected table has a caption', async () => {
+    const financeCall = vi.fn(async () => success({}));
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall };
+    const document: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' },
+      sources: [source],
+      content: [
+        { type: 'table', content: [
+          { type: 'tableRow', content: [cell('tableHeader', '项目'), cell('tableHeader', '金额')] },
+          { type: 'tableRow', content: [cell('tableCell', '费用'), cell('tableCell', '20')] },
+        ] },
+      ],
+    };
+    mount({ document, body: documentToMarkdown(document), draftId: 'f'.repeat(32), contextId: 'ctx-a' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    fireEvent.click(screen.getByText('费用'));
+    fireEvent.click(screen.getByRole('button', { name: '改成开票口径' }));
+    expect(await screen.findByText('请先给表加上标题再圈选改口径。')).toBeTruthy();
+    expect(financeCall).not.toHaveBeenCalled();
+  });
+
 });
 
 

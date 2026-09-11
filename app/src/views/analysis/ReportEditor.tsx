@@ -362,6 +362,8 @@ function formatWarnings(warnings: string[]): string {
 
 export function ReportEditor({
   taskId,
+  draftId,
+  contextId,
   title,
   body,
   appendix,
@@ -381,8 +383,11 @@ export function ReportEditor({
   onLimitations,
   onReview,
   onExport,
+  onAppliedDraft,
 }: {
   taskId: string;
+  draftId?: string;
+  contextId?: string;
   title: string;
   body: string;
   appendix?: string;
@@ -402,9 +407,13 @@ export function ReportEditor({
   onLimitations(value: string): void;
   onReview(value: string): void;
   onExport(format: ExportFormat): void | Promise<void>;
+  onAppliedDraft?(draft: { id: string; title?: string; body?: string; document?: ReportDocument }): void;
 }) {
   const [localMode, setLocalMode] = useState<ReportMode>(initialMode);
   const mode = controlledMode ?? localMode;
+  const [templates, setTemplates] = useState<{ template_id: string; label: string; kind: string }[]>([]);
+  const [templateError, setTemplateError] = useState('');
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState(body);
   const [sourceBackup, setSourceBackup] = useState<{
@@ -417,6 +426,9 @@ export function ReportEditor({
   const [noteId, setNoteId] = useState("1");
   const [noteText, setNoteText] = useState("");
   const [toolError, setToolError] = useState("");
+  const [circleMessage, setCircleMessage] = useState("");
+  const [circleBusy, setCircleBusy] = useState(false);
+
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState<ReportImportResult | null>(
     null,
@@ -490,6 +502,34 @@ export function ReportEditor({
     },
     onTransaction: () => setEditorRevision((value) => value + 1),
   });
+
+  async function circleSelect() {
+    const api = bridge();
+    if (!api?.financeCall) return;
+    setCircleBusy(true);
+    setToolError("");
+    setCircleMessage("");
+    try {
+      if (!draftId) throw new Error("请先保存文稿再圈选改口径。");
+      if (!contextId) throw new Error("请先保存财务口径。");
+      const table = editor?.getAttributes("table") as { caption?: string; id?: string } | undefined;
+      const blockId = String(table?.caption || table?.id || "").trim();
+      if (!blockId) throw new Error("请先给表加上标题再圈选改口径。");
+      unwrap(await api.financeCall(taskId, "analysis-circle-select", {
+        kind: "draft_table",
+        draft_id: draftId,
+        block_id: blockId,
+        range: "selection",
+        instruction: "改成开票口径",
+        context_id: contextId,
+      }) as Answer<Record<string, unknown>>);
+      setCircleMessage("已按圈选生成开票口径修订。");
+    } catch (failure) {
+      setToolError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setCircleBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!editor) return;
@@ -603,6 +643,46 @@ export function ReportEditor({
       ]),
     });
   };
+
+  async function loadTemplates() {
+    const api = bridge();
+    if (!api?.financeCall) return;
+    setTemplateError('');
+    try {
+      const listed = unwrap(await api.financeCall(taskId, 'report-template-list', {}) as Answer<{ templates?: { template_id: string; label: string; kind: string }[] }>);
+      setTemplates(listed.templates ?? []);
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+
+  async function publishCompanyTemplate() {
+    const api = bridge();
+    if (!api?.reportTemplatePublish) throw new Error('此版本暂不支持发布公司模板。');
+    setTemplateError('');
+    try {
+      const published = unwrap(await api.reportTemplatePublish(taskId) as Answer<{ cancelled?: boolean; template_id?: string }>);
+      if (published && published.cancelled) return;
+      await loadTemplates();
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+
+  async function applyCompanyTemplate(templateId: string) {
+    const api = bridge();
+    if (!api?.financeCall) throw new Error('此版本暂不支持套用公司模板。');
+    setTemplateError('');
+    try {
+      const applied = unwrap(await api.financeCall(taskId, 'report-template-apply', { template_id: templateId, ...(contextId ? { context_id: contextId } : {}) }) as Answer<{ draft?: { id: string; title?: string; body?: string; document?: ReportDocument } }>);
+      const draft = applied.draft;
+      if (!draft) throw new Error('套用公司模板没有返回新草稿。');
+      if (onAppliedDraft) onAppliedDraft(draft);
+      else if (draft.document) commitDocument({ ...draft.document, template_id: templateId });
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
 
   const openSourceEditor = () => {
     setSourceBackup({ body, document });
@@ -1007,6 +1087,26 @@ export function ReportEditor({
                 <summary>报告信息</summary>
                 <div>
                   <label>
+                    账套
+                    <Input
+                      aria-label="报告账套"
+                      value={workingDocument.metadata.ledger ?? ""}
+                      onChange={(event) =>
+                        updateMetadata("ledger", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    组织
+                    <Input
+                      aria-label="报告组织"
+                      value={workingDocument.metadata.organization ?? ""}
+                      onChange={(event) =>
+                        updateMetadata("organization", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
                     公司
                     <Input
                       aria-label="报告公司"
@@ -1054,9 +1154,21 @@ export function ReportEditor({
                   type="button"
                   onClick={insertManagementTemplate}
                 >
-                  插入经营分析模板
+                  插入空白提纲
                 </Button>
               )}
+              <div className="analysis-actions">
+                <Button variant="outline" type="button" onClick={() => void publishCompanyTemplate()}>发布本公司模板</Button>
+                <Button variant="outline" type="button" onClick={() => { setTemplateOpen(true); void loadTemplates(); }}>套用公司模板</Button>
+              </div>
+              {templateOpen ? <div className="analysis-details" aria-label="已发布模板">
+                {templates.length ? templates.map((row) => (
+                  <Button key={row.template_id} variant="outline" type="button" onClick={() => void applyCompanyTemplate(row.template_id)}>
+                    {row.label} · {row.kind}
+                  </Button>
+                )) : <p className="analysis-note">暂无已发布模板</p>}
+                {templateError ? <p role="alert" className="analysis-message analysis-message--error">{templateError}</p> : null}
+              </div> : null}
               <div
                 className="report-editor-toolbar"
                 aria-label="文稿编辑工具栏"
@@ -1162,6 +1274,13 @@ export function ReportEditor({
                 </IconButton>
                 {editor?.isActive("table") && (
                   <>
+                    <IconButton
+                      label="改成开票口径"
+                      disabled={circleBusy || busy || !draftId || !contextId}
+                      onClick={() => void circleSelect()}
+                    >
+                      <Scissors size={15} />
+                    </IconButton>
                     <IconButton
                       label="合并单元格"
                       disabled={!editor?.can().mergeCells()}
@@ -1432,6 +1551,7 @@ export function ReportEditor({
           onApply={applyImport}
         />
       )}
+      {circleMessage && <p role="status" className="report-status">{circleMessage}</p>}
       {toolError && (
         <p role="alert" className="analysis-message analysis-message--error">
           {toolError}
@@ -1687,7 +1807,15 @@ function pdfPreviewErrorMessage(failure: unknown): string {
   return "PDF 原页暂时无法预览，可继续使用已提取的草稿内容。";
 }
 
-function PdfComparison({ dataUrl }: { dataUrl: string }) {
+/**
+ * The archived PDF beside the draft, one page at a time.
+ *
+ * `page` is where to open: a locator names the page it cited, and a viewer
+ * that always opened on page 1 was showing the operator the cover of a
+ * document they asked about page 7 of. Clamped to the document once it is
+ * loaded; absent, page 1.
+ */
+export function PdfComparison({ dataUrl, page: initialPage }: { dataUrl: string; page?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<{
     numPages: number;
@@ -1729,7 +1857,7 @@ function PdfComparison({ dataUrl }: { dataUrl: string }) {
         }
         pdfRef.current = pdf;
         setPages(pdf.numPages);
-        setPage(1);
+        setPage(Math.min(Math.max(1, initialPage ?? 1), pdf.numPages || 1));
       } catch (failure) {
         const message = pdfPreviewErrorMessage(failure);
         if (!cancelled && message) setError(message);
@@ -1743,7 +1871,7 @@ function PdfComparison({ dataUrl }: { dataUrl: string }) {
       void pdfRef.current?.destroy?.();
       pdfRef.current = null;
     };
-  }, [dataUrl]);
+  }, [dataUrl, initialPage]);
 
   useEffect(() => {
     let cancelled = false;

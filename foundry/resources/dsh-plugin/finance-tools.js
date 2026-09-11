@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -83,6 +83,15 @@ export const FINANCE_TOOLS = {
     description: "查看本任务已授权资料、财务口径、科目映射、指标定义及requirement_metric_catalog规范能力名。先检查现有可复用方法与已加载财务技能；没有专用口径可建立，或继续 SQL/Python。无需审批。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["list-finance-context"],
   },
+  finance_readiness: {
+    description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
+    parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["finance-readiness"],
+  },
+  chart_deliverable_save: specTool("chart-deliverable-save", "把当前任务已授权 run 的结果系列归档为图表成果。写入 FinanceStore charts 与 analysis/charts，绑定 run_id 与 snapshot hash。不得传入路径、预览句柄或 dataset_id。打开归档图复现原值，不重跑。改假设走子情景后再归档新版本。", {
+    run_id: runId,
+    parent_id: text("可选父图表版本"),
+    label: text("图表名称"),
+  }, ["run_id"]),
   finance_context_save: specTool("finance-context-save", "建立不可变财务口径：bindings 为别名到现有快照 ID；scopes 按别名声明 ledger/organization/period/currency/unit/scenario，值来自资料或经理明确口径，不能猜测。policy.field_map 可映射中文列名。管理科目用 revenue/cost/expense；余额也可分析，缺少凭证时不虚构分录链接。修改科目映射或口径生成新版本。", {
     name: text("财务口径名称"), bindings: { type: "object", additionalProperties: { type: "string" } },
     scopes: { type: "object", additionalProperties: { type: "object" } }, policies: { type: "object", additionalProperties: { type: "object" } },
@@ -107,6 +116,13 @@ export const FINANCE_TOOLS = {
     method: { type: "string", enum: ["quantity_then_price", "base_weights_with_interaction"] }, field_map: { type: "object" }, actual_filters: { type: "object" }, baseline_filters: { type: "object" },
     negative_budget_policy: { type: "string", enum: ["absolute_baseline", "signed_baseline"] }, missing_groups_as_zero: { type: "boolean", description: "仅经理明确将缺失组按零处理时使用，资料缺失不能自行启用" },
   }, ["context_id"]),
+
+  open_source_locator: specTool("open-source-locator", "按 fact_id 或 run_id/row/column 打开已授权原文定位与预览句柄。只读；不得传入 dataset_id、本机路径或 URL。无定位返回 locator_unavailable，越权返回 locator_forbidden。返回不含路径。", {
+    fact_id: text("prepare_explanation 返回的事实 id"),
+    run_id: runId,
+    row: {type:"integer", minimum:0, description:"结果行下标，从0开始"},
+    column: text("结果列名，如 expense"),
+  }),
   drilldown_fact: specTool("drilldown-fact", "从当前任务真实 run 的结果行/列下钻到原始快照行。row 是所选 section 的下标（从0开始），section 可为 rows、detail_rows 或 excluded_detail_rows；返回精确 source_hash 和原始数据，不搜索其他账套或最新快照。余额资料无凭证链接；分页最多1000行。", {
     run_id: runId, section: { type: "string", enum: ["rows", "detail_rows", "excluded_detail_rows"] }, row: { type: "integer", minimum: 0 }, column: text("可选结果列"), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 1000 },
   }, ["run_id", "row"]),
@@ -125,4 +141,14 @@ export const FINANCE_TOOLS = {
   finance_background_list: specTool("finance-background-list", "列出当前授权且适用于 as_of/财务范围的业务背景。不会默认注入其他账套、过期背景或撤销授权后的资料。", {
     context_id: contextId, scope: financeScope, as_of: text("解释所处日期或期间"),
   }),
+  finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
+    context_id: contextId,
+  }, ["context_id"]),
+  report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
+  report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。Excel 模板的命名区数值只能来自 run_id 指向的已授权 run（命名区名匹配结果列或 metric 名），不接受调用方直接给数字；没有 run_id 就只套皮不写数。不覆盖旧稿。发布模板仍由经理点选。", {
+    template_id: text("report_template_list 返回的 template_id"),
+    context_id: contextId,
+    run_id: text("可选：为 Excel 命名区取数的已授权 run"),
+    scope: financeScope,
+  }, ["template_id"]),
 };

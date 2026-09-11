@@ -19,6 +19,7 @@ export const CHANNELS = {
   analysisOpenOutput: 'analysis:open-output',
   analysisState: 'analysis:state',
   analysisAddFiles: 'analysis:add-files',
+  reportTemplatePublish: 'report-template:publish',
   analysisReadDataset: 'analysis:read-dataset',
   analysisSave: 'analysis:save',
   analysisRun: 'analysis:run',
@@ -51,7 +52,16 @@ export const CHANNELS = {
    * as the preview is open, and takes it down on close. No model is anywhere
    * near this path and no `univer_*` tool is reachable from it.
    */
+  /**
+   * Open an authorized source cell in digest scratch, not an archived deliverable.
+   *
+   * The renderer names a fact or a run cell. Main resolves the locator, copies
+   * snapshot bytes into artifacts/preview/<source_hash>/, and fences Univer to
+   * that directory. This is not preview:open and not deliverable-path.
+   */
+  sourceLocatorOpen: 'source-locator:open',
   previewOpen: 'preview:open',
+
   previewClose: 'preview:close',
   previewStatus: 'preview:status',
   /** Which screen is on top. Both embedded panes are placed from it. */

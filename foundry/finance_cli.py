@@ -22,18 +22,34 @@ OPERATIONS = {
     "run-metric": "run_metric",
     "explain-variance": "explain_variance",
     "drilldown-fact": "drilldown_fact",
+    "open-source-locator": "open_source_locator",
     "prepare-explanation": "prepare_explanation",
     "validate-explanation": "validate_explanation",
     "save-explanation-draft": "save_explanation_draft",
     "finance-background-save": "finance_background_save",
     "finance-background-list": "finance_background_list",
+    "finance-adjustment-save": "finance_adjustment_save",
+    "finance-adjustment-list": "finance_adjustment_list",
+    "finance-adjustment-confirm": "finance_adjustment_confirm",
+    "report-template-list": "report_template_list",
+    "report-template-publish": "report_template_publish",
+    "report-template-apply": "report_template_apply",
+    "chart-deliverable-save": "chart_deliverable_save",
+    "chart-deliverable-open": "chart_deliverable_open",
+    "chart-deliverable-list": "chart_deliverable_list",
+    "analysis-circle-select": "analysis_circle_select",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
-LIST_COMMANDS = {"list-finance-context", "finance-source-list", "finance-completion-recoveries"}
+LIST_COMMANDS = {
+    "list-finance-context",
+    "finance-source-list",
+    "finance-completion-recoveries",
+    "finance-readiness",
+}
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
-COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh"}
+COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file"}
 
 
 def add_parsers(sub):
@@ -120,6 +136,8 @@ def dispatch(args):
         raise FoundryError("completion call id requires an operation")
     elif args.cmd == "list-finance-context":
         result = service.list_finance_context()
+    elif args.cmd == "finance-readiness":
+        result = service.finance_readiness({})
     elif args.cmd == "finance-source-list":
         batches = SourceRefreshService(context.task).batches()
         if context.session_id:
@@ -127,6 +145,10 @@ def dispatch(args):
         result = {"batches": batches}
     elif args.cmd == "finance-source-refresh":
         result = _refresh_source(context, _json(args.spec, "source refresh spec"))
+    elif args.cmd == "source-locator-preview-file":
+        from foundry.finance_locators import stage_source_locator_preview
+        print(stage_source_locator_preview(service, _json(args.spec, "finance spec")))
+        return True
     elif args.cmd in FILE_OPERATIONS:
         files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None)
         result = getattr(files, FILE_OPERATIONS[args.cmd])(_json(args.spec, "workbook spec"))

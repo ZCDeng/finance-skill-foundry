@@ -699,6 +699,25 @@ def _fact_priority(fact: dict) -> int:
     return 3
 
 
+
+def _locator_trace(refs) -> dict:
+    if not isinstance(refs, list):
+        return {"preview_available": False}
+    for ref in refs:
+        if isinstance(ref, dict) and isinstance(ref.get("source_locator"), dict):
+            locator = {
+                key: value
+                for key, value in ref["source_locator"].items()
+                if key not in {"path", "url", "file"}
+                and not (isinstance(value, str) and ("/" in value or "\\" in value or "file://" in value))
+            }
+            return {
+                "source_locator": locator,
+                "preview_available": bool(locator.get("preview_available")),
+            }
+    return {"preview_available": False}
+
+
 def _make_fact(
     run: dict,
     row_index: int,
@@ -746,6 +765,7 @@ def _make_fact(
             "source_hashes": run.get("source_hashes", {}),
             "source_rows": refs,
             "source_row_count": len(refs) if isinstance(refs, list) else 0,
+            **_locator_trace(refs),
             "provenance_status": (
                 run.get("result", {}).get("provenance", {}).get("status", "unverified")
                 if run.get("engine") == "structured_aggregate" else

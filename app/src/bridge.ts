@@ -100,6 +100,7 @@ export interface Bridge {
   analysisOpenOutput?(task: string, runId: string, output: string): Promise<Answer<Record<string, unknown>>>;
   analysisState?(task: string): Promise<Answer<AnalysisState>>;
   analysisAddFiles?(task: string): Promise<Answer<DatasetSnapshot[]>>;
+  reportTemplatePublish?(task: string): Promise<Answer<{ template_id: string; label: string; kind: string } | { cancelled: true }>>;
   analysisReadDataset?(task: string, id: string): Promise<Answer<Record<string, unknown>>>;
   analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
@@ -108,6 +109,7 @@ export interface Bridge {
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  sourceLocatorOpen?(task: string, spec: { fact_id: string } | { run_id: string; row: number; column?: string }): Promise<Answer<SourceLocatorResult>>;
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
@@ -168,6 +170,25 @@ export interface PreviewSpec {
   sha256: string;
   /** The viewer origin, so the strip can say where it is looking. */
   origin: string;
+  excel_range?: string;
+}
+
+/**
+ * What a locator preview names once Univer is up: the task and the digest,
+ * and the cell the operator asked about. No origin: the renderer reads that
+ * from `previewStatus`, the same way every other preview does.
+ */
+export type LocatorPreviewSpec = Omit<PreviewSpec, 'origin'>;
+
+/**
+ * What `sourceLocatorOpen` answers. Path-free by construction on the main
+ * side, and origin-free by type here: nothing in it says where a server is.
+ */
+export interface SourceLocatorResult extends Partial<LocatorPreviewSpec> {
+  status: 'ok' | 'locator_unavailable' | 'locator_forbidden' | string;
+  locator?: Record<string, unknown>;
+  preview?: { available?: boolean; handle?: string };
+  viewer?: 'univer' | 'pdf' | 'snapshot';
 }
 
 /** What `launch-formulator` reports back. */
@@ -339,6 +360,15 @@ export type FinanceCommand =
   | 'validate-explanation'
   | 'finance-background-save'
   | 'finance-background-list'
+  | 'finance-adjustment-save'
+  | 'finance-adjustment-list'
+  | 'finance-adjustment-confirm'
+  | 'report-template-list'
+  | 'report-template-apply'
+  | 'chart-deliverable-save'
+  | 'chart-deliverable-list'
+  | 'chart-deliverable-open'
+  | 'analysis-circle-select'
   | 'workbook-inspect'
   | 'workbook-bind'
   | 'workbook-read'

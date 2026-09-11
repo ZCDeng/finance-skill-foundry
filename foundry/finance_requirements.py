@@ -62,6 +62,7 @@ def save_requirements(analysis, spec):
     scope = spec.get('scope', {})
     items = spec.get('items')
     bindings = spec.get('bindings', {})
+    selection = _selection(spec.get('selection'))
     if not isinstance(scope, dict) or not isinstance(bindings, dict):
         raise FoundryError('requirements scope and bindings must be objects')
     if not isinstance(items, list) or len(items) > 100:
@@ -115,10 +116,25 @@ def save_requirements(analysis, spec):
         semantics = requirement_semantics(analysis, {**assessed_spec, 'removed_item_ids': removed})
         record = _new(analysis.task, **semantics, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
                       items=normalized, parent_id=(parent or {}).get('id'),
-                      removed_item_ids=removed, change_reason=reason,
+                      removed_item_ids=removed, change_reason=reason, selection=selection,
                       support=_assess_requirement_support(analysis, assessed_spec),
                       content_hash=_hash({'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}))
         return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
+
+
+SELECTION_KEYS = ('kind', 'draft_id', 'binding_id', 'block_id', 'range')
+
+
+def _selection(value):
+    """The circled table or workbook range a revision came from; never a path."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value:
+        raise FoundryError('requirements selection must be an object')
+    extra = set(value) - set(SELECTION_KEYS)
+    if extra:
+        raise FoundryError('requirements selection only records kind, draft_id, binding_id, block_id, range')
+    return {key: _safe_text(value[key], f'selection {key}', required=True, maximum=200) for key in SELECTION_KEYS if key in value}
 
 
 def _same_number(left, right):

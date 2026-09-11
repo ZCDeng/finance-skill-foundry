@@ -14,7 +14,9 @@ import {
   listTasks,
   readDeliverable,
   showTask,
+  sourceLocatorPreviewFile,
 } from '../reads.js';
+import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
 import { newTask } from '../writes.js';
 import { CHANNELS } from './contract.js';
@@ -45,6 +47,8 @@ async function answer<T>(work: () => Promise<T>): Promise<Answer<T>> {
     return { ok: false, refused: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
+
+const LOCATOR_CODES = new Set(['locator_forbidden', 'locator_unavailable', 'preview_unavailable', 'locator_error']);
 
 /** A task id as it comes off the wire. 32 hex, or the call does not run. */
 function taskId(value: unknown): string {
@@ -97,7 +101,14 @@ export function registerIpc(
     /** This app's own state root; a session's workspace is made under it. */
     userData: () => string;
   },
-): void {
+): { shutdown(): void } {
+  /**
+   * The locator scratch directories this process fenced Univer to, by task.
+   * Removed on preview close, on the next locator open for the same task, and
+   * at quit through `shutdown`; never a directory the renderer named.
+   */
+  const scratch = new ScratchFences();
+  const shutdown = () => scratch.discardAll();
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
 
   ipcMain.handle(CHANNELS.task, (_event, task: unknown) =>
@@ -243,6 +254,15 @@ export function registerIpc(
     'validate-explanation',
     'finance-background-save',
     'finance-background-list',
+    'finance-adjustment-save',
+    'finance-adjustment-list',
+    'finance-adjustment-confirm',
+    'report-template-list',
+    'report-template-apply',
+    'chart-deliverable-save',
+    'chart-deliverable-list',
+    'chart-deliverable-open',
+    'analysis-circle-select',
     'workbook-inspect',
     'workbook-bind',
     'workbook-read',
@@ -333,8 +353,19 @@ export function registerIpc(
       if (failure) throw failure;
       return rows;
     }));
+  ipcMain.handle(CHANNELS.reportTemplatePublish, (_e, rawTask: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const selected = await dialog.showOpenDialog({
+        title: '发布公司模板', properties: ['openFile'],
+        filters: [{ name: 'Word 或 Excel', extensions: ['docx', 'xlsx'] }],
+      });
+      if (selected.canceled || selected.filePaths.length === 0) return { cancelled: true };
+      const file = selected.filePaths[0];
+      return analysisCall(task, 'report-template-publish', ['--spec', objectJson({ path: file, name: path.basename(file), label: path.parse(file).name })]);
+    }));
 
-  if (!panes) return;
+  if (!panes) return { shutdown };
   const harness = panes;
 
   /**
@@ -470,6 +501,87 @@ export function registerIpc(
   );
 
   /**
+   * Open an authorized source cell on digest scratch.
+   *
+   * Not preview:open and not deliverable-path. The renderer names a fact or a
+   * run cell; the path never crosses the boundary, and Univer is fenced to
+   * artifacts/preview/<source_hash>/ rather than the analysis tree.
+   *
+   * A failure reaches the renderer as one of four fixed codes and nothing
+   * else: the CLI's stderr names files, and this channel is the one the
+   * renderer may call with a fact it has not been shown.
+   */
+  ipcMain.handle(
+    CHANNELS.sourceLocatorOpen,
+    async (_event, task: unknown, spec: unknown) => {
+      const outcome = await answer(async () => {
+        const window = panes?.window();
+        if (!window || !panes?.preview) throw new LocatorError('preview_unavailable');
+        let id: string;
+        let args: ReturnType<typeof locatorArgs>;
+        try {
+          id = taskId(task);
+          args = locatorArgs(spec);
+        } catch {
+          throw new LocatorError('locator_error');
+        }
+        // Whatever this task had on screen before is stale the moment a new
+        // cell is asked for; the copy goes before the CLI writes the next one.
+        scratch.discard(id);
+        let payload: Record<string, unknown>;
+        try {
+          payload = pathFreePayload(await analysisCall(id, 'open-source-locator', ['--spec', JSON.stringify(args)]));
+        } catch (error) {
+          if (error instanceof FoundryRefusal) throw new LocatorError('locator_forbidden');
+          throw new LocatorError('locator_unavailable');
+        }
+        if (String(payload.status ?? '') !== 'ok') return payload;
+        const locator = (payload.locator ?? {}) as Record<string, unknown>;
+        const preview = (payload.preview ?? {}) as Record<string, unknown>;
+        const available = Boolean(preview.available ?? locator.preview_available);
+        const kind = String(locator.kind ?? '');
+        if (!available) return payload;
+        if (kind === 'pdf') return { ...payload, viewer: 'pdf' };
+        if (kind !== 'xlsx' && kind !== 'csv') return { ...payload, viewer: 'snapshot' };
+        let fence: ReturnType<typeof previewFence>;
+        try {
+          const file = await sourceLocatorPreviewFile({ ...binding, task: id }, args as Record<string, unknown>);
+          fence = previewFence(file, String(locator.source_hash ?? ''), taskRoot(binding.varRoot, id));
+        } catch (error) {
+          if (error instanceof FoundryRefusal) throw new LocatorError('locator_forbidden');
+          throw new LocatorError('preview_unavailable');
+        }
+        scratch.fence(id, fence.allowedRoot);
+        let opened: { task: string; sha256: string };
+        try {
+          opened = await panes.preview.open(window, {
+            task: id,
+            sha256: String(locator.source_hash ?? ''),
+            file: fence.file,
+            allowedRoot: fence.allowedRoot,
+            label: String(locator.excel_range || locator.sheet || '授权预览'),
+            highlight: locatorHighlight(locator),
+          });
+        } catch {
+          scratch.discard(id);
+          throw new LocatorError('preview_unavailable');
+        }
+        return {
+          ...payload,
+          viewer: 'univer',
+          task: opened.task,
+          sha256: opened.sha256,
+        };
+      });
+      if (outcome.ok) return outcome;
+      // Only a code crosses here. `answer` already turned a `LocatorError`
+      // into its own name; anything else was thrown past the mapping above.
+      const code = LOCATOR_CODES.has(outcome.message) ? outcome.message : 'locator_error';
+      return { ok: false, refused: code === 'locator_forbidden', message: code };
+    },
+  );
+
+  /**
    * Open one archived workbook read-only in the Univer viewer.
    *
    * The renderer names a task and a digest, exactly as it does to read a brief.
@@ -506,6 +618,8 @@ export function registerIpc(
     answer(async () => {
       const window = panes.window();
       if (window) panes.preview.close(window);
+      // The gateway is down; the scratch copy it was fenced to goes with it.
+      scratch.discardAll();
       return { stopped: true };
     }),
   );
@@ -541,4 +655,5 @@ export function registerIpc(
       return { screen: name };
     }),
   );
+  return { shutdown };
 }

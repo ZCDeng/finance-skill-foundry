@@ -34,7 +34,9 @@ export function PreviewBar({
         {shortSha(preview.sha256)}
       </span>
       <span className="fnd-taskbar__sep">/</span>
-      <span className="fnd-muted">{`看的是归档副本, 在这里改什么都不落盘 · ${preview.origin}`}</span>
+      <span className="fnd-muted">{preview.excel_range
+        ? `看的是授权预览副本 · ${preview.excel_range} · 在这里改什么都不落盘 · ${preview.origin}`
+        : `看的是归档副本, 在这里改什么都不落盘 · ${preview.origin}`}</span>
       <span className="fnd-taskbar__spacer" />
       <button type="button" className="fnd-start" onClick={onClose}>
         <X size={13} strokeWidth={1.5} aria-hidden />

@@ -1150,3 +1150,102 @@ def test_score_observation_can_select_r4_contract_without_changing_default(monke
     assert legacy['scoring_contract'] == verifier.SCORING_CONTRACT_R3
     assert r4['scoring_contract'] == verifier.SCORING_CONTRACT_R4
     assert seen_contracts == [False, True]
+
+
+
+TABLE_NOTE = REPO / "tests/fixtures/finance_evals/table_note_cases.json"
+
+
+def test_table_note_fixture_is_independent_of_the_30_case_set() -> None:
+    main = verifier._load_fixture(FIXTURE)
+    table_note = verifier.load_table_note_fixture(TABLE_NOTE)
+    assert table_note["suite"] == "table_note"
+    assert table_note["scoring_contract"] == "r3-final-draft-text-bound-v3"
+    assert len(main["cases"]) >= 30
+    assert {case["id"] for case in table_note["cases"]}.isdisjoint({case["id"] for case in main["cases"]})
+    assert {case["id"] for case in table_note["cases"]} >= {
+        "TN01_footnote_changes_meaning",
+        "TN02_reconciling_table_must_close",
+        "TN03_expense_flat_zero_must_cite_real_cell",
+    }
+
+
+def test_cf32_footnote_must_not_call_table_profit_recurring() -> None:
+    case = next(item for item in verifier.load_table_note_fixture(TABLE_NOTE)["cases"] if item["id"].startswith("TN01"))
+    verifier.score_table_note_text(case, "账面利润 30 万元，脚注一次性补贴 8 万元（附注/调整），不是经常项目。")
+    with pytest.raises(AssertionError, match="forbidden label|经常性"):
+        verifier.score_table_note_text(case, "经常性利润 30 万元，另有补贴 8 万元。")
+
+
+def test_cf33_expense_zero_uses_real_cell_not_synthetic() -> None:
+    case = next(item for item in verifier.load_table_note_fixture(TABLE_NOTE)["cases"] if item["id"].startswith("TN03"))
+    run = {
+        "id": "run-zero",
+        "execution_status": "succeeded",
+        "bindings": {"actual": "a", "budget": "b"},
+        "result": {
+            "rows": [
+                {**case["expected"]["identity"], "metric": "profit", "contribution": "0"},
+                {**case["expected"]["identity"], "metric": "revenue", "contribution": "0"},
+                {**case["expected"]["identity"], "metric": "cost", "contribution": "0"},
+                {**case["expected"]["identity"], "metric": "expense", "contribution": "0"},
+            ]
+        },
+    }
+    draft = {
+        "run_ids": ["run-zero"],
+        "claims": [
+            {"basis": "calculation", "verification_status": "matches_run", "run_id": "run-zero", "row": 3, "column": "contribution", "value": "0"},
+        ],
+    }
+    state = {"runs": [run], "drafts": [draft]}
+    cells = verifier._find_expected_cells(state, case)
+    verifier.require_real_zero_cell(cells, "expense")
+    assert verifier._verified_draft_cells(state, cells) >= {"expense"}
+    unverified = {**state, "drafts": [{"run_ids": ["run-zero"], "claims": []}]}
+    assert "expense" not in verifier._verified_draft_cells(unverified, cells)
+    synthetic = {**cells, "expense": {**cells["expense"], "synthetic_zero": True}}
+    with pytest.raises(AssertionError, match="synthetic"):
+        verifier.require_real_zero_cell(synthetic, "expense")
+
+
+def test_table_note_reconciling_bridge_still_closes() -> None:
+    case = next(item for item in verifier.load_table_note_fixture(TABLE_NOTE)["cases"] if item["id"].startswith("TN02"))
+    run = {
+        "id": "run-bridge",
+        "execution_status": "succeeded",
+        "bindings": {"actual": "a", "budget": "b"},
+        "result": {
+            "rows": [
+                {**case["expected"]["identity"], "metric": "profit", "contribution": "5"},
+                {**case["expected"]["identity"], "metric": "revenue", "contribution": "20"},
+                {**case["expected"]["identity"], "metric": "cost", "contribution": "-10"},
+                {**case["expected"]["identity"], "metric": "expense", "contribution": "-5"},
+            ]
+        },
+    }
+    cells = verifier._find_expected_cells({"runs": [run], "drafts": []}, case)
+    assert {name: cell["value"] for name, cell in cells.items()} == case["expected"]["claims"]
+
+
+def test_verifier_main_runs_the_table_note_suite(tmp_path, monkeypatch, capsys) -> None:
+    import json
+    import sys
+
+    output = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["verify_finance_evals.py", "--suite", "table_note", "--output", str(output), "--validate-fixture-only"])
+    assert verifier.main() == 0
+    summary = json.loads((output / "fixture-summary.json").read_text(encoding="utf-8"))
+    assert summary["total_cases"] == 3
+    assert {case_id.split("_")[0] for case_id in summary["selected_cases"]} == {"TN01", "TN02", "TN03"}
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["status"] == "fixture-valid"
+
+
+def test_table_note_scoring_is_wired_into_case_scoring() -> None:
+    import inspect
+
+    source = inspect.getsource(verifier._score_case)
+    assert "score_table_note_text(case, final_text)" in source
+    assert 'require_real_zero_cell(cells, "expense")' in source
+    dispatch = inspect.getsource(verifier._find_expected_cells_inner)
+    assert 'kind == "table_note"' in dispatch

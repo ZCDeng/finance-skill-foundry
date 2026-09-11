@@ -75,9 +75,9 @@ describe('report document converters', () => {
     const imported = documentFromMarkdown(markdown);
     const html = renderReportHtml(imported, '经营分析报告');
 
-    expect(markdown).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
+    expect(markdown).toContain('账套：未声明；组织：未声明；企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
     expect(markdown).toContain('表题：利润预算差异；期间：2026-08；币种：CNY；单位：万元\n\n| 项目 | 金额 |');
-    expect(imported.metadata).toEqual({ company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' });
+    expect(imported.metadata).toEqual({ ledger: '', organization: '', company: '华宸物业', period: '2026-08', currency: 'CNY', unit: '万元' });
     expect(imported.content.find((node) => node.type === 'table')?.attrs).toMatchObject({ caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元' });
     expect(html).not.toContain('企业：华宸物业');
     expect(html).not.toContain('表题：利润预算差异');
@@ -193,7 +193,7 @@ describe('report document converters', () => {
     const note = imported.document!.content.find((node) => node.type === 'reportNote')!;
 
     expect(table.attrs).toMatchObject({ caption: '利润预算差异', period: '2026-08', currency: 'CNY', unit: '万元' });
-    expect(documentToMarkdown(doc)).toContain('企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
+    expect(documentToMarkdown(doc)).toContain('账套：未声明；组织：未声明；企业：华宸物业；期间：2026-08；币种：CNY；单位：万元');
     expect(documentToMarkdown(doc)).toContain('表题：利润预算差异；期间：2026-08；币种：CNY；单位：万元');
     expect(image.attrs).toMatchObject({ src: png1x1, alt: '趋势图' });
     expect(note.attrs).toMatchObject({ id: 'n1', source_id: 'source-a' });

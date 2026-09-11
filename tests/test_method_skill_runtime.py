@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from foundry.method_skills import BUNDLED_IDS, method_root
+from foundry.method_skills import BUNDLED_IDS, BUNDLED_PACKS, method_root
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
@@ -90,7 +90,7 @@ async function collect(config = {{}}) {{
     content: (message.args ?? []).join(' '),
   }}));
   const loaded = {{}};
-  for (const name of {json.dumps(list(BUNDLED_IDS))}) {{
+  for (const name of {json.dumps(list(BUNDLED_IDS) + list(BUNDLED_PACKS))}) {{
     const skill = await ctx.skills.get(name, lookup);
     loaded[name] = skill === undefined ? null : {{
       name: skill.name,
@@ -198,7 +198,7 @@ process.stdout.write(JSON.stringify({
 }));
 """,
     )
-    assert result["missing"]["loaded"] == {skill_id: None for skill_id in BUNDLED_IDS}
+    assert result["missing"]["loaded"] == {skill_id: None for skill_id in list(BUNDLED_IDS) + list(BUNDLED_PACKS)}
     assert result["diagnostics"]["missingRoot"].endswith("missing-bundled-root")
     assert result["diagnostics"]["badSummary"] is None
     assert result["diagnostics"]["badLoaded"] is None

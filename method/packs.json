@@ -1,0 +1,29 @@
+{
+  "packs": [
+    {
+      "id": "setup",
+      "entry": "setup",
+      "uses": ["finance_readiness"],
+      "output": "readiness-report"
+    },
+    {
+      "id": "close",
+      "entry": "close",
+      "uses": ["financial-statements", "reconciliation", "journal-entry", "variance-analysis"],
+      "output": "management-pnl-and-close-drafts"
+    },
+    {
+      "id": "bva",
+      "entry": "bva",
+      "uses": ["variance-analysis", "explain_variance"],
+      "output": "closed-profit-or-price-quantity-bridge"
+    },
+    {
+      "id": "cash",
+      "entry": "cash",
+      "uses": ["finance_scenario_save", "finance_scenario_run"],
+      "capabilities": ["receivables_aging", "cash_13_weeks"],
+      "output": "aging-or-13-week-cash"
+    }
+  ]
+}

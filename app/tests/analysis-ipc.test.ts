@@ -87,6 +87,17 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
   });
 
+  it('publishes a company template from the native picker and never dataset-add', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/company.docx'] });
+    await invoke(CHANNELS.reportTemplatePublish, task, '/unselected/secret.pptx');
+    expect(JSON.parse(String(mocks.run.mock.calls[0][2][1])).path).toBe('/chosen/company.docx');
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['report-template-publish']);
+    expect(mocks.run.mock.calls.map((call) => call[1])).not.toContain('dataset-add');
+    mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/company.docx'] });
+    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: { cancelled: true } });
+  });
+
   it('registers a conversation before exposing it and does not create a legacy window', async () => {
     const events: string[] = [];
     const host = {
@@ -204,6 +215,13 @@ describe('analysis IPC task and session binding', () => {
     await invoke(CHANNELS.financeCall, task, 'validate-explanation', { draft_id: 'draft-a' });
     await invoke(CHANNELS.financeCall, task, 'finance-background-save', { text: '销售提前确认', basis: 'professional_judgment', scope: { ledger: '总账' }, effective_from: '2026-08' });
     await invoke(CHANNELS.financeCall, task, 'finance-background-list', { scope: { ledger: '总账' }, as_of: '2026-08' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-save', { context_id: 'ctx-a', label: '总部费用调整', amount: '5', profit_impact: '5' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-list', { context_id: 'ctx-a' });
+    await invoke(CHANNELS.financeCall, task, 'finance-adjustment-confirm', { id: 'adj-a' });
+    await invoke(CHANNELS.financeCall, task, 'chart-deliverable-save', { run_id: 'run-a' });
+    await invoke(CHANNELS.financeCall, task, 'chart-deliverable-list', { run_id: 'run-a' });
+    await invoke(CHANNELS.financeCall, task, 'chart-deliverable-open', { id: 'chart-a' });
+    await invoke(CHANNELS.financeCall, task, 'analysis-circle-select', { kind: 'draft_table', draft_id: 'draft-a', range: 'A:A' });
     expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
       'list-finance-context',
       'finance-source-list',
@@ -217,6 +235,13 @@ describe('analysis IPC task and session binding', () => {
       'validate-explanation',
       'finance-background-save',
       'finance-background-list',
+      'finance-adjustment-save',
+      'finance-adjustment-list',
+      'finance-adjustment-confirm',
+      'chart-deliverable-save',
+      'chart-deliverable-list',
+      'chart-deliverable-open',
+      'analysis-circle-select',
     ]);
     expect(mocks.run.mock.calls[0][2]).toEqual([]);
     expect(mocks.run.mock.calls[1][2]).toEqual([]);
@@ -230,7 +255,21 @@ describe('analysis IPC task and session binding', () => {
     const backgroundListSpec = JSON.parse(mocks.run.mock.calls[11][2][1]);
     expect(backgroundListSpec.scope).toEqual({ ledger: '总账' });
     expect((await invoke(CHANNELS.financeCall, task, 'run-metric', ['not an object'])).ok).toBe(false);
-    expect(mocks.run).toHaveBeenCalledTimes(12);
+    expect(mocks.run).toHaveBeenCalledTimes(19);
+  });
+
+  it('does not reach open-source-locator through the generic finance channel', async () => {
+    registerIpc({ varRoot: '/store' });
+    const result = await invoke(CHANNELS.financeCall, task, 'open-source-locator', { fact_id: 'fact-a' });
+    expect(result).toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it('treats a template picker that returned no file as cancelled', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: [] });
+    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: { cancelled: true } });
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it('refreshes finance source files only from the native file picker', async () => {

@@ -1,0 +1,25 @@
+{
+  "template_id": "management-brief-v1",
+  "label": "经营简报",
+  "kind": "word",
+  "document": {
+    "schema_version": 1,
+    "template_version": "annual-v1",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": { "level": 1 },
+        "content": [{ "type": "text", "text": "经营简报" }]
+      },
+      {
+        "type": "heading",
+        "attrs": { "level": 2 },
+        "content": [{ "type": "text", "text": "管理摘要" }]
+      },
+      {
+        "type": "paragraph",
+        "content": [{ "type": "text", "text": "本期经营结论写在这里。" }]
+      }
+    ]
+  }
+}

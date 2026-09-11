@@ -8,7 +8,7 @@ import './analysis.css';
 import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
-import { ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
+import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -56,6 +56,7 @@ type Props = {
   onPick(id: string): void;
   onNew(question: string): void | Promise<string | void>;
   onChat(question?: string, draftId?: string, options?: AnalysisChatOptions): void | Promise<void>;
+  onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
@@ -97,7 +98,7 @@ function unwrap<T>(answer: Answer<T>): T {
 }
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
   const [tab, setTab] = useState<Tab>('datasets');
   const [question, setQuestionState] = useState(() => readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
@@ -371,7 +372,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} />
+          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
         </>}
         {view && tab === 'results' && <>
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
@@ -440,6 +441,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets}
+            onAppliedDraft={(next) => void perform(async (taskId) => { await refresh(taskId); if (next.id) setSelectedDraft(next.id); })}
+            onLocatorPreview={onLocatorPreview}
             versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
               triggerText={draft ? when(draft.created_at) : '选择文稿'}
               options={[...view.drafts].reverse().map((row) => ({
@@ -617,7 +620,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   </details>;
 }
 
-function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean }) {
+function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; contextId?: string }) {
   const xlsx = fileDatasets(datasets);
   const [datasetId, setDatasetId] = useState(xlsx[0]?.id ?? '');
   const [inspection, setInspection] = useState<Record<string, unknown> | null>(null);
@@ -651,7 +654,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
   }, [datasetId]);
   if (!xlsx.length) return null;
   const sourceSpec = () => sourceKind === 'range' ? { kind: 'range', sheet, range } : { kind: sourceKind, name: sourceName };
-  async function call(command: 'workbook-inspect' | 'workbook-bind' | 'workbook-read' | 'workbook-preview' | 'workbook-apply', spec: Record<string, unknown>) {
+  async function call(command: 'workbook-inspect' | 'workbook-bind' | 'workbook-read' | 'workbook-preview' | 'workbook-apply' | 'analysis-circle-select', spec: Record<string, unknown>) {
     const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持 Excel 协作。');
     return unwrap(await api.financeCall(taskId, command, spec));
   }
@@ -682,6 +685,14 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
       if (request !== workbookRequest.current) return;
       setBindingId(String(result.id ?? '')); setPreview(null); setResolutions({}); setMessage('已保存 Excel 区域绑定。');
     } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function circleSelect() {
+    try {
+      setError(''); setMessage('');
+      if (!contextId) throw new Error('请先保存财务口径。');
+      await call('analysis-circle-select', { kind: 'workbook', binding_id: bindingId, range: range || sourceName || 'A:A', instruction: '改成开票口径', context_id: contextId });
+      setMessage('已按圈选生成开票口径修订。');
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   async function read() {
     const request = ++workbookRequest.current;
@@ -748,6 +759,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy }: { taskId: string; datas
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
       <Button variant="outline" type="button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</Button>
+      <Button variant="outline" type="button" disabled={busy || !bindingId || !contextId} onClick={() => void circleSelect()}>改成开票口径</Button>
       <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</Button>
       <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</Button>
       <Button type="button" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</Button>
@@ -802,6 +814,153 @@ const agingStatusMapping = {
   collection_hold: ['暂停催收', 'hold', 'collection_hold'],
   written_off: ['核销', '已核销', 'written_off'],
 };
+
+type FinanceAdjustment = {
+  id: string;
+  label?: string;
+  include_in_management_pnl?: boolean;
+  note?: string;
+  amount?: string;
+  profit_impact?: string;
+  parent_id?: string | null;
+  /** The newer row that replaced this one. A superseded row, pending or confirmed, is history, not a choice. */
+  superseded_by?: string | null;
+};
+
+function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
+  taskId: string; contextId: string; busy: boolean; onRefresh(): Promise<void> | void;
+}) {
+  const [rows, setRows] = useState<FinanceAdjustment[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [pendingId, setPendingId] = useState('');
+  const [rerunning, setRerunning] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall || !contextId) return;
+    const listed = unwrap(await api.financeCall(taskId, 'finance-adjustment-list', { context_id: contextId }) as Answer<{ adjustments?: FinanceAdjustment[] }>);
+    const next = listed.adjustments ?? [];
+    setRows(next);
+    setSelected((current) => {
+      const nextSelected: Record<string, boolean> = {};
+      for (const row of next.filter((item) => item.include_in_management_pnl)) {
+        nextSelected[row.id] = current[row.id] !== false;
+      }
+      return nextSelected;
+    });
+  }, [taskId, contextId]);
+  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  const current = rows.filter((row) => !row.superseded_by);
+  const confirmed = current.filter((row) => row.include_in_management_pnl);
+  const pending = current.filter((row) => !row.include_in_management_pnl && !confirmed.some((item) => item.parent_id === row.id));
+  const locked = busy || Boolean(pendingId) || rerunning;
+  async function confirm(id: string) {
+    const api = bridge(); if (!api?.financeCall) return;
+    setPendingId(id); setError(''); setMessage('');
+    try {
+      unwrap(await api.financeCall(taskId, 'finance-adjustment-confirm', { id }));
+      setMessage('已确认纳入考核。');
+      await load();
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setPendingId('');
+    }
+  }
+  async function rerun() {
+    const api = bridge(); if (!api?.financeCall) return;
+    setRerunning(true); setError(''); setMessage('');
+    const ids = confirmed.filter((row) => selected[row.id] !== false).map((row) => row.id);
+    try {
+      unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' }, adjustment_ids: ids }));
+      setMessage(ids.length ? '已按勾选调整重算考核利润。' : '已无调整重跑账面利润。');
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setRerunning(false);
+    }
+  }
+  if (!contextId) return null;
+  return <aside className="analysis-details analysis-adjustment-panel" aria-label="考核调整">
+    <div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">确认后才会进入下一次管理损益。</span></div>
+    {pending.length ? <ul className="analysis-history-list">{pending.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
+      <span>{row.label || '调整'} · pending</span>
+      <Button type="button" disabled={locked} onClick={() => void confirm(row.id)}>{pendingId === row.id ? '确认中…' : '确认纳入'}</Button>
+    </li>)}</ul> : <p className="analysis-note">没有待确认的调整。</p>}
+    {confirmed.length ? <div className="analysis-fieldset analysis-adjustment-rerun" aria-label="重算">
+      <p className="analysis-note">重算</p>
+      {confirmed.map((row) => <label key={row.id}><input type="checkbox" checked={selected[row.id] !== false}
+        onChange={(event) => setSelected((value) => ({ ...value, [row.id]: event.target.checked }))} />{row.label || row.id}</label>)}
+      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? '重算中…' : '重算'}</Button>
+    </div> : null}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </aside>;
+}
+
+
+type FinanceChart = {
+  id: string;
+  label?: string;
+  run_id?: string;
+  content_hash?: string;
+  series?: { columns?: unknown[]; rows?: Record<string, unknown>[] };
+};
+
+function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
+  taskId: string; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void> | void;
+}) {
+  const [charts, setCharts] = useState<FinanceChart[]>([]);
+  const [opened, setOpened] = useState<FinanceChart | null>(null);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
+  const latest = [...runs].reverse().find((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall) return;
+    const listed = unwrap(await api.financeCall(taskId, 'chart-deliverable-list', {}) as Answer<{ charts?: FinanceChart[] }>);
+    setCharts(listed.charts ?? []);
+  }, [taskId]);
+  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  async function archive() {
+    const api = bridge(); if (!api?.financeCall || !latest) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      unwrap(await api.financeCall(taskId, 'chart-deliverable-save', { run_id: latest.id }));
+      setMessage('已归档当前结果图。');
+      await load();
+      await onRefresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setPending(false); }
+  }
+  async function open(id: string) {
+    const api = bridge(); if (!api?.financeCall) return;
+    setPending(true); setError(''); setMessage('');
+    try {
+      const record = unwrap(await api.financeCall(taskId, 'chart-deliverable-open', { id }) as Answer<FinanceChart>);
+      setOpened(record);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setPending(false); }
+  }
+  const rows = opened?.series?.rows ?? [];
+  const columns = rows[0] ? Object.keys(rows[0]) : [];
+  return <aside className="analysis-details analysis-chart-panel" aria-label="归档图">
+    <div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">绑定原 run，不重跑。</span></div>
+    <Button type="button" disabled={busy || pending || !latest} onClick={() => void archive()}>{pending ? '归档中…' : '归档当前结果图'}</Button>
+    {charts.length ? <ul className="analysis-history-list">{charts.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
+      <span>{row.label || row.id}</span>
+      <Button type="button" disabled={busy || pending} onClick={() => void open(row.id)}>打开</Button>
+    </li>)}</ul> : <p className="analysis-note">还没有归档图。</p>}
+    {opened && columns.length ? <table className="analysis-table"><thead><tr>{columns.map((name) => <th key={name}>{name}</th>)}</tr></thead>
+      <tbody>{rows.map((row, index) => <tr key={index}>{columns.map((name) => <td key={name}>{textValue(row[name])}</td>)}</tr>)}</tbody></table> : null}
+    {message && <p role="status" className="analysis-message">{message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </aside>;
+}
 
 function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void>;
@@ -960,7 +1119,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     }
   }
   const disabled = busy || !actual;
-  return <details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
+  return <><details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
     onToggle={(event) => setSetupOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary><div className="analysis-section-heading"><h3>财务业务口径</h3><span className="analysis-note">用已登记资料建立范围，结果仍保留 SQL 与脚本高级路径。</span></div></summary>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
@@ -1035,7 +1194,10 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     </details>
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </details>;
+  </details>
+  {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={busy} onRefresh={onRefresh} /> : null}
+  {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={busy} onRefresh={onRefresh} /> : null}
+  </>;
 }
 function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave, onChat }: {
   analysis: AnalysisRevision; datasets: DatasetSnapshot[]; busy: boolean;
@@ -1101,12 +1263,14 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker }: {
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
   versionPicker?: ReactNode;
+  onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
+  onAppliedDraft?(draft: AnalysisDraft): void;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
@@ -1125,6 +1289,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [recoveryError, setRecoveryError] = useState('');
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
+  const [locatorNotice, setLocatorNotice] = useState<Record<string, string>>({});
+  const [locatorPdf, setLocatorPdf] = useState<{ factId: string; dataUrl: string; page?: number } | null>(null);
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
   const [background, setBackground] = useState({ label: '', text: '', basis: 'professional_judgment', effective_from: '', effective_to: '', dataset_id: '', paragraph: '', source: '', retrieved_at: '' });
   const [backgroundScope, setBackgroundScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: '', unit: '' });
@@ -1267,6 +1433,60 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       if (request === factRequest.current) setFactDetails((value) => ({ ...value, [fact.id]: result }));
     } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
   }
+  async function openLocator(fact: ExplanationFact) {
+    const api = bridge();
+    const request = ++factRequest.current;
+    try {
+      setToolError('');
+      setLocatorNotice((value) => ({ ...value, [fact.id]: '' }));
+      setLocatorPdf(null);
+      if (!api?.sourceLocatorOpen) {
+        await openFact(fact);
+        return;
+      }
+      const located = unwrap(await api.sourceLocatorOpen(taskId, { fact_id: fact.id }));
+      if (request !== factRequest.current) return;
+      if (located.status === 'locator_forbidden') {
+        setLocatorNotice((value) => ({ ...value, [fact.id]: '无权打开' }));
+        return;
+      }
+      if (located.status === 'locator_unavailable') {
+        await openFact(fact);
+        return;
+      }
+      if (located.preview?.available === false) {
+        setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+        await openFact(fact);
+        return;
+      }
+      if (located.viewer === 'univer' && located.sha256 && located.task) {
+        onLocatorPreview?.({ task: located.task, sha256: located.sha256, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
+        return;
+      }
+      if (located.viewer === 'pdf') {
+        // A locator names a dataset, not a report source. The archived page
+        // is the report source whose bytes hash to the locator's source; a
+        // draft that imported no such file has no page to show.
+        const sourceHash = typeof located.locator?.source_hash === 'string' ? located.locator.source_hash : '';
+        const archived = sourceHash ? document?.sources?.find((item) => item.sha256 === sourceHash) : undefined;
+        if (!api.reportSource || !archived) {
+          setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+          await openFact(fact);
+          return;
+        }
+        const payload = unwrap(await api.reportSource(taskId, archived.id) as Answer<{ data_base64?: string }>);
+        if (!payload.data_base64) {
+          setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+          await openFact(fact);
+          return;
+        }
+        const page = typeof located.locator?.page === 'number' && Number.isInteger(located.locator.page) && located.locator.page > 0 ? located.locator.page : undefined;
+        setLocatorPdf({ factId: fact.id, dataUrl: `data:application/pdf;base64,${payload.data_base64}`, ...(page ? { page } : {}) });
+        return;
+      }
+      await openFact(fact);
+    } catch (failure) { if (request === factRequest.current) setToolError(locatorFailureText(failure)); }
+  }
   async function loadBackgrounds(request = ++backgroundRequest.current, scopeOverride?: Record<string, unknown>) {
     const api = bridge(); if (!api?.financeCall) return;
     try {
@@ -1338,18 +1558,19 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         onDiscuss={onDiscussRequirements} />
     </details>}
     </div>
-    <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} title={title} body={body} appendix={reading.appendix}
+    <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} draftId={draft?.id} contextId={contextId} title={title} body={body} appendix={reading.appendix}
       toolbarLabel={draft ? '文稿' : '写下判断与建议'}
       status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status}` : undefined}
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
       limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
-      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)} />
+      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)}
+      onAppliedDraft={onAppliedDraft} />
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} />}
+    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
@@ -1602,9 +1823,22 @@ function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: strin
   return Array.from(groups.values());
 }
 
-function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, busy, onRecheck, onOpenFact }: {
+/** Main answers a failed locator open with a code, not a sentence; the sentence is written here. */
+const LOCATOR_FAILURES: Record<string, string> = {
+  locator_forbidden: '无权打开',
+  locator_unavailable: '原文定位暂不可用',
+  preview_unavailable: '预览暂不可用',
+  locator_error: '原文定位失败',
+};
+
+function locatorFailureText(failure: unknown): string {
+  const message = failure instanceof Error ? failure.message : String(failure);
+  return LOCATOR_FAILURES[message] ?? message;
+}
+
+function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
   quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
-  factDetails: Record<string, FinanceDrilldown>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void;
+  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string; page?: number } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
   const issueGroups = groupedIssues(quality?.issues ?? []);
@@ -1638,7 +1872,10 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
         <p className="analysis-note">运行 {shortSha(fact.run_id)} · 第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
+        <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
+        {locatorNotice[fact.id] ? <p className="analysis-note" role="status">{locatorNotice[fact.id]}</p> : null}
+        {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} page={locatorPdf.page} /> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}

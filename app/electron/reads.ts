@@ -153,5 +153,14 @@ export async function deliverablePath(
   return found.trim();
 }
 
+export async function sourceLocatorPreviewFile(
+  binding: Binding,
+  spec: Record<string, unknown>,
+  env?: FoundryEnv,
+): Promise<string> {
+  const found = await runFoundry(binding, 'source-locator-preview-file', ['--spec', JSON.stringify(spec)], env);
+  return found.trim();
+}
+
 /** Every extension the store files a deliverable under. */
 const ARCHIVED_EXTS = new Set(['.md', '.xlsx']);
