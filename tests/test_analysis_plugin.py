@@ -185,6 +185,7 @@ const inputs = {
  'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},
  'explain_variance': {spec: {context_id: 'context-1'}},
  'drilldown_fact': {spec: {run_id: 'run-1', row: 0}},
+ 'open_source_locator': {spec: {run_id: 'run-1', row: 0, column: 'expense'}},
  'prepare_explanation': {spec: {run_ids: ['run-1'], materiality: {absolute: '10'}}},
  'validate_explanation': {spec: {body: '收入 {{fact:abc}}', run_ids: ['run-1'], fact_ids: ['abc']}},
  'save_explanation_draft': {spec: {body: '经理判断', claims: [{basis: 'professional_judgment', reason: '客户反馈'}]}},

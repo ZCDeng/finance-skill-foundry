@@ -85,6 +85,20 @@ def _xlsx_workbook(data: bytes) -> dict:
         archive.close()
 
 
+
+def _column_letter(cell) -> str:
+    coord = str(getattr(cell, "coordinate", "") or "")
+    letters = "".join(ch for ch in coord if ch.isalpha())
+    if letters:
+        return letters.upper()
+    column = getattr(cell, "column", None)
+    if isinstance(column, int) and column > 0:
+        from openpyxl.utils import get_column_letter
+
+        return get_column_letter(column)
+    return ""
+
+
 def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with _open_xlsx_archive(data) as archive:
@@ -131,19 +145,45 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
             rows = []
             source_row_numbers = []
             headers = None
+            header_columns = {}
             for number, cells in enumerate(sheet.iter_rows(), start=1):
                 if number > MAX_ROWS + 1:
                     raise FoundryError("dataset exceeds row limit")
-                values = [
-                    c.value
-                    if getattr(c, "is_date", False)
-                    else raw_cells.get(getattr(c, "coordinate", ""), c.value)
-                    for c in cells
-                ]
                 if headers is None:
-                    headers = [str(v).strip() if v is not None else "" for v in values]
-                elif any(v is not None for v in values):
-                    rows.append(dict(zip(headers, values)))
+                    ordered = []
+                    for cell in cells:
+                        raw = (
+                            cell.value
+                            if getattr(cell, "is_date", False)
+                            else raw_cells.get(getattr(cell, "coordinate", ""), cell.value)
+                        )
+                        name = str(raw).strip() if raw is not None else ""
+                        if not name:
+                            continue
+                        letter = _column_letter(cell)
+                        if not letter:
+                            continue
+                        ordered.append(name)
+                        header_columns[name] = letter
+                    headers = ordered
+                    continue
+                row = {name: None for name in headers}
+                nonempty = False
+                for cell in cells:
+                    raw = (
+                        cell.value
+                        if getattr(cell, "is_date", False)
+                        else raw_cells.get(getattr(cell, "coordinate", ""), cell.value)
+                    )
+                    letter = _column_letter(cell)
+                    name = next((key for key, col in header_columns.items() if col == letter), None)
+                    if name is None:
+                        continue
+                    if raw is not None:
+                        nonempty = True
+                    row[name] = raw
+                if nonempty:
+                    rows.append(row)
                     source_row_numbers.append(number)
             return (
                 headers or [],
@@ -154,6 +194,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                     "numeric_parser": "xlsx-original-xml-decimal",
                     "formulas": "cached-values-required",
                     "source_row_numbers": source_row_numbers,
+                    "header_columns": header_columns,
                 },
             )
         finally:

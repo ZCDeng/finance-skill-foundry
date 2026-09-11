@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -111,6 +111,13 @@ export const FINANCE_TOOLS = {
     method: { type: "string", enum: ["quantity_then_price", "base_weights_with_interaction"] }, field_map: { type: "object" }, actual_filters: { type: "object" }, baseline_filters: { type: "object" },
     negative_budget_policy: { type: "string", enum: ["absolute_baseline", "signed_baseline"] }, missing_groups_as_zero: { type: "boolean", description: "仅经理明确将缺失组按零处理时使用，资料缺失不能自行启用" },
   }, ["context_id"]),
+
+  open_source_locator: specTool("open-source-locator", "按 fact_id 或 run_id/row/column 打开已授权原文定位与预览句柄。只读；不得传入 dataset_id、本机路径或 URL。无定位返回 locator_unavailable，越权返回 locator_forbidden。返回不含路径。", {
+    fact_id: text("prepare_explanation 返回的事实 id"),
+    run_id: runId,
+    row: {type:"integer", minimum:0, description:"结果行下标，从0开始"},
+    column: text("结果列名，如 expense"),
+  }),
   drilldown_fact: specTool("drilldown-fact", "从当前任务真实 run 的结果行/列下钻到原始快照行。row 是所选 section 的下标（从0开始），section 可为 rows、detail_rows 或 excluded_detail_rows；返回精确 source_hash 和原始数据，不搜索其他账套或最新快照。余额资料无凭证链接；分页最多1000行。", {
     run_id: runId, section: { type: "string", enum: ["rows", "detail_rows", "excluded_detail_rows"] }, row: { type: "integer", minimum: 0 }, column: text("可选结果列"), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 1000 },
   }, ["run_id", "row"]),

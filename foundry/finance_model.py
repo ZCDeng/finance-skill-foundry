@@ -85,11 +85,13 @@ def normalize_finance_dataset(
         if not _in_scope(canonical, scope):
             continue
         source_status = _source_status(raw, canonical)
-        source_row = _source_row(canonical.get("source_row"), index)
+        source_row = _physical_source_row(dataset, canonical.get("source_row"), index)
+        locator = _row_locator(dataset, source_row)
         source_ref = {
             "dataset_id": str(dataset.get("id") or dataset.get("dataset_id") or ""),
             "row_index": index,
             "source_row": source_row,
+            **({"source_locator": locator} if locator else {}),
         }
         if _inactive_source_status(source_status):
             diagnostics.append(
@@ -149,6 +151,7 @@ def normalize_finance_dataset(
                 "dataset_id": str(dataset.get("id") or dataset.get("dataset_id") or ""),
                 "source_row": source_row,
                 "source": source_ref,
+                **({"source_locator": locator} if locator else {}),
                 "ledger": _text(canonical.get("ledger")),
                 "organization": _text(canonical.get("organization")),
                 "period": _text(canonical.get("period")),
@@ -559,6 +562,22 @@ def _convert_unit(
 def _debit_positive(amount: Decimal, dc_flag: str, account_direction: str) -> Decimal:
     direction = dc_flag or account_direction
     return -amount if direction == "credit" else amount
+
+
+
+def _physical_source_row(dataset: dict, declared: Any, index: int) -> int:
+    if declared not in (None, ""):
+        return _source_row(declared, index)
+    numbers = (dataset.get("transformation") or {}).get("source_row_numbers")
+    if isinstance(numbers, list) and 0 <= index - 1 < len(numbers):
+        return _source_row(numbers[index - 1], index)
+    return _source_row(declared, index)
+
+
+def _row_locator(dataset: dict, source_row: int) -> dict:
+    from foundry.finance_locators import build_source_locator
+
+    return build_source_locator(dataset, source_row)
 
 
 def _source_row(value: Any, index: int) -> int:

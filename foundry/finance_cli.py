@@ -22,6 +22,7 @@ OPERATIONS = {
     "run-metric": "run_metric",
     "explain-variance": "explain_variance",
     "drilldown-fact": "drilldown_fact",
+    "open-source-locator": "open_source_locator",
     "prepare-explanation": "prepare_explanation",
     "validate-explanation": "validate_explanation",
     "save-explanation-draft": "save_explanation_draft",

@@ -538,6 +538,11 @@ class FinanceStore:
             self.analysis._object_path("runs", record["id"]), record
         )
 
+    def open_source_locator(self, spec):
+        from foundry.finance_locators import open_source_locator as open_locator
+
+        return open_locator(self, spec)
+
     def drilldown_fact(self, spec):
         run = self.analysis.get_run(spec["run_id"])
         self._authorize(run["bindings"])
