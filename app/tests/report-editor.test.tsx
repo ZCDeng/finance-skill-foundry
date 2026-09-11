@@ -242,12 +242,35 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     fireEvent.change(screen.getByLabelText('报告公司'), { target: { value: '华宸物业' } });
     expect((handlers.onDocument.mock.calls.at(-1)?.[0] as ReportDocument).metadata.company).toBe('华宸物业');
 
-    fireEvent.click(screen.getByRole('button', { name: '插入经营分析模板' }));
+    fireEvent.click(screen.getByRole('button', { name: '插入空白提纲' }));
     const next = handlers.onDocument.mock.calls.at(-1)?.[0] as ReportDocument;
     expect(next.content.filter((node) => node.type === 'heading').map((node) => node.content?.[0]?.text)).toEqual([
       '报告信息', '管理摘要', '经营与预算分析', '现金流与周转', '风险及行动', '财务表格', '口径与证据附注',
     ]);
     expect(documentToMarkdown(next)).not.toContain('自动');
+  });
+
+  it('applies a listed company template as a new draft and does not keep the local outline entry', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'report-template-list') return success({ templates: [{ template_id: 'management-brief-v1', label: '经营简报', kind: 'word' }] });
+      if (command === 'report-template-apply') return success({
+        draft: {
+          id: 'n'.repeat(32),
+          title: '经营简报',
+          document: { schema_version: 1, template_version: 'annual-v1', template_id: 'management-brief-v1', metadata: { company: '', period: '2026-08', currency: 'CNY', unit: '万元' }, content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '经营简报' }] }] },
+        },
+      });
+      return success({});
+    });
+    const onAppliedDraft = vi.fn();
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall };
+    const handlers = mount({ body: '', document: { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [] }, onAppliedDraft });
+    fireEvent.click(screen.getByRole('button', { name: '套用公司模板' }));
+    await screen.findByRole('button', { name: '经营简报 · word' });
+    fireEvent.click(screen.getByRole('button', { name: '经营简报 · word' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(taskId, 'report-template-apply', { template_id: 'management-brief-v1' }));
+    expect(onAppliedDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'n'.repeat(32) }));
+    expect(handlers.onDocument).not.toHaveBeenCalled();
   });
 
   it('loads PDF comparison from decoded data and does not leak data URLs in errors', async () => {

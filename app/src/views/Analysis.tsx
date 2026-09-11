@@ -441,6 +441,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets}
+            onAppliedDraft={(next) => void perform(async (taskId) => { await refresh(taskId); if (next.id) setSelectedDraft(next.id); })}
             onLocatorPreview={onLocatorPreview}
             versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
               triggerText={draft ? when(draft.created_at) : '选择文稿'}
@@ -1187,13 +1188,14 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview }: {
+function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
   taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
   versionPicker?: ReactNode;
   onLocatorPreview?(preview: import('../bridge.js').PreviewSpec): void;
+  onAppliedDraft?(draft: AnalysisDraft): void;
 }) {
   const initialEditUnsaved = Boolean(draft && edit && draftEditDiffers(draft, edit));
   const [title, setTitle] = useState(edit?.title ?? draft?.title ?? '经营分析');
@@ -1465,7 +1467,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
       limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
-      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)} />
+      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)}
+      onAppliedDraft={onAppliedDraft} />
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>

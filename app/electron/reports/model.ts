@@ -12,7 +12,8 @@ export interface ReportNode {
 export interface ReportDocument {
   schema_version: 1;
   template_version: 'annual-v1';
-  metadata: { company: string; period: string; currency: string; unit: string };
+  template_id?: string;
+  metadata: { ledger?: string; organization?: string; company: string; period: string; currency: string; unit: string };
   content: ReportNode[];
   sources?: ReportSource[];
 }

@@ -115,7 +115,7 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
         raise FoundryError("report document metadata must be an object")
     clean_metadata = {
         key: _text(metadata.get(key, ""), f"report metadata {key}", maximum=300)
-        for key in ("company", "period", "currency", "unit")
+        for key in ("ledger", "organization", "company", "period", "currency", "unit")
     }
     sources = [validate_report_source(item) for item in document.get("sources", [])]
     if registered_source_ids is not None:
@@ -136,13 +136,18 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
             clean_content.append(normalized)
     if budget["text"] > MAX_DOCUMENT_TEXT:
         raise FoundryError("report document text exceeds 1 MiB limit")
-    return {
+    result = {
         "schema_version": 1,
         "template_version": REPORT_TEMPLATE_VERSION,
         "metadata": clean_metadata,
         "content": clean_content,
         **({"sources": sources} if sources else {}),
     }
+    template_id = document.get("template_id")
+    if template_id not in (None, ""):
+        from foundry.report_templates import assert_template_id
+        result["template_id"] = assert_template_id(template_id)
+    return result
 
 
 def _validate_node(
@@ -279,9 +284,27 @@ def _validate_mark(mark: Any) -> dict[str, Any]:
     return clean
 
 
-def _document_metadata_markdown(metadata: dict[str, Any]) -> str:
-    labels = (("company", "企业"), ("period", "期间"), ("currency", "币种"), ("unit", "单位"))
-    parts = [f"{label}：{str(metadata.get(key, '')).strip()}" for key, label in labels if str(metadata.get(key, '')).strip()]
+def _document_metadata_markdown(metadata: dict[str, Any], *, declare_missing: bool = False) -> str:
+    labels = (
+        ("ledger", "账套"),
+        ("organization", "组织"),
+        ("company", "企业"),
+        ("period", "期间"),
+        ("currency", "币种"),
+        ("unit", "单位"),
+    )
+    always = {"ledger", "organization", "period", "currency", "unit"}
+    has_any = any(str(metadata.get(key, "")).strip() for key, _label in labels)
+    if not has_any and not declare_missing:
+        return ""
+    parts = []
+    for key, label in labels:
+        value = str(metadata.get(key, "")).strip()
+        if not value:
+            if key not in always:
+                continue
+            value = "未声明"
+        parts.append(f"{label}：{value}")
     return "；".join(parts)
 
 
@@ -302,7 +325,7 @@ def report_document_markdown(document: dict[str, Any], *, title: str | None = No
     blocks: list[str] = []
     if title:
         blocks.append("# " + title.strip())
-    metadata_line = _document_metadata_markdown(clean["metadata"])
+    metadata_line = _document_metadata_markdown(clean["metadata"], declare_missing=bool(clean.get("template_id")))
     first_content_line = _paragraph_plain_text(clean["content"][0]) if clean["content"] else ""
     if metadata_line and first_content_line != metadata_line:
         blocks.append(metadata_line)
@@ -439,8 +462,8 @@ def _expanded_row_text(row: dict[str, Any]) -> list[str]:
 
 
 def _parse_document_metadata_line(text: str) -> dict[str, str] | None:
-    labels = {"企业": "company", "期间": "period", "币种": "currency", "单位": "unit"}
-    parsed = {"company": "", "period": "", "currency": "", "unit": ""}
+    labels = {"账套": "ledger", "组织": "organization", "企业": "company", "期间": "period", "币种": "currency", "单位": "unit"}
+    parsed = {"ledger": "", "organization": "", "company": "", "period": "", "currency": "", "unit": ""}
     found = False
     for part in text.split("；"):
         if "：" not in part:
@@ -449,7 +472,8 @@ def _parse_document_metadata_line(text: str) -> dict[str, str] | None:
         key = labels.get(label.strip())
         if not key:
             return None
-        parsed[key] = value.strip()
+        text_value = value.strip()
+        parsed[key] = "" if text_value == "未声明" else text_value
         found = True
     return parsed if found else None
 
@@ -484,8 +508,8 @@ def report_document_from_markdown_body(
     sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     nodes = report_nodes_from_markdown(markdown)
-    clean_metadata = {"company": "", "period": "", "currency": "", "unit": "", **(metadata or {})}
-    if nodes and not any(str(clean_metadata.get(key, "")).strip() for key in ("company", "period", "currency", "unit")):
+    clean_metadata = {"ledger": "", "organization": "", "company": "", "period": "", "currency": "", "unit": "", **(metadata or {})}
+    if nodes and not any(str(clean_metadata.get(key, "")).strip() for key in ("ledger", "organization", "company", "period", "currency", "unit")):
         parsed = _parse_document_metadata_line(_paragraph_plain_text(nodes[0]))
         if parsed:
             clean_metadata = parsed
@@ -645,6 +669,8 @@ def report_document_excel_rows(document: dict[str, Any], draft: dict[str, Any]) 
         ("发布状态", draft.get("publication_status", "")),
         ("复核状态", draft.get("review_status", "")),
         ("可复现性", draft.get("reproducibility_status", "")),
+        ("账套", clean["metadata"].get("ledger", "")),
+        ("组织", clean["metadata"].get("organization", "")),
         ("企业", clean["metadata"].get("company", "")),
         ("期间", clean["metadata"].get("period", "")),
         ("币种", clean["metadata"].get("currency", "")),
@@ -735,7 +761,7 @@ def report_document_from_xlsx(data: bytes, source: dict[str, Any], *, sheet: str
                 cells.append({"type": cell_type, "attrs": attrs, "content": [{"type": "paragraph", "content": [{"type": "text", "text": _display_value(value)}]}]})
             rows.append({"type": "tableRow", "content": cells})
         selected_range = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
-        metadata = {"company": "", "period": "", "currency": "", "unit": ""}
+        metadata = {"ledger": "", "organization": "", "company": "", "period": "", "currency": "", "unit": ""}
         content = [
             {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": source["name"]}]},
             {"type": "paragraph", "content": [{"type": "text", "text": f"来源：{source['name']}；工作表：{target_sheet}；区域：{selected_range}。"}]},

@@ -31,6 +31,9 @@ OPERATIONS = {
     "finance-adjustment-save": "finance_adjustment_save",
     "finance-adjustment-list": "finance_adjustment_list",
     "finance-adjustment-confirm": "finance_adjustment_confirm",
+    "report-template-list": "report_template_list",
+    "report-template-publish": "report_template_publish",
+    "report-template-apply": "report_template_apply",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }

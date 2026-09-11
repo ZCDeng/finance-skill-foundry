@@ -100,6 +100,7 @@ export interface Bridge {
   analysisOpenOutput?(task: string, runId: string, output: string): Promise<Answer<Record<string, unknown>>>;
   analysisState?(task: string): Promise<Answer<AnalysisState>>;
   analysisAddFiles?(task: string): Promise<Answer<DatasetSnapshot[]>>;
+  reportTemplatePublish?(task: string): Promise<Answer<{ template_id: string; label: string; kind: string }>>;
   analysisReadDataset?(task: string, id: string): Promise<Answer<Record<string, unknown>>>;
   analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
@@ -352,6 +353,8 @@ export type FinanceCommand =
   | 'finance-adjustment-save'
   | 'finance-adjustment-list'
   | 'finance-adjustment-confirm'
+  | 'report-template-list'
+  | 'report-template-apply'
   | 'workbook-inspect'
   | 'workbook-bind'
   | 'workbook-read'

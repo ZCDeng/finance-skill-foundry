@@ -75,7 +75,7 @@ def test_structured_report_document_projects_body_and_hashes_document(tmp_path: 
     store = _store(tmp_path)
     draft = store.save_draft({"title": "客户传来的标题", "body": "客户端旧正文", "document": _document()})
     assert "客户端旧正文" not in draft["body"]
-    assert "企业：华宸物业；期间：2026-08；币种：CNY；单位：万元" in draft["body"]
+    assert "账套：未声明；组织：未声明；企业：华宸物业；期间：2026-08；币种：CNY；单位：万元" in draft["body"]
     assert "利润超预算 5.00 万元。" in draft["body"]
     assert "表题：利润预算差异；期间：2026-08；币种：CNY；单位：万元" in draft["body"]
     assert "| 项目 | 金额 |" in draft["body"]
@@ -326,7 +326,7 @@ def test_xlsx_draft_export_includes_structured_chinese_report_sheets(tmp_path: P
     try:
         assert workbook.sheetnames[:6] == ["Report", "报告概览", "分段正文", "财务表格", "附注", "来源"]
         assert workbook["报告概览"]["A1"].value == "字段"
-        assert workbook["报告概览"]["B8"].value == "华宸物业"
+        assert workbook["报告概览"]["B10"].value == "华宸物业"
         assert workbook["分段正文"]["D2"].value == "管理摘要"
         assert workbook["财务表格"]["I2"].value == "利润预算差异"
         assert workbook["财务表格"]["K2"].value == "CNY"

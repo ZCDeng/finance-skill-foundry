@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from decimal import localcontext
 
-from foundry.analysis import AnalysisStore, _assert_id, _hash, _new, _safe_text
+from foundry.analysis import AnalysisStore, _assert_id, _hash, _hash_bytes, _new, _safe_text
 from foundry.errors import FoundryError
 from foundry.finance_explanations import (
     background_applies,
@@ -1078,6 +1078,128 @@ class FinanceStore:
                 if isinstance(value, dict):
                     return value
         return {}
+
+    def _template_root(self):
+        return self.analysis._inside(self.analysis.root / "report_templates")
+
+    def _published_templates(self):
+        root = self._template_root()
+        if not root.is_dir():
+            return []
+        records = []
+        for path in sorted(root.glob("*.json")):
+            record = self.analysis._read(path)
+            if (root / f"{record['id']}.bin").is_file():
+                records.append(record)
+        return records
+
+    def _template_record(self, template_id):
+        from foundry.report_templates import bundled_templates
+
+        for item in bundled_templates():
+            if item["template_id"] == template_id:
+                return {**item, "origin": "bundled"}
+        for record in self._published_templates():
+            if record.get("template_id") == template_id:
+                return record
+        raise FoundryError("unknown report template")
+
+    def report_template_list(self, spec):
+        from foundry.report_templates import bundled_templates, public_item
+
+        items = bundled_templates()
+        items.extend(public_item(record) for record in self._published_templates())
+        return {"templates": items}
+
+    def report_template_publish(self, spec):
+        from pathlib import Path
+        from foundry.report_templates import public_item, reject_pptx
+
+        if not isinstance(spec, dict):
+            raise FoundryError("template publish spec must be an object")
+        source = Path(spec.get("path", ""))
+        if not source.is_file() or source.is_symlink():
+            raise FoundryError("company template must be a regular file")
+        data = source.read_bytes()
+        kind = reject_pptx(source, data)
+        label = _safe_text(spec.get("label") or source.stem, "template label", required=True, maximum=300)
+        record = _new(
+            self.task,
+            domain="foundry.finance.report_templates.v1",
+            template_id="pending",
+            label=label,
+            kind=kind,
+            sha256=_hash_bytes(data),
+            bindings={},
+        )
+        record["template_id"] = record["id"]
+        root = self._template_root()
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{record['id']}.bin").write_bytes(data)
+        stored = self.analysis._write(root / f"{record['id']}.json", record)
+        return public_item(stored)
+
+    def report_template_apply(self, spec):
+        from pathlib import Path
+        from foundry.report_documents import validate_report_document
+        from foundry.report_templates import (
+            apply_excel_named_ranges,
+            bundled_document,
+            bundled_excel_bytes,
+            metadata_from_scope,
+        )
+
+        if not isinstance(spec, dict):
+            raise FoundryError("template apply spec must be an object")
+        template_id = spec.get("template_id")
+        record = self._template_record(template_id)
+        scope = spec.get("scope")
+        if spec.get("context_id"):
+            context = self._read("contexts", spec["context_id"])
+            scope = self._primary_scope(context.get("scopes")) or scope
+        metadata = metadata_from_scope(scope)
+        if record.get("kind") == "excel":
+            data = bundled_excel_bytes(template_id) if record.get("origin") == "bundled" else (
+                self._template_root() / f"{record['id']}.bin"
+            ).read_bytes()
+            applied = apply_excel_named_ranges(data, spec.get("values"))
+            from tempfile import NamedTemporaryFile
+            with NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
+                handle.write(applied)
+                path = handle.name
+            try:
+                source = self.analysis.add_report_source(path)
+            finally:
+                Path(path).unlink(missing_ok=True)
+            document = validate_report_document(
+                {
+                    "schema_version": 1,
+                    "template_version": "annual-v1",
+                    "template_id": template_id,
+                    "metadata": metadata,
+                    "sources": [source],
+                    "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": "已套用 Excel 公司模板。"}]}
+                    ],
+                },
+                registered_source_ids={source["id"]},
+            )
+        elif record.get("origin") == "bundled":
+            document = bundled_document(template_id)
+            document = {**document, "template_id": template_id, "metadata": {**document.get("metadata", {}), **metadata}}
+        else:
+            document = {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "template_id": template_id,
+                "metadata": metadata,
+                "content": [
+                    {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": record.get("label") or "本公司模板"}]},
+                    {"type": "paragraph", "content": [{"type": "text", "text": "已套用已发布公司模板。"}]},
+                ],
+            }
+        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
+        return {"draft": draft, "template_id": template_id, "kind": record.get("kind")}
 
 
 def _dedupe_explanation_claims(claims):

@@ -381,6 +381,7 @@ export function ReportEditor({
   onLimitations,
   onReview,
   onExport,
+  onAppliedDraft,
 }: {
   taskId: string;
   title: string;
@@ -402,9 +403,13 @@ export function ReportEditor({
   onLimitations(value: string): void;
   onReview(value: string): void;
   onExport(format: ExportFormat): void | Promise<void>;
+  onAppliedDraft?(draft: { id: string; title?: string; body?: string; document?: ReportDocument }): void;
 }) {
   const [localMode, setLocalMode] = useState<ReportMode>(initialMode);
   const mode = controlledMode ?? localMode;
+  const [templates, setTemplates] = useState<{ template_id: string; label: string; kind: string }[]>([]);
+  const [templateError, setTemplateError] = useState('');
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState(body);
   const [sourceBackup, setSourceBackup] = useState<{
@@ -603,6 +608,45 @@ export function ReportEditor({
       ]),
     });
   };
+
+  async function loadTemplates() {
+    const api = bridge();
+    if (!api?.financeCall) return;
+    setTemplateError('');
+    try {
+      const listed = unwrap(await api.financeCall(taskId, 'report-template-list', {}) as Answer<{ templates?: { template_id: string; label: string; kind: string }[] }>);
+      setTemplates(listed.templates ?? []);
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+
+  async function publishCompanyTemplate() {
+    const api = bridge();
+    if (!api?.reportTemplatePublish) throw new Error('此版本暂不支持发布公司模板。');
+    setTemplateError('');
+    try {
+      unwrap(await api.reportTemplatePublish(taskId));
+      await loadTemplates();
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+
+  async function applyCompanyTemplate(templateId: string) {
+    const api = bridge();
+    if (!api?.financeCall) throw new Error('此版本暂不支持套用公司模板。');
+    setTemplateError('');
+    try {
+      const applied = unwrap(await api.financeCall(taskId, 'report-template-apply', { template_id: templateId }) as Answer<{ draft?: { id: string; title?: string; body?: string; document?: ReportDocument } }>);
+      const draft = applied.draft;
+      if (!draft) throw new Error('套用公司模板没有返回新草稿。');
+      if (onAppliedDraft) onAppliedDraft(draft);
+      else if (draft.document) commitDocument({ ...draft.document, template_id: templateId });
+    } catch (failure) {
+      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
 
   const openSourceEditor = () => {
     setSourceBackup({ body, document });
@@ -1007,6 +1051,26 @@ export function ReportEditor({
                 <summary>报告信息</summary>
                 <div>
                   <label>
+                    账套
+                    <Input
+                      aria-label="报告账套"
+                      value={workingDocument.metadata.ledger ?? ""}
+                      onChange={(event) =>
+                        updateMetadata("ledger", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    组织
+                    <Input
+                      aria-label="报告组织"
+                      value={workingDocument.metadata.organization ?? ""}
+                      onChange={(event) =>
+                        updateMetadata("organization", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
                     公司
                     <Input
                       aria-label="报告公司"
@@ -1054,9 +1118,21 @@ export function ReportEditor({
                   type="button"
                   onClick={insertManagementTemplate}
                 >
-                  插入经营分析模板
+                  插入空白提纲
                 </Button>
               )}
+              <div className="analysis-actions">
+                <Button variant="outline" type="button" onClick={() => void publishCompanyTemplate()}>发布本公司模板</Button>
+                <Button variant="outline" type="button" onClick={() => { setTemplateOpen(true); void loadTemplates(); }}>套用公司模板</Button>
+              </div>
+              {templateOpen ? <div className="analysis-details" aria-label="已发布模板">
+                {templates.length ? templates.map((row) => (
+                  <Button key={row.template_id} variant="outline" type="button" onClick={() => void applyCompanyTemplate(row.template_id)}>
+                    {row.label} · {row.kind}
+                  </Button>
+                )) : <p className="analysis-note">暂无已发布模板</p>}
+                {templateError ? <p role="alert" className="analysis-message analysis-message--error">{templateError}</p> : null}
+              </div> : null}
               <div
                 className="report-editor-toolbar"
                 aria-label="文稿编辑工具栏"

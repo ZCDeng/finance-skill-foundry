@@ -19,6 +19,7 @@ export const CHANNELS = {
   analysisOpenOutput: 'analysis:open-output',
   analysisState: 'analysis:state',
   analysisAddFiles: 'analysis:add-files',
+  reportTemplatePublish: 'report-template:publish',
   analysisReadDataset: 'analysis:read-dataset',
   analysisSave: 'analysis:save',
   analysisRun: 'analysis:run',

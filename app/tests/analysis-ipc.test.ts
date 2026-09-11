@@ -87,6 +87,17 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
   });
 
+  it('publishes a company template from the native picker and never dataset-add', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/company.docx'] });
+    await invoke(CHANNELS.reportTemplatePublish, task, '/unselected/secret.pptx');
+    expect(JSON.parse(String(mocks.run.mock.calls[0][2][1])).path).toBe('/chosen/company.docx');
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['report-template-publish']);
+    expect(mocks.run.mock.calls.map((call) => call[1])).not.toContain('dataset-add');
+    mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/company.docx'] });
+    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: [] });
+  });
+
   it('registers a conversation before exposing it and does not create a legacy window', async () => {
     const events: string[] = [];
     const host = {

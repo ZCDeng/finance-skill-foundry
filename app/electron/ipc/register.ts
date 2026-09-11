@@ -249,6 +249,8 @@ export function registerIpc(
     'finance-adjustment-save',
     'finance-adjustment-list',
     'finance-adjustment-confirm',
+    'report-template-list',
+    'report-template-apply',
     'workbook-inspect',
     'workbook-bind',
     'workbook-read',
@@ -338,6 +340,17 @@ export function registerIpc(
       if (rows.length) await refreshRootAnalysisSession(task);
       if (failure) throw failure;
       return rows;
+    }));
+  ipcMain.handle(CHANNELS.reportTemplatePublish, (_e, rawTask: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const selected = await dialog.showOpenDialog({
+        title: '发布公司模板', properties: ['openFile'],
+        filters: [{ name: 'Word 或 Excel', extensions: ['docx', 'xlsx'] }],
+      });
+      if (selected.canceled) return [];
+      const file = selected.filePaths[0];
+      return analysisCall(task, 'report-template-publish', ['--spec', objectJson({ path: file, name: path.basename(file), label: path.parse(file).name })]);
     }));
 
   if (!panes) return;

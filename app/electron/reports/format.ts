@@ -1,6 +1,6 @@
 import type { ReportDocument, ReportMark, ReportNode } from './model.js';
 
-const EMPTY_METADATA = { company: '', period: '', currency: '', unit: '' };
+const EMPTY_METADATA = { ledger: '', organization: '', company: '', period: '', currency: '', unit: '' };
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
@@ -25,7 +25,7 @@ export function createReportDocument(content: ReportNode[] = []): ReportDocument
   return { schema_version: 1, template_version: 'annual-v1', metadata: { ...EMPTY_METADATA }, content };
 }
 
-const DOCUMENT_METADATA_LABELS = { company: '企业', period: '期间', currency: '币种', unit: '单位' } as const;
+const DOCUMENT_METADATA_LABELS = { ledger: '账套', organization: '组织', company: '企业', period: '期间', currency: '币种', unit: '单位' } as const;
 const TABLE_METADATA_LABELS = { caption: '表题', period: '期间', currency: '币种', unit: '单位' } as const;
 
 export function documentFromMarkdown(body: string): ReportDocument {
@@ -37,10 +37,13 @@ export function documentFromMarkdown(body: string): ReportDocument {
   if (firstContentIndex >= 0) {
     const parsedMetadata = parseProjectionLine(lines[firstContentIndex], DOCUMENT_METADATA_LABELS);
     if (parsedMetadata) {
-      metadata.company = parsedMetadata.company ?? '';
-      metadata.period = parsedMetadata.period ?? '';
-      metadata.currency = parsedMetadata.currency ?? '';
-      metadata.unit = parsedMetadata.unit ?? '';
+      const clean = (value?: string) => !value || value === '未声明' ? '' : value;
+      metadata.ledger = clean(parsedMetadata.ledger);
+      metadata.organization = clean(parsedMetadata.organization);
+      metadata.company = clean(parsedMetadata.company);
+      metadata.period = clean(parsedMetadata.period);
+      metadata.currency = clean(parsedMetadata.currency);
+      metadata.unit = clean(parsedMetadata.unit);
       i = firstContentIndex + 1;
     }
   }
@@ -176,7 +179,19 @@ ${body}
 }
 
 function documentMetadataMarkdown(doc: ReportDocument): string {
-  return projectionLine(doc.metadata ?? EMPTY_METADATA, DOCUMENT_METADATA_LABELS);
+  const metadata = { ...EMPTY_METADATA, ...(doc.metadata ?? {}) };
+  const hasAny = Object.values(metadata).some((value) => Boolean(attrText(value, 300)));
+  if (!hasAny && !doc.template_id) return '';
+  const declared = new Set(['ledger', 'organization', 'period', 'currency', 'unit']);
+  return Object.entries(DOCUMENT_METADATA_LABELS)
+    .map(([key, label]) => {
+      const value = attrText(metadata[key as keyof typeof metadata], 300);
+      if (value) return `${label}：${value}`;
+      if (declared.has(key)) return `${label}：未声明`;
+      return '';
+    })
+    .filter(Boolean)
+    .join('；');
 }
 
 function tableMetadataMarkdown(tableOrAttrs: ReportNode | ReportNode['attrs']): string {

@@ -1,0 +1,20 @@
+{
+  "template_id": "variance-note-v1",
+  "label": "差异说明",
+  "kind": "word",
+  "document": {
+    "schema_version": 1,
+    "template_version": "annual-v1",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": { "level": 1 },
+        "content": [{ "type": "text", "text": "差异说明" }]
+      },
+      {
+        "type": "paragraph",
+        "content": [{ "type": "text", "text": "预算差异与量价桥写在这里。" }]
+      }
+    ]
+  }
+}

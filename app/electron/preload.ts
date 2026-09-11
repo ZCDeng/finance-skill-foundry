@@ -23,6 +23,7 @@ const api = {
   analysisOpenOutput: (task: string, runId: string, output: string) => ipcRenderer.invoke('analysis:open-output', task, runId, output),
   analysisState: (task: string) => ipcRenderer.invoke('analysis:state', task),
   analysisAddFiles: (task: string) => ipcRenderer.invoke('analysis:add-files', task),
+  reportTemplatePublish: (task: string) => ipcRenderer.invoke('report-template:publish', task),
   analysisReadDataset: (task: string, id: string) => ipcRenderer.invoke('analysis:read-dataset', task, id),
   analysisSave: (task: string, spec: unknown) => ipcRenderer.invoke('analysis:save', task, spec),
   analysisRun: (task: string, id: string) => ipcRenderer.invoke('analysis:run', task, id),
