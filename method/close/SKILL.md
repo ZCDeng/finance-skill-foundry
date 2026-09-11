@@ -17,10 +17,11 @@ Do **not** refuse `run_metric` or the four method skills because this pack was n
 ## Suggested path
 
 1. Optionally call `finance_readiness` if scope or mapping is still unclear.
-2. Load `financial-statements` for management P&L and `control_totals`.
-3. Load `reconciliation` for tick-and-tie.
-4. Load `journal-entry` only for **drafts**. Foundry does not post.
-5. Load `variance-analysis` when the close question includes actual vs budget.
+2. If readiness is `blocked` with `reason=mapping_incomplete`, call `finance_map_save` before expecting `can_run` to include `management_pnl`.
+3. Load `financial-statements` for management P&L and `control_totals`.
+4. Load `reconciliation` for tick-and-tie.
+5. Load `journal-entry` only for **drafts**. Foundry does not post.
+6. Load `variance-analysis` when the close question includes actual vs budget.
 
 ## Standard output
 

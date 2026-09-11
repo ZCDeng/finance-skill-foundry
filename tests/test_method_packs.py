@@ -50,6 +50,8 @@ def test_cf11_setup_and_close_are_discoverable_first_level() -> None:
     close = (root / "close" / "SKILL.md").read_text(encoding="utf-8")
     assert "financial-statements" in close
     assert "run_metric" in close
+    assert "finance_map_save" in close
+    assert "mapping_incomplete" in close
 
 
 def test_cf14_missing_close_keeps_original_method_skills(tmp_path, monkeypatch) -> None:
