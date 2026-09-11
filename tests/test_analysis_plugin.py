@@ -179,6 +179,7 @@ const inputs = {
  'analysis-method-save': {analysis: 'analysis-1', name: '经营分析'},
  'analysis-method-apply': {method: 'method-1', bindings: {actual: 'snapshot-2'}, parameters: ['1.23'], question: '下一期'},
  'list_finance_context': {},
+ 'finance_readiness': {},
  'finance_context_save': {spec: {bindings: {actual: 'snapshot-1'}, scopes: {actual: {ledger: 'L1', currency: 'CNY', unit: '元'}}}},
  'finance_map_save': {spec: {rows: [{account_code: '001', management_account: 'revenue'}]}},
  'run_metric': {spec: {context_id: 'context-1', metric: {kind: 'management_pnl'}}},

@@ -126,6 +126,11 @@ class FinanceStore:
             ],
         }
 
+    def finance_readiness(self, spec=None):
+        from foundry.finance_readiness import build_readiness_report
+
+        return build_readiness_report(self, spec)
+
     def save_account_map(self, spec):
         if not isinstance(spec.get("rows"), list) or not all(
             isinstance(r, dict) for r in spec["rows"]

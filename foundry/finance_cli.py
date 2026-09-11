@@ -31,7 +31,12 @@ OPERATIONS = {
     "finance-scenario-run": "run_scenario",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
-LIST_COMMANDS = {"list-finance-context", "finance-source-list", "finance-completion-recoveries"}
+LIST_COMMANDS = {
+    "list-finance-context",
+    "finance-source-list",
+    "finance-completion-recoveries",
+    "finance-readiness",
+}
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh"}
 
@@ -120,6 +125,8 @@ def dispatch(args):
         raise FoundryError("completion call id requires an operation")
     elif args.cmd == "list-finance-context":
         result = service.list_finance_context()
+    elif args.cmd == "finance-readiness":
+        result = service.finance_readiness({})
     elif args.cmd == "finance-source-list":
         batches = SourceRefreshService(context.task).batches()
         if context.session_id:
