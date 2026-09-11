@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -141,4 +141,13 @@ export const FINANCE_TOOLS = {
   finance_background_list: specTool("finance-background-list", "列出当前授权且适用于 as_of/财务范围的业务背景。不会默认注入其他账套、过期背景或撤销授权后的资料。", {
     context_id: contextId, scope: financeScope, as_of: text("解释所处日期或期间"),
   }),
+  finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
+    context_id: contextId,
+  }, ["context_id"]),
+  report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
+  report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。不覆盖旧稿。发布模板仍由经理点选。", {
+    template_id: text("report_template_list 返回的 template_id"),
+    context_id: contextId,
+    scope: financeScope,
+  }, ["template_id"]),
 };

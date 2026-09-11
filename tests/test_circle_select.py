@@ -189,3 +189,42 @@ def test_cf31_workbook_binding_circle_select_copies_parent_bindings(tmp_path: Pa
                 "context_id": outsider["id"],
             }
         )
+
+
+def test_uncaptioned_zero_block_is_unauthorized(tmp_path: Path) -> None:
+    service, context, _dataset, _original = _service(tmp_path)
+    draft = service.analysis.save_draft(
+        {
+            "title": "经营简报",
+            "document": {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "content": [
+                    {
+                        "type": "table",
+                        "attrs": {"caption": "第一张"},
+                        "content": [
+                            {"type": "tableRow", "content": [{"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "A"}]}]}]}
+                        ],
+                    },
+                    {
+                        "type": "table",
+                        "content": [
+                            {"type": "tableRow", "content": [{"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "B"}]}]}]}
+                        ],
+                    },
+                ],
+            },
+        }
+    )
+    with pytest.raises(FoundryError, match="unauthorized"):
+        service.analysis_circle_select(
+            {
+                "kind": "draft_table",
+                "draft_id": draft["id"],
+                "block_id": "0",
+                "range": "selection",
+                "instruction": "改成开票口径",
+                "context_id": context["id"],
+            }
+        )

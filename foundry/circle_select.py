@@ -41,11 +41,12 @@ def match_draft_table(draft: dict, spec: dict) -> dict:
     document = draft.get("document") or {}
     tables = tables_in(document.get("content") or [])
     block_id = spec.get("block_id")
-    if block_id is None and spec.get("range") and tables:
-        return tables[0]
-    for index, table in enumerate(tables):
+    if not isinstance(block_id, str) or not block_id.strip():
+        raise FoundryError("unauthorized selection")
+    wanted = block_id.strip()
+    for table in tables:
         attrs = table.get("attrs") or {}
-        if str(block_id) in {str(attrs.get("caption") or ""), str(attrs.get("id") or ""), str(index)}:
+        if wanted in {str(attrs.get("caption") or ""), str(attrs.get("id") or "")}:
             return table
     raise FoundryError("unauthorized selection")
 

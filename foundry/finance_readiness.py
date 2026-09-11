@@ -107,6 +107,8 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
             }
         )
         diagnostics.append(_diag("error", "missing_scope", "period or currency is not declared"))
+    elif any(_pnl_sheet_ready(store, probe) for probe in probes):
+        can_run.append("management_pnl")
     elif not mapping_complete:
         blocked.append(
             {
@@ -118,8 +120,17 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
         diagnostics.append(
             _diag("error", "mapping_incomplete", "management accounts are not fully mapped")
         )
-    elif has_rows:
-        can_run.append("management_pnl")
+    else:
+        blocked.append(
+            {
+                "capability": "management_pnl",
+                "missing_fields": ["management_account"],
+                "reason": "mapping_incomplete",
+            }
+        )
+        diagnostics.append(
+            _diag("error", "mapping_incomplete", "management accounts are not fully mapped on one sheet")
+        )
 
     if missing_scope:
         blocked.append(
@@ -217,7 +228,7 @@ def _workbook_probes(
         headers = _headers_of(parsed, rows)
         probe = _probe(headers, rows, sheet=name)
         probes.append(probe)
-        sheet_candidates.append({"sheet": name, "mappable": _sheet_mappable(probe)})
+        sheet_candidates.append({"sheet": name, "mappable": _pnl_sheet_ready(store, probe)})
     if not probes:
         probes.append(_probe([], [], sheet=""))
     return probes
@@ -304,12 +315,11 @@ def _period_from_title(title: str) -> str:
 
 def _currency_from_title(title: str) -> str:
     match = _CURRENCY_IN_TITLE.search(title)
-    if not match:
-        return ""
-    token = match.group(1)
-    if token == "人民币":
-        return ""
-    return token
+    if match:
+        return match.group(1)
+    if "人民币" in title:
+        return "人民币"
+    return ""
 
 
 def _declared_values(rows: list[dict], fmap: dict, canonical: str) -> list[str]:
@@ -361,6 +371,28 @@ def _management_accounts(store, probes: list[dict[str, Any]]) -> set[str]:
             if code in codes and account:
                 accounts.add(account)
     return accounts
+
+
+def _accounts_for_probe(store, probe: dict[str, Any]) -> set[str]:
+    accounts = {value for value in (probe.get("management_accounts") or ()) if value}
+    codes = {value for value in (probe.get("account_codes") or ()) if value}
+    for record in store._list("account_maps"):
+        for item in record.get("rows") or []:
+            code = str(item.get("account_code") or "").strip()
+            account = str(item.get("management_account") or "").strip()
+            if code in codes and account:
+                accounts.add(account)
+    return accounts
+
+
+def _pnl_sheet_ready(store, probe: dict[str, Any]) -> bool:
+    if not probe.get("rows"):
+        return False
+    return bool(
+        probe.get("period")
+        and probe.get("currency")
+        and PNL_ACCOUNTS <= _accounts_for_probe(store, probe)
+    )
 
 
 def _sheet_mappable(probe: dict[str, Any]) -> bool:

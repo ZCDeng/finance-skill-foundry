@@ -224,3 +224,43 @@ def test_narrow_session_cannot_list_wide_adjustment(tmp_path):
     narrow = FinanceStore(service.task, snapshot_ids=set())
     listed = narrow.finance_adjustment_list({"context_id": context["id"]})
     assert listed["adjustments"] == []
+
+
+def test_hq_impact_applies_once_across_identity_rows():
+    from foundry.finance_adjustments import apply_to_metric
+
+    result = apply_to_metric(
+        {
+            "columns": ["organization", "profit"],
+            "rows": [
+                {"organization": "华东", "profit": "30", "period": "2026-08"},
+                {"organization": "华南", "profit": "30", "period": "2026-08"},
+            ],
+        },
+        [{"id": "adj-1", "profit_impact": "5", "effective_period": "2026-08"}],
+    )
+    rows = result["rows"]
+    by_org = {row.get("organization"): row for row in rows if row.get("organization")}
+    assert Decimal(str(by_org["华东"]["adjusted_total"])) == Decimal("30")
+    assert Decimal(str(by_org["华南"]["adjusted_total"])) == Decimal("30")
+    totals = [row for row in rows if not row.get("organization")]
+    assert len(totals) == 1
+    assert Decimal(str(totals[0]["adjusted_total"])) == Decimal("65")
+
+
+def test_adjustment_save_rejects_caller_bindings_not_on_context(tmp_path):
+    service, context, dataset = _finance(tmp_path)
+    extra = service.analysis.add_dataset(_write_csv(tmp_path / "other.csv", _g1_rows()[:3]), name="extra")
+    with pytest.raises(FoundryError, match="bindings"):
+        service.finance_adjustment_save(
+            _hq_spec(context["id"], dataset["id"], bindings={"actual": dataset["id"], "other": extra["id"]})
+        )
+    with pytest.raises(FoundryError, match="path|locator"):
+        service.finance_adjustment_save(
+            _hq_spec(
+                context["id"],
+                dataset["id"],
+                basis="source_fact",
+                locator={"dataset_id": dataset["id"], "path": "/tmp/secret.xlsx"},
+            )
+        )

@@ -165,6 +165,8 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                             continue
                         ordered.append(name)
                         header_columns[name] = letter
+                    if not ordered:
+                        continue
                     headers = ordered
                     continue
                 row = {name: None for name in headers}

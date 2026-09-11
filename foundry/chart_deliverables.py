@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from foundry.analysis import _hash, _safe_text
@@ -27,7 +28,7 @@ def reject_forbidden_spec(spec: dict) -> None:
     extra = FORBIDDEN_KEYS.intersection(spec)
     if extra:
         raise FoundryError("chart deliverable cannot take a path, preview handle, or dataset_id")
-    blob = _hash(spec)
+    blob = json.dumps(spec, ensure_ascii=False)
     if any(marker in blob for marker in SCRATCH_MARKERS):
         raise FoundryError("locator scratch cannot be registered as a chart")
 
@@ -61,11 +62,7 @@ def normalize_chart(spec: dict, *, run: dict) -> dict[str, Any]:
         raise FoundryError("chart bindings are required")
     if spec.get("bindings") and spec["bindings"] != bindings:
         raise FoundryError("chart bindings must match the bound run")
-    series = spec.get("series")
-    if series is None:
-        series = series_from_run(run)
-    elif not isinstance(series, dict):
-        raise FoundryError("chart series must be an object")
+    series = series_from_run(run)
     hashes = snapshot_hashes_from_run(run)
     filters = spec.get("filters") if isinstance(spec.get("filters"), dict) else (run.get("finance_spec") or {}).get("filters") or {}
     assumptions = spec.get("assumptions") if isinstance(spec.get("assumptions"), list) else run.get("assumptions") or []

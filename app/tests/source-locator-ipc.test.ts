@@ -98,7 +98,8 @@ describe('source-locator dedicated IPC', () => {
     expect(result.value.status).toBe('ok');
     expect(result.value.viewer).toBe('univer');
     expect(result.value.preview.handle).toBe('d'.repeat(64));
-    expect(result.value.origin).toBe('http://127.0.0.1:9081');
+    expect(result.value.origin).toBeUndefined();
+    expect(JSON.stringify(result.value)).not.toContain('127.0.0.1');
   });
 
   it('does not open Univer when the locator is unavailable, forbidden, or has no archived page', async () => {

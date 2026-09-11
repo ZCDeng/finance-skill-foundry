@@ -352,7 +352,7 @@ export function registerIpc(
         title: '发布公司模板', properties: ['openFile'],
         filters: [{ name: 'Word 或 Excel', extensions: ['docx', 'xlsx'] }],
       });
-      if (selected.canceled) return [];
+      if (selected.canceled) return { cancelled: true };
       const file = selected.filePaths[0];
       return analysisCall(task, 'report-template-publish', ['--spec', objectJson({ path: file, name: path.basename(file), label: path.parse(file).name })]);
     }));
@@ -531,7 +531,6 @@ export function registerIpc(
           viewer: 'univer',
           task: opened.task,
           sha256: opened.sha256,
-          origin: opened.origin,
         };
       }),
   );

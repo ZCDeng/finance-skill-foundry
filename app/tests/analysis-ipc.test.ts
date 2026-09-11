@@ -95,7 +95,7 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['report-template-publish']);
     expect(mocks.run.mock.calls.map((call) => call[1])).not.toContain('dataset-add');
     mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/company.docx'] });
-    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: [] });
+    expect(await invoke(CHANNELS.reportTemplatePublish, task)).toEqual({ ok: true, value: { cancelled: true } });
   });
 
   it('registers a conversation before exposing it and does not create a legacy window', async () => {

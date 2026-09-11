@@ -176,7 +176,7 @@ def _authorized_payload(store, run: dict, locator: dict) -> dict[str, Any]:
 def _sanitize_locator(locator: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for key, value in locator.items():
-        if key in {"path", "url", "file", "allowedRoot"}:
+        if key in {"path", "url", "file", "allowedRoot", "preview_path", "preview_digest"}:
             continue
         if isinstance(value, str) and any(marker in value for marker in PATH_MARKERS):
             continue

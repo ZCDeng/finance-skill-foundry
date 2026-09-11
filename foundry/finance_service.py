@@ -989,13 +989,12 @@ class FinanceStore:
         context = self._read("contexts", spec["context_id"]) if spec.get("context_id") else None
         if context is None:
             raise FoundryError("finance adjustment spec requires context_id")
-        bindings = spec.get("bindings")
-        if bindings is None:
-            bindings = context["bindings"]
+        if spec.get("bindings") is not None and spec.get("bindings") != context.get("bindings"):
+            raise FoundryError("adjustment bindings must match the finance context")
+        bindings = context["bindings"]
         if not isinstance(bindings, dict) or not bindings:
             raise FoundryError("adjustment bindings are required")
         self._authorize(bindings)
-        self._authorize(context["bindings"])
         fields = normalize_adjustment(spec, context=context, bindings=bindings)
         reject_overlapping_save(fields, [row for row in self._list("adjustments") if row.get("context_id") == context["id"]])
         return self._write("adjustments", **fields)
@@ -1141,10 +1140,22 @@ class FinanceStore:
         stored = self.analysis._write(root / f"{record['id']}.json", record)
         return public_item(stored)
 
-    def report_template_apply(self, spec):
+    def _report_source_from_bytes(self, data: bytes, suffix: str) -> dict:
         from pathlib import Path
+        from tempfile import NamedTemporaryFile
+
+        with NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(data)
+            path = handle.name
+        try:
+            return self.analysis.add_report_source(path)["source"]
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def report_template_apply(self, spec):
         from foundry.report_documents import validate_report_document
         from foundry.report_templates import (
+            G1_EXCEL_VALUES,
             apply_excel_named_ranges,
             bundled_document,
             bundled_excel_bytes,
@@ -1164,15 +1175,11 @@ class FinanceStore:
             data = bundled_excel_bytes(template_id) if record.get("origin") == "bundled" else (
                 self._template_root() / f"{record['id']}.bin"
             ).read_bytes()
-            applied = apply_excel_named_ranges(data, spec.get("values"))
-            from tempfile import NamedTemporaryFile
-            with NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
-                handle.write(applied)
-                path = handle.name
-            try:
-                source = self.analysis.add_report_source(path)
-            finally:
-                Path(path).unlink(missing_ok=True)
+            values = spec.get("values")
+            if values is None and record.get("origin") == "bundled" and template_id == "management-brief-xlsx-v1":
+                values = G1_EXCEL_VALUES
+            applied = apply_excel_named_ranges(data, values) if values else data
+            source = self._report_source_from_bytes(applied, ".xlsx")
             document = validate_report_document(
                 {
                     "schema_version": 1,
@@ -1190,16 +1197,24 @@ class FinanceStore:
             document = bundled_document(template_id)
             document = {**document, "template_id": template_id, "metadata": {**document.get("metadata", {}), **metadata}}
         else:
-            document = {
-                "schema_version": 1,
-                "template_version": "annual-v1",
-                "template_id": template_id,
-                "metadata": metadata,
-                "content": [
-                    {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": record.get("label") or "本公司模板"}]},
-                    {"type": "paragraph", "content": [{"type": "text", "text": "已套用已发布公司模板。"}]},
-                ],
-            }
+            source = self._report_source_from_bytes(
+                (self._template_root() / f"{record['id']}.bin").read_bytes(),
+                ".docx",
+            )
+            document = validate_report_document(
+                {
+                    "schema_version": 1,
+                    "template_version": "annual-v1",
+                    "template_id": template_id,
+                    "metadata": metadata,
+                    "sources": [source],
+                    "content": [
+                        {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": record.get("label") or "本公司模板"}]},
+                        {"type": "paragraph", "content": [{"type": "text", "text": "已套用已发布公司模板。"}]},
+                    ],
+                },
+                registered_source_ids={source["id"]},
+            )
         draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
         return {"draft": draft, "template_id": template_id, "kind": record.get("kind")}
 

@@ -148,3 +148,35 @@ def _minimal_docx() -> bytes:
         archive.writestr("[Content_Types].xml", "<Types></Types>")
         archive.writestr("word/document.xml", "<w:document></w:document>")
     return buffer.getvalue()
+
+
+def test_published_word_apply_cites_snapshot_bytes(tmp_path: Path) -> None:
+    service, _task = _finance(tmp_path)
+    source = tmp_path / "company.docx"
+    source.write_bytes(_minimal_docx())
+    published = service.report_template_publish({"path": str(source), "label": "本公司简报"})
+    applied = service.report_template_apply({"template_id": published["template_id"], "scope": SCOPE})
+    document = applied["draft"]["document"]
+    sources = document.get("sources") or []
+    assert sources
+    assert sources[0]["format"] == "docx"
+    assert "已套用已发布公司模板" in applied["draft"]["body"]
+    assert "账套：service-co" in applied["draft"]["body"]
+
+
+def test_excel_apply_unwraps_report_source_and_keeps_published_amounts(tmp_path: Path) -> None:
+    service, _task = _finance(tmp_path)
+    bundled = service.report_template_apply({"template_id": "management-brief-xlsx-v1", "scope": SCOPE})
+    assert bundled["draft"]["document"]["sources"]
+    published_path = tmp_path / "company.xlsx"
+    published_path.write_bytes(excel_brief_template_bytes())
+    published = service.report_template_publish({"path": str(published_path), "label": "本公司Excel"})
+    applied = service.report_template_apply({"template_id": published["template_id"], "scope": SCOPE})
+    source_id = applied["draft"]["document"]["sources"][0]["id"]
+    from openpyxl import load_workbook
+    record = service.analysis._read(service.analysis.root / "report_sources" / (source_id + ".json"))
+    data = (service.analysis.root / "report_sources" / record["id"] / record["source_file"]).read_bytes()
+    workbook = load_workbook(io.BytesIO(data))
+    sheet = workbook.active
+    assert sheet["B2"].value in (0, 0.0, None)
+    workbook.close()

@@ -179,3 +179,51 @@ def test_cf05_identity_policy_follows_document_line_keys(tmp_path):
     analysis.add_dataset(_write_csv(tmp_path / "balance.csv", rows, fieldnames=names), name="balance")
     balance_report = store.finance_readiness({})
     assert balance_report["file_identity_policy"] == "snapshot_only"
+
+
+def test_cf03c_renminbi_title_can_run(tmp_path):
+    path = tmp_path / "kingdee.csv"
+    path.write_text(
+        "科目名称,管理科目,金额,期间\n金蝶 币种：人民币 2026年08月,revenue,120,2026-08\n金蝶,cost,70,2026-08\n金蝶,expense,20,2026-08\n",
+        encoding="utf-8",
+    )
+    task, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="kingdee-rmb")
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["currency"] == "人民币"
+    assert "management_pnl" in report["can_run"]
+    assert not any(row.get("reason") == "identity_failed" for row in report["blocked"])
+
+
+def test_cf03_split_sheets_do_not_can_run(tmp_path):
+    book = Workbook()
+    income = book.active
+    income.title = "收入"
+    income.append(["period", "currency", "unit", "management_account", "amount"])
+    income.append(["2026-08", "CNY", "万元", "revenue", 120])
+    income.append(["2026-08", "CNY", "万元", "cost", 70])
+    expense = book.create_sheet("费用")
+    expense.append(["period", "currency", "unit", "management_account", "amount"])
+    expense.append(["2026-08", "CNY", "万元", "expense", 20])
+    path = tmp_path / "split.xlsx"
+    book.save(path)
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="split-sheet")
+    report = store.finance_readiness({})
+    assert "management_pnl" not in report["can_run"]
+
+
+def test_blank_first_xlsx_row_still_reads_headers(tmp_path):
+    book = Workbook()
+    sheet = book.active
+    sheet.append([None, None, None, None, None])
+    sheet.append(["period", "currency", "unit", "management_account", "amount"])
+    sheet.append(["2026-08", "CNY", "万元", "revenue", 120])
+    sheet.append(["2026-08", "CNY", "万元", "cost", 70])
+    sheet.append(["2026-08", "CNY", "万元", "expense", 20])
+    path = tmp_path / "blank-header.xlsx"
+    book.save(path)
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="blank-first")
+    report = store.finance_readiness({})
+    assert "management_pnl" in report["can_run"]

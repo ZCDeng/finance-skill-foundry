@@ -8,7 +8,7 @@ import './analysis.css';
 import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
-import { ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
+import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -372,7 +372,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={view.runs.find((run) => run.finance_context_id)?.finance_context_id} />
+          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
         </>}
         {view && tab === 'results' && <>
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
@@ -848,8 +848,8 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     });
   }, [taskId, contextId]);
   useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
-  const pending = rows.filter((row) => !row.include_in_management_pnl);
   const confirmed = rows.filter((row) => row.include_in_management_pnl);
+  const pending = rows.filter((row) => !row.include_in_management_pnl && !confirmed.some((item) => item.parent_id === row.id));
   const locked = busy || Boolean(pendingId) || rerunning;
   async function confirm(id: string) {
     const api = bridge(); if (!api?.financeCall) return;
@@ -1287,6 +1287,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const [facts, setFacts] = useState<ExplanationFact[]>([]);
   const [factDetails, setFactDetails] = useState<Record<string, FinanceDrilldown>>({});
   const [locatorNotice, setLocatorNotice] = useState<Record<string, string>>({});
+  const [locatorPdf, setLocatorPdf] = useState<{ factId: string; dataUrl: string } | null>(null);
   const [backgrounds, setBackgrounds] = useState<FinanceBackground[]>([]);
   const [background, setBackground] = useState({ label: '', text: '', basis: 'professional_judgment', effective_from: '', effective_to: '', dataset_id: '', paragraph: '', source: '', retrieved_at: '' });
   const [backgroundScope, setBackgroundScope] = useState<Record<string, string>>({ ledger: '', organization: '', period: '', currency: '', unit: '' });
@@ -1435,6 +1436,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     try {
       setToolError('');
       setLocatorNotice((value) => ({ ...value, [fact.id]: '' }));
+      setLocatorPdf(null);
       if (!api?.sourceLocatorOpen) {
         await openFact(fact);
         return;
@@ -1454,11 +1456,32 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         await openFact(fact);
         return;
       }
-      if (located.viewer === 'univer' && located.origin && located.sha256 && located.task) {
-        onLocatorPreview?.({ task: located.task, sha256: located.sha256, origin: located.origin, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
-      } else {
-        await openFact(fact);
+      if (located.viewer === 'univer' && located.sha256 && located.task) {
+        let origin = typeof located.origin === 'string' ? located.origin : '';
+        if (!origin && api.previewStatus) {
+          const status = unwrap(await api.previewStatus() as Answer<{ running?: { origin?: string } | null }>);
+          origin = status.running?.origin ?? '';
+        }
+        onLocatorPreview?.({ task: located.task, sha256: located.sha256, origin, excel_range: typeof located.locator?.excel_range === 'string' ? located.locator.excel_range : undefined });
+        return;
       }
+      if (located.viewer === 'pdf') {
+        const sourceId = typeof located.locator?.dataset_id === 'string' ? located.locator.dataset_id : '';
+        if (!api.reportSource || !sourceId) {
+          setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+          await openFact(fact);
+          return;
+        }
+        const payload = unwrap(await api.reportSource(taskId, sourceId) as Answer<{ data_base64?: string }>);
+        if (!payload.data_base64) {
+          setLocatorNotice((value) => ({ ...value, [fact.id]: '该页未归档' }));
+          await openFact(fact);
+          return;
+        }
+        setLocatorPdf({ factId: fact.id, dataUrl: `data:application/pdf;base64,${payload.data_base64}` });
+        return;
+      }
+      await openFact(fact);
     } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
   }
   async function loadBackgrounds(request = ++backgroundRequest.current, scopeOverride?: Record<string, unknown>) {
@@ -1544,7 +1567,7 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
+    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
@@ -1797,9 +1820,9 @@ function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: strin
   return Array.from(groups.values());
 }
 
-function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, busy, onRecheck, onOpenFact, onOpenLocator }: {
+function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
   quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
-  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
+  factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
   const issueGroups = groupedIssues(quality?.issues ?? []);
@@ -1836,6 +1859,7 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
         <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
         {locatorNotice[fact.id] ? <p className="analysis-note" role="status">{locatorNotice[fact.id]}</p> : null}
+        {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} /> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}

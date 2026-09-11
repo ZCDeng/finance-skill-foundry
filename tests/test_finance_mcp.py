@@ -222,7 +222,9 @@ def test_stdio_mcp_tool_flow_matches_direct_finance_service(tmp_path: Path, titl
             "finance_readiness",
             "open_source_locator",
             "finance_adjustment_save",
+            "finance_adjustment_list",
             "report_template_list",
+            "report_template_apply",
         } & set(by_name)
         assert by_name["run_metric"]["inputSchema"]["required"] == ["context_id", "metric"]
         assert by_name["run_metric"]["inputSchema"]["properties"]["metric"]["required"] == ["kind"]

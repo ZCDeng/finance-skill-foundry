@@ -27,6 +27,12 @@ def normalize_adjustment(spec: dict, *, context: dict, bindings: dict) -> dict:
     if basis == "source_fact" and not locator:
         raise FoundryError("source_fact adjustments require an authorized locator")
     if locator:
+        from foundry.finance_locators import _sanitize_locator
+
+        extra = {"path", "url", "file", "allowedRoot", "preview_path", "preview_digest"} & set(locator)
+        if extra:
+            raise FoundryError("adjustment locator cannot take a path or preview handle")
+        locator = _sanitize_locator(dict(locator))
         dataset_id = locator.get("dataset_id")
         if dataset_id not in bindings.values():
             raise FoundryError("adjustment locator is outside authorized snapshots")
@@ -99,19 +105,52 @@ def apply_to_metric(result: dict, adjustments: list[dict]) -> dict:
     for name in ("source_total", "adjusted_total"):
         if name not in columns:
             columns.append(name)
+    ids = [item["id"] for item in adjustments]
+    periods = {str(row.get("effective_period") or "") for row in adjustments}
+    period = next(iter(periods)) if len(periods) == 1 else ""
+
+    def source_of(row: dict) -> Decimal:
+        return _dec(row.get("profit") or row.get("source_total") or "0")
+
+    def matches_period(row: dict) -> bool:
+        row_period = str(row.get("period") or "").strip()
+        return not (period and row_period and row_period != period)
+
+    raw_rows = list(result.get("rows") or [])
+    matching = [row for row in raw_rows if isinstance(row, dict) and matches_period(row)]
+    target = None
+    if len(matching) == 1:
+        target = matching[0]
+    elif len(matching) > 1:
+        untitled = [row for row in matching if not str(row.get("organization") or "").strip()]
+        if untitled:
+            target = untitled[0]
+
     rows = []
-    for row in result.get("rows") or []:
+    for row in raw_rows:
         if not isinstance(row, dict):
             rows.append(row)
             continue
-        source = _dec(row.get("profit") or row.get("source_total") or "0")
-        updated = {
-            **row,
-            "source_total": _money(source),
-            "adjusted_total": _money(source + impact),
-            "applied_adjustment_ids": [item["id"] for item in adjustments],
+        source = source_of(row)
+        hit = target is not None and row is target
+        rows.append(
+            {
+                **row,
+                "source_total": _money(source),
+                "adjusted_total": _money(source + (impact if hit else Decimal("0"))),
+                "applied_adjustment_ids": ids if hit else [],
+            }
+        )
+    if matching and target is None:
+        source_sum = sum((source_of(row) for row in matching), Decimal("0"))
+        extra: dict[str, Any] = {
+            "source_total": _money(source_sum),
+            "adjusted_total": _money(source_sum + impact),
+            "applied_adjustment_ids": ids,
         }
-        rows.append(updated)
+        if period:
+            extra["period"] = period
+        rows.append(extra)
     return {**result, "columns": columns, "rows": rows}
 
 

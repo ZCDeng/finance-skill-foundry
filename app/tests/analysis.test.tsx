@@ -2,6 +2,23 @@
 import { press } from './press.js';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const pdfjsMock = vi.hoisted(() => ({
+  workerOptions: { workerSrc: '' },
+  getDocument: vi.fn(() => ({
+    promise: Promise.resolve({
+      numPages: 1,
+      getPage: async () => ({
+        getViewport: () => ({ width: 1, height: 1 }),
+        render: () => ({ promise: Promise.resolve(), cancel() {} }),
+      }),
+    }),
+  })),
+}));
+vi.mock('pdfjs-dist', () => ({
+  GlobalWorkerOptions: pdfjsMock.workerOptions,
+  getDocument: pdfjsMock.getDocument,
+}));
 import { Analysis } from '../src/views/Analysis.js';
 import { DraftBody } from '../src/views/analysis/DraftBody.js';
 import { documentFromMarkdown, documentToMarkdown } from '../electron/reports/format.js';
@@ -1670,6 +1687,23 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall.mock.calls.some(([, command]) => command === 'run-metric')).toBe(false);
   });
 
+  it('hides a pending parent once a confirmed child exists', async () => {
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id },
+      scopes: { actual: { ledger: '总账', organization: '华东', period: '2026-08', currency: 'CNY', unit: '元', scenario: 'actual' } } };
+    const pending = { id: 'adj-pending', label: '总部费用调整', include_in_management_pnl: false };
+    const confirmed = { ...pending, id: 'adj-confirmed', parent_id: pending.id, include_in_management_pnl: true };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [context], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-adjustment-list') return success({ adjustments: [pending, confirmed] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success(initial), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByRole('heading', { name: '考核调整' });
+    expect(screen.queryByRole('button', { name: '确认纳入' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: '总部费用调整' })).toBeTruthy();
+  });
+
   it('refreshes finance source files through the native bridge and keeps duplicate batches visible', async () => {
     const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list'
       ? success({ batches: [{ id: '7'.repeat(32), created_at: task.created_at, source_name: '金蝶导出', dataset_id: null, effective_dataset_id: source.id, row_count: 1, publication_status: 'published' }] })
@@ -1942,6 +1976,31 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall.mock.calls.some(([, command]) => command === 'drilldown-fact')).toBe(false);
   });
 
+  it('opens an archived PDF locator through reportSource instead of drilldown', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
+    const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
+    const sourceLocatorOpen = vi.fn(async () => success({
+      status: 'ok',
+      viewer: 'pdf' as const,
+      locator: { kind: 'pdf', dataset_id: source.id, preview_available: true },
+      preview: { available: true, handle: 'h'.repeat(64) },
+    }));
+    const reportSource = vi.fn(async () => success({ data_base64: btoa('%PDF-1.4\n') }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-pdf', run_id: financeRun.id, row: 0, column: 'expense', label: '费用', display_value: '20' }] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
+      if (command === 'finance-background-list') return success({ backgrounds: [] });
+      if (command === 'drilldown-fact') return success({ run_id: financeRun.id, row: 0, rows: [], total: 0, offset: 0, has_more: false });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [checkedDraft] }), financeCall, sourceLocatorOpen, reportSource });
+    render(<Analysis {...props} embedded section="drafts" />);
+    fireEvent.click(await screen.findByText('可引用事实 · 1 条'));
+    fireEvent.click(screen.getByRole('button', { name: '打开原文定位' }));
+    await waitFor(() => expect(reportSource).toHaveBeenCalledWith(task.id, source.id));
+    expect(financeCall.mock.calls.some(([, command]) => command === 'drilldown-fact')).toBe(false);
+  });
+
   it('keeps the snapshot row when a locator is unavailable or the page was not archived', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: 'ctx-a' };
     const checkedDraft: AnalysisDraft = { ...draft, run_ids: [financeRun.id], quality: { status: 'passed', issues: [] } };
@@ -2021,5 +2080,32 @@ ${canonicalAppendix} 已改写`;
     expect(await screen.findByText('已按圈选生成开票口径修订。')).toBeTruthy();
   });
 
+  it('uses the latest finance context for workbook circle-select', async () => {
+    const oldContext = { ...object, id: '3'.repeat(32), name: '旧口径' };
+    const context = { ...object, id: '4'.repeat(32), name: '八月经营口径', bindings: { actual: source.id } };
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const oldRun: AnalysisRun = { ...run, id: '1'.repeat(32), engine: 'finance', finance_context_id: oldContext.id };
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: context.id };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'workbook-inspect') return success({ sheet_names: ['Sheet1'], tables: ['OutputTable'], named_ranges: [], unsupported_features: [] });
+      if (command === 'workbook-bind') return success({ id: 'bind-1' });
+      if (command === 'analysis-circle-select') return success({ id: 'req-new', change_reason: '改成开票口径' });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [oldRun, financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
+    await screen.findByText(/工作表：Sheet1/);
+    fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存绑定' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-bind', expect.objectContaining({
+      source: { kind: 'table', name: 'OutputTable' },
+    })));
+    fireEvent.click(screen.getByRole('button', { name: '改成开票口径' }));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'analysis-circle-select', expect.objectContaining({
+      kind: 'workbook', binding_id: 'bind-1', context_id: context.id,
+    })));
+  });
 
 });

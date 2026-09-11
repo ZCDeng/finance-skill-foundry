@@ -512,11 +512,13 @@ export function ReportEditor({
     try {
       if (!draftId) throw new Error("请先保存文稿再圈选改口径。");
       if (!contextId) throw new Error("请先保存财务口径。");
-      const caption = editor?.getAttributes("table")?.caption;
+      const table = editor?.getAttributes("table") as { caption?: string; id?: string } | undefined;
+      const blockId = String(table?.caption || table?.id || "").trim();
+      if (!blockId) throw new Error("请先给表加上标题再圈选改口径。");
       unwrap(await api.financeCall(taskId, "analysis-circle-select", {
         kind: "draft_table",
         draft_id: draftId,
-        block_id: caption || "0",
+        block_id: blockId,
         range: "selection",
         instruction: "改成开票口径",
         context_id: contextId,
@@ -659,7 +661,8 @@ export function ReportEditor({
     if (!api?.reportTemplatePublish) throw new Error('此版本暂不支持发布公司模板。');
     setTemplateError('');
     try {
-      unwrap(await api.reportTemplatePublish(taskId));
+      const published = unwrap(await api.reportTemplatePublish(taskId) as Answer<{ cancelled?: boolean; template_id?: string }>);
+      if (published && published.cancelled) return;
       await loadTemplates();
     } catch (failure) {
       setTemplateError(failure instanceof Error ? failure.message : String(failure));
@@ -671,7 +674,7 @@ export function ReportEditor({
     if (!api?.financeCall) throw new Error('此版本暂不支持套用公司模板。');
     setTemplateError('');
     try {
-      const applied = unwrap(await api.financeCall(taskId, 'report-template-apply', { template_id: templateId }) as Answer<{ draft?: { id: string; title?: string; body?: string; document?: ReportDocument } }>);
+      const applied = unwrap(await api.financeCall(taskId, 'report-template-apply', { template_id: templateId, ...(contextId ? { context_id: contextId } : {}) }) as Answer<{ draft?: { id: string; title?: string; body?: string; document?: ReportDocument } }>);
       const draft = applied.draft;
       if (!draft) throw new Error('套用公司模板没有返回新草稿。');
       if (onAppliedDraft) onAppliedDraft(draft);
@@ -1804,7 +1807,7 @@ function pdfPreviewErrorMessage(failure: unknown): string {
   return "PDF 原页暂时无法预览，可继续使用已提取的草稿内容。";
 }
 
-function PdfComparison({ dataUrl }: { dataUrl: string }) {
+export function PdfComparison({ dataUrl }: { dataUrl: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<{
     numPages: number;

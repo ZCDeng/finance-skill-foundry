@@ -149,3 +149,16 @@ def test_cf29_missing_original_snapshot_fails_closed(tmp_path: Path) -> None:
     shutil.rmtree(service.analysis.root / "datasets" / dataset["id"])
     with pytest.raises(FoundryError, match="snapshot"):
         service.chart_deliverable_open({"id": chart["id"]})
+
+
+def test_chart_save_ignores_caller_series_and_rejects_scratch_text(tmp_path: Path) -> None:
+    service, _context, _dataset, run = _g1(tmp_path)
+    spoofed = service.chart_deliverable_save(
+        {"run_id": run["id"], "series": {"columns": ["profit"], "rows": [{"profit": "999"}]}}
+    )
+    opened = service.chart_deliverable_open({"id": spoofed["id"]})
+    assert opened["series"]["rows"] == run["result"]["rows"]
+    with pytest.raises(FoundryError, match="scratch|preview"):
+        service.chart_deliverable_save(
+            {"run_id": run["id"], "label": "artifacts/preview/abc/sheet.xlsx"}
+        )

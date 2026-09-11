@@ -599,7 +599,17 @@ export function App() {
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
           <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
             task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
-            onLocatorPreview={api.sourceLocatorOpen ? (spec) => { setPreview(spec); setLocatorPreview(true); } : undefined} />
+            onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
+              void (async () => {
+                let origin = spec.origin;
+                if (!origin && api.previewStatus) {
+                  const status = await api.previewStatus();
+                  if (status.ok) origin = status.value.running?.origin || origin;
+                }
+                setPreview({ ...spec, origin: origin || '' });
+                setLocatorPreview(true);
+              })();
+            } : undefined} />
         </Workspace>
       </div>
       {screen === 'tasks' && open === null ? (

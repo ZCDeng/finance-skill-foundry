@@ -109,6 +109,9 @@
             "save_explanation_draft",
             "finance_background_save",
             "finance_background_list",
+            "finance_adjustment_list",
+            "report_template_list",
+            "report_template_apply",
             "finance_scenario_save",
             "finance_scenario_run",
             "finance_source_list",
@@ -166,7 +169,10 @@
             "workbook_inspect",
             "workbook_read",
             "analysis_requirements_save",
-            "analysis_requirements_list"
+            "analysis_requirements_list",
+            "finance_adjustment_list",
+            "report_template_list",
+            "report_template_apply"
           ]
         }
       },
