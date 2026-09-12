@@ -38,17 +38,37 @@ def tables_in(node) -> list[dict]:
 
 
 def match_draft_table(draft: dict, spec: dict) -> dict:
+    """The table the manager circled, or what went wrong finding it.
+
+    All three of these used to answer "unauthorized selection", which sent the
+    reader looking for a permission problem when the draft simply had no table
+    in it. Only the workbook binding check below is about authorization.
+    """
     document = draft.get("document") or {}
     tables = tables_in(document.get("content") or [])
     block_id = spec.get("block_id")
     if not isinstance(block_id, str) or not block_id.strip():
-        raise FoundryError("unauthorized selection")
+        raise FoundryError("circle-select needs the caption or id of the table to change")
     wanted = block_id.strip()
     for table in tables:
         attrs = table.get("attrs") or {}
         if wanted in {str(attrs.get("caption") or ""), str(attrs.get("id") or "")}:
             return table
-    raise FoundryError("unauthorized selection")
+    if not tables:
+        raise FoundryError("this draft has no table to circle")
+    captions = sorted(
+        name
+        for table in tables
+        for name in [
+            str((table.get("attrs") or {}).get("caption") or "")
+            or str((table.get("attrs") or {}).get("id") or "")
+        ]
+        if name
+    )
+    raise FoundryError(
+        f"no table in this draft is called {wanted}"
+        + (f"; it has {'、'.join(captions)}" if captions else "")
+    )
 
 
 def authorize_workbook(store, spec: dict, context: dict) -> dict:

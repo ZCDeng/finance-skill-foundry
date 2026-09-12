@@ -259,3 +259,30 @@ def test_excel_apply_unwraps_report_source_and_keeps_published_amounts(tmp_path:
     sheet = workbook.active
     assert sheet["B2"].value in (0, 0.0, None)
     workbook.close()
+
+
+def test_an_applied_template_names_its_source_after_the_template(tmp_path: Path) -> None:
+    """The draft said tmppcj2w5jg.docx where 经营简报 belonged.
+
+    The temporary file is how the bytes reach the archive, not what the manager
+    applied.
+    """
+    from foundry.analysis import AnalysisStore
+    from foundry.finance_service import FinanceStore
+    from foundry.task import TaskStore
+
+    task = TaskStore(tmp_path / "var").create(title="模板")
+    service = FinanceStore(task, actor="manager")
+    del AnalysisStore
+    excel = next(
+        item
+        for item in service.report_template_list({})["templates"]
+        if item["kind"] == "excel"
+    )
+    applied = service.report_template_apply({"template_id": excel["template_id"]})
+    names = [
+        source.get("name")
+        for source in applied["draft"]["document"].get("sources") or []
+    ]
+    assert names == [f"{excel['label']}.xlsx"]
+    assert not any(str(name).startswith("tmp") for name in names)

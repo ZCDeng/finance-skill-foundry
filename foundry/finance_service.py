@@ -1525,7 +1525,13 @@ class FinanceStore:
         stored = self.analysis._write(root / f"{record['id']}.json", record)
         return public_item(stored)
 
-    def _report_source_from_bytes(self, data: bytes, suffix: str) -> dict:
+    def _report_source_from_bytes(self, data: bytes, suffix: str, *, name: str = "") -> dict:
+        """File bytes we built ourselves as a report source.
+
+        The temporary file is how the bytes reach the archive, not what the
+        manager applied: naming the source after it put tmppcj2w5jg.docx in her
+        draft where 经营简报 belonged.
+        """
         from pathlib import Path
         from tempfile import NamedTemporaryFile
 
@@ -1533,7 +1539,9 @@ class FinanceStore:
             handle.write(data)
             path = handle.name
         try:
-            return self.analysis.add_report_source(path)["source"]
+            return self.analysis.add_report_source(
+                path, name=f"{name}{suffix}" if name else None
+            )["source"]
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -1573,7 +1581,9 @@ class FinanceStore:
                 if values:
                     applied = apply_excel_named_ranges(data, values)
                     filled = sorted(values)
-            source = self._report_source_from_bytes(applied, ".xlsx")
+            source = self._report_source_from_bytes(
+                applied, ".xlsx", name=record.get("label") or str(template_id)
+            )
             document = validate_report_document(
                 {
                     "schema_version": 1,
@@ -1594,6 +1604,7 @@ class FinanceStore:
             source = self._report_source_from_bytes(
                 (self._template_root() / f"{record['id']}.bin").read_bytes(),
                 ".docx",
+                name=record.get("label") or str(template_id),
             )
             document = validate_report_document(
                 {
@@ -1695,15 +1706,21 @@ class FinanceStore:
                 "account_map_id": context.get("account_map_id"),
             }
         )
+        if not latest:
+            # 改口径 revises a stated scope. With none on file the instruction
+            # would be filed as the analytical question, and every later reader
+            # would take 「按区域拆开」 for what was asked.
+            raise FoundryError(
+                "circle-select revises an existing analysis; none has been stated yet"
+            )
         req_spec = {
             "context_id": child["id"],
-            "question": (latest or {}).get("question") or instruction,
-            "items": (latest or {}).get("items") or [],
+            "question": latest.get("question") or instruction,
+            "items": latest.get("items") or [],
             "change_reason": instruction,
             "selection": selection,
         }
-        if latest:
-            req_spec["parent_id"] = latest["id"]
+        req_spec["parent_id"] = latest["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
 

@@ -1651,3 +1651,40 @@ def test_structured_generated_appendix_canonical_markdown_tamper_stays_untrusted
         and issue.get("origin") == "manager_body"
         for issue in tampered["explanation_check"]["issues"]
     )
+
+
+def test_money_reads_with_thousands_separators() -> None:
+    """53,262,500 is read; 53262500 is counted a digit at a time."""
+    from foundry.finance_explanations import _display_value
+
+    assert _display_value("53262500", "expense", "元") == "53,262,500 元"
+    assert _display_value("414696250", "revenue", "元") == "414,696,250 元"
+    # A ratio is not money and keeps its own shape.
+    assert _display_value("12.84", "gross_margin_pct", "元") == "12.84%"
+    assert _display_value("0.1284", "ratio", "元") == "12.84%"
+    # Nothing else is regrouped.
+    assert _display_value("2026-08", "period", "") == "2026-08"
+
+
+def test_the_unit_is_written_once_even_when_the_manager_writes_it() -> None:
+    """「{{fact}} 元」 rendered as 「53,262,500 元 元」."""
+    from foundry.finance_explanations import render_fact_template
+
+    fact_id = "a" * 64
+    facts = [{
+        "id": fact_id, "display_value": "53,262,500 元", "unit": "元",
+        "value": "53262500", "column": "expense",
+    }]
+    token = "{{fact:%s}}" % fact_id
+    text, used = render_fact_template(f"本月期间费用 {token} 元。", facts)
+    assert text == "本月期间费用 53,262,500 元。"
+    assert used == [fact_id]
+    # The fact still carries the unit where the prose does not.
+    plain, _ = render_fact_template(f"本月期间费用 {token}。", facts)
+    assert plain == "本月期间费用 53,262,500 元。"
+    # 元 starting a longer word is not the unit being written out.
+    other, _ = render_fact_template(f"本月期间费用 {token} 元旦前结清。", facts)
+    assert other == "本月期间费用 53,262,500 元 元旦前结清。"
+    # And a different unit after the token is left alone.
+    mixed, _ = render_fact_template(f"本月期间费用 {token} 万元口径。", facts)
+    assert mixed == "本月期间费用 53,262,500 元 万元口径。"

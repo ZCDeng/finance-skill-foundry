@@ -889,7 +889,7 @@ class AnalysisStore:
         )
         return self._write(self._object_path("drafts", record["id"]), record)
 
-    def add_report_source(self, path: Path) -> dict:
+    def add_report_source(self, path: Path, *, name: str | None = None) -> dict:
         from foundry.report_documents import check_report_source_bytes, report_format_for_path
 
         source = Path(path).expanduser()
@@ -901,7 +901,9 @@ class AnalysisStore:
         digest = _hash_bytes(data)
         record = _new(
             self.task,
-            name=source.name,
+            # A caller that built the bytes itself passes the name the manager
+            # would recognise; otherwise the file on disk is the name.
+            name=str(name).strip() if str(name or "").strip() else source.name,
             format=fmt,
             sha256=digest,
             bytes=len(data),

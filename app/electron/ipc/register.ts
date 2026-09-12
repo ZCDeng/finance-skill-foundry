@@ -249,6 +249,7 @@ export function registerIpc(
   const financeCommands = new Set([
     'list-finance-context',
     'finance-source-list',
+    'finance-readiness',
     'finance-context-save',
     'finance-map-save',
     'finance-metric-save',
@@ -288,7 +289,7 @@ export function registerIpc(
     'workbook-preview',
     'workbook-apply',
   ]);
-  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-completion-recoveries']);
+  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-readiness', 'finance-completion-recoveries']);
   ipcMain.handle(CHANNELS.financeCall, (_e, task: unknown, command: unknown, spec: unknown = undefined) =>
     answer(() => {
       const name = String(command ?? '');

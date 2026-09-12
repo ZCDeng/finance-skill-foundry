@@ -10,6 +10,8 @@ import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
+import { AccountMapEditor } from './analysis/AccountMapEditor.js';
+import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
 import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from './analysis/StructureProposalCard.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -361,6 +363,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
+          <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
@@ -1237,13 +1240,12 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row"
         aria-current={context.id === contextId ? 'true' : undefined} onClick={() => setContextId(context.id)}>
         <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；')}</span><span>{shortSha(context.id)}</span></button>)}</div></details> : null}
-    <details className="analysis-details"><summary>高级：管理科目映射 JSON</summary>
-      <p className="analysis-note">引擎识别的管理科目为 revenue（收入）、cost（成本）、expense（费用）；中文科目名请映射到这些标准值。</p>
+    <details className="analysis-details"><summary>管理科目映射</summary>
+      <p className="analysis-note">损益算不出来，多半是这里没配齐。引擎只认收入、成本、费用三个管理科目，把原表的科目代码归到这三类。</p>
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
-          placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" />
-        <label>映射行数组<Textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
-          onChange={(event) => setMapRows(event.target.value)} /></label></div>
+          placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" /></div>
+      <AccountMapEditor value={mapRows} disabled={busy} onChange={setMapRows} />
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
       <Button variant="outline" type="button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>

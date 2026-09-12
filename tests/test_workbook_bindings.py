@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import zipfile
 from decimal import Decimal
 from pathlib import Path
@@ -231,3 +232,73 @@ def test_writes_outside_declared_area_are_refused(tmp_path: Path) -> None:
 
     with pytest.raises(FoundryError, match="outside declared writable area"):
         preview_output_patch(source, contract, [{"cell": "H2", "field": "result", "value": "1"}])
+
+
+def test_a_header_that_wraps_in_the_cell_binds_by_what_she_reads(tmp_path: Path) -> None:
+    """「本期发生额\\n借方」 is one header shown on two lines.
+
+    Matching the raw cell text made the manager type the line break to bind a
+    column she can see perfectly well.
+    """
+    from foundry.workbook_bindings import create_binding_contract, read_input
+
+    source = tmp_path / "ledger.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "余额表"
+    sheet["A1"] = "科目代码"
+    sheet["B1"] = "本期发生额\n借方"
+    sheet["A2"] = "6001"
+    sheet["B2"] = 100
+    book.save(source)
+    book.close()
+
+    spec = {"kind": "range", "sheet": "余额表", "range": "A1:B2"}
+    for spelling in ("本期发生额借方", "本期发生额\n借方", "本期发生额 借方"):
+        contract = create_binding_contract(
+            source, spec, [{"name": spelling, "type": "decimal"}], header=True
+        )
+        assert len(read_input(source, contract)["rows"]) == 1
+
+    absent = create_binding_contract(
+        source, spec, [{"name": "期末余额借方", "type": "decimal"}], header=True
+    )
+    with pytest.raises(FoundryError, match="binding header missing fields"):
+        read_input(source, absent)
+
+
+def test_two_headers_that_read_alike_are_refused_rather_than_guessed(tmp_path: Path) -> None:
+    from foundry.workbook_bindings import create_binding_contract, read_input
+
+    source = tmp_path / "twin.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "余额表"
+    sheet["A1"] = "本期发生额\n借方"
+    sheet["B1"] = "本期发生额借方"
+    sheet["A2"] = 1
+    sheet["B2"] = 2
+    book.save(source)
+    book.close()
+
+    contract = create_binding_contract(
+        source,
+        {"kind": "range", "sheet": "余额表", "range": "A1:B2"},
+        [{"name": "本期发生额借方", "type": "decimal"}],
+        header=True,
+    )
+    with pytest.raises(FoundryError, match="ambiguous"):
+        read_input(source, contract)
+
+
+def test_an_inspection_does_not_carry_the_hosts_path(tmp_path: Path) -> None:
+    from foundry.workbook_bindings import inspect_workbook
+
+    source = tmp_path / "book.xlsx"
+    book = Workbook()
+    book.active["A1"] = 1
+    book.save(source)
+    book.close()
+    inspection = inspect_workbook(source)
+    assert "path" not in inspection
+    assert str(tmp_path) not in json.dumps(inspection, ensure_ascii=False)

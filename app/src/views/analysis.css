@@ -235,3 +235,27 @@
 .analysis-structure-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .analysis-structure-blocked { display: flex; align-items: center; gap: 6px; font-size: 0.84rem; }
 .analysis-structure-error { font-size: 0.86rem; }
+
+/* Readiness: what this batch of files can answer for, and what is missing. */
+.analysis-readiness-card { display: grid; gap: 12px; }
+.analysis-readiness-capabilities { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.analysis-readiness-capabilities li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 0.88rem; }
+.analysis-readiness-capabilities li svg { align-self: center; flex: none; }
+.analysis-readiness-ready { color: var(--fnd-ink, #1d1b16); }
+.analysis-readiness-blocked { color: var(--fnd-muted, #6b675e); }
+.analysis-readiness-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.analysis-readiness-table caption { text-align: left; padding-bottom: 6px; }
+.analysis-readiness-table th,
+.analysis-readiness-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 8px; text-align: left; vertical-align: top; }
+.analysis-readiness-table thead th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-readiness-table tbody th { font-weight: 600; overflow-wrap: anywhere; }
+
+/* Which ledger accounts count as revenue, cost and expense. */
+.analysis-account-map { display: grid; gap: 10px; }
+.analysis-account-map-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.analysis-account-map-table caption { text-align: left; padding-bottom: 6px; }
+.analysis-account-map-table th,
+.analysis-account-map-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 6px; text-align: left; }
+.analysis-account-map-table thead th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
+.analysis-account-map select { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--fnd-line, #e5e2dc); border-radius: 6px; background: var(--fnd-surface, #fff); color: inherit; }

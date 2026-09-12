@@ -344,6 +344,7 @@ export interface AnalysisState {
 export type FinanceCommand =
   | 'list-finance-context'
   | 'finance-source-list'
+  | 'finance-readiness'
   | 'finance-context-save'
   | 'finance-map-save'
   | 'finance-metric-save'
@@ -391,6 +392,26 @@ export interface FinanceContextState {
   scenarios: Record<string, unknown>[];
   metric_definitions: Record<string, unknown>[];
   capabilities: string[];
+}
+
+/** What one file can answer for on its own, and what it is still missing. */
+export interface ReadinessDataset {
+  dataset_id: string;
+  name: string;
+  scope: { ledger: string; organization: string; period: string; currency: string; unit: string };
+  missing_fields: string[];
+  can_run: string[];
+  blocked: { capability: string; missing_fields: string[]; reason: string }[];
+}
+
+export interface ReadinessReport {
+  proposed_scope: { ledger: string; organization: string; period: string; currency: string; unit: string };
+  datasets: ReadinessDataset[];
+  can_run: string[];
+  blocked: { capability: string; missing_fields: string[]; reason: string; dataset_id?: string }[];
+  file_identity_policy: string;
+  diagnostics: { severity: string; code: string; message: string }[];
+  erp_connected: boolean;
 }
 
 export interface FinanceSourceBatch {
