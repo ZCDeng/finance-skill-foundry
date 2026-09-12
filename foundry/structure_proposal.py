@@ -116,6 +116,7 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         "excluded_rows": excluded,
         "fill_down_columns": _fill_down_columns(grid, header_row, columns, excluded),
         "scope_hints": _scope_hints(grid, title_rows),
+        "preview": _preview(grid, header_row),
         "confidence": _confidence(columns, pairs, header_row),
     }
 
@@ -132,6 +133,7 @@ def _excluded(name: str, reason: str) -> dict[str, Any]:
         "excluded_rows": [],
         "fill_down_columns": [],
         "scope_hints": {"period": "", "currency": "", "unit": ""},
+        "preview": [],
         "confidence": 0.0,
     }
 
@@ -433,6 +435,40 @@ def _fill_down_columns(
         if 0 < present < len(data_rows):
             filled.append(column["letter"])
     return filled
+
+
+PREVIEW_ROWS_EITHER_SIDE = 3
+PREVIEW_CELLS = 4
+PREVIEW_CELL_CHARS = 40
+
+
+def _preview(grid: dict[int, dict[str, Any]], header_row: int) -> list[dict[str, Any]]:
+    """The rows around the proposed header, so a wrong guess can be seen and moved.
+
+    The manager is told the header is row 4. Without the text of rows 1 to 7 in
+    front of her, correcting that is typing a number blind — which is the Excel
+    trip this whole flow exists to remove.
+    """
+    window = range(
+        max(1, header_row - PREVIEW_ROWS_EITHER_SIDE),
+        header_row + PREVIEW_ROWS_EITHER_SIDE + 1,
+    )
+    rows: list[dict[str, Any]] = []
+    for number in window:
+        row = grid.get(number)
+        if row is None:
+            continue
+        cells = [
+            {"letter": letter, "text": _clip(row[letter])}
+            for letter in sorted(row, key=_letter_index)[:PREVIEW_CELLS]
+        ]
+        rows.append({"row": number, "is_header": number == header_row, "cells": cells})
+    return rows
+
+
+def _clip(value: Any) -> str:
+    text = str(value if value is not None else "").strip().replace("\n", " ")
+    return text if len(text) <= PREVIEW_CELL_CHARS else text[: PREVIEW_CELL_CHARS - 1] + "…"
 
 
 def _scope_hints(grid: dict[int, dict[str, Any]], title_rows: list[int]) -> dict[str, str]:

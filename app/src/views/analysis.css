@@ -210,3 +210,28 @@
 
 .analysis-adjustment-panel { margin-top: 16px; padding: 12px 8px; }
 .analysis-adjustment-rerun label { display: flex; gap: 8px; align-items: center; color: var(--fnd-ink); }
+
+/* Table structure confirmation: the card a workbook waits behind. */
+.analysis-structure-panel { display: grid; gap: 12px; margin-bottom: 12px; }
+.analysis-structure-card { display: grid; gap: 10px; }
+.analysis-structure-sheet { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--fnd-line, #e5e2dc); border-radius: 8px; }
+.analysis-structure-sheet-name { display: flex; align-items: center; gap: 8px; }
+.analysis-structure-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.analysis-structure-field > label { min-width: 12rem; font-size: 0.86rem; }
+.analysis-structure-field input[type="number"] { width: 6rem; }
+.analysis-structure-preview,
+.analysis-structure-columns { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.analysis-structure-preview th,
+.analysis-structure-preview td,
+.analysis-structure-columns th,
+.analysis-structure-columns td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 3px 6px; text-align: left; }
+.analysis-structure-preview tr.is-header td,
+.analysis-structure-preview tr.is-header th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-structure-preview caption { text-align: left; padding-bottom: 4px; }
+.analysis-structure-excluded { font-size: 0.84rem; }
+.analysis-structure-excluded ul { margin: 6px 0 0; padding-left: 1.1rem; display: grid; gap: 3px; }
+.analysis-structure-reasons { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.analysis-structure-reasons li { display: grid; gap: 2px; }
+.analysis-structure-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.analysis-structure-blocked { display: flex; align-items: center; gap: 6px; font-size: 0.84rem; }
+.analysis-structure-error { font-size: 0.86rem; }

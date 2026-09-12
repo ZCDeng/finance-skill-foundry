@@ -220,3 +220,22 @@ def test_a_corrupt_workbook_is_refused_with_a_foundry_error() -> None:
 
     with pytest.raises(FoundryError):
         propose_workbook_structure(b"not a workbook at all")
+
+
+def test_the_proposal_shows_the_rows_around_the_header_it_picked() -> None:
+    ledger = _sheet(_pack(), "02")
+    preview = ledger["preview"]
+    header = next(row for row in preview if row["is_header"])
+    assert header["row"] == ledger["header_row"]
+    assert [cell["text"] for cell in header["cells"]][:2] == ["科目代码", "科目名称"]
+    # The title above and the first data rows below, so a wrong guess is visible.
+    assert {row["row"] for row in preview} >= {1, 2, 5, 6}
+    assert any("科目余额表" in cell["text"] for row in preview for cell in row["cells"])
+
+
+def test_preview_text_is_clipped_and_single_line() -> None:
+    ledger = _sheet(_pack(), "02")
+    for row in ledger["preview"]:
+        for cell in row["cells"]:
+            assert "\n" not in cell["text"]
+            assert len(cell["text"]) <= 40
