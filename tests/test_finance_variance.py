@@ -309,3 +309,43 @@ def test_price_quantity_filters_by_account_and_period_without_cross_period_merge
 def test_profit_bridge_rejects_account_dimension_that_splits_the_equation():
     with pytest.raises(FoundryError, match='management_account'):
         explain_variance(facts(), {'dimensions': ['management_account']})
+
+
+def test_a_declared_amount_that_disagrees_with_quantity_times_price_is_named() -> None:
+    """The books said 409,500 and q×p said 360, and nothing said so.
+
+    The decomposition still runs on quantity and price, because that is what a
+    price/volume bridge is. What changed is that the disagreement is reported
+    rather than resolved silently in favour of the drivers.
+    """
+    from foundry.finance_variance import price_quantity_bridge
+
+    rows = [
+        {"scenario": "budget", "product": "住宅物管", "quantity": "100",
+         "price": "3", "amount": "300", "period": "2026-08"},
+        {"scenario": "actual", "product": "住宅物管", "quantity": "90",
+         "price": "4", "amount": "409500", "period": "2026-08"},
+    ]
+    out = price_quantity_bridge(rows, {"dimensions": ["product"]})
+    assert out["rows"][0]["actual"] == "360"
+    mismatch = next(
+        d for d in out["diagnostics"] if d["code"] == "price_quantity_amount_mismatch"
+    )
+    assert mismatch["side"] == "actual"
+    assert mismatch["declared"] == "409500"
+    assert mismatch["computed"] == "360"
+    # The baseline row agrees, so only one side is reported.
+    assert len([d for d in out["diagnostics"]
+                if d["code"] == "price_quantity_amount_mismatch"]) == 1
+
+
+def test_rows_that_state_no_amount_raise_no_mismatch() -> None:
+    from foundry.finance_variance import price_quantity_bridge
+
+    rows = [
+        {"scenario": "budget", "product": "住宅物管", "quantity": "100", "price": "3"},
+        {"scenario": "actual", "product": "住宅物管", "quantity": "90", "price": "4"},
+    ]
+    out = price_quantity_bridge(rows, {"dimensions": ["product"]})
+    assert not [d for d in out["diagnostics"]
+                if d["code"] == "price_quantity_amount_mismatch"]

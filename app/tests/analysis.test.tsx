@@ -480,13 +480,16 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [analysis, newer], runs: [run, failed] }) });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('900719925474099.99');
-    expect(screen.getAllByRole('table')).toHaveLength(1);
+    const resultArea = screen.getByText('900719925474099.99').closest('.analysis-result') as HTMLElement;
+    expect(within(resultArea).getAllByRole('table')).toHaveLength(1);
     expect(screen.getByText('900719925474099.99').classList.contains('analysis-number')).toBe(true);
     const definition = screen.getByText(/^口径与计算定义/).closest('details');
     expect(definition?.open).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '查看失败记录' }));
     expect((await screen.findByRole('alert')).textContent).toBe('缺少成本列');
-    expect(screen.queryByRole('table')).toBeNull();
+    // A failed run shows no result table. The account-map editor is a table of
+    // its own elsewhere on the page, so this looks where the result would be.
+    expect(document.querySelector('.analysis-result table')).toBeNull();
     expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('新的成本口径');
   });
 
@@ -928,9 +931,14 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
     fireEvent.click(screen.getByRole('button', { name: '对比期间设为实际期间上期' }));
-    fireEvent.click(screen.getByText('高级：管理科目映射 JSON'));
-    expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('revenue');
-    expect((screen.getByLabelText('映射行数组') as HTMLTextAreaElement).value).toContain('expense');
+    fireEvent.click(screen.getByText('管理科目映射'));
+    // The mapping is edited as rows now: one line per account code, with the
+    // management account picked rather than typed into a JSON array.
+    expect((screen.getByLabelText('第 1 行科目代码') as HTMLInputElement).value).toBe('6001');
+    expect((screen.getByLabelText('第 1 行管理科目') as HTMLSelectElement).value).toBe('revenue');
+    expect((screen.getByLabelText('第 3 行管理科目') as HTMLSelectElement).value).toBe('expense');
+    fireEvent.change(screen.getByLabelText('第 2 行科目代码'), { target: { value: '6402' } });
+    expect((screen.getByLabelText('第 2 行科目代码') as HTMLInputElement).value).toBe('6402');
     fireEvent.click(screen.getByRole('button', { name: '已保存映射' }));
     fireEvent.mouseDown(await screen.findByRole('option', { name: /标准管理科目映射/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '已保存映射' }).textContent).toContain('标准管理科目映射'));

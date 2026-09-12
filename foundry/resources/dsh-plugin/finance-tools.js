@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -84,7 +84,7 @@ export const FINANCE_TOOLS = {
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["list-finance-context"],
   },
   finance_readiness: {
-    description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
+    description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、datasets、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。proposed_scope 只给所有文件一致的值，不一致就留空；每份文件各自的口径、缺什么、能算什么在 datasets 里，blocked 项带 dataset_id，要告诉经理是哪份文件缺什么，不要笼统说任务缺。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["finance-readiness"],
   },
   chart_deliverable_save: specTool("chart-deliverable-save", "把当前任务已授权 run 的结果系列归档为图表成果。写入 FinanceStore charts 与 analysis/charts，绑定 run_id 与 snapshot hash。不得传入路径、预览句柄或 dataset_id。打开归档图复现原值，不重跑。改假设走子情景后再归档新版本。", {
@@ -144,6 +144,15 @@ export const FINANCE_TOOLS = {
   finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
     context_id: contextId,
   }, ["context_id"]),
+  structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。blocked_reason 非空的表不能确认，unreadable_columns 表示它确实是张表但一列都没识别出来——复述给经理，不要放进确认清单。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
+    dataset_id: text("analysis-state 里的工作簿资料 id"),
+  }),
+  structure_proposal_confirm: specTool("structure-proposal-confirm", "代经理提交表结构确认，生成可算的表。只接受资料 id 与提议项，不接受路径、URL 或工作簿字节；来源由调用入口判定，spec 里自报的 source 一律丢弃。助手提交的确认记为待经理追认，经理在界面追认或拒绝。借贷方向未定时拒绝确认——先请经理说明哪一侧是金额。清单里带 blocked_reason 的表会被整单拒绝并报出表名，别原样把提议全量传回来。", {
+    dataset_id: text("要确认的工作簿资料 id"),
+    revision: {type:"integer", minimum:1, description:"structure_proposal_list 返回的提议版本号"},
+    sheets: {type:"array", items:{type:"object"}, description:"确认后的逐表结构声明，省略则按提议原样确认全部可作数据表的表"},
+  }, ["dataset_id"]),
+  structure_template_list: specTool("structure-template-list", "列出这套账记住的表结构模板：签名、表名模式、权重、是否停用。模板按工作区记，不按任务记，所以上个月确认的形状这个月照样命中。只读，不含路径或字节。命中模板的文件会自动套用并标为待经理追认。", {}),
   report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
   report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。Excel 模板的命名区数值只能来自 run_id 指向的已授权 run（命名区名匹配结果列或 metric 名），不接受调用方直接给数字；没有 run_id 就只套皮不写数。不覆盖旧稿。发布模板仍由经理点选。", {
     template_id: text("report_template_list 返回的 template_id"),

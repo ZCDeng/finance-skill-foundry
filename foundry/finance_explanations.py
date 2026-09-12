@@ -131,9 +131,26 @@ def render_fact_template(body: str, facts: list[dict]) -> tuple[str, list[str]]:
         if not fact:
             return match.group(0)
         used.append(fact_id)
-        return fact["display_value"]
+        display = fact["display_value"]
+        unit = str(fact.get("unit") or "")
+        # The manager writes 「期间费用 {{fact:…}} 元」 because that is how the
+        # sentence reads, and the fact already carries 元. Appending it again
+        # printed 「53,262,500 元 元」. Where the prose says the unit, the prose
+        # keeps it.
+        if unit and display.endswith(f" {unit}") and _unit_follows(body, match.end(), unit):
+            return display[: -len(unit)].rstrip()
+        return display
 
     return FACT_TOKEN.sub(replace, body), used
+
+
+def _unit_follows(body: str, position: int, unit: str) -> bool:
+    """Whether the prose right after the token writes this unit as a word.
+
+    「元」 is a prefix of 「元币」 and 「元旦」, so the unit only counts when what
+    follows it is not more of a word.
+    """
+    return re.match(rf"\s*{re.escape(unit)}(?![\w\u4e00-\u9fff])", body[position:]) is not None
 
 
 def claims_for_facts(facts: list[dict], fact_ids: list[str]) -> list[dict]:
@@ -877,7 +894,25 @@ def _display_value(exact: str, column: str, unit: Any) -> str:
         except InvalidOperation:
             return exact
     suffix = f" {unit}" if unit else ""
-    return f"{exact}{suffix}"
+    return f"{_grouped(exact, column)}{suffix}"
+
+
+def _grouped(exact: str, column: str) -> str:
+    """Money with thousands separators. 53,262,500 is read; 53262500 is counted.
+
+    The exact value is what every check compares against, so the separators are
+    a display choice and nothing else reads this string as a number.
+    """
+    if column not in MONEY_COLUMNS and column not in {"numerator_exact", "denominator_exact"}:
+        return exact
+    try:
+        value = Decimal(exact)
+    except InvalidOperation:
+        return exact
+    whole, _, fraction = exact.partition(".")
+    del whole
+    grouped = f"{value:,f}" if fraction else f"{value:,}"
+    return grouped
 
 
 def _label(row: dict, column: str) -> str:

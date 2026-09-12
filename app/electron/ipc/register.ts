@@ -109,6 +109,15 @@ export function registerIpc(
    */
   const scratch = new ScratchFences();
   const shutdown = () => scratch.discardAll();
+  // Everything this process does is the manager acting in her own window, so the
+  // stamp is set once here rather than at each call site.
+  binding = { ...binding, actor: 'manager' };
+  /**
+   * Files the manager asked to keep a second copy of, by path. Set by the
+   * renderer's answer to the duplicate prompt and cleared once used, so a later
+   * add of the same file asks again.
+   */
+  const allowDuplicates = new Set<string>();
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
 
   ipcMain.handle(CHANNELS.task, (_event, task: unknown) =>
@@ -195,6 +204,8 @@ export function registerIpc(
   // Every analysis operation goes through the same domain CLI as legacy work.
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
     JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
+  /** Commands that make a new snapshot the root session should be able to see. */
+  const widensTheSession = new Set(['structure-proposal-confirm', 'structure-reject', 'structure-withdraw']);
   let reportHost: Promise<ReportHost> | undefined;
   const reports = () => reportHost ??= import('../reports/host.js').then(({ ReportHost }) => new ReportHost(binding,
     (task, phase) => panes?.window()?.webContents.send(CHANNELS.reportProgress, { task, phase })));
@@ -238,6 +249,7 @@ export function registerIpc(
   const financeCommands = new Set([
     'list-finance-context',
     'finance-source-list',
+    'finance-readiness',
     'finance-context-save',
     'finance-map-save',
     'finance-metric-save',
@@ -263,13 +275,21 @@ export function registerIpc(
     'chart-deliverable-list',
     'chart-deliverable-open',
     'analysis-circle-select',
+    'structure-proposal-list',
+    'structure-proposal-confirm',
+    'structure-confirmation-list',
+    'structure-acknowledge',
+    'structure-reject',
+    'structure-withdraw',
+    'structure-template-list',
+    'structure-template-disable',
     'workbook-inspect',
     'workbook-bind',
     'workbook-read',
     'workbook-preview',
     'workbook-apply',
   ]);
-  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-completion-recoveries']);
+  const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-readiness', 'finance-completion-recoveries']);
   ipcMain.handle(CHANNELS.financeCall, (_e, task: unknown, command: unknown, spec: unknown = undefined) =>
     answer(() => {
       const name = String(command ?? '');
@@ -279,7 +299,12 @@ export function registerIpc(
         return analysisCall(task, name);
       }
       if (name === 'save-explanation-draft') return draftCall(task, name, spec);
-      return analysisCall(task, name, ['--spec', objectJson(spec)]);
+      return analysisCall(task, name, ['--spec', objectJson(spec)]).then(async (result) => {
+        // A confirmed structure makes a table the conversation should be able to
+        // reach, the same way adding a file does.
+        if (widensTheSession.has(name)) await refreshRootAnalysisSession(taskId(task));
+        return result;
+      });
     }));
   ipcMain.handle(CHANNELS.financeSourceRefresh, (_e, rawTask: unknown, rawSpec: unknown) =>
     answer(async () => {
@@ -338,18 +363,25 @@ export function registerIpc(
         title: '加入分析资料', properties: ['openFile', 'multiSelections'],
         filters: [{ name: '表格与背景资料', extensions: ['csv', 'xlsx', 'json', 'md', 'txt'] }],
       });
-      if (selected.canceled) return [];
+      if (selected.canceled || selected.filePaths.length === 0) return [];
       const rows = [];
       let failure: unknown;
       for (const file of selected.filePaths) {
         try {
-          rows.push(await analysisCall(task, 'dataset-add', ['--path', file, '--name', path.basename(file)]));
+          const args = ['--path', file, '--name', path.basename(file)];
+          // Re-adding the same bytes is answered, not filed: the caller is told
+          // which copy the task already holds and can ask for a second one.
+          if (allowDuplicates.has(file)) args.push('--allow-duplicate');
+          rows.push(await analysisCall(task, 'dataset-add', args));
         } catch (error) {
           failure = error;
           break;
         }
       }
-      if (rows.length) await refreshRootAnalysisSession(task);
+      allowDuplicates.clear();
+      if (rows.some((row) => !(row as { duplicate_of?: string }).duplicate_of)) {
+        await refreshRootAnalysisSession(task);
+      }
       if (failure) throw failure;
       return rows;
     }));

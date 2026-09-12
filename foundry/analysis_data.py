@@ -99,9 +99,50 @@ def _column_letter(cell) -> str:
     return ""
 
 
-def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
+def read_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
+    """Cell coordinate -> exact Decimal, read from the sheet XML.
+
+    openpyxl hands back floats; a ledger needs the digits the file actually
+    stores, so numeric cells are read from the original XML instead.
+    """
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with _open_xlsx_archive(data) as archive:
+        workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+        sheets = workbook_xml.find("s:sheets", ns)
+        try:
+            rid = next(
+                s.attrib[
+                    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+                ]
+                for s in sheets
+                if s.attrib["name"] == sheet_name
+            )
+        except StopIteration:
+            raise FoundryError(f"no worksheet: {sheet_name}") from None
+        rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        target = next(r.attrib["Target"] for r in rels if r.attrib["Id"] == rid)
+        member = target.lstrip("/") if target.startswith("/") else "xl/" + target
+        raw_cells: dict[str, Decimal] = {}
+        for _, cell in ET.iterparse(io.BytesIO(archive.read(member)), events=("end",)):
+            if cell.tag != "{" + ns["s"] + "}c":
+                continue
+            v, formula = cell.find("s:v", ns), cell.find("s:f", ns)
+            if formula is not None and (v is None or v.text is None):
+                raise FoundryError(
+                    f"formula has no cached value at {sheet_name}!{cell.attrib.get('r')}"
+                )
+            if cell.attrib.get("t") == "e":
+                raise FoundryError(
+                    f"worksheet error at {sheet_name}!{cell.attrib.get('r')}"
+                )
+            if cell.attrib.get("t", "n") == "n" and v is not None and v.text:
+                raw_cells[cell.attrib["r"]] = Decimal(v.text)
+            cell.clear()
+        return raw_cells
+
+
+def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
+    with _open_xlsx_archive(data):
         book = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
         try:
             sheet_name = metadata.get("sheet") or book.sheetnames[0]
@@ -112,36 +153,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                 sheet.max_row or 0
             ) > MAX_ROWS + 1:
                 raise FoundryError("worksheet exceeds row/column limits")
-            workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
-            sheets = workbook_xml.find("s:sheets", ns)
-            rid = next(
-                s.attrib[
-                    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
-                ]
-                for s in sheets
-                if s.attrib["name"] == sheet_name
-            )
-            rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
-            target = next(r.attrib["Target"] for r in rels if r.attrib["Id"] == rid)
-            member = target.lstrip("/") if target.startswith("/") else "xl/" + target
-            raw_cells = {}
-            for _, cell in ET.iterparse(
-                io.BytesIO(archive.read(member)), events=("end",)
-            ):
-                if cell.tag != "{" + ns["s"] + "}c":
-                    continue
-                v, formula = cell.find("s:v", ns), cell.find("s:f", ns)
-                if formula is not None and (v is None or v.text is None):
-                    raise FoundryError(
-                        f"formula has no cached value at {sheet_name}!{cell.attrib.get('r')}"
-                    )
-                if cell.attrib.get("t") == "e":
-                    raise FoundryError(
-                        f"worksheet error at {sheet_name}!{cell.attrib.get('r')}"
-                    )
-                if cell.attrib.get("t", "n") == "n" and v is not None and v.text:
-                    raw_cells[cell.attrib["r"]] = Decimal(v.text)
-                cell.clear()
+            raw_cells = read_exact_numerics(data, sheet_name)
             rows = []
             source_row_numbers = []
             headers = None
@@ -286,6 +298,32 @@ def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
                 )
             headers = list(dict.fromkeys(key for row in rows for key in row))
             transformation["row_locator"] = "one-based JSON row index"
+        return build_table_payload(headers, rows, transformation, metadata)
+    except FoundryError:
+        raise
+    except (
+        ValueError,
+        UnicodeError,
+        KeyError,
+        OSError,
+        InvalidOperation,
+        BadZipFile,
+        csv.Error,
+        ET.ParseError,
+    ) as exc:
+        raise FoundryError(f"cannot parse {suffix} source: {exc}") from exc
+
+
+def build_table_payload(
+    headers: list[str], rows: list[dict], transformation: dict, metadata: dict
+) -> dict:
+    """Type, normalize and schema a table the same way every parsed source is.
+
+    Shared so a table derived from a confirmed structure declaration carries the
+    same column types, decimal handling and schema shape as one parsed straight
+    from a file.
+    """
+    try:
         if not headers or len(headers) > MAX_COLUMNS or len(rows) > MAX_ROWS:
             raise FoundryError("dataset requires 1–256 columns and at most 100000 rows")
         if any(not isinstance(h, str) or not h.strip() for h in headers) or len(
@@ -359,14 +397,5 @@ def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
         }
     except FoundryError:
         raise
-    except (
-        ValueError,
-        UnicodeError,
-        KeyError,
-        OSError,
-        InvalidOperation,
-        BadZipFile,
-        csv.Error,
-        ET.ParseError,
-    ) as exc:
-        raise FoundryError(f"cannot parse {suffix} source: {exc}") from exc
+    except (ValueError, UnicodeError, KeyError, InvalidOperation) as exc:
+        raise FoundryError(f"cannot build table payload: {exc}") from exc

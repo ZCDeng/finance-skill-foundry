@@ -110,6 +110,9 @@
             "finance_background_save",
             "finance_background_list",
             "finance_adjustment_list",
+            "structure_proposal_list",
+            "structure_proposal_confirm",
+            "structure_template_list",
             "report_template_list",
             "report_template_apply",
             "finance_scenario_save",
@@ -171,6 +174,8 @@
             "analysis_requirements_save",
             "analysis_requirements_list",
             "finance_adjustment_list",
+            "structure_proposal_list",
+            "structure_template_list",
             "report_template_list",
             "report_template_apply"
           ]

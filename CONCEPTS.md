@@ -48,3 +48,23 @@ The Office companion's local collaboration server that the viewer talks to. The 
 
 - "Preview" had been used for both the in-window look at a Workbook and the merge preview inside the companion's viewer. Here it means the Workbook Preview; the companion's merge preview is not a concept of this project.
 - "Workspace" and "artifacts" are two per-Task trees. The workspace is where a conversation stands; the artifacts are where Deliverable Versions are filed. The Gateway is fenced to the second, never the first.
+
+## Source tables
+
+### Structure Proposal
+What the system proposes about one worksheet before it can be calculated on: which sheets count as data tables, which row is the header, what role each column plays (account code, amount, debit, credit, voucher number, period), which rows are section, subtotal, or check-note rows to exclude, which columns fill down, and what period, unit, and currency the title area declares. A proposal is never calculated on; it waits for a confirmation.
+
+### Table Snapshot
+The immutable, calculable table produced when a Structure Proposal is confirmed, carrying the confirmed structure declaration and, for every row and column, the original worksheet coordinates so a figure still points back to the source cell. A changed structure produces a new Table Snapshot; runs stay bound to the version they used. Until one exists, a file is only a raw snapshot and cannot enter a finance context.
+
+### Structure Template
+A confirmed structure declaration kept by header signature and sheet-name pattern so the next file of the same kind is matched instead of re-proposed. An exact match applies the template without a card; any difference returns to the confirmation card pre-filled. A template can be withdrawn from a table, demoted, or disabled by the manager. Templates are kept once per var root rather than per Task, because a Task is one closing period and August's confirmation has to be what September reads; nothing crosses between roots.
+
+### Pending Manager Acknowledgement (待经理追认)
+The state of a Table Snapshot whose confirmation was submitted by the assistant on the manager's behalf or applied from a Structure Template. It can be calculated on, but the data list, readiness report, and results carry the mark until the manager acknowledges it; acknowledging removes the mark and never reruns anything. It is distinct from the four existing states (executed, reproducible, manager-approved, published).
+
+### Amount Direction (金额方向)
+Which side of the books a fact sits on, read from the row's 借贷 column or its account's balance direction. A metric sums by that side where the row states it, so a 月末结转 voucher that debits revenue cancels the credit it reverses instead of counting the month twice. Where a row states neither, the sign comes from the management account, which cannot tell a reversal from an entry; that assumption is reported rather than made quietly.
+
+### Incomplete Run (不完整的运行)
+A run that finished without failing but produced something nobody should build on: no rows at all, or a diagnostic the engine raised at error severity. It stays `succeeded`, because nothing failed, and is marked `incomplete` so a draft, a chart, or an explanation can tell it apart from an answer. An empty result is the common case, and it is the engine's job to say so rather than hand back a green run with an empty table.

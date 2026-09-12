@@ -53,7 +53,10 @@ def build_source_locator(
     if kind == "xlsx":
         sheet = str(transformation.get("sheet") or "")
         locator["sheet"] = sheet
-        letter = _column_letter_for_field(
+        # A table derived from a confirmed structure records, per row, the column
+        # the amount actually came from — a 借方/贷方 pair puts it on a different
+        # side from one line to the next, which a header map cannot express.
+        letter = _row_column_letter(transformation, source_row) or _column_letter_for_field(
             transformation.get("header_columns"), _alias_candidates(field, aliases), row
         )
         if letter and sheet:
@@ -88,6 +91,19 @@ def _alias_candidates(field: str, aliases: tuple[str, ...] | list[str] | None) -
         if text and text not in ordered:
             ordered.append(text)
     return tuple(ordered)
+
+
+def _row_column_letter(transformation: Any, source_row: int) -> str:
+    if not isinstance(transformation, dict):
+        return ""
+    structure = transformation.get("structure")
+    if not isinstance(structure, dict):
+        return ""
+    row_columns = structure.get("row_columns")
+    if not isinstance(row_columns, dict):
+        return ""
+    letter = str(row_columns.get(str(source_row)) or "").strip()
+    return letter.upper() if letter.isalpha() else ""
 
 
 def _column_letter_for_field(header_columns: Any, candidates: tuple[str, ...], row: dict | None) -> str:

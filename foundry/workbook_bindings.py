@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
@@ -219,6 +220,26 @@ def _open(path: str | Path, *, data_only: bool = False) -> Workbook:
         raise FoundryError(f"cannot open workbook: {exc}") from exc
 
 
+def open_workbook_bytes(data: bytes, *, data_only: bool = False) -> Workbook:
+    """Open workbook bytes under the same size guards ``_open`` applies to a path.
+
+    A caller holding archived snapshot bytes has no file to point at, and the
+    non-read-only workbook is what carries merged-cell ranges and cell
+    coordinates.
+    """
+    try:
+        if len(data) > 32 * 1024 * 1024:
+            raise FoundryError("workbook exceeds 32 MiB limit")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            if sum(entry.file_size for entry in archive.infolist()) > 128 * 1024 * 1024:
+                raise FoundryError("expanded workbook exceeds 128 MiB limit")
+        return load_workbook(io.BytesIO(data), data_only=data_only)
+    except FoundryError:
+        raise
+    except Exception as exc:
+        raise FoundryError(f"cannot open workbook: {exc}") from exc
+
+
 def inspect_workbook(path: str | Path, bindings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     source = Path(path)
     features = _unsupported_features(source)
@@ -243,7 +264,9 @@ def inspect_workbook(path: str | Path, bindings: list[dict[str, Any]] | None = N
                 }
             )
         return {
-            "path": str(source),
+            # No path. The caller passed one in and every reader of this result
+            # reaches the workbook by dataset id; returning it only carried the
+            # host's directory layout out through the tool surface.
             "sha256": workbook_hash(source),
             "sheet_names": list(book.sheetnames),
             "tables": sorted(table for sheet in book.worksheets for table in sheet.tables),
@@ -290,14 +313,31 @@ def _headers(sheet: Any, resolved: ResolvedRange, fields: list[dict[str, Any]], 
         if len(fields) > resolved.width:
             raise FoundryError("binding fields exceed range width")
         return {field["name"]: resolved.min_col + offset for offset, field in enumerate(fields)}
-    header_values = {
-        str(sheet.cell(row=resolved.min_row, column=col).value or "").strip().casefold(): col
-        for col in range(resolved.min_col, resolved.max_col + 1)
-    }
-    missing = [field["name"] for field in fields if field["name"].casefold() not in header_values]
+    # 「本期发生额\n借方」 is one header that wraps in the cell. Matching the raw
+    # text made the manager type the line break to bind a column she can see.
+    from foundry.structure_proposal import normalize_header
+
+    header_values: dict[str, int] = {}
+    collisions: set[str] = set()
+    for col in range(resolved.min_col, resolved.max_col + 1):
+        raw = sheet.cell(row=resolved.min_row, column=col).value
+        for spelling in (str(raw or "").strip(), normalize_header(raw)):
+            key = spelling.casefold()
+            if not key:
+                continue
+            if key in header_values and header_values[key] != col:
+                collisions.add(key)
+            header_values.setdefault(key, col)
+    wanted = [(field["name"], normalize_header(field["name"]).casefold()) for field in fields]
+    missing = [name for name, key in wanted if key not in header_values]
     if missing:
         raise FoundryError("binding header missing fields: " + ", ".join(missing))
-    return {field["name"]: header_values[field["name"].casefold()] for field in fields}
+    ambiguous = sorted({name for name, key in wanted if key in collisions})
+    if ambiguous:
+        # Two columns that read the same once the line breaks are gone cannot be
+        # told apart by name, and guessing one would bind the wrong cells.
+        raise FoundryError("binding header is ambiguous for: " + ", ".join(ambiguous))
+    return {name: header_values[key] for name, key in wanted}
 
 
 def _decimal_text(value: Any) -> Decimal:

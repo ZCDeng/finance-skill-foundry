@@ -30,6 +30,7 @@ ERP_HEADER_MARKERS = frozenset(
 ERP_TITLE_MARKERS = ("金蝶", "用友", "KIS", "U8")
 _PERIOD_IN_TITLE = re.compile(r"(20\d{2})[-./年](\d{1,2})")
 _CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
+_UNIT_IN_TITLE = re.compile(r"(?:金额)?单位[:：\s]*([万亿]?元)")
 # Diagnostics are fixed finance_model codes and text; this only guards against a
 # path, URL, or host slipping into the message text. Business values in
 # proposed_scope and sheet_candidates are never rewritten.
@@ -41,7 +42,26 @@ AMOUNT_EXTRA = ("借方", "贷方")
 def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     del spec
     diagnostics: list[dict] = []
-    datasets = _authorized_tables(store, diagnostics)
+    datasets, structure_states, pending = _authorized_tables(store, diagnostics)
+    if pending:
+        # A file whose table structure nobody has confirmed cannot answer for a
+        # number yet, and saying "missing currency" about it would be a guess.
+        return _report(
+            proposed_scope={key: "" for key in SCOPE_KEYS},
+            can_run=[],
+            blocked=[_blocked("management_pnl", ["table_structure"], "pending_structure")],
+            policy="snapshot_only",
+            diagnostics=[
+                *diagnostics,
+                _diag(
+                    "error",
+                    "pending_structure",
+                    "table structure is waiting for the manager's confirmation",
+                ),
+            ],
+            sheet_candidates=[],
+            structure_states=structure_states,
+        )
     if not datasets:
         return _report(
             proposed_scope={key: "" for key in SCOPE_KEYS},
@@ -50,6 +70,7 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
             policy="snapshot_only",
             diagnostics=[*diagnostics, _diag("error", "no_dataset", "no authorized finance dataset")],
             sheet_candidates=[],
+            structure_states=structure_states,
         )
 
     code_map = _account_code_map(store)
@@ -59,38 +80,27 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
         probes.extend(_probes_for_dataset(store, dataset, sheet_candidates, diagnostics, code_map))
 
     proposed_scope = _proposed_scope(probes)
-    missing_scope = [key for key in ("period", "currency") if not proposed_scope.get(key)]
-    identity_failed = any(
-        probe["identity_attempted"] and not probe["identity_ok"] for probe in probes
-    )
-    has_amount_rows = any(probe["has_amount"] and probe["rows"] for probe in probes)
-
-    can_run: list[str] = []
+    # Each file answers for itself. A pack whose AR sheet never declares a
+    # currency says nothing about the ledger sheet that does, and a report that
+    # blocked the whole task on the weakest file sent the manager looking for a
+    # problem in the wrong place.
+    per_dataset = [
+        _dataset_readiness(group, code_map)
+        for group in _by_dataset(probes)
+    ]
+    can_run = [
+        name
+        for name in CAPABILITY_ORDER
+        if any(name in entry["can_run"] for entry in per_dataset)
+    ]
     blocked: list[dict[str, Any]] = []
-
-    if identity_failed:
-        blocked.append(_blocked("management_pnl", missing_scope or ["period", "currency"], "identity_failed"))
-        diagnostics.append(
-            _diag("error", "identity_failed", "header identity did not declare period and currency")
-        )
-    elif missing_scope:
-        blocked.append(_blocked("management_pnl", missing_scope, "missing_scope"))
-        diagnostics.append(_diag("error", "missing_scope", "period or currency is not declared"))
-    elif any(_pnl_sheet_ready(probe, code_map) for probe in probes):
-        can_run.append("management_pnl")
-    else:
-        blocked.append(_blocked("management_pnl", ["management_account"], "mapping_incomplete"))
-        diagnostics.append(
-            _diag("error", "mapping_incomplete", "management accounts are not fully mapped on one sheet")
-        )
-
-    if missing_scope:
-        blocked.append(_blocked("control_totals", missing_scope, "missing_scope"))
-    elif has_amount_rows:
-        can_run.append("control_totals")
-
-    if _aging_ready(probes) and not missing_scope:
-        can_run.append("receivables_aging")
+    for entry in per_dataset:
+        for item in entry["blocked"]:
+            if item["capability"] in can_run:
+                continue
+            blocked.append({**item, "dataset_id": entry["dataset_id"]})
+    for code, message in _report_diagnostics(blocked):
+        diagnostics.append(_diag("error", code, message))
 
     with_rows = [probe for probe in probes if probe["rows"]]
     policy = (
@@ -100,17 +110,103 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     )
     return _report(
         proposed_scope=proposed_scope,
-        can_run=[name for name in CAPABILITY_ORDER if name in can_run],
+        can_run=can_run,
         blocked=blocked,
         policy=policy,
         diagnostics=diagnostics,
         sheet_candidates=sheet_candidates,
+        structure_states=structure_states,
+        datasets=per_dataset,
     )
 
 
-def _report(*, proposed_scope, can_run, blocked, policy, diagnostics, sheet_candidates) -> dict[str, Any]:
+def _by_dataset(probes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    order: list[str] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for probe in probes:
+        key = str(probe.get("dataset_id") or "")
+        if key not in grouped:
+            order.append(key)
+            grouped[key] = []
+        grouped[key].append(probe)
+    return [grouped[key] for key in order]
+
+
+def _dataset_readiness(probes: list[dict[str, Any]], code_map: dict[str, str]) -> dict[str, Any]:
+    """What this one file can answer for, and what it is still missing."""
+    scope = _proposed_scope(probes)
+    missing = [key for key in ("period", "currency") if not scope.get(key)]
+    identity_failed = any(
+        probe["identity_attempted"] and not probe["identity_ok"] for probe in probes
+    )
+    has_amount_rows = any(probe["has_amount"] and probe["rows"] for probe in probes)
+    can_run: list[str] = []
+    blocked: list[dict[str, Any]] = []
+
+    if identity_failed:
+        blocked.append(
+            _blocked("management_pnl", missing or ["period", "currency"], "identity_failed")
+        )
+    elif missing:
+        blocked.append(_blocked("management_pnl", missing, "missing_scope"))
+    elif any(_pnl_sheet_ready(probe, code_map) for probe in probes):
+        can_run.append("management_pnl")
+    else:
+        blocked.append(_blocked("management_pnl", ["management_account"], "mapping_incomplete"))
+
+    if missing:
+        blocked.append(_blocked("control_totals", missing, "missing_scope"))
+    elif has_amount_rows:
+        can_run.append("control_totals")
+
+    if _aging_ready(probes) and not missing:
+        can_run.append("receivables_aging")
+
     return {
+        "dataset_id": str(probes[0].get("dataset_id") or "") if probes else "",
+        "name": str(probes[0].get("dataset_name") or "") if probes else "",
+        "scope": scope,
+        "missing_fields": missing,
+        "can_run": [name for name in CAPABILITY_ORDER if name in can_run],
+        "blocked": blocked,
+    }
+
+
+REASON_MESSAGES = {
+    "identity_failed": "header identity did not declare period and currency",
+    "missing_scope": "period or currency is not declared",
+    "mapping_incomplete": "management accounts are not fully mapped on one sheet",
+}
+
+
+def _report_diagnostics(blocked: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """One diagnostic per reason, not one per file that shares it."""
+    seen: list[tuple[str, str]] = []
+    for item in blocked:
+        reason = str(item.get("reason") or "")
+        message = REASON_MESSAGES.get(reason)
+        if message and (reason, message) not in seen:
+            seen.append((reason, message))
+    return seen
+
+
+def _report(
+    *,
+    proposed_scope,
+    can_run,
+    blocked,
+    policy,
+    diagnostics,
+    sheet_candidates,
+    structure_states=None,
+    datasets=None,
+) -> dict[str, Any]:
+    return {
+        "structure_states": structure_states or {},
         "proposed_scope": proposed_scope,
+        # What each file answers for on its own. `proposed_scope` above is only
+        # what they all agree on, so this is where a disagreement is legible.
+        "datasets": datasets or [],
         "can_run": can_run,
         "blocked": blocked,
         "file_identity_policy": policy,
@@ -127,7 +223,21 @@ def _blocked(capability: str, missing_fields: list[str], reason: str) -> dict[st
     return {"capability": capability, "missing_fields": list(missing_fields), "reason": reason}
 
 
-def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
+def _authorized_tables(store, diagnostics: list[dict]):
+    """Authorized datasets, what each one's table structure is waiting for, and
+    whether anything is still waiting for the manager.
+
+    A workbook whose structure has been confirmed is represented by the table it
+    produced; probing the original again would report the mis-parse the
+    confirmation exists to correct.
+    """
+    from foundry.structure_records import (
+        NO_TABLE,
+        NOT_APPLICABLE,
+        PENDING_CONFIRMATION,
+        WITHDRAWN,
+    )
+
     state = store.analysis.state()
     records = [
         row
@@ -135,6 +245,8 @@ def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
         if store.allowed is None or row["id"] in store.allowed
     ]
     tables = []
+    states: dict[str, str] = {}
+    pending = False
     for record in records:
         try:
             dataset = store.analysis.read_dataset(record["id"])
@@ -145,8 +257,19 @@ def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
             continue
         if dataset.get("kind") == "background":
             continue
+        structure = store.dataset_structure_state(record["id"])
+        states[record["id"]] = structure
+        if _is_workbook_shell(dataset) and structure != NOT_APPLICABLE:
+            # Once a workbook has been read, the tables it produced answer for
+            # it; probing the original again reports the mis-parse the
+            # confirmation exists to correct.
+            if structure in {PENDING_CONFIRMATION, NO_TABLE}:
+                pending = True
+            continue
+        if structure == WITHDRAWN:
+            continue
         tables.append(dataset)
-    return tables
+    return tables, states, pending
 
 
 def _account_code_map(store) -> dict[str, str]:
@@ -171,7 +294,28 @@ def _probes_for_dataset(
         return _workbook_probes(store, dataset, sheet_candidates, diagnostics, code_map)
     rows = list(dataset.get("rows") or [])
     headers = _headers_of(dataset, rows)
-    return [_probe(headers, rows, sheet=str(dataset.get("transformation", {}).get("sheet") or ""))]
+    return [
+        _probe(
+            headers,
+            rows,
+            sheet=str(dataset.get("transformation", {}).get("sheet") or ""),
+            dataset_id=str(dataset.get("id") or ""),
+            dataset_name=str(dataset.get("name") or ""),
+            hints=_declared_hints(dataset),
+        )
+    ]
+
+
+def _declared_hints(dataset: dict) -> dict[str, str]:
+    """Period, currency and unit as the manager confirmed them off the title area.
+
+    A derived table starts at the header row, so the title line that carried
+    「单位：元」 is not in its rows and cannot be read back out of them. The
+    confirmation kept it; this is where it re-enters the report.
+    """
+    structure = (dataset.get("transformation") or {}).get("structure") or {}
+    hints = (structure.get("declaration") or {}).get("scope_hints") or {}
+    return {key: str(hints.get(key) or "") for key in ("period", "currency", "unit")}
 
 
 def _is_workbook_shell(dataset: dict) -> bool:
@@ -207,7 +351,13 @@ def _workbook_probes(
             continue
         rows = list(parsed.get("rows") or [])
         headers = _headers_of(parsed, rows)
-        probe = _probe(headers, rows, sheet=name)
+        probe = _probe(
+            headers,
+            rows,
+            sheet=name,
+            dataset_id=str(dataset.get("id") or ""),
+            dataset_name=str(dataset.get("name") or ""),
+        )
         probes.append(probe)
         sheet_candidates.append({"sheet": name, "mappable": _pnl_sheet_ready(probe, code_map)})
     if not probes:
@@ -238,21 +388,46 @@ def _headers_of(dataset: dict, rows: list[dict]) -> list[str]:
     return []
 
 
-def _probe(headers: list[str], rows: list[dict], *, sheet: str) -> dict[str, Any]:
+def _probe(
+    headers: list[str],
+    rows: list[dict],
+    *,
+    sheet: str,
+    dataset_id: str = "",
+    dataset_name: str = "",
+    hints: dict[str, str] | None = None,
+) -> dict[str, Any]:
     fmap = _field_map({})
     title = _title_blob(headers, rows)
     attempted = _identity_attempted(headers, title)
-    period = _first(_declared_values(rows, fmap, "period")) or _period_from_title(title)
-    currency = _first(_declared_values(rows, fmap, "currency")) or _currency_from_title(title)
+    # What the manager confirmed about the title area outranks anything guessed
+    # back out of the derived rows, which no longer contain the title at all.
+    hints = {key: str(value or "").strip() for key, value in (hints or {}).items()}
+    period = (
+        _unanimous(_declared_values(rows, fmap, "period"))
+        or hints.get("period", "")
+        or _period_from_title(title)
+    )
+    currency = (
+        _unanimous(_declared_values(rows, fmap, "currency"))
+        or hints.get("currency", "")
+        or _currency_from_title(title)
+    )
     return {
         "sheet": sheet,
+        "dataset_id": dataset_id,
+        "dataset_name": dataset_name,
         "headers": headers,
         "rows": rows,
         "period": period,
         "currency": currency,
-        "ledger": _first(_declared_values(rows, fmap, "ledger")),
-        "organization": _first(_declared_values(rows, fmap, "organization")),
-        "unit": _first(_declared_values(rows, fmap, "unit")),
+        "ledger": _unanimous(_declared_values(rows, fmap, "ledger")),
+        "organization": _unanimous(_declared_values(rows, fmap, "organization")),
+        "unit": (
+            _unanimous(_declared_values(rows, fmap, "unit"))
+            or hints.get("unit", "")
+            or _unit_from_title(title)
+        ),
         "identity_attempted": attempted,
         "identity_ok": bool(period and currency) if attempted else True,
         "doc_id": bool(_declared_values(rows, fmap, "doc_id")),
@@ -289,6 +464,11 @@ def _period_from_title(title: str) -> str:
     return f"{match.group(1)}-{int(match.group(2)):02d}"
 
 
+def _unit_from_title(title: str) -> str:
+    match = _UNIT_IN_TITLE.search(title)
+    return match.group(1) if match else ""
+
+
 def _currency_from_title(title: str) -> str:
     match = _CURRENCY_IN_TITLE.search(title)
     if match:
@@ -312,8 +492,16 @@ def _declared_values(rows: list[dict], fmap: dict, canonical: str) -> list[str]:
     return values
 
 
-def _first(values: list[str]) -> str:
-    return values[0] if values else ""
+def _unanimous(values: list[str]) -> str:
+    """The one value a column declares, or blank where it declares several.
+
+    A column holding 上海城市公司 on one row and 宁波城市公司 on the next is a
+    dimension of the data, not the scope of the file. Taking the first row's
+    value made the readiness report answer 组织 with whatever happened to sort
+    first, and joining every value with a comma made 期间 read 2026-08,2026-01 —
+    a string no scope can ever match.
+    """
+    return values[0] if len(values) == 1 else ""
 
 
 def _headers_include(headers: list[str], canonical: str) -> bool:
@@ -322,6 +510,13 @@ def _headers_include(headers: list[str], canonical: str) -> bool:
 
 
 def _proposed_scope(probes: list[dict[str, Any]]) -> dict[str, str]:
+    """What every probe agrees on. Where they differ the answer is blank.
+
+    Two files closing different months do not share a period, and a report that
+    answered 2026-08,2026-01 offered a value that is not a period and cannot be
+    bound. The disagreement belongs in the per-dataset breakdown, not folded
+    into one string.
+    """
     scope = {key: "" for key in SCOPE_KEYS}
     for key in SCOPE_KEYS:
         found: list[str] = []
@@ -330,7 +525,7 @@ def _proposed_scope(probes: list[dict[str, Any]]) -> dict[str, str]:
             if not value or value in found:
                 continue
             found.append(value)
-        scope[key] = ",".join(found)
+        scope[key] = found[0] if len(found) == 1 else ""
     return scope
 
 

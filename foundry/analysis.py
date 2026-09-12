@@ -264,7 +264,12 @@ class AnalysisStore:
         }
 
     def add_dataset(
-        self, path: Path, *, name: str, metadata: dict | None = None
+        self,
+        path: Path,
+        *,
+        name: str,
+        metadata: dict | None = None,
+        allow_duplicate: bool = False,
     ) -> dict:
         path = Path(path)
         _safe_text(name, "dataset name", required=True, maximum=200)
@@ -283,8 +288,15 @@ class AnalysisStore:
                 data = handle.read(MAX_SOURCE_BYTES + 1)
         except OSError as exc:
             raise FoundryError(f"cannot read dataset source: {exc}") from exc
-        parsed = parse_source(data, suffix, metadata)
         source_hash = _hash_bytes(data)
+        if not allow_duplicate:
+            existing = self._same_source(source_hash)
+            if existing is not None:
+                # The manager already has these bytes. Hand back the copy she has,
+                # marked as the same upload, rather than filing a second one she
+                # then has to tell apart.
+                return {**existing, "duplicate_of": existing["id"]}
+        parsed = parse_source(data, suffix, metadata)
         for paragraph in parsed.get("paragraphs", []):
             paragraph["source_hash"] = source_hash
         encoded = _bytes(parsed)
@@ -312,6 +324,76 @@ class AnalysisStore:
             record["seq"] = self._next_seq()
             record["_integrity_hash"] = _hash(record)
             write_json_atomic(folder / "meta.json", record)
+        return record
+
+    def _same_source(self, source_hash: str) -> dict | None:
+        """An earlier upload of exactly these bytes, if the task has one.
+
+        A table derived from a confirmed structure carries its original's bytes
+        too, so it is skipped here: it is the same file seen through a structure,
+        not a second upload of it.
+        """
+        for row in self.state()["datasets"]:
+            if row.get("source_hash") != source_hash:
+                continue
+            if (row.get("transformation") or {}).get("structure"):
+                continue
+            return row
+        return None
+
+    def add_table_snapshot(
+        self, source_dataset_id: str, declaration: dict, *, name: str
+    ) -> dict:
+        """File the calculable table a confirmed structure declaration describes.
+
+        The original workbook bytes are stored again, so the snapshot answers for
+        its own source and a located figure can still be opened in the file the
+        manager uploaded.
+        """
+        from foundry.structure_snapshot import derive_table
+
+        _safe_text(name, "dataset name", required=True, maximum=200)
+        if not isinstance(declaration, dict):
+            raise FoundryError("structure declaration must be an object")
+        shell = self.read_dataset(source_dataset_id)
+        folder = self._inside(self.root / "datasets" / source_dataset_id)
+        data = (folder / shell["source_file"]).read_bytes()
+        if _hash_bytes(data) != shell["source_hash"]:
+            raise FoundryError("dataset integrity check failed")
+        declaration = json_value({**declaration, "derived_from": source_dataset_id})
+        parsed = derive_table(data, declaration)
+        encoded = _bytes(
+            {
+                "kind": parsed["kind"],
+                "schema": parsed["schema"],
+                "rows": parsed["rows"],
+                "row_count": parsed["row_count"],
+                "transformation": parsed["transformation"],
+            }
+        )
+        record = _new(
+            self.task,
+            name=name,
+            kind="table",
+            source_name=shell["source_name"],
+            source_hash=shell["source_hash"],
+            source_bytes=len(data),
+            data_hash=_hash_bytes(encoded),
+            schema=parsed["schema"],
+            row_count=parsed["row_count"],
+            metadata={"derived_from": source_dataset_id, "sheet": declaration["sheet"]},
+            transformation=parsed["transformation"],
+            source_file=shell["source_file"],
+        )
+        destination = self._inside(self.root / "datasets" / record["id"])
+        with exclusive(self.task.lock_path, timeout=10):
+            self._inside(destination)
+            destination.mkdir(parents=True, exist_ok=False)
+            (destination / record["source_file"]).write_bytes(data)
+            (destination / "data.json").write_bytes(encoded)
+            record["seq"] = self._next_seq()
+            record["_integrity_hash"] = _hash(record)
+            write_json_atomic(destination / "meta.json", record)
         return record
 
     def read_dataset(self, dataset_id: str) -> dict:
@@ -807,7 +889,7 @@ class AnalysisStore:
         )
         return self._write(self._object_path("drafts", record["id"]), record)
 
-    def add_report_source(self, path: Path) -> dict:
+    def add_report_source(self, path: Path, *, name: str | None = None) -> dict:
         from foundry.report_documents import check_report_source_bytes, report_format_for_path
 
         source = Path(path).expanduser()
@@ -819,7 +901,9 @@ class AnalysisStore:
         digest = _hash_bytes(data)
         record = _new(
             self.task,
-            name=source.name,
+            # A caller that built the bytes itself passes the name the manager
+            # would recognise; otherwise the file on disk is the name.
+            name=str(name).strip() if str(name or "").strip() else source.name,
             format=fmt,
             sha256=digest,
             bytes=len(data),

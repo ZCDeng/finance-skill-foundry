@@ -7,6 +7,14 @@ from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any
 
 FLOW_SIGNS = {"revenue": Decimal("1"), "cost": Decimal("-1"), "expense": Decimal("-1")}
+"""Which way a bare amount moves profit, for rows that never say which side.
+
+A source that carries no 借贷 column and no balance direction hands over a
+magnitude and nothing else, so the account itself is the only thing left to read
+the sign from. Where a row does say its side, that reading is wrong: a month-end
+transfer debits revenue to close it out, and counting the debit as another
+credit reports the month twice.
+"""
 FINANCE_IDENTITY = ("ledger", "organization", "period")
 INACTIVE_SOURCE_STATUS = {"duplicate_pull", "deleted", "void", "voided"}
 
@@ -30,6 +38,20 @@ def evaluate_metric(normalized: dict, spec: dict) -> dict:
             _diag("error", "unsupported_metric", f"unsupported metric kind: {kind}")
         )
         result = {"columns": [], "rows": []}
+    if not result["rows"] and kind != "control_totals":
+        # Nothing failed, so the run is not failed -- but a metric that produced
+        # no line at all answered no question, and a green run with an empty
+        # table reads as "the number is nothing". Error severity is what marks
+        # the run incomplete, which is the house signal for "do not build on it".
+        diagnostics.append(
+            _diag(
+                "error",
+                "empty_result",
+                f"{kind} produced no rows from {len(rows)} fact rows"
+                if rows
+                else f"{kind} had no fact rows to read",
+            )
+        )
     return {
         "domain": {
             "input": "foundry.finance.normalized.v1",
@@ -61,6 +83,9 @@ def _management_pnl(rows: list[dict], spec: dict, diagnostics: list[dict]) -> di
     }
     wanted = set(spec.get("accounts") or ["revenue", "cost", "expense"])
     buckets: dict[tuple, dict[str, Any]] = {}
+    undirected = 0
+    counted = 0
+    gross: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for row in rows:
         if not _active_row(row):
             continue
@@ -88,9 +113,46 @@ def _management_pnl(rows: list[dict], spec: dict, diagnostics: list[dict]) -> di
                 "source_rows": defaultdict(list),
             },
         )
-        contribution = _dec(row["amount"]) * signs.get(str(account), Decimal("1"))
+        # A row that knows its side is summed by that side. 结转 vouchers debit
+        # revenue to close the month, and the debit has to cancel the credit it
+        # reverses; reading the sign off the account instead would count the
+        # month twice, silently and with the run still green.
+        if _states_its_side(row):
+            contribution = -_dec(row["signed_amount"])
+        else:
+            undirected += 1
+            contribution = _dec(row["amount"]) * signs.get(str(account), Decimal("1"))
         bucket[str(account)] += contribution
         bucket["source_rows"][str(account)].append(row["source"])
+        gross[str(account)] += abs(contribution)
+        counted += 1
+    for account in sorted(wanted):
+        net = sum((b[account] for b in buckets.values()), Decimal("0"))
+        if gross[account] and not net:
+            # Every entry met its reversal. On a journal that is what a closed
+            # month looks like: the 结转 vouchers move the P&L accounts to
+            # 本年利润, so the period's movement really is nil. Saying so beats
+            # handing back a zero that looks like no activity.
+            diagnostics.append(
+                _diag(
+                    "warning",
+                    "account_nets_to_zero",
+                    f"{account} nets to zero over {gross[account]} of gross movement; "
+                    "a journal that includes the month-end 结转 vouchers cancels "
+                    "itself, and the balances rather than the entries are what a "
+                    "period P&L reads",
+                )
+            )
+    if undirected:
+        diagnostics.append(
+            _diag(
+                "warning",
+                "amount_direction_assumed",
+                f"{undirected} of {counted} rows carry no 借贷 or balance direction; "
+                "their sign was taken from the management account, which cannot "
+                "tell a reversal from an entry",
+            )
+        )
     out = []
     for bucket in sorted(
         buckets.values(),
@@ -358,6 +420,13 @@ def _dimensions(spec: dict) -> list[str]:
     if spec.get("aggregate_dimensions") is True:
         return requested
     return list(dict.fromkeys([*FINANCE_IDENTITY, *requested]))
+
+
+def _states_its_side(row: dict) -> bool:
+    """Whether this row says which side it sits on, rather than a bare magnitude."""
+    if row.get("debit_credit") or row.get("account_direction"):
+        return True
+    return (row.get("policies") or {}).get("amount_sign") == "debit_positive"
 
 
 def _active_row(row: dict) -> bool:

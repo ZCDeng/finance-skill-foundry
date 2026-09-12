@@ -285,6 +285,17 @@ def _display_amount_change(account, value, unit):
     return f"{labels.get(account, account)}{word} {text}{suffix}"
 
 
+def _declared_amount(row: dict, field: str) -> Decimal | None:
+    """The amount the row states for itself, if it states one at all."""
+    value = row.get(field)
+    if value in (None, ""):
+        return None
+    try:
+        return _decimal(value)
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
 def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:
     """Compare explicitly paired product observations; never invent drivers."""
     spec = _require_spec(spec, "price/quantity variance spec")
@@ -298,6 +309,7 @@ def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:
         "quantity": "quantity",
         "price": "price",
         "scenario": "scenario",
+        "amount": "amount",
         **field_map,
     }
     dimensions = _dimensions(spec, default=["product"])
@@ -360,6 +372,28 @@ def price_quantity_bridge(rows: list[dict], spec: dict) -> dict:
                 Decimal(0) if method == "quantity_then_price" else (qa - qb) * (pa - pb)
             )
             total = qa * pa - qb * pb
+            # A row that also states its amount is stating a fact about the
+            # books. Where q×p disagrees with it the decomposition is describing
+            # something the ledger does not say, and the manager has to be the
+            # one who decides which is wrong -- silently preferring q×p reported
+            # 34,221 against a booked 409,500 with nothing to notice.
+            for side, row, computed in (("actual", a, qa * pa), ("baseline", b, qb * pb)):
+                declared = _declared_amount(row, fields["amount"])
+                if declared is not None and declared != computed:
+                    diagnostics.append(
+                        {
+                            "severity": "warning",
+                            "code": "price_quantity_amount_mismatch",
+                            "group": dict(zip(dimensions, key)),
+                            "side": side,
+                            "declared": _text(declared),
+                            "computed": _text(computed),
+                            "message": (
+                                f"{side} 行声明金额 {_text(declared)}，数量乘单价得 "
+                                f"{_text(computed)}；分解用的是数量乘单价。"
+                            ),
+                        }
+                    )
             result.append(
                 {
                     **dict(zip(dimensions, key)),

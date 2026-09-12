@@ -18,6 +18,14 @@ Do **not** refuse `run_metric`, `explain_variance`, or the four method skills be
 
 Call `finance_readiness` (no need to load this pack first). The report is read-only: it does not write snapshots or finance context.
 
+When it reports `pending_structure`, the files are loaded but nobody has said what
+the tables in them are yet. Read `structure_proposal_list`, tell the manager what
+the engine made of each sheet — which row is the header, which column is the
+amount, which rows are subtotals — and confirm with `structure_proposal_confirm`
+only on her word. Say that a confirmation you submit is hers to acknowledge. If a
+debit/credit side is undecided, ask her which side carries the amount; guessing
+changes the numbers.
+
 Interpret the report as:
 
 - `can_run` — capabilities that already have declared period/currency and required mapping.

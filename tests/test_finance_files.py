@@ -309,3 +309,30 @@ def test_text_output_formula_literal_and_long_decimal_diagnostic(files) -> None:
         "decimal_written_as_text",
         "formula_like_text",
     ]
+
+
+def test_an_inspection_reply_carries_no_host_path(tmp_path: Path) -> None:
+    """The reply went out with /Users/... in it."""
+    import json as _json
+
+    from foundry.analysis import AnalysisStore
+    from foundry.finance_files import FinanceFiles
+    from foundry.task import TaskStore
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="检视")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "book.xlsx"
+    book = Workbook()
+    book.active["A1"] = "科目代码"
+    book.active["A2"] = "6001"
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="册", metadata={"mode": "workbook"})
+
+    reply = FinanceFiles(task).inspect({"dataset_id": dataset["id"]})
+    assert "path" not in reply
+    blob = _json.dumps(reply, ensure_ascii=False)
+    assert str(tmp_path) not in blob and "/Users/" not in blob
+    # What a caller actually needs is still there.
+    assert reply["dataset_id"] == dataset["id"] and reply["sheet_names"]

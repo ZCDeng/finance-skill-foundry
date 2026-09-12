@@ -7,6 +7,17 @@ from decimal import localcontext
 
 from foundry.analysis import AnalysisStore, _assert_id, _hash, _hash_bytes, _new, _safe_text
 from foundry.errors import FoundryError
+from foundry.structure_records import (
+    ACKNOWLEDGED,
+    ACTIVE_STATES,
+    MANAGER,
+    NOT_APPLICABLE,
+    PENDING_ACKNOWLEDGEMENT,
+    TEMPLATE,
+    WITHDRAWN,
+    assert_bindable,
+    latest_proposal,
+)
 from foundry.finance_explanations import (
     background_applies,
     claims_for_facts,
@@ -18,7 +29,11 @@ from foundry.finance_explanations import (
     validate_explanation as validate_explanation_payload,
 )
 from foundry.finance_metrics import evaluate_metric
-from foundry.finance_model import normalize_finance_dataset, scoped_source_rows
+from foundry.finance_model import (
+    normalize_finance_dataset,
+    scoped_source_rows,
+    voucher_reference,
+)
 from foundry.finance_variance import explain_variance, price_quantity_bridge
 
 COLLECTIONS = {
@@ -29,6 +44,8 @@ COLLECTIONS = {
     "backgrounds",
     "adjustments",
     "charts",
+    "structure_proposals",
+    "structure_confirmations",
 }
 
 
@@ -53,13 +70,23 @@ def _render_fact_template_in_document(document: dict, facts: list[dict]) -> tupl
 
 class FinanceStore:
     def __init__(
-        self, task, *, snapshot_ids=None, session_id=None, context_revision=None
+        self,
+        task,
+        *,
+        snapshot_ids=None,
+        session_id=None,
+        context_revision=None,
+        actor=None,
     ):
         self.analysis = AnalysisStore(task)
         self.task = task
         self.allowed = None if snapshot_ids is None else set(snapshot_ids)
         self.session_id = session_id
         self.context_revision = context_revision
+        # Stamped by the call layer; an unstamped call is the lower trust level.
+        from foundry.structure_records import resolve_source
+
+        self.actor = resolve_source(actor)
 
     def _folder(self, kind):
         if kind not in COLLECTIONS:
@@ -110,7 +137,7 @@ class FinanceStore:
             "task_id": self.task.id,
             "domain": "foundry.finance.context.v1",
             "datasets": [
-                r
+                {**r, "structure_state": self.dataset_structure_state(r["id"])}
                 for r in state["datasets"]
                 if self.allowed is None or r["id"] in self.allowed
             ],
@@ -180,6 +207,12 @@ class FinanceStore:
         parent = (
             self._read("contexts", spec["parent_id"]) if spec.get("parent_id") else {}
         )
+        for alias, value in bindings.items():
+            assert_bindable(
+                value,
+                self.dataset_structure_state(value),
+                is_shell=self.analysis.read_dataset(value).get("kind") == "workbook",
+            )
         source_hashes = {
             alias: self.analysis.read_dataset(value)["source_hash"]
             for alias, value in bindings.items()
@@ -596,14 +629,14 @@ class FinanceStore:
             ):
                 raise FoundryError("source evidence row is invalid")
             source = dataset["rows"][source_index - 1]
+            voucher = voucher_reference(source)
             values.append(
                 {
                     "source": ref,
                     "source_hash": dataset["source_hash"],
                     "data": source,
-                    "voucher_detail_available": bool(
-                        source.get("doc_id") and source.get("line_id")
-                    ),
+                    "voucher_detail_available": voucher is not None,
+                    **({"voucher": voucher} if voucher else {}),
                 }
             )
         location = {"run_id": run["id"], "row": index, "column": column, "output_hash": run.get("output_hash")}
@@ -1109,6 +1142,325 @@ class FinanceStore:
                     return value
         return {}
 
+    # ----- table structure: propose, confirm, acknowledge, reject, withdraw -----
+
+    def _structure_proposals(self, dataset_id):
+        return [
+            row
+            for row in self._list("structure_proposals")
+            if row.get("dataset_id") == dataset_id
+        ]
+
+    def _structure_confirmations(self, dataset_id):
+        return [
+            row
+            for row in self._list("structure_confirmations")
+            if row.get("dataset_id") == dataset_id
+        ]
+
+    def _authorized_dataset(self, dataset_id):
+        """A structure call may only reach a snapshot this session already holds."""
+        if not isinstance(dataset_id, str) or not dataset_id:
+            raise FoundryError("structure call requires a dataset_id")
+        self._authorize({"source": dataset_id})
+        return self.analysis.read_dataset(dataset_id)
+
+    def dataset_structure_state(self, dataset_id):
+        from foundry.structure_records import structure_state
+
+        try:
+            dataset = self.analysis.read_dataset(dataset_id)
+        except FoundryError:
+            return NOT_APPLICABLE
+        derived = (dataset.get("transformation") or {}).get("structure")
+        if derived:
+            owning = [
+                row
+                for row in self._list("structure_confirmations")
+                if dataset_id in (row.get("snapshot_ids") or {}).values()
+            ]
+            return structure_state(None, owning, is_snapshot=True)
+        proposals = self._structure_proposals(dataset_id)
+        return structure_state(
+            latest_proposal(proposals), self._structure_confirmations(dataset_id)
+        )
+
+    def structure_propose(self, dataset_id, *, source=None):
+        """Record what the engine reads in a freshly filed workbook."""
+        from foundry.structure_proposal import propose_workbook_structure
+        from foundry.structure_templates import apply_matching_templates
+
+        dataset = self._authorized_dataset(dataset_id)
+        if str(dataset.get("source_file") or "").lower() != "source.xlsx":
+            return None
+        if (dataset.get("transformation") or {}).get("structure"):
+            # Already the product of a confirmed structure; there is nothing to read.
+            return None
+        folder = self.analysis._inside(self.analysis.root / "datasets" / dataset_id)
+        data = (folder / dataset["source_file"]).read_bytes()
+        if _hash_bytes(data) != dataset["source_hash"]:
+            raise FoundryError("dataset integrity check failed")
+        proposed = propose_workbook_structure(data)
+        sheets, matches = apply_matching_templates(self, proposed["sheets"])
+        existing = self._structure_proposals(dataset_id)
+        revision = (latest_proposal(existing) or {}).get("revision", 0) + 1
+        record = self._write(
+            "structure_proposals",
+            dataset_id=dataset_id,
+            revision=revision,
+            sheets=sheets,
+            template_matches=matches,
+            bindings={"source": dataset_id},
+        )
+        auto = [match for match in matches if match.get("auto_apply")]
+        if auto:
+            self._confirm_declaration(
+                record,
+                [sheet for sheet in sheets if sheet["sheet"] in {m["sheet"] for m in auto}],
+                source=TEMPLATE,
+                triggered_by=source or self.actor,
+            )
+        return record
+
+    def structure_proposal_list(self, spec):
+        if not isinstance(spec, dict):
+            raise FoundryError("structure proposal list spec must be an object")
+        dataset_id = spec.get("dataset_id")
+        if dataset_id:
+            self._authorized_dataset(dataset_id)
+            proposals = self._structure_proposals(dataset_id)
+            latest = latest_proposal(proposals)
+            return {
+                "schema_version": 1,
+                "proposals": [self._public_proposal(latest)] if latest else [],
+            }
+        by_dataset = {}
+        for row in self._list("structure_proposals"):
+            current = by_dataset.get(row["dataset_id"])
+            if current is None or row.get("revision", 0) > current.get("revision", 0):
+                by_dataset[row["dataset_id"]] = row
+        return {
+            "schema_version": 1,
+            "proposals": [self._public_proposal(row) for row in by_dataset.values()],
+        }
+
+    def _public_proposal(self, record):
+        return {
+            "id": record["id"],
+            "dataset_id": record["dataset_id"],
+            "revision": record["revision"],
+            "structure_state": self.dataset_structure_state(record["dataset_id"]),
+            "sheets": record["sheets"],
+            "template_matches": record.get("template_matches") or [],
+        }
+
+    def structure_proposal_confirm(self, spec):
+        from foundry.structure_records import (
+            assert_confirmable,
+            reject_forbidden_spec,
+            strip_claimed_source,
+        )
+
+        spec = reject_forbidden_spec(spec)
+        spec, claimed = strip_claimed_source(spec)
+        self._refuse_child_session("confirm a table structure")
+        dataset_id = spec.get("dataset_id")
+        self._authorized_dataset(dataset_id)
+        proposals = self._structure_proposals(dataset_id)
+        latest = latest_proposal(proposals)
+        if latest is None:
+            raise FoundryError("no table structure proposal for this dataset")
+        revision = spec.get("revision")
+        if revision is not None and int(revision) != latest["revision"]:
+            raise FoundryError(
+                "table structure proposal has moved on; reload before confirming"
+            )
+        sheets = spec.get("sheets")
+        if sheets is None:
+            sheets = [
+                sheet for sheet in latest["sheets"] if sheet.get("decision") == "table"
+            ]
+        if not isinstance(sheets, list):
+            raise FoundryError("structure confirmation sheets must be a list")
+        known = {sheet["sheet"] for sheet in latest["sheets"]}
+        unknown = [item.get("sheet") for item in sheets if item.get("sheet") not in known]
+        if unknown:
+            raise FoundryError(f"sheet is not in the proposal: {unknown[0]}")
+        assert_confirmable(sheets)
+        record = self._confirm_declaration(
+            latest, sheets, source=self.actor, triggered_by=self.actor
+        )
+        if claimed:
+            record = {
+                **record,
+                "diagnostics": [
+                    {
+                        "severity": "warning",
+                        "code": "claimed_source_stripped",
+                        "message": "confirmation source comes from the call, not the request",
+                    }
+                ],
+            }
+        return record
+
+    def _confirm_declaration(self, proposal, sheets, *, source, triggered_by):
+        from foundry.locking import exclusive
+        from foundry.structure_records import (
+            active_confirmation,
+            state_for_source,
+        )
+        from foundry.structure_templates import remember_declaration
+
+        dataset_id = proposal["dataset_id"]
+        with exclusive(self.task.lock_path, timeout=10):
+            existing = self._structure_confirmations(dataset_id)
+            if active_confirmation(existing) is not None:
+                raise FoundryError(
+                    "this dataset already has a confirmed table structure; "
+                    "withdraw it before confirming again"
+                )
+        from foundry.structure_snapshot import undeclarable_reason
+
+        wanted = [sheet for sheet in sheets if sheet.get("decision") == "table"]
+        # Every sheet is checked before any is written. One confirmation is one
+        # act: a refusal on the fourth sheet must not leave the first three
+        # standing as snapshots nothing points at.
+        for sheet in wanted:
+            refusal = undeclarable_reason(sheet)
+            if refusal:
+                raise FoundryError(
+                    f"cannot confirm {sheet.get('sheet') or 'this sheet'}: {refusal}"
+                )
+        snapshots = {}
+        for sheet in wanted:
+            snapshot = self.analysis.add_table_snapshot(
+                dataset_id, sheet, name=sheet["sheet"]
+            )
+            snapshots[sheet["sheet"]] = snapshot["id"]
+        if not snapshots:
+            raise FoundryError("structure confirmation produced no table")
+        record = self._write(
+            "structure_confirmations",
+            dataset_id=dataset_id,
+            proposal_id=proposal["id"],
+            proposal_revision=proposal["revision"],
+            sheets=sheets,
+            snapshot_ids=snapshots,
+            source=source,
+            triggered_by_actor=triggered_by,
+            triggered_by_session=self.session_id,
+            state=state_for_source(source),
+            parent_id=None,
+            bindings={"source": dataset_id},
+        )
+        if source == MANAGER:
+            remember_declaration(self, sheets)
+        self._widen_session(list(snapshots.values()))
+        return record
+
+    def _widen_session(self, snapshot_ids):
+        """Keep a narrowed caller able to read the table it just confirmed."""
+        if not snapshot_ids:
+            return
+        if self.allowed is not None:
+            self.allowed.update(snapshot_ids)
+        if not self.session_id:
+            return
+        row = self.task.update_session_context(
+            self.session_id,
+            snapshot_ids=list(dict.fromkeys([*(self.allowed or []), *snapshot_ids])),
+        )
+        self.context_revision = row.get("context_revision", self.context_revision)
+
+    def _refuse_child_session(self, action):
+        if not self.session_id:
+            return
+        session = next(
+            (
+                row
+                for row in self.task.sessions()
+                if row["session_id"] == self.session_id
+            ),
+            None,
+        )
+        if session and session.get("parent_session_id"):
+            raise FoundryError(f"child sessions cannot {action}")
+
+    def _manager_only(self, action):
+        if self.actor != MANAGER:
+            raise FoundryError(f"only the manager can {action}")
+
+    def structure_acknowledge(self, spec):
+        return self._settle_confirmation(spec, ACKNOWLEDGED, "acknowledge a structure")
+
+    def structure_reject(self, spec):
+        return self._settle_confirmation(spec, WITHDRAWN, "reject a structure")
+
+    def structure_withdraw(self, spec):
+        return self._settle_confirmation(spec, WITHDRAWN, "withdraw a structure")
+
+    def _settle_confirmation(self, spec, state, action):
+        from foundry.structure_templates import demote_declaration
+
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError(f"{action} requires a confirmation id")
+        self._manager_only(action)
+        current = self._read("structure_confirmations", spec["id"])
+        if current.get("state") not in ACTIVE_STATES:
+            raise FoundryError("this confirmation is already settled")
+        if state == ACKNOWLEDGED and current["state"] != PENDING_ACKNOWLEDGEMENT:
+            raise FoundryError("only a pending confirmation can be acknowledged")
+        record = self._write(
+            "structure_confirmations",
+            dataset_id=current["dataset_id"],
+            proposal_id=current["proposal_id"],
+            proposal_revision=current["proposal_revision"],
+            sheets=current["sheets"],
+            snapshot_ids=current["snapshot_ids"],
+            source=current["source"],
+            triggered_by_actor=self.actor,
+            triggered_by_session=self.session_id,
+            state=state,
+            parent_id=current["id"],
+            bindings=current["bindings"],
+        )
+        if state == ACKNOWLEDGED:
+            from foundry.structure_templates import remember_declaration
+
+            remember_declaration(self, current["sheets"])
+        else:
+            demote_declaration(self, current["sheets"])
+        return record
+
+    def structure_confirmation_list(self, spec):
+        spec = spec or {}
+        dataset_id = spec.get("dataset_id") if isinstance(spec, dict) else None
+        rows = self._list("structure_confirmations")
+        if dataset_id:
+            rows = [row for row in rows if row.get("dataset_id") == dataset_id]
+        return {"schema_version": 1, "confirmations": rows}
+
+    def structure_template_list(self, spec):
+        from foundry.structure_templates import public_template, registry_for
+
+        del spec
+        # Templates are the store's memory, not this task's: a period that has
+        # confirmed nothing still sees what earlier periods settled.
+        return {
+            "schema_version": 1,
+            "templates": [
+                public_template(row) for row in registry_for(self).list()
+            ],
+        }
+
+    def structure_template_disable(self, spec):
+        from foundry.structure_templates import disable_template
+
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError("disabling a structure template requires an id")
+        self._manager_only("disable a structure template")
+        return disable_template(self, spec["id"])
+
     def _template_root(self):
         return self.analysis._inside(self.analysis.root / "report_templates")
 
@@ -1173,7 +1525,13 @@ class FinanceStore:
         stored = self.analysis._write(root / f"{record['id']}.json", record)
         return public_item(stored)
 
-    def _report_source_from_bytes(self, data: bytes, suffix: str) -> dict:
+    def _report_source_from_bytes(self, data: bytes, suffix: str, *, name: str = "") -> dict:
+        """File bytes we built ourselves as a report source.
+
+        The temporary file is how the bytes reach the archive, not what the
+        manager applied: naming the source after it put tmppcj2w5jg.docx in her
+        draft where 经营简报 belonged.
+        """
         from pathlib import Path
         from tempfile import NamedTemporaryFile
 
@@ -1181,7 +1539,9 @@ class FinanceStore:
             handle.write(data)
             path = handle.name
         try:
-            return self.analysis.add_report_source(path)["source"]
+            return self.analysis.add_report_source(
+                path, name=f"{name}{suffix}" if name else None
+            )["source"]
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -1221,7 +1581,9 @@ class FinanceStore:
                 if values:
                     applied = apply_excel_named_ranges(data, values)
                     filled = sorted(values)
-            source = self._report_source_from_bytes(applied, ".xlsx")
+            source = self._report_source_from_bytes(
+                applied, ".xlsx", name=record.get("label") or str(template_id)
+            )
             document = validate_report_document(
                 {
                     "schema_version": 1,
@@ -1242,6 +1604,7 @@ class FinanceStore:
             source = self._report_source_from_bytes(
                 (self._template_root() / f"{record['id']}.bin").read_bytes(),
                 ".docx",
+                name=record.get("label") or str(template_id),
             )
             document = validate_report_document(
                 {
@@ -1343,15 +1706,21 @@ class FinanceStore:
                 "account_map_id": context.get("account_map_id"),
             }
         )
+        if not latest:
+            # 改口径 revises a stated scope. With none on file the instruction
+            # would be filed as the analytical question, and every later reader
+            # would take 「按区域拆开」 for what was asked.
+            raise FoundryError(
+                "circle-select revises an existing analysis; none has been stated yet"
+            )
         req_spec = {
             "context_id": child["id"],
-            "question": (latest or {}).get("question") or instruction,
-            "items": (latest or {}).get("items") or [],
+            "question": latest.get("question") or instruction,
+            "items": latest.get("items") or [],
             "change_reason": instruction,
             "selection": selection,
         }
-        if latest:
-            req_spec["parent_id"] = latest["id"]
+        req_spec["parent_id"] = latest["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
 

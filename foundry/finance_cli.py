@@ -38,6 +38,14 @@ OPERATIONS = {
     "chart-deliverable-open": "chart_deliverable_open",
     "chart-deliverable-list": "chart_deliverable_list",
     "analysis-circle-select": "analysis_circle_select",
+    "structure-proposal-list": "structure_proposal_list",
+    "structure-proposal-confirm": "structure_proposal_confirm",
+    "structure-confirmation-list": "structure_confirmation_list",
+    "structure-acknowledge": "structure_acknowledge",
+    "structure-reject": "structure_reject",
+    "structure-withdraw": "structure_withdraw",
+    "structure-template-list": "structure_template_list",
+    "structure-template-disable": "structure_template_disable",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }
@@ -69,7 +77,7 @@ def add_parsers(sub):
             parser.add_argument("--completion-call-id")
 
 
-def _refresh_source(context, spec):
+def _refresh_source(context, spec, actor=None):
     if context.session_id:
         session = next(row for row in context.task.sessions() if row["session_id"] == context.session_id)
         if session.get("parent_session_id"):
@@ -90,6 +98,24 @@ def _refresh_source(context, spec):
         file_identity_policy=spec.get("file_identity_policy", "snapshot_only"),
     )
     result = {**result, "effective_dataset_id": result.get("dataset_id") or result.get("prior_snapshot_id")}
+    if result.get("dataset_id"):
+        service = FinanceStore(
+            context.task,
+            session_id=context.session_id,
+            actor=actor,
+        )
+        proposal = service.structure_propose(result["dataset_id"])
+        if proposal is not None:
+            result = {
+                **result,
+                "structure_proposal": {
+                    "id": proposal["id"],
+                    "revision": proposal["revision"],
+                    "structure_state": service.dataset_structure_state(
+                        result["dataset_id"]
+                    ),
+                },
+            }
     if context.session_id:
         # Keep prior snapshots available for reproducible historic runs.
         # New calculations explicitly select the newly published dataset.
@@ -107,7 +133,8 @@ def dispatch(args):
     if context.task is None:
         raise FoundryError("finance analysis requires a task")
     service = FinanceStore(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
-                           session_id=context.session_id, context_revision=context.context_revision)
+                           session_id=context.session_id, context_revision=context.context_revision,
+                           actor=getattr(args, "actor", "") or None)
     if args.cmd == "finance-completion-recoveries":
         if context.session_id:
             raise FoundryError("completion recovery requires the task editor")
@@ -144,7 +171,9 @@ def dispatch(args):
             batches = [row for row in batches if (row.get("dataset_id") or row.get("prior_snapshot_id")) in context.snapshot_ids]
         result = {"batches": batches}
     elif args.cmd == "finance-source-refresh":
-        result = _refresh_source(context, _json(args.spec, "source refresh spec"))
+        result = _refresh_source(
+            context, _json(args.spec, "source refresh spec"), getattr(args, "actor", "") or None
+        )
     elif args.cmd == "source-locator-preview-file":
         from foundry.finance_locators import stage_source_locator_preview
         print(stage_source_locator_preview(service, _json(args.spec, "finance spec")))

@@ -209,7 +209,12 @@ def test_cf31_workbook_binding_circle_select_copies_parent_bindings(tmp_path: Pa
         )
 
 
-def test_uncaptioned_zero_block_is_unauthorized(tmp_path: Path) -> None:
+def test_an_uncaptioned_table_cannot_be_reached_by_position(tmp_path: Path) -> None:
+    """block_id "0" must not address the second, unnamed table.
+
+    A table with no caption has no handle, and answering to an index would let
+    a caller circle whatever happened to sit there.
+    """
     service, context, _dataset, _original = _service(tmp_path)
     draft = service.analysis.save_draft(
         {
@@ -235,7 +240,9 @@ def test_uncaptioned_zero_block_is_unauthorized(tmp_path: Path) -> None:
             },
         }
     )
-    with pytest.raises(FoundryError, match="unauthorized"):
+    # And the refusal says what happened: the name matches no table, which is
+    # not the same thing as the caller lacking permission.
+    with pytest.raises(FoundryError, match="no table in this draft is called 0"):
         service.analysis_circle_select(
             {
                 "kind": "draft_table",
@@ -244,5 +251,82 @@ def test_uncaptioned_zero_block_is_unauthorized(tmp_path: Path) -> None:
                 "range": "selection",
                 "instruction": "改成开票口径",
                 "context_id": context["id"],
+            }
+        )
+
+
+def test_a_missing_table_is_reported_as_missing_not_as_a_permission_problem(
+    tmp_path: Path,
+) -> None:
+    service, context, _dataset, _original = _service(tmp_path)
+    draft = service.analysis.save_draft(
+        {
+            "title": "经营简报",
+            "document": {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "本月经营情况。"}]}
+                ],
+            },
+        }
+    )
+    base = {
+        "kind": "draft_table",
+        "draft_id": draft["id"],
+        "range": "A:A",
+        "instruction": "改成开票口径",
+        "context_id": context["id"],
+    }
+    with pytest.raises(FoundryError, match="this draft has no table to circle"):
+        service.analysis_circle_select({**base, "block_id": "tbl-expense"})
+    with pytest.raises(FoundryError, match="needs the caption or id"):
+        service.analysis_circle_select({**base, "block_id": "   "})
+
+
+def test_circle_select_needs_something_to_revise(tmp_path: Path) -> None:
+    """改口径 revises a stated scope; the instruction is not the question.
+
+    With no requirements on file, 「改成开票口径」 was filed as the analytical
+    question, and every later reader took it for what had been asked.
+    """
+    fresh = FinanceStore(TaskStore(tmp_path / "other").create(title="没有历史需求"))
+    rows = [{"ledger": "service-co", "organization": "华东", "period": "2026-08",
+             "currency": "CNY", "unit": "万元", "scenario": "actual",
+             "management_account": "expense", "amount": "20"}]
+    path = tmp_path / "fresh.json"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    dataset = fresh.analysis.add_dataset(path, name="fresh")
+    blank_context = fresh.save_context(
+        {"name": "口径", "bindings": {"actual": dataset["id"]}, "scopes": {"actual": SCOPE}}
+    )
+    draft = fresh.analysis.save_draft(
+        {
+            "title": "经营简报",
+            "document": {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "content": [
+                    {
+                        "type": "table",
+                        "attrs": {"caption": "tbl-expense"},
+                        "content": [
+                            {"type": "tableRow", "content": [{"type": "tableHeader",
+                             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "费用"}]}]}]}
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+    with pytest.raises(FoundryError, match="revises an existing analysis"):
+        fresh.analysis_circle_select(
+            {
+                "kind": "draft_table",
+                "draft_id": draft["id"],
+                "block_id": "tbl-expense",
+                "range": "A:A",
+                "instruction": "改成开票口径",
+                "context_id": blank_context["id"],
             }
         )

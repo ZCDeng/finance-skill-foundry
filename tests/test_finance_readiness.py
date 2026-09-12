@@ -322,3 +322,75 @@ def test_kingdee_header_with_covered_mapping_still_fails_identity(tmp_path):
     assert blocked["reason"] == "identity_failed"
     assert set(blocked["missing_fields"]) == {"period", "currency"}
     assert "management_account" not in blocked["missing_fields"]
+
+
+def _scoped_rows(period: str, unit: str) -> list[dict]:
+    return [
+        {"account_code": "6001", "amount": "400", "period": period,
+         "currency": "CNY", "unit": unit, "management_account": "revenue"},
+        {"account_code": "6401", "amount": "300", "period": period,
+         "currency": "CNY", "unit": unit, "management_account": "cost"},
+        {"account_code": "6602", "amount": "50", "period": period,
+         "currency": "CNY", "unit": unit, "management_account": "expense"},
+    ]
+
+
+def test_two_files_closing_different_months_do_not_share_a_period(tmp_path):
+    """Joining them produced 2026-08,2026-01, which is not a period at all."""
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(
+        _write_csv(tmp_path / "aug.csv", _scoped_rows("2026-08", "元")), name="八月"
+    )
+    analysis.add_dataset(
+        _write_csv(tmp_path / "jan.csv", _scoped_rows("2026-01", "万元")), name="一月"
+    )
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["period"] == ""
+    assert report["proposed_scope"]["unit"] == ""
+    # Each file still answers for itself.
+    periods = {row["name"]: row["scope"]["period"] for row in report["datasets"]}
+    assert periods == {"八月": "2026-08", "一月": "2026-01"}
+    units = {row["name"]: row["scope"]["unit"] for row in report["datasets"]}
+    assert units == {"八月": "元", "一月": "万元"}
+
+
+def test_one_file_missing_its_currency_does_not_block_the_file_that_has_one(tmp_path):
+    """A weak file used to kill the whole task's management_pnl."""
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(
+        _write_csv(tmp_path / "good.csv", _scoped_rows("2026-08", "元")), name="有币种"
+    )
+    bare = [{k: v for k, v in row.items() if k != "currency"}
+            for row in _scoped_rows("2026-08", "元")]
+    analysis.add_dataset(_write_csv(tmp_path / "bare.csv", bare), name="缺币种")
+
+    report = store.finance_readiness({})
+    assert "management_pnl" in report["can_run"]
+    weak = next(row for row in report["datasets"] if row["name"] == "缺币种")
+    assert weak["missing_fields"] == ["currency"]
+    assert "management_pnl" not in weak["can_run"]
+    strong = next(row for row in report["datasets"] if row["name"] == "有币种")
+    assert "management_pnl" in strong["can_run"]
+    # Nothing is reported as blocked once some file can answer for it.
+    assert not [row for row in report["blocked"]
+                if row["capability"] == "management_pnl"]
+
+
+def test_a_column_with_many_values_is_a_dimension_not_the_files_scope(tmp_path):
+    """组织 came back as 上海城市公司 because the first row happened to say so."""
+    _task_obj, analysis, store = _task(tmp_path)
+    rows = _scoped_rows("2026-08", "元")
+    rows[0]["organization"] = "上海城市公司"
+    rows[1]["organization"] = "宁波城市公司"
+    analysis.add_dataset(_write_csv(tmp_path / "multi.csv", rows), name="多组织")
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["organization"] == ""
+    assert report["datasets"][0]["scope"]["organization"] == ""
+
+
+def test_a_file_that_names_one_organization_still_reports_it(tmp_path):
+    _task_obj, analysis, store = _task(tmp_path)
+    rows = [{**row, "organization": "集团合并"} for row in _scoped_rows("2026-08", "元")]
+    analysis.add_dataset(_write_csv(tmp_path / "one.csv", rows), name="单组织")
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["organization"] == "集团合并"

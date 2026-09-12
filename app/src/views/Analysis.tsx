@@ -10,7 +10,10 @@ import { RunPanel } from './analysis/RunPanel.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
+import { AccountMapEditor } from './analysis/AccountMapEditor.js';
+import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { RequirementsPanel } from './analysis/RequirementsPanel.js';
+import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from './analysis/StructureProposalCard.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, PeriodRangeInput, SearchableSelect, TextField, type SelectOption } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
@@ -359,6 +362,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
+          <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
+          <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
@@ -367,7 +372,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               if (currentTask.current === taskId) setDataset({ source, content });
             })} disabled={busy}>
             <span className="fnd-title">{source.name}</span><span className="analysis-source-meta">
-              {{ table: '数据表', background: '背景资料', workbook: 'Excel 工作簿' }[source.kind] ?? source.kind}{datasetSize(source) ? ` · ${datasetSize(source)}` : ''} · {when(source.created_at)}</span>
+              {{ table: '数据表', background: '背景资料', workbook: 'Excel 工作簿' }[source.kind] ?? source.kind}{datasetSize(source) ? ` · ${datasetSize(source)}` : ''} · {when(source.created_at)}{structureLabel(source) ? ` · ${structureLabel(source)}` : ''}</span>
             <span className="analysis-note">{['period', 'unit', 'currency'].filter((key) => source.metadata?.[key] != null)
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
@@ -827,6 +832,59 @@ type FinanceAdjustment = {
   superseded_by?: string | null;
 };
 
+const STRUCTURE_LABELS: Record<string, string> = {
+  pending_confirmation: '待确认表结构',
+  pending_acknowledgement: '待经理追认',
+  no_table: '没有可用的表',
+  withdrawn: '已撤回',
+};
+
+function structureLabel(source: DatasetSnapshot): string {
+  const state = (source as { structure_state?: string }).structure_state ?? '';
+  return STRUCTURE_LABELS[state] ?? '';
+}
+
+/**
+ * Every file in this task that is waiting on the manager: one waiting for her to
+ * say what its tables are, one somebody else confirmed on her behalf, one a
+ * remembered structure was applied to.
+ */
+function StructurePanel({ taskId, datasets, busy, onRefresh }: {
+  taskId: string; datasets: DatasetSnapshot[]; busy: boolean; onRefresh(): Promise<void> | void;
+}) {
+  const [proposals, setProposals] = useState<StructureProposal[]>([]);
+  const [pending, setPending] = useState<{ id: string; dataset_id: string; source: string; state: string; parent_id: string | null }[]>([]);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    const api = bridge(); if (!api?.financeCall) return;
+    const listed = unwrap(await api.financeCall(taskId, 'structure-proposal-list', {}) as Answer<{ proposals?: StructureProposal[] }>);
+    setProposals(listed.proposals ?? []);
+    const settled = unwrap(await api.financeCall(taskId, 'structure-confirmation-list', {}) as Answer<{ confirmations?: typeof pending }>);
+    const rows = settled.confirmations ?? [];
+    const superseded = new Set(rows.map((row) => row.parent_id).filter(Boolean) as string[]);
+    setPending(rows.filter((row) => row.state === 'pending_acknowledgement' && !superseded.has(row.id)));
+  }, [taskId]);
+  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load, datasets]);
+
+  const named = (id: string) => datasets.find((item) => item.id === id)?.name ?? id;
+  const settle = async () => { await load(); await onRefresh(); };
+  const waiting = proposals.filter((item) => item.structure_state === 'pending_confirmation' || item.structure_state === 'no_table');
+  if (!waiting.length && !pending.length && !error) return null;
+  return (
+    <div className="analysis-structure-panel">
+      {error && <p role="alert" className="analysis-structure-error">{error}</p>}
+      {waiting.map((proposal) => (
+        <StructureProposalCard key={proposal.id} taskId={taskId} datasetName={named(proposal.dataset_id)}
+          proposal={proposal} busy={busy} onSettled={settle} />
+      ))}
+      {pending.map((confirmation) => (
+        <StructurePendingStrip key={confirmation.id} taskId={taskId} datasetName={named(confirmation.dataset_id)}
+          confirmation={confirmation} busy={busy} onSettled={settle} />
+      ))}
+    </div>
+  );
+}
+
 function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
   taskId: string; contextId: string; busy: boolean; onRefresh(): Promise<void> | void;
 }) {
@@ -1182,13 +1240,12 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row"
         aria-current={context.id === contextId ? 'true' : undefined} onClick={() => setContextId(context.id)}>
         <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；')}</span><span>{shortSha(context.id)}</span></button>)}</div></details> : null}
-    <details className="analysis-details"><summary>高级：管理科目映射 JSON</summary>
-      <p className="analysis-note">引擎识别的管理科目为 revenue（收入）、cost（成本）、expense（费用）；中文科目名请映射到这些标准值。</p>
+    <details className="analysis-details"><summary>管理科目映射</summary>
+      <p className="analysis-note">损益算不出来，多半是这里没配齐。引擎只认收入、成本、费用三个管理科目，把原表的科目代码归到这三类。</p>
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
-          placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" />
-        <label>映射行数组<Textarea className="analysis-code" rows={4} value={mapRows} placeholder='[{"account_code":"6001","management_account":"revenue"},{"account_code":"6401","management_account":"cost"},{"account_code":"6601","management_account":"expense"}]'
-          onChange={(event) => setMapRows(event.target.value)} /></label></div>
+          placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" /></div>
+      <AccountMapEditor value={mapRows} disabled={busy} onChange={setMapRows} />
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
       <Button variant="outline" type="button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
