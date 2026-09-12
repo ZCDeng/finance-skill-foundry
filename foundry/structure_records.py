@@ -116,7 +116,13 @@ def structure_state(
         return CONFIRMED
     if proposal is None:
         return NOT_APPLICABLE
-    if not any(sheet.get("decision") == "table" for sheet in proposal.get("sheets") or []):
+    # A table nothing can be derived from leaves her nothing to confirm, so the
+    # file is "no table" rather than forever pending: otherwise readiness would
+    # report pending_structure with no action that could ever clear it.
+    if not any(
+        sheet.get("decision") == "table" and not sheet.get("blocked_reason")
+        for sheet in proposal.get("sheets") or []
+    ):
         return NO_TABLE
     active = active_confirmation(confirmations)
     if active is None:

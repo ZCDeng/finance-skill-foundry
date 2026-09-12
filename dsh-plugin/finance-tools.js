@@ -144,10 +144,10 @@ export const FINANCE_TOOLS = {
   finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
     context_id: contextId,
   }, ["context_id"]),
-  structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
+  structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。blocked_reason 非空的表不能确认，unreadable_columns 表示它确实是张表但一列都没识别出来——复述给经理，不要放进确认清单。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
     dataset_id: text("analysis-state 里的工作簿资料 id"),
   }),
-  structure_proposal_confirm: specTool("structure-proposal-confirm", "代经理提交表结构确认，生成可算的表。只接受资料 id 与提议项，不接受路径、URL 或工作簿字节；来源由调用入口判定，spec 里自报的 source 一律丢弃。助手提交的确认记为待经理追认，经理在界面追认或拒绝。借贷方向未定时拒绝确认——先请经理说明哪一侧是金额。", {
+  structure_proposal_confirm: specTool("structure-proposal-confirm", "代经理提交表结构确认，生成可算的表。只接受资料 id 与提议项，不接受路径、URL 或工作簿字节；来源由调用入口判定，spec 里自报的 source 一律丢弃。助手提交的确认记为待经理追认，经理在界面追认或拒绝。借贷方向未定时拒绝确认——先请经理说明哪一侧是金额。清单里带 blocked_reason 的表会被整单拒绝并报出表名，别原样把提议全量传回来。", {
     dataset_id: text("要确认的工作簿资料 id"),
     revision: {type:"integer", minimum:1, description:"structure_proposal_list 返回的提议版本号"},
     sheets: {type:"array", items:{type:"object"}, description:"确认后的逐表结构声明，省略则按提议原样确认全部可作数据表的表"},

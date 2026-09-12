@@ -40,6 +40,7 @@ function ledger(overrides: Partial<StructureProposal['sheets'][number]> = {}) {
       { row: 5, is_header: false, cells: [{ letter: 'A', text: '资产类科目' }] },
     ],
     confidence: 0.9,
+    blocked_reason: null,
     ...overrides,
   };
 }
@@ -114,12 +115,36 @@ describe('structure confirmation card', () => {
 
   it('explains a file with nothing tabular in it instead of offering a confirmation', () => {
     const covers = proposal([
-      ledger({ sheet: '00·封面与编制说明', decision: 'excluded', reason: 'presentation_sheet', columns: [], amount_pairs: [], preview: [] }),
-      ledger({ sheet: '13·行业对标与假设', decision: 'excluded', reason: 'presentation_sheet', columns: [], amount_pairs: [], preview: [] }),
+      ledger({ sheet: '00·封面与编制说明', decision: 'excluded', reason: 'presentation_sheet', blocked_reason: 'presentation_sheet', columns: [], amount_pairs: [], preview: [] }),
+      ledger({ sheet: '13·行业对标与假设', decision: 'excluded', reason: 'presentation_sheet', blocked_reason: 'presentation_sheet', columns: [], amount_pairs: [], preview: [] }),
     ], 'no_table');
     render(<StructureProposalCard taskId="t" datasetName="只有封面" proposal={covers} busy={false} onSettled={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /确认表结构/ })).toBeNull();
     expect(screen.getAllByText('封面、看板或对标页')).toHaveLength(2);
+  });
+
+  it('shows an unreadable table with the headers it read, and never offers it', () => {
+    const pack = proposal([
+      ledger(),
+      ledger({
+        sheet: '10·区域经营损益表',
+        blocked_reason: 'unreadable_columns',
+        amount_pairs: [],
+        columns: [
+          { letter: 'A', header: '区　域', display: '区域', role: 'unknown', pair: null, direction: null },
+          { letter: 'B', header: '营业收入', display: '营业收入', role: 'unknown', pair: null, direction: null },
+          { letter: 'C', header: '期间费用', display: '期间费用', role: 'unknown', pair: null, direction: null },
+        ],
+      }),
+    ]);
+    render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={pack}
+      busy={false} onSettled={vi.fn()} />);
+    // No checkbox for it, so she cannot tick something that would be refused.
+    expect(screen.queryByLabelText('采用 10·区域经营损益表')).toBeNull();
+    expect(screen.getByText(/是一张表，但没有一列能识别/)).toBeTruthy();
+    expect(screen.getByText(/区域、营业收入、期间费用/)).toBeTruthy();
+    // The readable sheet is still offered.
+    expect(screen.getByRole('button', { name: /确认表结构/ })).toBeTruthy();
   });
 
   it('drops a row from the not-counted list when the manager puts it back', async () => {

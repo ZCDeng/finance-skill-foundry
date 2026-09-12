@@ -239,3 +239,76 @@ def test_preview_text_is_clipped_and_single_line() -> None:
         for cell in row["cells"]:
             assert "\n" not in cell["text"]
             assert len(cell["text"]) <= 40
+
+
+def test_a_compound_takes_its_role_from_its_head_noun() -> None:
+    """期间费用 is a kind of 费用, not an accounting period.
+
+    Role aliases used to match anywhere in a header, so a column of money
+    labelled 期间费用 was read as the accounting period and the amounts landed
+    in a column called `period` — data, not a visible guess. In a Chinese
+    compound the head noun sits last, so that is where an alias counts.
+    """
+    from foundry.structure_proposal import _role_for
+
+    assert _role_for("期间费用") == "unknown"
+    assert _role_for("期间费用预算") == "unknown"
+    assert _role_for("期间") == "period"
+    # Heads the vocabulary does know, reached through a modifier.
+    assert _role_for("供应商类别") == "category"
+    assert _role_for("城市公司") == "organization"
+    assert _role_for("流失金额") == "amount"
+    # A trailing parenthetical qualifies the column, it does not rename it.
+    assert _role_for("年化合同金额（万元）") == "amount"
+    # 借贷 markers are read before the vocabulary and are unaffected.
+    assert _role_for("借方金额") == "debit"
+    assert _role_for("本期发生额贷方") == "credit"
+
+
+def test_a_table_nothing_can_be_read_from_is_named_rather_than_offered() -> None:
+    """It is still a table; there is just nothing here to derive.
+
+    A 区域经营损益表 is plainly tabular — one row per region, numbers across —
+    so calling it "not a table" would be false. But none of 营业收入, 营业成本,
+    期间费用 means anything to a ledger vocabulary, so confirming it could only
+    fail. AE4 keeps the decision; `blocked_reason` carries the refusal.
+    """
+    region = _sheet(_pack(), "10")
+    assert region["decision"] == "table"
+    assert region["blocked_reason"] == "unreadable_columns"
+    # The headers it did read come back, because "I understood none of these"
+    # is only actionable if she can see which ones.
+    assert [column["display"] for column in region["columns"]][:2] == ["区域", "营业收入"]
+    assert all(column["role"] == "unknown" for column in region["columns"])
+
+
+def test_a_readable_table_carries_no_blocked_reason() -> None:
+    ledger = _sheet(_pack(), "02")
+    assert ledger["decision"] == "table"
+    assert ledger["blocked_reason"] is None
+
+
+def test_every_sheet_answers_why_it_cannot_be_confirmed() -> None:
+    for sheet in _pack()["sheets"]:
+        if sheet["decision"] == "excluded":
+            assert sheet["blocked_reason"] == sheet["reason"]
+
+
+def test_every_unblocked_table_can_actually_be_derived() -> None:
+    """The gate and the snapshot builder must not drift apart.
+
+    `_carries_data` decides what the card offers and `_derived_headers` decides
+    what can be built. They live in different modules and answer the same
+    question, so this holds them together on a real-shaped pack.
+    """
+    from foundry.structure_snapshot import derive_table, undeclarable_reason
+
+    data = fixture.monthly_pack()
+    for sheet in propose_workbook_structure(data)["sheets"]:
+        if sheet["decision"] != "table":
+            continue
+        if sheet["blocked_reason"]:
+            assert undeclarable_reason(sheet) is not None
+            continue
+        assert undeclarable_reason(sheet) is None
+        derive_table(data, sheet)

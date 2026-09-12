@@ -1315,10 +1315,20 @@ class FinanceStore:
                     "this dataset already has a confirmed table structure; "
                     "withdraw it before confirming again"
                 )
+        from foundry.structure_snapshot import undeclarable_reason
+
+        wanted = [sheet for sheet in sheets if sheet.get("decision") == "table"]
+        # Every sheet is checked before any is written. One confirmation is one
+        # act: a refusal on the fourth sheet must not leave the first three
+        # standing as snapshots nothing points at.
+        for sheet in wanted:
+            refusal = undeclarable_reason(sheet)
+            if refusal:
+                raise FoundryError(
+                    f"cannot confirm {sheet.get('sheet') or 'this sheet'}: {refusal}"
+                )
         snapshots = {}
-        for sheet in sheets:
-            if sheet.get("decision") != "table":
-                continue
+        for sheet in wanted:
             snapshot = self.analysis.add_table_snapshot(
                 dataset_id, sheet, name=sheet["sheet"]
             )

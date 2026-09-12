@@ -204,6 +204,24 @@ def _derived_headers(
     return headers
 
 
+def undeclarable_reason(declaration: dict[str, Any]) -> str | None:
+    """Why this declaration cannot become a table, or None if it can.
+
+    The proposal engine asks the same question of a sheet before offering it,
+    but a declaration can also arrive from a tool call or a hand-edited card,
+    and those never passed the engine. This is the one place that answers it,
+    so a refusal reads the same on both doors.
+    """
+    columns = declaration.get("columns") or []
+    if not columns:
+        return "no column was declared"
+    try:
+        _derived_headers(columns, _primary_pair(declaration))
+    except FoundryError:
+        return "no column carries a role the table can keep"
+    return None
+
+
 def _amount_for(
     raw: dict[str, Any],
     pair: dict[str, Any],

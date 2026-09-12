@@ -27,6 +27,7 @@ export interface ProposedSheet {
   sheet: string;
   decision: 'table' | 'excluded';
   reason: string | null;
+  blocked_reason: string | null;
   header_row: number | null;
   title_rows: number[];
   columns: ProposedColumn[];
@@ -65,7 +66,14 @@ const EXCLUSION_LABELS: Record<string, string> = {
   section: '分节标题', subtotal: '小计或合计', note: '说明',
   presentation_sheet: '封面、看板或对标页', no_header: '没有找到表头',
   empty_sheet: '空白工作表', too_large: '超出行列上限',
+  unreadable_columns: '是一张表，但没有一列能识别',
 };
+
+// An unrecognised header is only actionable if she can see which one it was.
+function unreadHeaders(sheet: ProposedSheet): string[] {
+  if (sheet.blocked_reason !== 'unreadable_columns') return [];
+  return sheet.columns.map((column) => column.display || column.header).filter(Boolean);
+}
 const ROLE_CHOICES = ['account_code', 'account_name', 'management_account', 'category', 'direction',
   'amount', 'debit', 'credit', 'doc_id', 'line_id', 'date', 'summary', 'period', 'currency', 'unit',
   'organization', 'ledger', 'unknown'];
@@ -98,12 +106,17 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
   useEffect(() => {
     setSheets(proposal.sheets);
     const next: Record<string, boolean> = {};
-    for (const sheet of proposal.sheets) if (sheet.decision === 'table') next[sheet.sheet] = true;
+    for (const sheet of proposal.sheets) {
+      if (sheet.decision === 'table' && !sheet.blocked_reason) next[sheet.sheet] = true;
+    }
     setChosen(next);
   }, [proposal]);
 
-  const tables = sheets.filter((sheet) => sheet.decision === 'table');
-  const excluded = sheets.filter((sheet) => sheet.decision === 'excluded');
+  const tables = sheets.filter((sheet) => sheet.decision === 'table' && !sheet.blocked_reason);
+  // A sheet the engine read as a table but cannot derive anything from. It is
+  // shown with the headers it did read, and never offered: ticking it would
+  // only produce a refusal she had no way to see coming.
+  const setAside = sheets.filter((sheet) => sheet.blocked_reason !== null);
   const selected = tables.filter((sheet) => chosen[sheet.sheet]);
   const blocking = selected.filter(undecided);
   const locked = busy || working;
@@ -135,10 +148,15 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
         </div>
         <p className="analysis-note">这份文件里没有可以计算的表。每张表的判断如下。</p>
         <ul className="analysis-structure-reasons">
-          {excluded.map((sheet) => (
+          {setAside.map((sheet) => (
             <li key={sheet.sheet}>
               <span className="fnd-title">{sheet.sheet}</span>
-              <span className="analysis-note">{EXCLUSION_LABELS[sheet.reason ?? ''] ?? sheet.reason}</span>
+              <span className="analysis-note">
+                {EXCLUSION_LABELS[sheet.blocked_reason ?? ''] ?? sheet.blocked_reason}
+              </span>
+              {unreadHeaders(sheet).length > 0 && (
+                <span className="analysis-note">读到的列：{unreadHeaders(sheet).join('、')}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -261,12 +279,17 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
         </div>
       ))}
 
-      {excluded.length > 0 && (
+      {setAside.length > 0 && (
         <details className="analysis-structure-excluded">
-          <summary>不作数据表的工作表 {excluded.length} 张</summary>
+          <summary>不能确认的工作表 {setAside.length} 张</summary>
           <ul>
-            {excluded.map((sheet) => (
-              <li key={sheet.sheet}>{sheet.sheet} · {EXCLUSION_LABELS[sheet.reason ?? ''] ?? sheet.reason}</li>
+            {setAside.map((sheet) => (
+              <li key={sheet.sheet}>
+                {sheet.sheet} · {EXCLUSION_LABELS[sheet.blocked_reason ?? ''] ?? sheet.blocked_reason}
+                {unreadHeaders(sheet).length > 0 && (
+                  <span className="analysis-note">读到的列：{unreadHeaders(sheet).join('、')}</span>
+                )}
+              </li>
             ))}
           </ul>
         </details>

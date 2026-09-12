@@ -6,8 +6,11 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from foundry.analysis import AnalysisStore
 from foundry.cli import main
+from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
 
@@ -147,3 +150,72 @@ def test_a_csv_never_enters_the_flow_and_says_so(tmp_path: Path) -> None:
     assert service.dataset_structure_state(dataset["id"]) == "not_applicable"
     report = service.finance_readiness({})
     assert report["structure_states"][dataset["id"]] == "not_applicable"
+
+
+def _sheets(service: FinanceStore, shell_id: str) -> list[dict]:
+    return service.structure_proposal_list({"dataset_id": shell_id})["proposals"][0]["sheets"]
+
+
+def test_handing_back_the_whole_proposal_is_refused_rather_than_trimmed(
+    tmp_path: Path,
+) -> None:
+    """A caller who sends every sheet is told which one cannot be read.
+
+    Quietly dropping the unreadable sheet would confirm something other than
+    what was asked for, and nothing would say so.
+    """
+    _task_obj, analysis, service = _task(tmp_path)
+    shell = analysis.add_dataset(
+        _write(tmp_path, fixture.monthly_pack(), "八月"), name="八月", metadata={"mode": "workbook"}
+    )
+    service.structure_propose(shell["id"])
+    with pytest.raises(FoundryError, match="cannot confirm 10·区域经营损益表"):
+        service.structure_proposal_confirm(
+            {"dataset_id": shell["id"], "sheets": _sheets(service, shell["id"])}
+        )
+    assert service.dataset_structure_state(shell["id"]) == "pending_confirmation"
+
+
+def test_the_sheets_the_card_offers_confirm_in_one_go(tmp_path: Path) -> None:
+    """What the card actually sends: every table it was allowed to offer."""
+    _task_obj, analysis, service = _task(tmp_path)
+    shell = analysis.add_dataset(
+        _write(tmp_path, fixture.monthly_pack(), "八月"), name="八月", metadata={"mode": "workbook"}
+    )
+    service.structure_propose(shell["id"])
+    offered = [
+        sheet
+        for sheet in _sheets(service, shell["id"])
+        if sheet["decision"] == "table" and not sheet["blocked_reason"]
+    ]
+    record = service.structure_proposal_confirm(
+        {"dataset_id": shell["id"], "sheets": offered}
+    )
+    assert "02·GL科目余额表" in record["snapshot_ids"]
+    assert "10·区域经营损益表" not in record["snapshot_ids"]
+    assert service.dataset_structure_state(shell["id"]) == "confirmed"
+
+
+def test_a_declaration_that_can_yield_nothing_is_refused_by_name(tmp_path: Path) -> None:
+    """A hand-edited or tool-composed declaration never reaches the builder.
+
+    The card will not offer an unreadable sheet, but a declaration also arrives
+    through the tool call, where nothing passed the engine first.
+    """
+    _task_obj, analysis, service = _task(tmp_path)
+    shell = analysis.add_dataset(
+        _write(tmp_path, fixture.monthly_pack(), "八月"), name="八月", metadata={"mode": "workbook"}
+    )
+    service.structure_propose(shell["id"])
+    sheets = [s for s in _sheets(service, shell["id"]) if s["sheet"].startswith(("02", "03"))]
+    blinded = dict(sheets[1])
+    blinded["columns"] = [{**c, "role": "unknown"} for c in blinded["columns"]]
+    blinded["amount_pairs"] = []
+
+    with pytest.raises(FoundryError, match="cannot confirm 03·GL月结分录清单"):
+        service.structure_proposal_confirm(
+            {"dataset_id": shell["id"], "sheets": [sheets[0], blinded]}
+        )
+    # Refused as one act: the sheet ahead of it in the list was not written.
+    assert service.dataset_structure_state(shell["id"]) == "pending_confirmation"
+    assert not service.structure_confirmation_list({"dataset_id": shell["id"]})["confirmations"]

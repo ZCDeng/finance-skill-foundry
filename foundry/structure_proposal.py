@@ -65,6 +65,9 @@ PERIOD_IN_TITLE = re.compile(r"(20\d{2})\s*[-./年]\s*(\d{1,2})")
 # 「2026年1-8月」 is a span, not a period; declaring one month of it would invent scope.
 PERIOD_SPAN_IN_TITLE = re.compile(r"20\d{2}\s*年\s*\d{1,2}\s*[-–—~至]\s*\d{1,2}\s*月")
 CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
+# A parenthetical at the end qualifies the column, it does not name it:
+# 「年化合同金额（万元）」 is a 金额 reported in 万元.
+TRAILING_QUALIFIER = re.compile(r"[（(][^（()）]*[)）]\s*$")
 UNIT_IN_TITLE = re.compile(r"(?:金额)?单位[:：\s]*([万亿]?元)")
 
 # Grouping keys that only carry a value on a group's first line.
@@ -118,10 +121,33 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         "scope_hints": _scope_hints(grid, title_rows),
         "preview": _preview(grid, header_row),
         "confidence": _confidence(columns, pairs, header_row),
+        # Whether this is a data table and whether anything can be derived from
+        # it are two questions. A 区域经营损益表 is plainly a table -- one row per
+        # region, numbers across -- while none of its column names mean anything
+        # to a ledger vocabulary. Saying "not a table" would be false; offering
+        # a checkbox that throws when ticked would be worse.
+        "blocked_reason": None if _carries_data(columns, pairs) else "unreadable_columns",
     }
 
 
-def _excluded(name: str, reason: str) -> dict[str, Any]:
+def _carries_data(
+    columns: list[dict[str, Any]], pairs: list[dict[str, Any]]
+) -> bool:
+    """Whether anything on this sheet survives into a derived table.
+
+    The snapshot builder keeps a column for every named role and folds each
+    借贷 pair into one amount with its side; a column it cannot name is dropped.
+    A sheet where everything is dropped yields no table at all, and the two
+    modules must agree on that -- `test_every_proposed_table_can_be_derived`
+    holds them together.
+    """
+    if pairs:
+        return True
+    return any(column["role"] in ROLE_ALIASES for column in columns)
+
+
+def _excluded(name: str, reason: str, **read: Any) -> dict[str, Any]:
+    """A sheet set aside before any structure was read out of it."""
     return {
         "sheet": name,
         "decision": "excluded",
@@ -135,6 +161,8 @@ def _excluded(name: str, reason: str) -> dict[str, Any]:
         "scope_hints": {"period": "", "currency": "", "unit": ""},
         "preview": [],
         "confidence": 0.0,
+        "blocked_reason": reason,
+        **read,
     }
 
 
@@ -244,8 +272,14 @@ def _role_for(header: str) -> str:
     for role, aliases in ROLE_ALIASES.items():
         if header.casefold() in {alias.casefold() for alias in aliases}:
             return role
+    # An alias counts only where the compound's head noun sits, at the end:
+    # 供应商类别 is a kind of 类别 and 城市公司 a kind of 公司. An alias anywhere
+    # earlier modifies something else -- 期间费用 is a kind of 费用, not an
+    # accounting period -- and taking the role from it would file an amount in a
+    # column named period, which reads as data rather than as a bad guess.
+    tail = TRAILING_QUALIFIER.sub("", header).strip().casefold()
     for role, aliases in ROLE_ALIASES.items():
-        if any(alias in header for alias in aliases if len(alias) > 1):
+        if any(tail.endswith(alias.casefold()) for alias in aliases if len(alias) > 1):
             return role
     return "unknown"
 

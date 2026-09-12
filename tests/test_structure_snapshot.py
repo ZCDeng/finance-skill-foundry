@@ -228,3 +228,23 @@ def test_a_manager_chosen_fixed_side_derives_the_table() -> None:
     declaration["amount_pairs"][0]["direction"] = {"kind": "fixed", "side": "credit"}
     payload = derive_table(data, declaration)
     assert [row["dc_flag"] for row in payload["rows"]] == ["贷", "贷"]
+
+
+def test_undeclarable_reason_names_what_cannot_be_built() -> None:
+    from foundry.structure_snapshot import undeclarable_reason
+
+    unreadable = {
+        "sheet": "10·区域经营损益表",
+        "header_row": 4,
+        "columns": [
+            {"letter": "A", "display": "区域", "role": "unknown"},
+            {"letter": "B", "display": "营业收入", "role": "unknown"},
+        ],
+        "amount_pairs": [],
+    }
+    assert undeclarable_reason(unreadable) == "no column carries a role the table can keep"
+    assert undeclarable_reason({"columns": []}) == "no column was declared"
+    # One named role is enough; a 借贷 pair on its own is too.
+    assert undeclarable_reason({**unreadable, "columns": [
+        {"letter": "A", "display": "科目代码", "role": "account_code"},
+    ]}) is None
