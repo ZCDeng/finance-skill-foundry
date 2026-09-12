@@ -314,6 +314,61 @@ class AnalysisStore:
             write_json_atomic(folder / "meta.json", record)
         return record
 
+    def add_table_snapshot(
+        self, source_dataset_id: str, declaration: dict, *, name: str
+    ) -> dict:
+        """File the calculable table a confirmed structure declaration describes.
+
+        The original workbook bytes are stored again, so the snapshot answers for
+        its own source and a located figure can still be opened in the file the
+        manager uploaded.
+        """
+        from foundry.structure_snapshot import derive_table
+
+        _safe_text(name, "dataset name", required=True, maximum=200)
+        if not isinstance(declaration, dict):
+            raise FoundryError("structure declaration must be an object")
+        shell = self.read_dataset(source_dataset_id)
+        folder = self._inside(self.root / "datasets" / source_dataset_id)
+        data = (folder / shell["source_file"]).read_bytes()
+        if _hash_bytes(data) != shell["source_hash"]:
+            raise FoundryError("dataset integrity check failed")
+        declaration = json_value({**declaration, "derived_from": source_dataset_id})
+        parsed = derive_table(data, declaration)
+        encoded = _bytes(
+            {
+                "kind": parsed["kind"],
+                "schema": parsed["schema"],
+                "rows": parsed["rows"],
+                "row_count": parsed["row_count"],
+                "transformation": parsed["transformation"],
+            }
+        )
+        record = _new(
+            self.task,
+            name=name,
+            kind="table",
+            source_name=shell["source_name"],
+            source_hash=shell["source_hash"],
+            source_bytes=len(data),
+            data_hash=_hash_bytes(encoded),
+            schema=parsed["schema"],
+            row_count=parsed["row_count"],
+            metadata={"derived_from": source_dataset_id, "sheet": declaration["sheet"]},
+            transformation=parsed["transformation"],
+            source_file=shell["source_file"],
+        )
+        destination = self._inside(self.root / "datasets" / record["id"])
+        with exclusive(self.task.lock_path, timeout=10):
+            self._inside(destination)
+            destination.mkdir(parents=True, exist_ok=False)
+            (destination / record["source_file"]).write_bytes(data)
+            (destination / "data.json").write_bytes(encoded)
+            record["seq"] = self._next_seq()
+            record["_integrity_hash"] = _hash(record)
+            write_json_atomic(destination / "meta.json", record)
+        return record
+
     def read_dataset(self, dataset_id: str) -> dict:
         _assert_id(dataset_id)
         folder = self._inside(self.root / "datasets" / dataset_id)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
@@ -215,6 +216,26 @@ def _open(path: str | Path, *, data_only: bool = False) -> Workbook:
             if sum(entry.file_size for entry in archive.infolist()) > 128 * 1024 * 1024:
                 raise FoundryError("expanded workbook exceeds 128 MiB limit")
         return load_workbook(path, data_only=data_only)
+    except Exception as exc:
+        raise FoundryError(f"cannot open workbook: {exc}") from exc
+
+
+def open_workbook_bytes(data: bytes, *, data_only: bool = False) -> Workbook:
+    """Open workbook bytes under the same size guards ``_open`` applies to a path.
+
+    A caller holding archived snapshot bytes has no file to point at, and the
+    non-read-only workbook is what carries merged-cell ranges and cell
+    coordinates.
+    """
+    try:
+        if len(data) > 32 * 1024 * 1024:
+            raise FoundryError("workbook exceeds 32 MiB limit")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            if sum(entry.file_size for entry in archive.infolist()) > 128 * 1024 * 1024:
+                raise FoundryError("expanded workbook exceeds 128 MiB limit")
+        return load_workbook(io.BytesIO(data), data_only=data_only)
+    except FoundryError:
+        raise
     except Exception as exc:
         raise FoundryError(f"cannot open workbook: {exc}") from exc
 
