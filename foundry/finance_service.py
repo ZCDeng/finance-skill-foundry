@@ -29,7 +29,11 @@ from foundry.finance_explanations import (
     validate_explanation as validate_explanation_payload,
 )
 from foundry.finance_metrics import evaluate_metric
-from foundry.finance_model import normalize_finance_dataset, scoped_source_rows
+from foundry.finance_model import (
+    normalize_finance_dataset,
+    scoped_source_rows,
+    voucher_reference,
+)
 from foundry.finance_variance import explain_variance, price_quantity_bridge
 
 COLLECTIONS = {
@@ -625,14 +629,14 @@ class FinanceStore:
             ):
                 raise FoundryError("source evidence row is invalid")
             source = dataset["rows"][source_index - 1]
+            voucher = voucher_reference(source)
             values.append(
                 {
                     "source": ref,
                     "source_hash": dataset["source_hash"],
                     "data": source,
-                    "voucher_detail_available": bool(
-                        source.get("doc_id") and source.get("line_id")
-                    ),
+                    "voucher_detail_available": voucher is not None,
+                    **({"voucher": voucher} if voucher else {}),
                 }
             )
         location = {"run_id": run["id"], "row": index, "column": column, "output_hash": run.get("output_hash")}

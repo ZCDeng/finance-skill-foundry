@@ -62,3 +62,9 @@ A confirmed structure declaration kept by header signature and sheet-name patter
 
 ### Pending Manager Acknowledgement (待经理追认)
 The state of a Table Snapshot whose confirmation was submitted by the assistant on the manager's behalf or applied from a Structure Template. It can be calculated on, but the data list, readiness report, and results carry the mark until the manager acknowledges it; acknowledging removes the mark and never reruns anything. It is distinct from the four existing states (executed, reproducible, manager-approved, published).
+
+### Amount Direction (金额方向)
+Which side of the books a fact sits on, read from the row's 借贷 column or its account's balance direction. A metric sums by that side where the row states it, so a 月末结转 voucher that debits revenue cancels the credit it reverses instead of counting the month twice. Where a row states neither, the sign comes from the management account, which cannot tell a reversal from an entry; that assumption is reported rather than made quietly.
+
+### Incomplete Run (不完整的运行)
+A run that finished without failing but produced something nobody should build on: no rows at all, or a diagnostic the engine raised at error severity. It stays `succeeded`, because nothing failed, and is marked `incomplete` so a draft, a chart, or an explanation can tell it apart from an answer. An empty result is the common case, and it is the engine's job to say so rather than hand back a green run with an empty table.

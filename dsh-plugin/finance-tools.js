@@ -84,7 +84,7 @@ export const FINANCE_TOOLS = {
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["list-finance-context"],
   },
   finance_readiness: {
-    description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
+    description: "只读检查当前任务已授权资料能否计算管理损益等能力：返回 proposed_scope、datasets、can_run、blocked、file_identity_policy。不写快照、不写口径。缺期间/币种或科目映射时列入 blocked，不填本月或币种。proposed_scope 只给所有文件一致的值，不一致就留空；每份文件各自的口径、缺什么、能算什么在 datasets 里，blocked 项带 dataset_id，要告诉经理是哪份文件缺什么，不要笼统说任务缺。未具名授权适配器时 erp_connected 为 false。不必先加载 setup；未加载 setup 不得拒绝 run_metric。",
     parameters: { type: "object", required: [], properties: {}, additionalProperties: false }, kind: "read", argv: () => ["finance-readiness"],
   },
   chart_deliverable_save: specTool("chart-deliverable-save", "把当前任务已授权 run 的结果系列归档为图表成果。写入 FinanceStore charts 与 analysis/charts，绑定 run_id 与 snapshot hash。不得传入路径、预览句柄或 dataset_id。打开归档图复现原值，不重跑。改假设走子情景后再归档新版本。", {

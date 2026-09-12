@@ -355,3 +355,109 @@ def test_metrics_exclude_inactive_source_refresh_rows() -> None:
     assert Decimal(total["rows"][0]["amount"]) == Decimal("100")
     assert Decimal(ratio["rows"][0]["numerator"]) == Decimal("100")
     assert any(diag["code"] == "inactive_source_row" for diag in pnl["diagnostics"])
+
+
+def _ledger_rows(entries: list[tuple[str, str, str]]) -> list[dict]:
+    """(科目代码, 借贷, 金额) as a ledger export spells them."""
+    return [
+        {
+            "科目代码": code,
+            "借贷": side,
+            "金额": amount,
+            "期间": "2026-08",
+            "币种": "CNY",
+            "单位": "元",
+        }
+        for code, side, amount in entries
+    ]
+
+
+def _normalized(entries: list[tuple[str, str, str]], mapping: dict[str, str]) -> dict:
+    return normalize_finance_dataset(
+        _dataset("ledger", _ledger_rows(entries)),
+        {
+            "ledger": "华宸物业",
+            "organization": "集团合并",
+            "period": "2026-08",
+            "currency": "CNY",
+            "unit": "元",
+            "scenario": "actual",
+        },
+        account_map={"rows": [
+            {"account_code": code, "management_account": account}
+            for code, account in mapping.items()
+        ]},
+    )
+
+
+def test_a_closing_voucher_cancels_the_entry_it_reverses() -> None:
+    """月末结转 debits revenue to close the month; it is not a second sale.
+
+    Summing magnitudes by a sign read off the account counted the debit as
+    another credit, so revenue came back at twice the month, with the run green
+    and no diagnostic to notice.
+    """
+    normalized = _normalized(
+        [
+            ("6001", "credit", "400"),   # 确认收入
+            ("6001", "debit", "400"),    # 月末结转至本年利润
+            ("6401", "debit", "300"),
+            ("6401", "credit", "300"),
+        ],
+        {"6001": "revenue", "6401": "cost"},
+    )
+    result = evaluate_metric(normalized, {"kind": "management_pnl"})
+    row = result["rows"][0]
+    assert Decimal(row["revenue"]) == Decimal("0")
+    assert Decimal(row["cost"]) == Decimal("0")
+    # And it says why a month of activity nets to nothing.
+    netted = [d for d in result["diagnostics"] if d["code"] == "account_nets_to_zero"]
+    assert {d["message"].split()[0] for d in netted} == {"revenue", "cost"}
+
+
+def test_the_balances_still_read_the_way_they_always_did() -> None:
+    """A trial balance carries each account once, on its own side."""
+    normalized = _normalized(
+        [("6001", "credit", "400"), ("6401", "debit", "300"), ("6602", "debit", "50")],
+        {"6001": "revenue", "6401": "cost", "6602": "expense"},
+    )
+    row = evaluate_metric(normalized, {"kind": "management_pnl"})["rows"][0]
+    assert Decimal(row["revenue"]) == Decimal("400")
+    assert Decimal(row["cost"]) == Decimal("300")
+    assert Decimal(row["expense"]) == Decimal("50")
+    assert Decimal(row["profit"]) == Decimal("50")
+
+
+def test_a_row_that_names_no_side_says_the_sign_was_assumed() -> None:
+    """A budget export carries an amount and nothing about direction."""
+    rows = [
+        {"account_code": "6001", "amount": "400", "period": "2026-08", "currency": "CNY", "unit": "元"},
+        {"account_code": "6401", "amount": "300", "period": "2026-08", "currency": "CNY", "unit": "元"},
+    ]
+    normalized = normalize_finance_dataset(
+        _dataset("budget", rows),
+        {"ledger": "华宸物业", "organization": "集团合并", "period": "2026-08",
+         "currency": "CNY", "unit": "元", "scenario": "budget"},
+        account_map={"rows": [
+            {"account_code": "6001", "management_account": "revenue"},
+            {"account_code": "6401", "management_account": "cost"},
+        ]},
+    )
+    result = evaluate_metric(normalized, {"kind": "management_pnl"})
+    row = result["rows"][0]
+    # Unchanged arithmetic: the account is the only thing left to read a sign from.
+    assert Decimal(row["revenue"]) == Decimal("400")
+    assert Decimal(row["cost"]) == Decimal("300")
+    assumed = next(d for d in result["diagnostics"] if d["code"] == "amount_direction_assumed")
+    assert assumed["severity"] == "warning"
+    assert "2 of 2" in assumed["message"]
+
+
+def test_a_metric_that_produced_no_line_is_not_a_quiet_success() -> None:
+    normalized = _normalized([("6001", "credit", "400")], {"9999": "revenue"})
+    result = evaluate_metric(normalized, {"kind": "management_pnl"})
+    assert result["rows"] == []
+    empty = next(d for d in result["diagnostics"] if d["code"] == "empty_result")
+    # Error severity is what marks the run incomplete downstream.
+    assert empty["severity"] == "error"
+    assert "1 fact rows" in empty["message"]

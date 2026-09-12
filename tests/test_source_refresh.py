@@ -536,3 +536,39 @@ def test_rows_must_match_scope_and_provide_explicit_business_line_id(tmp_path: P
 
     assert refresh.batches() == []
     assert store.state()["datasets"] == []
+
+
+def test_switching_a_source_from_snapshot_only_to_business_key_rebaselines(
+    tmp_path: Path,
+) -> None:
+    """The manager gets a proper export after months of plain file drops.
+
+    The snapshot batch filed its rows without business keys, so nothing in the
+    keyed batch can be matched against it. Indexing the old rows by a key they
+    never had raised a bare KeyError out of the refresh.
+    """
+    task, refresh, store = _task(tmp_path)
+    source = tmp_path / "ledger.csv"
+    rows = [
+        {"document_id": "V-1", "line_id": "1", "account_code": "6001", "amount": "100"},
+        {"document_id": "V-1", "line_id": "2", "account_code": "6401", "amount": "60"},
+    ]
+    _write_csv(source, rows)
+
+    snapshot = refresh.refresh_file(
+        source, scope=_scope(), name="ledger", file_identity_policy="snapshot_only"
+    )
+    assert snapshot["business_key_count"] == 0
+
+    # Same rows, now claimed to carry business keys. The bytes differ so this is
+    # not answered as a duplicate.
+    _write_csv(source, [*rows, {"document_id": "V-2", "line_id": "1",
+                                "account_code": "6602", "amount": "40"}])
+    keyed = refresh.refresh_file(
+        source, scope=_scope(), name="ledger", file_identity_policy="business_key"
+    )
+    assert keyed["business_key_count"] == 3
+    assert keyed["identity_rebaselined"] is True
+    # Not "3 inserted": the first two rows are not new, they are unmatchable.
+    assert set(keyed["change_counts"].values()) == {"unknown_identity_change"}
+    assert store.read_dataset(keyed["dataset_id"])["row_count"] == 3

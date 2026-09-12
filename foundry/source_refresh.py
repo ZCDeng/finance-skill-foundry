@@ -551,6 +551,9 @@ class SourceRefreshService:
                     duplicate_row_count=batch_input["duplicate_row_count"],
                     change_counts=batch_input["change_counts"],
                     changes=batch_input["changes"],
+                    # Says the counts above could not be computed against the
+                    # prior batch, rather than leaving them to be read as zeros.
+                    identity_rebaselined=bool(batch_input.get("identity_rebaselined")),
                     checkpoint=checkpoint,
                     publication_status="published",
                     published_at=now_iso(),
@@ -711,7 +714,20 @@ def _prepare_batch(
     prior_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     _reject_secrets(rows)
-    prior_by_key = {row["_source_business_key"]: row for row in prior_rows}
+    # A batch published under snapshot_only filed its rows without business
+    # keys, so nothing here can be matched against it. Indexing it by a key it
+    # never had raised a bare KeyError out of the refresh; diffing against an
+    # empty prior would be worse, because it would report a whole unchanged
+    # period as newly inserted. The first keyed batch after a snapshot is a new
+    # baseline, and the counts say so.
+    rebaselined = bool(prior_rows) and any(
+        "_source_business_key" not in row for row in prior_rows
+    )
+    prior_by_key = (
+        {}
+        if rebaselined
+        else {row["_source_business_key"]: row for row in prior_rows}
+    )
     deduped: dict[str, dict[str, Any]] = {}
     duplicate_count = 0
     for row in rows:
@@ -725,7 +741,7 @@ def _prepare_batch(
 
     mode = scope_record["mode"]
     capabilities = description["capabilities"]
-    final_by_key = dict(prior_by_key) if mode == "incremental" else {}
+    final_by_key = dict(prior_by_key) if mode == "incremental" and not rebaselined else {}
     changes: list[dict[str, Any]] = []
     counts = {"inserted": 0, "updated": 0, "deleted": 0, "voided": 0, "unchanged": 0}
 
@@ -772,6 +788,9 @@ def _prepare_batch(
 
     final_rows = [final_by_key[key] for key in sorted(final_by_key)]
     data_hash = _hash({"rows": final_rows})
+    if rebaselined:
+        counts = {name: "unknown_identity_change" for name in counts}
+        changes = []
     return {
         "rows": final_rows,
         "data_hash": data_hash,
@@ -780,6 +799,7 @@ def _prepare_batch(
         "change_counts": counts,
         "changes": changes,
         "prior_snapshot_id": prior.get("dataset_id") if prior else None,
+        **({"identity_rebaselined": True} if rebaselined else {}),
     }
 
 

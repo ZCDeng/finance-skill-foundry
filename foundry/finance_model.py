@@ -24,21 +24,29 @@ PARENT_STATUS = INACTIVE_SOURCE_STATUS
 DEFAULT_FIELD_MAP: dict[str, tuple[str, ...]] = {
     "ledger": ("ledger", "ledger_id", "账套"),
     "organization": ("organization", "organization_id", "org", "组织"),
-    "period": ("period", "会计期间", "期间"),
+    "period": ("period", "会计期间", "期间", "所属期间"),
     "currency": ("currency", "原币", "币种"),
     "unit": ("unit", "金额单位", "单位"),
     "scenario": ("scenario", "version", "口径"),
-    "account_code": ("account_code", "科目编码"),
-    "account_name": ("account_name", "科目名称"),
-    "account_direction": ("account_direction", "余额方向"),
+    # These spellings must keep up with `structure_proposal.ROLE_ALIASES`: the
+    # proposal engine names a column 科目代码 and this table only knew 科目编码,
+    # so a raw import read every account code as blank and filed 30 rows under
+    # __unmapped__ without a word.
+    "account_code": ("account_code", "科目编码", "科目代码", "会计科目代码"),
+    "account_name": ("account_name", "科目名称", "会计科目"),
+    "account_direction": ("account_direction", "余额方向", "方向"),
     "management_account": ("management_account", "管理科目"),
-    "amount": ("amount", "金额"),
-    "dc_flag": ("dc_flag", "借贷"),
+    "amount": ("amount", "金额", "发生额", "本期金额"),
+    "dc_flag": ("dc_flag", "借贷", "借贷方向"),
     "line_type": ("line_type", "行类型"),
     "posting_status": ("posting_status", "过账状态"),
     "source_row": ("source_row", "source_row_number", "source_row_index", "来源行"),
-    "doc_id": ("doc_id", "document_id", "voucher_id", "单据ID", "凭证号"),
-    "line_id": ("line_id", "document_line_id", "voucher_line_id", "行ID"),
+    "doc_id": (
+        "doc_id", "document_id", "voucher_id", "单据ID", "凭证号", "凭证字号", "单据编号",
+    ),
+    "line_id": (
+        "line_id", "document_line_id", "voucher_line_id", "行ID", "行号", "分录行号",
+    ),
     "source_status": ("source_status", "_source_row_state", "status"),
     "aux_customer": ("aux_customer", "customer", "客户"),
     "aux_department": ("aux_department", "department", "部门"),
@@ -172,9 +180,7 @@ def normalize_finance_dataset(
                 "posting_status": posting_status,
                 "source_status": source_status or "active",
                 "auxiliaries": aux,
-                "drilldown_available": bool(
-                    _text(canonical.get("doc_id")) and _text(canonical.get("line_id"))
-                ),
+                "drilldown_available": bool(_text(canonical.get("doc_id"))),
                 "trace": {
                     name: _text(
                         canonical.get(name) if name in canonical else raw.get(name)
@@ -194,7 +200,7 @@ def normalize_finance_dataset(
                     _diag(
                         "info",
                         "voucher_detail_unavailable",
-                        "row is usable for balance-level analysis but has no voucher drilldown key",
+                        "row is usable for balance-level analysis but names no voucher",
                         row_ref=row["source"],
                     )
                 )
@@ -287,7 +293,7 @@ def _result(
             "account_map_version": mapping_version,
         },
         "rows": rows,
-        "diagnostics": _bounded_diagnostics(diagnostics),
+        "diagnostics": _bounded_diagnostics(_collapse_unmapped(diagnostics)),
         "control_totals": control_totals or [],
         "movement_checks": movement_checks or [],
     }
@@ -370,6 +376,33 @@ def _in_scope(row: dict, scope: dict) -> bool:
         elif actual and actual != str(expected):
             return False
     return True
+
+
+def _collapse_unmapped(diagnostics: list[dict], sample_limit: int = 12) -> list[dict]:
+    """One line for an unmapped chart of accounts, naming codes rather than rows.
+
+    A ledger whose map is missing raises this once per row -- 128 warnings for
+    128 accounts -- which buries every other diagnostic in the same list. What
+    the manager needs is the count and which codes, so that is what survives.
+    """
+    unmapped = [d for d in diagnostics if d.get("code") == "unmapped_account"]
+    if len(unmapped) <= sample_limit:
+        return diagnostics
+    codes = sorted({str(d.get("account_code") or "") for d in unmapped})
+    shown = codes[:sample_limit]
+    kept = [d for d in diagnostics if d.get("code") != "unmapped_account"]
+    kept.append(
+        _diag(
+            "warning",
+            "unmapped_account",
+            f"{len(codes)} account codes are not mapped to a management account: "
+            + "、".join(shown)
+            + ("…" if len(codes) > len(shown) else ""),
+            count=len(unmapped),
+            account_codes=shown,
+        )
+    )
+    return kept
 
 
 def _bounded_diagnostics(diagnostics: list[dict], sample_limit: int = 5) -> list[dict]:
@@ -481,7 +514,21 @@ def _management_account(
             _diag(
                 "warning",
                 "unmapped_account",
-                f"account {account_code} is not mapped",
+                "account is not mapped to a management account",
+                row_index=index,
+                account_code=account_code,
+            )
+        )
+    else:
+        # A row with no account code at all is not an unmapped account, it is a
+        # column that was never read -- usually a header spelling the field map
+        # does not know. Falling through silently is how 30 rows became
+        # __unmapped__ with nothing said.
+        diagnostics.append(
+            _diag(
+                "warning",
+                "missing_account_code",
+                "row carries no account code, so it cannot be mapped",
                 row_index=index,
             )
         )
@@ -800,6 +847,22 @@ def _as_decimal(value: Any) -> Decimal:
 
 def _money(value: Decimal) -> str:
     return format(value, "f")
+
+
+def voucher_reference(row: dict, field_map: dict | None = None) -> dict[str, str] | None:
+    """The voucher this source row belongs to, read the way normalization reads it.
+
+    Two things kept the drilldown dark on every real export. It looked for a
+    literal ``doc_id`` key while the sheet spells the column 凭证号, and it
+    demanded a line id as well -- an ERP-internal number that a file export
+    almost never carries, though the row itself is the line and the evidence
+    reference already says which one.
+    """
+    fmap = field_map or _field_map({})
+    doc_id = _text(_read(row, fmap, "doc_id"))
+    if not doc_id:
+        return None
+    return {"doc_id": doc_id, "line_id": _text(_read(row, fmap, "line_id"))}
 
 
 def _diag(severity: str, code: str, message: str, **extra: Any) -> dict:

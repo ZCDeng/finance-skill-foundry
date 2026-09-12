@@ -410,3 +410,83 @@ def test_scoped_source_rows_refuses_unit_relabel_without_conversion_policy() -> 
         assert "explicit conversion" in str(exc)
     else:
         raise AssertionError("unit mismatch must be refused")
+
+
+def test_the_field_map_knows_the_spelling_the_proposal_engine_proposes() -> None:
+    """Two alias tables for one vocabulary have to agree.
+
+    The structure proposal engine names a column 科目代码; this table only knew
+    科目编码, so a raw import read every account code as blank and filed the
+    rows under __unmapped__ without saying anything.
+    """
+    from foundry.structure_proposal import ROLE_ALIASES
+    from foundry.finance_model import DEFAULT_FIELD_MAP
+
+    shared = {
+        "account_code": "account_code",
+        "account_name": "account_name",
+        "amount": "amount",
+        "doc_id": "doc_id",
+        "line_id": "line_id",
+        "period": "period",
+        "currency": "currency",
+        "unit": "unit",
+    }
+    for role, field in shared.items():
+        missing = set(ROLE_ALIASES[role]) - set(DEFAULT_FIELD_MAP[field])
+        assert not missing, f"{field} does not know {sorted(missing)}"
+
+
+def test_a_row_with_no_account_code_says_so_rather_than_falling_through() -> None:
+    from foundry.finance_model import normalize_finance_dataset
+
+    normalized = normalize_finance_dataset(
+        {"id": "d", "name": "d", "rows": [
+            {"科目名称": "主营业务收入", "金额": "400", "期间": "2026-08",
+             "币种": "CNY", "单位": "元"},
+        ]},
+        {"ledger": "l", "organization": "o", "period": "2026-08",
+         "currency": "CNY", "unit": "元", "scenario": "actual"},
+        account_map={"rows": []},
+    )
+    codes = [d["code"] for d in normalized["diagnostics"]]
+    assert "missing_account_code" in codes
+    assert normalized["rows"][0]["management_account"] == "__unmapped__"
+
+
+def test_an_unmapped_chart_of_accounts_is_one_line_naming_the_codes() -> None:
+    """128 warnings for 128 accounts buried every other diagnostic."""
+    from foundry.finance_model import normalize_finance_dataset
+
+    rows = [
+        {"科目代码": f"6{index:03d}", "金额": "10", "期间": "2026-08",
+         "币种": "CNY", "单位": "元"}
+        for index in range(40)
+    ]
+    normalized = normalize_finance_dataset(
+        {"id": "d", "name": "d", "rows": rows},
+        {"ledger": "l", "organization": "o", "period": "2026-08",
+         "currency": "CNY", "unit": "元", "scenario": "actual"},
+        account_map={"rows": []},
+    )
+    unmapped = [d for d in normalized["diagnostics"] if d["code"] == "unmapped_account"]
+    assert len(unmapped) == 1
+    assert unmapped[0]["count"] == 40
+    assert len(unmapped[0]["account_codes"]) == 12
+    assert "6000" in unmapped[0]["message"]
+
+
+def test_a_voucher_number_alone_is_enough_to_drill_down() -> None:
+    """A file export names the voucher; the ERP's line number is its own.
+
+    Requiring both left every real export permanently un-drillable, while the
+    row itself is the line and the evidence reference already says which.
+    """
+    from foundry.finance_model import voucher_reference
+
+    assert voucher_reference({"凭证号": "记-2026-08-001"}) == {
+        "doc_id": "记-2026-08-001",
+        "line_id": "",
+    }
+    assert voucher_reference({"凭证号": "记-1", "行号": "3"})["line_id"] == "3"
+    assert voucher_reference({"科目代码": "6001"}) is None

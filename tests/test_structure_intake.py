@@ -128,8 +128,16 @@ def test_readiness_reads_the_confirmed_table_and_stops_probing_the_original(
     assert report["structure_states"][shell["id"]] == "confirmed"
     snapshot = next(iter(confirmation["snapshot_ids"].values()))
     assert report["structure_states"][snapshot] == "confirmed"
-    # The derived table declares its own period and unit; currency was never stated.
-    assert report["proposed_scope"]["period"] == ""
+    # The derived table starts at the header row, so the title line carrying
+    # 「2026年08月 | 单位：元」 is not in its rows. The confirmation kept it, and
+    # that is what the report answers with. Currency was never stated anywhere.
+    assert report["proposed_scope"]["period"] == "2026-08"
+    assert report["proposed_scope"]["unit"] == "元"
+    assert report["proposed_scope"]["currency"] == ""
+    # And the file answers for itself, by name.
+    entry = next(row for row in report["datasets"] if row["dataset_id"] == snapshot)
+    assert entry["scope"]["period"] == "2026-08"
+    assert entry["missing_fields"] == ["currency"]
 
 
 def test_the_context_list_shows_the_same_state_the_card_does(tmp_path: Path) -> None:
