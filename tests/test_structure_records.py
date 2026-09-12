@@ -223,3 +223,36 @@ def test_a_table_dataset_outside_the_flow_stays_bindable(tmp_path: Path) -> None
         {"bindings": {"actual": dataset["id"]}, "scopes": {"actual": SCOPE}}
     )
     assert context["bindings"]["actual"] == dataset["id"]
+
+
+def test_the_assistant_is_offered_reads_and_one_confirmation_and_nothing_else() -> None:
+    """U6: the assistant can propose and confirm; settling stays with the manager."""
+    import json
+
+    profile = json.loads(Path("dsh-plugin/package.json").read_text())["dsh"]["foundry"][
+        "profiles"
+    ]["analysis"]
+    tools = set(profile["tools"])
+    assert {
+        "structure_proposal_list",
+        "structure_proposal_confirm",
+        "structure_template_list",
+    } <= tools
+    # Acknowledging, rejecting, withdrawing and disabling are the manager's alone.
+    assert not tools & {
+        "structure_acknowledge",
+        "structure_reject",
+        "structure_withdraw",
+        "structure_template_disable",
+    }
+    child = set(profile["childTools"])
+    assert "structure_proposal_confirm" not in child
+    assert {"structure_proposal_list", "structure_template_list"} <= child
+
+
+def test_the_assistants_confirm_tool_is_declared_as_an_edit() -> None:
+    source = Path("dsh-plugin/finance-tools.js").read_text()
+    assert "structure-proposal-list" in source and "structure-template-list" in source
+    reads = source.split('? "read"')[0]
+    assert "structure-proposal-list" in reads
+    assert "structure-proposal-confirm" not in reads

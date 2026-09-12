@@ -3,7 +3,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -144,6 +144,15 @@ export const FINANCE_TOOLS = {
   finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
     context_id: contextId,
   }, ["context_id"]),
+  structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
+    dataset_id: text("analysis-state 里的工作簿资料 id"),
+  }),
+  structure_proposal_confirm: specTool("structure-proposal-confirm", "代经理提交表结构确认，生成可算的表。只接受资料 id 与提议项，不接受路径、URL 或工作簿字节；来源由调用入口判定，spec 里自报的 source 一律丢弃。助手提交的确认记为待经理追认，经理在界面追认或拒绝。借贷方向未定时拒绝确认——先请经理说明哪一侧是金额。", {
+    dataset_id: text("要确认的工作簿资料 id"),
+    revision: {type:"integer", minimum:1, description:"structure_proposal_list 返回的提议版本号"},
+    sheets: {type:"array", items:{type:"object"}, description:"确认后的逐表结构声明，省略则按提议原样确认全部可作数据表的表"},
+  }, ["dataset_id"]),
+  structure_template_list: specTool("structure-template-list", "列出本任务记住的表结构模板：签名、表名模式、权重、是否停用。只读，不含路径或字节。命中模板的文件会自动套用并标为待经理追认。", {}),
   report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
   report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。Excel 模板的命名区数值只能来自 run_id 指向的已授权 run（命名区名匹配结果列或 metric 名），不接受调用方直接给数字；没有 run_id 就只套皮不写数。不覆盖旧稿。发布模板仍由经理点选。", {
     template_id: text("report_template_list 返回的 template_id"),
