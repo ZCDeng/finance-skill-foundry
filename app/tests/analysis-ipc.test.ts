@@ -39,7 +39,7 @@ describe('analysis IPC task and session binding', () => {
     registerIpc({ varRoot: '/store' });
     mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/actual.csv'] });
     await invoke(CHANNELS.analysisAddFiles, task, '/unselected/secret.csv');
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task }, 'dataset-add', [
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'dataset-add', [
       '--path', '/chosen/actual.csv', '--name', 'actual.csv',
     ]);
     mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/actual.csv'] });
@@ -65,7 +65,7 @@ describe('analysis IPC task and session binding', () => {
       'task-show',
       'analysis-refresh',
     ]);
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root', actor: 'manager' }, 'analysis-refresh');
   });
 
   it('syncs successful native imports before returning a later file failure', async () => {
@@ -84,7 +84,65 @@ describe('analysis IPC task and session binding', () => {
       'task-show',
       'analysis-refresh',
     ]);
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root', actor: 'manager' }, 'analysis-refresh');
+  });
+
+  it('stamps every call it makes as the manager, so a confirmation is not left pending', async () => {
+    registerIpc({ varRoot: '/store' });
+    await invoke(CHANNELS.financeCall, task, 'structure-proposal-confirm', { dataset_id: 'snapshot-1' });
+    const [binding, command] = mocks.run.mock.calls[0];
+    expect(command).toBe('structure-proposal-confirm');
+    expect(binding.actor).toBe('manager');
+  });
+
+  it('lets the card reach the structure commands and still refuses an unknown one', async () => {
+    registerIpc({ varRoot: '/store' });
+    for (const command of [
+      'structure-proposal-list',
+      'structure-proposal-confirm',
+      'structure-acknowledge',
+      'structure-reject',
+      'structure-withdraw',
+      'structure-template-list',
+      'structure-template-disable',
+    ]) {
+      expect((await invoke(CHANNELS.financeCall, task, command, { id: 'x' })).ok).toBe(true);
+    }
+    const refused = await invoke(CHANNELS.financeCall, task, 'structure-delete-everything', {});
+    expect(refused).toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
+  });
+
+  it('reaches the conversation after a confirmation so it can bind the new table', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] })
+      : JSON.stringify({ id: 'confirmation-1' }));
+    await invoke(CHANNELS.financeCall, task, 'structure-proposal-confirm', { dataset_id: 'snapshot-1' });
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual([
+      'structure-proposal-confirm',
+      'task-show',
+      'analysis-refresh',
+    ]);
+  });
+
+  it('answers a repeat upload instead of filing it, and leaves the conversation alone', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/月结.xlsx'] });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] })
+      : JSON.stringify({ id: 'existing', duplicate_of: 'existing', name: '月结' }));
+    const result = await invoke(CHANNELS.analysisAddFiles, task);
+    expect(result.ok).toBe(true);
+    expect(result.value[0].duplicate_of).toBe('existing');
+    // Nothing new was filed, so nothing widens.
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['dataset-add']);
+  });
+
+  it('files nothing when the picker returns without a file', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.chooser.mockResolvedValue({ canceled: false, filePaths: [] });
+    expect(await invoke(CHANNELS.analysisAddFiles, task)).toEqual({ ok: true, value: [] });
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it('publishes a company template from the native picker and never dataset-add', async () => {
@@ -113,7 +171,7 @@ describe('analysis IPC task and session binding', () => {
     expect(result.ok).toBe(true);
     expect(events).toEqual(['task-show', 'create', 'record-session', 'show']);
     expect(host.open).toHaveBeenCalledWith('analysis', '/workspace/task-a', undefined, true);
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'session-a' }, 'record-session', [
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'session-a', actor: 'manager' }, 'record-session', [
       '--role', 'analysis', '--workspace', '/workspace/task-a', '--verbatim', '利润为什么下降？',
     ]);
     expect(host.show).toHaveBeenCalledWith('session-a', '利润为什么下降？', '/workspace/task-a', '华东利润分析');
@@ -157,7 +215,7 @@ describe('analysis IPC task and session binding', () => {
     const result = await invoke(CHANNELS.harnessOpen, 'analysis', task, { verbatim: '补了预算，再分析' });
     expect(result.value.sessionId).toBe('root');
     expect(host.open).not.toHaveBeenCalled();
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root' }, 'analysis-refresh');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, session: 'root', actor: 'manager' }, 'analysis-refresh');
     expect(host.show).toHaveBeenCalledWith('root', '补了预算，再分析', '/workspace/task-a', '预算差异分析');
   });
 
@@ -281,7 +339,7 @@ describe('analysis IPC task and session binding', () => {
       product: 'kingdee',
     });
     const encoded = mocks.run.mock.calls[0][2][1];
-    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task }, 'finance-source-refresh', ['--spec', expect.any(String)]);
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'finance-source-refresh', ['--spec', expect.any(String)]);
     expect(encoded).toContain('/chosen/gl.csv');
     expect(encoded).not.toContain('/renderer/secret.csv');
     mocks.chooser.mockResolvedValue({ canceled: true, filePaths: ['/chosen/gl.csv'] });
@@ -319,7 +377,7 @@ describe('embedded workspace IPC', () => {
   it('validates task rename before the domain mutation', async () => {
     registerIpc({varRoot:'/store'});
     await invoke(CHANNELS.taskRename,task,'  月度利润复盘  ');
-    expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task},'task-rename',['--title','月度利润复盘']);
+    expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task,actor:'manager'},'task-rename',['--title','月度利润复盘']);
     expect((await invoke(CHANNELS.taskRename,task,'bad\nname')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledOnce();
   });

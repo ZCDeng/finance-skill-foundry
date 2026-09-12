@@ -43,6 +43,12 @@ export interface Binding {
   task?: string;
   /** The conversation. U10 supplies it from the harness; nothing here invents one. */
   session?: string;
+  /**
+   * Who this call speaks for. The app stamps `manager` on the manager's own
+   * clicks; an unstamped call counts as the assistant and needs her
+   * acknowledgement, so a missed stamp costs a confirmation, never trust.
+   */
+  actor?: 'manager' | 'assistant';
 }
 
 /**
@@ -57,6 +63,7 @@ export function foundryArgs(binding: Binding, command: string, rest: readonly st
   const argv = ['--var', binding.varRoot];
   if (binding.task) argv.push('--task', binding.task);
   if (binding.session) argv.push('--session', binding.session);
+  if (binding.actor) argv.push('--actor', binding.actor);
   return [...argv, command, ...rest];
 }
 
