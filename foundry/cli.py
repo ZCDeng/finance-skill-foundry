@@ -251,6 +251,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="conversation id this call happened in; the harness supplies it per call",
     )
+    parser.add_argument(
+        "--actor",
+        default="",
+        choices=["", "manager", "assistant"],
+        help="who the call speaks for; the desktop app stamps manager for the manager's own clicks. "
+        "An unstamped call counts as assistant and needs her acknowledgement.",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("create")

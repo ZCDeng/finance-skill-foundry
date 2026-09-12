@@ -270,18 +270,28 @@ def city_sheet(book: Workbook, name: str = "11·城市公司明细表") -> None:
             sheet.cell(row=5 + offset, column=index, value=value)
 
 
-def monthly_pack(path: Path | None = None) -> bytes:
-    """A 华宸-shaped month-end pack: cover, dashboard, ledger, journal, region, city, benchmark."""
-    book = Workbook()
-    book.remove(book.active)
-    cover_sheet(book)
-    dashboard_sheet(book)
-    ledger_sheet(book)
-    journal_sheet(book)
-    region_sheet(book)
-    city_sheet(book)
-    benchmark_sheet(book)
-    return _save(book, path)
+def monthly_pack(path: Path | None = None, *, period: str = "2026年08月") -> bytes:
+    """A 华宸-shaped month-end pack: cover, dashboard, ledger, journal, region, city, benchmark.
+
+    ``period`` produces next month's pack: the same shape, different bytes, which
+    is what a structure template has to recognise.
+    """
+    global SUBTITLE
+    original = SUBTITLE
+    SUBTITLE = original.replace("2026年08月", period)
+    try:
+        book = Workbook()
+        book.remove(book.active)
+        cover_sheet(book)
+        dashboard_sheet(book)
+        ledger_sheet(book)
+        journal_sheet(book)
+        region_sheet(book)
+        city_sheet(book)
+        benchmark_sheet(book)
+        return _save(book, path)
+    finally:
+        SUBTITLE = original
 
 
 def ledger_only(path: Path | None = None, *, sheet_name: str = "科目余额表") -> bytes:

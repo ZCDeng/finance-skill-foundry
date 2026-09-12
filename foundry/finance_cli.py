@@ -38,6 +38,14 @@ OPERATIONS = {
     "chart-deliverable-open": "chart_deliverable_open",
     "chart-deliverable-list": "chart_deliverable_list",
     "analysis-circle-select": "analysis_circle_select",
+    "structure-proposal-list": "structure_proposal_list",
+    "structure-proposal-confirm": "structure_proposal_confirm",
+    "structure-confirmation-list": "structure_confirmation_list",
+    "structure-acknowledge": "structure_acknowledge",
+    "structure-reject": "structure_reject",
+    "structure-withdraw": "structure_withdraw",
+    "structure-template-list": "structure_template_list",
+    "structure-template-disable": "structure_template_disable",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
 }
@@ -107,7 +115,8 @@ def dispatch(args):
     if context.task is None:
         raise FoundryError("finance analysis requires a task")
     service = FinanceStore(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
-                           session_id=context.session_id, context_revision=context.context_revision)
+                           session_id=context.session_id, context_revision=context.context_revision,
+                           actor=getattr(args, "actor", "") or None)
     if args.cmd == "finance-completion-recoveries":
         if context.session_id:
             raise FoundryError("completion recovery requires the task editor")
