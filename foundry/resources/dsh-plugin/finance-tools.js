@@ -152,7 +152,7 @@ export const FINANCE_TOOLS = {
     revision: {type:"integer", minimum:1, description:"structure_proposal_list 返回的提议版本号"},
     sheets: {type:"array", items:{type:"object"}, description:"确认后的逐表结构声明，省略则按提议原样确认全部可作数据表的表"},
   }, ["dataset_id"]),
-  structure_template_list: specTool("structure-template-list", "列出本任务记住的表结构模板：签名、表名模式、权重、是否停用。只读，不含路径或字节。命中模板的文件会自动套用并标为待经理追认。", {}),
+  structure_template_list: specTool("structure-template-list", "列出这套账记住的表结构模板：签名、表名模式、权重、是否停用。模板按工作区记，不按任务记，所以上个月确认的形状这个月照样命中。只读，不含路径或字节。命中模板的文件会自动套用并标为待经理追认。", {}),
   report_template_list: specTool("report-template-list", "列出当前任务可用的公司 Word/Excel 模板（内置与已发布）。只返回 template_id、label、kind，不含路径或字节。", {}),
   report_template_apply: specTool("report-template-apply", "按 template_id 套用公司模板，在当前任务写一份新草稿。可传 context_id 填页眉口径。Excel 模板的命名区数值只能来自 run_id 指向的已授权 run（命名区名匹配结果列或 metric 名），不接受调用方直接给数字；没有 run_id 就只套皮不写数。不覆盖旧稿。发布模板仍由经理点选。", {
     template_id: text("report_template_list 返回的 template_id"),

@@ -42,7 +42,6 @@ COLLECTIONS = {
     "charts",
     "structure_proposals",
     "structure_confirmations",
-    "structure_templates",
 }
 
 
@@ -1428,13 +1427,15 @@ class FinanceStore:
         return {"schema_version": 1, "confirmations": rows}
 
     def structure_template_list(self, spec):
-        from foundry.structure_templates import public_template
+        from foundry.structure_templates import public_template, registry_for
 
         del spec
+        # Templates are the store's memory, not this task's: a period that has
+        # confirmed nothing still sees what earlier periods settled.
         return {
             "schema_version": 1,
             "templates": [
-                public_template(row) for row in self._list("structure_templates")
+                public_template(row) for row in registry_for(self).list()
             ],
         }
 

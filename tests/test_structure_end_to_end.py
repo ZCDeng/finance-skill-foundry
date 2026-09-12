@@ -133,26 +133,39 @@ def test_the_whole_path_on_a_month_end_pack(tmp_path: Path, capsys) -> None:
     assert len(analysis.state()["datasets"]) == before
 
     # --- F3 / AE8. Next month's pack matches the remembered shape. ---
+    # September closes in its own task, because a task is one closing period.
+    # The shape has to survive the task that learned it or the manager confirms
+    # the same workbook every month.
+    next_task = TaskStore(root).create(title="华宸 2026-09 月结", period="2026-09")
+    next_analysis = AnalysisStore(next_task)
+    next_manager = FinanceStore(next_task, actor="manager")
+    assert next_manager.structure_template_list({})["templates"]
+
     september = tmp_path / "华宸_2026年09月.xlsx"
     september.write_bytes(fixture.monthly_pack(period="2026年09月"))
-    assert _cli(root, task.id, "dataset-add", "--path", str(september), "--name", "九月套表",
+    assert _cli(root, next_task.id, "dataset-add", "--path", str(september), "--name", "九月套表",
                 "--meta", json.dumps({"mode": "workbook"})) == 0
     capsys.readouterr()
     next_shell = next(
-        item for item in analysis.state()["datasets"] if item["name"] == "九月套表"
+        item for item in next_analysis.state()["datasets"] if item["name"] == "九月套表"
     )
-    assert manager.dataset_structure_state(next_shell["id"]) == "pending_acknowledgement"
+    assert next_manager.dataset_structure_state(next_shell["id"]) == "pending_acknowledgement"
     applied = next(
         item
-        for item in manager.structure_confirmation_list({"dataset_id": next_shell["id"]})[
-            "confirmations"
-        ]
+        for item in next_manager.structure_confirmation_list(
+            {"dataset_id": next_shell["id"]}
+        )["confirmations"]
         if item["source"] == "template"
     )
     assert applied["triggered_by_actor"] == "manager"
+    # August's task never saw September's file.
+    assert "九月套表" not in [item["name"] for item in analysis.state()["datasets"]]
 
-    manager.structure_withdraw({"id": applied["id"]})
-    assert manager.dataset_structure_state(next_shell["id"]) == "pending_confirmation"
+    next_manager.structure_withdraw({"id": applied["id"]})
+    assert next_manager.dataset_structure_state(next_shell["id"]) == "pending_confirmation"
+    # The demotion lands on the shelf both tasks read.
+    shelf = manager.structure_template_list({})["templates"]
+    assert shelf and all(item["weight"] == 0 for item in shelf)
 
 
 def test_the_assistant_confirms_on_the_managers_word_and_she_settles_it(

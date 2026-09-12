@@ -158,13 +158,13 @@ flowchart TB
 - 就绪报告按数据集分项、凭证下钻的判定、刷新策略切换崩溃：就绪与溯源一致块，另开计划。本计划只给就绪报告加「待确认表结构」原因、按资料的结构状态，并跳过已有确认表的原件壳。
 - 文稿数字千分位与单位、临时文件名、圈选错误文案、工作簿检视回包路径：交互修补块，另开计划。
 - 不自动填币种为 CNY，不跨表合并数据，不做 PDF 或扫描件的表结构识别。
-- 模板不跨任务、跨租户共享。
+- 模板不跨租户共享。注册表按 var 根存放，一个根就是一个租户的书架；同一根下跨任务复用（关账期间按任务划分，不跨任务就等于不复用）。
 - 现有 Excel 区域绑定（workbook_bind）保持并行存在，本计划不改也不隐藏。
 
 #### Deferred to Follow-Up Work
 
 - 多行表头与合并表头单元格的识别。
-- 模板跨任务共享与模板导入导出。
+- 模板跨 var 根的导入导出。
 - 助手侧的撤销模板套用与停用模板工具，待经理追认的交互稳定后再放开。
 
 <!-- ce-section: work-relationships -->
@@ -210,10 +210,10 @@ flowchart TB
 ### Key Technical Decisions
 
 - KTD1. **表快照是一份 `kind=table` 的普通资料，内嵌原件工作簿字节。** `source.xlsx` 存原件字节，`source_hash` 因此等于原件哈希，定位预览、就绪的完整性校验与 `FinanceFiles` 授权都不用改；`data.json` 存派生行，`transformation` 沿用 `format`、`sheet`、`source_row_numbers`、`header_columns`，并新增 `structure` 块（结构声明、`derived_from` 原件资料 id、被排除行、填充来源、逐行取值列）。Governs R12, R18。
-- KTD2. **提议、确认、模板是 FinanceStore 的三个不可变集合。** `structure_proposals`（按原件资料 id，带 `revision`）、`structure_confirmations`（`parent_id` 指向提议 revision，`source` 为 manager、assistant、template 之一，`state` 为 confirmed、pending_acknowledgement、acknowledged、withdrawn 之一，追认与撤回各写一条新记录并以 `parent_id` 链接）、`structure_templates`。确认时若提议 revision 不是最新则拒绝，这是并发冲突的唯一处理。镜像调整项的 pending 到确认链与 `mark_superseded`。Governs R9, R13, R14, R17。
+- KTD2. **提议与确认是 FinanceStore 的两个不可变集合，模板是 store 级注册表。** `structure_proposals`（按原件资料 id，带 `revision`）、`structure_confirmations`（`parent_id` 指向提议 revision，`source` 为 manager、assistant、template 之一，`state` 为 confirmed、pending_acknowledgement、acknowledged、withdrawn 之一，追认与撤回各写一条新记录并以 `parent_id` 链接）都落在任务下。模板不落在任务下：`TemplateRegistry` 写 `<var>/structure_templates/`，与 `tasks/` 平级，因为任务是一个关账期间，放任务下的注册表只能答自己那个月。模板是活计数不是归档版本，就地改写，因此上面不存任何算出来的东西。确认时若提议 revision 不是最新则拒绝，这是并发冲突的唯一处理。镜像调整项的 pending 到确认链与 `mark_superseded`。Governs R9, R13, R14, R17。
 - KTD3. **确认来源由调用入口打标，用 CLI 的 `--actor` 顶层参数。** Electron 主进程对经理动作注入 `--actor manager`；未传时有 `--session` 视为 assistant，无会话视为 manager；模板套用由服务端内部标 template。请求 spec 里的 `source`、`confirmed_by`、`actor` 一律剥除。`FinanceStore` 在初始化时接收 actor。(session-settled: user-approved — chosen over 用「有无会话」推断来源: 主进程在 `analysis-refresh` 与 `record-session` 也会带会话 id，推断不可靠。) Governs R13。
 - KTD4. **确认后的可见性：助手代确认要把新表快照并进该会话的快照集。** 镜像 `finance-source-refresh` 的 `update_session_context` 写法，否则窄会话确认了自己读不到的表。子会话不能确认。Governs R10, R11。
-- KTD5. **模板匹配用表头签名加相似度。** 签名为去空白后的规范列角色序列加原表名模式；相似度按列名集合 Jaccard、顺序一致率、标题模式三项加权，初始阈值 0.85，命中且逐项差异为零才自动套用；差异非零回到卡片预填。模板记录带 `weight`，撤销一次降权，降到 0 停用；经理可手动停用。匹配发生在加文件那一刻，紧接提议引擎之后。Governs R15, R16, R17。
+- KTD5. **模板匹配用表头签名加相似度，注册表按 var 根共享。** 签名为去空白后的规范列角色序列加原表名模式；相似度按列名集合 Jaccard、顺序一致率、标题模式三项加权，初始阈值 0.85，命中且逐项差异为零才自动套用；差异非零回到卡片预填。模板记录带 `weight`，撤销一次降权，降到 0 停用；经理可手动停用。匹配发生在加文件那一刻，紧接提议引擎之后。八月确认的形状，九月的任务读得到；另一个 var 根读不到。Governs R15, R16, R17。
 - KTD6. **提议引擎是纯函数：工作簿字节进，逐表提议出。** 表头行取「非空字符串单元格最多且其后连续有数据行」的行；表头之上为标题区；分节行为只有首格有值且其余为空的行；小计、合计、校验行按关键词加数值模式；借贷对按表头名（借方、贷方、借方金额、贷方金额及带换行变体）配对；方向按类别或方向列；期间、单位、币种复用就绪报告的标题正则并新增单位正则；超过 `MAX_ROWS` 或 `MAX_COLUMNS` 的表标「排除：过大」而不是整簿抛错。Governs R1 到 R7。
 - KTD7. **同字节去重在 `add_dataset` 入口做，只针对原件壳。** 计算 `source_hash` 后扫描任务内 `kind=workbook` 或无 `structure` 的资料，命中返回 `duplicate_of` 而不落盘；`allow_duplicate=true` 时照常落盘；`source_refresh` 自带的 `duplicate_of` 不动。Governs R8。
 - KTD8. **就绪报告与资料清单加按资料的结构状态。** 每条资料带 `structure_state`（pending_confirmation、pending_acknowledgement、confirmed、no_table、withdrawn）；有已确认子表的原件壳不再逐表探测；待确认壳以 `pending_structure` 为阻塞原因排在 `identity_failed` 之前；`sheet_candidates` 照旧输出以保住既有测试。Governs R11, R13。
@@ -352,7 +352,7 @@ stateDiagram-v2
 - **Goal:** 确认即入库，加文件时匹配模板，零差异自动套用，撤销降权。
 - **Requirements:** R14, R15, R16, R17; AE8; KTD5
 - **Dependencies:** U1, U3
-- **Files:** 新增 `foundry/structure_templates.py`（签名、相似度、差异）、`foundry/finance_service.py`（`structure_template_list`、`structure_template_disable`、入库钩子）、`foundry/structure_records.py`（模板套用来源）；测试 `tests/test_structure_templates.py`
+- **Files:** 新增 `foundry/structure_templates.py`（`TemplateRegistry` 写 `<var>/structure_templates/`、签名、相似度、差异）、`foundry/finance_service.py`（`structure_template_list`、`structure_template_disable`、入库钩子）、`foundry/structure_records.py`（模板套用来源）；测试 `tests/test_structure_templates.py`
 - **Approach:**
   1. 确认或追认成功后从结构声明生成模板记录（签名、表名模式、声明、`weight=1`）。
   2. 加文件时对每张表算相似度，达阈值取最高分模板，逐项比对差异；零差异直接走 U3 的模板来源确认；有差异把模板声明写进提议记录的 `prefill`。
