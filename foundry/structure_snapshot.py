@@ -75,7 +75,7 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
     excluded = {int(item["row"]) for item in declaration.get("excluded_rows") or []}
     fill_down = list(declaration.get("fill_down_columns") or [])
     pair = _primary_pair(declaration)
-    headers, letter_for = _derived_headers(columns, pair)
+    headers = _derived_headers(columns, pair)
 
     rows: list[dict[str, Any]] = []
     source_rows: list[int] = []
@@ -185,9 +185,8 @@ def _pair_letters(pair: dict[str, Any] | None) -> list[str]:
 
 def _derived_headers(
     columns: list[dict[str, Any]], pair: dict[str, Any] | None
-) -> tuple[list[str], dict[str, str]]:
+) -> list[str]:
     headers: list[str] = []
-    letter_for: dict[str, str] = {}
     for column in columns:
         role = column.get("role")
         if role in {"debit", "credit", "unknown"}:
@@ -196,14 +195,13 @@ def _derived_headers(
         if not name or name in headers:
             continue
         headers.append(name)
-        letter_for[name] = column["letter"]
     if pair is not None:
         for name in (AMOUNT_COLUMN, DC_COLUMN):
             if name not in headers:
                 headers.append(name)
     if not headers:
         raise FoundryError("structure declaration yields no usable column")
-    return headers, letter_for
+    return headers
 
 
 def _amount_for(

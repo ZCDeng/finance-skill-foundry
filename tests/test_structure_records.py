@@ -142,7 +142,6 @@ def test_an_undecided_debit_credit_side_blocks_confirmation(tmp_path: Path) -> N
 
 def test_a_narrow_session_can_read_the_table_it_just_confirmed(tmp_path: Path) -> None:
     task, _analysis, _manager, shell = _setup(tmp_path)
-    session = task.open_session(seat="analysis") if hasattr(task, "open_session") else None
     narrow = FinanceStore(task, snapshot_ids=[shell["id"]], actor="assistant")
     confirmation = narrow.structure_proposal_confirm(
         {"dataset_id": shell["id"], "sheets": _ledger_sheets(narrow, shell["id"])}
@@ -150,7 +149,6 @@ def test_a_narrow_session_can_read_the_table_it_just_confirmed(tmp_path: Path) -
     snapshot = next(iter(confirmation["snapshot_ids"].values()))
     assert snapshot in narrow.allowed
     assert narrow.dataset_structure_state(snapshot) == "pending_acknowledgement"
-    del session
 
 
 def test_a_session_cannot_confirm_a_shell_outside_its_own_scope(tmp_path: Path) -> None:
@@ -256,3 +254,11 @@ def test_the_assistants_confirm_tool_is_declared_as_an_edit() -> None:
     reads = source.split('? "read"')[0]
     assert "structure-proposal-list" in reads
     assert "structure-proposal-confirm" not in reads
+
+
+def test_an_actor_the_call_layer_does_not_know_is_refused(tmp_path: Path) -> None:
+    import pytest as _pytest
+
+    task = TaskStore(tmp_path / "var").create(title="来源")
+    with _pytest.raises(FoundryError, match="manager or assistant"):
+        FinanceStore(task, actor="auditor")

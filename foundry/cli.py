@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--actor",
         default="",
-        choices=["", "manager", "assistant"],
+        metavar="manager|assistant",
         help="who the call speaks for; the desktop app stamps manager for the manager's own clicks. "
         "An unstamped call counts as assistant and needs her acknowledgement.",
     )
