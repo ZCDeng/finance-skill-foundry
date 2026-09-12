@@ -128,16 +128,20 @@ def structure_state(
     )
 
 
-def assert_bindable(dataset_id: str, state: str) -> None:
-    if state not in BINDABLE_STATES:
-        reason = (
-            "pending_structure"
-            if state in {PENDING_CONFIRMATION, NO_TABLE}
-            else state
-        )
-        raise FoundryError(
-            f"dataset {dataset_id} cannot be bound while its table structure is {reason}"
-        )
+def assert_bindable(dataset_id: str, state: str, *, is_shell: bool) -> None:
+    """Refuse a binding the structure flow has not settled.
+
+    A workbook waiting for its card is refused, and so is a table the manager
+    withdrew. A plain table the flow never replaced is bound exactly as before.
+    """
+    if state in BINDABLE_STATES:
+        return
+    if state in {PENDING_CONFIRMATION, NO_TABLE} and not is_shell:
+        return
+    reason = "pending_structure" if state in {PENDING_CONFIRMATION, NO_TABLE} else state
+    raise FoundryError(
+        f"dataset {dataset_id} cannot be bound while its table structure is {reason}"
+    )
 
 
 def assert_confirmable(declaration_sheets: list[dict]) -> None:

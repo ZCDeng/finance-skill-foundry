@@ -42,6 +42,11 @@ def add_parsers(sub):
     p.add_argument("--path", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--meta", default="{}")
+    p.add_argument(
+        "--allow-duplicate",
+        action="store_true",
+        help="file these bytes again even though the task already holds them",
+    )
     p = sub.add_parser("dataset-read")
     p.add_argument("--dataset", required=True)
     p = sub.add_parser("analysis-save")
@@ -120,6 +125,32 @@ def _bound(context, bindings):
             raise FoundryError(
                 "snapshots are outside this session context; use analysis-refresh to include task datasets"
             )
+
+
+def _propose_structure(context, dataset, actor):
+    """Read the new file's shape straight away, so the card is there to answer.
+
+    Structure records live in the finance store while datasets live in the
+    analysis store, so the reading is triggered here, where both are in hand,
+    rather than from inside the dataset write itself.
+    """
+    from foundry.finance_service import FinanceStore
+
+    service = FinanceStore(
+        context.task,
+        snapshot_ids=None,
+        session_id=context.session_id,
+        actor=actor,
+    )
+    record = service.structure_propose(dataset["id"], source=service.actor)
+    if record is None:
+        return None
+    return {
+        "id": record["id"],
+        "revision": record["revision"],
+        "structure_state": service.dataset_structure_state(dataset["id"]),
+        "template_matches": record.get("template_matches") or [],
+    }
 
 
 def _uploaded_path(context, value):
@@ -226,12 +257,23 @@ def dispatch(args) -> bool:
             _uploaded_path(context, args.path),
             name=args.name,
             metadata=_json(args.meta, "metadata"),
+            allow_duplicate=getattr(args, "allow_duplicate", False),
         )
-        if context.session_id:
-            row = context.task.update_session_context(
-                context.session_id, snapshot_ids=[*context.snapshot_ids, result["id"]]
-            )
-            result = {**result, "context_revision": row["context_revision"]}
+        if result.get("duplicate_of"):
+            # Same bytes already filed; nothing was written, so nothing widens.
+            pass
+        else:
+            if context.session_id:
+                row = context.task.update_session_context(
+                    context.session_id, snapshot_ids=[*context.snapshot_ids, result["id"]]
+                )
+                result = {**result, "context_revision": row["context_revision"]}
+            result = {
+                **result,
+                "structure_proposal": _propose_structure(
+                    context, result, getattr(args, "actor", "") or None
+                ),
+            }
     elif args.cmd == "dataset-read":
         _bound(context, {"dataset": args.dataset})
         result = service.read_dataset(args.dataset)

@@ -41,7 +41,26 @@ AMOUNT_EXTRA = ("借方", "贷方")
 def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     del spec
     diagnostics: list[dict] = []
-    datasets = _authorized_tables(store, diagnostics)
+    datasets, structure_states, pending = _authorized_tables(store, diagnostics)
+    if pending:
+        # A file whose table structure nobody has confirmed cannot answer for a
+        # number yet, and saying "missing currency" about it would be a guess.
+        return _report(
+            proposed_scope={key: "" for key in SCOPE_KEYS},
+            can_run=[],
+            blocked=[_blocked("management_pnl", ["table_structure"], "pending_structure")],
+            policy="snapshot_only",
+            diagnostics=[
+                *diagnostics,
+                _diag(
+                    "error",
+                    "pending_structure",
+                    "table structure is waiting for the manager's confirmation",
+                ),
+            ],
+            sheet_candidates=[],
+            structure_states=structure_states,
+        )
     if not datasets:
         return _report(
             proposed_scope={key: "" for key in SCOPE_KEYS},
@@ -50,6 +69,7 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
             policy="snapshot_only",
             diagnostics=[*diagnostics, _diag("error", "no_dataset", "no authorized finance dataset")],
             sheet_candidates=[],
+            structure_states=structure_states,
         )
 
     code_map = _account_code_map(store)
@@ -105,11 +125,22 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
         policy=policy,
         diagnostics=diagnostics,
         sheet_candidates=sheet_candidates,
+        structure_states=structure_states,
     )
 
 
-def _report(*, proposed_scope, can_run, blocked, policy, diagnostics, sheet_candidates) -> dict[str, Any]:
+def _report(
+    *,
+    proposed_scope,
+    can_run,
+    blocked,
+    policy,
+    diagnostics,
+    sheet_candidates,
+    structure_states=None,
+) -> dict[str, Any]:
     return {
+        "structure_states": structure_states or {},
         "proposed_scope": proposed_scope,
         "can_run": can_run,
         "blocked": blocked,
@@ -127,7 +158,21 @@ def _blocked(capability: str, missing_fields: list[str], reason: str) -> dict[st
     return {"capability": capability, "missing_fields": list(missing_fields), "reason": reason}
 
 
-def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
+def _authorized_tables(store, diagnostics: list[dict]):
+    """Authorized datasets, what each one's table structure is waiting for, and
+    whether anything is still waiting for the manager.
+
+    A workbook whose structure has been confirmed is represented by the table it
+    produced; probing the original again would report the mis-parse the
+    confirmation exists to correct.
+    """
+    from foundry.structure_records import (
+        NO_TABLE,
+        NOT_APPLICABLE,
+        PENDING_CONFIRMATION,
+        WITHDRAWN,
+    )
+
     state = store.analysis.state()
     records = [
         row
@@ -135,6 +180,8 @@ def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
         if store.allowed is None or row["id"] in store.allowed
     ]
     tables = []
+    states: dict[str, str] = {}
+    pending = False
     for record in records:
         try:
             dataset = store.analysis.read_dataset(record["id"])
@@ -145,8 +192,19 @@ def _authorized_tables(store, diagnostics: list[dict]) -> list[dict]:
             continue
         if dataset.get("kind") == "background":
             continue
+        structure = store.dataset_structure_state(record["id"])
+        states[record["id"]] = structure
+        if _is_workbook_shell(dataset) and structure != NOT_APPLICABLE:
+            # Once a workbook has been read, the tables it produced answer for
+            # it; probing the original again reports the mis-parse the
+            # confirmation exists to correct.
+            if structure in {PENDING_CONFIRMATION, NO_TABLE}:
+                pending = True
+            continue
+        if structure == WITHDRAWN:
+            continue
         tables.append(dataset)
-    return tables
+    return tables, states, pending
 
 
 def _account_code_map(store) -> dict[str, str]:

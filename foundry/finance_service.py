@@ -134,7 +134,7 @@ class FinanceStore:
             "task_id": self.task.id,
             "domain": "foundry.finance.context.v1",
             "datasets": [
-                r
+                {**r, "structure_state": self.dataset_structure_state(r["id"])}
                 for r in state["datasets"]
                 if self.allowed is None or r["id"] in self.allowed
             ],
@@ -205,7 +205,11 @@ class FinanceStore:
             self._read("contexts", spec["parent_id"]) if spec.get("parent_id") else {}
         )
         for alias, value in bindings.items():
-            assert_bindable(value, self.dataset_structure_state(value))
+            assert_bindable(
+                value,
+                self.dataset_structure_state(value),
+                is_shell=self.analysis.read_dataset(value).get("kind") == "workbook",
+            )
         source_hashes = {
             alias: self.analysis.read_dataset(value)["source_hash"]
             for alias, value in bindings.items()
@@ -1187,6 +1191,7 @@ class FinanceStore:
         if str(dataset.get("source_file") or "").lower() != "source.xlsx":
             return None
         if (dataset.get("transformation") or {}).get("structure"):
+            # Already the product of a confirmed structure; there is nothing to read.
             return None
         folder = self.analysis._inside(self.analysis.root / "datasets" / dataset_id)
         data = (folder / dataset["source_file"]).read_bytes()

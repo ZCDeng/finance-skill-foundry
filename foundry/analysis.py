@@ -264,7 +264,12 @@ class AnalysisStore:
         }
 
     def add_dataset(
-        self, path: Path, *, name: str, metadata: dict | None = None
+        self,
+        path: Path,
+        *,
+        name: str,
+        metadata: dict | None = None,
+        allow_duplicate: bool = False,
     ) -> dict:
         path = Path(path)
         _safe_text(name, "dataset name", required=True, maximum=200)
@@ -283,8 +288,15 @@ class AnalysisStore:
                 data = handle.read(MAX_SOURCE_BYTES + 1)
         except OSError as exc:
             raise FoundryError(f"cannot read dataset source: {exc}") from exc
-        parsed = parse_source(data, suffix, metadata)
         source_hash = _hash_bytes(data)
+        if not allow_duplicate:
+            existing = self._same_source(source_hash)
+            if existing is not None:
+                # The manager already has these bytes. Hand back the copy she has,
+                # marked as the same upload, rather than filing a second one she
+                # then has to tell apart.
+                return {**existing, "duplicate_of": existing["id"]}
+        parsed = parse_source(data, suffix, metadata)
         for paragraph in parsed.get("paragraphs", []):
             paragraph["source_hash"] = source_hash
         encoded = _bytes(parsed)
@@ -313,6 +325,21 @@ class AnalysisStore:
             record["_integrity_hash"] = _hash(record)
             write_json_atomic(folder / "meta.json", record)
         return record
+
+    def _same_source(self, source_hash: str) -> dict | None:
+        """An earlier upload of exactly these bytes, if the task has one.
+
+        A table derived from a confirmed structure carries its original's bytes
+        too, so it is skipped here: it is the same file seen through a structure,
+        not a second upload of it.
+        """
+        for row in self.state()["datasets"]:
+            if row.get("source_hash") != source_hash:
+                continue
+            if (row.get("transformation") or {}).get("structure"):
+                continue
+            return row
+        return None
 
     def add_table_snapshot(
         self, source_dataset_id: str, declaration: dict, *, name: str
