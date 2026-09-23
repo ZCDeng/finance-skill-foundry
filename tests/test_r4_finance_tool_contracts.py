@@ -210,6 +210,7 @@ def test_dsh_and_method_r4_contracts_are_mirrored_into_resources():
 
     finance_tools = (ROOT / "dsh-plugin/finance-tools.js").read_text(encoding="utf-8")
     assert "analysis_requirements_save" in finance_tools
+    assert 'organizations:{type:"array"' in finance_tools
     assert "status_filter" in finance_tools
     assert "excluded_detail_rows" in finance_tools
     assert "repair_allowed" in finance_tools

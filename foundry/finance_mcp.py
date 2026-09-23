@@ -529,7 +529,7 @@ def _tools() -> list[dict[str, Any]]:
             "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
                 "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
                 "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
-                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "requires_drilldown": {"type": "boolean"}}},
+                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "organizations": {"type": "array", "items": text, "description": "Every organization that must be covered, crossed with every requested period. Leave shared scope.organization empty for a multi-organization requirement."}, "requires_drilldown": {"type": "boolean"}}},
                 },
             }},
         },

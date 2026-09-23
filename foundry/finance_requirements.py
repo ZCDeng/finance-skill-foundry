@@ -84,6 +84,7 @@ def save_requirements(analysis, spec):
         metric = _safe_text(item.get('metric'), 'requirement metric', required=True, maximum=200)
         dimensions = item.get('dimensions', {})
         periods = item.get('periods', [])
+        organizations = item.get('organizations', [])
         if not isinstance(dimensions, dict) or not isinstance(item.get('requires_drilldown', False), bool):
             raise FoundryError('invalid requirement dimensions or drilldown flag')
         if isinstance(dimensions.get('period'), (list, tuple, set, frozenset, dict)):
@@ -96,13 +97,30 @@ def save_requirements(analysis, spec):
             or any(not isinstance(period, str) or not period.strip() for period in periods)
         ):
             raise FoundryError('requirement periods must be an array of non-empty strings')
+        periods = list(dict.fromkeys(period.strip() for period in periods))
+        if periods and scope.get('period') not in (None, '') and periods != [scope['period']]:
+            raise FoundryError('requirement periods conflict with scope.period; set common period only when every item shares it')
+        if organizations in (None, ''):
+            organizations = []
+        if (
+            not isinstance(organizations, list)
+            or len(organizations) > 100
+            or any(not isinstance(organization, str) or not organization.strip() for organization in organizations)
+        ):
+            raise FoundryError('requirement organizations must be an array of non-empty strings')
+        organizations = list(dict.fromkeys(organization.strip() for organization in organizations))
+        if organizations and scope.get('organization') not in (None, ''):
+            if organizations != [scope['organization']]:
+                raise FoundryError('requirement organizations conflict with scope.organization; set common organization only when every item shares it')
         from foundry.finance_requirement_support import canonical_dimensions
         normalized_item = {'id': item['id'], 'metric': metric,
                            'label': _safe_text(item.get('label', metric), 'requirement label', maximum=500),
                            'dimensions': canonical_dimensions(dimensions),
                            'requires_drilldown': item.get('requires_drilldown', False)}
         if periods:
-            normalized_item['periods'] = list(dict.fromkeys(periods))
+            normalized_item['periods'] = periods
+        if organizations:
+            normalized_item['organizations'] = organizations
         normalized.append(normalized_item)
     with exclusive(analysis.task.lock_path, timeout=10):
         parent = latest_requirements(analysis)
@@ -279,6 +297,45 @@ def _row_period(run, row):
 def _period_matches(item, run, row):
     periods = item.get('periods', [])
     return not periods or _row_period(run, row) in periods
+
+
+def _row_organization(run, row):
+    if row.get('organization') not in (None, ''):
+        return row['organization']
+    scopes = run.get('finance_scope', {})
+    if not isinstance(scopes, dict):
+        return None
+    for side in ('actual', 'source'):
+        scope = scopes.get(side)
+        if isinstance(scope, dict) and scope.get('organization') not in (None, ''):
+            return scope['organization']
+    return None
+
+
+def _organization_matches(item, run, row):
+    organizations = item.get('organizations', [])
+    return not organizations or _row_organization(run, row) in organizations
+
+
+def _requested_grain_matches(item, run, row):
+    return _period_matches(item, run, row) and _organization_matches(item, run, row)
+
+
+def _requested_grains(item):
+    if not item.get('periods') and not item.get('organizations'):
+        return None
+    return {
+        (organization, period): []
+        for organization in (item.get('organizations') or [None])
+        for period in (item.get('periods') or [None])
+    }
+
+
+def _row_grain(item, run, row):
+    return (
+        _row_organization(run, row) if item.get('organizations') else None,
+        _row_period(run, row) if item.get('periods') else None,
+    )
 
 
 def _matches(item, row, column, run=None):
@@ -496,6 +553,8 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
             continue
         if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
             continue
+        if not _metric_filters_cover_requirement(metric, item, latest['scope']):
+            continue
         if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
             continue
         rows = _result_set_required_rows(item, run, latest['scope'])
@@ -535,7 +594,7 @@ def _result_set_kind(item):
     metric = _canonical_metric_name(item.get('metric'))
     if metric in RESULT_SET_METRICS:
         return metric
-    if item.get('periods') and metric not in RESULT_SET_METRICS and metric not in METRIC_LABELS:
+    if (item.get('periods') or item.get('organizations')) and metric not in RESULT_SET_METRICS and metric not in METRIC_LABELS:
         return 'account_total'
     return None
 
@@ -547,6 +606,35 @@ def _account_total_metric_matches_item(metric, item):
         and len(accounts) == 1
         and str(accounts[0]) == item.get('metric')
     )
+
+
+def _metric_filters_cover_requirement(metric, item, scope):
+    filters = metric.get('filters') or {}
+    if not isinstance(filters, dict):
+        return False
+    expected = _comparison_scopes(scope)
+    dimensions = item.get('dimensions', {})
+    for key, filtered in filters.items():
+        if key == 'organization' and item.get('organizations'):
+            required = item['organizations']
+        elif key == 'period' and item.get('periods'):
+            required = item['periods']
+        elif key == 'management_account' and metric.get('kind') == 'account_total':
+            required = item['metric']
+        elif key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
+            required = dimensions[key]
+        else:
+            required = expected['actual'].get(key, expected['source'].get(key))
+        if required is None:
+            return False
+        filtered_values = filtered if isinstance(filtered, (list, tuple, set, frozenset)) else [filtered]
+        required_values = required if isinstance(required, (list, tuple, set, frozenset)) else [required]
+        try:
+            if set(filtered_values) != set(required_values):
+                return False
+        except TypeError:
+            return False
+    return True
 
 
 def _run_scope_is_narrower_than_requirement(run, item, scope):
@@ -566,6 +654,10 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
                 if expected_value != value:
                     return True
                 continue
+            if key == 'organization' and item.get('organizations'):
+                if set(item['organizations']) == {value}:
+                    continue
+                return True
             if (
                 key == 'scenario'
                 and _result_set_kind(item) == 'control_totals'
@@ -587,17 +679,17 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
 
 
 def _result_set_required_rows(item, run, scope):
-    periods = set(item.get('periods', []))
     rows = []
     for index, row in enumerate(run.get('result', {}).get('rows', [])):
         if not _scope_matches(run, row, scope):
             continue
         if not _item_dimensions_match(item, row, run):
             continue
-        if periods and row.get('period') not in periods:
+        if not _requested_grain_matches(item, run, row):
             continue
         rows.append((index, row))
-    if periods and {row.get('period') for _, row in rows} != periods:
+    requested_grains = _requested_grains(item)
+    if requested_grains is not None and {_row_grain(item, run, row) for _, row in rows} != set(requested_grains):
         return []
     return rows
 
@@ -825,6 +917,8 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
             continue
         if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
             continue
+        if not _metric_filters_cover_requirement(metric, item, latest['scope']):
+            continue
         if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
             continue
         rows = _result_set_required_rows(item, run, latest['scope'])
@@ -900,7 +994,7 @@ def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
         if not _run_inputs_match_requirement(run, latest):
             continue
         for index, row in enumerate(run.get('result', {}).get('rows', [])):
-            if not _scope_matches(run, row, latest['scope']) or not _period_matches(item, run, row):
+            if not _scope_matches(run, row, latest['scope']) or not _requested_grain_matches(item, run, row):
                 continue
             for column in row:
                 if _account_amount_claim_requires_native_total(item, row, column):
@@ -1039,7 +1133,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
             if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
                 continue
             row = run['result']['rows'][index]
-            if not _period_matches(item, run, row):
+            if not _requested_grain_matches(item, run, row):
                 continue
             group = evidence['groups'].get((run_id, index))
             profit_bridge_locations = _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, latest['scope'])
@@ -1081,26 +1175,25 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                 locations.append({**location, 'evidence': metadata, 'status': status})
                 statuses.append(status)
         item_status = _item_status(statuses)
-        period_locations = None
-        if result_set is None and item.get('periods'):
-            period_locations = {period: [] for period in item['periods']}
+        grain_locations = _requested_grains(item) if result_set is None else None
+        if grain_locations is not None:
             for location in locations:
                 run = runs[location['run_id']]
                 row = run['result']['rows'][location['row']]
-                period_locations.get(_row_period(run, row), []).append(location)
+                grain_locations.get(_row_grain(item, run, row), []).append(location)
             if not all(
-                any(location['status'] == 'answered' for location in period_locations[period])
-                for period in item['periods']
+                any(location['status'] == 'answered' for location in members)
+                for members in grain_locations.values()
             ):
                 item_status = 'pending'
         failed_source = item['id'] in source_failures
         source_matches = [_source_verified(location, checks) for location in locations]
         if _profit_bridge_group_required(item):
             source_complete = bool(source_matches) and all(source_matches)
-        elif period_locations is not None:
+        elif grain_locations is not None:
             source_complete = all(
-                any(_source_verified(location, checks) for location in period_locations[period])
-                for period in item['periods']
+                any(location['status'] == 'answered' and _source_verified(location, checks) for location in members)
+                for members in grain_locations.values()
             )
         else:
             source_complete = any(source_matches)

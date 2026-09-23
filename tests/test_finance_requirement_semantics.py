@@ -132,6 +132,29 @@ def test_metric_alias_and_label_edit_can_reuse_semantically_equivalent_finance_r
     assert not completion["actions"]
 
 
+def test_required_organization_set_changes_semantic_fingerprint(tmp_path):
+    from foundry.finance_requirement_semantics import run_has_equivalent_requirements
+
+    service, context = _management_service(tmp_path)
+    base = {
+        "question": "逐组织核对成本率",
+        "context_id": context["id"],
+        "scope": {"ledger": "L1"},
+        "items": [{"id": "margin", "metric": "ratio", "requires_drilldown": False}],
+    }
+    original = service.analysis_requirements_save(base)
+    run = _run_ratio(service, context)
+    revised = service.analysis_requirements_save({
+        **base,
+        "parent_id": original["id"],
+        "items": [{**base["items"][0], "organizations": ["O1", "O2"]}],
+    })
+
+    assert original["semantic_fingerprint"] != revised["semantic_fingerprint"]
+    assert revised["semantic_basis"]["items"][0]["organizations"] == ["O1", "O2"]
+    assert not run_has_equivalent_requirements(service.analysis, run, revised)
+
+
 def test_profit_bridge_method_alias_reuses_same_semantic_fingerprint_and_run(tmp_path):
     service, context = _management_service(tmp_path, dirname="profit-method")
     original = service.analysis_requirements_save({
