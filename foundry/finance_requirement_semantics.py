@@ -35,6 +35,7 @@ def requirement_semantics(analysis, record):
             'periods': sorted(set(item.get('periods', []))),
             'requires_drilldown': item.get('requires_drilldown', False),
             **({'organizations': sorted(set(item['organizations']))} if item.get('organizations') else {}),
+            **({'scenarios': sorted(set(item['scenarios']))} if item.get('scenarios') else {}),
         } for item in record.get('items', [])], key=lambda item: item['id']),
     }
     return {'semantic_version': SEMANTIC_VERSION, 'semantic_basis': basis,

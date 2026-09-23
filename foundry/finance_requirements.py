@@ -28,6 +28,14 @@ METRIC_LABELS = {
     'ratio': ('ratio', 'rate', 'achievement_ratio', 'attainment_rate', '达成率', '比率'),
     'other_income': ('other_income', 'other_gains', 'other_income_and_gains_4items', '其他收益', '其他损益'),
 }
+RATIO_SCENARIOS = {
+    'achievement_ratio', 'achievement_ratio_estimate',
+    'attainment_rate', 'attainment_ratio',
+    'completion_rate',
+    'actual_budget_ratio', 'actual_to_budget',
+    'budget_phase_ratio',
+    'ratio',
+}
 PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction'}
 PRICE_QUANTITY_REQUIRED_COLUMNS = (
     'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'
@@ -85,6 +93,7 @@ def save_requirements(analysis, spec):
         dimensions = item.get('dimensions', {})
         periods = item.get('periods', [])
         organizations = item.get('organizations', [])
+        scenarios = item.get('scenarios', [])
         if not isinstance(dimensions, dict) or not isinstance(item.get('requires_drilldown', False), bool):
             raise FoundryError('invalid requirement dimensions or drilldown flag')
         if isinstance(dimensions.get('period'), (list, tuple, set, frozenset, dict)):
@@ -112,6 +121,18 @@ def save_requirements(analysis, spec):
         if organizations and scope.get('organization') not in (None, ''):
             if organizations != [scope['organization']]:
                 raise FoundryError('requirement organizations conflict with scope.organization; set common organization only when every item shares it')
+        if scenarios in (None, ''):
+            scenarios = []
+        if (
+            not isinstance(scenarios, list)
+            or len(scenarios) > 100
+            or any(not isinstance(scenario, str) or not scenario.strip() for scenario in scenarios)
+        ):
+            raise FoundryError('requirement scenarios must be an array of non-empty strings')
+        scenarios = list(dict.fromkeys(scenario.strip() for scenario in scenarios))
+        if scenarios and scope.get('scenario') not in (None, ''):
+            if scenarios != [scope['scenario']]:
+                raise FoundryError('requirement scenarios conflict with scope.scenario; set common scenario only when every item shares it')
         from foundry.finance_requirement_support import canonical_dimensions
         normalized_item = {'id': item['id'], 'metric': metric,
                            'label': _safe_text(item.get('label', metric), 'requirement label', maximum=500),
@@ -121,6 +142,8 @@ def save_requirements(analysis, spec):
             normalized_item['periods'] = periods
         if organizations:
             normalized_item['organizations'] = organizations
+        if scenarios:
+            normalized_item['scenarios'] = scenarios
         normalized.append(normalized_item)
     with exclusive(analysis.task.lock_path, timeout=10):
         parent = latest_requirements(analysis)
@@ -128,12 +151,10 @@ def save_requirements(analysis, spec):
             raise FoundryError('requirements update must reference the latest version')
         if not parent and spec.get('parent_id'):
             raise FoundryError('requirements parent does not exist')
-        removed = sorted(
-            set((parent or {}).get('removed_item_ids', []))
-            | ({item['id'] for item in (parent or {}).get('items', [])} - seen)
-        )
+        newly_removed = {item['id'] for item in (parent or {}).get('items', [])} - seen
+        removed = sorted(set((parent or {}).get('removed_item_ids', [])) | newly_removed)
         reason = _safe_text(spec.get('change_reason', ''), 'requirements change reason', maximum=2000)
-        if removed and not reason.strip():
+        if newly_removed and not reason.strip():
             raise FoundryError('removing requirements requires a change reason')
         assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
         from foundry.finance_requirement_semantics import requirement_semantics
@@ -317,17 +338,31 @@ def _organization_matches(item, run, row):
     return not organizations or _row_organization(run, row) in organizations
 
 
+def _row_scenario(_run, row):
+    return row.get('scenario') if row.get('scenario') not in (None, '') else None
+
+
+def _scenario_matches(item, run, row):
+    scenarios = item.get('scenarios', [])
+    return not scenarios or _row_scenario(run, row) in scenarios
+
+
 def _requested_grain_matches(item, run, row):
-    return _period_matches(item, run, row) and _organization_matches(item, run, row)
+    return (
+        _period_matches(item, run, row)
+        and _organization_matches(item, run, row)
+        and _scenario_matches(item, run, row)
+    )
 
 
 def _requested_grains(item):
-    if not item.get('periods') and not item.get('organizations'):
+    if not item.get('periods') and not item.get('organizations') and not item.get('scenarios'):
         return None
     return {
-        (organization, period): []
+        (organization, period, scenario): []
         for organization in (item.get('organizations') or [None])
         for period in (item.get('periods') or [None])
+        for scenario in (item.get('scenarios') or [None])
     }
 
 
@@ -335,6 +370,7 @@ def _row_grain(item, run, row):
     return (
         _row_organization(run, row) if item.get('organizations') else None,
         _row_period(run, row) if item.get('periods') else None,
+        _row_scenario(run, row) if item.get('scenarios') else None,
     )
 
 
@@ -350,10 +386,22 @@ def _matches(item, row, column, run=None):
     }
     if column not in amount_columns:
         return False
+    if _metric_key_ratio_pin_matches(item, row, metric):
+        return True
     if _metric_key_matches(row.get('metric_key'), metric, aliases):
         return True
     labels = [str(row.get(key, '')).lower() for key in ('metric', 'line', 'contribution_line', 'management_account')]
     return any(alias.lower() in labels for alias in aliases)
+
+
+def _metric_key_ratio_pin_matches(item, row, metric):
+    if metric != 'ratio':
+        return False
+    dimensions = item.get('dimensions', {})
+    if not isinstance(dimensions, dict) or dimensions.get('metric_key') in (None, ''):
+        return False
+    scenario = row.get('scenario')
+    return isinstance(scenario, str) and scenario.strip().lower() in RATIO_SCENARIOS
 
 
 def _metric_key_matches(value, metric, aliases):
@@ -619,6 +667,8 @@ def _metric_filters_cover_requirement(metric, item, scope):
             required = item['organizations']
         elif key == 'period' and item.get('periods'):
             required = item['periods']
+        elif key == 'scenario' and item.get('scenarios'):
+            required = item['scenarios']
         elif key == 'management_account' and metric.get('kind') == 'account_total':
             required = item['metric']
         elif key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
@@ -643,6 +693,7 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
         return False
     expected = _comparison_scopes(scope)
     periods = set(item.get('periods', []))
+    scenarios = set(item.get('scenarios', []))
     for candidate in scopes.values():
         if not isinstance(candidate, dict):
             continue
@@ -656,6 +707,10 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
                 continue
             if key == 'organization' and item.get('organizations'):
                 if set(item['organizations']) == {value}:
+                    continue
+                return True
+            if key == 'scenario' and scenarios:
+                if value in scenarios:
                     continue
                 return True
             if (
