@@ -250,6 +250,10 @@ describe('workbook browser', () => {
         source_name: '月结.xlsx',
         sheet,
         range,
+        header_context: [
+          { address: 'A1', text: '2026 年度预算总表（BUD-2026）' },
+          { address: 'A2', text: '单位：万元；12 个月分解' },
+        ],
         bounds: { min_row: 36, min_col: 2, max_row: 37, max_col: 3 },
         cells: [
           { address: 'B36', row: 36, column: 2, column_letter: 'B', kind: 'number', display, exact: display === '8.20' ? '8.199999999999999' : display, formula: null, cached_value_available: false, cached_value: null, number_format: display === '8.20' ? '#,##0.00;[Red]-#,##0.00' : 'General', merged: false },
@@ -275,6 +279,8 @@ describe('workbook browser', () => {
     expect(screen.getByText('8.20').closest('td')?.getAttribute('title')).toContain('原始值：8.199999999999999');
     expect(screen.getByText(/=B36\*2/)).toBeTruthy();
     expect(screen.getByText(/无缓存值/)).toBeTruthy();
+    expect(screen.getByText(/A1：2026 年度预算总表（BUD-2026）/)).toBeTruthy();
+    expect(screen.getByText(/A2：单位：万元；12 个月分解/)).toBeTruthy();
     expect(screen.queryByText('精确值')).toBeNull();
   });
 

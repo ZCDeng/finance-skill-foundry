@@ -64,6 +64,7 @@ def preview_workbook_range(
             "sheet": sheet_name,
             "range": _range_text(bounds),
             "bounds": bounds,
+            "header_context": _header_context(sheet),
             "limits": {
                 "default_rows": DEFAULT_ROWS,
                 "default_columns": DEFAULT_COLUMNS,
@@ -76,6 +77,22 @@ def preview_workbook_range(
     finally:
         formula_book.close()
         value_book.close()
+
+
+def _header_context(sheet: Any) -> list[dict[str, str]]:
+    """Show a few literal title cells beside a detached range, without inferring scope."""
+    context: list[dict[str, str]] = []
+    for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row or 1, 3), max_col=min(sheet.max_column or 1, 8)):
+        for cell in row:
+            if cell.data_type == "f" or not isinstance(cell.value, str):
+                continue
+            value = cell.value.strip()
+            if not value:
+                continue
+            context.append({"address": cell.coordinate, "text": value[:200]})
+            if len(context) == 4:
+                return context
+    return context
 
 
 def _resolve_range(sheet: Any, range_ref: str | None) -> dict[str, int]:

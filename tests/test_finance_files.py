@@ -387,6 +387,29 @@ def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path
     assert cell["number_format"] == "#,##0.00;[Red]-#,##0.00"
 
 
+def test_range_preview_keeps_original_title_context_outside_requested_cells(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="budget title context")
+    source = tmp_path / "budget.xlsx"
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = "01·年度预算总表"
+    sheet["A1"] = "2026 年度预算总表（BUD-2026）"
+    sheet["A2"] = "单位：万元；12 个月分解"
+    sheet["B36"] = 224
+    wb.save(source)
+    wb.close()
+    dataset = AnalysisStore(task).add_dataset(source, name="budget", metadata={"mode": "workbook"})
+
+    preview = FinanceFiles(task).range_preview(
+        {"dataset_id": dataset["id"], "sheet": "01·年度预算总表", "range": "B36"}
+    )
+    assert preview["header_context"] == [
+        {"address": "A1", "text": "2026 年度预算总表（BUD-2026）"},
+        {"address": "A2", "text": "单位：万元；12 个月分解"},
+    ]
+    assert [cell["address"] for cell in preview["cells"]] == ["B36"]
+
+
 def test_range_preview_rejects_unbounded_or_oversized_ranges(files) -> None:
     service, _, dataset, _ = files
     for ref in ("A:A", "1:1", "A1:B2,D1:E2", "'Other'!A1:B2"):
