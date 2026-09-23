@@ -87,6 +87,33 @@ def test_script_rejects_unbound_snapshot_before_creating_job(tmp_path: Path):
     assert not (task.root / "analysis" / "jobs").exists()
 
 
+def test_script_rejects_requirements_outside_frozen_context(tmp_path: Path):
+    from foundry.finance_requirements import save_requirements
+
+    task, _ = _context(tmp_path)
+    analysis = AnalysisStore(task)
+    allowed_path = tmp_path / "allowed.csv"
+    allowed_path.write_text("amount\n1\n", encoding="utf-8")
+    outside_path = tmp_path / "outside.csv"
+    outside_path.write_text("amount\n2\n", encoding="utf-8")
+    allowed = analysis.add_dataset(allowed_path, name="allowed")
+    outside = analysis.add_dataset(outside_path, name="outside")
+    task.update_session_context("parent", snapshot_ids=[allowed["id"]])
+    context = resolve_context(task.store.var_root, session_id="parent")
+    requirement = save_requirements(analysis, {
+        "question": "解释利润",
+        "bindings": {"actual": outside["id"]},
+        "items": [{"id": "profit", "metric": "profit"}],
+    })
+
+    with pytest.raises(FoundryError, match="requirements are outside"):
+        JobStore(task).create(context, "script", {
+            "code": "print(1)",
+            "bindings": {"actual": allowed["id"]},
+            "requirements_id": requirement["id"],
+        })
+
+
 @pytest.mark.skipif(not runner_capabilities()["available"], reason="requires macOS isolated runner")
 def test_real_background_script_completion_failure_and_retry(tmp_path: Path):
     task, context = _context(tmp_path)

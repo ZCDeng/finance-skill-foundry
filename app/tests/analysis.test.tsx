@@ -73,6 +73,11 @@ async function openSourceRefreshDetails() {
   expect(details).toBeTruthy();
   if (!details!.open) fireEvent.click(heading.closest('summary')!);
   expect(details!.open).toBe(true);
+  return details!;
+}
+function sourceRefreshField(label: string) {
+  const details = screen.getByText('更新 ERP 来源').closest('details') as HTMLDetailsElement;
+  return within(details).getByLabelText(label);
 }
 function chooseSearchable(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
@@ -221,7 +226,7 @@ describe('analysis workbench', () => {
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '这是我的专业判断。' } });
     expect((screen.getByLabelText('我的审阅状态') as HTMLSelectElement).value).toBe('unreviewed');
     exportDraft();
-    await waitFor(() => expect(analysisExport).toHaveBeenCalledWith(task.id, '3'.repeat(32), 'md'));
+    await waitFor(() => expect(analysisExport).toHaveBeenCalledWith(task.id, '3'.repeat(32), 'md', 'management'));
     await waitFor(() => expect(analysisDraft).toHaveBeenCalledWith(task.id, expect.objectContaining({
       parent_id: draft.id, body: '这是我的专业判断。', run_ids: [run.id], claims: draft.claims, review_status: 'unreviewed', publication_status: 'draft',
     })));
@@ -871,10 +876,10 @@ ${canonicalAppendix} 已改写`;
     render(<Analysis {...props} embedded section="results" />);
     fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
     await openSourceRefreshDetails();
-    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
-    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
@@ -901,10 +906,10 @@ ${canonicalAppendix} 已改写`;
     const { rerender } = render(<Analysis {...props} embedded section="results" tasks={[task, other]} />);
     fireEvent.click(await screen.findByRole('tab', { name: /资料/ }));
     await openSourceRefreshDetails();
-    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
-    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
     rerender(<Analysis {...props} embedded section="drafts" task={other} tasks={[task, other]} />);
@@ -1185,23 +1190,24 @@ ${canonicalAppendix} 已改写`;
     })));
   });
 
-  it('loads completion recovery payloads into an editable unchecked draft copy', async () => {
-    const financeRun = { ...run, id: 'r-recovered', engine: 'finance' };
+  it.each([true, false])('loads completion recovery into an editable, recheckable copy (existing draft: %s)', async (hasDraft) => {
+    const financeRun = { ...run, id: 'r-recovered', engine: 'finance', result: { ...run.result!, rows: [{ profit: '88' }] } };
     const oldClaims = [{ basis: 'calculation', run_id: run.id, row: 0, column: 'profit', value: '900719925474099.99' }];
     const recoveryClaims = [{ basis: 'calculation', run_id: financeRun.id, row: 0, column: 'profit', value: '88' }];
     const recovery = {
       operation_id: 'op-1',
-      status: 'failed',
-      revision: 'rev-2',
+      status: 'repair_available',
+      revision: 2,
       title: '恢复的经营说明',
       body: '恢复正文 {{fact:fact-recovered}}。',
       limitations: ['等待销售确认'],
       run_ids: [financeRun.id],
       fact_ids: ['fact-recovered'],
-      claims: recoveryClaims,
+      claims: [{ ...recoveryClaims[0], value: '99' }],
       materiality: { absolute: '9000' },
       requirements_id: 'req-recovered',
       parent_id: null,
+      validation_error: { code: 'claim_value_mismatch', message: 'claim value differs', details: [{ run_id: financeRun.id, row: 0, column: 'profit', expected: '99', actual: '88' }] },
       updated_at: '2026-09-06T10:00:00Z',
     };
     const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
@@ -1213,17 +1219,20 @@ ${canonicalAppendix} 已改写`;
       if (command === 'prepare-explanation') return success({ facts: [{ id: 'fact-recovered', run_id: financeRun.id, row: 0, column: 'profit', label: '恢复利润', display_value: '88' }] });
       if (command === 'validate-explanation') return success({ status: 'pass', issues: [] });
       if (command === 'finance-background-list') return success({ backgrounds: [] });
-      if (command === 'save-explanation-draft') return success({ ...draft, ...spec, id: '9'.repeat(32) });
+      if (command === 'finance-completion-recover') return success({ ...draft, ...(spec?.draft as Record<string, unknown>), id: '9'.repeat(32) });
       return success({});
     });
-    mountBridge({ analysisState: async () => success({ ...initial, runs: [run, financeRun], drafts: [{ ...draft, fact_ids: ['fact-old'], claims: oldClaims, run_ids: [run.id] }] }), financeCall });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [run, financeRun], drafts: hasDraft ? [{ ...draft, fact_ids: ['fact-old'], claims: oldClaims, run_ids: [run.id] }] : [] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     await screen.findByText('可恢复的未保存文稿 · 1 条');
+    expect(screen.getByText(/可修复/)).toBeTruthy();
+    expect(screen.getByText(/填报 99，结果 88/)).toBeTruthy();
     fireEvent.click(screen.getByText('可恢复的未保存文稿 · 1 条'));
     fireEvent.click(screen.getByRole('button', { name: '载入可编辑副本' }));
     expect((await screen.findByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('恢复正文 {{fact:fact-recovered}}。');
     expect(screen.getByText(/已载入未保存恢复稿/)).toBeTruthy();
     expect(screen.getByText(/待重检/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '采用引用 1 的结果值' }));
     fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'prepare-explanation', expect.objectContaining({
       run_ids: [financeRun.id],
@@ -1235,7 +1244,8 @@ ${canonicalAppendix} 已改写`;
       claims: recoveryClaims,
     })));
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
-    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'save-explanation-draft', expect.objectContaining({
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-completion-recover', expect.objectContaining({
+      operation_id: 'op-1', revision: 2, draft: expect.objectContaining({
       title: '恢复的经营说明',
       body: '恢复正文 {{fact:fact-recovered}}。',
       run_ids: [financeRun.id],
@@ -1244,9 +1254,8 @@ ${canonicalAppendix} 已改写`;
       materiality: { absolute: '9000' },
       requirements_id: 'req-recovered',
       review_status: 'unreviewed',
-    })));
-    const recoverySave = financeCall.mock.calls.find(([, command, spec]) => command === 'save-explanation-draft'
-      && (spec as Record<string, unknown>)?.body === '恢复正文 {{fact:fact-recovered}}。')?.[2] as Record<string, unknown>;
+    }) })));
+    const recoverySave = financeCall.mock.calls.find(([, command]) => command === 'finance-completion-recover')?.[2]?.draft as Record<string, unknown>;
     expect(recoverySave).not.toHaveProperty('parent_id');
     expect(recoverySave.fact_ids).not.toContain('fact-old');
     expect(recoverySave.claims).not.toEqual(oldClaims);
@@ -1406,7 +1415,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     expect(await screen.findByText(/需要复核/)).toBeTruthy();
-    const issueSummary = screen.getByText(/引用绑定 · 需修正 · 120 条/, { selector: 'summary' });
+    const issueSummary = screen.getByText(/引用已不属于当前计算结果 · 120 条原始问题/, { selector: 'summary' });
     expect(issueSummary.textContent).toContain('引用已不属于当前计算结果');
     const grouped = issueSummary.closest('details') as HTMLDetailsElement;
     expect(grouped.open).toBe(false);
@@ -1746,10 +1755,10 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success(initial), financeCall, financeSourceRefresh });
     render(<Analysis {...props} embedded section="materials" />);
     await openSourceRefreshDetails();
-    fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
-    fireEvent.change(screen.getByLabelText('截止时间'), { target: { value: '2026-08-31' } });
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-08' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-08-31' } });
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledWith(task.id, expect.objectContaining({
       product: 'file', version: 'export', file_identity_policy: 'snapshot_only',
@@ -1773,7 +1782,7 @@ ${canonicalAppendix} 已改写`;
     const details = screen.getByText('更新 ERP 来源').closest('details') as HTMLDetailsElement | null;
     expect(details).toBeTruthy();
     expect(details!.open).toBe(false);
-    expect(screen.getByLabelText('账簿').closest('details')).toBe(details);
+    expect(within(details!).getByLabelText('账簿').closest('details')).toBe(details);
   });
 
   it('inspects, binds, previews and applies an Excel collaboration workbook', async () => {

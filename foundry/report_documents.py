@@ -392,6 +392,82 @@ def _unescape_markdown_text(value: str) -> str:
     return re.sub(r"\\([\\`*\[\]\(\)|])", r"\1", value)
 
 
+
+
+def _find_unescaped(value: str, needle: str, start: int = 0) -> int:
+    pos = start
+    while True:
+        pos = value.find(needle, pos)
+        if pos == -1:
+            return -1
+        backslashes = 0
+        cursor = pos - 1
+        while cursor >= 0 and value[cursor] == "\\":
+            backslashes += 1
+            cursor -= 1
+        if backslashes % 2 == 0:
+            return pos
+        pos += len(needle)
+
+
+def _parse_markdown_inline(value: str) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+
+    def append_text(raw: str) -> None:
+        if raw:
+            nodes.append({"type": "text", "text": _unescape_markdown_text(raw)})
+
+    index = 0
+    while index < len(value):
+        code_start = _find_unescaped(value, "`", index)
+        bold_start = _find_unescaped(value, "**", index)
+        link_start = _find_unescaped(value, "[", index)
+        candidates = [(pos, kind) for pos, kind in ((code_start, "code"), (bold_start, "bold"), (link_start, "link")) if pos != -1]
+        if not candidates:
+            append_text(value[index:])
+            break
+        start, kind = min(candidates, key=lambda item: item[0])
+        append_text(value[index:start])
+        if kind == "code":
+            end = _find_unescaped(value, "`", start + 1)
+            if end == -1:
+                append_text(value[start:])
+                break
+            nodes.append({"type": "text", "text": _unescape_markdown_text(value[start + 1:end]), "marks": [{"type": "code"}]})
+            index = end + 1
+        elif kind == "bold":
+            end = _find_unescaped(value, "**", start + 2)
+            if end == -1:
+                append_text(value[start:])
+                break
+            nodes.append({"type": "text", "text": _unescape_markdown_text(value[start + 2:end]), "marks": [{"type": "bold"}]})
+            index = end + 2
+        else:
+            close = _find_unescaped(value, "]", start + 1)
+            if close == -1 or close + 1 >= len(value) or value[close + 1] != "(":
+                append_text(value[start:start + 1])
+                index = start + 1
+                continue
+            href_end = _find_unescaped(value, ")", close + 2)
+            if href_end == -1:
+                append_text(value[start:])
+                break
+            href = value[close + 2:href_end].strip()
+            if not href:
+                append_text(value[start:href_end + 1])
+                index = href_end + 1
+                continue
+            nodes.append({
+                "type": "text",
+                "text": _unescape_markdown_text(value[start + 1:close]),
+                "marks": [{"type": "link", "attrs": {"href": href}}],
+            })
+            index = href_end + 1
+    return nodes or [{"type": "text", "text": ""}]
+
+
+
+
 def _flat_inline(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for node in nodes:
@@ -539,7 +615,7 @@ def report_nodes_from_markdown(markdown: str) -> list[dict[str, Any]]:
             nodes.append({
                 "type": "reportNote",
                 "attrs": {"id": note.group(1)},
-                "content": [{"type": "paragraph", "content": [{"type": "text", "text": note.group(2)}]}],
+                "content": [{"type": "paragraph", "content": _parse_markdown_inline(note.group(2))}],
             })
             index += 1
             continue
@@ -548,7 +624,7 @@ def report_nodes_from_markdown(markdown: str) -> list[dict[str, Any]]:
             nodes.append({
                 "type": "heading",
                 "attrs": {"level": len(heading.group(1))},
-                "content": [{"type": "text", "text": heading.group(2)}],
+                "content": _parse_markdown_inline(heading.group(2)),
             })
             index += 1
             continue
@@ -581,7 +657,7 @@ def report_nodes_from_markdown(markdown: str) -> list[dict[str, Any]]:
                 current = re.match(r"^(\s*)([-*+]|\d+[.)])\s+(.+)$", lines[index])
                 if not current or bool(re.match(r"\d+[.)]", current.group(2))) != ordered:
                     break
-                items.append({"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": current.group(3)}]}]})
+                items.append({"type": "listItem", "content": [{"type": "paragraph", "content": _parse_markdown_inline(current.group(3))}]})
                 index += 1
             nodes.append({"type": "orderedList" if ordered else "bulletList", "content": items})
             continue
@@ -598,7 +674,7 @@ def report_nodes_from_markdown(markdown: str) -> list[dict[str, Any]]:
                 break
             paragraph.append(lines[index])
             index += 1
-        nodes.append({"type": "paragraph", "content": [{"type": "text", "text": "\n".join(paragraph)}]})
+        nodes.append({"type": "paragraph", "content": _parse_markdown_inline("\n".join(paragraph))})
     return nodes
 
 
@@ -618,7 +694,7 @@ def _parse_table(lines: list[str]) -> dict[str, Any]:
             {
                 "type": "tableHeader" if row_index == 0 else "tableCell",
                 "attrs": {"textAlign": "right" if _markdown_numeric_like(cell.strip()) else "left"},
-                "content": [{"type": "paragraph", "content": [{"type": "text", "text": _unescape_markdown_text(cell.strip())}]}],
+                "content": [{"type": "paragraph", "content": _parse_markdown_inline(cell.strip())}],
             }
             for cell in _split_markdown_row(line)
         ]
@@ -664,7 +740,7 @@ def report_document_excel_rows(document: dict[str, Any], draft: dict[str, Any]) 
     overview = [["字段", "值"]]
     for label, value in (
         ("标题", draft.get("title", "")),
-        ("版本", draft.get("id", "")),
+        ("版本", draft.get("id", draft.get("draft_id", ""))),
         ("内容哈希", draft.get("content_hash", "")),
         ("发布状态", draft.get("publication_status", "")),
         ("复核状态", draft.get("review_status", "")),
@@ -676,6 +752,8 @@ def report_document_excel_rows(document: dict[str, Any], draft: dict[str, Any]) 
         ("币种", clean["metadata"].get("currency", "")),
         ("单位", clean["metadata"].get("unit", "")),
         ("来源数量", len(clean.get("sources", []))),
+        ("导出模式", draft.get("content_mode", "")),
+        ("投影哈希", draft.get("projection_hash", "")),
     ):
         overview.append([label, value])
 

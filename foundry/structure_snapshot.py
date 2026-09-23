@@ -68,7 +68,8 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
         sheet = book[sheet_name]
         if (sheet.max_column or 0) > MAX_COLUMNS or (sheet.max_row or 0) > MAX_ROWS + 1:
             raise FoundryError("worksheet exceeds row/column limits")
-        grid = _grid(sheet, read_exact_numerics(data, sheet_name))
+        bounds = _bounds(declaration, sheet)
+        grid = _grid(sheet, read_exact_numerics(data, sheet_name), bounds)
     finally:
         book.close()
 
@@ -84,7 +85,7 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
     carried: dict[str, Any] = {}
 
     for number in sorted(grid):
-        if number <= header_row:
+        if number <= header_row or number < bounds["start_row"] or number > bounds["end_row"]:
             continue
         raw = grid[number]
         for letter in fill_down:
@@ -95,11 +96,13 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
         row: dict[str, Any] = {name: None for name in headers}
         filled_here: list[str] = []
         for column in columns:
+            if column.get("include") is False:
+                continue
             letter = column["letter"]
             role = column.get("role")
-            if role in {"debit", "credit"} or role == "unknown":
+            if role in {"debit", "credit"}:
                 continue
-            name = CANONICAL_NAMES.get(role)
+            name = _derived_column_name(column)
             if not name:
                 continue
             value = raw.get(letter)
@@ -127,15 +130,37 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
         "formulas": "cached-values-required",
         "sheet": sheet_name,
         "header_row": header_row,
+        "bounds": bounds,
         "source_row_numbers": source_rows,
         # Original letters, so a locator still points at the file's own columns.
         "header_columns": {
-            column["header"] or column["letter"]: column["letter"] for column in columns
+            _derived_column_name(column) or column["header"] or column["letter"]: column["letter"]
+            for column in columns
+            if column.get("include") is not False
+            and column.get("role") not in {"debit", "credit"}
+            and _derived_column_name(column)
         },
         "structure": {
             "declaration": declaration,
             "derived_from": declaration.get("derived_from"),
+            "bounds": bounds,
             "excluded_rows": sorted(excluded),
+            "excluded_columns": _excluded_columns(columns),
+            "header_columns": {
+                _derived_column_name(column): column["letter"]
+                for column in columns
+                if column.get("include") is not False
+                and column.get("role") not in {"debit", "credit"}
+                and _derived_column_name(column)
+            },
+            "column_roles": {
+                _derived_column_name(column): column.get("role", "unknown")
+                for column in columns
+                if column.get("include") is not False
+                and column.get("role") not in {"debit", "credit"}
+                and _derived_column_name(column)
+            },
+            "numeric_coverage": _numeric_coverage(columns),
             "fill_provenance": fill_provenance,
             "row_columns": row_columns,
             "amount_column_letters": _pair_letters(pair),
@@ -146,13 +171,17 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _grid(sheet, exact: dict[str, Decimal]) -> dict[int, dict[str, Any]]:
+def _grid(sheet, exact: dict[str, Decimal], bounds: dict[str, Any]) -> dict[int, dict[str, Any]]:
     from foundry.analysis_data import _column_letter
 
     grid: dict[int, dict[str, Any]] = {}
     for number, cells in enumerate(sheet.iter_rows(), start=1):
+        if number < bounds["start_row"] or number > bounds["end_row"]:
+            continue
         row: dict[str, Any] = {}
         for cell in cells:
+            if cell.column < bounds["start_col_index"] or cell.column > bounds["end_col_index"]:
+                continue
             coordinate = getattr(cell, "coordinate", "") or ""
             value = (
                 cell.value
@@ -167,6 +196,71 @@ def _grid(sheet, exact: dict[str, Decimal]) -> dict[int, dict[str, Any]]:
         if row:
             grid[number] = row
     return grid
+
+
+def _bounds(declaration: dict[str, Any], sheet: Any) -> dict[str, Any]:
+    block = _selected_block(declaration)
+    header_row = declaration["header_row"]
+    start_row = _positive_int(declaration.get("start_row") or block.get("start_row") or header_row, "start row")
+    end_row = _positive_int(declaration.get("end_row") or block.get("end_row") or (sheet.max_row or header_row), "end row")
+    start_column = str(declaration.get("start_column") or block.get("start_column") or _first_column(declaration)).upper()
+    end_column = str(declaration.get("end_column") or block.get("end_column") or _last_column(declaration)).upper()
+    start_col_index = _column_index(start_column)
+    end_col_index = _column_index(end_column)
+    if start_row > end_row or start_col_index > end_col_index:
+        raise FoundryError("structure declaration has invalid table bounds")
+    if header_row < start_row or header_row > end_row:
+        raise FoundryError("structure declaration header row must be inside table bounds")
+    if end_row > (sheet.max_row or 1) or end_col_index > (sheet.max_column or 1):
+        raise FoundryError("structure declaration bounds exceed worksheet")
+    return {
+        "start_row": start_row,
+        "end_row": end_row,
+        "start_column": start_column,
+        "end_column": end_column,
+        "start_col_index": start_col_index,
+        "end_col_index": end_col_index,
+    }
+
+
+def _selected_block(declaration: dict[str, Any]) -> dict[str, Any]:
+    selected = declaration.get("selected_block_id")
+    blocks = declaration.get("table_blocks") or []
+    if selected and isinstance(blocks, list):
+        match = next((block for block in blocks if block.get("id") == selected), None)
+        if match is None:
+            raise FoundryError("structure declaration selected block is not in table blocks")
+        return match
+    return {}
+
+
+def _positive_int(value: Any, label: str) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise FoundryError(f"structure declaration requires a {label}") from exc
+    if number < 1:
+        raise FoundryError(f"structure declaration requires a positive {label}")
+    return number
+
+
+def _first_column(declaration: dict[str, Any]) -> str:
+    columns = [column.get("letter") for column in declaration.get("columns") or [] if column.get("letter")]
+    return min(columns, key=_column_index, default="A")
+
+
+def _last_column(declaration: dict[str, Any]) -> str:
+    columns = [column.get("letter") for column in declaration.get("columns") or [] if column.get("letter")]
+    return max(columns, key=_column_index, default="A")
+
+
+def _column_index(letter: str) -> int:
+    if not letter or not letter.isalpha():
+        raise FoundryError("structure declaration requires column letters in table bounds")
+    index = 0
+    for char in letter.upper():
+        index = index * 26 + (ord(char) - 64)
+    return index
 
 
 def _primary_pair(declaration: dict[str, Any]) -> dict[str, Any] | None:
@@ -188,10 +282,12 @@ def _derived_headers(
 ) -> list[str]:
     headers: list[str] = []
     for column in columns:
-        role = column.get("role")
-        if role in {"debit", "credit", "unknown"}:
+        if column.get("include") is False:
             continue
-        name = CANONICAL_NAMES.get(role)
+        role = column.get("role")
+        if role in {"debit", "credit"}:
+            continue
+        name = _derived_column_name(column)
         if not name or name in headers:
             continue
         headers.append(name)
@@ -202,6 +298,45 @@ def _derived_headers(
     if not headers:
         raise FoundryError("structure declaration yields no usable column")
     return headers
+
+
+def _derived_column_name(column: dict[str, Any]) -> str | None:
+    role = column.get("role")
+    if role and role != "unknown":
+        return CANONICAL_NAMES.get(role)
+    stable = column.get("stable_name")
+    if isinstance(stable, str) and stable.strip():
+        return stable
+    letter = column.get("letter")
+    display = column.get("display") or column.get("header") or "unknown"
+    return f"col_{letter}_{normalize_header(display)}" if isinstance(letter, str) and letter else None
+
+
+def _excluded_columns(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    excluded = []
+    for column in columns:
+        if column.get("include") is not False:
+            continue
+        excluded.append(
+            {
+                "letter": column.get("letter"),
+                "header": column.get("display") or column.get("header") or "",
+                "stable_name": column.get("stable_name") or _derived_column_name(column),
+                "reason": column.get("exclusion_reason") or "excluded by structure declaration",
+            }
+        )
+    return excluded
+
+
+def _numeric_coverage(columns: list[dict[str, Any]]) -> dict[str, Any]:
+    numeric = [column for column in columns if column.get("numeric")]
+    included = [column for column in numeric if column.get("include") is not False]
+    return {
+        "numeric_columns_total": len(numeric),
+        "numeric_columns_included": len(included),
+        "numeric_columns_excluded": len(numeric) - len(included),
+        "metadata_only": len(included) == 0,
+    }
 
 
 def undeclarable_reason(declaration: dict[str, Any]) -> str | None:

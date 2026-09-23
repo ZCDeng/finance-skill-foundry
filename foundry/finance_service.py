@@ -129,6 +129,18 @@ class FinanceStore:
         for dataset_id in bindings.values():
             _assert_id(dataset_id)
 
+    def _authorize_evidence_recipes(self, recipes):
+        from foundry.financial_evidence import recipe_dataset_ids
+
+        for dataset_id in recipe_dataset_ids(recipes):
+            self._authorize({"evidence": dataset_id})
+
+    def _authorize_consistency_sources(self, sources):
+        from foundry.financial_evidence import consistency_dataset_ids
+
+        for dataset_id in consistency_dataset_ids(sources):
+            self._authorize({"consistency": dataset_id})
+
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
 
@@ -727,6 +739,10 @@ class FinanceStore:
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             reserved = operations.reserve(operation_id, payload=spec, call_id=call_id)
             attempt = reserved["attempt"]
+            if attempt.get("status") == "rejected_validation":
+                error = attempt.get("error") if isinstance(attempt.get("error"), dict) else {}
+                message = error.get("message") if isinstance(error.get("message"), str) else "completion validation failed"
+                raise FoundryError(message)
             key = _hash({"operation_id": operation_id, "call_id": call_id})
             previous = next((row for row in self.analysis._list("drafts")
                              if row.get("completion_request_key") == key), None)
@@ -746,14 +762,95 @@ class FinanceStore:
                     raise FoundryError("completion operation stopped: " + str(operation.get("stop_reason")))
 
             check_deadline()
-            result = self._save_explanation_draft(
-                {**spec, "completion_request_key": key,
-                 "completion_operation_id": operation_id,
-                 "completion_operation_revision": attempt["revision"]},
-                check_deadline=check_deadline,
-            )
+            save_spec = {
+                **spec,
+                "completion_request_key": key,
+                "completion_operation_id": operation_id,
+                "completion_operation_revision": attempt["revision"],
+            }
+            try:
+                result = self._save_explanation_draft(save_spec, check_deadline=check_deadline)
+            except FoundryError as exc:
+                saved_after_error = next((row for row in self.analysis._list("drafts")
+                                          if row.get("completion_request_key") == key), None)
+                if saved_after_error:
+                    raise
+                details = getattr(exc, "details", None)
+                if isinstance(details, dict):
+                    error_details = [details]
+                    primary_detail = details
+                elif isinstance(details, list):
+                    error_details = [item for item in details if isinstance(item, dict)]
+                    primary_detail = error_details[0] if error_details else {}
+                else:
+                    error_details = []
+                    primary_detail = {}
+                operations.reject_attempt(operation_id, attempt["revision"], {
+                    "code": str(primary_detail.get("code") or "claim_value_mismatch") if primary_detail else "completion_validation_failed",
+                    "message": str(exc),
+                    "details": error_details,
+                    "primary_detail": primary_detail,
+                })
+                raise
             operation = operations.settle(operation_id, attempt["revision"], result, result["completion"])
             return {**result, "completion_operation": operation}
+
+    def recover_completion_draft(self, spec):
+        """Manager-owned recovery of an explicitly selected completion attempt."""
+        from foundry.analysis import _hash
+        from foundry.finance_completion import record_completion
+        from foundry.finance_completion_operations import (
+            CompletionOperationStore,
+            TERMINAL,
+            get_completion_operation_for_recovery,
+        )
+        from foundry.locking import exclusive
+
+        if self.session_id:
+            raise FoundryError("completion recovery requires the task editor")
+        if not isinstance(spec, dict):
+            raise FoundryError("completion recovery spec must be an object")
+        draft_spec = spec.get("draft")
+        if not isinstance(draft_spec, dict):
+            raise FoundryError("completion recovery draft must be an object")
+        self._reject_completion_authority(draft_spec)
+        operation = get_completion_operation_for_recovery(self.task, spec.get("operation_id"))
+        revision = spec.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            raise FoundryError("operation revision must be a positive integer")
+        if operation.get("status") == "running":
+            raise FoundryError("live completion operation cannot be recovered")
+        if operation.get("status") == "complete":
+            raise FoundryError("completion operation is already complete")
+        attempt = next((row for row in operation.get("revisions", []) if row.get("revision") == revision), None)
+        if not attempt:
+            raise FoundryError("operation revision has not been reserved")
+        if attempt.get("status") == "reserved" and operation.get("status") not in TERMINAL:
+            raise FoundryError("live completion attempt cannot be recovered")
+        recovery_key = _hash({"operation_id": operation["id"], "revision": revision, "draft": draft_spec})
+        operations = CompletionOperationStore(self.task, operation["session_id"])
+        with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
+            previous_by_revision = next((row for row in self.analysis._list("drafts")
+                                         if row.get("completion_operation_id") == operation["id"]
+                                         and row.get("completion_operation_revision") == revision), None)
+            if previous_by_revision:
+                if previous_by_revision.get("completion_request_key") != recovery_key:
+                    raise FoundryError("completion recovery already saved with a different payload")
+                receipt = (self.analysis._get("completions", attempt["completion_id"])
+                           if attempt.get("completion_id") else
+                           record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
+                settled = operations.settle(operation["id"], revision, previous_by_revision, receipt)
+                return {**previous_by_revision, "completion": receipt, "completion_operation": settled,
+                        "replayed": True, "validation_basis": "saved_draft_version"}
+            save_spec = {
+                **draft_spec,
+                "completion_request_key": recovery_key,
+                "completion_operation_id": operation["id"],
+                "completion_operation_revision": revision,
+            }
+            result = self._save_explanation_draft(save_spec)
+            settled = operations.settle(operation["id"], revision, result, result["completion"])
+            return {**result, "completion_operation": settled}
 
     @staticmethod
     def _reject_completion_authority(spec):
@@ -780,11 +877,15 @@ class FinanceStore:
             previous = next((row for row in self.analysis._list("drafts")
                              if row.get("completion_request_key") == key), None)
             if previous:
+                self._authorize_evidence_recipes(previous.get("evidence_recipes", []))
+                self._authorize_consistency_sources(previous.get("consistency_sources", {}))
                 if previous.get("requirements_id"):
                     self._authorize(self.analysis._get("requirements", previous["requirements_id"]).get("bindings", {}))
                 for run_id in previous.get("run_ids", []):
                     self._authorize(self.analysis.get_run(run_id)["bindings"])
                 for claim in previous.get("claims", []):
+                    if claim.get("run_id"):
+                        self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
                     if claim.get("dataset_id"):
                         self._authorize({"source": claim["dataset_id"]})
                 receipt = record_completion(self.analysis, previous, previous["explanation_check"])
@@ -797,6 +898,10 @@ class FinanceStore:
         parent = (
             self.analysis.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         )
+        self._authorize_evidence_recipes(spec.get("evidence_recipes", parent.get("evidence_recipes", [])))
+        self._authorize_consistency_sources(spec.get("consistency_sources", parent.get("consistency_sources", {})))
+        if self.session_id and spec.get("review_status", parent.get("review_status", "unreviewed")) != "unreviewed":
+            raise FoundryError("runtime drafts cannot mark professional review complete")
         if parent.get("requirements_id"):
             self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
@@ -932,6 +1037,8 @@ class FinanceStore:
             run = self.analysis.get_run(run_id)
             self._authorize(run["bindings"])
             runs.append(run)
+        self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
+        self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         backgrounds = self._backgrounds_for_runs(runs)
         payload = prepare_explanation_payload(
             self.analysis,
@@ -939,6 +1046,24 @@ class FinanceStore:
             backgrounds=backgrounds,
             materiality=spec.get("materiality") or {},
         )
+        request_context = {
+            "scope": spec.get("scope", {}),
+            "result_role": spec.get("result_role"),
+            "requirements_id": spec.get("requirements_id"),
+        }
+        payload["request_context"] = {key: value for key, value in request_context.items() if value not in (None, {}, "")}
+        if spec.get("evidence_recipes") is not None or spec.get("consistency_rules") is not None or spec.get("consistency_sources") is not None:
+            from foundry.financial_consistency import evaluate_consistency_rules
+            from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+            evidence_report = evaluate_evidence_recipes(self.analysis, spec.get("evidence_recipes", []))
+            resolved_rules, source_auth = prepare_consistency_inputs(
+                self.analysis, spec.get("consistency_rules", []), spec.get("consistency_sources", {})
+            )
+            payload["evidence_report"] = evidence_report
+            payload["consistency_report"] = evaluate_consistency_rules(
+                resolved_rules, recipe_report=evidence_report, source_auth=source_auth
+            )
         from foundry.finance_locators import record_fact_index
 
         record_fact_index(self, payload.get("facts") or [])
@@ -963,6 +1088,8 @@ class FinanceStore:
                     self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
                 if claim.get("dataset_id"):
                     self._authorize({"source": claim["dataset_id"]})
+        self._authorize_evidence_recipes(spec.get("evidence_recipes", draft.get("evidence_recipes", [])))
+        self._authorize_consistency_sources(spec.get("consistency_sources", draft.get("consistency_sources", {})))
         from foundry.finance_requirements import augment_quality, latest_requirements
 
         current = latest_requirements(self.analysis)
@@ -1740,6 +1867,21 @@ def _dedupe_explanation_claims(claims):
             )
         if key is not None:
             if key in seen:
+                if isinstance(claim, dict) and "presentation" in claim:
+                    for existing in result:
+                        if (
+                            isinstance(existing, dict)
+                            and existing.get("basis") == "calculation"
+                            and (
+                                "calculation",
+                                existing.get("fact_id"),
+                                existing.get("run_id"),
+                                existing.get("row"),
+                                existing.get("column"),
+                            ) == key
+                        ):
+                            existing["presentation"] = claim["presentation"]
+                            break
                 continue
             seen.add(key)
         result.append(claim)

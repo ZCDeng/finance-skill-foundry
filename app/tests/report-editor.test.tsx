@@ -143,6 +143,21 @@ describe('report editor workspace', () => {
     expect(JSON.stringify(validated.document)).toContain('"range":"B2"');
   });
 
+  it('deduplicates an exact leading title from the reader body and outline', () => {
+    const document = documentFromMarkdown('# 经营分析\n\n## 管理摘要\n正文\n\n# 附录\n用户附录。');
+    mount({ initialMode: 'read', title: '经营分析', document, body: documentToMarkdown(document) });
+
+    const reading = screen.getByRole('article', { name: '文稿阅读' });
+    expect(within(reading).getAllByRole('heading', { name: '经营分析' })).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: '经营分析' })).toBeNull();
+    const outline = screen.getByText('目录').closest('details') as HTMLDetailsElement;
+    expect(outline.open).toBe(false);
+    fireEvent.click(within(outline).getByText('目录'));
+    expect(outline.open).toBe(true);
+    expect(screen.getByRole('link', { name: '管理摘要' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '附录' })).toBeTruthy();
+  });
+
   it('folds the exact appendix without reparsing rich main content', () => {
     const appendixDoc = documentFromMarkdown('## 计算依据附录\n| 项目 | 金额 |\n| --- | --- |\n| 收入 | 1,234.50 |\n');
     const appendix = documentToMarkdown(appendixDoc).trim();

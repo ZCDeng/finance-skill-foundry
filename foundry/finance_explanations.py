@@ -6,7 +6,7 @@ import re
 import hashlib
 from datetime import date, datetime, timezone
 from calendar import monthrange
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from typing import Any
 
 from foundry.analysis import BASIS, _hash, _safe_text
@@ -412,13 +412,19 @@ def validate_explanation(analysis, spec: dict) -> dict:
             prepared.get("evidence_groups", []),
         )
     )
-    allowed_numbers = _allowed_numbers(
+    presentation = _presentation_allowed_numbers_and_issues(claims, by_id)
+    issues.extend(presentation["issues"])
+    base_allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
     ignored_number_spans = _generated_appendix_heading_number_spans(body, prepared)
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
-        if _normalize_number(token["text"]) not in allowed_numbers:
-            issues.append(
+        normalized = _normalize_number(token["text"])
+        if normalized in base_allowed_numbers:
+            continue
+        if normalized in presentation["numbers"] and _presentation_token_unit_matches(body, token, presentation["numbers"][normalized]):
+            continue
+        issues.append(
                 {
                     "code": "uncited_number",
                     "severity": "warning",
@@ -456,6 +462,46 @@ def validate_explanation(analysis, spec: dict) -> dict:
                     "closure_status": closure.get("status"),
                 }
             )
+    merged = {**draft, **spec, "run_ids": run_ids}
+    evidence_recipes = merged.get("evidence_recipes", [])
+    consistency_rules = merged.get("consistency_rules", [])
+    consistency_sources = merged.get("consistency_sources", {})
+    from foundry.analysis import _quality_status_dimensions, _revision_quality_issues
+    from foundry.finance_revision import compare_draft_runs
+    from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
+    from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+    parent = analysis.get_draft(merged["parent_id"]) if merged.get("parent_id") else {}
+    revision_comparison = compare_draft_runs(analysis, parent, {"run_ids": run_ids})
+    evidence_report = evaluate_evidence_recipes(analysis, evidence_recipes)
+    resolved_rules, consistency_source_auth = prepare_consistency_inputs(
+        analysis, consistency_rules, consistency_sources
+    )
+    consistency_report = evaluate_consistency_rules(
+        resolved_rules,
+        recipe_report=evidence_report,
+        source_auth=consistency_source_auth,
+    )
+    issues.extend(_revision_quality_issues(revision_comparison))
+    issues.extend(evidence_report.get("issues", []))
+    issues.extend(consistency_quality_issues(consistency_report))
+    execution_status = (
+        "succeeded"
+        if runs and all(run.get("execution_status") == "succeeded" for run in runs)
+        else "failed"
+        if runs
+        else "not_run"
+    )
+    stored_review = draft.get("review_status", "unreviewed") if draft else "unreviewed"
+    effective_review = stored_review if draft and body == draft.get("body") and claims == draft.get("claims", []) else "unreviewed"
+    status_dimensions = _quality_status_dimensions(
+        execution_status=execution_status,
+        review_status=effective_review,
+        quality_issues=issues,
+        evidence_report=evidence_report,
+        consistency_report=consistency_report,
+        numeric_configured=bool(run_ids or claims or fact_ids),
+    )
     status = "pass" if not issues else "needs_attention"
     issues = _locate_issues(issues, generated_regions)
     readability = _readability_suggestions(body, generated_regions)
@@ -463,6 +509,10 @@ def validate_explanation(analysis, spec: dict) -> dict:
         "schema_version": 1,
         "status": status,
         "issues": [issue for issue in issues if issue],
+        "status_dimensions": status_dimensions,
+        "evidence_report": evidence_report,
+        "consistency_report": consistency_report,
+        "revision_comparison": revision_comparison,
         "readability": readability,
         "coverage": {
             "referenced_fact_count": len(referenced),
@@ -755,7 +805,7 @@ def _make_fact(
             "value": exact,
         }
     )
-    unit = _fact_unit(row, column, column_defs)
+    unit = _fact_unit(row, column, column_defs, run)
     display = _display_value(exact, column, unit)
     semantics = _semantics(row, column, exact, materiality)
     refs = row.get("evidence", {}).get(column, row.get("source_rows", []))
@@ -811,7 +861,7 @@ def _semantics(row: dict, column: str, exact: str, materiality: dict) -> dict:
     material = absolute_material or relative["is_material"]
     return {
         "role": role,
-        "metric": row.get("metric") or column,
+        "metric": _row_metric(row, column),
         "direction": "positive" if not exact.startswith("-") else "negative",
         "state": "observed_zero" if magnitude == 0 else "nonzero",
         "materiality": {
@@ -845,21 +895,105 @@ def _semantics(row: dict, column: str, exact: str, materiality: dict) -> dict:
 
 
 def _fact_role(column: str) -> str:
-    if column in RATIO_COLUMNS:
+    if _is_ratio_column(column):
         return "ratio"
-    if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
-        return "amount"
     if _is_count_column(column):
         return "count"
     if column in QUANTITY_COLUMNS:
         return "quantity"
     if column in UNIT_PRICE_COLUMNS:
         return "unit_price"
+    if _is_amount_column(column):
+        return "amount"
     return "value"
 
 
-def _fact_unit(row: dict, column: str, column_defs: dict[str, dict]) -> Any:
-    if column in RATIO_COLUMNS:
+def _column_tokens(column: str) -> set[str]:
+    return {token for token in re.split(r"[^a-z0-9]+", column.lower()) if token}
+
+
+def _is_ratio_column(column: str) -> bool:
+    lowered = column.lower()
+    tokens = _column_tokens(column)
+    return (
+        column in RATIO_COLUMNS
+        or lowered.endswith("_pct")
+        or bool(tokens & {"ratio", "rate", "pct", "percent", "percentage"})
+        or "比率" in column
+        or "达成率" in column
+        or "完成率" in column
+        or column.endswith("率")
+    )
+
+
+def _is_amount_column(column: str) -> bool:
+    if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
+        return True
+    if _is_ratio_column(column) or _is_count_column(column):
+        return False
+    tokens = _column_tokens(column)
+    if tokens & {"amount", "revenue", "cost", "expense", "profit", "cash", "budget", "actual", "variance"}:
+        return True
+    return any(
+        token in column
+        for token in (
+            "收入",
+            "成本",
+            "费用",
+            "利润",
+            "毛利",
+            "减值",
+            "损益",
+            "收益",
+            "现金",
+            "应收",
+            "预算",
+            "实际",
+            "差异",
+            "缺口",
+        )
+    )
+
+
+def _row_unit(row: dict) -> Any:
+    for key in ("unit", "单位"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _run_scope_unit(run: dict | None) -> Any:
+    if not isinstance(run, dict):
+        return None
+    for scope_key in ("scope", "finance_scope"):
+        scope = run.get(scope_key)
+        if not isinstance(scope, dict):
+            continue
+        direct = scope.get("unit") or scope.get("单位")
+        if direct not in (None, ""):
+            return direct
+        nested_units = [
+            item.get("unit") or item.get("单位")
+            for item in scope.values()
+            if isinstance(item, dict) and (item.get("unit") or item.get("单位")) not in (None, "")
+        ]
+        if nested_units and all(unit == nested_units[0] for unit in nested_units):
+            return nested_units[0]
+    return None
+
+
+def _amount_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict | None) -> Any:
+    return (
+        row.get(f"{column}_unit")
+        or _row_unit(row)
+        or column_defs.get(column, {}).get("unit")
+        or _run_scope_unit(run)
+    )
+
+
+def _fact_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict | None = None) -> Any:
+    if _is_ratio_column(column):
         return "%"
     if _is_count_column(column):
         return row.get(f"{column}_unit") or "条"
@@ -875,15 +1009,15 @@ def _fact_unit(row: dict, column: str, column_defs: dict[str, dict]) -> Any:
             or row.get("price_unit")
             or column_defs.get(column, {}).get("unit")
         )
-    if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
-        return row.get("unit")
-    if column == "value" and row.get("unit") not in (None, ""):
-        return row.get("unit")
+    if _is_amount_column(column):
+        return _amount_unit(row, column, column_defs, run)
+    if column == "value" and _row_unit(row) not in (None, ""):
+        return _row_unit(row)
     return column_defs.get(column, {}).get("unit")
 
 
 def _display_value(exact: str, column: str, unit: Any) -> str:
-    if column in RATIO_COLUMNS:
+    if _is_ratio_column(column):
         try:
             percent = (
                 Decimal(exact)
@@ -903,7 +1037,7 @@ def _grouped(exact: str, column: str) -> str:
     The exact value is what every check compares against, so the separators are
     a display choice and nothing else reads this string as a number.
     """
-    if column not in MONEY_COLUMNS and column not in {"numerator_exact", "denominator_exact"}:
+    if not _is_amount_column(column):
         return exact
     try:
         value = Decimal(exact)
@@ -916,13 +1050,23 @@ def _grouped(exact: str, column: str) -> str:
 
 
 def _label(row: dict, column: str) -> str:
-    parts = [str(row.get("metric") or column)]
+    parts = [str(_row_metric(row, column))]
     if column != parts[0]:
         parts.append(column)
     for key in ("scenario", "period"):
         if row.get(key):
             parts.append(str(row[key]))
     return " / ".join(parts)
+
+
+def _row_metric(row: dict, column: str) -> str:
+    metric = row.get("metric")
+    if metric not in (None, ""):
+        return str(metric)
+    metric_key = row.get("metric_key")
+    if metric_key not in (None, ""):
+        return str(metric_key)
+    return column
 
 
 def _is_fact_value(value: Any, column: str) -> bool:
@@ -1268,13 +1412,13 @@ def _evidence_member(
     payload = {
         "row": row_index,
         "column": column,
-        "semantic_role": semantic_role or column,
+        "semantic_role": semantic_role or (fact.get("semantics", {}).get("role") if fact else _fact_role(column)),
         "label": _label(row, column),
         "state": state,
         "fact_id": fact["id"] if fact else None,
         "value": fact["value"] if fact else None,
         "display_value": fact["display_value"] if fact else None,
-        "unit": fact.get("unit") if fact else row.get("unit"),
+        "unit": fact.get("unit") if fact else _row_unit(row),
         "scope": _row_scope(row),
         "source_row_count": (
             fact.get("source_trace", {}).get("source_row_count") if fact else 0
@@ -1794,27 +1938,155 @@ def _token_matches_fact(text: str, fact: dict) -> bool:
     return fact['semantics'].get('role') == 'profit_impact' and any(abs(value) == abs(Decimal(option)) for option in options)
 
 
-def _validate_calculation_claim(analysis, claim: dict, run_ids: list[str]) -> dict | None:
+def _presentation_allowed_numbers_and_issues(claims: list[dict], by_id: dict[str, dict]) -> dict:
+    numbers: dict[str, set[str]] = {}
+    issues: list[dict] = []
+    for claim in claims:
+        if not isinstance(claim, dict) or "presentation" not in claim:
+            continue
+        fact_id = claim.get("fact_id")
+        fact = by_id.get(fact_id) if isinstance(fact_id, str) else None
+        result, issue = _presentation_number(claim, fact)
+        if issue:
+            issues.append(issue)
+        elif result:
+            numbers.setdefault(result["number"], set()).add(result["unit"])
+    return {"numbers": numbers, "issues": issues}
+
+
+def _presentation_number(claim: dict, fact: dict | None) -> tuple[dict | None, dict | None]:
+    presentation = claim.get("presentation")
+    base_issue = {
+        "code": "invalid_presentation",
+        "severity": "error",
+        "message": "claim presentation must be derived from the bound calculation fact.",
+        "fact_id": claim.get("fact_id"),
+    }
+    if claim.get("basis") != "calculation" or not fact:
+        return None, {**base_issue, "reason": "presentation_requires_bound_fact"}
+    if not _claim_matches_fact(claim, fact):
+        return None, {**base_issue, "reason": "claim_does_not_match_fact"}
+    if not isinstance(presentation, dict):
+        return None, {**base_issue, "reason": "presentation_must_be_object"}
+    if set(presentation) != {"decimal_places", "scale", "rounding"}:
+        return None, {**base_issue, "reason": "unsupported_presentation_fields"}
+    decimal_places = presentation.get("decimal_places")
+    scale = presentation.get("scale")
+    rounding = presentation.get("rounding")
+    if isinstance(decimal_places, bool) or not isinstance(decimal_places, int) or not 0 <= decimal_places <= 6:
+        return None, {**base_issue, "reason": "decimal_places_out_of_range"}
+    if scale not in {"identity", "percent"} or rounding != "half_up":
+        return None, {**base_issue, "reason": "unsupported_presentation_policy"}
     try:
-        run = analysis.get_run(claim.get("run_id"))
+        value = Decimal(str(fact["value"]))
+    except (InvalidOperation, KeyError):
+        return None, {**base_issue, "reason": "fact_value_not_decimal"}
+    if not value.is_finite():
+        return None, {**base_issue, "reason": "fact_value_not_finite"}
+    if scale == "percent":
+        if not _fact_is_ratio(fact):
+            return None, {**base_issue, "reason": "percent_requires_ratio_fact"}
+        value = _fact_percent_value(fact, value)
+    quant = Decimal("1") if decimal_places == 0 else Decimal("1").scaleb(-decimal_places)
+    try:
+        with localcontext() as ctx:
+            ctx.prec = max(28, len(value.as_tuple().digits) + decimal_places + 4)
+            rounded = value.quantize(quant, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return None, {**base_issue, "reason": "presentation_rounding_failed"}
+    rendered = format(rounded, f".{decimal_places}f")
+    unit = "%" if scale == "percent" else str(fact.get("unit") or "").strip()
+    if scale == "percent":
+        rendered += "%"
+    return {"number": _normalize_number(rendered), "unit": unit}, None
+
+
+def _claim_matches_fact(claim: dict, fact: dict) -> bool:
+    return (
+        claim.get("run_id") == fact.get("run_id")
+        and claim.get("row") == fact.get("row")
+        and claim.get("column") == fact.get("column")
+        and _decimal_equal(claim.get("value"), fact.get("value"))
+    )
+
+
+def _fact_is_ratio(fact: dict) -> bool:
+    unit = str(fact.get("unit") or "").strip().lower()
+    semantics = fact.get("semantics") if isinstance(fact.get("semantics"), dict) else {}
+    return unit in {"%", "比率", "ratio"} or semantics.get("role") == "ratio"
+
+
+def _fact_percent_value(fact: dict, value: Decimal) -> Decimal:
+    if str(fact.get("column") or "").endswith("_pct"):
+        return value
+    return value * Decimal(100)
+
+
+EXPLICIT_PRESENTATION_UNITS = ("亿元", "万元", "千元", "元", "%", "比率")
+
+
+def _presentation_token_unit_matches(body: str, token: dict, allowed_units: set[str]) -> bool:
+    explicit = _explicit_unit_for_token(body, token)
+    if explicit is None:
+        return True
+    return any(_units_compatible(explicit, unit) for unit in allowed_units)
+
+
+def _explicit_unit_for_token(body: str, token: dict) -> str | None:
+    text = str(token.get("text") or "")
+    if text.endswith("%"):
+        return "%"
+    start = token.get("start")
+    if not isinstance(start, int):
+        return None
+    end = token.get("end", start + len(text))
+    suffix = body[end:]
+    match = re.match(r"\s*(" + "|".join(map(re.escape, EXPLICIT_PRESENTATION_UNITS)) + r")", suffix)
+    return match.group(1) if match else None
+
+
+def _units_compatible(explicit: str, expected: str) -> bool:
+    if explicit == expected:
+        return True
+    return explicit == "%" and expected in {"%", "比率", "ratio"}
+
+
+def _validate_calculation_claim(analysis, claim: dict, run_ids: list[str]) -> dict | None:
+    run_id = claim.get("run_id")
+    row = claim.get("row")
+    column = claim.get("column")
+    expected = claim.get("value")
+    try:
+        run = analysis.get_run(run_id)
         if run["id"] not in run_ids or run.get("execution_status") != "succeeded":
             raise ValueError("claim requires a referenced successful run")
-        row = claim["row"]
         if isinstance(row, bool) or not isinstance(row, int) or row < 0:
             raise ValueError("claim row must be a non-negative integer")
-        actual = run["result"]["rows"][row][claim["column"]]
-        matches = _decimal_equal(actual, claim.get("value"))
+        actual = run["result"]["rows"][row][column]
+        matches = _decimal_equal(actual, expected)
     except Exception:
         return {
             "code": "invalid_claim_location",
             "severity": "error",
             "message": "calculation claim has an invalid output location.",
+            "run_id": run_id,
+            "row": row,
+            "column": column,
         }
     if not matches:
         return {
             "code": "claim_value_mismatch",
             "severity": "error",
-            "message": "claim value differs from execution result.",
+            "message": (
+                "claim value differs from execution result "
+                f"(run_id={run['id']}, row={row}, column={column}, "
+                f"expected={expected}, actual={actual})."
+            ),
+            "run_id": run["id"],
+            "row": row,
+            "column": column,
+            "expected": str(expected),
+            "actual": str(actual),
         }
     return None
 
@@ -2101,6 +2373,7 @@ def _non_body_issue_origin(issue: dict) -> str:
     if issue.get("code") in {
         "invalid_claim",
         "invalid_claim_location",
+        "claim_value_mismatch",
         "fact_claim_mismatch",
         "unknown_fact",
         "missing_required_fact",
@@ -2153,7 +2426,7 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
             continue
         if _is_spreadsheet_reference_number(body, match):
             continue
-        values.append({"text": match.group(0), "start": match.start()})
+        values.append({"text": match.group(0), "start": match.start(), "end": match.end()})
     return values
 
 

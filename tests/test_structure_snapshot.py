@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
 
 from foundry.analysis import AnalysisStore
 from foundry.errors import FoundryError
@@ -27,6 +28,15 @@ SCOPE = {
     "unit": "元",
     "scenario": "actual",
 }
+
+
+def _bytes(book: Workbook) -> bytes:
+    import io
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    book.close()
+    return buffer.getvalue()
 
 
 def _ledger_declaration(data: bytes) -> dict:
@@ -242,9 +252,100 @@ def test_undeclarable_reason_names_what_cannot_be_built() -> None:
         ],
         "amount_pairs": [],
     }
-    assert undeclarable_reason(unreadable) == "no column carries a role the table can keep"
+    assert undeclarable_reason(unreadable) is None
     assert undeclarable_reason({"columns": []}) == "no column was declared"
     # One named role is enough; a 借贷 pair on its own is too.
     assert undeclarable_reason({**unreadable, "columns": [
         {"letter": "A", "display": "科目代码", "role": "account_code"},
     ]}) is None
+
+
+def test_unknown_numeric_columns_survive_with_source_letters() -> None:
+    data = fixture.monthly_pack()
+    declaration = next(
+        sheet
+        for sheet in propose_workbook_structure(data)["sheets"]
+        if sheet["sheet"].startswith("10")
+    )
+    payload = derive_table(data, declaration)
+
+    names = [column["name"] for column in payload["schema"]]
+    assert names == ["col_A_区域", "col_B_营业收入", "col_C_营业成本", "col_D_期间费用", "col_E_营业利润"]
+    assert payload["rows"][0]["col_A_区域"] == "华东区域"
+    assert payload["rows"][0]["col_B_营业收入"] == "109742.028"
+    structure = payload["transformation"]["structure"]
+    assert payload["transformation"]["header_columns"]["col_B_营业收入"] == "B"
+    assert structure["column_roles"]["col_B_营业收入"] == "unknown"
+    assert structure["numeric_coverage"]["numeric_columns_included"] == 4
+
+
+def test_explicitly_excluded_unknown_column_records_reason() -> None:
+    data = fixture.monthly_pack()
+    declaration = next(
+        sheet
+        for sheet in propose_workbook_structure(data)["sheets"]
+        if sheet["sheet"].startswith("10")
+    )
+    declaration["columns"] = [
+        {
+            **column,
+            "include": False,
+            "exclusion_reason": "not needed for this calculation",
+        }
+        if column["letter"] == "D"
+        else column
+        for column in declaration["columns"]
+    ]
+
+    payload = derive_table(data, declaration)
+    names = [column["name"] for column in payload["schema"]]
+    assert "col_D_期间费用" not in names
+    excluded = payload["transformation"]["structure"]["excluded_columns"]
+    assert excluded == [
+        {
+            "letter": "D",
+            "header": "期间费用",
+            "stable_name": "col_D_期间费用",
+            "reason": "not needed for this calculation",
+        }
+    ]
+
+
+def test_selected_block_bounds_keep_independent_tables_from_bleeding() -> None:
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算表"
+    sheet["A1"] = "年度预算"
+    for index, text in enumerate(["项目", "预算", "实际"], start=1):
+        sheet.cell(row=2, column=index, value=text)
+    sheet.append(["住宅", 10, 9])
+    sheet.append(["商业", 20, 19])
+    for index, text in enumerate(["城市公司", "合同金额"], start=1):
+        sheet.cell(row=6, column=index, value=text)
+    sheet.cell(row=7, column=1, value="宁波")
+    sheet.cell(row=7, column=2, value=100)
+    sheet.cell(row=8, column=1, value="常州")
+    sheet.cell(row=8, column=2, value=200)
+    data = _bytes(book)
+    proposal = propose_workbook_structure(data)["sheets"][0]
+    second = proposal["table_blocks"][1]
+    declaration = {
+        **proposal,
+        "selected_block_id": second["id"],
+        "header_row": second["header_row"],
+        "start_row": second["start_row"],
+        "end_row": second["end_row"],
+        "start_column": second["start_column"],
+        "end_column": second["end_column"],
+        "columns": second["columns"],
+        "amount_pairs": second["amount_pairs"],
+        "excluded_rows": second["excluded_rows"],
+        "fill_down_columns": second["fill_down_columns"],
+    }
+
+    payload = derive_table(data, declaration)
+    assert payload["row_count"] == 2
+    assert payload["transformation"]["bounds"]["start_row"] == 6
+    assert payload["transformation"]["bounds"]["end_row"] == 8
+    assert [row["organization"] for row in payload["rows"]] == ["宁波", "常州"]
+    assert "住宅" not in str(payload["rows"])

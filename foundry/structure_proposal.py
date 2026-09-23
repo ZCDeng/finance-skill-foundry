@@ -64,6 +64,8 @@ NOTE_KEYWORDS = ("校验说明", "说明", "备注", "注：")
 PERIOD_IN_TITLE = re.compile(r"(20\d{2})\s*[-./年]\s*(\d{1,2})")
 # 「2026年1-8月」 is a span, not a period; declaring one month of it would invent scope.
 PERIOD_SPAN_IN_TITLE = re.compile(r"20\d{2}\s*年\s*\d{1,2}\s*[-–—~至]\s*\d{1,2}\s*月")
+ANNUAL_IN_TITLE = re.compile(r"20\d{2}\s*(?:年度|全年)")
+AS_OF_DATE_IN_TITLE = re.compile(r"基准日\s*(20\d{2})[-./年]\s*(\d{1,2})[-./月]\s*(\d{1,2})")
 CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
 # A parenthetical at the end qualifies the column, it does not name it:
 # 「年化合同金额（万元）」 is a 金额 reported in 万元.
@@ -98,16 +100,17 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         return _excluded(name, "empty_sheet")
     if _is_presentation_sheet(name, grid):
         return _excluded(name, "presentation_sheet")
-    header_row = _find_header_row(grid)
-    if header_row is None:
+    candidates = _header_candidates(grid)
+    if not candidates:
         return _excluded(name, "no_header")
-    columns = _columns(grid, header_row)
-    if len(columns) < MIN_HEADER_COLUMNS:
+    blocks = _table_blocks(grid, candidates)
+    if not blocks:
         return _excluded(name, "no_header")
-    pairs = _amount_pairs(columns)
-    title_rows = [number for number in sorted(grid) if number < header_row]
-    excluded = _excluded_rows(grid, header_row, columns)
-    _apply_direction(grid, header_row, columns, pairs, excluded)
+    selected = max(blocks, key=lambda block: (block["score"], -block["header_row"]))
+    header_row = selected["header_row"]
+    columns = selected["columns"]
+    pairs = selected["amount_pairs"]
+    title_rows = [number for number in sorted(grid) if number < selected["start_row"]]
     return {
         "sheet": name,
         "decision": "table",
@@ -116,16 +119,89 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         "title_rows": title_rows,
         "columns": columns,
         "amount_pairs": pairs,
-        "excluded_rows": excluded,
-        "fill_down_columns": _fill_down_columns(grid, header_row, columns, excluded),
+        "excluded_rows": selected["excluded_rows"],
+        "fill_down_columns": selected["fill_down_columns"],
         "scope_hints": _scope_hints(grid, title_rows),
-        "preview": _preview(grid, header_row),
-        "confidence": _confidence(columns, pairs, header_row),
+        "table_blocks": blocks,
+        "selected_block_id": selected["id"],
+        "start_row": selected["start_row"],
+        "end_row": selected["end_row"],
+        "start_column": selected["start_column"],
+        "end_column": selected["end_column"],
+        "numeric_coverage": selected["numeric_coverage"],
+        "preview": selected["preview"],
+        "confidence": selected["confidence"],
         # Whether this is a data table and whether anything can be derived from
         # it are two questions. A 区域经营损益表 is plainly a table -- one row per
         # region, numbers across -- while none of its column names mean anything
         # to a ledger vocabulary. Saying "not a table" would be false; offering
         # a checkbox that throws when ticked would be worse.
+        "blocked_reason": None if _carries_data(columns, pairs) else "unreadable_columns",
+    }
+
+
+def _custom_table(name: str, grid: dict[int, dict[str, Any]], reason: str) -> dict[str, Any]:
+    first = min(grid)
+    last = max(grid)
+    first_col = min((letter for row in grid.values() for letter in row), key=_letter_index, default="A")
+    last_col = max((letter for row in grid.values() for letter in row), key=_letter_index, default="A")
+    return {
+        "sheet": name,
+        "decision": "table",
+        "reason": reason,
+        "header_row": None,
+        "title_rows": [],
+        "columns": [],
+        "amount_pairs": [],
+        "excluded_rows": [],
+        "fill_down_columns": [],
+        "scope_hints": {"period": "", "currency": "", "unit": ""},
+        "table_blocks": [],
+        "selected_block_id": None,
+        "start_row": first,
+        "end_row": last,
+        "start_column": first_col,
+        "end_column": last_col,
+        "numeric_coverage": {
+            "numeric_columns_total": 0,
+            "numeric_columns_included": 0,
+            "numeric_columns_excluded": 0,
+            "retained_cell_coverage": 0.0,
+            "metadata_only": True,
+        },
+        "preview": _preview(grid, first),
+        "confidence": 0.0,
+        "blocked_reason": reason,
+    }
+
+
+def _propose_block(grid: dict[int, dict[str, Any]], block: dict[str, Any]) -> dict[str, Any] | None:
+    header_row = block["header_row"]
+    bounded = _bounded_grid(grid, block)
+    columns = _columns(bounded, header_row)
+    if len(columns) < MIN_HEADER_COLUMNS:
+        return None
+    pairs = _amount_pairs(columns)
+    excluded = _excluded_rows(bounded, header_row, columns)
+    _annotate_columns(bounded, header_row, columns, excluded)
+    coverage = _numeric_coverage(bounded, header_row, columns, excluded)
+    _apply_direction(bounded, header_row, columns, pairs, excluded)
+    confidence = _confidence(columns, pairs, header_row)
+    return {
+        "id": block["id"],
+        "header_row": header_row,
+        "start_row": block["start_row"],
+        "end_row": block["end_row"],
+        "start_column": block["start_column"],
+        "end_column": block["end_column"],
+        "score": block["score"],
+        "columns": columns,
+        "amount_pairs": pairs,
+        "excluded_rows": excluded,
+        "fill_down_columns": _fill_down_columns(bounded, header_row, columns, excluded),
+        "numeric_coverage": coverage,
+        "preview": _preview(grid, header_row),
+        "confidence": confidence,
         "blocked_reason": None if _carries_data(columns, pairs) else "unreadable_columns",
     }
 
@@ -141,9 +217,7 @@ def _carries_data(
     modules must agree on that -- `test_every_proposed_table_can_be_derived`
     holds them together.
     """
-    if pairs:
-        return True
-    return any(column["role"] in ROLE_ALIASES for column in columns)
+    return bool(pairs or any(column.get("include", True) for column in columns))
 
 
 def _excluded(name: str, reason: str, **read: Any) -> dict[str, Any]:
@@ -159,6 +233,15 @@ def _excluded(name: str, reason: str, **read: Any) -> dict[str, Any]:
         "excluded_rows": [],
         "fill_down_columns": [],
         "scope_hints": {"period": "", "currency": "", "unit": ""},
+        "table_blocks": [],
+        "selected_block_id": None,
+        "numeric_coverage": {
+            "numeric_columns_total": 0,
+            "numeric_columns_included": 0,
+            "numeric_columns_excluded": 0,
+            "retained_cell_coverage": 0.0,
+            "metadata_only": True,
+        },
         "preview": [],
         "confidence": 0.0,
         "blocked_reason": reason,
@@ -200,7 +283,16 @@ def normalize_header(text: Any) -> str:
 
 def _find_header_row(grid: dict[int, dict[str, Any]]) -> int | None:
     """The labelled row that data follows — not merely the first non-empty one."""
-    best: tuple[int, int] | None = None
+    candidates = _header_candidates(grid)
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda item: (item["score"], -item["header_row"]))
+    return int(best["header_row"])
+
+
+def _header_candidates(grid: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rows that can plausibly start an independent table block."""
+    candidates: list[dict[str, Any]] = []
     for number in sorted(grid):
         if number > MAX_HEADER_SCAN_ROWS:
             break
@@ -221,10 +313,25 @@ def _find_header_row(grid: dict[int, dict[str, Any]]) -> int | None:
         )
         if overlap < MIN_HEADER_COLUMNS:
             continue
-        score = len(labels)
-        if best is None or score > best[1]:
-            best = (number, score)
-    return best[0] if best else None
+        known = sum(1 for letter in labels if _role_for(normalize_header(grid[number][letter])) != "unknown")
+        numeric_below = sum(
+            1
+            for n in sorted(following)[:8]
+            for letter in labels
+            if _is_numeric(grid[n].get(letter))
+        )
+        roles = {_role_for(normalize_header(grid[number][letter])) for letter in labels}
+        has_amount_pair = "debit" in roles and "credit" in roles
+        if not (known >= MIN_HEADER_COLUMNS or numeric_below > 0 or has_amount_pair):
+            continue
+        candidates.append(
+            {
+                "header_row": number,
+                "labels": labels,
+                "score": len(labels) * 10 + overlap * 3 + known * 4 + min(numeric_below, len(labels) * 2),
+            }
+        )
+    return candidates
 
 
 def _columns(grid: dict[int, dict[str, Any]], header_row: int) -> list[dict[str, Any]]:
@@ -246,15 +353,120 @@ def _columns(grid: dict[int, dict[str, Any]], header_row: int) -> list[dict[str,
         columns.append(
             {
                 "letter": letter,
+                "source_letter": letter,
                 "header": str(value),
                 "display": header,
+                "stable_name": _stable_name(letter, header),
                 "role": role,
+                "include": True,
+                "exclusion_reason": "",
+                "numeric": False,
                 "pair": None,
                 "direction": None,
                 "direction_basis": None,
             }
         )
     return columns
+
+
+def _stable_name(letter: str, header: str) -> str:
+    cleaned = re.sub(r"\W+", "_", header, flags=re.UNICODE).strip("_")
+    return f"col_{letter}_{cleaned or 'column'}"
+
+
+def _annotate_columns(
+    grid: dict[int, dict[str, Any]],
+    header_row: int,
+    columns: list[dict[str, Any]],
+    excluded: list[dict[str, Any]],
+) -> None:
+    skip = {item["row"] for item in excluded}
+    for column in columns:
+        letter = column["letter"]
+        values = [
+            grid[number].get(letter)
+            for number in sorted(grid)
+            if number > header_row and number not in skip and letter in grid[number]
+        ]
+        column["numeric"] = any(_is_numeric(value) for value in values)
+
+
+def _is_numeric(value: Any) -> bool:
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
+
+
+def _numeric_coverage(
+    grid: dict[int, dict[str, Any]],
+    header_row: int,
+    columns: list[dict[str, Any]],
+    excluded: list[dict[str, Any]],
+) -> dict[str, Any]:
+    numeric = [column for column in columns if column.get("numeric")]
+    included = [column for column in numeric if column.get("include", True)]
+    column_letters = {column["letter"] for column in columns}
+    included_letters = {column["letter"] for column in columns if column.get("include", True)}
+    skip = {item["row"] for item in excluded}
+    total_cells = 0
+    retained_cells = 0
+    for number in sorted(grid):
+        if number <= header_row or number in skip:
+            continue
+        for letter in grid[number]:
+            if letter not in column_letters:
+                continue
+            total_cells += 1
+            if letter in included_letters:
+                retained_cells += 1
+    return {
+        "numeric_columns_total": len(numeric),
+        "numeric_columns_included": len(included),
+        "numeric_columns_excluded": len(numeric) - len(included),
+        "retained_cell_coverage": round(retained_cells / total_cells, 4) if total_cells else 0.0,
+        "metadata_only": len(included) == 0,
+    }
+
+
+def _table_blocks(grid: dict[int, dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Explicit block rectangles derived from adjacent candidate headers."""
+    blocks: list[dict[str, Any]] = []
+    ordered = sorted(candidates, key=lambda item: item["header_row"])
+    max_row = max(grid)
+    for index, candidate in enumerate(ordered):
+        labels = sorted(candidate["labels"], key=_letter_index)
+        if not labels:
+            continue
+        next_header = ordered[index + 1]["header_row"] if index + 1 < len(ordered) else None
+        end_row = (next_header - 1) if next_header is not None else max_row
+        block = {
+            "id": f"block_{len(blocks) + 1}",
+            "header_row": candidate["header_row"],
+            "start_row": candidate["header_row"],
+            "end_row": end_row,
+            "start_column": labels[0],
+            "end_column": labels[-1],
+            "score": candidate["score"],
+        }
+        proposed = _propose_block(grid, block)
+        if proposed is not None:
+            blocks.append(proposed)
+    return blocks
+
+
+def _bounded_grid(grid: dict[int, dict[str, Any]], block: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    start_col = _letter_index(block["start_column"])
+    end_col = _letter_index(block["end_column"])
+    bounded: dict[int, dict[str, Any]] = {}
+    for number, row in grid.items():
+        if number < block["start_row"] or number > block["end_row"]:
+            continue
+        clipped = {
+            letter: value
+            for letter, value in row.items()
+            if start_col <= _letter_index(letter) <= end_col
+        }
+        if clipped:
+            bounded[number] = clipped
+    return bounded
 
 
 def _letter_index(letter: str) -> int:
@@ -514,7 +726,14 @@ def _scope_hints(grid: dict[int, dict[str, Any]], title_rows: list[int]) -> dict
         if value is not None
     )
     period = ""
-    if not PERIOD_SPAN_IN_TITLE.search(blob):
+    granularity = ""
+    as_of_date = ""
+    if ANNUAL_IN_TITLE.search(blob):
+        granularity = "annual"
+    elif found_as_of := AS_OF_DATE_IN_TITLE.search(blob):
+        as_of_date = f"{found_as_of.group(1)}-{int(found_as_of.group(2)):02d}-{int(found_as_of.group(3)):02d}"
+        granularity = "as_of"
+    elif not PERIOD_SPAN_IN_TITLE.search(blob):
         match = PERIOD_IN_TITLE.search(blob)
         if match:
             period = f"{match.group(1)}-{int(match.group(2)):02d}"
@@ -528,7 +747,16 @@ def _scope_hints(grid: dict[int, dict[str, Any]], title_rows: list[int]) -> dict
     found_unit = UNIT_IN_TITLE.search(blob)
     if found_unit:
         unit = found_unit.group(1)
-    return {"period": period, "currency": currency, "unit": unit}
+    result = {"period": period, "currency": currency, "unit": unit}
+    if granularity:
+        result["granularity"] = granularity
+    if as_of_date:
+        result["as_of_date"] = as_of_date
+    if "BUD" in blob or "预算" in blob:
+        result["scenario"] = "budget"
+    if "LE" in blob or "滚动预测" in blob:
+        result["forecast"] = "LE"
+    return result
 
 
 def _confidence(

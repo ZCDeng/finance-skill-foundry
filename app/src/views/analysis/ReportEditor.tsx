@@ -53,6 +53,7 @@ import type {
   ReportFormat,
   ReportImportResult,
   ReportNode,
+  ReportProjectionMode,
   ReportSource,
 } from "../../../electron/reports/model.js";
 import {
@@ -279,22 +280,30 @@ function sameEditorContent(left: unknown, right: unknown): boolean {
 
 function reportHeadings(
   document: ReportDocument,
+  title: string,
 ): { id: string; level: number; text: string; headingIndex: number }[] {
   let headingIndex = 0;
+  const normalizedTitle = normalizeReportTitle(title);
   return document.content.flatMap((node) => {
     if (node.type !== "heading") return [];
     headingIndex += 1;
     const level = Number(node.attrs?.level ?? 1);
+    const text = textContent(node).trim();
+    if (headingIndex === 1 && level === 1 && normalizeReportTitle(text) === normalizedTitle) return [];
     if (level > 2) return [];
     return [
       {
         id: `section-${headingIndex}`,
         level,
         headingIndex,
-        text: textContent(node).trim() || `章节 ${headingIndex}`,
+        text: text || `章节 ${headingIndex}`,
       },
     ];
   });
+}
+
+function normalizeReportTitle(value: string): string {
+  return value.replace(/\s+/g, "").trim().toLocaleLowerCase();
 }
 
 function appendixMarkdownVariants(appendix?: string): string[] {
@@ -406,7 +415,7 @@ export function ReportEditor({
   onDocument(value: ReportDocument | undefined): void;
   onLimitations(value: string): void;
   onReview(value: string): void;
-  onExport(format: ExportFormat): void | Promise<void>;
+  onExport(format: ExportFormat, mode?: ReportProjectionMode): void | Promise<void>;
   onAppliedDraft?(draft: { id: string; title?: string; body?: string; document?: ReportDocument }): void;
 }) {
   const [localMode, setLocalMode] = useState<ReportMode>(initialMode);
@@ -442,6 +451,7 @@ export function ReportEditor({
   } | null>(null);
   const [reportPhase, setReportPhase] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportMode, setExportMode] = useState<ReportProjectionMode>("management");
   const [reflowPreview, setReflowPreview] =
     useState<ReportParagraphReflowResult | null>(null);
   const [, setEditorRevision] = useState(0);
@@ -466,8 +476,8 @@ export function ReportEditor({
   );
   const readingDocument = readingResult.document;
   const headings = useMemo(
-    () => reportHeadings(readingDocument),
-    [readingDocument],
+    () => reportHeadings(readingDocument, title),
+    [readingDocument, title],
   );
   const editor = useEditor({
     extensions: [
@@ -783,9 +793,9 @@ export function ReportEditor({
 
   const handleExport = async (format: ExportFormat) => {
     setExporting(true);
-    setReportPhase(`导出 ${sourceLabel(format)}`);
+    setReportPhase(`导出 ${exportMode === "audit" ? "审计版" : "管理版"} ${sourceLabel(format)}`);
     try {
-      await onExport(format);
+      await onExport(format, exportMode);
     } finally {
       setExporting(false);
       setReportPhase("");
@@ -984,13 +994,32 @@ export function ReportEditor({
                     variant="outline"
                     size="sm"
                     type="button"
+                    aria-label="导出"
                     disabled={busy || !title.trim() || !body.trim()}
                   >
                     <Download size={14} aria-hidden />
-                    导出
+                    导出·{exportMode === "audit" ? "审计版" : "管理版"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" collisionPadding={16}>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setExportMode("management");
+                    }}
+                  >
+                    管理版
+                    <DropdownMenuShortcut>{exportMode === "management" ? "已选" : ""}</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setExportMode("audit");
+                    }}
+                  >
+                    审计版
+                    <DropdownMenuShortcut>{exportMode === "audit" ? "已选" : ""}</DropdownMenuShortcut>
+                  </DropdownMenuItem>
                   {(
                     ["docx", "pdf", "html", "md", "xlsx"] as ExportFormat[]
                   ).map((format) => (
@@ -1012,7 +1041,7 @@ export function ReportEditor({
           </div>
         </div>
         <aside className="report-outline" aria-label="文稿目录">
-          <details open className="report-outline__sections">
+          <details className="report-outline__sections">
             <summary><BookOpen size={15} aria-hidden /><span>目录</span></summary>
             {headings.length ? (
               <nav>

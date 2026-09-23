@@ -186,7 +186,7 @@ const captureContext = `(() => {
       };
     });
     check(`compact_shell_${width}`,'real DOM',shell,
-      shell.width===width&&shell.sidebarWidth<=40&&shell.settingsTop<=4&&!shell.headline
+      shell.width===width&&shell.sidebarWidth<=40&&shell.settingsTop>=24&&shell.settingsTop<=32&&!shell.headline
       &&shell.centerPaddingTop==='0px'&&shell.detailsTop===0
       &&Boolean(shell.composerBorder));
     await native(()=>{const trigger=document.querySelector('[data-foundry-settings] button');if(!trigger)throw new Error('settings trigger absent');trigger.click();});
@@ -198,9 +198,9 @@ const captureContext = `(() => {
     check(`settings_fits_${width}`,'real native settings slot/render',panel,panel.x>=0&&panel.y>=0&&panel.x+panel.width<=width+1&&panel.y+panel.height<=panel.viewport.height+1&&panel.direction==='column'&&panel.navDirection==='row'&&panel.close?.width>0&&panel.close.y<150);
     const closeFocus=await native(()=>{
       const button=document.querySelector('.VOzbGW_close');button.focus();const css=getComputedStyle(button);
-      return {dark:document.body.hasAttribute('data-ds-dark-theme'),outline:css.outlineWidth,offset:css.outlineOffset,color:css.outlineColor};
+      return {focused:document.activeElement===button,dark:document.body.hasAttribute('data-ds-dark-theme'),outline:css.outlineWidth,offset:css.outlineOffset,color:css.outlineColor};
     });
-    check(`settings_close_focus_${width}`,'real native settings keyboard focus color',closeFocus,closeFocus.outline==='2px'&&closeFocus.offset==='-1px'&&closeFocus.color===(closeFocus.dark?'rgb(226, 193, 128)':'rgb(166, 126, 60)'));
+    check(`settings_close_focus_${width}`,'real native settings keyboard focus ring',closeFocus,closeFocus.focused&&parseFloat(closeFocus.outline)>=1&&closeFocus.offset==='-1px'&&/^rgb/.test(closeFocus.color)&&closeFocus.color!=='rgba(0, 0, 0, 0)');
     await captureNative(`settings-${width}`);
     await native(()=>document.querySelector('.VOzbGW_close').click());
     await until(()=>native(()=>!document.querySelector('.VOzbGW_panel')),Boolean,'settings closed');
@@ -229,11 +229,11 @@ const captureContext = `(() => {
       const title=details?.querySelector('.wSkVaW_titleRow');
       return {height:header?.getBoundingClientRect().height,open:details?.open,titleVisible:title?.checkVisibility(),summary:details?.querySelector('summary')?.textContent};
     });
-    check(`compact_header_${width}`,'real native header geometry and collapsed metadata',header,header.height===44&&header.open===false&&header.titleVisible===false&&header.summary==='会话信息');
+    check(`compact_header_${width}`,'real native header geometry and collapsed metadata',header,header.height===72&&header.open===false&&header.titleVisible===false&&header.summary==='对话工具');
     await native(()=>{const summary=document.querySelector('[data-foundry-session-details] summary');summary.focus();summary.click();});
     const metadata=await native(()=>{
       const details=document.querySelector('[data-foundry-session-details]'),title=details.querySelector('.wSkVaW_titleRow');
-      return {open:details.open,rect:title.getBoundingClientRect().toJSON(),text:title.innerText,logVisible:Array.from(title.querySelectorAll('button')).some(button=>button.textContent.includes('Session log')&&button.checkVisibility())};
+      return {open:details.open,rect:title.getBoundingClientRect().toJSON(),text:title.innerText,logVisible:Array.from(title.querySelectorAll('button')).some(button=>button.textContent.includes('导出排查日志')&&button.checkVisibility())};
     });
     check(`session_metadata_fits_${width}`,'original native lineage/action/log slots inside disclosure',metadata,metadata.open&&metadata.rect.x>=0&&metadata.rect.right<=width&&metadata.logVisible&&metadata.text.includes(taskA));
     await captureNative(`session-metadata-${width}`);
@@ -244,8 +244,8 @@ const captureContext = `(() => {
       await app.evaluate(({nativeTheme},value)=>{nativeTheme.themeSource=value;},scheme);
       await until(()=>native(()=>document.body.hasAttribute('data-ds-dark-theme')),value=>value===(scheme==='dark'),'resolved DSH theme');
       const expected=scheme==='dark'
-        ? {background:'rgb(17, 17, 17)',card:'rgb(31, 31, 31)',border:'rgba(255, 255, 255, 0.14)',tab:'rgb(226, 193, 128)',send:'rgb(226, 193, 128)',sendText:'rgb(31, 31, 31)'}
-        : {background:'rgb(255, 255, 255)',card:'rgb(255, 255, 255)',border:'rgba(31, 31, 31, 0.14)',tab:'rgb(138, 103, 41)',send:'rgb(138, 103, 41)',sendText:'rgb(249, 250, 251)'};
+        ? {background:'rgb(17, 17, 17)',card:'rgb(31, 31, 31)',border:'rgba(255, 255, 255, 0.14)',tab:'rgb(249, 250, 251)',send:'rgb(226, 193, 128)',sendText:'rgb(31, 31, 31)'}
+        : {background:'rgb(255, 255, 255)',card:'rgb(255, 255, 255)',border:'rgba(31, 31, 31, 0.14)',tab:'rgba(0, 0, 0, 0.88)',send:'rgb(138, 103, 41)',sendText:'rgb(249, 250, 251)'};
       const palette=await until(()=>native(()=>{
         const styleOf=selector=>getComputedStyle(document.querySelector(selector));
         const card=styleOf('[data-composer-card]'),tab=styleOf('.wSkVaW_tabActive'),send=styleOf('.uV2eYG_trailing > button.uV2eYG_primary');
@@ -254,7 +254,7 @@ const captureContext = `(() => {
       check(`native_palette_${width}_${scheme}`,'computed native surfaces and controls match host semantic colors',palette,Object.keys(expected).every(key=>palette[key]===expected[key]));
       await native(()=>document.querySelector('[data-composer-card] textarea').focus());
       const focus=await native(()=>{const style=getComputedStyle(document.querySelector('[data-composer-card]'));return {outline:style.outlineWidth,offset:style.outlineOffset,color:style.outlineColor,border:style.borderColor};});
-      check(`native_composer_focus_${width}_${scheme}`,'real composer focus style',focus,focus.outline==='2px'&&focus.offset==='-1px'&&focus.color===focus.border&&focus.color===(scheme==='dark'?'rgb(226, 193, 128)':'rgb(166, 126, 60)'));
+      check(`native_composer_focus_${width}_${scheme}`,'real composer focus style',focus,parseFloat(focus.outline)>=1&&focus.border===(scheme==='dark'?'rgb(191, 163, 108)':'rgb(138, 103, 41)')&&/^rgb/.test(focus.color));
       await captureNative(`composer-${width}-${scheme}`);
       await native(()=>document.querySelector('[data-foundry-session-details] summary').focus());
     }

@@ -157,8 +157,100 @@ def assert_confirmable(declaration_sheets: list[dict]) -> None:
     tables = [sheet for sheet in declaration_sheets if sheet.get("decision") == "table"]
     if not tables:
         raise FoundryError("structure confirmation requires at least one table sheet")
+    _reject_duplicate_or_overlapping_blocks(tables)
+    _reject_missing_column_exclusion_reasons(tables)
     undecided = [sheet["sheet"] for sheet in tables if has_undecided_direction(sheet)]
     if undecided:
         raise FoundryError(
             "choose the debit/credit side before confirming: " + ", ".join(undecided)
         )
+
+
+def _reject_duplicate_or_overlapping_blocks(tables: list[dict]) -> None:
+    seen: set[tuple[str, str]] = set()
+    rectangles: list[tuple[str, dict[str, int], str]] = []
+    for sheet in tables:
+        name = str(sheet.get("sheet") or "")
+        bounds = _table_bounds(sheet)
+        block_id = str(sheet.get("selected_block_id") or _bounds_key(bounds))
+        key = (name, block_id)
+        if key in seen:
+            raise FoundryError(f"duplicate table block confirmation: {name} {block_id}")
+        seen.add(key)
+        for existing_name, existing, existing_id in rectangles:
+            if existing_name == name and _overlaps(existing, bounds):
+                raise FoundryError(
+                    f"overlapping table block confirmation: {name} {existing_id} and {block_id}"
+                )
+        rectangles.append((name, bounds, block_id))
+
+
+def _reject_missing_column_exclusion_reasons(tables: list[dict]) -> None:
+    for sheet in tables:
+        missing = [
+            column.get("letter") or column.get("display") or "unknown"
+            for column in sheet.get("columns") or []
+            if column.get("include") is False and not str(column.get("exclusion_reason") or "").strip()
+        ]
+        if missing:
+            raise FoundryError(
+                f"excluded columns require a reason on {sheet.get('sheet')}: {', '.join(map(str, missing))}"
+            )
+
+
+def _table_bounds(sheet: dict) -> dict[str, int]:
+    block = _selected_block(sheet)
+    start_row = _positive_int(sheet.get("start_row") or block.get("start_row") or sheet.get("header_row"), "start row")
+    end_row = _positive_int(sheet.get("end_row") or block.get("end_row"), "end row")
+    start_column = str(sheet.get("start_column") or block.get("start_column") or "").upper()
+    end_column = str(sheet.get("end_column") or block.get("end_column") or "").upper()
+    if not start_column or not end_column:
+        raise FoundryError(f"table bounds require columns on {sheet.get('sheet')}")
+    start_col = _column_index(start_column)
+    end_col = _column_index(end_column)
+    if start_row > end_row or start_col > end_col:
+        raise FoundryError(f"invalid table bounds on {sheet.get('sheet')}")
+    return {"start_row": start_row, "end_row": end_row, "start_col": start_col, "end_col": end_col}
+
+
+def _selected_block(sheet: dict) -> dict:
+    selected = sheet.get("selected_block_id")
+    blocks = sheet.get("table_blocks") or []
+    if selected:
+        match = next((block for block in blocks if block.get("id") == selected), None)
+        if match is None:
+            raise FoundryError(f"selected table block is not in proposal: {sheet.get('sheet')}")
+        return match
+    return {}
+
+
+def _positive_int(value: Any, label: str) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise FoundryError(f"table bounds require a {label}") from exc
+    if number < 1:
+        raise FoundryError(f"table bounds require a positive {label}")
+    return number
+
+
+def _column_index(letter: str) -> int:
+    if not letter or not letter.isalpha():
+        raise FoundryError("table bounds require column letters")
+    index = 0
+    for char in letter:
+        index = index * 26 + (ord(char) - 64)
+    return index
+
+
+def _overlaps(left: dict[str, int], right: dict[str, int]) -> bool:
+    return not (
+        left["end_row"] < right["start_row"]
+        or right["end_row"] < left["start_row"]
+        or left["end_col"] < right["start_col"]
+        or right["end_col"] < left["start_col"]
+    )
+
+
+def _bounds_key(bounds: dict[str, int]) -> str:
+    return f"{bounds['start_row']}:{bounds['end_row']}:{bounds['start_col']}:{bounds['end_col']}"

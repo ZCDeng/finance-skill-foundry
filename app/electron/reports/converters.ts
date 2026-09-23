@@ -61,14 +61,28 @@ export async function importReport(data: Buffer, format: ReportFormat, source: R
   }
 }
 
-export async function exportDocx(doc: ReportDocument, title: string, fontData?: Uint8Array): Promise<Buffer> {
+type ExportOptions = { marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[] };
+
+export async function exportDocx(doc: ReportDocument, title: string, fontData?: Uint8Array, options: ExportOptions = {}): Promise<Buffer> {
   const metadata = [doc.metadata.company, doc.metadata.period, doc.metadata.currency, doc.metadata.unit].filter(Boolean).join(' / ');
-  const children = [
-    new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: metadata ? 120 : 360 } }),
-    ...(metadata ? [new Paragraph({ keepNext: true, spacing: { after: 360 }, children: [new TextRun({ text: metadata, size: 20, color: '696760' })] })] : []),
-    new TableOfContents('目录', { hyperlink: true, headingStyleRange: '1-2' }),
-    ...nodesToDocx(doc.content, collectNoteIds(doc.content)),
+  const content = exportNodes(doc.content, title);
+  const managementMode = isManagementMode(options);
+  const receipt = docxReceipt(options);
+  const body = nodesToDocx(content, collectNoteIds(content));
+  const frontMatter = [
+    ...(options.marker ? [new Paragraph({ keepNext: true, spacing: { after: 120 }, children: [new TextRun({ text: options.marker, size: 18, color: '7A4D00', bold: true })] })] : []),
+    new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: metadata ? 120 : 180 } }),
+    ...(metadata ? [new Paragraph({ keepNext: true, spacing: { after: 180 }, children: [new TextRun({ text: metadata, size: 20, color: '696760' })] })] : []),
   ];
+  const children = managementMode
+    ? [...frontMatter, ...body, ...receipt]
+    : [...frontMatter, ...receipt, new TableOfContents('目录', { hyperlink: true, headingStyleRange: '1-2' }), ...body];
+  const headerText = [
+    options.marker,
+    title,
+    options.contentMode,
+    options.projectionHash?.slice(0, 12),
+  ].filter(Boolean).join(' · ');
   const document = new Document({
     creator: 'FA Foundry',
     title,
@@ -103,7 +117,7 @@ export async function exportDocx(doc: ReportDocument, title: string, fontData?: 
           pageNumbers: { start: 1 },
         },
       },
-      headers: { default: new Header({ children: [new Paragraph({ children: [new TextRun({ text: title, size: 18 })] })] }) },
+      headers: { default: new Header({ children: [new Paragraph({ children: [new TextRun({ text: headerText || title, size: 18 })] })] }) },
       footers: {
         default: new Footer({
           children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: [PageNumber.CURRENT] })] })],
@@ -113,6 +127,42 @@ export async function exportDocx(doc: ReportDocument, title: string, fontData?: 
     }],
   });
   return Packer.toBuffer(document);
+}
+
+function isManagementMode(options: ExportOptions): boolean {
+  return options.contentMode === 'management';
+}
+
+function docxReceipt(options: ExportOptions): Paragraph[] {
+  const rows = [
+    ['文稿标记', options.marker],
+    ['草稿版本', options.draftId],
+    ['导出模式', options.contentMode],
+    ['投影 SHA-256', options.projectionHash],
+    ['内容 SHA-256', options.contentHash],
+    ['发布状态', options.publicationStatus],
+    ['复核状态', options.reviewStatus],
+    ['可复现状态', options.reproducibilityStatus],
+  ].filter((row): row is [string, string] => Boolean(row[1]));
+  const sources = (options.sources ?? []).filter(Boolean).slice(0, 12);
+  const paragraphs = rows.map(([label, value]) => new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `${label}：`, bold: true, size: 18, color: '696760' }), new TextRun({ text: value, size: 18, color: '696760' })] }));
+  if (sources.length) {
+    paragraphs.push(new Paragraph({ spacing: { before: 60, after: 40 }, children: [new TextRun({ text: '授权来源：' + sources.join('；'), size: 18, color: '696760' })] }));
+  }
+  if (paragraphs.length) paragraphs.push(new Paragraph({ spacing: { after: 240 } }));
+  return paragraphs;
+}
+
+function exportNodes(content: ReportNode[], title: string): ReportNode[] {
+  const first = content[0];
+  if (first?.type === 'heading' && Number(first.attrs?.level ?? 1) === 1 && normalizeTitle(textContent(first)) === normalizeTitle(title)) {
+    return content.slice(1);
+  }
+  return content;
+}
+
+function normalizeTitle(value: string): string {
+  return value.replace(/\s+/g, '').toLocaleLowerCase();
 }
 
 async function importDocx(data: Buffer, source: ReportSource): Promise<ReportImportResult> {

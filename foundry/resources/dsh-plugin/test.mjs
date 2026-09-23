@@ -420,6 +420,7 @@ for (const toolName of ROSTER) {
   const clientSource = readFileSync(new URL("./client.js", import.meta.url), "utf8");
   const registered = new Map();
   const injected = [];
+  const inputSources = [];
   const jsxRuntime = {
     jsx: (type, props, key) => ({ type, props, key }),
     jsxs: (type, props, key) => ({ type, props, key }),
@@ -446,6 +447,12 @@ for (const toolName of ROSTER) {
             return descriptor;
           },
         },
+        inputTriggers: { registerSource: (source) => { inputSources.push(source); return source; } },
+        get: (name) => {
+          if (name === "inputTriggers") return { registerSource: (source) => { inputSources.push(source); return source; } };
+          throw new Error(`unexpected ctx.get(${name})`);
+        },
+        effect: (run) => run(),
         layout: { toggleSidebar: () => {} },
       });
     },
@@ -469,11 +476,19 @@ for (const toolName of ROSTER) {
   }
 
   assert.ok(injected.includes("tool.call.toolview"), "the tool view slot was never injected");
-  assert.deepEqual(
-    [...registered.keys()].sort(),
-    ["emit-brief", "query-locked", "record-reference"],
-    "the row is registered for exactly the verbs that file versions",
-  );
+  assert.ok(inputSources.some((source) => source.name === "foundry-draft"),
+    "the draft reference input source was never registered");
+  const registeredKeys = new Set(registered.keys());
+  for (const key of ["emit-brief", "query-locked", "record-reference"]) {
+    assert.ok(registeredKeys.has(key), `${key} receipt row was not registered`);
+  }
+  for (const key of ["workbook-range-preview", "run-metric", "validate-explanation", "save-explanation-draft"]) {
+    assert.ok(registeredKeys.has(key), `${key} finance stage row was not registered`);
+  }
+  for (const key of ["analysis-script", "save_explanation_draft", "run_metric", "workbook_read", "validate_explanation"]) {
+    assert.ok(registeredKeys.has(key), `${key} runtime finance stage row was not registered`);
+  }
+  assert.ok(!registeredKeys.has("unknown_finance_like_tool"), "unknown tools must not be claimed as finance stages");
 
   const Row = registered.get("emit-brief");
   const flatten = (node) => {
@@ -558,4 +573,26 @@ for (const toolName of ROSTER) {
     flatten(Row({ callId: "c", toolName: "emit-brief", block: { argsRaw: "{}" } })),
     /正在从锁库算/,
   );
+
+  const StageRow = registered.get("save_explanation_draft");
+  const stageTree = StageRow({
+    callId: "save-1",
+    toolName: "save_explanation_draft",
+    block: {
+      kind: "tool-result",
+      isError: false,
+      argsRaw: JSON.stringify({ spec: { body: "很长".repeat(1000) } }),
+      content: [{ type: "text", text: JSON.stringify({ saved: true, draft_id: "draft-1", body: "结果".repeat(1000) }) }],
+    },
+  });
+  assert.match(flatten(stageTree.props.children[0]), /保存结果 · 已完成/);
+  assert.ok(flatten(stageTree.props.children[0]).length < 80, "stage summary must stay bounded");
+  assert.ok(flatten(stageTree).includes('"body"'), "raw input/output remains available in details");
+
+  const scriptTree = registered.get("analysis-script")({
+    callId: "script-1",
+    toolName: "analysis-script",
+    block: { kind: "tool-result", isError: false, content: [{ type: "text", text: "ok" }] },
+  });
+  assert.match(flatten(scriptTree.props.children[0]), /计算指标 · 已完成/);
 }

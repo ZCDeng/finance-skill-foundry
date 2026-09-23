@@ -7,6 +7,8 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
   let serial = Promise.resolve();
   let disposed = false;
   const delay = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const REFERENCE_SOURCE = 'foundry-draft';
+  const referenceKey = (sessionId) => `fnd.references.${sessionId}`;
   async function waitFor(read, message) {
     const end = Date.now() + 12000;
     while (!disposed && Date.now() < end) {
@@ -30,13 +32,80 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
     }
     return {sessionId, submitted: false, blockedReason: '提交仍在确认中，请稍后重试；重试会等待本次结果。'};
   }
+  function referenceLabel(reference) {
+    const revision = Number(reference?.revision);
+    if (!Number.isInteger(revision) || revision <= 0) throw new Error('invalid draft revision reference');
+    return `基于修订 ${revision}`;
+  }
+  function normalizeReference(reference) {
+    if (!reference || typeof reference !== 'object') return undefined;
+    if (typeof reference.draftId !== 'string' || !reference.draftId || reference.draftId.length > 200 || reference.draftId.includes('\0') || reference.draftId.includes(']')) throw new Error('invalid draft reference');
+    const label = referenceLabel(reference);
+    return {
+      source: REFERENCE_SOURCE,
+      ref: JSON.stringify({ draftId: reference.draftId, revision: reference.revision }),
+      label,
+      appearance: 'session',
+      clipboardText: label,
+    };
+  }
+  function saveDraftMirror(sessionId, shell) {
+    const key = `dsh.conversation.chat.${sessionId}`;
+    let previous = {};
+    try {
+      const saved = JSON.parse(page.localStorage.getItem(key) ?? 'null');
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) previous = saved;
+    } catch {}
+    page.localStorage.setItem(key, JSON.stringify({ selection: null, view: null, inspect: null, ...previous, draft: shell.snapshot.draft }));
+  }
+  function saveReferences(sessionId, shell) {
+    const snapshot = shell.snapshot;
+    const ours = (snapshot.occurrences || []).filter((item) => item.source === REFERENCE_SOURCE);
+    if (!ours.length) {
+      page.localStorage.removeItem(referenceKey(sessionId));
+      return;
+    }
+    page.localStorage.setItem(referenceKey(sessionId), JSON.stringify({ draft: snapshot.draft, occurrences: ours }));
+  }
+  function saveSessionState(sessionId, shell) {
+    saveDraftMirror(sessionId, shell);
+    saveReferences(sessionId, shell);
+  }
+  function restoreReferences(sessionId, shell) {
+    if ((shell.snapshot.occurrences || []).some((item) => item.source === REFERENCE_SOURCE)) return;
+    let saved;
+    try { saved = JSON.parse(page.localStorage.getItem(referenceKey(sessionId)) ?? 'null'); } catch {}
+    if (!saved || saved.draft !== shell.snapshot.draft || !Array.isArray(saved.occurrences)) return;
+    for (const item of saved.occurrences) {
+      if (item?.source !== REFERENCE_SOURCE || typeof item.label !== 'string' || typeof item.ref !== 'string') continue;
+      const span = { start: item.offset, end: item.offset + item.length, draftRev: shell.snapshot.draftRev };
+      shell.insertReference({
+        source: REFERENCE_SOURCE,
+        ref: item.ref,
+        label: item.label,
+        appearance: item.appearance,
+        clipboardText: item.clipboardText || item.label,
+      }, span);
+    }
+  }
+  function applyReference(sessionId, shell, draftReference) {
+    const reference = normalizeReference(draftReference);
+    if (!reference) return false;
+    const label = reference.label;
+    if (!shell.snapshot.draft.startsWith(label)) shell.actions.setDraft(`${label} ${shell.snapshot.draft}`.trimEnd());
+    const span = { start: 0, end: label.length, draftRev: shell.snapshot.draftRev };
+    if (!shell.insertReference(reference, span)) throw new Error('修订引用未能写入输入框，请重试。');
+    saveSessionState(sessionId, shell);
+    return true;
+  }
   const api = {
     version: 1,
     async dispatch(request) {
       if (!request || typeof request.sessionId !== 'string' || !request.sessionId || request.sessionId.length > 200) throw new Error('invalid embedded session');
       if (request.draft !== undefined && (typeof request.draft !== 'string' || request.draft.length > 100000 || request.draft.includes('\0'))) throw new Error('invalid embedded draft');
+      normalizeReference(request.draftReference);
       if (request.submit && (!request.requestId || typeof request.requestId !== 'string' || request.requestId.length > 200 || !request.draft?.trim())) throw new Error('submission needs question and action id');
-      const fingerprint = JSON.stringify([request.sessionId, request.draft, Boolean(request.submit)]);
+      const fingerprint = JSON.stringify([request.sessionId, request.draft, request.draftReference || null, Boolean(request.submit)]);
       const old = request.requestId && requests.get(request.requestId);
       if (old) {
         if (old.fingerprint !== fingerprint) throw new Error('action id was reused for different content');
@@ -53,6 +122,8 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
         const shell = inputHub.shell(request.sessionId);
         // React binds the persisted draft mirror before a handoff writes into the machine.
         await waitFor(() => shell.mirrorFn, '输入框尚未就绪，请稍后重试。');
+        restoreReferences(request.sessionId, shell);
+        saveSessionState(request.sessionId, shell);
         touched.add(request.sessionId);
         const submittedKey = `fnd.submitted.${request.sessionId}.${request.requestId}`;
         let receipt;
@@ -68,7 +139,9 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
           const draft = !request.submit && previous && previous !== request.draft
             ? `${previous}\n\n${request.draft}` : request.draft;
           shell.actions.setDraft(draft);
+          if (!request.draftReference) saveSessionState(request.sessionId, shell);
         }
+        if (request.draftReference) applyReference(request.sessionId, shell, request.draftReference);
         touched.add(request.sessionId);
         const snapshot = session.getSnapshot();
         const block = composerBlocks.storeFor(request.sessionId).getSnapshot();
@@ -85,6 +158,7 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
             const outcome = await settleAdmission(shell, receipt, submittedKey, request.sessionId);
             submitted = outcome.submitted;
             blockedReason = outcome.blockedReason;
+            if (submitted) saveSessionState(request.sessionId, shell);
           }
         }
         if (request.draft !== undefined) input?.focus({ preventScroll: true });
@@ -98,17 +172,28 @@ function installFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks, p
       return result;
     },
     snapshot() {
-      const drafts = {};
       for (const id of touched) {
-        const key = `dsh.conversation.chat.${id}`;
-        try { drafts[id] = JSON.parse(page.localStorage.getItem(key) ?? 'null'); } catch {}
+        try { saveSessionState(id, inputHub.shell(id)); } catch {}
+      }
+      const drafts = {};
+      for (let i = 0; i < page.localStorage.length; i++) {
+        const key = page.localStorage.key(i);
+        if (!key?.startsWith('dsh.conversation.chat.')) continue;
+        const id = key.slice('dsh.conversation.chat.'.length);
+        if (!id || id.length > 200) continue;
+        try {
+          const value = JSON.parse(page.localStorage.getItem(key) ?? 'null');
+          if (value && typeof value === 'object' && typeof value.draft === 'string') drafts[id] = value;
+        } catch {}
       }
       const receipts = {};
+      const references = {};
       for (let i = 0; i < page.localStorage.length; i++) {
         const key = page.localStorage.key(i);
         if (key?.startsWith('fnd.submitted.')) receipts[key] = page.localStorage.getItem(key);
+        if (key?.startsWith('fnd.references.')) references[key] = page.localStorage.getItem(key);
       }
-      return {drafts, receipts};
+      return {drafts, receipts, references};
     },
   };
   ctx.effect(() => {

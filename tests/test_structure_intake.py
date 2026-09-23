@@ -164,24 +164,25 @@ def _sheets(service: FinanceStore, shell_id: str) -> list[dict]:
     return service.structure_proposal_list({"dataset_id": shell_id})["proposals"][0]["sheets"]
 
 
-def test_handing_back_the_whole_proposal_is_refused_rather_than_trimmed(
+def test_handing_back_the_whole_proposal_confirms_all_repairable_tables(
     tmp_path: Path,
 ) -> None:
-    """A caller who sends every sheet is told which one cannot be read.
+    """A caller may return every proposed sheet; excluded sheets are ignored.
 
-    Quietly dropping the unreadable sheet would confirm something other than
-    what was asked for, and nothing would say so.
+    Wide management tables with unknown headers are still calculable as generic
+    columns, so they should be confirmed rather than silently discarded.
     """
     _task_obj, analysis, service = _task(tmp_path)
     shell = analysis.add_dataset(
         _write(tmp_path, fixture.monthly_pack(), "八月"), name="八月", metadata={"mode": "workbook"}
     )
     service.structure_propose(shell["id"])
-    with pytest.raises(FoundryError, match="cannot confirm 10·区域经营损益表"):
-        service.structure_proposal_confirm(
-            {"dataset_id": shell["id"], "sheets": _sheets(service, shell["id"])}
-        )
-    assert service.dataset_structure_state(shell["id"]) == "pending_confirmation"
+    record = service.structure_proposal_confirm(
+        {"dataset_id": shell["id"], "sheets": _sheets(service, shell["id"])}
+    )
+    assert "10·区域经营损益表" in record["snapshot_ids"]
+    assert "00·封面与编制说明" not in record["snapshot_ids"]
+    assert service.dataset_structure_state(shell["id"]) == "confirmed"
 
 
 def test_the_sheets_the_card_offers_confirm_in_one_go(tmp_path: Path) -> None:
@@ -200,7 +201,7 @@ def test_the_sheets_the_card_offers_confirm_in_one_go(tmp_path: Path) -> None:
         {"dataset_id": shell["id"], "sheets": offered}
     )
     assert "02·GL科目余额表" in record["snapshot_ids"]
-    assert "10·区域经营损益表" not in record["snapshot_ids"]
+    assert "10·区域经营损益表" in record["snapshot_ids"]
     assert service.dataset_structure_state(shell["id"]) == "confirmed"
 
 
@@ -217,7 +218,7 @@ def test_a_declaration_that_can_yield_nothing_is_refused_by_name(tmp_path: Path)
     service.structure_propose(shell["id"])
     sheets = [s for s in _sheets(service, shell["id"]) if s["sheet"].startswith(("02", "03"))]
     blinded = dict(sheets[1])
-    blinded["columns"] = [{**c, "role": "unknown"} for c in blinded["columns"]]
+    blinded["columns"] = []
     blinded["amount_pairs"] = []
 
     with pytest.raises(FoundryError, match="cannot confirm 03·GL月结分录清单"):

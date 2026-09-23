@@ -76,6 +76,19 @@ export function adaptSource(name, original) {
     source = once(source, 'this.inflight = void 0;\n\t\t\t\tthis.phase = "plain";\n\t\t\t\treturn [];\n\t\t\t}\n\t\t\tonAdjudicationFailed', 'this.foundryAdmission = {seq: attempt.seq, ok: true};\n        this.inflight = void 0;\n\t\t\t\tthis.phase = "plain";\n\t\t\t\treturn [];\n\t\t\t}\n\t\t\tonAdjudicationFailed');
     const helper = readFileSync(join(APP, 'harness-client/bridge.js'), 'utf8');
     source = once(source, 'const composerBlocks = new ComposerBlockRegistry();', `const composerBlocks = new ComposerBlockRegistry();\n${helper}\ninstallFoundryEmbeddedBridge(ctx, sessions, inputHub, composerBlocks);`);
+    source = once(source,
+      'function projectUserText(text, sessionLabels) {\n\t\t\tconst ranges = [];',
+      `function projectUserText(text, sessionLabels) {
+      text = text.replace(/\\[\\[FA_FOUNDRY_DRAFT_REF:(\\{[^\\]]+\\})\\]\\]/gu, (_match, raw) => {
+        try {
+          const value = JSON.parse(raw);
+          return '基于修订 ' + value.revision;
+        } catch {
+          return '基于修订';
+        }
+      });
+\t\t\tconst ranges = [];`);
+    source = once(source, 'title: "Think",', 'title: "处理思路",');
     source = once(source, 'hero && (0, react_jsx_runtime.jsx)(HeroGlow, { className: ConversationRoot_module_css_default.heroGlow }),', 'null,');
     source = once(source, 'hero && (0, react_jsx_runtime.jsx)(HeroShell, {\n\t\t\t\t\t\tt,\n\t\t\t\t\t\trenderSlot\n\t\t\t\t\t}),', `hero && (0, react_jsx_runtime.jsx)('p', {'data-foundry-empty': true, children: '从一个财务问题开始。资料、计算和结论会保留在当前任务。'}),`);
     source = once(source, 'hero && heroWorkspaceRow,', 'null,');

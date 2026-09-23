@@ -194,6 +194,16 @@
 .analysis-finance-setup > .analysis-fieldset + .analysis-actions { margin-top: 16px; }
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-finance-variance .analysis-table th, .analysis-finance-variance .analysis-table td { white-space: nowrap; }
+.analysis-business-result, .analysis-scope-card, .analysis-revision-diff { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.analysis-period-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 12px; display: grid; gap: 4px; background: var(--fnd-surface); min-width: 0; }
+.analysis-kpi-card span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.analysis-kpi-card strong { font-size: 20px; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-business-table .fnd-tablewrap { max-width: 100%; }
+.analysis-business-table .analysis-table { table-layout: auto; }
+.analysis-business-table .analysis-table th:first-child,
+.analysis-business-table .analysis-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--fnd-bg); }
 .analysis-quality { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 16px; background: color-mix(in srgb, var(--fnd-surface) 88%, transparent); }
 .analysis-quality h4 { margin: 0; font-size: 15px; }
 .analysis-quality ul { margin: 0; padding-left: 20px; font-size: var(--fnd-size-small); }
@@ -219,6 +229,14 @@
 .analysis-structure-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .analysis-structure-field > label { min-width: 12rem; font-size: 0.86rem; }
 .analysis-structure-field input[type="number"] { width: 6rem; }
+.analysis-structure-field select,
+.analysis-structure-columns select {
+  color: var(--fnd-ink);
+  background: var(--fnd-surface);
+  border: 1px solid var(--fnd-line);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
 .analysis-structure-preview,
 .analysis-structure-columns { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .analysis-structure-preview th,

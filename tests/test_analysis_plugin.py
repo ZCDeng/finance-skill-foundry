@@ -152,6 +152,131 @@ process.stdout.write(JSON.stringify({
     assert result["hasEmptyItems"] is False
 
 
+def test_draft_tools_expose_the_same_bound_numeric_presentation(tmp_path: Path):
+    result = _node(tmp_path, """
+const tools = Object.fromEntries(definitions().map(d => [d.name, d]));
+const claims = ['analysis-draft', 'save_explanation_draft'].map(name =>
+  tools[name].parameters.properties.spec.properties.claims.items.properties);
+process.stdout.write(JSON.stringify(claims.map(claim => ({
+  factId: claim.fact_id,
+  presentation: claim.presentation,
+  clientVerification: claim.verification_status,
+}))));
+""")
+    assert result[0] == result[1]
+    assert result[0]["factId"]["type"] == "string"
+    policy = result[0]["presentation"]
+    assert policy["additionalProperties"] is False
+    assert policy["required"] == ["decimal_places", "scale", "rounding"]
+    assert set(policy["properties"]) == set(policy["required"])
+    assert policy["properties"]["decimal_places"] == {"type": "integer", "minimum": 0, "maximum": 6}
+    assert policy["properties"]["scale"]["enum"] == ["identity", "percent"]
+    assert policy["properties"]["rounding"]["enum"] == ["half_up"]
+    assert "clientVerification" not in result[0]
+
+
+def test_analysis_evidence_recipe_schema_matches_validated_contract(tmp_path: Path):
+    result = _node(tmp_path, """
+const tools = Object.fromEntries(definitions().map((d) => [d.name, d]));
+const analysisSaveSpec = tools['analysis-save'].parameters.properties.spec.properties;
+const scriptSpec = tools['analysis-script'].parameters.properties.spec.properties;
+const scriptStartSpec = tools['analysis-script-start'].parameters.properties.spec.properties;
+const draftRecipe = tools['analysis-draft'].parameters.properties.spec.properties.evidence_recipes.items;
+const saveRecipe = tools.save_explanation_draft.parameters.properties.spec.properties.evidence_recipes.items;
+const validateRecipe = tools.validate_explanation.parameters.properties.spec.properties.evidence_recipes.items;
+const draftSpec = tools['analysis-draft'].parameters.properties.spec.properties;
+const saveSpec = tools.save_explanation_draft.parameters.properties.spec.properties;
+const validateSpec = tools.validate_explanation.parameters.properties.spec.properties;
+const prepareSpec = tools.prepare_explanation.parameters.properties.spec.properties;
+process.stdout.write(JSON.stringify({
+  runMetadataRoles: [
+    analysisSaveSpec.result_role.enum,
+    scriptSpec.result_role.enum,
+    scriptStartSpec.result_role.enum,
+  ],
+  runMetadataFields: [
+    Object.hasOwn(analysisSaveSpec, 'requirements_id') && Object.hasOwn(analysisSaveSpec, 'scope'),
+    Object.hasOwn(scriptSpec, 'requirements_id') && Object.hasOwn(scriptSpec, 'scope'),
+    Object.hasOwn(scriptStartSpec, 'requirements_id') && Object.hasOwn(scriptStartSpec, 'scope'),
+  ],
+  draftAdditional: draftRecipe.additionalProperties,
+  saveAdditional: saveRecipe.additionalProperties,
+  validateAdditional: validateRecipe.additionalProperties,
+  draftReviewStatus: draftSpec.review_status.enum,
+  exposesIgnoredMetadata: [
+    Object.hasOwn(draftSpec, 'result_role'),
+    Object.hasOwn(draftSpec, 'scope'),
+    Object.hasOwn(saveSpec, 'result_role'),
+    Object.hasOwn(saveSpec, 'scope'),
+    Object.hasOwn(validateSpec, 'result_role'),
+    Object.hasOwn(validateSpec, 'scope'),
+    Object.hasOwn(prepareSpec, 'result_role'),
+    Object.hasOwn(prepareSpec, 'scope'),
+  ].some(Boolean),
+  required: draftRecipe.required,
+  kinds: draftRecipe.properties.kind.enum,
+  sourceRequired: draftRecipe.properties.left.required,
+  sourceAdditional: draftRecipe.properties.left.additionalProperties,
+  claimRequired: draftRecipe.properties.claim.required,
+  claimAdditional: draftRecipe.properties.claim.additionalProperties,
+  hasTopExpected: Object.hasOwn(draftRecipe.properties, 'expected'),
+  hasClaimExpected: Object.hasOwn(draftRecipe.properties.claim.properties, 'expected'),
+  oneOfCount: draftRecipe.oneOf.length,
+  consistencySourceOneOf: tools['analysis-draft'].parameters.properties.spec.properties.consistency_sources.items.oneOf,
+  consistencySourceAdditional: tools['analysis-draft'].parameters.properties.spec.properties.consistency_sources.items.additionalProperties,
+  consistencyValuesOneOf: tools['analysis-draft'].parameters.properties.spec.properties.consistency_rules.items.properties.values.items.oneOf,
+  consistencyForbiddenInline: JSON.stringify(tools['analysis-draft'].parameters.properties.spec.properties.consistency_rules.items).includes('declared_value') || JSON.stringify(tools['analysis-draft'].parameters.properties.spec.properties.consistency_rules.items).includes('original_text'),
+}));
+""")
+    expected_roles = ["business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"]
+    assert result["runMetadataRoles"] == [expected_roles, expected_roles, expected_roles]
+    assert result["runMetadataFields"] == [True, True, True]
+    assert result["draftAdditional"] is False
+    assert result["saveAdditional"] is False
+    assert result["validateAdditional"] is False
+    assert result["draftReviewStatus"] == ["unreviewed"]
+    assert result["exposesIgnoredMetadata"] is False
+    assert result["required"] == ["kind", "claim"]
+    assert result["kinds"] == ["direct", "sum", "diff", "ratio"]
+    assert result["sourceRequired"] == ["dataset_id", "source_hash", "sheet", "range"]
+    assert result["sourceAdditional"] is False
+    assert result["claimRequired"] == ["run_id", "row", "column"]
+    assert result["claimAdditional"] is False
+    assert result["hasTopExpected"] is False
+    assert result["hasClaimExpected"] is False
+    assert result["oneOfCount"] == 2
+    assert result["consistencySourceAdditional"] is False
+    assert result["consistencySourceOneOf"][0]["properties"]["kind"]["enum"] == ["number"]
+    assert result["consistencySourceOneOf"][1]["properties"]["kind"]["enum"] == ["text"]
+    assert result["consistencySourceOneOf"][2]["properties"]["kind"]["enum"] == ["text"]
+    assert result["consistencyValuesOneOf"] == [{"required": ["source_id"]}, {"required": ["recipe_result_id"]}]
+    assert result["consistencyForbiddenInline"] is False
+
+
+def test_analysis_export_mode_and_workbook_range_preview_schema(tmp_path: Path):
+    result = _node(tmp_path, """
+const tools = Object.fromEntries(definitions().map((d) => [d.name, d]));
+const preview = tools.workbook_range_preview;
+const exportTool = tools['analysis-export'];
+process.stdout.write(JSON.stringify({
+  previewDeclared: Boolean(preview),
+  definitionsCount: definitions().length,
+  previewRequired: preview.parameters.properties.spec.required,
+  previewHasRange: Boolean(preview.parameters.properties.spec.properties.range),
+  exportRequired: exportTool.parameters.required,
+  exportMode: exportTool.parameters.properties.mode.enum,
+}));
+""")
+    assert result["previewDeclared"] is True
+    assert "workbook_range_preview" in PROFILE["tools"]
+    assert "workbook_range_preview" in PROFILE["childTools"]
+    assert len(PROFILE["tools"]) == result["definitionsCount"]
+    assert result["previewRequired"] == ["dataset_id", "sheet"]
+    assert result["previewHasRange"] is True
+    assert result["exportRequired"] == ["draft", "format"]
+    assert result["exportMode"] == ["management", "audit"]
+
+
 def test_analysis_executes_real_argument_shapes_and_session_only_binding(tmp_path: Path):
     log = tmp_path / "argv.jsonl"
     shim = tmp_path / "foundry"
@@ -168,14 +293,14 @@ const inputs = {
  'dataset-add': {path: '/task/uploads/actual.csv', name: '实际', meta: {currency: 'CNY'}},
  'dataset-read': {dataset: 'snapshot-1'},
  'method-resource': {skill: 'variance-analysis', resource: 'FOUNDRY.md'},
- 'analysis-save': {spec: {question: '差异', sql: 'SELECT amount FROM actual', bindings: {actual: 'snapshot-1'}}},
+ 'analysis-save': {spec: {question: '差异', sql: 'SELECT amount FROM actual', bindings: {actual: 'snapshot-1'}, requirements_id: 'req-1', result_role: 'business', scope: {period: '2026-08'}}},
  'analysis-run': {analysis: 'analysis-1'},
- 'analysis-script': {spec: {language: 'python', code: "print('done')", bindings: {actual: 'snapshot-1'}}},
- 'analysis-script-start': {spec: {code: "print('done')", bindings: {actual: 'snapshot-1'}}},
+ 'analysis-script': {spec: {language: 'python', code: "print('done')", bindings: {actual: 'snapshot-1'}, requirements_id: 'req-1', result_role: 'activity', scope: {period: '2026-08'}}},
+ 'analysis-script-start': {spec: {code: "print('done')", bindings: {actual: 'snapshot-1'}, requirements_id: 'req-1', result_role: 'probe', scope: {period: '2026-08'}}},
  'analysis-jobs': {},
  'analysis-job-output': {job: 'job-1'},
  'analysis-draft': {spec: {title: '经营分析', body: '收入', run_ids: ['run-1']}},
- 'analysis-export': {draft: 'draft-1', format: 'xlsx'},
+ 'analysis-export': {draft: 'draft-1', format: 'xlsx', mode: 'audit'},
  'analysis-method-save': {analysis: 'analysis-1', name: '经营分析'},
  'analysis-method-apply': {method: 'method-1', bindings: {actual: 'snapshot-2'}, parameters: ['1.23'], question: '下一期'},
  'list_finance_context': {},
@@ -205,6 +330,7 @@ const inputs = {
  'workbook_inspect': {spec: {dataset_id: 'snapshot-1'}},
  'workbook_bind': {spec: {dataset_id: 'snapshot-1', source: {kind: 'named_range', name: 'Result'}, fields: [{name: 'amount', policy: 'amount'}]}},
  'workbook_read': {spec: {binding_id: 'binding-1'}},
+ 'workbook_range_preview': {spec: {dataset_id: 'snapshot-1', sheet: 'Sheet1', range: 'A1:C5'}},
  'workbook_preview': {spec: {binding_id: 'binding-1', writes: [{cell: 'A1', field: 'amount', value: '10'}]}},
  'workbook_apply': {spec: {patch_id: 'patch-1', resolutions: {A1: 'keep'}}},
  'analysis_requirements_save': {spec: {context_id: 'context-1', question: '解释利润', items: [{id: 'profit', metric: 'profit'}]}},
@@ -223,7 +349,22 @@ process.stdout.write(JSON.stringify(results));
         assert row[:5] == ["--var", str(tmp_path / "var"), "--session", "analysis-session", aliases.get(tool, tool.replace("_", "-"))]
         assert "--task" not in row
     assert rows[4][4:] == ["method-resource", "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
-    assert json.loads(rows[5][6])["bindings"] == {"actual": "snapshot-1"}
+    saved_spec = json.loads(rows[5][6])
+    assert saved_spec["bindings"] == {"actual": "snapshot-1"}
+    assert saved_spec["requirements_id"] == "req-1"
+    assert saved_spec["result_role"] == "business"
+    assert saved_spec["scope"] == {"period": "2026-08"}
+    script_call = next(row for row in rows if row[4] == "analysis-script")
+    script_spec = json.loads(script_call[6])
+    assert script_spec["result_role"] == "activity"
+    assert script_spec["scope"] == {"period": "2026-08"}
+    script_start_call = next(row for row in rows if row[4] == "analysis-script-start")
+    script_start_spec = json.loads(script_start_call[6])
+    assert script_start_spec["result_role"] == "probe"
+    export_call = next(row for row in rows if row[4] == "analysis-export")
+    assert export_call[5:] == ["--draft", "draft-1", "--format", "xlsx", "--mode", "audit"]
+    range_call = next(row for row in rows if row[4] == "workbook-range-preview")
+    assert json.loads(range_call[6]) == {"dataset_id": "snapshot-1", "sheet": "Sheet1", "range": "A1:C5"}
     method_call = next(row for row in rows if row[4] == "analysis-method-apply")
     assert method_call[5:] == ["--method", "method-1", "--bindings", '{"actual":"snapshot-2"}',
                             "--parameters", '["1.23"]', "--question", "下一期"]

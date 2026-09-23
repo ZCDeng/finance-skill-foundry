@@ -128,6 +128,26 @@ class FinanceFiles:
             **result,
         }
 
+    def range_preview(self, spec: dict[str, Any]) -> dict[str, Any]:
+        from foundry.workbook_preview import preview_workbook_range
+
+        dataset_id = str(spec.get("dataset_id") or "")
+        dataset, source = self._source_path(dataset_id)
+        sheet = str(spec.get("sheet") or "").strip()
+        if not sheet:
+            raise FoundryError("workbook range preview requires a sheet")
+        range_ref = spec.get("range")
+        if range_ref is not None and not isinstance(range_ref, str):
+            raise FoundryError("workbook range preview range must be text")
+        return preview_workbook_range(
+            source,
+            dataset_id=dataset["id"],
+            source_hash=dataset["source_hash"],
+            source_name=dataset["source_name"],
+            sheet_name=sheet,
+            range_ref=range_ref,
+        )
+
     def _verify_run_writes(
         self,
         run_id: str | None,

@@ -315,7 +315,16 @@ def _declared_hints(dataset: dict) -> dict[str, str]:
     """
     structure = (dataset.get("transformation") or {}).get("structure") or {}
     hints = (structure.get("declaration") or {}).get("scope_hints") or {}
-    return {key: str(hints.get(key) or "") for key in ("period", "currency", "unit")}
+    keys = (
+        "period",
+        "currency",
+        "unit",
+        "granularity",
+        "as_of_date",
+        "scenario",
+        "forecast",
+    )
+    return {key: str(hints.get(key) or "") for key in keys}
 
 
 def _is_workbook_shell(dataset: dict) -> bool:

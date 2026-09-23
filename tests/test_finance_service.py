@@ -573,6 +573,35 @@ def test_manual_unknown_claim_issue_is_located_as_claim_binding(finance):
     assert issue["location"]["section"] == "claim_binding"
 
 
+
+
+def test_manual_calculation_claim_mismatch_reports_expected_actual_location(finance):
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"]})
+    check = service.validate_explanation({
+        "body": "利润金额待核对。",
+        "run_ids": [run["id"]],
+        "claims": [{
+            "basis": "calculation",
+            "run_id": run["id"],
+            "row": 0,
+            "column": "profit",
+            "value": "999",
+        }],
+    })
+
+    issue = next(item for item in check["issues"] if item["code"] == "claim_value_mismatch")
+    assert issue["origin"] == "claim_binding"
+    assert issue["location"]["section"] == "claim_binding"
+    assert issue["run_id"] == run["id"]
+    assert issue["row"] == 0
+    assert issue["column"] == "profit"
+    assert issue["expected"] == "999"
+    assert issue["actual"] == "30"
+    assert "expected=999" in issue["message"]
+    assert "actual=30" in issue["message"]
+
+
 def test_concurrent_identical_completions_create_one_draft(finance):
     from concurrent.futures import ThreadPoolExecutor
     service, context = finance
@@ -631,6 +660,39 @@ def test_replay_marks_historical_validation_and_authorizes_original_scope(financ
     with pytest.raises(FoundryError, match='outside'):
         restricted.save_explanation_draft({'parent_id': draft['id']})
     assert draft['requirements_id'] == requirement['id']
+
+
+def test_replay_reauthorizes_saved_evidence_sources(finance, tmp_path):
+    from openpyxl import Workbook
+
+    service, context = finance
+    run = service.explain_variance({'context_id': context['id']})
+    row = next(index for index, item in enumerate(run["result"]["rows"]) if item["metric"] == "profit")
+    source = tmp_path / "evidence.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["B2"] = int(run["result"]["rows"][row]["contribution"])
+    book.save(source)
+    book.close()
+    dataset = service.analysis.add_dataset(source, name="evidence", metadata={"mode": "workbook"})
+    recipe = {
+        "id": "profit-contribution-source",
+        "kind": "direct",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "预算",
+        "range": "B2",
+        "claim": {"run_id": run["id"], "row": row, "column": "contribution"},
+    }
+    spec = {"body": "查看计算依据。", "run_ids": [run["id"]], "evidence_recipes": [recipe]}
+
+    first = service.save_explanation_draft(spec)
+    assert first["evidence_report"]["summary"]["status"] == "pass"
+
+    restricted = FinanceStore(service.task, snapshot_ids=[])
+    with pytest.raises(FoundryError, match="outside"):
+        restricted.save_explanation_draft(spec)
 
 
 def test_completion_requests_fresh_run_after_requirements_revision(finance):
@@ -738,6 +800,229 @@ def test_runtime_completion_payload_conflict_and_session_mismatch(finance):
         service.save_completion_draft(operation["id"], "call-2", spec)
 
 
+def test_runtime_completion_validation_failure_can_be_corrected_in_same_operation(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"]})
+    service.session_id = "runtime-validation"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 2})
+    wrong = {
+        "title": "说明",
+        "body": "利润金额待核对。",
+        "run_ids": [run["id"]],
+        "claims": [{
+            "basis": "calculation",
+            "run_id": run["id"],
+            "row": 0,
+            "column": "profit",
+            "value": "999",
+        }],
+    }
+
+    with pytest.raises(FoundryError, match="claim value differs"):
+        service.save_completion_draft(operation["id"], "call-wrong", wrong)
+
+    rejected = operations.get(operation["id"])
+    assert rejected["status"] == "repair_available"
+    assert rejected["revisions"][0]["status"] == "rejected_validation"
+    assert rejected["revisions"][0]["error"]["code"] == "claim_value_mismatch"
+    assert rejected["revisions"][0]["error"]["details"] == [{
+        "run_id": run["id"],
+        "row": 0,
+        "column": "profit",
+        "expected": "999",
+        "actual": "30",
+        "code": "claim_value_mismatch",
+    }]
+    assert rejected["revisions"][0]["error"]["primary_detail"] == rejected["revisions"][0]["error"]["details"][0]
+    assert service.analysis.state()["drafts"] == []
+    rejected_event_count = len(rejected["events"])
+
+    with pytest.raises(FoundryError, match="claim value differs"):
+        service.save_completion_draft(operation["id"], "call-wrong", wrong)
+    replayed_rejection = operations.get(operation["id"])
+    assert len(replayed_rejection["revisions"]) == 1
+    assert len(replayed_rejection["events"]) == rejected_event_count
+    with pytest.raises(FoundryError, match="payload conflict"):
+        service.save_completion_draft(operation["id"], "call-wrong", {**wrong, "body": "不同正文"})
+
+    corrected = {
+        **wrong,
+        "claims": [{**wrong["claims"][0], "value": "30"}],
+    }
+    saved = service.save_completion_draft(operation["id"], "call-corrected", corrected)
+
+    assert saved["completion_operation"]["revisions"][0]["status"] == "rejected_validation"
+    assert saved["completion_operation"]["revisions"][1]["status"] == "settled"
+    assert saved["claims"][0]["verification_status"] == "matches_run"
+    assert len(service.analysis.state()["drafts"]) == 1
+
+
+
+def test_manager_recovery_saves_rejected_attempt_with_explicit_revision(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, context = finance
+    run = service.run_metric({"context_id": context["id"]})
+    service.session_id = "runtime-manager-recovery"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    wrong = {
+        "title": "说明",
+        "body": "利润待核对。",
+        "run_ids": [run["id"]],
+        "claims": [{"basis": "calculation", "run_id": run["id"], "row": 0, "column": "profit", "value": "999"}],
+    }
+    with pytest.raises(FoundryError, match="claim value differs"):
+        service.save_completion_draft(operation["id"], "bad-call", wrong)
+
+    manager = FinanceStore(service.task)
+    corrected = {**wrong, "claims": [{**wrong["claims"][0], "value": "30"}]}
+    saved = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": corrected})
+
+    assert saved["completion_operation_id"] == operation["id"]
+    assert saved["completion_operation_revision"] == 1
+    assert saved["claims"][0]["verification_status"] == "matches_run"
+    assert saved["completion_operation"]["revisions"][0]["status"] == "settled"
+    assert saved["completion_operation"]["revisions"][0]["draft_id"] == saved["id"]
+    assert len(manager.analysis.state()["drafts"]) == 1
+
+    replay = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": corrected})
+    assert replay["id"] == saved["id"]
+    assert replay["replayed"] is True
+    with pytest.raises(FoundryError, match="different payload"):
+        manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": {**corrected, "body": "另一个版本"}})
+
+
+def test_manager_recovery_refuses_live_attempt_and_runtime_authority(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, _ = finance
+    service.session_id = "runtime-live-recovery"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    operations.reserve(operation["id"], payload={"body": "仍在运行"}, call_id="live-call")
+
+    manager = FinanceStore(service.task)
+    with pytest.raises(FoundryError, match="live completion operation"):
+        manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": {"body": "经理保存"}})
+    with pytest.raises(FoundryError, match="task editor"):
+        service.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": {"body": "运行时保存"}})
+    with pytest.raises(FoundryError, match="authority"):
+        manager.recover_completion_draft({
+            "operation_id": operation["id"],
+            "revision": 1,
+            "draft": {"body": "经理保存", "completion_operation_id": operation["id"]},
+        })
+
+
+def test_manager_recovery_is_task_local(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, _ = finance
+    service.session_id = "runtime-cross-task-recovery"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    operations.reserve(operation["id"], payload={"body": "只属于原任务"}, call_id="task-call")
+    operations.stop(operation["id"], "timeout")
+    other_task = TaskStore(service.task.store.var_root).create(title="other", make_current=False)
+
+    with pytest.raises(FoundryError, match="unavailable|integrity|outside"):
+        FinanceStore(other_task).recover_completion_draft({
+            "operation_id": operation["id"],
+            "revision": 1,
+            "draft": {"body": "跨任务保存"},
+        })
+
+
+def test_manager_recovery_preserves_cancelled_or_timed_out_operation_status(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, _ = finance
+    service.session_id = "runtime-terminal-recovery"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    operations.reserve(operation["id"], payload={"body": "可恢复正文"}, call_id="timeout-call")
+    operations.stop(operation["id"], "timeout")
+
+    manager = FinanceStore(service.task)
+    saved = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": {"body": "经理恢复正文"}})
+
+    assert saved["completion_operation"]["status"] == "timed_out"
+    assert saved["completion_operation"]["stop_reason"] == "timeout"
+    assert saved["completion_operation"]["revisions"][0]["status"] == "settled"
+
+
+def test_manager_recovery_reconciles_committed_draft_after_receipt_failure(finance, monkeypatch):
+    import foundry.finance_completion as completion
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, _ = finance
+    service.session_id = "runtime-recovery-receipt"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    operations.reserve(operation["id"], payload={"body": "可恢复正文"}, call_id="receipt-call")
+    operations.stop(operation["id"], "timeout")
+    manager = FinanceStore(service.task)
+    draft = {"body": "经理恢复正文"}
+    original = completion.record_completion
+
+    def interrupted(*args, **kwargs):
+        raise FoundryError("interrupted before receipt")
+
+    monkeypatch.setattr(completion, "record_completion", interrupted)
+    with pytest.raises(FoundryError, match="interrupted before receipt"):
+        manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": draft})
+    assert len(manager.analysis._list("drafts")) == 1
+
+    monkeypatch.setattr(completion, "record_completion", original)
+    recovered = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": draft})
+
+    assert recovered["completion"]["draft_id"] == recovered["id"]
+    assert recovered["completion_operation"]["revisions"][0]["draft_id"] == recovered["id"]
+    assert recovered["completion_operation"]["status"] == "timed_out"
+    assert recovered["replayed"] is True
+    assert len(manager.analysis._list("drafts")) == 1
+
+
+def test_manager_recovery_reconciles_existing_receipt_after_settlement_failure(finance, monkeypatch):
+    import foundry.finance_completion_operations as operations_module
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    service, _ = finance
+    service.session_id = "runtime-recovery-settle"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    operations.reserve(operation["id"], payload={"body": "可恢复正文"}, call_id="settle-call")
+    operations.stop(operation["id"], "timeout")
+    manager = FinanceStore(service.task)
+    draft = {"body": "经理恢复正文"}
+    original_settle = operations_module.CompletionOperationStore.settle
+    calls = {"count": 0}
+
+    def interrupted_once(self, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise FoundryError("interrupted after receipt")
+        return original_settle(self, *args, **kwargs)
+
+    monkeypatch.setattr(operations_module.CompletionOperationStore, "settle", interrupted_once)
+    with pytest.raises(FoundryError, match="interrupted after receipt"):
+        manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": draft})
+    assert len(manager.analysis._list("drafts")) == 1
+    assert len(manager.analysis._list("completions")) == 1
+
+    recovered = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1, "draft": draft})
+
+    assert recovered["replayed"] is True
+    assert recovered["completion"]["id"] == manager.analysis._list("completions")[0]["id"]
+    assert recovered["completion_operation"]["revisions"][0]["completion_id"] == recovered["completion"]["id"]
+    assert len(manager.analysis._list("drafts")) == 1
+    assert len(manager.analysis._list("completions")) == 1
+
+
 def test_completion_deadline_keeps_saved_draft_and_pending_body(finance, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from foundry import finance_completion_operations as module
@@ -766,3 +1051,44 @@ def test_completion_deadline_keeps_saved_draft_and_pending_body(finance, monkeyp
     assert service.analysis.state()["drafts"][-1]["id"] == previous["id"]
     manual = service.save_explanation_draft({"title": "经理继续记录", "body": "超时后仍能编辑保存。"})
     assert manual["id"] != previous["id"]
+
+
+def test_runtime_completion_claim_mismatch_is_recoverable_with_corrected_save(finance):
+    from foundry.finance_completion_operations import CompletionOperationStore, list_completion_recoveries
+    service, context = finance
+    run = service.explain_variance({"context_id": context["id"]})
+    row = next(index for index, item in enumerate(run["result"]["rows"]) if item["metric"] == "profit")
+    service.session_id = "runtime-claim-recovery"
+    operations = CompletionOperationStore(service.task, service.session_id)
+    operation = operations.begin("manager-message", policy={"max_repairs": 1})
+    bad = {
+        "title": "利润说明",
+        "body": "利润差异待核对。",
+        "run_ids": [run["id"]],
+        "claims": [{"basis": "calculation", "run_id": run["id"], "row": row, "column": "actual", "value": "999"}],
+    }
+
+    with pytest.raises(FoundryError, match="claim value differs"):
+        service.save_completion_draft(operation["id"], "call-bad", bad)
+
+    rejected = operations.get(operation["id"])
+    assert rejected["status"] == "repair_available"
+    assert rejected["revisions"][0]["status"] == "rejected_validation"
+    assert rejected["revisions"][0]["error"]["details"][0]["expected"] == "999"
+    recoveries = list_completion_recoveries(service.task)["recoveries"]
+    assert recoveries[0]["operation_id"] == operation["id"]
+    assert recoveries[0]["status"] == "repair_available"
+    assert recoveries[0]["validation_error"]["details"][0]["column"] == "actual"
+    with pytest.raises(FoundryError, match="claim value differs"):
+        service.save_completion_draft(operation["id"], "call-bad", bad)
+
+    corrected = {
+        **bad,
+        "claims": [{"basis": "calculation", "run_id": run["id"], "row": row, "column": "actual", "value": run["result"]["rows"][row]["actual"]}],
+    }
+    saved = service.save_completion_draft(operation["id"], "call-good", corrected)
+
+    assert saved["completion_operation"]["revisions"][0]["status"] == "rejected_validation"
+    assert saved["completion_operation"]["revisions"][1]["status"] == "settled"
+    assert saved["completion_operation"]["revisions"][1]["draft_id"] == saved["id"]
+    assert saved["completion_operation"]["status"] in {"complete", "needs_review", "awaiting_input"}

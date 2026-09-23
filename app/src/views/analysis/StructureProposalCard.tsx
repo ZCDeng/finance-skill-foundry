@@ -7,9 +7,14 @@ import { Input } from '../../components/ui/input.js';
 /** One column of a sheet, as the engine read it. */
 export interface ProposedColumn {
   letter: string;
+  source_letter?: string;
   header: string;
   display: string;
+  stable_name?: string;
   role: string;
+  include?: boolean;
+  exclusion_reason?: string;
+  numeric?: boolean;
   pair: string | null;
   direction: string | null;
 }
@@ -23,6 +28,24 @@ export interface ProposedPair {
   direction: { kind: string; column?: string; side?: string };
 }
 
+export interface ProposedTableBlock {
+  id: string;
+  header_row: number;
+  start_row: number;
+  end_row: number;
+  start_column: string;
+  end_column: string;
+  score?: number;
+  columns?: ProposedColumn[];
+  amount_pairs?: ProposedPair[];
+  excluded_rows?: { row: number; text: string; reason: string }[];
+  fill_down_columns?: string[];
+  numeric_coverage?: ProposedSheet['numeric_coverage'];
+  preview?: ProposedSheet['preview'];
+  confidence?: number;
+  blocked_reason?: string | null;
+}
+
 export interface ProposedSheet {
   sheet: string;
   decision: 'table' | 'excluded';
@@ -34,7 +57,28 @@ export interface ProposedSheet {
   amount_pairs: ProposedPair[];
   excluded_rows: { row: number; text: string; reason: string }[];
   fill_down_columns: string[];
-  scope_hints: { period: string; currency: string; unit: string };
+  scope_hints: {
+    period: string;
+    currency: string;
+    unit: string;
+    granularity?: string;
+    as_of_date?: string;
+    scenario?: string;
+    forecast?: string;
+  };
+  table_blocks?: ProposedTableBlock[];
+  selected_block_id?: string | null;
+  start_row?: number;
+  end_row?: number;
+  start_column?: string;
+  end_column?: string;
+  numeric_coverage?: {
+    numeric_columns_total: number;
+    numeric_columns_included: number;
+    numeric_columns_excluded: number;
+    retained_cell_coverage?: number;
+    metadata_only?: boolean;
+  };
   preview: { row: number; is_header: boolean; cells: { letter: string; text: string }[] }[];
   confidence: number;
 }
@@ -82,6 +126,36 @@ function undecided(sheet: ProposedSheet): boolean {
   return sheet.amount_pairs.some((pair) => pair.primary && pair.direction.kind === 'undecided');
 }
 
+function hasIncludedColumn(sheet: ProposedSheet): boolean {
+  return sheet.columns.some((column) => column.include !== false || column.role === 'debit' || column.role === 'credit');
+}
+
+function applyBlock(sheet: ProposedSheet, blockId: string): ProposedSheet {
+  const block = sheet.table_blocks?.find((item) => item.id === blockId);
+  if (!block) return { ...sheet, selected_block_id: blockId };
+  return {
+    ...sheet,
+    selected_block_id: block.id,
+    header_row: block.header_row,
+    start_row: block.start_row,
+    end_row: block.end_row,
+    start_column: block.start_column,
+    end_column: block.end_column,
+    columns: block.columns ?? sheet.columns,
+    amount_pairs: block.amount_pairs ?? sheet.amount_pairs,
+    excluded_rows: block.excluded_rows ?? sheet.excluded_rows,
+    fill_down_columns: block.fill_down_columns ?? sheet.fill_down_columns,
+    numeric_coverage: block.numeric_coverage ?? sheet.numeric_coverage,
+    preview: block.preview ?? sheet.preview,
+    confidence: block.confidence ?? sheet.confidence,
+    blocked_reason: block.blocked_reason ?? null,
+  };
+}
+
+function markRepairable(sheet: ProposedSheet): ProposedSheet {
+  return { ...sheet, blocked_reason: null, reason: null };
+}
+
 /**
  * The card the manager answers before a workbook becomes calculable.
  *
@@ -107,18 +181,15 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
     setSheets(proposal.sheets);
     const next: Record<string, boolean> = {};
     for (const sheet of proposal.sheets) {
-      if (sheet.decision === 'table' && !sheet.blocked_reason) next[sheet.sheet] = true;
+      if (sheet.decision === 'table') next[sheet.sheet] = true;
     }
     setChosen(next);
   }, [proposal]);
 
-  const tables = sheets.filter((sheet) => sheet.decision === 'table' && !sheet.blocked_reason);
-  // A sheet the engine read as a table but cannot derive anything from. It is
-  // shown with the headers it did read, and never offered: ticking it would
-  // only produce a refusal she had no way to see coming.
-  const setAside = sheets.filter((sheet) => sheet.blocked_reason !== null);
+  const tables = sheets.filter((sheet) => sheet.decision === 'table');
+  const setAside = sheets.filter((sheet) => sheet.decision !== 'table');
   const selected = tables.filter((sheet) => chosen[sheet.sheet]);
-  const blocking = selected.filter(undecided);
+  const blocking = selected.filter((sheet) => undecided(sheet) || !hasIncludedColumn(sheet));
   const locked = busy || working;
 
   function edit(name: string, change: (sheet: ProposedSheet) => ProposedSheet) {
@@ -140,7 +211,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
     }
   }
 
-  if (proposal.structure_state === 'no_table') {
+  if (proposal.structure_state === 'no_table' && tables.length === 0) {
     return (
       <section className="fnd-card analysis-structure-card">
         <div className="analysis-section-heading">
@@ -184,9 +255,61 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
             <Input id={`header-${sheet.sheet}`} type="number" min={1} disabled={locked}
               value={String(sheet.header_row ?? '')}
               onChange={(event) => edit(sheet.sheet, (current) => ({
-                ...current, header_row: Number(event.target.value) || current.header_row,
+                ...markRepairable(current), header_row: Number(event.target.value) || current.header_row,
               }))} />
           </div>
+          {sheet.table_blocks && sheet.table_blocks.length > 0 && (
+            <div className="analysis-structure-field">
+              <label htmlFor={`block-${sheet.sheet}`}>表块</label>
+              <select id={`block-${sheet.sheet}`} disabled={locked}
+                value={sheet.selected_block_id ?? ''}
+                onChange={(event) => edit(sheet.sheet, (current) => applyBlock(current, event.target.value))}>
+                {sheet.table_blocks.map((block) => (
+                  <option key={block.id} value={block.id}>
+                    {block.id} · {block.start_column}{block.start_row}:{block.end_column}{block.end_row}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="analysis-structure-field">
+            <label htmlFor={`start-row-${sheet.sheet}`}>起始行</label>
+            <Input id={`start-row-${sheet.sheet}`} type="number" min={1} disabled={locked}
+              value={String(sheet.start_row ?? sheet.header_row ?? '')}
+              onChange={(event) => edit(sheet.sheet, (current) => ({
+                ...markRepairable(current), start_row: Number(event.target.value) || current.start_row,
+              }))} />
+          </div>
+          <div className="analysis-structure-field">
+            <label htmlFor={`end-row-${sheet.sheet}`}>结束行</label>
+            <Input id={`end-row-${sheet.sheet}`} type="number" min={1} disabled={locked}
+              value={String(sheet.end_row ?? '')}
+              onChange={(event) => edit(sheet.sheet, (current) => ({
+                ...markRepairable(current), end_row: Number(event.target.value) || current.end_row,
+              }))} />
+          </div>
+          <div className="analysis-structure-field">
+            <label htmlFor={`start-col-${sheet.sheet}`}>起始列</label>
+            <Input id={`start-col-${sheet.sheet}`} disabled={locked}
+              value={sheet.start_column ?? ''}
+              onChange={(event) => edit(sheet.sheet, (current) => ({
+                ...markRepairable(current), start_column: event.target.value.toUpperCase(),
+              }))} />
+          </div>
+          <div className="analysis-structure-field">
+            <label htmlFor={`end-col-${sheet.sheet}`}>结束列</label>
+            <Input id={`end-col-${sheet.sheet}`} disabled={locked}
+              value={sheet.end_column ?? ''}
+              onChange={(event) => edit(sheet.sheet, (current) => ({
+                ...markRepairable(current), end_column: event.target.value.toUpperCase(),
+              }))} />
+          </div>
+          {sheet.numeric_coverage && (
+            <p className="analysis-note">
+              数值列覆盖：纳入 {sheet.numeric_coverage.numeric_columns_included}/{sheet.numeric_coverage.numeric_columns_total}
+              {sheet.numeric_coverage.metadata_only ? ' · 仅元数据表' : ''}
+            </p>
+          )}
           <table className="analysis-structure-preview">
             <caption className="analysis-note">原件第 {sheet.preview[0]?.row ?? 1} 行起</caption>
             <tbody>
@@ -200,22 +323,40 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
           </table>
 
           <table className="analysis-structure-columns">
-            <thead><tr><th scope="col">列</th><th scope="col">原表头</th><th scope="col">含义</th></tr></thead>
+            <thead><tr><th scope="col">纳入</th><th scope="col">列</th><th scope="col">原表头</th><th scope="col">含义</th><th scope="col">排除原因</th></tr></thead>
             <tbody>
               {sheet.columns.map((column) => (
                 <tr key={column.letter}>
-                  <th scope="row">{column.letter}</th>
+                  <td>
+                    <input type="checkbox" checked={column.include !== false} disabled={locked}
+                      aria-label={`${sheet.sheet} ${column.letter} 列纳入`}
+                      onChange={(event) => edit(sheet.sheet, (current) => ({
+                        ...markRepairable(current),
+                        columns: current.columns.map((item) => (item.letter === column.letter
+                          ? { ...item, include: event.target.checked } : item)),
+                      }))} />
+                  </td>
+                  <th scope="row">{column.letter}{column.numeric ? ' · 数值' : ''}</th>
                   <td>{column.display}</td>
                   <td>
                     <select aria-label={`${sheet.sheet} ${column.letter} 列含义`} disabled={locked}
                       value={column.role}
                       onChange={(event) => edit(sheet.sheet, (current) => ({
-                        ...current,
+                        ...markRepairable(current),
                         columns: current.columns.map((item) => (item.letter === column.letter
                           ? { ...item, role: event.target.value } : item)),
                       }))}>
                       {ROLE_CHOICES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role] ?? role}</option>)}
                     </select>
+                  </td>
+                  <td>
+                    <Input aria-label={`${sheet.sheet} ${column.letter} 列排除原因`} disabled={locked || column.include !== false}
+                      value={column.exclusion_reason ?? ''}
+                      onChange={(event) => edit(sheet.sheet, (current) => ({
+                        ...markRepairable(current),
+                        columns: current.columns.map((item) => (item.letter === column.letter
+                          ? { ...item, exclusion_reason: event.target.value } : item)),
+                      }))} />
                   </td>
                 </tr>
               ))}
@@ -270,10 +411,19 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
           )}
           <p className="analysis-note">
             标题读到：期间 {sheet.scope_hints.period || '未声明'} · 单位 {sheet.scope_hints.unit || '未声明'} · 币种 {sheet.scope_hints.currency || '未声明'}
+            {sheet.scope_hints.granularity ? ` · 粒度 ${sheet.scope_hints.granularity}` : ''}
+            {sheet.scope_hints.as_of_date ? ` · 基准日 ${sheet.scope_hints.as_of_date}` : ''}
+            {sheet.scope_hints.scenario ? ` · 口径 ${sheet.scope_hints.scenario}` : ''}
+            {sheet.scope_hints.forecast ? ` · 预测 ${sheet.scope_hints.forecast}` : ''}
           </p>
           {undecided(sheet) && (
             <p role="status" className="analysis-structure-blocked">
               <AlertTriangle size={14} strokeWidth={1.5} aria-hidden /> 这张表的借贷方向还没定，选定后才能确认。
+            </p>
+          )}
+          {!hasIncludedColumn(sheet) && (
+            <p role="status" className="analysis-structure-blocked">
+              <AlertTriangle size={14} strokeWidth={1.5} aria-hidden /> 至少保留一列，或取消采用这张表。
             </p>
           )}
         </div>

@@ -5,7 +5,7 @@ const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
 
-type RenderOptions = { fontDataUrl?: string; print?: boolean };
+type RenderOptions = { fontDataUrl?: string; print?: boolean; marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[] };
 
 const blockTypes = new Set([
   'paragraph',
@@ -138,7 +138,10 @@ export function documentToMarkdown(doc: ReportDocument): string {
 export function renderReportHtml(doc: ReportDocument, title: string, options: RenderOptions = {}): string {
   const css = reportCss(options);
   const noteIds = collectNoteIds(doc.content);
-  const toc = normalizeBlocks(doc.content)
+  const blocks = exportBlocks(doc.content, title);
+  const managementMode = isManagementMode(options);
+  const receipt = renderReceipt(options);
+  const toc = managementMode ? '' : blocks
     .filter((node) => node.type === 'heading' && Number(node.attrs?.level ?? 1) <= 2)
     .map((node, index) => {
       const level = Math.max(1, Math.min(6, Number(node.attrs?.level ?? 1)));
@@ -147,7 +150,7 @@ export function renderReportHtml(doc: ReportDocument, title: string, options: Re
     })
     .join('');
   let sectionIndex = 0;
-  const body = normalizeBlocks(doc.content).map((node) => {
+  const body = blocks.map((node) => {
     if (node.type === 'heading') {
       sectionIndex += 1;
       return nodeToHtml(node, sectionIndex, noteIds);
@@ -164,18 +167,57 @@ export function renderReportHtml(doc: ReportDocument, title: string, options: Re
 <style>${css}</style>
 </head>
 <body>
-<main class="report-shell${options.print ? ' is-print' : ''}">
+<main class="report-shell${options.print ? ' is-print' : ''}"${options.contentMode ? ` data-report-content-mode="${escapeAttribute(options.contentMode)}"` : ''}${options.projectionHash ? ` data-report-projection-hash="${escapeAttribute(options.projectionHash)}"` : ''}>
 <header class="report-cover">
+${options.marker ? `<p class="report-review-marker">${escapeHtml(options.marker)}</p>` : ''}
 <p class="report-kicker">${escapeHtml(metadataLine(doc))}</p>
 <h1>${escapeHtml(title)}</h1>
+${managementMode ? '' : receipt}
 </header>
 ${toc ? `<nav class="report-toc" aria-label="目录"><h2>目录</h2><ol>${toc}</ol></nav>` : ''}
 <article class="report-body">
 ${body}
 </article>
+${managementMode ? receipt : ''}
 </main>
 </body>
 </html>`;
+}
+
+
+function isManagementMode(options: RenderOptions): boolean {
+  return options.contentMode === 'management';
+}
+
+function renderReceipt(options: RenderOptions): string {
+  const rows = [
+    ['文稿标记', options.marker],
+    ['草稿版本', options.draftId],
+    ['导出模式', options.contentMode],
+    ['投影 SHA-256', options.projectionHash],
+    ['内容 SHA-256', options.contentHash],
+    ['发布状态', options.publicationStatus],
+    ['复核状态', options.reviewStatus],
+    ['可复现状态', options.reproducibilityStatus],
+  ].filter((row): row is [string, string] => Boolean(row[1]));
+  const sources = (options.sources ?? []).filter(Boolean).slice(0, 12);
+  if (!rows.length && !sources.length) return '';
+  const items = rows.map(([label, value]) => `<li><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</li>`).join('');
+  const sourceItems = sources.length ? `<li><strong>授权来源：</strong><ul>${sources.map((source) => `<li>${escapeHtml(source)}</li>`).join('')}</ul></li>` : '';
+  return `<section class="report-receipt" aria-label="导出身份"><ul>${items}${sourceItems}</ul></section>`;
+}
+
+function exportBlocks(content: ReportNode[], title: string): ReportNode[] {
+  const blocks = normalizeBlocks(content);
+  const first = blocks[0];
+  if (first?.type === 'heading' && Number(first.attrs?.level ?? 1) === 1 && normalizeTitle(textContent(first)) === normalizeTitle(title)) {
+    return blocks.slice(1);
+  }
+  return blocks;
+}
+
+function normalizeTitle(value: string): string {
+  return value.replace(/\s+/g, '').toLocaleLowerCase();
 }
 
 function documentMetadataMarkdown(doc: ReportDocument): string {
@@ -658,6 +700,9 @@ body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:va
 .report-shell{max-width:calc(42em + 48px);margin:0 auto;padding:32px 24px 56px}
 .report-cover,.report-toc,.report-body{max-width:42em;margin:0 auto}
 .report-cover{padding:12px 0 28px;border-bottom:1px solid var(--report-line)}
+.report-review-marker{display:inline-block;margin:0 0 12px;padding:2px 8px;border:1px solid #b78a38;border-radius:4px;background:#fff6d8;color:#7a4d00;font-size:13px;line-height:22px}
+.report-receipt{margin:16px 0 0;padding:10px 12px;border:1px solid var(--report-line);border-radius:6px;background:#faf9f5;color:var(--report-muted);font-size:12px;line-height:20px}
+.report-receipt ul{margin:0;padding-left:18px}.report-receipt li+li{margin-top:2px}.report-receipt strong{color:var(--report-ink)}
 .report-kicker,.table-meta,figcaption{margin:0;color:var(--report-muted);font-size:13px;line-height:22px}
 h1{margin:8px 0 0;font-size:28px;line-height:40px;font-weight:750;letter-spacing:0}
 h2{margin:32px 0 12px;font-size:22px;line-height:32px;font-weight:720;break-after:avoid}

@@ -25,6 +25,7 @@ COMMANDS = {
     "analysis-script",
     "analysis-output",
     "report-draft-read",
+    "report-projection-read",
     "report-source-add",
     "report-source-read",
     "report-xlsx-read",
@@ -58,8 +59,12 @@ def add_parsers(sub):
     p = sub.add_parser("analysis-export")
     p.add_argument("--draft", required=True)
     p.add_argument("--format", choices=["md", "xlsx"], default="md")
+    p.add_argument("--mode", choices=["management", "audit"], default="management")
     p = sub.add_parser("report-draft-read")
     p.add_argument("--draft", required=True)
+    p = sub.add_parser("report-projection-read")
+    p.add_argument("--draft", required=True)
+    p.add_argument("--mode", choices=["management", "audit"], default="management")
     p = sub.add_parser("report-source-add")
     p.add_argument("--path", required=True)
     p = sub.add_parser("report-source-read")
@@ -72,6 +77,8 @@ def add_parsers(sub):
     p.add_argument("--draft", required=True)
     p.add_argument("--format", choices=["md", "xlsx", "docx", "pdf", "html"], required=True)
     p.add_argument("--path", required=True)
+    p.add_argument("--mode", choices=["management", "audit"], default="management")
+    p.add_argument("--projection-hash")
     p = sub.add_parser("analysis-method-save")
     p.add_argument("--analysis", required=True)
     p.add_argument("--name", required=True)
@@ -125,6 +132,45 @@ def _bound(context, bindings):
             raise FoundryError(
                 "snapshots are outside this session context; use analysis-refresh to include task datasets"
             )
+
+
+def _bound_draft(context, service, draft):
+    """Report presentation cannot widen a session's source permissions."""
+    for run_id in draft.get("run_ids", []):
+        _bound(context, service.get_run(run_id)["bindings"])
+    for claim in draft.get("claims", []):
+        if isinstance(claim, dict):
+            if claim.get("dataset_id"):
+                _bound(context, {"source": claim["dataset_id"]})
+            if claim.get("run_id"):
+                _bound(context, service.get_run(claim["run_id"])["bindings"])
+    _bound_evidence(context, service, draft)
+    _bound_requirements(context, service, draft)
+
+
+def _bound_requirements(context, service, spec):
+    if spec.get("requirements_id"):
+        _bound(context, service._get("requirements", spec["requirements_id"]).get("bindings", {}))
+
+
+def _bound_evidence(context, service, spec):
+    from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
+
+    recipes = spec.get("evidence_recipes", [])
+    for dataset_id in recipe_dataset_ids(recipes) | consistency_dataset_ids(spec.get("consistency_sources", [])):
+        _bound(context, {"source": dataset_id})
+    for recipe in recipes:
+        claim = recipe.get("claim", {})
+        if claim.get("run_id"):
+            _bound(context, service.get_run(claim["run_id"])["bindings"])
+
+
+def _draft_visible(context, service, draft):
+    try:
+        _bound_draft(context, service, draft)
+    except FoundryError:
+        return False
+    return True
 
 
 def _propose_structure(context, dataset, actor):
@@ -213,11 +259,7 @@ def dispatch(args) -> bool:
             result["drafts"] = [
                 d
                 for d in result["drafts"]
-                if set(d["run_ids"]) <= run_ids
-                and all(
-                    not c.get("dataset_id") or c["dataset_id"] in allowed
-                    for c in d["claims"]
-                )
+                if set(d["run_ids"]) <= run_ids and _draft_visible(context, service, d)
             ]
         result["context"] = {
             "session_id": context.session_id,
@@ -280,10 +322,12 @@ def dispatch(args) -> bool:
     elif args.cmd == "analysis-save":
         spec = _json(args.spec, "analysis spec")
         _bound(context, spec.get("bindings", {}))
+        _bound_requirements(context, service, spec)
         result = service.save_analysis(spec)
     elif args.cmd == "analysis-run":
         analysis = service.get_analysis(args.analysis)
         _bound(context, analysis["bindings"])
+        _bound_requirements(context, service, analysis)
         result = service.run_analysis(
             args.analysis,
             session_id=context.session_id,
@@ -291,7 +335,12 @@ def dispatch(args) -> bool:
         )
     elif args.cmd == "analysis-draft":
         spec = _json_spec(args, "draft spec")
+        if context.session_id and spec.get("review_status", "unreviewed") != "unreviewed":
+            raise FoundryError("professional review must be recorded by the manager, not the runtime session")
         parent = service.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
+        _bound_draft(context, service, parent)
+        _bound_evidence(context, service, spec)
+        _bound_requirements(context, service, spec)
         for run_id in [
             *parent.get("run_ids", []),
             *spec.get("run_ids", parent.get("run_ids", [])),
@@ -303,11 +352,12 @@ def dispatch(args) -> bool:
         result = service.save_draft(spec)
     elif args.cmd == "analysis-export":
         draft = service.get_draft(args.draft)
-        for run_id in draft["run_ids"]:
-            _bound(context, service.get_run(run_id)["bindings"])
-        result = service.export_draft(args.draft, args.format)
-    elif args.cmd == "report-draft-read":
-        result = service.get_draft(args.draft)
+        _bound_draft(context, service, draft)
+        result = service.export_draft(args.draft, args.format, mode=args.mode)
+    elif args.cmd in {"report-draft-read", "report-projection-read"}:
+        draft = service.get_draft(args.draft)
+        _bound_draft(context, service, draft)
+        result = service.projection_for_draft(args.draft, args.mode) if args.cmd == "report-projection-read" else draft
     elif args.cmd == "report-source-add":
         result = service.add_report_source(_uploaded_path(context, args.path))
     elif args.cmd == "report-source-read":
@@ -315,7 +365,9 @@ def dispatch(args) -> bool:
     elif args.cmd == "report-xlsx-read":
         result = service.read_report_xlsx(args.source, sheet=args.sheet, range_ref=getattr(args, "range"))
     elif args.cmd == "report-export-register":
-        result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path))
+        _bound_draft(context, service, service.get_draft(args.draft))
+        result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path),
+                                                content_mode=args.mode, projection_hash=args.projection_hash)
     elif args.cmd == "analysis-output":
         run = service.get_run(args.run)
         _bound(context, run["bindings"])
@@ -336,6 +388,7 @@ def dispatch(args) -> bool:
     else:
         spec = _json(args.spec, "script spec")
         _bound(context, spec.get("bindings", {}))
+        _bound_requirements(context, service, spec)
         result = service.run_script(
             spec,
             session_id=context.session_id,

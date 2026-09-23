@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { basename, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 import type { BrowserWindow } from 'electron';
 
@@ -17,7 +17,7 @@ import {
   rpcUrl,
   rpcValue,
 } from './boot.js';
-import { followupDraft, residentHandoffScript, snapshotDraftsScript, restoreDraftsScript, type EmbeddedReply } from './handoff.js';
+import { followupDraft, residentHandoffScript, snapshotDraftsScript, restoreDraftsScript, type EmbeddedDraftReference, type EmbeddedReply } from './handoff.js';
 import { noticePatch, readNotice } from './notice.js';
 import { Pane } from './pane.js';
 import { HARNESS_SKIN } from './skin.js';
@@ -56,6 +56,9 @@ export class HarnessHost {
   private child: ChildProcess | null = null;
   private readonly pane = new Pane();
   private paneOrigin: string | null = null;
+  private restoredOrigin: string | null = null;
+  private draftSnapshotTimer: ReturnType<typeof setInterval> | null = null;
+  private draftSnapshotPersisting = false;
   private base: string | null = null;
   private starting: Promise<string> | null = null;
 
@@ -108,6 +111,75 @@ export class HarnessHost {
       });
     });
     return this.starting;
+  }
+
+
+  private draftSnapshotPath(): string {
+    return join(this.opts.varRoot, 'harness-draft-snapshot.json');
+  }
+
+  private readDraftSnapshot(): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(readFileSync(this.draftSnapshotPath(), 'utf8'));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private snapshotHasEntries(snapshot: Record<string, unknown> | undefined): snapshot is Record<string, unknown> {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+    return ['drafts', 'receipts', 'references'].some((key) => {
+      const value = snapshot[key];
+      return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length);
+    });
+  }
+
+  private persistDraftSnapshot(snapshot: Record<string, unknown> | undefined): void {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return;
+    try {
+      const path = this.draftSnapshotPath();
+      mkdirSync(dirname(path), { recursive: true });
+      const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(temp, JSON.stringify(snapshot), { encoding: 'utf8', mode: 0o600 });
+      chmodSync(temp, 0o600);
+      renameSync(temp, path);
+    } catch {
+      // Draft persistence is recovery-only. A filesystem refusal must not break
+      // the live conversation, which still has the browser's localStorage.
+    }
+  }
+
+  private async persistCurrentDraftSnapshot(): Promise<void> {
+    if (!this.pane.attached() || this.draftSnapshotPersisting) return;
+    this.draftSnapshotPersisting = true;
+    try {
+      const snapshot = await this.pane.run(snapshotDraftsScript) as Record<string, unknown> | undefined;
+      this.persistDraftSnapshot(snapshot ?? {});
+    } catch {
+      // The runtime may be navigating or gone during shutdown. The next poll or
+      // handoff will refresh the durable recovery snapshot.
+    } finally {
+      this.draftSnapshotPersisting = false;
+    }
+  }
+
+  private startDraftSnapshotPersistence(): void {
+    if (this.draftSnapshotTimer) return;
+    this.draftSnapshotTimer = setInterval(() => { void this.persistCurrentDraftSnapshot(); }, 1000);
+    this.draftSnapshotTimer.unref?.();
+  }
+
+  private async restoreDraftSnapshot(origin: string): Promise<void> {
+    if (this.restoredOrigin === origin) return;
+    this.restoredOrigin = origin;
+    const snapshot = this.readDraftSnapshot();
+    if (!this.snapshotHasEntries(snapshot)) return;
+    await this.pane.run(restoreDraftsScript(snapshot));
+    // DSH reads the chat store while booting. Reload after restoring the new
+    // origin's localStorage so a full app restart behaves like a port migration.
+    await this.pane.load(origin);
+    this.paneOrigin = origin;
   }
 
   /** One RPC against the running runtime. */
@@ -188,7 +260,7 @@ export class HarnessHost {
 
   /** Select a resident native session; passive resume preserves its input machine. */
   async show(sessionId: string, draft?: string, cwd?: string, workspaceTitle?: string,
-    action?: {submit?: boolean; requestId?: string}): Promise<EmbeddedReply> {
+    action?: {submit?: boolean; requestId?: string; draftReference?: EmbeddedDraftReference}): Promise<EmbeddedReply> {
     const origin = await this.start();
     if (!this.pane.attached()) throw new Error('对话窗口尚未连接，请重新打开对话。');
     if (cwd !== undefined) {
@@ -206,15 +278,21 @@ export class HarnessHost {
       const drafts = await this.pane.run(snapshotDraftsScript) as Record<string, unknown> | undefined;
       await this.pane.load(origin);
       this.paneOrigin = origin;
-      if (drafts && Object.keys(drafts).length) {
+      this.restoredOrigin = origin;
+      if (this.snapshotHasEntries(drafts)) {
         await this.pane.run(restoreDraftsScript(drafts));
+        this.persistDraftSnapshot(drafts);
         // New origins have separate browser stores. Restore before constructing
         // the new conversation stores; same-origin task switches never reload.
         await this.pane.load(origin);
       }
+    } else {
+      await this.restoreDraftSnapshot(origin);
     }
+    this.startDraftSnapshotPersistence();
     const reply = await this.pane.run(residentHandoffScript({sessionId, draft, ...action})) as EmbeddedReply | undefined;
     if (reply?.sessionId !== sessionId) throw new Error('对话未能恢复到当前任务，请重试。');
+    await this.persistCurrentDraftSnapshot();
     if (draft !== undefined) this.pane.focus();
     return reply;
   }
@@ -266,6 +344,7 @@ export class HarnessHost {
     const origin = await this.start();
     await this.pane.attach(window, origin);
     this.paneOrigin = origin;
+    await this.restoreDraftSnapshot(origin);
   }
 
   /** Show or hide the page by giving it a rectangle or none. */
@@ -278,6 +357,11 @@ export class HarnessHost {
   }
 
   stop(): void {
+    if (this.draftSnapshotTimer) {
+      clearInterval(this.draftSnapshotTimer);
+      this.draftSnapshotTimer = null;
+    }
+    void this.persistCurrentDraftSnapshot();
     this.child?.kill();
     this.child = null;
     this.base = null;

@@ -6,15 +6,20 @@ import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { type Binding, runFoundryJson } from '../foundry.js';
-import type { ReportDocument, ReportFormat, ReportImportOptions, ReportImportResult, ReportSource } from './model.js';
+import type { ReportDocument, ReportFormat, ReportImportOptions, ReportImportResult, ReportProjection, ReportProjectionMode, ReportSource } from './model.js';
 import { ocrDocument } from './ocr.js';
 import { localReportResources } from './resources.js';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const FORMATS = new Set<ReportFormat>(['docx', 'pdf', 'html', 'md', 'xlsx']);
+const MODES = new Set<ReportProjectionMode>(['management', 'audit']);
 export function reportFormat(value: unknown): ReportFormat {
   if (!FORMATS.has(value as ReportFormat)) throw new Error('不支持的文稿格式。');
   return value as ReportFormat;
+}
+function reportMode(value: unknown): ReportProjectionMode {
+  if (!MODES.has(value as ReportProjectionMode)) throw new Error('不支持的文稿模式。');
+  return value as ReportProjectionMode;
 }
 export function sourceId(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{32}$/.test(value)) throw new Error('无效的文稿来源。');
@@ -25,6 +30,17 @@ function assertDocument(value: unknown): asserts value is ReportDocument {
     || !Array.isArray((value as ReportDocument).content) || Buffer.byteLength(JSON.stringify(value)) > MAX_BYTES) {
     throw new Error('文稿结构无效或超过容量。');
   }
+}
+function assertProjection(value: unknown): asserts value is ReportProjection {
+  if (!value || typeof value !== 'object' || (value as ReportProjection).schema_version !== 1
+    || typeof (value as ReportProjection).projection_hash !== 'string'
+    || !/^[a-f0-9]{64}$/.test((value as ReportProjection).projection_hash)
+    || !MODES.has((value as ReportProjection).content_mode)
+    || typeof (value as ReportProjection).title !== 'string'
+    || typeof (value as ReportProjection).body !== 'string') {
+    throw new Error('文稿导出投影无效。');
+  }
+  assertDocument((value as ReportProjection).document);
 }
 function aborted(signal: AbortSignal) { if (signal.aborted) throw new Error('已取消文档转换。'); }
 
@@ -88,7 +104,7 @@ export function appendOcrDraft(result: ReportImportResult, supplement: ReportImp
 }
 
 /** A private renderer prints only our escaped template, with no preload, network or navigation. */
-export async function printReportPdf(html: string, signal: AbortSignal): Promise<Buffer> {
+export async function printReportPdf(html: string, signal: AbortSignal, marker = ''): Promise<Buffer> {
   aborted(signal);
   const scratch = await mkdtemp(path.join(tmpdir(), 'fa-report-print-'));
   const entry = pathToFileURL(path.join(scratch, 'report.html')).href;
@@ -110,12 +126,13 @@ export async function printReportPdf(html: string, signal: AbortSignal): Promise
       await Promise.all(Array.from(document.images, image => image.decode()));
       if (!document.fonts.check('11pt "Noto Sans SC"', '财务报告')) throw new Error('中文字体未加载');
     })()`);
-    const reportTitle = String(await window.webContents.executeJavaScript('document.title'))
-      .replace(/[&<>"']/g, (value) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[value]!));
+    const rawTitle = String(await window.webContents.executeJavaScript('document.title'));
+    const reportTitle = escapePdfHeaderText(rawTitle);
+    if (marker) await injectPrintablePageMarginHeader(window, `${marker} · ${rawTitle}`);
     aborted(signal);
     return await window.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true,
       displayHeaderFooter: true, margins: { top: 20 / 25.4, bottom: 20 / 25.4, left: 20 / 25.4, right: 20 / 25.4 },
-      headerTemplate: `<div style="font:9pt sans-serif;margin:0 20mm;width:170mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#666">${reportTitle}</div>`,
+      headerTemplate: marker ? '<div></div>' : `<div style="font:9pt sans-serif;margin:0 20mm;width:170mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#666">${reportTitle}</div>`,
       footerTemplate: '<div style="font:9pt sans-serif;width:100%;text-align:center;color:#666"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
     });
   } finally {
@@ -124,6 +141,37 @@ export async function printReportPdf(html: string, signal: AbortSignal): Promise
     await session.clearStorageData();
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+
+
+async function injectPrintablePageMarginHeader(window: BrowserWindow, text: string): Promise<void> {
+  const header = text.length > 96 ? `${text.slice(0, 95)}…` : text;
+  await window.webContents.executeJavaScript(`(() => {
+    const existingStyle = document.querySelector('[data-fa-report-print-header="style"]');
+    if (existingStyle) existingStyle.remove();
+    const style = document.createElement('style');
+    style.setAttribute('data-fa-report-print-header', 'style');
+    style.textContent = ${JSON.stringify(`
+      @page {
+        margin: 20mm;
+        @top-left {
+          content: ${cssString(header)};
+          color: #666;
+          font: 9pt "Noto Sans SC", sans-serif;
+        }
+      }
+    `)};
+    document.head.appendChild(style);
+  })()`);
+}
+
+function cssString(value: string): string {
+  return `"${value.replace(/[\\\"\n\r\f]/g, (char) => ({ '\\': '\\\\', '"': '\\"', '\n': '\\A ', '\r': '\\A ', '\f': '\\A ' }[char]!))}"`;
+}
+
+function escapePdfHeaderText(value: string): string {
+  return value.replace(/[&<>\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char]!));
 }
 
 type Job = { controller: AbortController; committing: boolean };
@@ -205,11 +253,13 @@ export class ReportHost {
       return { html: await conversion<string>('html', { document, title, options: { print: true, fontDataUrl: await fontData() } }, signal) };
     });
   }
-  async export(task: string, id: string, rawFormat: unknown): Promise<Record<string, unknown>> {
+  async export(task: string, id: string, rawFormat: unknown, rawMode: unknown = 'management'): Promise<Record<string, unknown>> {
     const format = reportFormat(rawFormat);
+    const mode = reportMode(rawMode);
     return this.job(task, async (signal, commit) => {
-      const draft = await this.call<{ title: string; body: string; document?: ReportDocument }>(task, 'report-draft-read', ['--draft', id], signal);
-      const selected = await dialog.showSaveDialog({ title: '导出财务文稿', defaultPath: `${draft.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100)}.${format}`,
+      const projection = await this.call<ReportProjection>(task, 'report-projection-read', ['--draft', id, '--mode', mode], signal);
+      assertProjection(projection);
+      const selected = await dialog.showSaveDialog({ title: '导出财务文稿', defaultPath: `${projection.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100)}-${projection.content_mode}.${format}`,
         filters: [{ name: format.toUpperCase(), extensions: [format] }] });
       if (selected.canceled || !selected.filePath) return { cancelled: true };
       aborted(signal); this.progress(task, '生成导出文件');
@@ -218,20 +268,20 @@ export class ReportHost {
         let archived: { path: string; [key: string]: unknown };
         if (format === 'md' || format === 'xlsx') {
           commit();
-          archived = await this.call(task, 'analysis-export', ['--draft', id, '--format', format]);
+          archived = await this.call(task, 'analysis-export', ['--draft', id, '--format', format, '--mode', projection.content_mode]);
         } else {
-          const document = draft.document ?? await conversion<ReportDocument>('markdown', { body: draft.body }, signal);
           let data: Buffer;
-          if (format === 'docx') data = Buffer.from(await conversion<Uint8Array>('docx', { document, title: draft.title, fontData: await docxFontData() }, signal));
+          const renderOptions = { marker: projection.marker, contentMode: projection.content_mode, projectionHash: projection.projection_hash, draftId: projection.draft_id, contentHash: projection.content_hash, publicationStatus: projection.publication_status, reviewStatus: projection.review_status, reproducibilityStatus: projection.reproducibility_status, sources: projection.sources ?? [] };
+          if (format === 'docx') data = Buffer.from(await conversion<Uint8Array>('docx', { document: projection.document, title: projection.title, fontData: await docxFontData(), options: renderOptions }, signal));
           else {
-            const html = await conversion<string>('html', { document, title: draft.title, options: { print: format === 'pdf', fontDataUrl: await fontData() } }, signal);
-            data = format === 'pdf' ? await printReportPdf(html, signal) : Buffer.from(html);
+            const html = await conversion<string>('html', { document: projection.document, title: projection.title, options: { print: format === 'pdf', ...(format === 'pdf' ? { fontDataUrl: await fontData() } : {}), ...renderOptions } }, signal);
+            data = format === 'pdf' ? await printReportPdf(html, signal, projection.marker) : Buffer.from(html);
           }
           aborted(signal);
           const temp = path.join(scratch, `report.${format}`);
           await writeFile(temp, data, { mode: 0o600 });
           commit(); this.progress(task, '保存导出记录');
-          archived = await this.call(task, 'report-export-register', ['--draft', id, '--format', format, '--path', temp]);
+          archived = await this.call(task, 'report-export-register', ['--draft', id, '--format', format, '--path', temp, '--mode', projection.content_mode, '--projection-hash', projection.projection_hash]);
         }
         await copyFile(archived.path, selected.filePath);
         return { ...archived, path: selected.filePath, archived_path: archived.path, format };

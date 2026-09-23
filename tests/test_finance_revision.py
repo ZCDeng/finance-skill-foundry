@@ -1,0 +1,589 @@
+from __future__ import annotations
+
+import pytest
+
+from foundry.analysis import AnalysisStore, _new
+from foundry.errors import FoundryError
+from foundry.finance_explanations import validate_explanation
+from foundry.task import TaskStore
+
+
+def _run(
+    analysis: AnalysisStore,
+    *,
+    value: str,
+    suffix: str,
+    source_hash: str = "source-hash-a",
+    seq: int | None = None,
+    row_extra: dict | None = None,
+) -> dict:
+    record = _new(
+        analysis.task,
+        id=suffix * 32,
+        analysis_id="a" * 32,
+        engine="finance",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        bindings={"budget": "dataset-a"},
+        input_hashes={"budget": "data-hash-a"},
+        source_hashes={"budget": source_hash},
+        finance_scope={
+            "budget": {
+                "period": "2026-01..2026-08",
+                "scenario": "BUD",
+                "organization": "集团",
+                "unit": "万元",
+                "currency": "CNY",
+            }
+        },
+        **({"seq": seq} if seq is not None else {}),
+        result={
+            "columns": [{"name": "metric"}, {"name": "actual"}],
+            "rows": [{
+                "metric_key": "revenue",
+                "metric": "收入",
+                "actual": value,
+                "unit": "万元",
+                "currency": "CNY",
+                **(row_extra or {}),
+            }],
+            "row_count": 1,
+            "truncated": False,
+        },
+    )
+    return analysis._write(analysis._object_path("runs", record["id"]), record)
+
+
+def test_revision_compare_flags_unquoted_same_basis_numeric_regression(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="1")
+    new_run = _run(analysis, value="344487.0552", suffix="2")
+    parent = analysis.save_draft({
+        "title": "旧稿",
+        "body": "收入完成情况。",
+        "run_ids": [old_run["id"]],
+    })
+
+    revised = analysis.save_draft({
+        "parent_id": parent["id"],
+        "body": "只修正其他收益预算。",
+        "run_ids": [new_run["id"]],
+    })
+
+    issues = revised["revision_comparison"]["issues"]
+    assert revised["revision_comparison"]["summary"]["status"] == "needs_attention"
+    assert issues == [{
+        "code": "revision_numeric_regression",
+        "business_key": issues[0]["business_key"],
+        "column": "actual",
+        "old_value": "325644",
+        "new_value": "344487.0552",
+        "old_run_id": old_run["id"],
+        "new_run_id": new_run["id"],
+        "severity": "error",
+        "message": "同一来源和口径下的关键数值发生变化，需要解释或修正。",
+    }]
+
+
+def test_revision_compare_discloses_basis_change_without_numeric_regression(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="1")
+    new_run = _run(analysis, value="344487.0552", suffix="2", source_hash="source-hash-b")
+    parent = analysis.save_draft({"body": "旧稿", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({"parent_id": parent["id"], "body": "新来源", "run_ids": [new_run["id"]]})
+
+    assert revised["revision_comparison"]["issues"][0]["code"] == "revision_basis_changed"
+
+
+def test_revision_compare_uses_legacy_period_org_and_latest_run_for_regression(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    row_scope = {"period": "2026-01..2026-08", "organization": "集团", "scenario": "actual_vs_budget"}
+    old_run = _run(analysis, value="325644", suffix="3", seq=1, row_extra=row_scope)
+    copied_old_run = _run(analysis, value="325644", suffix="4", seq=2, row_extra=row_scope)
+    new_run = _run(analysis, value="344487.0552", suffix="5", seq=3, row_extra=row_scope)
+    # Legacy script rows often carry scope directly on the row rather than under
+    # finance_scope. These fields must be part of the business identity so YTD,
+    # month, and regional rows do not collapse into one ambiguous metric bucket.
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入。", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({
+        "parent_id": parent["id"],
+        "body": "只修其他损益，收入不应改变。",
+        "run_ids": [copied_old_run["id"], new_run["id"]],
+    })
+
+    issue = next(item for item in revised["revision_comparison"]["issues"] if item["code"] == "revision_numeric_regression")
+    assert issue["old_value"] == "325644"
+    assert issue["new_value"] == "344487.0552"
+    assert issue["new_run_id"] == new_run["id"]
+    assert any(item["code"] == "revision_numeric_regression" for item in revised["quality"]["issues"])
+
+
+def test_revision_compare_zero_business_intersection_is_not_pass(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="a")
+    new_run = _run(analysis, value="42", suffix="b", row_extra={"metric_key": "profit", "metric": "利润"})
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入。", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({"parent_id": parent["id"], "body": "利润。", "run_ids": [new_run["id"]]})
+
+    assert revised["revision_comparison"]["summary"]["status"] == "no_comparable_runs"
+    assert revised["revision_comparison"]["summary"]["compared_business_keys"] == 0
+
+
+def test_evidence_recipe_mismatch_enters_draft_quality_and_validate_explanation(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="evidence recipes")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "budget.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["B2"] = 100
+    sheet["C2"] = 23
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="budget", metadata={"mode": "workbook"})
+    run = _run(analysis, value="120", suffix="6")
+    recipe = {
+        "id": "budget-sum",
+        "label": "预算合计",
+        "kind": "sum",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "预算",
+        "range": "B2:C2",
+        "unit": "万元",
+        "claim": {"run_id": run["id"], "row": 0, "column": "actual"},
+        "business_key": {"metric": "budget", "period": "2026-08"},
+    }
+
+    check = validate_explanation(analysis, {"body": "预算为120万元。", "run_ids": [run["id"]], "evidence_recipes": [recipe]})
+    issue = next(item for item in check["issues"] if item["code"] == "evidence_recipe_mismatch")
+    assert issue["actual"] == "123"
+    assert issue["expected"] == "120"
+    assert issue["location"]["sheet"] == "预算"
+
+    draft = analysis.save_draft({"title": "说明", "body": "预算为120万元。", "run_ids": [run["id"]], "evidence_recipes": [recipe]})
+    assert draft["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert any(item["code"] == "evidence_recipe_mismatch" for item in draft["quality"]["issues"])
+
+
+def test_evidence_recipe_zero_and_invalid_ranges_are_not_silent_passes(tmp_path):
+    from foundry.financial_evidence import evaluate_evidence_recipes
+    from foundry.errors import FoundryError
+
+    task = TaskStore(tmp_path / "var").create(title="evidence recipes")
+    analysis = AnalysisStore(task)
+    assert evaluate_evidence_recipes(analysis, [])["summary"]["status"] == "not_configured"
+
+    bad = {
+        "id": "full-column",
+        "label": "full-column",
+        "kind": "sum",
+        "dataset_id": "0" * 32,
+        "source_hash": "a" * 64,
+        "sheet": "预算",
+        "range": "A:A",
+        "claim": {"run_id": "1" * 32, "row": 0, "column": "actual"},
+    }
+    try:
+        evaluate_evidence_recipes(analysis, [bad])
+    except FoundryError as exc:
+        assert "bounded A1" in str(exc)
+    else:
+        raise AssertionError("full-column recipe should be rejected")
+
+    duplicate = [{**bad, "range": "A1:A1", "id": "dup"}, {**bad, "range": "B1:B1", "id": "dup"}]
+    try:
+        evaluate_evidence_recipes(analysis, duplicate)
+    except FoundryError as exc:
+        assert "unique" in str(exc)
+    else:
+        raise AssertionError("duplicate recipe ids should be rejected")
+
+def test_consistency_rules_read_values_from_authorized_sources(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="consistency")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "variance.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "差异"
+    sheet["B2"] = 8
+    sheet["C2"] = 12
+    book.save(source)
+    book.close()
+    numbers = analysis.add_dataset(source, name="variance", metadata={"mode": "workbook"})
+    text_path = tmp_path / "assertion.md"
+    text_path.write_text("所有关键差异均超过10万元。\n", encoding="utf-8")
+    text_source = analysis.add_dataset(text_path, name="assertion")
+    run = _run(analysis, value="20", suffix="7")
+
+    draft = analysis.save_draft({
+        "title": "一致性",
+        "body": "所有关键差异均超过10万元。",
+        "run_ids": [run["id"]],
+        "consistency_sources": {
+            "a": {"kind": "number", "dataset_id": numbers["id"], "source_hash": numbers["source_hash"], "sheet": "差异", "range": "B2"},
+            "b": {"kind": "number", "dataset_id": numbers["id"], "source_hash": numbers["source_hash"], "sheet": "差异", "range": "C2"},
+            "assertion": {"kind": "text", "dataset_id": text_source["id"], "source_hash": text_source["source_hash"], "paragraph": 1},
+        },
+        "consistency_rules": [{
+            "id": "all-material",
+            "kind": "all_absolute_exceed",
+            "threshold": "10",
+            "asserted_result": True,
+            "assertion_source_id": "assertion",
+            "values": [{"id": "a", "source_id": "a"}, {"id": "b", "source_id": "b"}],
+        }],
+    })
+
+    assert draft["consistency_report"]["summary"]["status"] == "needs_attention"
+    issue = next(item for item in draft["quality"]["issues"] if item["code"] == "financial_consistency_mismatch")
+    assert issue["computed_result"] is False
+    assert issue["original_text"] == "所有关键差异均超过10万元。"
+    assert draft["quality"]["status_dimensions"]["source_validation"]["status"] == "needs_attention"
+
+
+def test_consistency_rules_reject_caller_supplied_values(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="consistency")
+    analysis = AnalysisStore(task)
+    run = _run(analysis, value="20", suffix="8")
+    try:
+        analysis.save_draft({
+            "title": "一致性",
+            "body": "差异超过10。",
+            "run_ids": [run["id"]],
+            "consistency_rules": [{
+                "id": "fake",
+                "kind": "all_absolute_exceed",
+                "threshold": "10",
+                "asserted_result": True,
+                "assertion_source_id": "assertion",
+                "values": [{"id": "fake", "source_id": "missing", "value": "999"}],
+            }],
+        })
+    except FoundryError as exc:
+        assert "authorized source" in str(exc)
+    else:
+        raise AssertionError("caller supplied consistency values should be rejected")
+
+
+def test_quality_status_dimensions_keep_missing_source_validation_distinct(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="dimensions")
+    analysis = AnalysisStore(task)
+    run = _run(analysis, value="20", suffix="9")
+    draft = analysis.save_draft({"title": "说明", "body": "说明。", "run_ids": [run["id"]]})
+    dimensions = draft["quality"]["status_dimensions"]
+    assert set(dimensions) == {"execution", "numeric_citation", "source_validation", "professional_review"}
+    assert dimensions["execution"]["status"] == "pass"
+    assert dimensions["source_validation"]["status"] == "not_configured"
+    assert dimensions["professional_review"]["status"] == "unreviewed"
+
+def test_huachen_direct_source_recipe_accepts_3185_and_rejects_proportional_3063(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="huachen source recipe")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "budget.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["B36"] = 3185
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="budget", metadata={"mode": "workbook"})
+    correct = _run(analysis, value="3185", suffix="b")
+    wrong = _run(analysis, value="3063.0494", suffix="c")
+
+    base_recipe = {
+        "id": "other-gains-budget-direct",
+        "label": "其他收益预算直接取数",
+        "kind": "direct",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "预算",
+        "range": "B36",
+        "claim": {"run_id": correct["id"], "row": 0, "column": "actual"},
+        "business_key": {"metric": "other_gains_budget", "period": "2026-01..2026-08", "organization": "集团"},
+    }
+    ok = analysis.save_draft({"title": "正确", "body": "其他收益预算3185。", "run_ids": [correct["id"]], "evidence_recipes": [base_recipe]})
+    assert ok["evidence_report"]["summary"]["status"] == "pass"
+
+    bad_recipe = {**base_recipe, "claim": {"run_id": wrong["id"], "row": 0, "column": "actual"}}
+    bad = analysis.save_draft({"title": "错误", "body": "其他收益预算3063.0494。", "run_ids": [wrong["id"]], "evidence_recipes": [bad_recipe]})
+    issue = next(item for item in bad["quality"]["issues"] if item["code"] == "evidence_recipe_mismatch")
+    assert issue["actual"] == "3185"
+    assert issue["expected"] == "3063.0494"
+    assert issue["location"]["range"] == "B36"
+
+def test_consistency_text_source_can_read_archived_workbook_single_cell(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="workbook text source")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "budget.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["A32"] = "所有关键差异均超过10万元。"
+    sheet["B2"] = 8
+    sheet["C2"] = 12
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="budget", metadata={"mode": "workbook"})
+    run = _run(analysis, value="20", suffix="d")
+
+    spec = {
+        "title": "一致性",
+        "body": "所有关键差异均超过10万元。",
+        "run_ids": [run["id"]],
+        "consistency_sources": {
+            "a": {"kind": "number", "dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "预算", "range": "B2"},
+            "b": {"kind": "number", "dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "预算", "range": "C2"},
+            "assertion": {"kind": "text", "dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "预算", "range": "A32"},
+        },
+        "consistency_rules": [{
+            "id": "all-material",
+            "kind": "all_absolute_exceed",
+            "threshold": "10",
+            "asserted_result": True,
+            "assertion_source_id": "assertion",
+            "values": [{"id": "a", "source_id": "a"}, {"id": "b", "source_id": "b"}],
+        }],
+    }
+    check = validate_explanation(analysis, {key: value for key, value in spec.items() if key != "title"})
+    issue = next(item for item in check["issues"] if item["code"] == "financial_consistency_mismatch")
+    assert issue["original_text"] == "所有关键差异均超过10万元。"
+    assert issue["assertion_source"]["reference"]["sheet"] == "预算"
+    assert issue["assertion_source"]["reference"]["range"] == "A32"
+    assert check["status_dimensions"]["source_validation"]["status"] == "needs_attention"
+
+    draft = analysis.save_draft(spec)
+    assert draft["consistency_report"]["issues"][0]["original_text"] == "所有关键差异均超过10万元。"
+
+
+def test_consistency_assertion_source_must_be_archived_text_not_numeric_label(tmp_path):
+    from openpyxl import Workbook
+    from foundry.financial_consistency import evaluate_consistency_rules
+    from foundry.financial_evidence import prepare_consistency_inputs
+
+    task = TaskStore(tmp_path / "var").create(title="consistency sources")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "budget.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["B2"] = 0.2
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="budget", metadata={"mode": "workbook"})
+    sources = {
+        "numeric-cell": {
+            "kind": "number",
+            "dataset_id": dataset["id"],
+            "source_hash": dataset["source_hash"],
+            "sheet": "预算",
+            "range": "B2",
+            "label": "caller label is not original text",
+        }
+    }
+    rules = [{
+        "id": "fake-assertion",
+        "kind": "all_absolute_exceed",
+        "threshold": "0.10",
+        "asserted_result": True,
+        "assertion_source_id": "numeric-cell",
+        "values": [{"id": "v", "source_id": "numeric-cell"}],
+    }]
+
+    resolved_rules, source_auth = prepare_consistency_inputs(analysis, rules, sources)
+
+    assert source_auth["numeric-cell"]["kind"] == "number"
+    assert "text" not in source_auth["numeric-cell"]
+    with pytest.raises(FoundryError, match="authorized text source"):
+        evaluate_consistency_rules(resolved_rules, source_auth=source_auth)
+
+
+def test_quality_dimensions_do_not_pass_without_numeric_work(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="dimensions")
+    analysis = AnalysisStore(task)
+    check = validate_explanation(analysis, {"body": "没有数字。"})
+    assert check["status_dimensions"]["numeric_citation"]["status"] == "not_configured"
+    assert check["status_dimensions"]["source_validation"]["status"] == "not_configured"
+    draft = analysis.save_draft({"title": "空", "body": "没有数字。"})
+    assert draft["quality"]["status_dimensions"]["numeric_citation"]["status"] == "not_configured"
+
+
+def test_revision_duplicate_business_key_marks_summary_needs_attention(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision duplicate")
+    analysis = AnalysisStore(task)
+    row_scope = {"period": "2026-01..2026-08", "organization": "集团", "scenario": "actual"}
+    old_run = _run(analysis, value="325644", suffix="e", seq=1, row_extra=row_scope)
+    duplicate_run = _new(
+        analysis.task,
+        id="f" * 32,
+        analysis_id="a" * 32,
+        engine="finance",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        bindings={"budget": "dataset-a"},
+        input_hashes={"budget": "data-hash-a"},
+        source_hashes={"budget": "source-hash-a"},
+        finance_scope={"budget": {"period": "2026-01..2026-08", "scenario": "BUD", "organization": "集团", "unit": "万元", "currency": "CNY"}},
+        result={
+            "columns": [{"name": "metric"}, {"name": "actual"}],
+            "rows": [
+                {"metric_key": "revenue", "metric": "收入", "actual": "325644", "unit": "万元", "currency": "CNY", **row_scope},
+                {"metric_key": "revenue", "metric": "收入", "actual": "325644", "unit": "万元", "currency": "CNY", **row_scope},
+            ],
+            "row_count": 2,
+            "truncated": False,
+        },
+    )
+    duplicate_run = analysis._write(analysis._object_path("runs", duplicate_run["id"]), duplicate_run)
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入。", "run_ids": [old_run["id"]]})
+    revised = analysis.save_draft({"parent_id": parent["id"], "body": "收入。", "run_ids": [duplicate_run["id"]]})
+    assert revised["revision_comparison"]["summary"]["status"] == "needs_attention"
+    assert any(item["code"] == "revision_comparison_ambiguous" for item in revised["quality"]["issues"])
+
+
+def test_recipe_and_consistency_count_caps_are_enforced(tmp_path):
+    from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+    task = TaskStore(tmp_path / "var").create(title="caps")
+    analysis = AnalysisStore(task)
+    recipe = {"kind": "sum", "dataset_id": "0" * 32, "source_hash": "a" * 64, "sheet": "预算", "range": "A1", "claim": {"run_id": "1" * 32, "row": 0, "column": "actual"}}
+    try:
+        evaluate_evidence_recipes(analysis, [{**recipe, "id": f"r{i}"} for i in range(257)])
+    except FoundryError as exc:
+        assert "count limit" in str(exc)
+    else:
+        raise AssertionError("recipe count cap should be enforced")
+    try:
+        prepare_consistency_inputs(analysis, [{"id": f"r{i}", "kind": "all_absolute_exceed", "threshold": "1", "asserted_result": True, "assertion_source_id": "s", "values": []} for i in range(257)], {})
+    except FoundryError as exc:
+        assert "rule count limit" in str(exc)
+    else:
+        raise AssertionError("rule count cap should be enforced")
+
+def test_source_count_and_excel_bounds_are_enforced(tmp_path):
+    from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+    task = TaskStore(tmp_path / "var").create(title="bounds")
+    analysis = AnalysisStore(task)
+    try:
+        prepare_consistency_inputs(analysis, [], {f"s{i}": {"kind": "text", "dataset_id": "0" * 32, "source_hash": "a" * 64, "paragraph": 1} for i in range(257)})
+    except FoundryError as exc:
+        assert "source count limit" in str(exc)
+    else:
+        raise AssertionError("consistency source count cap should be enforced")
+    try:
+        evaluate_evidence_recipes(analysis, [{"id": "bad-bounds", "kind": "sum", "dataset_id": "0" * 32, "source_hash": "a" * 64, "sheet": "预算", "range": "XFE1:XFE1", "claim": {"run_id": "1" * 32, "row": 0, "column": "actual"}}])
+    except FoundryError as exc:
+        assert "Excel worksheet bounds" in str(exc)
+    else:
+        raise AssertionError("Excel bounds should be enforced")
+
+def test_analysis_and_script_persist_result_role_scope_to_runs(tmp_path):
+    import csv
+
+    task = TaskStore(tmp_path / "var").create(title="metadata")
+    analysis = AnalysisStore(task)
+    csv_path = tmp_path / "input.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["value"])
+        writer.writerow(["1"])
+    dataset = analysis.add_dataset(csv_path, name="input")
+    saved = analysis.save_analysis({
+        "question": "count rows",
+        "sql": "select count(*) as actual from source",
+        "bindings": {"source": dataset["id"]},
+        "result_role": "probe",
+        "scope": {"period": "2026-08", "organization": "集团"},
+    })
+    assert saved["result_role"] == "probe"
+    assert saved["scope"]["period"] == "2026-08"
+    run = analysis.run_analysis(saved["id"])
+    assert run["result_role"] == "probe"
+    assert run["scope"]["organization"] == "集团"
+
+    script_run = analysis.run_script({
+        "language": "python",
+        "code": "print('ok')",
+        "result_role": "activity",
+        "scope": {"period": "2026-09"},
+    })
+    assert script_run["result_role"] == "activity"
+    assert script_run["scope"] == {"period": "2026-09"}
+    default_script_run = analysis.run_script({
+        "language": "python",
+        "code": "print('probe')",
+    })
+    assert default_script_run["result_role"] == "activity"
+
+
+def test_projection_for_draft_resolves_recipe_and_run_datasets(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="projection sources")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "budget.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet["B36"] = 3185
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="华宸预算", metadata={"mode": "workbook"})
+    run = _new(
+        analysis.task,
+        id="a" * 32,
+        analysis_id="a" * 32,
+        engine="finance",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        bindings={"budget": dataset["id"]},
+        input_hashes={"budget": dataset["data_hash"]},
+        source_hashes={"budget": dataset["source_hash"]},
+        result={"columns": [{"name": "actual"}], "rows": [{"metric_key": "other_gains", "actual": "3185"}], "row_count": 1, "truncated": False},
+    )
+    run = analysis._write(analysis._object_path("runs", run["id"]), run)
+    draft = analysis.save_draft({
+        "title": "报告",
+        "body": "其他收益预算3185。",
+        "run_ids": [run["id"]],
+        "evidence_recipes": [{"id": "direct", "kind": "direct", "dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "预算", "range": "B36", "claim": {"run_id": run["id"], "row": 0, "column": "actual"}}],
+    })
+    projection = analysis.projection_for_draft(draft["id"], "audit")
+    assert any("华宸预算" in item and dataset["id"] in item for item in projection["sources"])
+
+def test_runtime_cannot_promote_professional_review_and_edits_reset_review(tmp_path):
+    from foundry.finance_service import FinanceStore
+
+    task = TaskStore(tmp_path / "var").create(title="review authority")
+    analysis = AnalysisStore(task)
+    runtime = FinanceStore(task, session_id="runtime")
+    try:
+        runtime._save_explanation_draft({"body": "待复核", "review_status": "reviewed"})
+    except FoundryError as exc:
+        assert "professional review" in str(exc)
+    else:
+        raise AssertionError("runtime save should not promote review status")
+
+    reviewed = analysis.save_draft({"title": "已复核", "body": "数字正确。", "review_status": "reviewed"})
+    unchanged = validate_explanation(analysis, {"draft_id": reviewed["id"]})
+    assert unchanged["status_dimensions"]["professional_review"]["status"] == "pass"
+    spoofed = validate_explanation(analysis, {"draft_id": reviewed["id"], "body": "数字改了。", "review_status": "accepted"})
+    assert spoofed["status_dimensions"]["professional_review"]["status"] == "unreviewed"
+    child = analysis.save_draft({"parent_id": reviewed["id"], "body": "数字改了。", "review_status": "reviewed"})
+    assert child["review_status"] == "unreviewed"

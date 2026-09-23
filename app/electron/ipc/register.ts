@@ -262,6 +262,8 @@ export function registerIpc(
     'analysis-requirements-save',
     'analysis-requirements-list',
     'finance-completion-recoveries',
+    'finance-completion-recover',
+    'workbook-range-preview',
     'prepare-explanation',
     'validate-explanation',
     'finance-background-save',
@@ -350,11 +352,12 @@ export function registerIpc(
         '--method', objectId(id), '--bindings', objectJson(bindings), '--parameters', encoded,
       ]);
     }));
-  ipcMain.handle(CHANNELS.analysisExport, (_e, task: unknown, id: unknown, rawFormat: unknown) =>
+  ipcMain.handle(CHANNELS.analysisExport, (_e, task: unknown, id: unknown, rawFormat: unknown, rawMode: unknown = 'management') =>
     answer(async () => {
       const taskKey = taskId(task), draft = objectId(id);
       if (!['md', 'xlsx', 'docx', 'pdf', 'html'].includes(String(rawFormat))) throw new Error('unsupported export format');
-      return (await reports()).export(taskKey, draft, rawFormat);
+      if (rawMode !== 'management' && rawMode !== 'audit') throw new Error('unsupported export mode');
+      return (await reports()).export(taskKey, draft, rawFormat, rawMode);
     }));
   ipcMain.handle(CHANNELS.analysisAddFiles, (_e, rawTask: unknown) =>
     answer(async () => {
@@ -463,7 +466,20 @@ export function registerIpc(
         const seed = (rawSeed ?? {}) as { windowId?: string; briefSha?: string; verbatim?: string; draftId?: string; submit?: boolean; requestId?: string };
         if (seed.verbatim !== undefined && (typeof seed.verbatim !== 'string' || seed.verbatim.length > 100000 || seed.verbatim.includes('\0'))) throw new Error('invalid question');
         if (seed.submit && (intent !== 'analysis' || !seed.verbatim?.trim())) throw new Error('只有明确的分析问题可以直接提交。');
-        const action = seed.submit ? {submit: true, requestId: seed.requestId} : undefined;
+        let draftReference: { draftId: string; revision: number } | undefined;
+        if (seed.draftId !== undefined) {
+          if (intent !== 'analysis') throw new Error('只有分析任务可以引用文稿。');
+          const draftId = objectId(seed.draftId);
+          const state = await analysisCall(task, 'analysis-state');
+          const drafts = Array.isArray(state.drafts) ? state.drafts : [];
+          const index = drafts.findIndex((draft: { id?: string }) => draft.id === draftId);
+          if (index < 0) throw new Error('所选文稿不属于当前任务或已不可读取。');
+          draftReference = { draftId, revision: index + 1 };
+        }
+        const action = seed.submit || draftReference ? {
+          ...(seed.submit ? {submit: true, requestId: seed.requestId} : {}),
+          ...(draftReference ? {draftReference} : {}),
+        } : undefined;
         const workspace = ensureTaskWorkspace(harness.userData(), task);
         let workspaceTitle: string | undefined;
         if (intent === 'analysis') {
@@ -472,7 +488,7 @@ export function registerIpc(
           if (previous.sessionId) {
             // Refresh only this root conversation; an active run keeps its fixed inputs.
             await runFoundry({ ...binding, task, session: previous.sessionId }, 'analysis-refresh');
-            const draft = [seed.draftId ? `继续分析文稿 ${objectId(seed.draftId)}，先查看文稿依据。` : '', seed.verbatim ?? ''].filter(Boolean).join('\n');
+            const draft = seed.verbatim ?? '';
             const reply = action
               ? await harness.host.show(previous.sessionId, draft || undefined, workspace, workspaceTitle, action)
               : await harness.host.show(previous.sessionId, draft || undefined, workspace, workspaceTitle);
@@ -492,7 +508,7 @@ export function registerIpc(
           ...(seed.verbatim ? ['--verbatim', seed.verbatim] : []),
         ]);
         const draft = intent === 'analysis'
-          ? [seed.draftId ? `继续分析文稿 ${objectId(seed.draftId)}，先用 analysis-state 查看所引数据和运行。` : '', seed.verbatim ?? ''].filter(Boolean).join('\n')
+          ? seed.verbatim ?? ''
           : intent === 'followup' && windowId
             ? followupDraft({ windowId, briefSha: seed.briefSha })
             : '';

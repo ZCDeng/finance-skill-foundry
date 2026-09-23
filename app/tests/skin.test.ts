@@ -27,6 +27,7 @@ const LAYOUT = read('../extra/dsh/.foundry-client-stock/layout.js');
 const CONVERSATION = read('../extra/dsh/.foundry-client-stock/conversation.js');
 const SETTINGS = read('../extra/dsh/.foundry-client-stock/settings-general.js');
 const COMPACT = read('../harness-client/compact.css');
+const ADAPTER = read('../scripts/adapt-harness-client.mjs');
 const BUNDLE = JSON.parse(read('../../dsh-plugin/package.json')) as {
   dsh?: { client?: { platform?: string; inject?: string[] } };
   exports?: Record<string, unknown>;
@@ -238,7 +239,7 @@ describe('the brand this product puts in the page', () => {
   });
 
   it('takes the layout service it needs to close the rail', () => {
-    expect(CLIENT).toContain("const inject = ['slots', 'layout'];");
+    expect(CLIENT).toContain("const inject = ['slots', 'layout', 'inputTriggers'];");
   });
 
   /*
@@ -304,5 +305,22 @@ describe('the brand this product puts in the page', () => {
     expect(CLIENT, 'reads a state that lies on the first frame').not.toContain(
       "querySelector('[data-sidebar-collapsed]')",
     );
+  });
+
+  it('registers native draft references and finance stage tool rows without hiding raw text globally', () => {
+    expect(CLIENT).toContain("const inject = ['slots', 'layout', 'inputTriggers']");
+    expect(CLIENT).toContain("name: DRAFT_REF_SOURCE");
+    expect(CLIENT).toContain('FA_FOUNDRY_DRAFT_REF');
+    expect(CLIENT).toContain('FinanceStageRow');
+    expect(CLIENT).toContain("'run-metric'");
+    expect(CLIENT).toContain("'validate-explanation'");
+    expect(CLIENT).toContain('这只是工具阶段状态，不代表财务口径已核验');
+    expect(CLIENT).not.toContain('display: none');
+  });
+
+  it('projects only the exact own draft-reference protocol in user bubbles and keeps reasoning as a disclosure', () => {
+    expect(ADAPTER).toContain('text = text.replace(/\\\\[\\\\[FA_FOUNDRY_DRAFT_REF:(\\\\{[^\\\\]]+\\\\})\\\\]\\\\]/gu');
+    expect(ADAPTER).toContain('基于修订');
+    expect(ADAPTER).toContain('title: "处理思路"');
   });
 });

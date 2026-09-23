@@ -27,3 +27,21 @@ export interface ReportImportResult {
   sheets?: string[];
   needsReview?: boolean;
 }
+export type ReportProjectionMode = 'management' | 'audit';
+export interface ReportProjection {
+  schema_version: 1;
+  draft_id: string;
+  task_id?: string;
+  title: string;
+  content_hash: string;
+  projection_hash: string;
+  content_mode: ReportProjectionMode;
+  publication_status: string;
+  review_status: string;
+  reproducibility_status: string;
+  marker: string;
+  body: string;
+  document: ReportDocument;
+  limitations?: string[];
+  sources?: string[];
+}

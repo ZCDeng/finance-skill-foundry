@@ -18,9 +18,15 @@ SCOPE_CONTROL_KEYS = {
     'baseline_period', 'comparison_period', 'period_baseline', 'baseline_scenario',
 }
 METRIC_LABELS = {
-    'profit': ('profit', 'management_profit', '利润', '管理利润', '管理利润合计'),
-    'revenue': ('revenue', '收入'), 'cost': ('cost', '成本'),
-    'expense': ('expense', '费用'),
+    'profit': (
+        'profit', 'management_profit', 'operating_profit', 'gross_profit', 'net_profit',
+        'operating_profit_ex_other_income', '利润', '管理利润', '管理利润合计', '营业利润', '毛利', '净利润',
+    ),
+    'revenue': ('revenue', 'operating_revenue', '收入', '营业收入'),
+    'cost': ('cost', 'operating_cost', '营业成本', '成本'),
+    'expense': ('expense', 'period_expense', 'total_expense', '费用', '期间费用', '总费用'),
+    'ratio': ('ratio', 'rate', 'achievement_ratio', 'attainment_rate', '达成率', '比率'),
+    'other_income': ('other_income', 'other_gains', 'other_income_and_gains_4items', '其他收益', '其他损益'),
 }
 PRICE_QUANTITY_METHODS = {'quantity_then_price', 'base_weights_with_interaction'}
 PRICE_QUANTITY_REQUIRED_COLUMNS = (
@@ -262,12 +268,30 @@ def _matches(item, row, column, run=None):
         return False
     metric = _canonical_metric_name(item['metric'])
     aliases = METRIC_LABELS.get(metric, (metric,))
-    labels = [str(row.get(key, '')).lower() for key in ('metric', 'line', 'contribution_line', 'management_account')]
     if column == metric or column in {f'{alias}_{suffix}' for alias in aliases for suffix in ('variance','difference','contribution','change','impact')}:
         return True
-    return any(alias.lower() in labels for alias in aliases) and column in {
+    amount_columns = {
         'contribution','profit_impact','amount_change','variance','difference','value','amount','open_amount',
     }
+    if column not in amount_columns:
+        return False
+    if _metric_key_matches(row.get('metric_key'), metric, aliases):
+        return True
+    labels = [str(row.get(key, '')).lower() for key in ('metric', 'line', 'contribution_line', 'management_account')]
+    return any(alias.lower() in labels for alias in aliases)
+
+
+def _metric_key_matches(value, metric, aliases):
+    if not isinstance(value, str):
+        return False
+    raw = value.strip()
+    if not raw:
+        return False
+    canonical = _canonical_metric_name(raw)
+    candidates = {metric}
+    candidates.update(str(alias).strip() for alias in aliases if str(alias).strip())
+    candidates.update(_canonical_metric_name(alias) for alias in list(candidates))
+    return canonical in candidates or raw.lower() in {str(candidate).lower() for candidate in candidates}
 
 
 def _run_method(run):
