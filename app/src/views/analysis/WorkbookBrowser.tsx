@@ -27,6 +27,7 @@ export interface WorkbookRangePreview {
   sheet: string;
   range: string;
   bounds: { min_row: number; min_col: number; max_row: number; max_col: number };
+  header_context?: { address: string; text: string }[];
   cells: WorkbookCellPreview[];
   warnings: string[];
 }
@@ -195,6 +196,10 @@ export function WorkbookBrowser({
       </form>
       {contextText && <p className="analysis-note">{contextText}</p>}
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
+      {preview?.header_context?.length ? <div className="analysis-workbook-context" aria-label="原表标题区">
+        <span>原表标题区：</span>
+        {preview.header_context.map((cell) => <span key={cell.address}>{cell.address}：{cell.text}</span>)}
+      </div> : null}
       {preview && (
         <div className="analysis-workbook-grid-wrap">
           <table className="analysis-workbook-grid" aria-label={preview ? `${preview.sheet} ${preview.range}` : undefined}>
