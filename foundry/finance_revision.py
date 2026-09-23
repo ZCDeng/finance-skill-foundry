@@ -68,7 +68,7 @@ def compare_draft_runs(analysis, parent: dict[str, Any], draft: dict[str, Any]) 
         old = old_rows[0]
         new = new_rows[0]
         if old["basis"] != new["basis"]:
-            issues.append({
+            issue = {
                 "code": "revision_basis_changed",
                 "business_key": key,
                 "old_run_id": old["run_id"],
@@ -77,7 +77,16 @@ def compare_draft_runs(analysis, parent: dict[str, Any], draft: dict[str, Any]) 
                 "old_basis": old["basis"],
                 "new_basis": new["basis"],
                 "message": "指标来源或口径发生变化，未作为同源数值回归处理。",
-            })
+            }
+            changed_columns = _changed_numeric_columns(old["values"], new["values"])
+            if changed_columns:
+                issue["changed_columns"] = changed_columns
+                issue["severity"] = "warning"
+                issue["message"] = "指标来源或口径及数值均发生变化，需核对并说明原因。"
+            changed_hash_aliases = _changed_hash_aliases(old["basis"], new["basis"])
+            if changed_hash_aliases:
+                issue["changed_hash_aliases"] = changed_hash_aliases
+            issues.append(issue)
             continue
         for column in sorted(set(old["values"]) & set(new["values"])):
             old_value = old["values"][column]
@@ -164,7 +173,7 @@ def _business_key(run: dict[str, Any], row: dict[str, Any]) -> str | None:
     period = row.get("period") or row.get("period_key") or _scope_value(scope, "period") or ""
     organization = row.get("organization") or row.get("org") or row.get("region") or _scope_value(scope, "organization") or ""
     scenario = row.get("scenario") or row.get("baseline_scenario") or _scope_value(scope, "scenario") or ""
-    aggregation = row.get("aggregation") or row.get("aggregation_definition") or row.get("basis") or ""
+    aggregation = row.get("aggregation") or row.get("aggregation_definition") or row.get("basis") or row.get("value_kind") or ""
     unit = row.get("unit") or _scope_value(scope, "unit") or ""
     currency = row.get("currency") or _scope_value(scope, "currency") or ""
     return repr({
@@ -191,7 +200,8 @@ def _numeric_values(row: dict[str, Any]) -> dict[str, Decimal]:
     values: dict[str, Decimal] = {}
     for key, value in row.items():
         if key not in NUMERIC_COLUMNS and not key.endswith(("_actual", "_budget", "_variance")):
-            continue
+            if key != "value" or not _is_declared_financial_value_row(row):
+                continue
         try:
             decimal = Decimal(str(value))
         except (InvalidOperation, ValueError):
@@ -200,6 +210,43 @@ def _numeric_values(row: dict[str, Any]) -> dict[str, Decimal]:
             continue
         values[key] = decimal
     return values
+
+
+def _is_declared_financial_value_row(row: dict[str, Any]) -> bool:
+    return any(
+        isinstance(row.get(key), str) and row.get(key).strip()
+        for key in ("metric_key", "value_kind")
+    )
+
+
+def _changed_numeric_columns(old_values: dict[str, Decimal], new_values: dict[str, Decimal]) -> list[dict[str, str]]:
+    changes = []
+    for column in sorted(set(old_values) & set(new_values)):
+        old_value = old_values[column]
+        new_value = new_values[column]
+        if old_value == new_value:
+            continue
+        changes.append({"column": column, "old_value": str(old_value), "new_value": str(new_value)})
+    return changes
+
+
+def _changed_hash_aliases(old_basis: dict[str, Any], new_basis: dict[str, Any]) -> list[dict[str, str]]:
+    aliases = []
+    for map_name in ("input_hashes", "source_hashes"):
+        old_hashes = old_basis.get(map_name) if isinstance(old_basis.get(map_name), dict) else {}
+        new_hashes = new_basis.get(map_name) if isinstance(new_basis.get(map_name), dict) else {}
+        for alias in sorted(set(old_hashes) | set(new_hashes)):
+            old_value = old_hashes.get(alias)
+            new_value = new_hashes.get(alias)
+            if old_value == new_value:
+                continue
+            aliases.append({
+                "kind": map_name,
+                "alias": str(alias),
+                "old_value": str(old_value),
+                "new_value": str(new_value),
+            })
+    return aliases
 
 
 def _scope_value(scope: Any, key: str) -> Any:
