@@ -21,6 +21,7 @@ type RequirementItem = {
   requires_drilldown: boolean;
   periods?: string[];
   organizations?: string[];
+  scenarios?: string[];
 };
 
 type RequirementMissingInput = {
@@ -127,6 +128,10 @@ function itemOrganizations(item: RequirementItem): string[] {
   return normalizePeriods(item.organizations);
 }
 
+function itemScenarios(item: RequirementItem): string[] {
+  return normalizePeriods(item.scenarios);
+}
+
 function normalizeMissingInputs(value: unknown): RequirementMissingInput[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -184,6 +189,9 @@ function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
       dimensions: item.dimensions && typeof item.dimensions === 'object' && !Array.isArray(item.dimensions) ? item.dimensions : {},
       requires_drilldown: item.requires_drilldown === true,
       periods: normalizePeriods((item as Record<string, unknown>).periods),
+      ...(Array.isArray((item as Record<string, unknown>).scenarios)
+        ? { scenarios: normalizePeriods((item as Record<string, unknown>).scenarios) }
+        : {}),
       ...(Array.isArray((item as Record<string, unknown>).organizations)
         ? { organizations: normalizePeriods((item as Record<string, unknown>).organizations) }
         : {}),
@@ -357,7 +365,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   const addItem = () => {
     setItems((previous) => {
       const id = nextItemId(previous);
-      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false, periods: [], organizations: [] }];
+      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false, periods: [], organizations: [], scenarios: [] }];
     });
   };
   const removeItem = (id: string) => {
@@ -403,6 +411,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
           requires_drilldown: item.requires_drilldown,
           ...(itemPeriods(item).length ? { periods: itemPeriods(item) } : {}),
           ...(itemOrganizations(item).length ? { organizations: itemOrganizations(item) } : {}),
+          ...(itemScenarios(item).length ? { scenarios: itemScenarios(item) } : {}),
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));
@@ -435,6 +444,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       || savedItem.metric !== item.metric
       || !equalStringArrays(savedItem.periods, item.periods)
       || !equalStringArrays(savedItem.organizations, item.organizations)
+      || !equalStringArrays(savedItem.scenarios, item.scenarios)
       || canonicalJson(savedItem.dimensions) !== canonicalJson(item.dimensions);
   };
 
@@ -509,6 +519,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
   const [nextPeriod, setNextPeriod] = useState('');
   const [nextPeriodRange, setNextPeriodRange] = useState('');
   const [nextOrganization, setNextOrganization] = useState('');
+  const [nextScenario, setNextScenario] = useState('');
   const addPeriod = () => {
     const value = nextPeriod.trim();
     const periods = itemPeriods(item);
@@ -532,6 +543,20 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     setNextOrganization('');
   };
   const removeOrganization = (organization: string) => onChange({ organizations: organizations.filter((value) => value !== organization) });
+  const scenarios = itemScenarios(item);
+  const addScenario = () => {
+    const value = nextScenario.trim();
+    if (!value || scenarios.includes(value)) return;
+    onChange({ scenarios: [...scenarios, value] });
+    setNextScenario('');
+  };
+  const removeScenario = (scenario: string) => onChange({ scenarios: scenarios.filter((value) => value !== scenario) });
+  const exactMetricKey = typeof item.dimensions.metric_key === 'string' ? item.dimensions.metric_key : '';
+  const setExactMetricKey = (value: string) => {
+    const dimensions = { ...item.dimensions };
+    if (value.trim()) dimensions.metric_key = value.trim(); else delete dimensions.metric_key;
+    onChange({ dimensions });
+  };
   return <article className="analysis-history-row analysis-history-row--static" aria-label={`必答指标 ${index + 1}`}>
     <div className="analysis-edit-grid">
       <SearchableSelect label={`指标 ${index + 1}`} value={item.metric} onChange={(value) => onChange({ metric: value, label: item.label || itemLabel(value) })}
@@ -562,6 +587,19 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
         {organizations.map((organization) => <Button variant="outline" key={organization} type="button" onClick={() => removeOrganization(organization)}>{organization} ×</Button>)}
       </div> : <p className="analysis-note">未指定时沿用上方单个组织；指定多个后，每个组织与每个适用期间都须有结果。</p>}
     </FieldShell>
+    <FieldShell label="须逐一覆盖的结果情景">
+      <div className="analysis-actions">
+        <TextField label={`添加结果情景 ${index + 1}`} value={nextScenario} onChange={setNextScenario} placeholder="例如：actual_ytd、budget_ytd、achievement_ratio" />
+        <Button variant="outline" type="button" onClick={addScenario} disabled={!nextScenario.trim() || scenarios.includes(nextScenario.trim())}>添加情景</Button>
+      </div>
+      {scenarios.length ? <div className="analysis-actions" aria-label={`已选结果情景 ${index + 1}`}>
+        {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" onClick={() => removeScenario(scenario)}>{scenario} ×</Button>)}
+      </div> : <p className="analysis-note">只在承诺多个结果情景时填写；每个组织、期间和情景都须有对应结果。情景键须与运行结果中的 scenario 一致。</p>}
+    </FieldShell>
+    <div>
+      <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
+      <p className="analysis-note">与运行结果中的 metric_key 完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
+    </div>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;

@@ -128,6 +128,7 @@
 .analysis-history-row[aria-current='true'], .analysis-history-row:hover { background: var(--fnd-selection-surface); }
 .analysis-history-row--static { cursor: default; }
 .analysis-history-row--static:hover { background: transparent; }
+.analysis-definition .analysis-history-row--static { grid-template-columns: minmax(0, 1fr); }
 .analysis-scenario-panel { border-top: 1px solid var(--fnd-line); padding-top: 12px; }
 .analysis-comparison { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 18px 0; border-bottom: 1px solid var(--fnd-line); }
 .analysis-comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }

@@ -118,14 +118,44 @@ def test_removed_item_ids_accumulate_across_versions(analysis):
     assert third['removed_item_ids'] == ['profit', 'revenue']
 
 
+def test_unrelated_revision_after_removed_item_does_not_require_another_removal_reason(analysis):
+    first = save_requirements(analysis, spec(items=[
+        {'id': 'profit', 'metric': 'profit'},
+        {'id': 'revenue', 'metric': 'revenue'},
+    ]))
+    reduced = save_requirements(analysis, spec(parent_id=first['id'],
+        items=[{'id': 'profit', 'metric': 'profit'}], change_reason='经理取消收入要求'))
+    revised = save_requirements(analysis, spec(parent_id=reduced['id'],
+        items=[{'id': 'profit', 'metric': 'profit', 'label': '营业利润'}]))
+
+    assert revised['removed_item_ids'] == ['revenue']
+    assert revised['change_reason'] == ''
+
+
 def test_metric_key_matches_only_declared_metric_aliases_for_generic_values(analysis):
     from foundry.finance_requirements import _matches
 
     assert _matches({'metric': 'profit', 'dimensions': {}}, {'metric_key': 'operating_profit', 'value': '1'}, 'value')
     assert _matches({'metric': 'profit', 'dimensions': {}}, {'metric_key': 'gross_profit', 'value': '1'}, 'value')
+    assert _matches({'metric': 'profit', 'dimensions': {'metric_key': 'operating_profit'}},
+                    {'metric_key': 'operating_profit', 'value': '1'}, 'value')
+    assert not _matches({'metric': 'profit', 'dimensions': {'metric_key': 'operating_profit'}},
+                        {'metric_key': 'gross_profit', 'value': '1'}, 'value')
+    assert not _matches({'metric': 'profit', 'dimensions': {'metric_key': 'revenue'}},
+                        {'metric_key': 'revenue', 'value': '1'}, 'value')
     assert _matches({'metric': 'expense', 'dimensions': {}}, {'metric_key': 'period_expense', 'value': '1'}, 'value')
     assert _matches({'metric': 'other_income', 'dimensions': {}}, {'metric_key': 'other_income_and_gains_4items', 'value': '1'}, 'value')
     assert _matches({'metric': 'ratio', 'dimensions': {}}, {'metric_key': 'achievement_ratio', 'value': '0.9'}, 'value')
+    assert _matches({'metric': 'ratio', 'dimensions': {'metric_key': 'revenue'}},
+                    {'metric_key': 'revenue', 'scenario': 'achievement_ratio', 'value': '0.9'}, 'value')
+    assert _matches({'metric': 'ratio', 'dimensions': {'metric_key': 'revenue'}},
+                    {'metric_key': 'revenue', 'scenario': 'achievement_ratio_estimate', 'value': '0.9'}, 'value')
+    assert _matches({'metric': 'ratio', 'dimensions': {'metric_key': 'revenue'}},
+                    {'metric_key': 'revenue', 'scenario': 'budget_phase_ratio', 'value': '0.9'}, 'value')
+    assert not _matches({'metric': 'ratio', 'dimensions': {'metric_key': 'revenue'}},
+                        {'metric_key': 'revenue', 'scenario': 'actual', 'value': '120'}, 'value')
+    assert not _matches({'metric': 'ratio', 'dimensions': {'metric_key': 'revenue'}},
+                        {'metric_key': 'revenue', 'value': '120'}, 'value')
 
     assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'not_revenue', 'value': '1'}, 'value')
     assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'revenue_noise', 'value': '1'}, 'value')
@@ -225,6 +255,160 @@ def test_generic_requirement_requires_each_organization_and_period(analysis):
     sourced = check_requirements(analysis, {'requirements_id': requirement['id'],
                                             'run_ids': [run['id']], 'claims': claims[:4]})
     assert sourced['provenance']['status'] == 'pass'
+
+
+def test_generic_requirement_requires_each_declared_scenario_grain(analysis):
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'scenario_ratio', 'metric': 'ratio',
+                'organizations': ['总部'], 'periods': ['2026-08'], 'scenarios': ['actual', 'budget'],
+                'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='scenario-ratio', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['organization', 'period', 'scenario', 'metric_key', 'value'],
+        'rows': [
+            {'organization': '总部', 'period': '2026-08', 'scenario': 'actual', 'metric_key': 'ratio', 'value': '0.8'},
+            {'organization': '总部', 'period': '2026-08', 'scenario': 'budget', 'metric_key': 'ratio', 'value': '0.9'},
+            {'organization': '总部', 'period': '2026-08', 'scenario': 'forecast', 'metric_key': 'ratio', 'value': '1.1'},
+        ],
+    })
+    actual = _claim(run, row=0, column='value', value='0.8')
+    budget = _claim(run, row=1, column='value', value='0.9')
+    forecast = _claim(run, row=2, column='value', value='1.1')
+
+    assert requirement['items'][0]['scenarios'] == ['actual', 'budget']
+    partial = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                            'run_ids': [run['id']], 'claims': [actual]})
+    wrong_scenario = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                   'run_ids': [run['id']], 'claims': [actual, forecast]})
+    complete = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                             'run_ids': [run['id']], 'claims': [actual, budget]})
+
+    assert partial['items'][0]['status'] == 'pending'
+    assert wrong_scenario['items'][0]['status'] == 'pending'
+    assert complete['items'][0]['status'] == 'answered'
+    assert {location['row'] for location in complete['items'][0]['locations']} == {0, 1}
+    assert complete['provenance']['status'] == 'needs_attention'
+
+    _verified_source(analysis, {key: complete['items'][0]['locations'][0][key]
+                                for key in ('run_id', 'row', 'column', 'output_hash')})
+    one_source = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']], 'claims': [actual, budget]})
+    assert one_source['provenance']['status'] == 'needs_attention'
+
+    _verified_source(analysis, {key: complete['items'][0]['locations'][1][key]
+                                for key in ('run_id', 'row', 'column', 'output_hash')})
+    sourced = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                            'run_ids': [run['id']], 'claims': [actual, budget]})
+    assert sourced['provenance']['status'] == 'pass'
+
+
+def test_metric_key_pin_allows_long_form_ratio_rows_for_exact_scenario(analysis):
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'revenue_ratio', 'metric': 'ratio',
+                'dimensions': {'metric_key': 'revenue'}, 'scenarios': ['achievement_ratio'],
+                'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='revenue-achievement-ratio', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['metric_key', 'scenario', 'value'],
+        'rows': [
+            {'metric_key': 'revenue', 'scenario': 'achievement_ratio', 'value': '0.91'},
+            {'metric_key': 'operating_profit', 'scenario': 'achievement_ratio', 'value': '0.82'},
+            {'metric_key': 'revenue', 'scenario': 'actual', 'value': '120'},
+        ],
+    })
+    revenue_ratio = _claim(run, row=0, column='value', value='0.91')
+    profit_ratio = _claim(run, row=1, column='value', value='0.82')
+    revenue_actual = _claim(run, row=2, column='value', value='120')
+
+    profit_ratio_result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': [profit_ratio]})
+    non_ratio_result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                     'run_ids': [run['id']], 'claims': [revenue_actual]})
+    answered = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                             'run_ids': [run['id']], 'claims': [revenue_ratio]})
+    auto_fixup = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']], 'claims': []})
+
+    assert profit_ratio_result['items'][0]['status'] == 'pending'
+    assert non_ratio_result['items'][0]['status'] == 'pending'
+    assert answered['items'][0]['status'] == 'answered'
+    assert answered['items'][0]['locations'][0]['row'] == 0
+    assert auto_fixup['items'][0]['status'] == 'pending'
+    assert [(fixup['row'], fixup['column']) for fixup in auto_fixup['items'][0]['fixups']
+            if fixup['code'] == 'add_calculation_claim'] == [(0, 'value')]
+
+
+def test_ratio_metric_key_pin_without_declared_scenarios_still_requires_ratio_valued_row(analysis):
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'revenue_ratio', 'metric': 'ratio',
+                'dimensions': {'metric_key': 'revenue'}, 'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='revenue-ratio-no-scenario-obligation', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['metric_key', 'scenario', 'value'],
+        'rows': [
+            {'metric_key': 'revenue', 'scenario': 'actual', 'value': '120'},
+            {'metric_key': 'revenue', 'scenario': 'attainment_rate', 'value': '0.91'},
+        ],
+    })
+    actual_amount = _claim(run, row=0, column='value', value='120')
+    ratio_value = _claim(run, row=1, column='value', value='0.91')
+
+    amount_result = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                  'run_ids': [run['id']], 'claims': [actual_amount]})
+    answered = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                             'run_ids': [run['id']], 'claims': [ratio_value]})
+    auto_fixup = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']], 'claims': []})
+
+    assert amount_result['items'][0]['status'] == 'pending'
+    assert answered['items'][0]['status'] == 'answered'
+    assert answered['items'][0]['locations'][0]['row'] == 1
+    assert [(fixup['row'], fixup['column']) for fixup in auto_fixup['items'][0]['fixups']
+            if fixup['code'] == 'add_calculation_claim'] == [(1, 'value')]
+
+
+def test_required_scenarios_are_deduped_and_must_be_non_empty_strings(analysis):
+    requirement = save_requirements(analysis, spec(
+        items=[{'id': 'profit', 'metric': 'profit', 'scenarios': [' actual ', 'budget', 'actual']}],
+    ))
+    assert requirement['items'][0]['scenarios'] == ['actual', 'budget']
+
+    with pytest.raises(FoundryError, match='scenarios'):
+        save_requirements(analysis, spec(
+            parent_id=requirement['id'],
+            items=[{'id': 'profit', 'metric': 'profit', 'scenarios': ['actual', '']}],
+        ))
+
+
+def test_semantic_fingerprint_changes_when_scenario_obligations_change(tmp_path):
+    analysis = AnalysisStore(TaskStore(tmp_path / 'semantic-var').create(title='语义指纹'))
+    path = tmp_path / 'semantic.json'
+    path.write_text(json.dumps([{'amount': '1'}], ensure_ascii=False), encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='source')
+    first = save_requirements(analysis, spec(
+        bindings={'actual': dataset['id']},
+        items=[{'id': 'profit', 'metric': 'profit', 'scenarios': ['actual']}],
+    ))
+    second = save_requirements(analysis, spec(
+        parent_id=first['id'],
+        bindings={'actual': dataset['id']},
+        change_reason='补充预算场景复核',
+        items=[{'id': 'profit', 'metric': 'profit', 'scenarios': ['actual', 'budget']}],
+    ))
+
+    assert first['semantic_fingerprint']
+    assert first['semantic_fingerprint'] != second['semantic_fingerprint']
+    assert first['semantic_basis']['items'][0]['scenarios'] == ['actual']
+    assert second['semantic_basis']['items'][0]['scenarios'] == ['actual', 'budget']
 
 
 def test_required_organizations_cannot_contradict_global_organization(analysis):

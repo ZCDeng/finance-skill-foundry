@@ -271,6 +271,59 @@ describe('requirements panel', () => {
     })));
   });
 
+  it('preserves and saves each required result scenario for a financial metric', async () => {
+    const withScenarios: AnalysisRequirementsRecord = {
+      ...current,
+      items: [{ ...current.items[0], scenarios: ['actual_ytd'] }, current.items[1]],
+    };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...withScenarios, id: 'r-scenarios-002', parent_id: withScenarios.id, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [withScenarios], current: withScenarios })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    expect(within(profit).getByText('actual_ytd ×')).toBeTruthy();
+    const input = within(profit).getByLabelText('添加结果情景 1');
+    fireEvent.change(input, { target: { value: 'budget_ytd' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
+    fireEvent.change(input, { target: { value: 'achievement_ratio' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      items: expect.arrayContaining([expect.objectContaining({
+        id: 'profit', scenarios: ['actual_ytd', 'budget_ytd', 'achievement_ratio'],
+      })]),
+    })));
+  });
+
+  it('lets a requirement pin the exact result metric key instead of relying on broad profit aliases', async () => {
+    const pinned: AnalysisRequirementsRecord = {
+      ...current,
+      items: [{ ...current.items[0], dimensions: { metric_key: 'operating_profit' } }, current.items[1]],
+    };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...pinned, id: 'r-metric-key-002', parent_id: pinned.id, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [pinned], current: pinned })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    const exactKey = within(profit).getByLabelText('精确结果键 1') as HTMLInputElement;
+    expect(exactKey.value).toBe('operating_profit');
+    fireEvent.change(exactKey, { target: { value: 'gross_profit' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      items: expect.arrayContaining([expect.objectContaining({
+        id: 'profit', dimensions: expect.objectContaining({ metric_key: 'gross_profit' }),
+      })]),
+    })));
+  });
+
   it('round-trips supported custom requirements without stale choice warnings', async () => {
     const supportedCustom: AnalysisRequirementsRecord = {
       ...current,
