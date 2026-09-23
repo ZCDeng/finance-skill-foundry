@@ -27,6 +27,19 @@ function scopeValue(scope: Record<string, unknown> | undefined, key: string, fal
 }
 
 const editableScopeKeys = ['period', 'granularity', 'unit', 'currency', 'scenario', 'organization'] as const;
+const itemScopeKeys = [
+  { field: 'period', itemField: 'periods', label: '期间' },
+  { field: 'organization', itemField: 'organizations', label: '组织' },
+  { field: 'scenario', itemField: 'scenarios', label: '情景' },
+] as const;
+
+function conflictingItemScope(items: unknown[] | undefined, itemField: string, value: string): boolean {
+  return Boolean(value && items?.some((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const values = (item as Record<string, unknown>)[itemField];
+    return Array.isArray(values) && values.length > 0 && (values.length !== 1 || values[0] !== value);
+  }));
+}
 
 export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSaved }: {
   taskId: string;
@@ -103,6 +116,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
     }
   }
   const blocked = disabled || loading || saving || !taskId || !bridge()?.financeCall;
+  const conflicts = itemScopeKeys.filter(({ field, itemField }) => conflictingItemScope(current?.items, itemField, scope[field]));
   return <section className="analysis-scope-card" aria-label="分析口径">
     <div className="analysis-section-heading"><div><h3>分析口径</h3><p className="analysis-note">运行前确认期间、单位、情景和组织；保存会生成新版要求。</p></div>
       <span className="analysis-note">{current ? `版本 ${current.id.slice(0, 12)}` : '未保存'} · 资料 {datasets.length} 份</span></div>
@@ -115,8 +129,12 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       <label>情景<Input aria-label="分析口径情景" disabled={blocked} value={scope.scenario} onChange={(event) => setField('scenario', event.target.value)} placeholder="待确认" /></label>
       <label>组织<Input aria-label="分析口径组织" disabled={blocked} value={scope.organization} onChange={(event) => setField('organization', event.target.value)} placeholder="待确认" /></label>
     </div>
+    {conflicts.map(({ field, label }) => <p key={field} role="alert" className="analysis-message analysis-message--error">
+      共享{label}与逐项{label}冲突。<Button type="button" variant="outline" disabled={blocked}
+        onClick={() => setField(field, '')}>移除共享{label}，保留逐项{label}</Button>
+    </p>)}
     {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
     {message ? <p role="status" className="analysis-message">{message}</p> : null}
-    <Button type="button" disabled={blocked} onClick={() => void save()}><Save size={14} aria-hidden />保存口径</Button>
+    <Button type="button" disabled={blocked || conflicts.length > 0} onClick={() => void save()}><Save size={14} aria-hidden />保存口径</Button>
   </section>;
 }

@@ -97,6 +97,33 @@ describe('business result components', () => {
     await screen.findByText('已保存口径版本 blank-scope-。');
   });
 
+  it('resolves a legacy shared-period conflict explicitly while preserving item periods and bindings', async () => {
+    const items = [{ id: 'monthly_profit', metric: 'operating_profit', periods: ['2026-01', '2026-08'], dimensions: {}, requires_drilldown: true }];
+    const current = {
+      id: 'legacy-requirements', question: '核对月度利润',
+      scope: { period: '2026-01:2026-08', unit: '万元', currency: 'CNY' },
+      bindings: { actual: 'actual-dataset' }, items,
+    };
+    const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'analysis-requirements-list') return ok({ current });
+      expect(command).toBe('analysis-requirements-save');
+      expect(spec).toMatchObject({ parent_id: current.id, items, bindings: current.bindings, scope: { unit: '元', currency: 'CNY' } });
+      expect(spec?.scope).not.toHaveProperty('period');
+      return ok({ ...current, id: 'resolved-requirements', scope: spec?.scope });
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    render(<AnalysisScopeCard taskId={taskId} question="新问题" datasets={[dataset]} />);
+    expect(await screen.findByDisplayValue('2026-01:2026-08')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('分析口径单位'), { target: { value: '元' } });
+    expect(screen.getByRole('button', { name: '保存口径' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('逐项期间');
+    fireEvent.click(screen.getByRole('button', { name: '移除共享期间，保留逐项期间' }));
+    expect((screen.getByLabelText('分析口径期间') as HTMLInputElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
+    await screen.findByText('已保存口径版本 resolved-req。');
+    expect(financeCall).toHaveBeenCalledTimes(2);
+  });
+
   it('toggles periods while preserving exact amount, ratio, percentage-point and source detail text', () => {
     const onSources = vi.fn();
     render(<BusinessResultView run={run([
