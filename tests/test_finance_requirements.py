@@ -118,6 +118,20 @@ def test_removed_item_ids_accumulate_across_versions(analysis):
     assert third['removed_item_ids'] == ['profit', 'revenue']
 
 
+def test_metric_key_matches_only_declared_metric_aliases_for_generic_values(analysis):
+    from foundry.finance_requirements import _matches
+
+    assert _matches({'metric': 'profit', 'dimensions': {}}, {'metric_key': 'operating_profit', 'value': '1'}, 'value')
+    assert _matches({'metric': 'profit', 'dimensions': {}}, {'metric_key': 'gross_profit', 'value': '1'}, 'value')
+    assert _matches({'metric': 'expense', 'dimensions': {}}, {'metric_key': 'period_expense', 'value': '1'}, 'value')
+    assert _matches({'metric': 'other_income', 'dimensions': {}}, {'metric_key': 'other_income_and_gains_4items', 'value': '1'}, 'value')
+    assert _matches({'metric': 'ratio', 'dimensions': {}}, {'metric_key': 'achievement_ratio', 'value': '0.9'}, 'value')
+
+    assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'not_revenue', 'value': '1'}, 'value')
+    assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'revenue_noise', 'value': '1'}, 'value')
+    assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'revenue', 'note': '1'}, 'note')
+
+
 def test_default_context_scenario_scope_allows_valid_actual_budget_bridge(analysis):
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1', 'organization': 'O1', 'period': '2026-09',

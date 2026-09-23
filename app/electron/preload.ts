@@ -28,7 +28,7 @@ const api = {
   analysisSave: (task: string, spec: unknown) => ipcRenderer.invoke('analysis:save', task, spec),
   analysisRun: (task: string, id: string) => ipcRenderer.invoke('analysis:run', task, id),
   analysisDraft: (task: string, spec: unknown) => ipcRenderer.invoke('analysis:draft', task, spec),
-  analysisExport: (task: string, id: string, format: string) => ipcRenderer.invoke('analysis:export', task, id, format),
+  analysisExport: (task: string, id: string, format: string, mode?: 'management' | 'audit') => ipcRenderer.invoke('analysis:export', task, id, format, mode),
   analysisMethodSave: (task: string, id: string, name: string) => ipcRenderer.invoke('analysis:method-save', task, id, name),
   analysisMethodApply: (task: string, id: string, bindings: unknown, parameters: unknown = []) => ipcRenderer.invoke('analysis:method-apply', task, id, bindings, parameters),
   financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),

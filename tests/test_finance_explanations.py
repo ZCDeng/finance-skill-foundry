@@ -929,6 +929,153 @@ def test_generic_value_column_uses_row_unit_without_relaxing_ratio_or_count(serv
     assert checked["status"] == "pass", checked["issues"]
 
 
+def test_chinese_wide_result_reads_row_unit_and_keeps_ratio_percent(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "abababababababababababababababab",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "合并", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "项目", "type": "VARCHAR"},
+                {"name": "收入_实际_1_8月", "type": "DECIMAL(38,4)"},
+                {"name": "收入_达成率_1_8月", "type": "DECIMAL(18,6)"},
+                {"name": "单位", "type": "VARCHAR"},
+            ],
+            "rows": [{
+                "项目": "营业收入",
+                "收入_实际_1_8月": "325644.0000",
+                "收入_达成率_1_8月": "0.945301",
+                "单位": "万元",
+            }],
+        },
+    })
+
+    prepared = prepare_explanation(store.analysis, [run])
+    facts = {fact["column"]: fact for fact in prepared["facts"]}
+    members = {
+        member["column"]: member
+        for member in prepared["evidence_groups"][0]["members"]
+    }
+
+    assert facts["收入_实际_1_8月"]["unit"] == "万元"
+    assert facts["收入_实际_1_8月"]["display_value"] == "325,644.0000 万元"
+    assert facts["收入_实际_1_8月"]["semantics"]["role"] == "amount"
+    assert members["收入_实际_1_8月"]["semantic_role"] == "amount"
+    assert facts["收入_达成率_1_8月"]["unit"] == "%"
+    assert facts["收入_达成率_1_8月"]["display_value"] == "94.53%"
+    assert facts["收入_达成率_1_8月"]["semantics"]["role"] == "ratio"
+    assert members["收入_达成率_1_8月"]["semantic_role"] == "ratio"
+
+
+def test_chinese_wide_result_uses_run_scope_unit_without_leaking_to_ratio(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "合并", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "项目", "type": "VARCHAR"},
+                {"name": "经营利润_实际_1_8月", "type": "DECIMAL(38,4)"},
+                {"name": "利润达成率_1_8月", "type": "DECIMAL(18,6)"},
+            ],
+            "rows": [{
+                "项目": "经营利润",
+                "经营利润_实际_1_8月": "24564.3000",
+                "利润达成率_1_8月": "0.775438",
+            }],
+        },
+    })
+
+    prepared = prepare_explanation(store.analysis, [run])
+    facts = {fact["column"]: fact for fact in prepared["facts"]}
+
+    assert facts["经营利润_实际_1_8月"]["unit"] == "万元"
+    assert facts["经营利润_实际_1_8月"]["display_value"] == "24,564.3000 万元"
+    assert facts["利润达成率_1_8月"]["unit"] == "%"
+    assert facts["利润达成率_1_8月"]["display_value"] == "77.54%"
+
+
+
+def test_generic_value_fact_uses_metric_key_for_semantics_without_changing_value_contract(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    payload = prepare_explanation(store.analysis, [{
+        "id": "metric-key-run",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(38,4)"},
+                {"name": "unit", "type": "VARCHAR"},
+            ],
+            "rows": [{
+                "metric_key": "operating_profit",
+                "value": "21086.0000",
+                "unit": "万元",
+                "scenario": "actual_ytd",
+            }],
+        },
+    }])
+    fact = next(fact for fact in payload["facts"] if fact["column"] == "value")
+
+    assert fact["value"] == "21086.0000"
+    assert fact["semantics"]["metric"] == "operating_profit"
+    assert fact["label"] == "operating_profit / value / actual_ytd"
+
+
+def test_english_ratio_detection_uses_tokens_not_substrings(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "efefefefefefefefefefefefefefefef",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "corporate_expense", "type": "DECIMAL(38,4)"},
+                {"name": "operational_cost", "type": "DECIMAL(38,4)"},
+                {"name": "duration_months", "type": "DECIMAL(38,4)"},
+                {"name": "attainment_rate", "type": "DECIMAL(18,6)"},
+                {"name": "unit", "type": "VARCHAR"},
+            ],
+            "rows": [{
+                "corporate_expense": "100",
+                "operational_cost": "100",
+                "duration_months": "100",
+                "attainment_rate": "1",
+                "unit": "万元",
+            }],
+        },
+    })
+
+    prepared = prepare_explanation(store.analysis, [run])
+    facts = {fact["column"]: fact for fact in prepared["facts"]}
+
+    assert facts["corporate_expense"]["semantics"]["role"] == "amount"
+    assert facts["corporate_expense"]["display_value"] == "100 万元"
+    assert facts["operational_cost"]["semantics"]["role"] == "amount"
+    assert facts["operational_cost"]["display_value"] == "100 万元"
+    assert facts["duration_months"]["semantics"]["role"] == "value"
+    assert facts["duration_months"]["display_value"] == "100"
+    assert facts["attainment_rate"]["semantics"]["role"] == "ratio"
+    assert facts["attainment_rate"]["display_value"] == "100.00%"
+
+
+
 @pytest.mark.parametrize("identity_type", ["VARCHAR", "INTEGER"])
 def test_typed_identity_columns_do_not_become_amount_facts(service, identity_type):
     from foundry.finance_explanations import prepare_explanation
@@ -1217,6 +1364,162 @@ def test_source_row_count_column_is_count_not_money(service):
     assert facts["source_row_count"]["semantics"]["role"] == "count"
     assert facts["amount"]["display_value"] == "9 元"
 
+
+
+def _presentation_claim_for_fact(fact, presentation):
+    return {
+        "basis": "calculation",
+        "fact_id": fact["id"],
+        "run_id": fact["run_id"],
+        "row": fact["row"],
+        "column": fact["column"],
+        "value": fact["value"],
+        "presentation": presentation,
+    }
+
+
+def _synthetic_single_value_fact(store, *, run_id, value, unit="万元", metric_key="operating_profit"):
+    from foundry.finance_explanations import prepare_explanation
+
+    run = _write_synthetic_run(store.analysis, {
+        "id": run_id,
+        "bindings": {},
+        "assumptions": [],
+        "execution_status": "succeeded",
+        "reproducibility_status": "reproducible",
+        "output_hash": "hash-" + run_id[:8],
+        "result": {
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(38,18)"},
+                {"name": "unit", "type": "VARCHAR"},
+            ],
+            "rows": [{"metric_key": metric_key, "value": value, "unit": unit, "scenario": "actual_ytd"}],
+        },
+    })
+    fact = next(fact for fact in prepare_explanation(store.analysis, [run])["facts"] if fact["column"] == "value")
+    return run, fact
+
+
+def test_claim_presentation_allows_only_decimal_derived_display_tokens(service):
+    store, _ = service
+    run, fact = _synthetic_single_value_fact(
+        store,
+        run_id="11111111111111111111111111111111",
+        value="21086.0040",
+    )
+    claim = _presentation_claim_for_fact(
+        fact,
+        {"decimal_places": 2, "scale": "identity", "rounding": "half_up"},
+    )
+
+    good = store.validate_explanation({"body": "管理利润为21,086.00万元。", "run_ids": [run["id"]], "claims": [claim]})
+    bad = store.validate_explanation({"body": "管理利润为21,086.01万元。", "run_ids": [run["id"]], "claims": [claim]})
+    percent_unit = store.validate_explanation({"body": "管理利润为21,086.00%。", "run_ids": [run["id"]], "claims": [claim]})
+
+    budget_run, budget_fact = _synthetic_single_value_fact(
+        store,
+        run_id="66666666666666666666666666666666",
+        value="64441.3769",
+    )
+    budget_claim = _presentation_claim_for_fact(
+        budget_fact,
+        {"decimal_places": 2, "scale": "identity", "rounding": "half_up"},
+    )
+    matching_unit = store.validate_explanation({"body": "预算为64,441.38 万元。", "run_ids": [budget_run["id"]], "claims": [budget_claim]})
+    mismatched_unit = store.validate_explanation({"body": "预算为64,441.38 元。", "run_ids": [budget_run["id"]], "claims": [budget_claim]})
+
+    assert good["status"] == "pass", good["issues"]
+    assert matching_unit["status"] == "pass", matching_unit["issues"]
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "21,086.01" for issue in bad["issues"])
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "21,086.00%" for issue in percent_unit["issues"])
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "64,441.38" for issue in mismatched_unit["issues"])
+
+
+def test_claim_presentation_does_not_allow_unknown_or_mismatched_fact(service):
+    store, _ = service
+    run, fact = _synthetic_single_value_fact(
+        store,
+        run_id="22222222222222222222222222222222",
+        value="100.0040",
+    )
+    presentation = {"decimal_places": 2, "scale": "identity", "rounding": "half_up"}
+    unknown = _presentation_claim_for_fact(fact, presentation)
+    unknown["fact_id"] = "f" * 64
+    mismatch = _presentation_claim_for_fact(fact, presentation)
+    mismatch["value"] = "100.0140"
+    extra_field = _presentation_claim_for_fact(fact, {**presentation, "unit": "元"})
+
+    unknown_check = store.validate_explanation({"body": "金额100.00万元。", "run_ids": [run["id"]], "claims": [unknown]})
+    mismatch_check = store.validate_explanation({"body": "金额100.00万元。", "run_ids": [run["id"]], "claims": [mismatch]})
+    extra_field_check = store.validate_explanation({"body": "金额100.00万元。", "run_ids": [run["id"]], "claims": [extra_field]})
+
+    assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "presentation_requires_bound_fact" for issue in unknown_check["issues"])
+    assert any(issue["code"] == "unknown_fact" for issue in unknown_check["issues"])
+    assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "claim_does_not_match_fact" for issue in mismatch_check["issues"])
+    assert any(issue["code"] == "fact_claim_mismatch" for issue in mismatch_check["issues"])
+    assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "unsupported_presentation_fields" for issue in extra_field_check["issues"])
+
+
+def test_claim_presentation_preserves_negative_sign_and_percent_requires_ratio(service):
+    store, _ = service
+    amount_run, amount_fact = _synthetic_single_value_fact(
+        store,
+        run_id="33333333333333333333333333333333",
+        value="-6106.3769",
+        unit="万元",
+    )
+    ratio_run, ratio_fact = _synthetic_single_value_fact(
+        store,
+        run_id="44444444444444444444444444444444",
+        value="0.945301122594983360",
+        unit="比率",
+        metric_key="achievement_ratio",
+    )
+    amount_claim = _presentation_claim_for_fact(amount_fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"})
+    invalid_percent = _presentation_claim_for_fact(amount_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})
+    ratio_claim = _presentation_claim_for_fact(ratio_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})
+
+    signed = store.validate_explanation({"body": "利润差异-6,106.38万元。", "run_ids": [amount_run["id"]], "claims": [amount_claim]})
+    unsigned = store.validate_explanation({"body": "利润差异6,106.38万元。", "run_ids": [amount_run["id"]], "claims": [amount_claim]})
+    bad_percent = store.validate_explanation({"body": "金额-610,637.69%。", "run_ids": [amount_run["id"]], "claims": [invalid_percent]})
+    ratio = store.validate_explanation({"body": "收入达成率94.53%。", "run_ids": [ratio_run["id"]], "claims": [ratio_claim]})
+
+    assert signed["status"] == "pass", signed["issues"]
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "6,106.38" for issue in unsigned["issues"])
+    assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "percent_requires_ratio_fact" for issue in bad_percent["issues"])
+    assert ratio["status"] == "pass", ratio["issues"]
+
+
+def test_claim_presentation_persists_and_appears_in_audit_projection(service):
+    from foundry.report_projection import build_report_projection
+
+    store, _ = service
+    run, fact = _synthetic_single_value_fact(
+        store,
+        run_id="55555555555555555555555555555555",
+        value="21086.0040",
+    )
+    claim = _presentation_claim_for_fact(
+        fact,
+        {"decimal_places": 2, "scale": "identity", "rounding": "half_up"},
+    )
+
+    draft = store.save_explanation_draft({
+        "title": "presentation",
+        "body": "管理利润为21,086.00万元。",
+        "run_ids": [run["id"]],
+        "claims": [claim],
+    })
+    persisted = store.analysis.get_draft(draft["id"])
+    audit = build_report_projection(persisted, mode="audit")
+
+    persisted_claim = next(item for item in persisted["claims"] if item.get("fact_id") == fact["id"])
+    assert persisted_claim["verification_status"] == "matches_run"
+    assert persisted_claim["presentation"] == claim["presentation"]
+    assert persisted["explanation_check"]["status"] == "pass", persisted["explanation_check"]["issues"]
+    assert '"presentation"' in audit["body"]
+    assert '"decimal_places":2' in audit["body"]
 
 def _write_synthetic_run(analysis, run):
     saved = analysis._write(

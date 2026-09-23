@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import hashlib
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -11,6 +12,7 @@ from foundry.cli import main
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.report_documents import report_document_from_markdown_body, report_document_markdown, validate_report_document
+from foundry.report_projection import build_report_projection
 from foundry.task import TaskStore
 
 
@@ -185,6 +187,68 @@ def test_python_projection_matches_renderer_markdown_rules_for_marks_notes_and_t
 
 
 
+def test_markdown_body_list_items_preserve_inline_bold_when_projected_back() -> None:
+    body = """# 经营分析
+
+1. **收入端**：1—8 月营业收入 325,644.0 万元。
+2. **利润端**：利润端在 8 月明显失速，**没有随收入缺口收敛。**
+"""
+
+    document = report_document_from_markdown_body(body)
+    rendered = report_document_markdown(document)
+
+    first_item = document["content"][1]["content"][0]["content"][0]["content"]
+    assert first_item[0] == {"type": "text", "text": "收入端", "marks": [{"type": "bold"}]}
+    assert "1. **收入端**：1—8 月营业收入 325,644.0 万元。" in rendered
+    assert r"\*\*收入端\*\*" not in rendered
+    assert "2. **利润端**：利润端在 8 月明显失速，**没有随收入缺口收敛。**" in rendered
+
+
+
+def test_existing_list_item_ast_literal_markdown_chars_are_not_reinterpreted() -> None:
+    draft = {
+        "id": "e3a364e360864e1c879025ad353d3dd7",
+        "task_id": "task-1",
+        "title": "参数说明",
+        "content_hash": "c" * 64,
+        "document": {
+            "schema_version": 1,
+            "template_version": "annual-v1",
+            "metadata": {},
+            "content": [
+                {
+                    "type": "orderedList",
+                    "content": [
+                        {
+                            "type": "listItem",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": "参数 a**b**c 保持原值",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    projection = build_report_projection(draft)
+    rendered = projection["body"]
+    first_inline = projection["document"]["content"][0]["content"][0]["content"][0]["content"]
+
+    assert first_inline == [{"type": "text", "text": "参数 a**b**c 保持原值"}]
+    assert "参数 abc 保持原值" not in rendered
+    assert r"1. 参数 a\*\*b\*\*c 保持原值" in rendered
+
+
+
 def test_python_table_projection_escapes_pipes_backslashes_and_line_breaks_deterministically() -> None:
     def header(text: str) -> dict:
         return {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}
@@ -335,6 +399,165 @@ def test_xlsx_draft_export_includes_structured_chinese_report_sheets(tmp_path: P
         workbook.close()
 
 
+def test_report_projection_marks_draft_and_deduplicates_title_without_dropping_user_appendix(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    source_file = tmp_path / "report.md"
+    source_file.write_text("# 来源报告\n", encoding="utf-8")
+    report_source = store.add_report_source(source_file)["source"]
+    draft = store.save_draft({
+        "title": "经营分析",
+        "document": {
+            **_document(report_source),
+            "content": [
+                {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "经营分析"}]},
+                {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "附录"}]},
+                {"type": "paragraph", "content": [{"type": "text", "text": "这是用户写入的附录内容。"}]},
+            ],
+        },
+        "limitations": ["区域预算为估算，待业务确认。"],
+    })
+
+    projection = build_report_projection(draft, mode="management")
+
+    assert projection["content_mode"] == "management"
+    assert projection["marker"] == "分析草稿·待复核"
+    assert projection["draft_id"] == draft["id"]
+    assert projection["content_hash"] == draft["content_hash"]
+    assert projection["title"] == "经营分析"
+    assert projection["body"].startswith("分析草稿·待复核\n\n# 经营分析\n")
+    assert projection["body"].count("# 经营分析") == 1
+    assert "# 附录" in projection["body"]
+    assert "这是用户写入的附录内容。" in projection["body"]
+    assert "区域预算为估算" in projection["body"]
+    assert "## 导出身份与来源" in projection["body"]
+    assert f"草稿版本：{draft['id']}" in projection["body"]
+    assert f"内容 SHA-256：{draft['content_hash']}" in projection["body"]
+    assert "复核状态：unreviewed" in projection["body"]
+    assert "report.md" in projection["body"]
+    assert report_source["sha256"][:12] in projection["body"]
+    assert projection["sources"] and "report.md" in projection["sources"][0]
+    assert len(projection["projection_hash"]) == 64
+
+
+def test_report_projection_management_omits_only_authenticated_generated_appendix(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    appendix = "## 系统生成计算依据附录\n\n自动证据明细 123.45"
+    draft = store.save_draft({
+        "title": "经营分析",
+        "body": "管理摘要。\n\n## 附录\n\n用户手写附录保留。",
+        "evidence_appendix": appendix,
+        "evidence_appendix_meta": {
+            "schema_version": 1,
+            "render_version": 1,
+            "body_sha256": hashlib.sha256(appendix.encode("utf-8")).hexdigest(),
+        },
+    })
+
+    management = build_report_projection(draft, mode="management")
+    audit = build_report_projection(draft, mode="audit")
+
+    assert "用户手写附录保留" in management["body"]
+    assert "自动证据明细" not in management["body"]
+    assert "自动证据明细" in audit["body"]
+    assert audit["content_mode"] == "audit"
+    assert audit["body"].count("自动证据明细") == 1
+    assert "## 审计质量与证据记录" in audit["body"]
+    assert management["projection_hash"] != audit["projection_hash"]
+
+
+def test_report_projection_management_includes_resolved_finance_workbook_sources(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["metric", "amount"])
+    sheet.append(["revenue", 123.45])
+    source_path = tmp_path / "actual_workbook.xlsx"
+    workbook.save(source_path)
+    dataset = store.add_dataset(source_path, name="实际工作簿")
+    draft = store.save_draft({
+        "title": "经营分析",
+        "body": "# 管理摘要\n\n收入 123.45 万元。",
+    })
+    projected_draft = {**draft, "evidence_recipes": [{"source_hash": "0" * 64, "name": "模型声称来源"}]}
+
+    projection = build_report_projection(projected_draft, mode="management", resolved_datasets=[dataset])
+
+    assert "授权来源：未附加外部文稿来源" not in projection["body"]
+    assert "实际工作簿" in projection["body"]
+    assert "table" in projection["body"]
+    assert dataset["id"] in projection["body"]
+    assert dataset["source_hash"][:12] in projection["body"]
+    assert "模型声称来源" not in projection["body"]
+    assert "000000000000" not in projection["body"]
+    assert projection["sources"] == [f"实际工作簿（table；ID {dataset['id']}；SHA-256 {dataset['source_hash'][:12]}）"]
+
+
+def test_report_projection_audit_includes_consistency_and_source_reports() -> None:
+    draft = {
+        "id": "d" * 32,
+        "task_id": "t" * 32,
+        "title": "经营分析",
+        "body": "正文。",
+        "content_hash": "c" * 64,
+        "publication_status": "draft",
+        "review_status": "unreviewed",
+        "reproducibility_status": "unverified",
+        "limitations": [],
+        "consistency_rules": [{"rule": "actual_budget_complete"}],
+        "consistency_report": {"summary": {"status": "needs_attention"}},
+        "source_report": {"archived_dataset_count": 2},
+    }
+
+    projection = build_report_projection(draft, mode="audit")
+
+    assert "## 审计质量与证据记录" in projection["body"]
+    assert '"consistency_rules"' in projection["body"]
+    assert '"actual_budget_complete"' in projection["body"]
+    assert '"consistency_report"' in projection["body"]
+    assert '"source_report"' in projection["body"]
+
+
+def test_audit_projection_preserves_large_diagnostics_without_indentation_overflow() -> None:
+    issues = [
+        {"code": "unknown_fact", "detail": {"fact_id": f"fact_{i}", "label": "待核对", "status": "needs_review"}}
+        for i in range(4000)
+    ]
+    payload = {"quality": {"issues": issues}, "explanation_check": {"issues": issues}}
+    assert len(json.dumps(payload, ensure_ascii=False, indent=2)) > 1_000_000
+    draft = {
+        "id": "d" * 32, "content_hash": "c" * 64, "title": "待复核报告",
+        "body": "正文保留。", "review_status": "unreviewed", **payload,
+    }
+
+    projection = build_report_projection(draft, mode="audit")
+
+    code = next(node for node in projection["document"]["content"] if node["type"] == "codeBlock")
+    assert json.loads(code["content"][0]["text"]) == payload
+    assert projection["review_status"] == "unreviewed"
+    assert "正文保留。" in projection["body"]
+    assert "分析草稿·待复核" in projection["body"]
+
+
+def test_report_projection_strips_canonical_stored_appendix_once_for_audit(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    appendix = "## 系统生成计算依据附录\n\n| 项目 | 金额 |\n| --- | ---: |\n| 收入 | 1,234.50 |"
+    body = "# 经营分析\n\n正文。\n\n" + appendix
+    draft = store.save_draft({
+        "title": "经营分析",
+        "body": body,
+        "evidence_appendix": appendix,
+        "evidence_appendix_meta": {"body_sha256": hashlib.sha256(appendix.encode("utf-8")).hexdigest()},
+        "quality": {"status": "needs_attention", "issues": [{"code": "source_missing"}]},
+    })
+
+    management = build_report_projection(draft, mode="management")
+    audit = build_report_projection(draft, mode="audit")
+
+    assert "| 收入 | 1,234.50 |" not in management["body"]
+    assert audit["body"].count("| 收入 | 1,234.50 |") == 1
+    assert '"uncited_number"' in audit["body"]
+
+
 def test_report_export_register_is_immutable_and_readable(tmp_path: Path) -> None:
     store = _store(tmp_path)
     draft = store.save_draft({"title": "经营分析", "document": _document()})
@@ -349,6 +572,44 @@ def test_report_export_register_is_immutable_and_readable(tmp_path: Path) -> Non
     assert Path(replay["path"]).read_text(encoding="utf-8").startswith("<!doctype html><meta")
 
 
+def test_report_export_register_keys_projection_receipts_without_overwriting_old_exports(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    draft = store.save_draft({"title": "经营分析", "document": _document()})
+    old_html = tmp_path / "old.html"
+    old_html.write_text("<!doctype html><h1>old</h1>", encoding="utf-8")
+    old_receipt = store.register_report_export(draft["id"], "html", old_html)
+
+    projection = build_report_projection(draft, mode="management")
+    management_html = tmp_path / "management.html"
+    management_html.write_text("<!doctype html><h1>management</h1>", encoding="utf-8")
+    management_receipt = store.register_report_export(
+        draft["id"],
+        "html",
+        management_html,
+        content_mode="management",
+        projection_hash=projection["projection_hash"],
+    )
+    audit = build_report_projection(draft, mode="audit")
+    audit_html = tmp_path / "audit.html"
+    audit_html.write_text("<!doctype html><h1>audit</h1>", encoding="utf-8")
+    audit_receipt = store.register_report_export(
+        draft["id"],
+        "html",
+        audit_html,
+        content_mode="audit",
+        projection_hash=audit["projection_hash"],
+    )
+
+    assert old_receipt["path"] != management_receipt["path"] != audit_receipt["path"]
+    assert old_receipt.get("content_mode") is None
+    assert management_receipt["content_mode"] == "management"
+    assert management_receipt["projection_hash"] == projection["projection_hash"]
+    assert audit_receipt["content_mode"] == "audit"
+    assert Path(old_receipt["path"]).read_text(encoding="utf-8").endswith("old</h1>")
+    assert Path(management_receipt["path"]).read_text(encoding="utf-8").endswith("management</h1>")
+    assert Path(audit_receipt["path"]).read_text(encoding="utf-8").endswith("audit</h1>")
+
+
 def test_report_cli_spec_file_source_and_draft_read(tmp_path: Path, capsys) -> None:
     root = tmp_path / "var"
     task = TaskStore(root).create(title="CLI")
@@ -360,6 +621,11 @@ def test_report_cli_spec_file_source_and_draft_read(tmp_path: Path, capsys) -> N
     assert draft["title"] == "大文稿"
     assert main([*args, "report-draft-read", "--draft", draft["id"]]) == 0
     assert json.loads(capsys.readouterr().out)["id"] == draft["id"]
+    assert main([*args, "report-projection-read", "--draft", draft["id"], "--mode", "management"]) == 0
+    projection = json.loads(capsys.readouterr().out)
+    assert projection["draft_id"] == draft["id"]
+    assert projection["content_mode"] == "management"
+    assert projection["marker"] == "分析草稿·待复核"
 
     html = tmp_path / "report.html"
     html.write_text("<h1>报告</h1>", encoding="utf-8")

@@ -61,6 +61,9 @@ def test_recoveries_list_terminal_unsettled_payload_without_runtime_authority(ta
         "run_ids": ["run-1"],
         "fact_ids": ["fact-1"],
         "claims": [{"basis": "professional_judgment", "reason": "经理判断"}],
+        "evidence_recipes": [{"dataset_id": "dataset-1", "columns": ["amount"]}],
+        "consistency_rules": [{"id": "rule-1", "kind": "tie_out"}],
+        "consistency_sources": [{"run_id": "run-1", "column": "profit"}],
         "materiality": {"absolute": "10"},
         "requirements_id": "req-1",
         "parent_id": "parent-1",
@@ -80,6 +83,9 @@ def test_recoveries_list_terminal_unsettled_payload_without_runtime_authority(ta
         "run_ids": ["run-1"],
         "fact_ids": ["fact-1"],
         "claims": [{"basis": "professional_judgment", "reason": "经理判断"}],
+        "evidence_recipes": [{"dataset_id": "dataset-1", "columns": ["amount"]}],
+        "consistency_rules": [{"id": "rule-1", "kind": "tie_out"}],
+        "consistency_sources": [{"run_id": "run-1", "column": "profit"}],
         "materiality": {"absolute": "10"},
         "requirements_id": "req-1",
         "parent_id": "parent-1",
@@ -96,6 +102,24 @@ def test_recoveries_list_terminal_unsettled_payload_without_runtime_authority(ta
     assert "bindings" not in recovery[0]
 
 
+def test_recoveries_preserve_consistency_source_mapping_and_default_wrong_types(task):
+    ops = store(task)
+    op = ops.begin("runtime-request-1")
+    ops.reserve(op["id"], payload={
+        "body": "待恢复正文",
+        "evidence_recipes": {"dataset_id": "dataset-1"},
+        "consistency_rules": "rule-1",
+        "consistency_sources": {"source-1": {"kind": "number", "dataset_id": "dataset-1"}},
+    }, call_id="call-bad-metadata")
+    ops.stop(op["id"], "timeout")
+
+    recovery = list_completion_recoveries(task)["recoveries"][0]
+
+    assert recovery["evidence_recipes"] == []
+    assert recovery["consistency_rules"] == []
+    assert recovery["consistency_sources"] == {"source-1": {"kind": "number", "dataset_id": "dataset-1"}}
+
+
 def test_recoveries_expire_running_operations_before_listing(task):
     clock = Clock()
     ops = store(task, clock=clock)
@@ -108,6 +132,17 @@ def test_recoveries_expire_running_operations_before_listing(task):
     assert listed[0]["operation_id"] == op["id"]
     assert listed[0]["status"] == "timed_out"
     assert store(task, clock=clock).get(op["id"])["status"] == "timed_out"
+
+
+def test_recoveries_do_not_resurface_rejected_payload_after_later_saved_revision(task):
+    ops = store(task)
+    op = ops.begin("runtime-request-1")
+    ops.reserve(op["id"], payload={"body": "错误正文"}, call_id="bad-call")
+    ops.reject_attempt(op["id"], 1, {"code": "claim_value_mismatch", "message": "bad"})
+    ops.reserve(op["id"], payload={"body": "已保存正文"}, call_id="good-call")
+    ops.settle(op["id"], 2, draft("2"), completion("2", repair_allowed=True))
+
+    assert list_completion_recoveries(task) == {"recoveries": []}
 
 
 def test_recoveries_exclude_settled_and_real_service_saved_before_settle(task):
@@ -283,6 +318,20 @@ def test_call_id_retry_reuses_server_assigned_revision_without_counting_budget(t
     assert len(retry["revisions"]) == 1
 
 
+def test_different_call_id_cannot_start_new_revision_while_first_is_inflight(task):
+    ops = store(task)
+    op = ops.begin("runtime-request-1", policy={"max_repairs": 2})
+    ops.reserve(op["id"], payload={"body": "first"}, call_id="tool-call-1")
+
+    with pytest.raises(FoundryError, match="has not settled"):
+        ops.reserve(op["id"], payload={"body": "second"}, call_id="tool-call-2")
+
+    current = ops.get(op["id"])
+    assert current["current_revision"] == 1
+    assert [row["call_id"] for row in current["revisions"]] == ["tool-call-1"]
+    assert [event["type"] for event in current["events"]].count("revision_reserved") == 1
+
+
 def test_call_id_rejects_changed_payload_or_wrong_explicit_revision(task):
     ops = store(task)
     op = ops.begin("runtime-request-1")
@@ -347,6 +396,20 @@ def test_zero_repairs_allows_initial_attempt_only(task):
         ops.reserve(op["id"], 2, {"body": "repair"})
 
 
+def test_rejected_attempt_with_zero_repair_budget_goes_to_review(task):
+    ops = store(task)
+    op = ops.begin("runtime-request-1", policy={"max_repairs": 0})
+    ops.reserve(op["id"], 1, {"body": "bad"}, call_id="tool-call-1")
+
+    rejected = ops.reject_attempt(op["id"], 1, {"code": "claim_value_mismatch", "message": "bad claim"})
+
+    assert rejected["status"] == "needs_review"
+    assert rejected["stop_reason"] == "repair_budget_exhausted"
+    assert rejected["revisions"][0]["status"] == "rejected_validation"
+    with pytest.raises(FoundryError, match="terminal"):
+        ops.reserve(op["id"], payload={"body": "fixed"}, call_id="tool-call-2")
+
+
 def test_deadline_persists_across_restarted_store_and_blocks_new_reserve(task):
     clock = Clock()
     op = store(task, clock=clock).begin("runtime-request-1", policy={"timeout_seconds": 30})
@@ -372,6 +435,26 @@ def test_subsecond_clock_does_not_round_deadline(task):
     assert store(task, clock=clock).get(op["id"])["status"] == "running"
     clock.value = datetime(2026, 9, 7, 1, 0, 1, 500000, tzinfo=timezone.utc)
     assert store(task, clock=clock).get(op["id"])["status"] == "timed_out"
+
+
+def test_cancelled_status_is_distinct_from_automatic_timeout(task):
+    clock = Clock()
+    ops = store(task, clock=clock)
+    cancelled = ops.begin("cancelled-request", policy={"timeout_seconds": 1})
+    ops.reserve(cancelled["id"], payload={"body": "cancel"}, call_id="cancel-call")
+    stopped = ops.stop(cancelled["id"], "user_cancelled")
+    clock.advance(2)
+
+    assert store(task, clock=clock).get(cancelled["id"])["status"] == "cancelled"
+    assert stopped["stop_reason"] == "user_cancelled"
+
+    timed = store(task, clock=clock).begin("timeout-request", policy={"timeout_seconds": 1})
+    store(task, clock=clock).reserve(timed["id"], payload={"body": "timeout"}, call_id="timeout-call")
+    clock.advance(2)
+    expired = store(task, clock=clock).get(timed["id"])
+
+    assert expired["status"] == "timed_out"
+    assert expired["stop_reason"] == "timeout"
 
 
 def test_settle_after_deadline_keeps_draft_reference_but_times_out(task):

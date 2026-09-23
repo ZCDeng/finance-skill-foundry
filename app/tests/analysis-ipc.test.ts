@@ -25,6 +25,38 @@ beforeEach(() => {
 });
 
 describe('analysis IPC task and session binding', () => {
+  it('passes a task-validated revision reference separately from the visible question', async () => {
+    const host = { open: vi.fn(), show: vi.fn().mockResolvedValue({}) };
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] })
+      : command === 'analysis-state' ? JSON.stringify({ drafts: [{ id: 'draft-one' }, { id: 'draft-two' }] }) : '{}');
+    registerIpc({ varRoot: '/store' }, { host, userData: () => '/user' } as any);
+    expect((await invoke(CHANNELS.harnessOpen, 'analysis', task, { draftId: 'draft-two', verbatim: '修正预算' })).ok).toBe(true);
+    expect(host.show).toHaveBeenCalledWith('root', '修正预算', '/workspace/task-a', undefined,
+      { draftReference: { draftId: 'draft-two', revision: 2 } });
+    expect((await invoke(CHANNELS.harnessOpen, 'analysis', task, { draftId: 'foreign-draft', verbatim: '继续' })).ok).toBe(false);
+    expect(host.show).toHaveBeenCalledTimes(1);
+  });
+  it('passes explicit audit mode and rejects unsupported export modes before exporting', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.reportExport.mockResolvedValue({ path: '/export/audit.pdf' });
+    expect((await invoke(CHANNELS.analysisExport, task, 'draft-1', 'pdf', 'audit')).ok).toBe(true);
+    expect(mocks.reportExport).toHaveBeenCalledWith(task, 'draft-1', 'pdf', 'audit');
+    expect((await invoke(CHANNELS.analysisExport, task, 'draft-1', 'pdf', 'all-files')).ok).toBe(false);
+    expect(mocks.reportExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes bounded workbook preview and explicit recovery through manager task authority', async () => {
+    registerIpc({ varRoot: '/store' });
+    for (const [name, spec] of [
+      ['workbook-range-preview', { dataset_id: 'source', sheet: '预算', range: 'B36:I39' }],
+      ['finance-completion-recover', { operation_id: 'operation', revision: 'revision', draft: { title: '纠正稿' } }],
+    ] as const) {
+      expect((await invoke(CHANNELS.financeCall, task, name, spec)).ok).toBe(true);
+      expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, name, ['--spec', JSON.stringify(spec)]);
+    }
+  });
+
   it('routes successive task calls explicitly and rejects invalid ids before executing', async () => {
     registerIpc({ varRoot: '/store' });
     await invoke(CHANNELS.analysisState, task);
@@ -234,7 +266,7 @@ describe('analysis IPC task and session binding', () => {
     for (const format of ['md', 'xlsx', 'docx', 'pdf', 'html']) {
       const result = await invoke(CHANNELS.analysisExport, task, 'draft-a', format);
       expect(result.ok).toBe(true);
-      expect(mocks.reportExport).toHaveBeenLastCalledWith(task, 'draft-a', format);
+      expect(mocks.reportExport).toHaveBeenLastCalledWith(task, 'draft-a', format, 'management');
     }
     expect((await invoke(CHANNELS.analysisExport, task, 'draft-a', 'exe')).ok).toBe(false);
     expect((await invoke(CHANNELS.analysisExport, task, '../escape', 'xlsx')).ok).toBe(false);

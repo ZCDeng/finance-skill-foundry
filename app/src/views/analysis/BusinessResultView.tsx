@@ -1,0 +1,107 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { AnalysisRun } from '../../bridge.js';
+import { Button } from '../../components/ui/button.js';
+import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, periodOptions, rowBasisLabel, type DisplayColumn } from './businessResults.js';
+import { Table } from './presentation.js';
+
+type Kpi = { title: string; period: string; unit: string; basis: string; actual: string; budget: string; difference: string; rate: string };
+
+function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
+  for (const name of names) {
+    if (!(name in row)) continue;
+    const value = row[name];
+    if (value == null || value === '') continue;
+    const column = columns.find((item) => item.name === name);
+    const displayColumn = column ?? { name, label: name, semantics: columnSemantics(name, typeof value === 'number' ? 'DOUBLE' : undefined) };
+    return formatBusinessCell(value, displayColumn, row);
+  }
+  return fallback;
+}
+
+function metricTitle(row: Record<string, unknown>): string {
+  const metric = row.metric ?? row.metric_key ?? row.business_key ?? row.result_key ?? row.item ?? row.name ?? row['指标'];
+  const title = metric == null || metric === '' ? '结果' : formatBusinessValue(metric, 'text');
+  const region = row.region ?? row.organization ?? row['区域'];
+  return region == null || region === '' ? title : `${title} · ${region}`;
+}
+
+function metricKey(row: Record<string, unknown>): string {
+  return String(row.metric_key ?? row.business_key ?? row.result_key ?? row.metric ?? row.item ?? row.name ?? row['指标'] ?? '').toLowerCase();
+}
+
+function kpiPriority(row: Record<string, unknown>): number {
+  const key = metricKey(row);
+  if (key === 'revenue' || key === '收入' || key === '营业收入') return 0;
+  if (key === 'operating_profit' || key === '营业利润') return 1;
+  if (key.includes('经营利润') && (key.includes('剔除') || key.includes('excl'))) return 2;
+  return 10;
+}
+
+function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return rows
+    .filter((row) => row.actual != null && row.actual !== '')
+    .map((row, index) => ({ row, index, priority: kpiPriority(row) }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+    .slice(0, 4)
+    .map((item) => item.row);
+}
+
+function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
+  return {
+    title: metricTitle(row),
+    period: row.period == null || row.period === '' ? '未声明期间' : String(row.period),
+    unit: row.unit == null || row.unit === '' ? '未声明单位' : String(row.unit),
+    basis: rowBasisLabel(row),
+    actual: valueFor(row, columns, ['actual']),
+    budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
+    difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
+    rate: valueFor(row, columns, ['attainment_rate', 'attainment_pct', 'achievement_pct', 'completion_pct', 'attainment', 'attainment_ratio', 'budget_attainment', 'budget_attainment_rate', 'budget_completion', 'budget_completion_rate', 'completion_rate', 'completion', 'achievement_rate', 'achievement', 'actual_budget_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio']),
+  };
+}
+
+export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSources?(): void }) {
+  const periods = useMemo(() => periodOptions(run), [run]);
+  const [period, setPeriod] = useState(periods[0] ?? '');
+  useEffect(() => {
+    setPeriod((current) => (current && periods.includes(current) ? current : periods[0] ?? ''));
+  }, [run.id, periods]);
+  const columns = useMemo(() => displayColumns(run), [run]);
+  const sourceRows = useMemo(() => businessRows(run), [run]);
+  const filteredRows = useMemo(() => (period ? sourceRows.filter((row) => String(row.period ?? '') === period) : sourceRows), [period, sourceRows]);
+  const rows = useMemo(() => filteredRows.map((row) => {
+    const output: Record<string, string> = {};
+    for (const column of columns) {
+      output[column.label] = column.name === '__basis' ? rowBasisLabel(row) : formatBusinessCell(row[column.name], column, row);
+    }
+    return output;
+  }), [columns, filteredRows]);
+  const kpis = useMemo(() => kpiRows(filteredRows).map((row) => kpiFor(row, columns)), [columns, filteredRows]);
+  return <section className="analysis-business-result" aria-label="业务结果">
+    {periods.length > 1 ? <div className="analysis-period-tabs" role="tablist" aria-label="结果期间">
+      {periods.map((item) => <Button key={item} variant={item === period ? 'default' : 'outline'} type="button" role="tab" aria-selected={item === period}
+        onClick={() => setPeriod(item)}>{item}</Button>)}
+    </div> : null}
+    {kpis.length ? <div className="analysis-kpi-grid" aria-label="关键指标">
+      {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
+        <span>{kpi.title}</span>
+        <strong aria-label={`${kpi.title}实际`}>{kpi.actual}</strong>
+        <small>{kpi.period} · {kpi.unit} · 依据：{kpi.basis}</small>
+        <dl aria-label={`${kpi.title}指标明细`}>
+          <div><dt>预算</dt><dd>{kpi.budget}</dd></div>
+          <div><dt>差异</dt><dd>{kpi.difference}</dd></div>
+          <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
+        </dl>
+      </article>)}
+    </div> : null}
+    <div className="analysis-business-table">
+      <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
+        rows={rows} caption="业务结果" />
+    </div>
+    <div className="analysis-actions">
+      {onSources ? <Button variant="outline" type="button" onClick={onSources}>查看来源与口径</Button> : null}
+      <details className="analysis-details"><summary>原始字段 · {run.result?.columns.length ?? 0} 列</summary>
+        <Table key={`${run.id}:raw-business`} columns={run.result?.columns ?? []} rows={run.result?.rows ?? []} caption="原始计算结果" />
+      </details>
+    </div>
+  </section>;
+}

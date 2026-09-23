@@ -199,6 +199,18 @@ class JobStore:
                 raise FoundryError("script bindings must be a map of snapshot ids")
             if not set(bindings.values()).issubset(set(frozen["snapshot_ids"])):
                 raise FoundryError("script snapshots are outside the frozen session context")
+            requirements_id = spec.get("requirements_id")
+            if requirements_id:
+                from foundry.analysis import AnalysisStore
+
+                requirements = AnalysisStore(self.task)._get("requirements", requirements_id)
+                requirement_bindings = requirements.get("bindings", {})
+                if (
+                    not isinstance(requirement_bindings, dict)
+                    or any(not isinstance(value, str) for value in requirement_bindings.values())
+                    or not set(requirement_bindings.values()).issubset(set(frozen["snapshot_ids"]))
+                ):
+                    raise FoundryError("script requirements are outside the frozen session context")
             if not isinstance(spec.get("code"), str) or not spec["code"].strip() or len(spec["code"].encode()) > 256 * 1024:
                 raise FoundryError("script code must contain 1 to 256 KiB of text")
         runtime_identity = _runtime_identity(runtime_pid) if kind == "child" else None

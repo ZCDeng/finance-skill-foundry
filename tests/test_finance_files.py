@@ -336,3 +336,85 @@ def test_an_inspection_reply_carries_no_host_path(tmp_path: Path) -> None:
     assert str(tmp_path) not in blob and "/Users/" not in blob
     # What a caller actually needs is still there.
     assert reply["dataset_id"] == dataset["id"] and reply["sheet_names"]
+
+
+def test_range_preview_reads_archived_workbook_without_paths(files) -> None:
+    service, _, dataset, _ = files
+    preview = service.range_preview(
+        {"dataset_id": dataset["id"], "sheet": "Data", "range": "A1:B2"}
+    )
+
+    assert preview["dataset_id"] == dataset["id"]
+    assert preview["source_hash"] == dataset["source_hash"]
+    assert preview["range"] == "A1:B2"
+    assert "path" not in json.dumps(preview, ensure_ascii=False)
+    cells = {cell["address"]: cell for cell in preview["cells"]}
+    assert cells["A2"]["display"] == "001234567890123456"
+    assert cells["B2"]["exact"] == "10"
+    assert cells["B2"]["kind"] == "number"
+
+
+def test_range_preview_defaults_to_existing_sheet_bounds_and_accepts_single_cell(files) -> None:
+    service, _, dataset, _ = files
+    default = service.range_preview({"dataset_id": dataset["id"], "sheet": "Data"})
+    assert default["range"] == "A1:C2"
+
+    single = service.range_preview({"dataset_id": dataset["id"], "sheet": "Data", "range": "B2"})
+    assert single["range"] == "B2:B2"
+    assert single["cells"][0]["exact"] == "10"
+
+
+def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="formatted preview")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "formatted.xlsx"
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = "Budget"
+    sheet["A1"] = "value"
+    sheet["A2"] = 8.199999999999999
+    sheet["A2"].number_format = "#,##0.00;[Red]-#,##0.00"
+    wb.save(source)
+    wb.close()
+    dataset = analysis.add_dataset(source, name="formatted", metadata={"mode": "workbook"})
+
+    preview = FinanceFiles(task).range_preview(
+        {"dataset_id": dataset["id"], "sheet": "Budget", "range": "A2"}
+    )
+    cell = preview["cells"][0]
+    assert cell["display"] == "8.20"
+    assert cell["exact"] == "8.199999999999999"
+    assert cell["number_format"] == "#,##0.00;[Red]-#,##0.00"
+
+
+def test_range_preview_rejects_unbounded_or_oversized_ranges(files) -> None:
+    service, _, dataset, _ = files
+    for ref in ("A:A", "1:1", "A1:B2,D1:E2", "'Other'!A1:B2"):
+        with pytest.raises(FoundryError, match="bounded|single|external|range"):
+            service.range_preview({"dataset_id": dataset["id"], "sheet": "Data", "range": ref})
+    with pytest.raises(FoundryError, match="too large"):
+        service.range_preview({"dataset_id": dataset["id"], "sheet": "Data", "range": "A1:AO201"})
+
+
+def test_range_preview_shows_formula_text_without_calculating(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="formula preview")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "formula.xlsx"
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = "Calc"
+    sheet["A1"] = "value"
+    sheet["A2"] = 2
+    sheet["B2"] = "=A2*10"
+    wb.save(source)
+    wb.close()
+    dataset = analysis.add_dataset(source, name="formula", metadata={"mode": "workbook"})
+
+    preview = FinanceFiles(task).range_preview(
+        {"dataset_id": dataset["id"], "sheet": "Calc", "range": "A1:B2"}
+    )
+    cells = {cell["address"]: cell for cell in preview["cells"]}
+    assert cells["B2"]["kind"] == "formula"
+    assert cells["B2"]["formula"] == "=A2*10"
+    assert cells["B2"]["cached_value_available"] is False
+    assert cells["B2"]["cached_value"] is None

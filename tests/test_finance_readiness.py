@@ -35,6 +35,59 @@ def _task(tmp_path: Path):
     return task, AnalysisStore(task), FinanceStore(task)
 
 
+def test_declared_hints_preserve_annual_budget_and_forecast_context() -> None:
+    from foundry.finance_readiness import _declared_hints
+
+    dataset = {
+        "transformation": {
+            "structure": {
+                "declaration": {
+                    "scope_hints": {
+                        "period": "",
+                        "currency": "",
+                        "unit": "万元",
+                        "granularity": "annual",
+                        "scenario": "budget",
+                        "forecast": "LE",
+                    }
+                }
+            }
+        }
+    }
+    assert _declared_hints(dataset) == {
+        "period": "",
+        "currency": "",
+        "unit": "万元",
+        "granularity": "annual",
+        "as_of_date": "",
+        "scenario": "budget",
+        "forecast": "LE",
+    }
+
+
+def test_declared_hints_preserve_as_of_date_without_guessing_monthly_period() -> None:
+    from foundry.finance_readiness import _declared_hints
+
+    dataset = {
+        "transformation": {
+            "structure": {
+                "declaration": {
+                    "scope_hints": {
+                        "period": "",
+                        "unit": "万元",
+                        "granularity": "as_of",
+                        "as_of_date": "2026-08-31",
+                    }
+                }
+            }
+        }
+    }
+    hints = _declared_hints(dataset)
+    assert hints["period"] == ""
+    assert hints["granularity"] == "as_of"
+    assert hints["as_of_date"] == "2026-08-31"
+
+
 def test_cf01_g1_files_can_run_management_pnl_without_writing_context(tmp_path):
     task, analysis, store = _task(tmp_path)
     actual = _write_csv(tmp_path / "actual.csv", _csv_rows("service_ledger.csv"))

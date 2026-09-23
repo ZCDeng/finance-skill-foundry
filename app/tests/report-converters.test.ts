@@ -128,6 +128,51 @@ describe('report document converters', () => {
     expect(html.match(/<nav[\s\S]*<\/nav>/)?.[0]).not.toContain('三级指标不进目录');
   });
 
+  it('renders management exports with conclusions before receipt metadata and no automatic TOC', async () => {
+    const doc = documentFromMarkdown('# 经营分析报告\n\n## 管理摘要\n\n管理层第一屏结论。\n\n## 经营拆解\n\n正文继续。');
+    const options = { marker: '分析草稿·待复核', contentMode: 'management', projectionHash: 'd'.repeat(64), draftId: 'draft-1', contentHash: 'c'.repeat(64), publicationStatus: 'draft', reviewStatus: 'unreviewed', reproducibilityStatus: 'unverified', sources: ['report.md（md；ID source-1；SHA-256 aaaaaaaaaaaa）'] };
+    const html = renderReportHtml(doc, '经营分析报告', { print: true, ...options });
+
+    expect(html).toContain('data-report-projection-hash="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"');
+    expect(html).toContain('class="report-review-marker">分析草稿·待复核</p>');
+    expect(html).not.toContain('class="report-toc"');
+    expect(html.indexOf('管理层第一屏结论。')).toBeLessThan(html.indexOf('草稿版本'));
+    expect(html).toContain('draft-1');
+    expect(html).toContain('内容 SHA-256');
+    expect(html).toContain('report.md');
+    expect(html.match(/<h1>经营分析报告<\/h1>/g)).toHaveLength(1);
+    expect(html.match(/经营分析报告/g)!.length).toBeLessThan(5);
+
+    const buffer = await exportDocx(doc, '经营分析报告', undefined, options);
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('string');
+    const headerXml = await zip.file('word/header1.xml')!.async('string');
+    expect(documentXml).toContain('分析草稿·待复核');
+    expect(documentXml).not.toContain('w:instrText xml:space="preserve">TOC');
+    expect(documentXml.indexOf('管理层第一屏结论')).toBeLessThan(documentXml.indexOf('草稿版本'));
+    expect(documentXml).toContain('draft-1');
+    expect(documentXml).toContain('内容 SHA-256');
+    expect(documentXml).toContain('report.md');
+    expect(headerXml).toContain('分析草稿·待复核');
+    expect(headerXml).toContain('management');
+    expect(headerXml).toContain('dddddddddddd');
+  });
+
+  it('keeps the legacy receipt-first layout and TOC outside management mode', async () => {
+    const doc = documentFromMarkdown('# 经营分析报告\n\n## 管理摘要\n\n正文。');
+    const options = { marker: '分析草稿·待复核', contentMode: 'audit', projectionHash: 'd'.repeat(64), draftId: 'draft-1', contentHash: 'c'.repeat(64), publicationStatus: 'draft', reviewStatus: 'unreviewed', reproducibilityStatus: 'unverified', sources: ['report.md（md；ID source-1；SHA-256 aaaaaaaaaaaa）'] };
+    const html = renderReportHtml(doc, '经营分析报告', { print: true, ...options });
+
+    expect(html).toContain('class="report-toc"');
+    expect(html.indexOf('草稿版本')).toBeLessThan(html.indexOf('正文。'));
+
+    const buffer = await exportDocx(doc, '经营分析报告', undefined, options);
+    const zip = await JSZip.loadAsync(buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('string');
+    expect(documentXml).toContain('w:instrText xml:space="preserve">TOC');
+    expect(documentXml.indexOf('草稿版本')).toBeLessThan(documentXml.indexOf('正文'));
+  });
+
   it('imports HTML inertly and preserves source anchors without trusting executable content', async () => {
     const html = Buffer.from(`
       <article>

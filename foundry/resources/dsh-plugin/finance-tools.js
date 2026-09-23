@@ -1,4 +1,15 @@
 const text = (description) => ({ type: "string", description });
+export const NUMERIC_PRESENTATION = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decimal_places", "scale", "rounding"],
+  description: "可选数字展示规则；须绑定真实 fact_id 并保留精确 value。服务据事实计算展示值，不接受自由填写展示数字或改变单位、符号。",
+  properties: {
+    decimal_places: { type: "integer", minimum: 0, maximum: 6 },
+    scale: { type: "string", enum: ["identity", "percent"], description: "identity 保留原单位；percent 仅适用于事实明确为比率的值" },
+    rounding: { type: "string", enum: ["half_up"] },
+  },
+};
 const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
@@ -46,6 +57,82 @@ const scenarioInputs = {
   },
   additionalProperties: true,
 };
+const evidenceSource = {
+  type: "object",
+  required: ["dataset_id", "source_hash", "sheet", "range"],
+  additionalProperties: false,
+  properties: {
+    dataset_id: text("授权资料快照 id；必须属于当前任务/会话"),
+    source_hash: text("资料原始文件 SHA-256；必须匹配归档快照"),
+    sheet: text("工作表名"),
+    range: text("有界 A1 矩形，例如 B36:I39；后端不接受整列/整行，最大200行、40列、8000格"),
+  },
+};
+const evidenceClaim = {
+  type: "object",
+  required: ["run_id", "row", "column"],
+  additionalProperties: false,
+  properties: { run_id: runId, row: { type: "integer", minimum: 0 }, column: text("被核验的结果列名；expected 由该运行单元格读取，不由模型填写") },
+};
+const evidenceRecipe = {
+  type: "object",
+  required: ["kind", "claim"],
+  additionalProperties: false,
+  oneOf: [
+    { required: ["kind", "claim", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["direct", "sum"] } }, not: { anyOf: [{ required: ["left"] }, { required: ["right"] }] } },
+    { required: ["kind", "claim", "left", "right"], properties: { kind: { enum: ["diff", "ratio"] } }, not: { anyOf: [{ required: ["dataset_id"] }, { required: ["source_hash"] }, { required: ["sheet"] }, { required: ["range"] }] } },
+  ],
+  properties: {
+    id: text("稳定 recipe id，同一文稿内唯一；省略时服务按顺序生成 recipe-N"),
+    label: text("给财务经理看的检查名称；省略时使用 id"),
+    kind: { type: "string", enum: ["direct", "sum", "diff", "ratio"] },
+    ...evidenceSource.properties,
+    left: evidenceSource,
+    right: evidenceSource,
+    scale: text("可选 Decimal 缩放，默认 1"),
+    unit: text("展示单位"),
+    claim: evidenceClaim,
+    business_key: { type: "object", additionalProperties: true },
+  },
+};
+
+
+const consistencySource = {
+  type: "object",
+  required: ["id", "kind", "dataset_id", "source_hash"],
+  additionalProperties: false,
+  oneOf: [
+    { required: ["id", "kind", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["number"] } }, not: { required: ["paragraph"] } },
+    { required: ["id", "kind", "dataset_id", "source_hash", "paragraph"], properties: { kind: { enum: ["text"] } }, not: { anyOf: [{ required: ["sheet"] }, { required: ["range"] }, { required: ["scale"] }] } },
+    { required: ["id", "kind", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["text"] } }, not: { anyOf: [{ required: ["paragraph"] }, { required: ["scale"] }] } },
+  ],
+  properties: {
+    id: text("稳定 source id，供 consistency_rules 引用"),
+    label: text("展示标签"),
+    kind: { type: "string", enum: ["number", "text"] },
+    dataset_id: text("授权归档资料快照 id"),
+    source_hash: text("资料原始文件 SHA-256；必须匹配归档快照"),
+    sheet: text("归档工作簿 sheet；number source 必填，text source 可用单格 sheet/range 代替 paragraph"),
+    range: text("归档工作簿有界范围；number source 可为单格或区域，text source 只能是单格；模型不能填写 value/original_text"),
+    paragraph: { type: "integer", minimum: 1, description: "text source 的归档段落号；与 sheet/range 二选一" },
+    scale: text("number source 可选 Decimal 缩放，默认 1"),
+  },
+};
+const consistencyRule = {
+  type: "object",
+  required: ["id", "kind", "threshold", "asserted_result", "assertion_source_id", "values"],
+  additionalProperties: false,
+  properties: {
+    id: text("稳定规则 id"),
+    label: text("展示标签"),
+    kind: { type: "string", enum: ["all_absolute_exceed"] },
+    threshold: text("Decimal 阈值；按绝对值比较"),
+    asserted_result: { type: "boolean", description: "正文声明的判断结果" },
+    assertion_source_id: text("声明文本所在的 consistency source id；必须是归档 text source"),
+    values: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["id"], oneOf: [{ required: ["source_id"] }, { required: ["recipe_result_id"] }], properties: { id: text("值 id"), label: text("展示标签"), source_id: text("归档 number source id；服务读取真实数值"), recipe_result_id: text("也可引用 evidence_recipes 的 recipe_id/result_id") } } },
+  },
+};
+
 export const FINANCE_TOOLS = {
   analysis_requirements_list: specTool("analysis-requirements-list", "读取当前任务已登记的分析要求及版本；先于选择文稿引用确认哪些问题必须回答。", {}),
   analysis_requirements_save: specTool("analysis-requirements-save", "计算前登记用户要求：问题、范围、必答指标和指定下钻对象。更新必须带当前parent_id，移除项必须说明change_reason，不代表原问题已经完成。返回support由绑定快照核验；requires_input应补资料或字段映射，不能补零。", {
@@ -68,6 +155,9 @@ export const FINANCE_TOOLS = {
     fields: { type: "array", items: { type: "object", properties: {name: text("列名"), policy: {type:"string", enum:["text","identifier","amount","decimal"]}, unit: text("金额单位")}, required:["name"] } }, role: { type: "string", enum: ["input", "output"] }, writable: { type: "boolean" }, header: { type: "boolean" }, parent_id: text("可选父绑定版本id"),
   }, ["dataset_id", "source", "fields"]),
   workbook_read: specTool("workbook-read", "读取已保存绑定的输入；可传更新后的XLSX快照，保持旧绑定与旧成果。", { binding_id: text("绑定版本id"), dataset_id: text("可选新XLSX快照id") }, ["binding_id"]),
+  workbook_range_preview: specTool("workbook-range-preview", "只读预览已授权XLSX快照的工作表范围，用于确定表头、总计行、证据recipe范围或绑定区域。必须传 dataset_id 和 sheet；range 可选但必须是有界A1范围；不读取任意本机文件，不写入工作簿。", {
+    dataset_id: text("已登记XLSX快照id"), sheet: text("工作表名"), range: text("可选有界A1矩形，例如 B36:I39；省略时由后端返回安全预览窗口"),
+  }, ["dataset_id", "sheet"]),
   workbook_preview: specTool("workbook-preview", "预览限定区域的Excel结果写入。writes每项包含field、value以及cell或从1开始的row；引用计算结果时附run_id及result_row/result_column。显示经理修改冲突与数值精度策略，保存patch_id后再应用。", {
     binding_id: text("结果绑定id"), dataset_id: text("可选更新后的XLSX快照"), run_id: text("可选真实运行id"),
     writes: { type: "array", items: { type: "object", properties: { cell: text("目标单元格地址"), field: text("绑定字段名"), row: {type:"integer", minimum:1}, value: {}, result_row: { type: "integer", minimum: 0 }, result_column: text("真实结果列名") }, required: ["field", "value"] } },
@@ -126,14 +216,15 @@ export const FINANCE_TOOLS = {
   drilldown_fact: specTool("drilldown-fact", "从当前任务真实 run 的结果行/列下钻到原始快照行。row 是所选 section 的下标（从0开始），section 可为 rows、detail_rows 或 excluded_detail_rows；返回精确 source_hash 和原始数据，不搜索其他账套或最新快照。余额资料无凭证链接；分页最多1000行。", {
     run_id: runId, section: { type: "string", enum: ["rows", "detail_rows", "excluded_detail_rows"] }, row: { type: "integer", minimum: 0 }, column: text("可选结果列"), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 1000 },
   }, ["run_id", "row"]),
-  prepare_explanation: specTool("prepare-explanation", "为财务解释准备稳定 fact id、精确值、展示值、scope、semantics、evidence_groups、自动附表和适用业务背景。先登记分析要求，再只读取能回答要求的当前授权成功 run；用于让模型选择事实而不是手写 run/row/column。示例：{run_ids:[run.id], materiality:{absolute:'10'}}。", {
+  prepare_explanation: specTool("prepare-explanation", "为财务解释准备稳定 fact id、精确值、展示值、scope、semantics、evidence_groups、自动附表和适用业务背景。先登记分析要求，再只读取能回答要求的当前授权成功 run；用于让模型选择事实而不是手写 run/row/column。新问题或新资料必须使用新 run_ids，不要用旧 claim 掩盖新的运行变化。示例：{run_ids:[run.id], materiality:{absolute:'10'}}。", {
     run_ids: { type: "array", minItems: 1, items: runId }, materiality: { type: "object", properties: { absolute: text("绝对重要性阈值") }, additionalProperties: true },
   }, ["run_ids"]),
-  validate_explanation: specTool("validate-explanation", "检查当前说明正文与事实引用、已登记分析要求、来源追溯和自动附表是否一致：数字、方向、单位、舍入展示和缺失引用。可传 draft_id，或传未保存的 body/run_ids/fact_ids/claims。检查不代表经理认可，也不阻止保存普通草稿。", {
-    require_all_material_facts: { type: "boolean", description: "检查全部重要行是否引用；正文通常只需当前问题相关事实" }, draft_id: text("可选已保存文稿 id"), body: text("未保存正文"), run_ids: { type: "array", items: runId }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object" } },
+  validate_explanation: specTool("validate-explanation", "检查当前说明正文与事实引用、已登记分析要求、来源追溯、独立 evidence_recipes 和自动附表是否一致：数字、方向、单位、舍入展示和缺失引用。可传 draft_id，或传未保存的 body/run_ids/fact_ids/claims/evidence_recipes/consistency_sources/consistency_rules。检查不代表经理认可，也不阻止保存普通草稿；区域均值、行业估计等只能作为 user_assumption/external_reference 单独列示，不可混成直接来源事实。", {
+    require_all_material_facts: { type: "boolean", description: "检查全部重要行是否引用；正文通常只需当前问题相关事实" }, draft_id: text("可选已保存文稿 id"), body: text("未保存正文"), run_ids: { type: "array", items: runId }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object" } }, evidence_recipes: { type: "array", items: evidenceRecipe },
+    consistency_sources: { type: "array", items: consistencySource }, consistency_rules: { type: "array", items: consistencyRule },
   }),
-  save_explanation_draft: specTool("save-explanation-draft", "保存可由经理自由编辑的说明。优先使用 prepare_explanation 返回的 fact_ids 或 {{fact:FACT_ID}}；服务会补齐精确 claims 并返回 quality 与 completion。completion 中 repair_allowed、stop_reason=no_progress 和最多两轮修复预算用于继续或停止自动收尾。awaiting_input和verified_input_gap表示绑定快照已核验资料缺口，本轮答复可结束但原分析要求仍未完成；不要重复运行同一缺资料计算。每个计算数字 claim 引用 run_id、row、column、value，value必须匹配真实单元格；服务保留口径/映射版本。业务原因若来自经理，basis=professional_judgment；直接假设为user_assumption。缺少原因证据可以保存草稿，不能写成确定因果。修改可用parent_id，新版本不覆盖历史。", {
-    title: text("说明标题"), body: text("可编辑的Markdown正文"), run_ids: { type: "array", items: { type: "string" } }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object", properties: { basis: { type: "string", enum: ["calculation", "source_fact", "external_reference", "user_assumption", "professional_judgment"] }, run_id: text("运行id"), row: { type: "integer", minimum: 0 }, column: text("结果列名"), value: text("精确结果值"), reason: text("判断或假设依据") }, required: ["basis"] } }, parent_id: text("被修改的文稿 id"),
+  save_explanation_draft: specTool("save-explanation-draft", "保存可由经理自由编辑的说明。优先使用 prepare_explanation 返回的 fact_ids 或 {{fact:FACT_ID}}；服务会补齐精确 claims 并返回 quality 与 completion。内部草稿引用协议仅用于原生输入：[[FA_FOUNDRY_DRAFT_REF:{\"draftId\":\"...\",\"revision\":N}]]；正文中不得展示 raw draftId，应显示“基于修订 N”。completion 中 repair_allowed、stop_reason=no_progress 和最多两轮修复预算用于继续或停止自动收尾。awaiting_input和verified_input_gap表示绑定快照已核验资料缺口，本轮答复可结束但原分析要求仍未完成；不要重复运行同一缺资料计算。每个计算数字 claim 引用 run_id、row、column、value，value必须匹配真实单元格；服务保留口径/映射版本。关键数字可附 evidence_recipes，用归档工作簿单元格/范围独立核验指定 run 单元格；recipe 的 expected 不能自填，必须由 claim.run_id/row/column 指向真实运行结果。业务原因若来自经理，basis=professional_judgment；直接假设为user_assumption。缺少原因证据可以保存草稿，不能写成确定因果。修改可用parent_id，新版本不覆盖历史。", {
+    title: text("说明标题"), body: text("可编辑的Markdown正文"), run_ids: { type: "array", items: { type: "string" } }, fact_ids: { type: "array", items: { type: "string" } }, claims: { type: "array", items: { type: "object", additionalProperties: false, properties: { basis: { type: "string", enum: ["calculation", "source_fact", "external_reference", "user_assumption", "professional_judgment"] }, run_id: text("运行id"), row: { type: "integer", minimum: 0 }, column: text("结果列名"), value: text("精确结果值"), fact_id: text("prepare_explanation 返回的真实事实 id；使用 presentation 时必填"), presentation: NUMERIC_PRESENTATION, reason: text("判断或假设依据"), dataset_id: text("source_fact 的资料快照id"), paragraph: { type: "integer", minimum: 0 } }, required: ["basis"] } }, evidence_recipes: { type: "array", items: evidenceRecipe }, consistency_sources: { type: "array", items: consistencySource }, consistency_rules: { type: "array", items: consistencyRule }, parent_id: text("被修改的文稿 id"),
   }, ["body"]),
   finance_background_save: specTool("finance-background-save", "保存一条版本化业务背景，只在当前授权财务范围和有效期内供解释使用。basis 区分 source_fact/external_reference/user_assumption/professional_judgment；经理输入不要伪装为系统事实。可用 dataset_id/paragraph 绑定授权资料段落。", {
     external_reference: { type: "object", properties: { title: text("外部来源名称"), url: text("外部来源URL"), source_date: text("来源日期YYYY-MM-DD"), retrieved_at: text("查询日期YYYY-MM-DD") } }, context_id: contextId, text: text("背景内容"), basis: financeBasis, scope: financeScope, effective_from: text("生效起始日期或期间"), effective_to: text("可选失效日期或期间"), dataset_id: text("可选授权资料快照id"), paragraph: { type: "integer", minimum: 1 }, parent_id: text("可选父背景id"), label: text("背景标签"),

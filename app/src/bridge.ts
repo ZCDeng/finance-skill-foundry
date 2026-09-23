@@ -105,7 +105,7 @@ export interface Bridge {
   analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
   analysisDraft?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisDraft>>;
-  analysisExport?(task: string, id: string, format: import('../electron/reports/model').ReportFormat): Promise<Answer<Record<string, unknown>>>;
+  analysisExport?(task: string, id: string, format: import('../electron/reports/model').ReportFormat, mode?: 'management' | 'audit'): Promise<Answer<Record<string, unknown>>>;
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
@@ -313,9 +313,17 @@ export interface AnalysisDraft extends AnalysisObject {
   run_ids: string[];
   claims: unknown[];
   fact_ids?: string[];
+  evidence_recipes?: Record<string, unknown>[];
+  consistency_rules?: Record<string, unknown>[];
+  consistency_sources?: Record<string, unknown>[] | Record<string, unknown>;
   requirements_id?: string | null;
   materiality?: Record<string, unknown>;
   quality?: Record<string, unknown>;
+  revision_comparison?: {
+    summary?: { status?: string; issue_count?: number; compared_business_keys?: number };
+    issues?: { code?: string; severity?: string; message?: string; business_key?: string; column?: string;
+      old_value?: string | number; new_value?: string | number; old_run_id?: string; new_run_id?: string; old_basis?: unknown; new_basis?: unknown }[];
+  };
   parent_id?: string | null;
   publication_status: string;
   review_status: string;
@@ -357,6 +365,8 @@ export type FinanceCommand =
   | 'analysis-requirements-save'
   | 'analysis-requirements-list'
   | 'finance-completion-recoveries'
+  | 'finance-completion-recover'
+  | 'workbook-range-preview'
   | 'prepare-explanation'
   | 'validate-explanation'
   | 'finance-background-save'

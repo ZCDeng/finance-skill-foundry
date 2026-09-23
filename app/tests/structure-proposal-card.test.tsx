@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from '../src/views/analysis/StructureProposalCard.js';
+import { WorkbookBrowser } from '../src/views/analysis/WorkbookBrowser.js';
 
 const financeCall = vi.fn();
 beforeEach(() => {
@@ -123,28 +124,82 @@ describe('structure confirmation card', () => {
     expect(screen.getAllByText('封面、看板或对标页')).toHaveLength(2);
   });
 
-  it('shows an unreadable table with the headers it read, and never offers it', () => {
+  it('shows a blocked table in no-table state so the manager can repair and confirm it', async () => {
+    const onSettled = vi.fn();
+    const pack = proposal([
+      ledger({
+        sheet: '坏表头',
+        decision: 'table',
+        reason: 'no_header',
+        blocked_reason: 'unreadable_columns',
+        header_row: 2,
+        start_row: 2,
+        end_row: 4,
+        start_column: 'A',
+        end_column: 'B',
+        amount_pairs: [],
+        columns: [
+          { letter: 'A', header: '项目', display: '项目', role: 'unknown', pair: null, direction: null, include: true, stable_name: 'col_A_项目' },
+          { letter: 'B', header: '金额', display: '金额', role: 'unknown', pair: null, direction: null, include: true, stable_name: 'col_B_金额', numeric: true },
+        ],
+        numeric_coverage: {
+          numeric_columns_total: 1,
+          numeric_columns_included: 1,
+          numeric_columns_excluded: 0,
+          retained_cell_coverage: 1,
+          metadata_only: false,
+        },
+      }),
+    ], 'no_table');
+    render(<StructureProposalCard taskId="t" datasetName="待修复套表" proposal={pack}
+      busy={false} onSettled={onSettled} />);
+
+    expect(screen.getByLabelText('采用 坏表头')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('坏表头 B 列含义'), { target: { value: 'amount' } });
+    fireEvent.click(screen.getByRole('button', { name: /确认表结构/ }));
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
+    const sent = financeCall.mock.calls[0][2].sheets[0];
+    expect(sent.sheet).toBe('坏表头');
+    expect(sent.blocked_reason).toBeNull();
+    expect(sent.reason).toBeNull();
+    expect(sent.columns.find((column: { letter: string }) => column.letter === 'B').role).toBe('amount');
+  });
+
+  it('lets a wide table with unknown headers be repaired and confirmed', async () => {
+    const onSettled = vi.fn();
     const pack = proposal([
       ledger(),
       ledger({
         sheet: '10·区域经营损益表',
-        blocked_reason: 'unreadable_columns',
+        blocked_reason: null,
         amount_pairs: [],
+        numeric_coverage: {
+          numeric_columns_total: 2,
+          numeric_columns_included: 2,
+          numeric_columns_excluded: 0,
+          retained_cell_coverage: 1,
+          metadata_only: false,
+        },
         columns: [
-          { letter: 'A', header: '区　域', display: '区域', role: 'unknown', pair: null, direction: null },
-          { letter: 'B', header: '营业收入', display: '营业收入', role: 'unknown', pair: null, direction: null },
-          { letter: 'C', header: '期间费用', display: '期间费用', role: 'unknown', pair: null, direction: null },
+          { letter: 'A', header: '区　域', display: '区域', role: 'unknown', pair: null, direction: null, include: true, stable_name: 'col_A_区域' },
+          { letter: 'B', header: '营业收入', display: '营业收入', role: 'unknown', pair: null, direction: null, include: true, numeric: true, stable_name: 'col_B_营业收入' },
+          { letter: 'C', header: '期间费用', display: '期间费用', role: 'unknown', pair: null, direction: null, include: true, numeric: true, stable_name: 'col_C_期间费用' },
         ],
       }),
     ]);
     render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={pack}
-      busy={false} onSettled={vi.fn()} />);
-    // No checkbox for it, so she cannot tick something that would be refused.
-    expect(screen.queryByLabelText('采用 10·区域经营损益表')).toBeNull();
-    expect(screen.getByText(/是一张表，但没有一列能识别/)).toBeTruthy();
-    expect(screen.getByText(/区域、营业收入、期间费用/)).toBeTruthy();
-    // The readable sheet is still offered.
-    expect(screen.getByRole('button', { name: /确认表结构/ })).toBeTruthy();
+      busy={false} onSettled={onSettled} />);
+    expect(screen.getByLabelText('采用 10·区域经营损益表')).toBeTruthy();
+    expect(screen.getByText(/数值列覆盖：纳入 2\/2/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('10·区域经营损益表 C 列纳入'));
+    fireEvent.change(screen.getByLabelText('10·区域经营损益表 C 列排除原因'), { target: { value: '本次不分析费用' } });
+    fireEvent.click(screen.getByRole('button', { name: /确认表结构/ }));
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
+    const sent = financeCall.mock.calls[0][2].sheets.find((sheet: { sheet: string }) => sheet.sheet === '10·区域经营损益表');
+    expect(sent.columns.find((column: { letter: string }) => column.letter === 'C')).toMatchObject({
+      include: false,
+      exclusion_reason: '本次不分析费用',
+    });
   });
 
   it('drops a row from the not-counted list when the manager puts it back', async () => {
@@ -182,5 +237,107 @@ describe('pending acknowledgement strip', () => {
       confirmation={{ ...confirmation, source: 'template' }} busy={false} onSettled={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /撤销套用/ }));
     await waitFor(() => expect(financeCall.mock.calls[0][1]).toBe('structure-withdraw'));
+  });
+});
+
+describe('workbook browser', () => {
+  function preview(sheet: string, range: string, display = '910') {
+    return {
+      ok: true,
+      value: {
+        dataset_id: 'shell-1',
+        source_hash: 'hash',
+        source_name: '月结.xlsx',
+        sheet,
+        range,
+        bounds: { min_row: 36, min_col: 2, max_row: 37, max_col: 3 },
+        cells: [
+          { address: 'B36', row: 36, column: 2, column_letter: 'B', kind: 'number', display, exact: display === '8.20' ? '8.199999999999999' : display, formula: null, cached_value_available: false, cached_value: null, number_format: display === '8.20' ? '#,##0.00;[Red]-#,##0.00' : 'General', merged: false },
+          { address: 'C36', row: 36, column: 3, column_letter: 'C', kind: 'formula', display: '', exact: null, formula: '=B36*2', cached_value_available: false, cached_value: null, number_format: 'General', merged: false },
+        ],
+        warnings: [],
+      },
+    };
+  }
+
+  it('auto-loads a bounded task workbook range and renders formula and exact-value status', async () => {
+    financeCall.mockResolvedValue(preview('04·合并利润表', 'B36:C37', '8.20'));
+    render(<WorkbookBrowser taskId="t" datasetId="shell-1" initialSheet="04·合并利润表" initialRange="B36:C37" />);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith('t', 'workbook-range-preview', {
+      dataset_id: 'shell-1',
+      sheet: '04·合并利润表',
+      range: 'B36:C37',
+    }));
+    expect(await screen.findByText('8.20')).toBeTruthy();
+    expect(screen.getByRole('region', { name: /04·合并利润表 B36:C37/ })).toBeTruthy();
+    expect(screen.getByRole('table', { name: /04·合并利润表 B36:C37/ })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'B' })).toBeTruthy();
+    expect(screen.getByText('8.20').closest('td')?.getAttribute('title')).toContain('原始值：8.199999999999999');
+    expect(screen.getByText(/=B36\*2/)).toBeTruthy();
+    expect(screen.getByText(/无缓存值/)).toBeTruthy();
+    expect(screen.queryByText('精确值')).toBeNull();
+  });
+
+  it('searches sheets and submits a range with Enter', async () => {
+    financeCall.mockResolvedValue(preview('01·看板', 'A1:L40'));
+    render(<WorkbookBrowser
+      taskId="t"
+      datasetId="shell-1"
+      initialSheet="01·看板"
+      sheets={['01·看板', '04·合并利润表']}
+      sheetContext={{ '04·合并利润表': { period: '2026-08', unit: '元', granularity: '月度' } }}
+    />);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('搜索工作表'), { target: { value: '利润' } });
+    financeCall.mockResolvedValue(preview('04·合并利润表', 'A1:L40'));
+    fireEvent.change(screen.getByLabelText('工作表'), { target: { value: '04·合并利润表' } });
+    await waitFor(() => expect(financeCall).toHaveBeenLastCalledWith('t', 'workbook-range-preview', {
+      dataset_id: 'shell-1',
+      sheet: '04·合并利润表',
+    }));
+    expect(screen.getByText(/期间 2026-08/)).toBeTruthy();
+
+    financeCall.mockResolvedValue(preview('04·合并利润表', 'B36:I39'));
+    fireEvent.change(screen.getByLabelText('区域'), { target: { value: 'B36:I39' } });
+    fireEvent.keyDown(screen.getByLabelText('区域'), { key: 'Enter' });
+    await waitFor(() => expect(financeCall).toHaveBeenLastCalledWith('t', 'workbook-range-preview', {
+      dataset_id: 'shell-1',
+      sheet: '04·合并利润表',
+      range: 'B36:I39',
+    }));
+  });
+
+  it('can hide the local sheet picker when an overview owns workbook navigation', async () => {
+    financeCall.mockResolvedValue(preview('04·合并利润表', 'A1:L40'));
+    render(<WorkbookBrowser
+      taskId="t"
+      datasetId="shell-1"
+      initialSheet="04·合并利润表"
+      sheets={['01·看板', '04·合并利润表']}
+      showSheetPicker={false}
+    />);
+    expect(screen.queryByLabelText('搜索工作表')).toBeNull();
+    expect(screen.queryByLabelText('工作表')).toBeNull();
+    expect(screen.getByText('工作表 04·合并利润表')).toBeTruthy();
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith('t', 'workbook-range-preview', {
+      dataset_id: 'shell-1',
+      sheet: '04·合并利润表',
+    }));
+  });
+
+  it('keeps stale workbook preview responses from replacing the active dataset', async () => {
+    let resolveFirst: (answer: unknown) => void = () => undefined;
+    financeCall.mockReturnValueOnce(new Promise((resolve) => {
+      resolveFirst = resolve;
+    }));
+    financeCall.mockResolvedValueOnce(preview('04·合并利润表', 'A1:L40', '222'));
+    const { rerender } = render(<WorkbookBrowser taskId="t" datasetId="shell-1" initialSheet="04·合并利润表" />);
+    await waitFor(() => expect(financeCall).toHaveBeenCalledTimes(1));
+    rerender(<WorkbookBrowser taskId="t" datasetId="shell-2" initialSheet="04·合并利润表" />);
+    await waitFor(() => expect(screen.getByText('222')).toBeTruthy());
+    resolveFirst(preview('04·合并利润表', 'A1:L40', '111'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText('111')).toBeNull();
   });
 });

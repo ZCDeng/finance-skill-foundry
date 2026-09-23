@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { shortSha, when, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
+import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
+import { BusinessResultView } from './BusinessResultView.js';
+import { RevisionDiff } from './RevisionDiff.js';
+import { runPresentationRole, selectBusinessResult } from './businessResults.js';
 
-export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
-  analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; busy: boolean;
+export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
+  analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
@@ -20,8 +23,8 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
   const evidenceButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const relevant = runs.filter((run) => run.analysis_id === analysis.id);
-  const run = relevant.find((row) => row.id === selected)
-    ?? [...relevant].reverse().find((row) => row.execution_status === 'succeeded' || row.execution_status === 'success') ?? relevant.at(-1);
+  const selection = selectBusinessResult(analysis, runs, drafts);
+  const run = relevant.find((row) => row.id === selected) ?? selection.primary;
   const latest = runs.at(-1);
   const compared = runs.find((row) => row.id === comparison && row.id !== run?.id);
   const assumptions = run?.assumptions ?? analysis.assumptions;
@@ -35,7 +38,8 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
     {latest && run && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
       最近一次运行失败，当前保留已成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看失败记录</Button></p>}
     {!run ? <p className="analysis-note">此版本尚未运行。检查口径后即可计算。</p> : <article className="analysis-result">
-      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)}</p></div><RunStatus run={run} /></div>
+      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)} · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
+      {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
@@ -79,7 +83,8 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
       <label className="analysis-select-label">对照运行<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
         <option value="">选择一个已保存的运行</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
           <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · {when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
-      {compared && <><p className="analysis-note">按各次运行原有的行序展示，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
+      {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} />
+      <p className="analysis-note">完整原始结果仍按各次运行自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
         const definition = analyses.find((item) => item.id === row.analysis_id);
         return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · {shortSha(row.id)}</h4><RunStatus run={row} />
           <p>参数：{parameterSummary(row.parameters ?? definition?.parameters, row.parameter_metadata ?? definition?.parameter_metadata)}</p>
@@ -88,9 +93,9 @@ export function RunPanel({ analysis, analyses, runs, datasets, busy, onPick, onC
             : <p className="analysis-note">{row.error ?? '此运行没有表格结果。'}</p>}</div>;
       })}</div></>}
     </section>}
-    <details className="analysis-details analysis-history"><summary>运行历史 · {runs.length} 次</summary>
+    <details className="analysis-details analysis-history"><summary>运行历史 · 业务 {selection.businessRuns.length} · 活动 {selection.activityRuns.length} · 失败 {selection.failedRuns.length}</summary>
       <div className="analysis-history-list">{[...runs].reverse().map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === run?.id ? 'true' : undefined} onClick={() => pick(row)}>
-        <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>{shortSha(row.id)}</span></button>)}</div>
+        <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{runRoleLabel(row)}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>{shortSha(row.id)}</span></button>)}</div>
     </details>
   </div>;
 }
@@ -100,8 +105,17 @@ function RunResultTable({ run }: { run: AnalysisRun }) {
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;
   if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} />;
   if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} />;
+  if (runPresentationRole(run) === 'business' && run.result?.rows.length) return <BusinessResultView run={run} />;
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p></>;
+}
+
+function runRoleLabel(run: AnalysisRun): string {
+  return ({ business: '业务结果', activity: '技术活动', failure: '失败记录' } as const)[runPresentationRole(run)];
+}
+
+function revisionLabel(run: AnalysisRun, runs: AnalysisRun[]): string {
+  return [...runs].filter((row) => row.analysis_id === run.analysis_id && row.created_at <= run.created_at).length.toString();
 }
 
 type SourceDrilldownSection = 'rows' | 'detail_rows' | 'excluded_detail_rows';

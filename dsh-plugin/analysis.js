@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
 import { createCompletionRuntime } from "./completion-runtime.js";
-import { FINANCE_TOOLS } from "./finance-tools.js";
+import { FINANCE_TOOLS, NUMERIC_PRESENTATION } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
   .dsh.foundry.profiles.analysis;
@@ -11,6 +11,17 @@ const object = (properties, required = Object.keys(properties)) => ({
   type: "object", properties, required, additionalProperties: false,
 });
 const json = (value) => JSON.stringify(value);
+const resultRole = {
+  type: "string",
+  enum: ["business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"],
+  description: "本次运行结果在业务流程中的角色；后端校验并持久化到 analysis/run 记录。默认 SQL 有 result_file 时 business，否则 activity；脚本默认 business。",
+};
+const runScope = {
+  type: "object",
+  additionalProperties: true,
+  description: "本次运行结果适用的账套、组织、期间、币种、单位等业务范围元数据；后端按对象持久化，不替代 filters/exclusions。",
+};
+const requirementsId = string("analysis_requirements_save 返回的要求版本 id；用于把运行与当前问题/范围绑定");
 const relationship = {
   type: "object",
   required: ["left", "right", "left_keys", "right_keys", "cardinality"],
@@ -97,6 +108,9 @@ const analysisSpec = {
     metrics: { type: "array", items: {}, description: "指标定义、币种、单位与舍入规则" },
     missing_inputs: { type: "array", items: {}, description: "保存时已知缺失资料或口径，不把缺失推断为0" },
     conversion_rules: { type: "array", items: {}, description: "明确的币种、单位或口径转换规则；未声明则不得改标签合并" },
+    requirements_id: requirementsId,
+    result_role: resultRole,
+    scope: runScope,
     timeout_seconds: { type: "number", minimum: 0.01, maximum: 60 },
     max_rows: { type: "integer", minimum: 1, maximum: 10000 },
     method_id: string("由方法应用生成时的来源方法 id"),
@@ -104,10 +118,91 @@ const analysisSpec = {
   },
 };
 
+
+const evidenceSource = {
+  type: "object",
+  required: ["dataset_id", "source_hash", "sheet", "range"],
+  additionalProperties: false,
+  properties: {
+    dataset_id: string("授权资料快照 id；必须属于当前任务/会话"),
+    source_hash: string("资料原始文件 SHA-256；必须匹配归档快照"),
+    sheet: string("工作表名"),
+    range: string("有界 A1 矩形，例如 B36:I39；不接受整列/整行"),
+  },
+};
+const evidenceClaim = {
+  type: "object",
+  required: ["run_id", "row", "column"],
+  additionalProperties: false,
+  properties: {
+    run_id: string("被核验的运行 id"),
+    row: { type: "integer", minimum: 0, description: "result.rows 的 0-based 行下标" },
+    column: string("被核验的结果列名；expected 由该运行单元格读取，不由模型填写"),
+  },
+};
+const evidenceRecipe = {
+  type: "object",
+  required: ["kind", "claim"],
+  additionalProperties: false,
+  oneOf: [
+    { required: ["kind", "claim", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["direct", "sum"] } }, not: { anyOf: [{ required: ["left"] }, { required: ["right"] }] } },
+    { required: ["kind", "claim", "left", "right"], properties: { kind: { enum: ["diff", "ratio"] } }, not: { anyOf: [{ required: ["dataset_id"] }, { required: ["source_hash"] }, { required: ["sheet"] }, { required: ["range"] }] } },
+  ],
+  properties: {
+    id: string("稳定 recipe id，同一文稿内唯一；省略时服务按顺序生成 recipe-N"),
+    label: string("给财务经理看的检查名称；省略时使用 id"),
+    kind: { type: "string", enum: ["direct", "sum", "diff", "ratio"] },
+    ...evidenceSource.properties,
+    left: evidenceSource,
+    right: evidenceSource,
+    scale: string("可选 Decimal 缩放，默认 1"),
+    unit: string("展示单位"),
+    claim: evidenceClaim,
+    business_key: { type: "object", additionalProperties: true },
+  },
+};
+
+
+const consistencySource = {
+  type: "object",
+  required: ["id", "kind", "dataset_id", "source_hash"],
+  additionalProperties: false,
+  oneOf: [
+    { required: ["id", "kind", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["number"] } }, not: { required: ["paragraph"] } },
+    { required: ["id", "kind", "dataset_id", "source_hash", "paragraph"], properties: { kind: { enum: ["text"] } }, not: { anyOf: [{ required: ["sheet"] }, { required: ["range"] }, { required: ["scale"] }] } },
+    { required: ["id", "kind", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["text"] } }, not: { anyOf: [{ required: ["paragraph"] }, { required: ["scale"] }] } },
+  ],
+  properties: {
+    id: string("稳定 source id，供 consistency_rules 引用"),
+    label: string("展示标签"),
+    kind: { type: "string", enum: ["number", "text"] },
+    dataset_id: string("授权归档资料快照 id"),
+    source_hash: string("资料原始文件 SHA-256；必须匹配归档快照"),
+    sheet: string("归档工作簿 sheet；number source 必填，text source 可用单格 sheet/range 代替 paragraph"),
+    range: string("归档工作簿有界范围；number source 可为单格或区域，text source 只能是单格；模型不能填写 value/original_text"),
+    paragraph: { type: "integer", minimum: 1, description: "text source 的归档段落号；与 sheet/range 二选一" },
+    scale: string("number source 可选 Decimal 缩放，默认 1"),
+  },
+};
+const consistencyRule = {
+  type: "object",
+  required: ["id", "kind", "threshold", "asserted_result", "assertion_source_id", "values"],
+  additionalProperties: false,
+  properties: {
+    id: string("稳定规则 id"),
+    label: string("展示标签"),
+    kind: { type: "string", enum: ["all_absolute_exceed"] },
+    threshold: string("Decimal 阈值；按绝对值比较"),
+    asserted_result: { type: "boolean", description: "正文声明的判断结果" },
+    assertion_source_id: string("声明文本所在的 consistency source id；必须是归档 text source"),
+    values: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["id"], oneOf: [{ required: ["source_id"] }, { required: ["recipe_result_id"] }], properties: { id: string("值 id"), label: string("展示标签"), source_id: string("归档 number source id；服务读取真实数值"), recipe_result_id: string("也可引用 evidence_recipes 的 recipe_id/result_id") } } },
+  },
+};
+
 const claim = {
   type: "object",
   required: ["basis"],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     basis: {
       type: "string",
@@ -117,7 +212,9 @@ const claim = {
     run_id: string("basis=calculation 时必填，引用 analysis-run 返回的成功运行 id"),
     row: { type: "integer", minimum: 0, description: "basis=calculation 时必填；result.rows 的下标，从 0 开始" },
     column: string("basis=calculation 时必填，引用 result.rows[row] 中的列名"),
-    value: string("basis=calculation 时必填，必须等于该 run 对应单元格；经理调整另写 user_assumption claim"),
+    value: string("basis=calculation 时必填，必须等于该 run 对应单元格；不匹配时更正 row/column/value。独立业务假设另写 user_assumption claim，不能覆盖计算值。"),
+    fact_id: string("prepare_explanation 返回的真实事实 id；使用 presentation 时必填"),
+    presentation: NUMERIC_PRESENTATION,
     dataset_id: string("source_fact 可选，引用资料快照 id"),
     paragraph: { type: "integer", minimum: 0, description: "背景资料段落号，按 dataset-read 返回值填写" },
     reason: string("用户假设、专业判断或调整说明"),
@@ -178,6 +275,9 @@ const SPECS = {
         bindings: { type: "object", additionalProperties: { type: "string" }, description: "本次允许读取的别名到快照id映射" },
         question: string("本次脚本要回答的问题"),
         result_file: string("可选：当前输出目录中已生成的 CSV/JSON 表格相对路径，例如 result.json；JSON为对象行数组，列名非空唯一，金额使用字符串"),
+        requirements_id: requirementsId,
+        result_role: resultRole,
+        scope: runScope,
         assumptions: { type: "array", items: {} },
         timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
       },
@@ -190,6 +290,7 @@ const SPECS = {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
       result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串"),
+      requirements_id: requirementsId, result_role: resultRole, scope: runScope,
       assumptions: { type: "array", items: {} }, timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
     } } }),
     kind: "execute", argv: (input) => ["analysis-script-start", "--spec", json(input.spec)],
@@ -216,7 +317,7 @@ const SPECS = {
     parameters: object({ job: string("需要重试的后台任务id") }), kind: "execute", runtime: true,
   },
   "analysis-draft": {
-    description: "从分析结果与专业判断保存一版可编辑文稿，允许先导出草稿。spec 包含 title、body、run_ids、claims、limitations，可用 parent_id 延续上一版。claims 的 basis 必须是 source_fact、calculation、external_reference、user_assumption 或 professional_judgment。计算数字用 basis=calculation、run_id、row、column、value 引用真实输出；row 是 result.rows 的 0-based 下标，第一行写 0，不要写自然语言行号；假设和判断分别标明，不伪造计算依据。review_status 与 publication_status 独立，只有用户明确选定归档时设置 archived，已归档内容不会原地修改。",
+    description: "从分析结果与专业判断保存一版可编辑文稿，允许先导出草稿。spec 包含 title、body、run_ids、claims、limitations，可用 parent_id 延续上一版。claims 的 basis 必须是 source_fact、calculation、external_reference、user_assumption 或 professional_judgment。计算数字用 basis=calculation、run_id、row、column、value 引用真实输出；row 是 result.rows 的 0-based 下标，第一行写 0，不要写自然语言行号；假设和判断分别标明，不伪造计算依据。关键数字可附 evidence_recipes，用归档工作簿单元格/范围独立核验指定 run 单元格；recipe 的 expected 不能自填，必须由 claim.run_id/row/column 指向真实运行结果。review_status 与 publication_status 独立，只有用户明确选定归档时设置 archived，已归档内容不会原地修改。",
     parameters: object({ spec: {
       type: "object", required: ["title", "body"],
       properties: {
@@ -224,17 +325,20 @@ const SPECS = {
         run_ids: { type: "array", items: { type: "string" } },
         claims: { type: "array", items: claim, description: "数字定位与来源、用户假设、专业判断；计算引用包含 basis,run_id,row,column,value；row 使用 result.rows 的 0-based 下标" },
         limitations: { type: "array", items: { type: "string" } },
+        evidence_recipes: { type: "array", items: evidenceRecipe, description: "独立来源核验 recipe；用于检查运行结果是否等于归档工作簿中的单元格、范围和差额/比例" },
+        consistency_sources: { type: "array", items: consistencySource, description: "一致性规则使用的归档 text/number source；number 的值由服务读取，不由模型填写" },
+        consistency_rules: { type: "array", items: consistencyRule, description: "声明与来源数值之间的一致性规则；当前支持 all_absolute_exceed" },
         parent_id: string("上一文稿版本id"),
         publication_status: { type: "string", enum: ["draft", "archived"] },
-        review_status: { type: "string", enum: ["unreviewed", "reviewed", "accepted"] },
+        review_status: { type: "string", enum: ["unreviewed"], description: "模型只能保存未复核草稿；reviewed/accepted 由经理界面或受控后端权限设置" },
       },
     } }),
     kind: "edit", argv: (input) => ["analysis-draft", "--spec", json(input.spec)],
   },
   "analysis-export": {
-    description: "导出指定文稿版本为 Markdown 或 Excel 工作簿，包含其结果和依据。草稿可直接导出；导出不自动标记为经理认可或正式归档。stdout 为导出记录 JSON。",
-    parameters: object({ draft: string("analysis-draft 返回的文稿版本id"), format: { type: "string", enum: ["md", "xlsx"] } }),
-    kind: "edit", argv: (input) => ["analysis-export", "--draft", input.draft, "--format", input.format],
+    description: "导出指定文稿版本为 Markdown 或 Excel 工作簿，包含其结果和依据。mode=management 为管理阅读版；mode=audit 附加审计质量与证据记录。草稿可直接导出；导出不自动标记为经理认可或正式归档。stdout 为导出记录 JSON。",
+    parameters: object({ draft: string("analysis-draft 返回的文稿版本id"), format: { type: "string", enum: ["md", "xlsx"] }, mode: { type: "string", enum: ["management", "audit"], description: "可选导出模式；默认 management" } }, ["draft", "format"]),
+    kind: "edit", argv: (input) => ["analysis-export", "--draft", input.draft, "--format", input.format, ...(input.mode === undefined ? [] : ["--mode", input.mode])],
   },
   "analysis-method-save": {
     description: "将选定分析定义保存为可复用方法，保留表达式与数据契约；任务敏感数据和临时问题不默认带入。方法沉淀是成功分析后的可选动作，不阻止当前分析。",

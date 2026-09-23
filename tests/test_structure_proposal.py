@@ -275,11 +275,27 @@ def test_a_table_nothing_can_be_read_from_is_named_rather_than_offered() -> None
     """
     region = _sheet(_pack(), "10")
     assert region["decision"] == "table"
-    assert region["blocked_reason"] == "unreadable_columns"
-    # The headers it did read come back, because "I understood none of these"
-    # is only actionable if she can see which ones.
+    assert region["blocked_reason"] is None
+    # The headers it did read come back, because "these are retained as generic
+    # columns" is only actionable if she can see which ones.
     assert [column["display"] for column in region["columns"]][:2] == ["区域", "营业收入"]
     assert all(column["role"] == "unknown" for column in region["columns"])
+
+
+def test_wide_business_table_keeps_unknown_numeric_columns_confirmable() -> None:
+    """A wide management table must not be blocked just because it is not a ledger."""
+    region = _sheet(_pack(), "10")
+    assert region["decision"] == "table"
+    assert region["blocked_reason"] is None
+    assert region["numeric_coverage"]["numeric_columns_total"] == 4
+    assert region["numeric_coverage"]["numeric_columns_included"] == 4
+    assert region["numeric_coverage"]["metadata_only"] is False
+
+    columns = {column["letter"]: column for column in region["columns"]}
+    assert columns["B"]["role"] == "unknown"
+    assert columns["B"]["include"] is True
+    assert columns["B"]["stable_name"] == "col_B_营业收入"
+    assert columns["B"]["source_letter"] == "B"
 
 
 def test_a_readable_table_carries_no_blocked_reason() -> None:
@@ -312,3 +328,78 @@ def test_every_unblocked_table_can_actually_be_derived() -> None:
             continue
         assert undeclarable_reason(sheet) is None
         derive_table(data, sheet)
+
+
+def test_duplicate_unknown_headers_get_stable_letter_names() -> None:
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "合同台账"
+    sheet["A1"] = "合同台账"
+    for index, text in enumerate(["项目", "预算", "预算"], start=1):
+        sheet.cell(row=2, column=index, value=text)
+    for offset, values in enumerate([("项目一", 10, 11), ("项目二", 20, 21)]):
+        for index, value in enumerate(values, start=1):
+            sheet.cell(row=3 + offset, column=index, value=value)
+
+    proposal = propose_workbook_structure(_bytes(book))["sheets"][0]
+    columns = {column["letter"]: column for column in proposal["columns"]}
+    assert columns["B"]["stable_name"] == "col_B_预算"
+    assert columns["C"]["stable_name"] == "col_C_预算"
+    assert columns["B"]["include"] is True
+    assert columns["C"]["include"] is True
+
+
+def test_independent_vertical_blocks_are_proposed_with_explicit_bounds() -> None:
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算表"
+    sheet["A1"] = "年度预算"
+    for index, text in enumerate(["项目", "预算", "实际"], start=1):
+        sheet.cell(row=2, column=index, value=text)
+    sheet.append(["住宅", 10, 9])
+    sheet.append(["商业", 20, 19])
+    for index, text in enumerate(["城市公司", "合同金额"], start=1):
+        sheet.cell(row=6, column=index, value=text)
+    sheet.cell(row=7, column=1, value="宁波")
+    sheet.cell(row=7, column=2, value=100)
+    sheet.cell(row=8, column=1, value="常州")
+    sheet.cell(row=8, column=2, value=200)
+
+    proposal = propose_workbook_structure(_bytes(book))["sheets"][0]
+    assert proposal["decision"] == "table"
+    blocks = proposal["table_blocks"]
+    assert [(block["header_row"], block["start_row"], block["end_row"], block["start_column"], block["end_column"]) for block in blocks] == [
+        (2, 2, 5, "A", "C"),
+        (6, 6, 8, "A", "B"),
+    ]
+    assert all(block["columns"] for block in blocks)
+
+
+def test_annual_budget_workbook_keeps_budget_blocks_and_annual_context() -> None:
+    path = Path("/Users/zcdeng/Desktop/物业集团月结财务套表/华宸物业_2026年度_全面预算与合同台账.xlsx")
+    if not path.exists():
+        pytest.skip("Huachen annual workbook is not present on this machine")
+
+    before = path.read_bytes()
+    proposal = propose_workbook_structure(before)
+    after = path.read_bytes()
+    assert after == before
+    sheets = {sheet["sheet"]: sheet for sheet in proposal["sheets"]}
+    revenue = sheets["02·收入预算"]
+    assert [(block["header_row"], f"{block['start_column']}{block['start_row']}:{block['end_column']}{block['end_row']}") for block in revenue["table_blocks"][:2]] == [
+        (5, "A5:I15"),
+        (16, "A16:I46"),
+    ]
+    assert revenue["scope_hints"]["period"] == ""
+    assert revenue["scope_hints"]["granularity"] == "annual"
+    assert revenue["scope_hints"]["scenario"] == "budget"
+
+    linkage = sheets["15·合同与预算联动分析"]
+    assert [(block["header_row"], f"{block['start_column']}{block['start_row']}:{block['end_column']}{block['end_row']}") for block in linkage["table_blocks"]] == [
+        (5, "A5:H9"),
+        (10, "A10:H14"),
+        (15, "A15:H43"),
+    ]
+    assert linkage["scope_hints"]["period"] == ""
+    assert linkage["scope_hints"]["granularity"] == "as_of"
+    assert linkage["scope_hints"]["as_of_date"] == "2026-08-31"

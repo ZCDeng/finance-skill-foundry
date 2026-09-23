@@ -7,6 +7,12 @@ import { bridge, shortSha, when, type Answer, type AnalysisDraft, type AnalysisM
 import './analysis.css';
 import { Table, RunStatus, STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
+import { runPresentationRole } from './analysis/businessResults.js';
+import { AnalysisScopeCard } from './analysis/AnalysisScopeCard.js';
+import { ClaimBindingRepair } from './analysis/ClaimBindingRepair.js';
+import { WorkbookOverview } from './analysis/WorkbookOverview.js';
+import { RevisionDiff } from './analysis/RevisionDiff.js';
+import { EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
@@ -31,9 +37,9 @@ type ReportMode = 'read' | 'edit' | 'print';
 interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
 }
-interface ExplanationIssue { code?: string; message?: string; severity?: string; origin?: string; excerpt?: string }
 interface ExplanationQuality {
-  status?: string; issues?: ExplanationIssue[]; coverage?: unknown; citations?: unknown[];
+  status?: string; issues?: EvidenceIssue[]; coverage?: unknown; citations?: unknown[];
+  status_dimensions?: EvidenceDimensions;
   readability?: { status: 'clear' | 'suggestions'; issues: { code: string; message: string; position?: number }[] };
   checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
   requirements?: { scope_changed?: boolean; items?: { id: string; label: string; status: string; provenance_status: string }[] };
@@ -43,8 +49,10 @@ interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
 }
 interface FinanceCompletionRecovery {
-  operation_id: string; status: string; revision?: string; title?: string; body?: string; limitations?: string[] | string; run_ids?: string[]; fact_ids?: string[];
+  operation_id: string; status: string; revision?: number; title?: string; body?: string; limitations?: string[] | string; run_ids?: string[]; fact_ids?: string[];
   claims?: unknown[]; materiality?: Record<string, unknown>; requirements_id?: string | null; parent_id?: string | null; updated_at?: string;
+  evidence_recipes?: Record<string, unknown>[]; consistency_rules?: Record<string, unknown>[]; consistency_sources?: Record<string, unknown>[] | Record<string, unknown>;
+  attempt_status?: string | null; validation_error?: { code?: string; message?: string; details?: unknown[] } | null;
 }
 type Selection = { analysis?: string; draft?: string };
 export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'methods';
@@ -268,7 +276,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   const view = state?.task_id === task?.id ? state : null;
-  const lastSuccessful = view && [...view.runs].reverse().find((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
+  const referencedRuns = view?.drafts.at(-1)?.run_ids ?? [];
+  const lastSuccessful = view && (referencedRuns.map((id) => view.runs.find((run) => run.id === id && runPresentationRole(run) === 'business')).find(Boolean)
+    ?? [...view.runs].reverse().find((row) => runPresentationRole(row) === 'business')
+    ?? [...view.runs].reverse().find((row) => row.execution_status === 'succeeded' || row.execution_status === 'success'));
   const analysis = view?.analyses.find((row) => row.id === selectedAnalysis)
     ?? view?.analyses.find((row) => row.id === lastSuccessful?.analysis_id) ?? view?.analyses.at(-1);
   const draft = view?.drafts.find((row) => row.id === selectedDraft) ?? view?.drafts.at(-1);
@@ -291,15 +302,20 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       writeCopy(`${task?.id}:selection`, { ...readCopy<Selection>(`${task?.id}:selection`), draft: draft.id });
     }
   }, [draftKey, draft?.id]);
-  const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.analyses.length ?? 0,
+  const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
     drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
+    const recoveryRef = spec.recovery_ref as { operation_id: string; revision: number } | undefined;
+    const { recovery_ref: _recoveryRef, ...draftSpec } = spec;
     const usesFinanceRun = (spec.run_ids as unknown[] | undefined)?.some((id) => view?.runs.some((run) => run.id === id && (run.engine === 'finance' || run.engine === 'structured_aggregate')));
-    if (!api?.analysisDraft && !(usesFinanceRun && api?.financeCall)) throw new Error('此版本暂不支持保存文稿。');
-    const next = unwrap((usesFinanceRun && api.financeCall
-      ? await api.financeCall(taskId, 'save-explanation-draft', spec)
-      : await api.analysisDraft!(taskId, spec)) as Answer<AnalysisDraft>);
+    if (recoveryRef && !api?.financeCall) throw new Error('此版本暂不支持恢复保存。');
+    if (!api?.analysisDraft && !((usesFinanceRun || recoveryRef) && api?.financeCall)) throw new Error('此版本暂不支持保存文稿。');
+    const next = unwrap((recoveryRef && api?.financeCall
+      ? await api.financeCall(taskId, 'finance-completion-recover', { ...recoveryRef, draft: draftSpec })
+      : usesFinanceRun && api?.financeCall
+        ? await api.financeCall(taskId, 'save-explanation-draft', draftSpec)
+        : await api!.analysisDraft!(taskId, draftSpec)) as Answer<AnalysisDraft>);
     draftEdits.current.delete(draftKey); removeCopy(draftKey);
     await refresh(taskId);
     if (currentTask.current === taskId) {
@@ -362,6 +378,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
+          {bridge()?.financeCall && view.datasets.length > 0 && <AnalysisScopeCard taskId={task.id} question={task.title} datasets={view.datasets}
+            disabled={busy} onSaved={() => void refresh(task.id)} />}
+          <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
@@ -377,7 +396,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
+          <details className="analysis-details"><summary>写回 Excel</summary>
+            <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
+          </details>
         </>}
         {view && tab === 'results' && <>
           {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
@@ -388,7 +409,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `${when(row.created_at)} · ${shortSha(row.id)}` }))}
               onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
-            <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} datasets={view.datasets} busy={busy}
+            <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
               onOpen={(run, path) => void perform(async (taskId) => {
                 const api = bridge(); if (!api?.analysisOpenOutput) throw new Error('此版本暂不支持打开分析文件。');
@@ -445,13 +466,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
         </>}
         {view && tab === 'drafts' && <>
-          <DraftEditor key={draftKey} taskId={task.id} draft={draft} busy={busy} runs={view.runs} datasets={view.datasets}
+          <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}
             onAppliedDraft={(next) => void perform(async (taskId) => { await refresh(taskId); if (next.id) setSelectedDraft(next.id); })}
             onLocatorPreview={onLocatorPreview}
             versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
-              triggerText={draft ? when(draft.created_at) : '选择文稿'}
+              triggerText={draft ? `修订 ${view.drafts.findIndex((row) => row.id === draft.id) + 1}${draft.id === view.drafts.at(-1)?.id ? ' · 最新' : ''}` : '选择文稿'}
               options={[...view.drafts].reverse().map((row) => ({
-                value: row.id ?? '', label: row.title,
+                value: row.id ?? '', label: `修订 ${view.drafts.findIndex((item) => item.id === row.id) + 1} · ${row.title}`,
                 meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
               }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /> : undefined}
             onChat={(spec) => void perform(async (taskId) => {
@@ -463,12 +484,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onSave={(spec) => void perform(async (taskId) => {
               await saveDraft(taskId, spec);
               if (currentTask.current === taskId) setNotice('已保存为新的文稿版本。');
-            })} onExport={(format, spec) => perform(async (taskId) => {
+            })} onExport={(format, spec, mode) => perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisExport) throw new Error('此版本暂不支持导出文稿。');
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               if (!id) throw new Error('请先写下文稿内容。');
-              const exportDraftFile = api.analysisExport as (task: string, id: string, nextFormat: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx') => Promise<Answer<Record<string, unknown>>>;
-              const result = unwrap(await exportDraftFile(taskId, id, format));
+              const result = unwrap(await api.analysisExport(taskId, id, format, mode));
               if (currentTask.current === taskId) setNotice(result.cancelled ? '已取消导出。' : `已导出${format === 'xlsx' ? '工作簿' : sourceFormatLabel(format)}${result.path ? `：${textValue(result.path)}` : '。'}`);
             })} />
         </>}
@@ -1320,10 +1340,10 @@ function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, onSave,
     </details>
   </div>;
 }
-function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
-  taskId: string; draft?: AnalysisDraft; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
+function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
+  taskId: string; draft?: AnalysisDraft; drafts: AnalysisDraft[]; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
-  onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
+  onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>, mode?: 'management' | 'audit'): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
   versionPicker?: ReactNode;
   onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
@@ -1360,6 +1380,15 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   const backgroundRequest = useRef(0);
   const recoveryRequest = useRef(0);
   const draftRuns = runs.filter((run) => draft?.run_ids.includes(run.id));
+  const parentDraft = drafts.find((candidate) => candidate.id === draft?.parent_id);
+  const previousRun = runs.find((run) => parentDraft?.run_ids.includes(run.id));
+  const comparison = draft?.revision_comparison;
+  const affectedClaims = (comparison?.issues ?? []).filter((issue) => issue.code === 'revision_numeric_regression').map((issue) => ({
+    label: `${issue.column ?? '指标'} · 原值 ${issue.old_value ?? ''} → 新值 ${issue.new_value ?? ''}`,
+    message: `${(draft?.claims ?? []).filter((claim) => Boolean(claim && typeof claim === 'object'
+      && (claim as Record<string, unknown>).column === issue.column
+      && [(issue as { old_run_id?: string }).old_run_id, (issue as { new_run_id?: string }).new_run_id].includes(String((claim as Record<string, unknown>).run_id)))).length} 条计算引用需要按当前版本核对。`,
+  }));
   const financeRuns = draftRuns.filter((run) => (run.engine === 'finance' || run.engine === 'structured_aggregate'));
   const primaryFinanceRun = financeRuns[0];
   const defaultScope = firstFinanceScope(primaryFinanceRun);
@@ -1459,6 +1488,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
   function spec(publication: 'draft' | 'archived') {
     const parentId = recovery ? recovery.parent_id : draft?.id;
     return { title: title.trim(), body, ...(document ? { document } : richDraftDocument(draft) ? { document: null } : {}), run_ids: effectiveRunIds, claims: effectiveClaims, ...(citedFactIds.length ? { fact_ids: citedFactIds } : {}),
+      ...(recovery ? { recovery_ref: { operation_id: recovery.operation_id, revision: recovery.revision },
+        evidence_recipes: recovery.evidence_recipes ?? [], consistency_rules: recovery.consistency_rules ?? [], consistency_sources: recovery.consistency_sources ?? [] } : {}),
       ...(parentId ? { parent_id: parentId } : {}),
       ...((updatedRequirementsId ?? recovery?.requirements_id) ? { requirements_id: updatedRequirementsId ?? recovery?.requirements_id } : {}),
       materiality: materialitySpec, publication_status: publication, review_status: review,
@@ -1473,7 +1504,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
       const prepared = unwrap(await api.financeCall(taskId, 'prepare-explanation', { run_ids: effectiveRunIds, materiality: materialitySpec }) as Answer<ExplanationPreparation>);
       if (request !== qualityRequest.current) return;
       setFacts(prepared.facts ?? []);
-      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { ...(recovery ? {} : { draft_id: draft!.id }), body, run_ids: effectiveRunIds, fact_ids: explicitFactIds(recovery ? undefined : draft, body, recovery?.fact_ids), claims: effectiveClaims,
+      const checked = unwrap(await api.financeCall(taskId, 'validate-explanation', { ...(recovery ? {} : { draft_id: draft!.id }), body, review_status: review, run_ids: effectiveRunIds, fact_ids: explicitFactIds(recovery ? undefined : draft, body, recovery?.fact_ids), claims: effectiveClaims,
+        ...(recovery ? { evidence_recipes: recovery.evidence_recipes ?? [], consistency_rules: recovery.consistency_rules ?? [], consistency_sources: recovery.consistency_sources ?? [] } : {}),
         ...((updatedRequirementsId ?? recovery?.requirements_id) ? { requirements_id: updatedRequirementsId ?? recovery?.requirements_id } : {}), materiality: materialitySpec }) as Answer<ExplanationQuality>);
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
@@ -1605,6 +1637,8 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
     <CompletionRecoveriesPanel recoveries={recoveries} error={recoveryError} disabled={busy || !canLoadRecovery} onRetry={() => void loadRecoveries()} onLoad={loadRecovery} />
     {recoveries.length > 0 && !canLoadRecovery && <p className="analysis-note">当前有未保存输入；保存或放弃当前修改后再载入恢复稿，避免覆盖你的编辑。</p>}
     {recovery && <p role="status" className="analysis-message">已载入未保存恢复稿，尚未检查；保存后才会成为新的文稿版本。</p>}
+    {recovery && <ClaimBindingRepair claims={effectiveClaims} runs={runs.filter((run) => effectiveRunIds.includes(run.id))} disabled={busy}
+      onChange={(claims) => { setRecovery({ ...recovery, claims }); markQualityStale(); setReview('unreviewed'); }} />}
     <div className="analysis-draft-navigation" data-expanded={bridge()?.financeCall && requirementsOpen ? 'true' : undefined}>
     {versionPicker && <div className="analysis-version-picker">{versionPicker}</div>}
     {bridge()?.financeCall && <details className="analysis-details analysis-requirements" open={requirementsOpen}
@@ -1622,12 +1656,15 @@ function DraftEditor({ taskId, draft, busy, runs, datasets, edit, onEdit, onSave
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
       limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
-      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format) => onExport(format, changed ? spec('draft') : undefined)}
+      onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format, mode) => onExport(format, changed ? spec('draft') : undefined, mode)}
       onAppliedDraft={onAppliedDraft} />
+    {draft && parentDraft && draftRuns[0] && <RevisionDiff current={draftRuns[0]} previous={previousRun} comparison={comparison}
+      currentRevision={drafts.findIndex((item) => item.id === draft.id) + 1} previousRevision={drafts.findIndex((item) => item.id === parentDraft.id) + 1}
+      evidence={{ affected_claims: affectedClaims, unresolved_issues: quality?.issues ?? [] }} />}
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {draft && <ExplanationQualityPanel quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
+    {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
@@ -1745,7 +1782,7 @@ function explicitFactIds(draft: AnalysisDraft | undefined, body: string, extraFa
 }
 
 function isVisibleRecovery(item: FinanceCompletionRecovery): boolean {
-  return ['timed_out', 'cancelled', 'failed', 'needs_review', 'awaiting_input'].includes(item.status)
+  return ['repair_available', 'timed_out', 'cancelled', 'failed', 'needs_review', 'awaiting_input'].includes(item.status)
     && Boolean(String(item.body ?? item.title ?? '').trim());
 }
 
@@ -1791,7 +1828,22 @@ function sourceFormatLabel(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx'): str
 }
 
 function recoveryStatusLabel(status: string): string {
-  return ({ timed_out: '超时', cancelled: '已取消', failed: '失败', needs_review: '待审阅', awaiting_input: '等待输入' } as Record<string, string>)[status] ?? status;
+  return ({ repair_available: '可修复', timed_out: '超时', cancelled: '已取消', failed: '失败', needs_review: '待审阅', awaiting_input: '等待输入' } as Record<string, string>)[status] ?? status;
+}
+
+function recoveryValidationText(item: FinanceCompletionRecovery): string {
+  const error = item.validation_error;
+  if (!error) return '';
+  const first = Array.isArray(error.details) ? error.details[0] : null;
+  if (first && typeof first === 'object') {
+    const detail = first as Record<string, unknown>;
+    const location = [detail.run_id, detail.row, detail.column].filter((part) => part !== undefined && part !== null && String(part).trim()).join(' / ');
+    const values = detail.expected !== undefined || detail.actual !== undefined
+      ? `填报 ${textValue(detail.expected ?? '')}，结果 ${textValue(detail.actual ?? '')}`
+      : '';
+    return [location, values].filter(Boolean).join('：');
+  }
+  return textValue(error.message ?? '');
 }
 
 function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry, onLoad }: {
@@ -1805,7 +1857,7 @@ function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry, onLoa
     <div className="analysis-history-list">{recoveries.map((item) => <div className="analysis-history-row analysis-history-row--static" key={item.operation_id}>
       <span>{item.title?.trim() || '未命名恢复稿'}</span>
       <span>{recoveryStatusLabel(item.status)}{item.updated_at ? ` · ${when(item.updated_at)}` : ''}{item.revision ? ` · ${item.revision}` : ''}</span>
-      <span>{recoveryLimitationsText(item.limitations) || `${item.run_ids?.length ?? 0} 次运行 · ${item.fact_ids?.length ?? 0} 条事实`}</span>
+      <span>{recoveryValidationText(item) || recoveryLimitationsText(item.limitations) || `${item.run_ids?.length ?? 0} 次运行 · ${item.fact_ids?.length ?? 0} 条事实`}</span>
       <Button variant="outline" type="button" disabled={disabled} onClick={() => onLoad(item)}>载入可编辑副本</Button>
     </div>)}</div>
   </details>;
@@ -1842,44 +1894,6 @@ function factLabel(fact: ExplanationFact): string {
   return [label, value, fact.unit && !value.includes(fact.unit) ? fact.unit : ''].filter(Boolean).join(' · ') || fact.id;
 }
 
-function explanationIssueText(issue: ExplanationIssue): string {
-  if (issue.origin === 'generated_appendix' && issue.code === 'uncited_number') {
-    return '自动附表中的数字与计算依据尚未对应，需要重新核验附表。你的正文可以继续编辑和保存。';
-  }
-  const messages: Record<string, string> = {
-    uncited_number: '正文有数字尚未关联计算依据，请核对数字或补充引用。',
-    unknown_fact: '引用已不属于当前计算结果，请重新选择依据。',
-    invalid_claim: '这条依据缺少类型，请注明是计算、资料事实还是经理判断。',
-    invalid_claim_location: '找不到引用的计算位置，请重新选择依据。',
-    claim_value_mismatch: '引用的数字与计算结果不一致，请核对。',
-    fact_claim_mismatch: '引用内容与所选事实不一致，请重新关联。',
-    missing_required_fact: '重要的计算结果尚未在说明中引用。',
-  };
-  return messages[issue.code ?? ''] ?? textValue(issue.message ?? '请核对这条说明的数字和依据。');
-}
-
-function issueOriginLabel(issue: ExplanationIssue): string {
-  return issue.origin === 'generated_appendix' ? '自动附表' : issue.origin === 'claim_binding' ? '引用绑定' : '文稿';
-}
-
-function issueSeverityLabel(issue: ExplanationIssue): string {
-  return issue.severity === 'error' ? '需修正' : '请核对';
-}
-
-function groupedIssues(issues: ExplanationIssue[]): { key: string; origin: string; severity: string; message: string; issues: ExplanationIssue[] }[] {
-  const groups = new Map<string, { key: string; origin: string; severity: string; message: string; issues: ExplanationIssue[] }>();
-  for (const issue of issues) {
-    const origin = issueOriginLabel(issue);
-    const severity = issueSeverityLabel(issue);
-    const message = explanationIssueText(issue);
-    const key = JSON.stringify([issue.severity ?? '', issue.origin ?? '', issue.code ?? '', message]);
-    const group = groups.get(key) ?? { key, origin, severity, message, issues: [] };
-    group.issues.push(issue);
-    groups.set(key, group);
-  }
-  return Array.from(groups.values());
-}
-
 /** Main answers a failed locator open with a code, not a sentence; the sentence is written here. */
 const LOCATOR_FAILURES: Record<string, string> = {
   locator_forbidden: '无权打开',
@@ -1893,12 +1907,11 @@ function locatorFailureText(failure: unknown): string {
   return LOCATOR_FAILURES[message] ?? message;
 }
 
-function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
-  quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
+function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
+  taskId: string; quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
   factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string; page?: number } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
-  const issueGroups = groupedIssues(quality?.issues ?? []);
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
@@ -1914,17 +1927,8 @@ function ExplanationQualityPanel({ quality, state, facts, citedFactIds, factDeta
       <p className="analysis-note">可用“整理段落”预览分段，再将比较数据、完整公式和来源附注分别组织。</p>
       <ul>{quality.readability.issues.map((issue, index) => <li key={`${issue.code}-${issue.position ?? index}`}>{issue.message}</li>)}</ul>
     </section> : null}
-    {issueGroups.length ? <div>
-      {issueGroups.map((group) => <details className="analysis-details" key={group.key}>
-        <summary>{group.origin} · {group.severity} · {group.issues.length} 条：{group.message}</summary>
-        <ol>{group.issues.map((issue, index) => <li key={index}>
-          <p>问题 {index + 1}{issue.code ? ` · ${issue.code}` : ''}</p>
-          {issue.excerpt && <p className="analysis-note">对应片段：{issue.excerpt}</p>}
-          <details className="analysis-details"><summary>原始问题 {index + 1}</summary>
-            <pre className="analysis-source-text">{JSON.stringify(issue, null, 2)}</pre></details>
-        </li>)}</ol>
-      </details>)}
-    </div> : <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
+    <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={state === 'stale'} />
+    {!(quality?.issues?.length) && <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>

@@ -62,8 +62,13 @@ export function followupDraft(opts: { windowId: string; briefSha?: string | null
 export interface EmbeddedInput {
   sessionId: string;
   draft?: string;
+  draftReference?: EmbeddedDraftReference;
   submit?: boolean;
   requestId?: string;
+}
+export interface EmbeddedDraftReference {
+  draftId: string;
+  revision: number;
 }
 export interface EmbeddedReply {
   sessionId: string;
@@ -87,6 +92,9 @@ export function restoreDraftsScript(drafts: Record<string, unknown>): string {
     const snapshot = ${JSON.stringify(drafts)};
     for (const [key, value] of Object.entries(snapshot.receipts ?? {})) {
       if (key.startsWith('fnd.submitted.') && typeof value === 'string') window.localStorage.setItem(key, value);
+    }
+    for (const [key, value] of Object.entries(snapshot.references ?? {})) {
+      if (key.startsWith('fnd.references.') && typeof value === 'string') window.localStorage.setItem(key, value);
     }
     for (const [id, value] of Object.entries(snapshot.drafts ?? {})) {
       if (id.length <= 200 && value && typeof value === 'object' && typeof value.draft === 'string') {

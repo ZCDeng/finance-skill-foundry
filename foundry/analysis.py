@@ -35,6 +35,7 @@ ID = re.compile(r"^[0-9a-f]{32}$")
 ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions"}
 REPORT_EXPORT_FORMATS = {"md", "xlsx", "docx", "pdf", "html"}
+RESULT_ROLES = {"business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
@@ -65,6 +66,79 @@ def _hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+
+
+
+
+def _quality_status_dimensions(
+    *,
+    execution_status: str,
+    review_status: str,
+    quality_issues: list[dict],
+    evidence_report: dict,
+    consistency_report: dict,
+    numeric_configured: bool = True,
+) -> dict[str, dict]:
+    evidence_issues = [item for item in quality_issues if str(item.get("code", "")).startswith("evidence_recipe_")]
+    consistency_issues = [item for item in quality_issues if str(item.get("code", "")).startswith("financial_consistency_")]
+    revision_issues = [item for item in quality_issues if str(item.get("code", "")).startswith("revision_")]
+    numeric_issues = [
+        item
+        for item in quality_issues
+        if item not in evidence_issues and item not in consistency_issues and item not in revision_issues
+    ]
+    evidence_status = (evidence_report.get("summary") or {}).get("status") or "not_configured"
+    consistency_status = (consistency_report.get("summary") or {}).get("status") or "pass"
+    source_status = "needs_attention" if consistency_status == "needs_attention" else evidence_status
+    source_issues = [*evidence_issues, *consistency_issues]
+    return {
+        "execution": {
+            "label": "执行状态",
+            "status": "pass" if execution_status == "succeeded" else execution_status,
+            "issues": [],
+        },
+        "numeric_citation": {
+            "label": "数值引用",
+            "status": (
+                "needs_attention"
+                if numeric_issues or revision_issues
+                else "pass"
+                if numeric_configured
+                else "not_configured"
+            ),
+            "issues": [*numeric_issues, *revision_issues],
+        },
+        "source_validation": {
+            "label": "来源核验",
+            "status": source_status,
+            "issues": source_issues,
+        },
+        "professional_review": {
+            "label": "专业复核",
+            "status": "pass" if review_status in {"reviewed", "accepted"} else "unreviewed",
+            "issues": [],
+        },
+    }
+
+def _revision_quality_issues(comparison: dict) -> list[dict]:
+    issues = []
+    for item in comparison.get("issues", []):
+        code = item.get("code")
+        if code == "revision_numeric_regression":
+            issues.append({
+                **item,
+                "severity": item.get("severity", "error"),
+                "message": item.get("message") or "同源同口径业务数值发生变化，需要解释或修正。",
+            })
+        elif code in {"revision_basis_changed", "revision_comparison_ambiguous"}:
+            issues.append({
+                **item,
+                "severity": item.get("severity", "warning"),
+                "message": item.get("message") or "修订比较口径发生变化，需要复核。",
+            })
+    return issues
+
+
 def _new(task: Task, **fields) -> dict:
     return {
         "id": uuid.uuid4().hex,
@@ -92,6 +166,29 @@ def _safe_text(value: Any, label: str, *, required=False, maximum=1_000_000) -> 
         )
     return value
 
+
+
+
+def _result_role(value: Any, *, default: str = "business") -> str:
+    if value in (None, ""):
+        return default
+    if not isinstance(value, str) or value not in RESULT_ROLES:
+        raise FoundryError("result_role is unsupported")
+    return value
+
+
+def _scope_metadata(value: Any) -> dict:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise FoundryError("scope must be an object")
+    return json_value(value)
+
+
+def _requirements_id(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return _assert_id(value)
 
 def _append_excel(sheet, row):
     parts = [
@@ -466,6 +563,11 @@ class AnalysisStore:
         parent_id = spec.get("parent_id")
         if parent_id:
             self.get_analysis(parent_id)
+        requirements_id = _requirements_id(spec.get("requirements_id"))
+        if requirements_id:
+            self._get("requirements", requirements_id)
+        result_role = _result_role(spec.get("result_role"))
+        scope = _scope_metadata(spec.get("scope"))
         parameters = spec.get("parameters") or []
         if not isinstance(parameters, (list, dict)):
             raise FoundryError("SQL parameters must be an array or object")
@@ -512,6 +614,9 @@ class AnalysisStore:
             parameters=parameters,
             parameter_metadata=parameter_metadata,
             parent_id=parent_id,
+            requirements_id=requirements_id,
+            result_role=result_role,
+            scope=scope,
             max_rows=max_rows,
             timeout_seconds=timeout,
             method_id=spec.get("method_id"),
@@ -563,6 +668,10 @@ class AnalysisStore:
         from foundry.finance_requirement_semantics import capture_requirements
         requirements_snapshot = capture_requirements(self)
         analysis = self.get_analysis(analysis_id)
+        requirements_snapshot = {
+            **requirements_snapshot,
+            "requirements_id": analysis.get("requirements_id") or requirements_snapshot.get("requirements_id"),
+        }
         if analysis.get("engine") == "finance":
             from foundry.finance_service import FinanceStore
 
@@ -579,6 +688,9 @@ class AnalysisStore:
                     "timeout_seconds": analysis["timeout_seconds"],
                     "assumptions": analysis["assumptions"],
                     "result_file": analysis.get("result_file"),
+                    "requirements_id": analysis.get("requirements_id"),
+                    "result_role": analysis.get("result_role"),
+                    "scope": analysis.get("scope", {}),
                 },
                 session_id=session_id,
                 context_revision=context_revision,
@@ -652,6 +764,8 @@ class AnalysisStore:
                 "finance_scope": analysis["aggregate_plan"].get("scope", {})}
                if structured else {}),
             **requirements_snapshot,
+            result_role=analysis.get("result_role", "business"),
+            scope=analysis.get("scope", {}),
             session_id=session_id,
             context_revision=context_revision,
             sql=analysis["sql"],
@@ -759,9 +873,20 @@ class AnalysisStore:
                         except InvalidOperation:
                             pass
                     if not matches:
-                        raise FoundryError(
-                            "claim value differs from execution result; save an explicit user_assumption override"
+                        error = FoundryError(
+                            "claim value differs from execution result "
+                            f"(run_id={run['id']}, row={row}, column={claim['column']}, "
+                            f"expected={expected}, actual={actual})"
                         )
+                        error.details = {
+                            "code": "claim_value_mismatch",
+                            "run_id": run["id"],
+                            "row": row,
+                            "column": claim["column"],
+                            "expected": str(expected),
+                            "actual": str(actual),
+                        }
+                        raise error
                 except (KeyError, IndexError, TypeError) as exc:
                     raise FoundryError("claim has an invalid output location") from exc
                 claim["verification_status"] = "matches_run"
@@ -802,6 +927,8 @@ class AnalysisStore:
         changed = bool(parent) and (
             body != parent.get("body") or claims != parent.get("claims")
         )
+        if changed:
+            review = "unreviewed"
         reproducibility = (
             "reproducible"
             if claims
@@ -838,11 +965,52 @@ class AnalysisStore:
                 "evidence_appendix_meta": evidence_appendix_meta,
             },
         )
+        evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
         explanation_check = augment_quality(self, {
             "body": body, "run_ids": list(runs), "claims": claims,
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
+            "evidence_recipes": evidence_recipes,
         }, explanation_check)
+        consistency_rules = spec.get("consistency_rules", parent.get("consistency_rules", []))
+        consistency_sources = spec.get("consistency_sources", parent.get("consistency_sources", {}))
+        from foundry.finance_revision import compare_draft_runs
+        from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
+        from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+        revision_comparison = compare_draft_runs(self, parent, {"run_ids": list(runs)})
+        evidence_report = evaluate_evidence_recipes(self, evidence_recipes)
+        resolved_rules, consistency_source_auth = prepare_consistency_inputs(self, consistency_rules, consistency_sources)
+        consistency_report = evaluate_consistency_rules(
+            resolved_rules,
+            recipe_report=evidence_report,
+            source_auth=consistency_source_auth,
+        )
+        quality_issues = list(explanation_check.get("issues", []))
+        quality_issues.extend(_revision_quality_issues(revision_comparison))
+        quality_issues.extend(evidence_report.get("issues", []))
+        quality_issues.extend(consistency_quality_issues(consistency_report))
+        execution_status = (
+            "succeeded"
+            if runs and all(r["execution_status"] == "succeeded" for r in runs.values())
+            else "failed"
+            if runs
+            else "not_run"
+        )
+        status_dimensions = _quality_status_dimensions(
+            execution_status=execution_status,
+            review_status=review,
+            quality_issues=quality_issues,
+            evidence_report=evidence_report,
+            consistency_report=consistency_report,
+            numeric_configured=bool(runs or claims),
+        )
+        explanation_check = {
+            **explanation_check,
+            "issues": quality_issues,
+            "status": "needs_attention" if quality_issues else explanation_check.get("status", "pass"),
+            "status_dimensions": status_dimensions,
+        }
         record = _new(
             self.task,
             requirements_id=requirements_id,
@@ -853,6 +1021,11 @@ class AnalysisStore:
             source_read_failures=source_read_failures,
             evidence_appendix=evidence_appendix,
             evidence_appendix_meta=evidence_appendix_meta,
+            evidence_recipes=evidence_recipes,
+            evidence_report=evidence_report,
+            consistency_rules=consistency_rules,
+            consistency_sources=consistency_sources,
+            consistency_report=consistency_report,
             title=title,
             body=body,
             **({"document": document} if document is not None else {}),
@@ -860,14 +1033,11 @@ class AnalysisStore:
             run_ids=list(runs),
             fact_ids=fact_ids,
             claims=claims,
+            revision_comparison=revision_comparison,
             explanation_check=explanation_check,
             quality=explanation_check,
             parent_id=parent.get("id"),
-            execution_status="succeeded"
-            if runs and all(r["execution_status"] == "succeeded" for r in runs.values())
-            else "failed"
-            if runs
-            else "not_run",
+            execution_status=execution_status,
             reproducibility_status=reproducibility,
             review_status=review,
             publication_status=publication,
@@ -950,10 +1120,24 @@ class AnalysisStore:
             range_ref=range_ref,
         )
 
-    def register_report_export(self, draft_id: str, format: str, path: Path) -> dict:
+    def register_report_export(
+        self,
+        draft_id: str,
+        format: str,
+        path: Path,
+        *,
+        content_mode: str | None = None,
+        projection_hash: str | None = None,
+    ) -> dict:
         if format not in REPORT_EXPORT_FORMATS:
             raise FoundryError("report export format must be md, xlsx, docx, pdf or html")
         draft = self.get_draft(draft_id)
+        if projection_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", projection_hash):
+            raise FoundryError("report export projection_hash must be a sha256")
+        if projection_hash is None:
+            content_mode = None
+        elif content_mode not in {"management", "audit"}:
+            raise FoundryError("report export mode must be management or audit")
         template_version = (draft.get("document") or {}).get("template_version")
         source = Path(path).expanduser()
         if not source.is_file() or source.is_symlink():
@@ -962,13 +1146,23 @@ class AnalysisStore:
         if len(data) > MAX_SOURCE_BYTES:
             raise FoundryError("report export exceeds 32 MiB limit")
         digest = _hash_bytes(data)
-        target = self._inside(self.root / "exports" / "registered" / f"{draft_id}.{format}")
+        filename = (
+            f"{draft_id}-{content_mode}-{projection_hash[:12]}.{format}"
+            if content_mode and projection_hash
+            else f"{draft_id}.{format}"
+        )
+        target = self._inside(self.root / "exports" / "registered" / filename)
         manifest_path = self._inside(target.with_suffix(target.suffix + ".meta.json"))
         with exclusive(self.task.lock_path, timeout=10):
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 manifest = self._read(manifest_path)
-                if manifest.get("sha256") != _hash_bytes(target.read_bytes()) or manifest.get("content_hash") != draft["content_hash"]:
+                if (
+                    manifest.get("sha256") != _hash_bytes(target.read_bytes())
+                    or manifest.get("content_hash") != draft["content_hash"]
+                    or manifest.get("content_mode") != content_mode
+                    or manifest.get("projection_hash") != projection_hash
+                ):
                     raise FoundryError("report export integrity check failed; archived bytes differ from their receipt")
                 if manifest.get("format") != format or manifest.get("template_version") != template_version:
                     raise FoundryError("report export receipt does not match the requested format/template")
@@ -985,6 +1179,8 @@ class AnalysisStore:
                         sha256=digest,
                         bytes=len(data),
                         content_hash=draft["content_hash"],
+                        content_mode=content_mode,
+                        projection_hash=projection_hash,
                         template_version=template_version,
                         source_sha256=digest,
                     )
@@ -999,15 +1195,63 @@ class AnalysisStore:
             "path": str(target.resolve()),
             "sha256": digest,
             "content_hash": draft["content_hash"],
+            **({"content_mode": content_mode, "projection_hash": projection_hash} if content_mode and projection_hash else {}),
             "publication_status": draft["publication_status"],
         }
 
-    def export_draft(self, draft_id: str, format: str = "md") -> dict:
+    def projection_for_draft(self, draft_id: str, mode: str = "management") -> dict:
+        from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
+        from foundry.report_projection import build_report_projection
+
+        draft = self.get_draft(draft_id)
+        dataset_ids: set[str] = set()
+        for run_id in draft.get("run_ids", []) or []:
+            try:
+                run = self.get_run(run_id)
+            except FoundryError:
+                continue
+            bindings = run.get("bindings", {})
+            if isinstance(bindings, dict):
+                dataset_ids.update(value for value in bindings.values() if isinstance(value, str))
+        for claim in draft.get("claims", []) or []:
+            if not isinstance(claim, dict):
+                continue
+            if isinstance(claim.get("dataset_id"), str):
+                dataset_ids.add(claim["dataset_id"])
+            if isinstance(claim.get("run_id"), str):
+                try:
+                    run = self.get_run(claim["run_id"])
+                except FoundryError:
+                    continue
+                bindings = run.get("bindings", {})
+                if isinstance(bindings, dict):
+                    dataset_ids.update(value for value in bindings.values() if isinstance(value, str))
+        dataset_ids.update(recipe_dataset_ids(draft.get("evidence_recipes", [])))
+        dataset_ids.update(consistency_dataset_ids(draft.get("consistency_sources", {})))
+        resolved = []
+        for dataset_id in sorted(dataset_ids):
+            try:
+                dataset = self.read_dataset(dataset_id)
+            except FoundryError:
+                continue
+            resolved.append({
+                "id": dataset["id"],
+                "name": dataset.get("name") or dataset.get("source_name") or dataset["id"],
+                "kind": dataset.get("kind") or dataset.get("metadata", {}).get("mode") or "dataset",
+                "source_hash": dataset.get("source_hash"),
+            })
+        return build_report_projection(draft, mode=mode, resolved_datasets=resolved)
+
+    def report_projection(self, draft_id: str, mode: str = "management") -> dict:
+        return self.projection_for_draft(draft_id, mode)
+
+    def export_draft(self, draft_id: str, format: str = "md", *, mode: str = "management") -> dict:
         draft = self.get_draft(draft_id)
         if format not in {"md", "xlsx"}:
             raise FoundryError("draft export format must be md or xlsx")
+        projection = self.report_projection(draft_id, mode=mode)
         runs = [self.get_run(run_id) for run_id in draft["run_ids"]]
-        path = self._inside(self.root / "exports" / (draft_id + "." + format))
+        path = self._inside(self.root / "exports" / f"{draft_id}-{mode}-{projection['projection_hash'][:12]}.{format}")
         with exclusive(self.task.lock_path, timeout=10):
             self._inside(path)
             manifest_path = self._inside(path.with_suffix(path.suffix + ".meta.json"))
@@ -1016,6 +1260,7 @@ class AnalysisStore:
                 if (
                     manifest.get("sha256") != _hash_bytes(path.read_bytes())
                     or manifest.get("content_hash") != draft["content_hash"]
+                    or manifest.get("projection_hash") != projection["projection_hash"]
                 ):
                     raise FoundryError(
                         "export integrity check failed; archived bytes differ from their receipt"
@@ -1023,15 +1268,14 @@ class AnalysisStore:
             else:
                 if format == "md":
                     lines = [
-                        "# " + draft["title"],
-                        "",
-                        draft["body"],
+                        projection["body"].rstrip(),
                         "",
                         "---",
                         "",
                         f"Version: {draft_id}",
-                        f"Status: {draft['publication_status']}; review: {draft['review_status']}",
-                        f"Content SHA-256: {draft['content_hash']}",
+                        f"Projection: {projection['content_mode']}; SHA-256: {projection['projection_hash']}",
+                        f"Status: {projection['publication_status']}; review: {projection['review_status']}",
+                        f"Content SHA-256: {projection['content_hash']}",
                     ]
                     if draft["limitations"]:
                         lines += [
@@ -1086,17 +1330,20 @@ class AnalysisStore:
                     sheet = workbook.active
                     sheet.title = "Report"
                     for row in [
-                        [draft["title"]],
-                        [draft["body"]],
+                        [projection["title"]],
+                        [projection["marker"]],
+                        [projection["body"]],
                         ["Version", draft_id],
-                        ["Content SHA-256", draft["content_hash"]],
-                        ["Publication", draft["publication_status"]],
-                        ["Review", draft["review_status"]],
-                        ["Reproducibility", draft["reproducibility_status"]],
+                        ["Projection", projection["content_mode"]],
+                        ["Projection SHA-256", projection["projection_hash"]],
+                        ["Content SHA-256", projection["content_hash"]],
+                        ["Publication", projection["publication_status"]],
+                        ["Review", projection["review_status"]],
+                        ["Reproducibility", projection["reproducibility_status"]],
                     ]:
                         _append_excel(sheet, row)
-                    if draft.get("document"):
-                        for sheet_name, rows in report_document_excel_rows(draft["document"], draft).items():
+                    if projection.get("document"):
+                        for sheet_name, rows in report_document_excel_rows(projection["document"], projection).items():
                             structured_sheet = workbook.create_sheet(sheet_name)
                             for row in rows:
                                 _append_excel(structured_sheet, row)
@@ -1193,6 +1440,8 @@ class AnalysisStore:
                         format=format,
                         sha256=_hash_bytes(data),
                         content_hash=draft["content_hash"],
+                        content_mode=projection["content_mode"],
+                        projection_hash=projection["projection_hash"],
                     )
                     manifest["_integrity_hash"] = _hash(manifest)
                     write_json_atomic(manifest_path, manifest)
@@ -1206,6 +1455,8 @@ class AnalysisStore:
             "path": str(path.resolve()),
             "sha256": digest,
             "content_hash": draft["content_hash"],
+            "content_mode": projection["content_mode"],
+            "projection_hash": projection["projection_hash"],
             "publication_status": draft["publication_status"],
         }
 
@@ -1344,6 +1595,12 @@ class AnalysisStore:
         ):
             raise FoundryError("script timeout_seconds must be between 0 and 300")
         timeout = float(timeout)
+        requirements_id = _requirements_id(spec.get("requirements_id"))
+        if requirements_id:
+            self._get("requirements", requirements_id)
+        default_result_role = "business" if result_file else "activity"
+        result_role = _result_role(spec.get("result_role"), default=default_result_role)
+        scope = _scope_metadata(spec.get("scope"))
         revision = _new(
             self.task,
             question=spec.get("question", "脚本分析"),
@@ -1355,6 +1612,9 @@ class AnalysisStore:
             assumptions=assumptions,
             result_file=result_file,
             parent_id=None,
+            requirements_id=requirements_id,
+            result_role=result_role,
+            scope=scope,
             timeout_seconds=timeout,
             relationships=[],
             metrics=[],
@@ -1363,6 +1623,9 @@ class AnalysisStore:
         )
         if analysis_id:
             revision = self.get_analysis(analysis_id)
+            requirements_id = revision.get("requirements_id")
+            result_role = revision.get("result_role", "business")
+            scope = revision.get("scope", {})
         else:
             self._write(self._object_path("revisions", revision["id"]), revision)
         run_id = uuid.uuid4().hex
@@ -1458,10 +1721,16 @@ class AnalysisStore:
             if succeeded
             else None
         )
+        requirements_snapshot = {
+            **requirements_snapshot,
+            "requirements_id": requirements_id or requirements_snapshot.get("requirements_id"),
+        }
         record = _new(
             self.task,
             analysis_id=revision["id"],
             **requirements_snapshot,
+            result_role=result_role,
+            scope=scope,
             session_id=session_id,
             context_revision=context_revision,
             engine=language,

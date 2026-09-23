@@ -1,0 +1,78 @@
+.analysis-workbook-browser {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--fnd-line, #e5e2dc);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fnd-surface, #fff) 92%, var(--fnd-accent-soft, #f3efe6));
+}
+
+.analysis-workbook-browser-form {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.analysis-workbook-browser-form label {
+  display: grid;
+  gap: 3px;
+  font-size: 0.82rem;
+}
+
+.analysis-workbook-browser-form input,
+.analysis-workbook-browser-form select {
+  min-width: 9rem;
+  color: var(--fnd-ink, #1f1b16);
+  background: var(--fnd-surface, #fff);
+  border-color: var(--fnd-line, #e5e2dc);
+}
+
+.analysis-workbook-grid-wrap {
+  overflow: auto;
+  max-height: 280px;
+  border: 1px solid var(--fnd-line, #e5e2dc);
+  border-radius: 6px;
+  background: var(--fnd-surface, #fff);
+}
+
+.analysis-workbook-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.analysis-workbook-grid th,
+.analysis-workbook-grid td {
+  border: 1px solid var(--fnd-line, #e5e2dc);
+  padding: 3px 6px;
+  min-width: 4.5rem;
+  white-space: nowrap;
+}
+
+.analysis-workbook-grid th {
+  color: var(--fnd-ink, #1f1b16);
+  position: sticky;
+  background: var(--fnd-surface-strong);
+  z-index: 1;
+}
+
+.analysis-workbook-grid tbody th {
+  left: 0;
+  z-index: 1;
+}
+
+.analysis-workbook-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.analysis-workbook-grid .analysis-workbook-corner {
+  left: 0;
+  z-index: 3;
+}
+
+.analysis-workbook-formula {
+  color: var(--fnd-muted, #6f6a60);
+}

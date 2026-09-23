@@ -28,6 +28,7 @@ DEFAULT_MAX_REPAIRS = 2
 MAX_REPAIRS_CAP = 2
 POLICY_KEYS = {"max_repairs", "timeout_seconds"}
 TERMINAL = {"complete", "awaiting_input", "needs_review", "timed_out", "cancelled", "failed"}
+ATTEMPT_TERMINAL = {"settled", "rejected_validation", "failed_execution"}
 
 Clock = Callable[[], datetime | int | float]
 
@@ -232,7 +233,7 @@ def _attempt_saved_by_draft(
 def _latest_unsettled_payload(record: dict[str, Any]) -> dict[str, Any] | None:
     for attempt in sorted(record.get("revisions", []), key=lambda row: row.get("revision", 0), reverse=True):
         if attempt.get("draft_id") or attempt.get("completion_id"):
-            continue
+            return None
         payload = attempt.get("payload")
         if isinstance(payload, dict):
             return attempt
@@ -243,7 +244,7 @@ def _recovery_projection(record: dict[str, Any], attempt: dict[str, Any]) -> dic
     payload = attempt.get("payload")
     if not isinstance(payload, dict) or not isinstance(payload.get("body"), str):
         return None
-    return {
+    result = {
         "operation_id": record["id"],
         "status": record["status"],
         "revision": attempt["revision"],
@@ -253,11 +254,33 @@ def _recovery_projection(record: dict[str, Any], attempt: dict[str, Any]) -> dic
         "run_ids": payload.get("run_ids") if isinstance(payload.get("run_ids"), list) else [],
         "fact_ids": payload.get("fact_ids") if isinstance(payload.get("fact_ids"), list) else [],
         "claims": payload.get("claims") if isinstance(payload.get("claims"), list) else [],
+        "evidence_recipes": payload.get("evidence_recipes") if isinstance(payload.get("evidence_recipes"), list) else [],
+        "consistency_rules": payload.get("consistency_rules") if isinstance(payload.get("consistency_rules"), list) else [],
+        "consistency_sources": payload.get("consistency_sources") if isinstance(payload.get("consistency_sources"), (dict, list)) else [],
         "materiality": payload.get("materiality") if isinstance(payload.get("materiality"), dict) else {},
         "requirements_id": payload.get("requirements_id") if isinstance(payload.get("requirements_id"), str) else None,
         "parent_id": payload.get("parent_id") if isinstance(payload.get("parent_id"), str) else None,
         "updated_at": record.get("updated_at"),
     }
+    if attempt.get("status") == "rejected_validation":
+        result["attempt_status"] = "rejected_validation"
+    if isinstance(attempt.get("error"), dict):
+        result["validation_error"] = attempt["error"]
+    return result
+
+
+
+
+def get_completion_operation_for_recovery(task: Task, operation_id: str, clock: Clock | None = None) -> dict[str, Any]:
+    """Read an operation for manager recovery without runtime session authority.
+
+    Recovery still happens by explicit operation id and revision; this helper does
+    not expose call ids or permit reserving new runtime work.
+    """
+    operation_id = _operation_id(operation_id)
+    with exclusive(task.lock_path, timeout=10):
+        record = _expire_record_locked(task, _read_operation_path(task, _operation_path(task, operation_id)), clock)
+        return _public(record)
 
 
 def list_completion_recoveries(task: Task, clock: Clock | None = None) -> dict[str, Any]:
@@ -276,7 +299,7 @@ def list_completion_recoveries(task: Task, clock: Clock | None = None) -> dict[s
             return {"recoveries": recoveries}
         for path in root.glob("*.json"):
             record = _expire_record_locked(task, _read_operation_path(task, path), clock)
-            if record.get("status") not in TERMINAL or record.get("status") == "complete":
+            if record.get("status") not in {*TERMINAL, "repair_available"} or record.get("status") == "complete":
                 continue
             attempt = _latest_unsettled_payload(record)
             if not attempt:
@@ -381,7 +404,7 @@ class CompletionOperationStore:
                     raise FoundryError("operation call id revision conflict")
                 if existing.get("payload_hash") != payload_hash:
                     raise FoundryError("operation payload conflict")
-                if self._attempt_settled(existing):
+                if self._attempt_finished(existing):
                     return self._public_with_attempt(record, existing, reservation_replayed=True)
             existing_by_revision = self._revision_record(record, revision) if revision is not None else None
             if existing_by_revision:
@@ -389,7 +412,7 @@ class CompletionOperationStore:
                     raise FoundryError("operation payload conflict")
                 if call_id and existing_by_revision.get("call_id") not in (None, call_id):
                     raise FoundryError("operation call id conflict")
-                if self._attempt_settled(existing_by_revision):
+                if self._attempt_finished(existing_by_revision):
                     return self._public_with_attempt(record, existing_by_revision, reservation_replayed=True)
             if record["status"] in TERMINAL:
                 raise FoundryError("completion operation is terminal")
@@ -407,7 +430,7 @@ class CompletionOperationStore:
                 raise FoundryError("operation revision conflict")
             if revision > 1:
                 previous = self._revision_record(record, revision - 1)
-                if not previous or not self._attempt_settled(previous):
+                if not previous or not self._attempt_finished(previous):
                     raise FoundryError("previous operation revision has not settled")
             max_repairs = int(record["policy"]["max_repairs"])
             if max(0, revision - 1) > max_repairs:
@@ -436,6 +459,45 @@ class CompletionOperationStore:
             record["events"].append(event)
             self._write_locked(record)
             return self._public_with_attempt(record, attempt)
+
+    def reject_attempt(self, operation_id: str, revision: int, error: dict[str, Any]) -> dict[str, Any]:
+        operation_id = _operation_id(operation_id)
+        revision = _revision(revision)
+        clean_error = _json(error, "attempt error")
+        with exclusive(self.task.lock_path, timeout=10):
+            record = self._read_locked(operation_id)
+            self._authorize(record)
+            target = self._revision_record(record, revision)
+            if not target:
+                raise FoundryError("operation revision has not been reserved")
+            if target.get("draft_id") or target.get("completion_id"):
+                raise FoundryError("operation revision already saved")
+            if target.get("status") in ATTEMPT_TERMINAL:
+                return _public(record, replayed=True)
+            now = _iso(_utc_now(self.clock))
+            target.update({
+                "status": "rejected_validation",
+                "error": clean_error,
+                "rejected_at": now,
+            })
+            record["repair_attempts_settled"] = max(record.get("repair_attempts_settled", 0), max(0, revision - 1))
+            record["updated_at"] = now
+            record["events"].append({
+                "type": "revision_rejected",
+                "revision": revision,
+                "code": clean_error.get("code"),
+                "at": now,
+            })
+            next_revision = int(record.get("current_revision", 0)) + 1
+            if max(0, next_revision - 1) > int(record["policy"]["max_repairs"]):
+                self._mark_locked(record, "needs_review", "repair_budget_exhausted")
+            elif record["status"] not in TERMINAL:
+                record["status"] = "repair_available"
+                record["stop_reason"] = None
+                record["finished_at"] = None
+                record["events"].append({"type": "operation_status", "status": "repair_available", "at": now})
+            self._write_locked(record)
+            return _public(record)
 
     def settle(self, operation_id: str, revision: int, draft: dict[str, Any], completion: dict[str, Any]) -> dict[str, Any]:
         operation_id = _operation_id(operation_id)
@@ -561,6 +623,10 @@ class CompletionOperationStore:
     @staticmethod
     def _attempt_settled(attempt: dict[str, Any]) -> bool:
         return bool(attempt.get("draft_id") and attempt.get("completion_id"))
+
+    @classmethod
+    def _attempt_finished(cls, attempt: dict[str, Any]) -> bool:
+        return cls._attempt_settled(attempt) or attempt.get("status") in ATTEMPT_TERMINAL
 
     def _public_with_attempt(
         self,

@@ -163,6 +163,212 @@ window.__ModuleLoader__.load({
     const QUIET = { opacity: 0.6 };
     /* A refusal is a designed output here, not a crash, but it is not a result. */
     const REFUSED = { color: '#a8442e' };
+    const FINANCE_STAGE_TOOLS = new Set([
+      'analysis-state',
+      'analysis-refresh',
+      'dataset-add',
+      'dataset-read',
+      'method-resource',
+      'analysis-save',
+      'analysis-run',
+      'analysis-script',
+      'analysis-script-start',
+      'analysis-delegate',
+      'analysis-jobs',
+      'analysis-job-output',
+      'analysis-job-cancel',
+      'analysis-job-retry',
+      'analysis-draft',
+      'analysis-export',
+      'analysis-method-save',
+      'analysis-method-apply',
+      'list_finance_context',
+      'finance_readiness',
+      'chart_deliverable_save',
+      'finance_context_save',
+      'finance_map_save',
+      'run_metric',
+      'explain_variance',
+      'drilldown_fact',
+      'open_source_locator',
+      'prepare_explanation',
+      'validate_explanation',
+      'save_explanation_draft',
+      'finance_background_save',
+      'finance_background_list',
+      'finance_adjustment_list',
+      'structure_proposal_list',
+      'structure_proposal_confirm',
+      'structure_template_list',
+      'report_template_list',
+      'report_template_apply',
+      'finance_scenario_save',
+      'finance_scenario_run',
+      'finance_source_list',
+      'finance_source_refresh',
+      'workbook_inspect',
+      'workbook_bind',
+      'workbook_read',
+      'workbook_range_preview',
+      'workbook_preview',
+      'workbook_apply',
+      'analysis_requirements_save',
+      'analysis_requirements_list',
+      'finance-source-list',
+      'finance-source-refresh',
+      'finance-readiness',
+      'list-finance-context',
+      'finance-context-save',
+      'finance-map-save',
+      'finance-metric-save',
+      'finance-scenario-save',
+      'finance-scenario-run',
+      'run-metric',
+      'explain-variance',
+      'drilldown-fact',
+      'workbook-inspect',
+      'workbook-bind',
+      'workbook-read',
+      'workbook-range-preview',
+      'workbook-preview',
+      'workbook-apply',
+      'prepare-explanation',
+      'validate-explanation',
+      'save-explanation-draft',
+      'analysis-requirements-save',
+      'analysis-requirements-list',
+      'finance-completion-recoveries',
+      'finance-completion-recover',
+      'finance-background-save',
+      'finance-background-list',
+      'finance-adjustment-save',
+      'finance-adjustment-list',
+      'finance-adjustment-confirm',
+      'report-template-list',
+      'report-template-apply',
+      'chart-deliverable-save',
+      'chart-deliverable-list',
+      'chart-deliverable-open',
+      'analysis-circle-select',
+      'structure-proposal-list',
+      'structure-proposal-confirm',
+      'structure-confirmation-list',
+      'structure-acknowledge',
+      'structure-reject',
+      'structure-withdraw',
+      'structure-template-list',
+      'structure-template-disable',
+    ]);
+    const TOOL_STAGE = {
+      'analysis-state': 'read',
+      'analysis-refresh': 'read',
+      'dataset-add': 'read',
+      'dataset-read': 'read',
+      'method-resource': 'read',
+      'finance-source-list': 'read',
+      'finance-source-refresh': 'read',
+      'finance-readiness': 'read',
+      'list-finance-context': 'read',
+      'workbook-inspect': 'read',
+      'workbook-read': 'read',
+      'workbook-range-preview': 'read',
+      'finance_source_list': 'read',
+      'finance_source_refresh': 'read',
+      'finance_readiness': 'read',
+      'list_finance_context': 'read',
+      'workbook_inspect': 'read',
+      'workbook_read': 'read',
+      'workbook_range_preview': 'read',
+      'finance-context-save': 'structure',
+      'finance-map-save': 'structure',
+      'finance-metric-save': 'structure',
+      'finance-scenario-save': 'structure',
+      'workbook-bind': 'structure',
+      'analysis-requirements-save': 'structure',
+      'analysis-requirements-list': 'structure',
+      'finance_context_save': 'structure',
+      'finance_map_save': 'structure',
+      'finance_scenario_save': 'structure',
+      'workbook_bind': 'structure',
+      'analysis_requirements_save': 'structure',
+      'analysis_requirements_list': 'structure',
+      'analysis-save': 'calc',
+      'analysis-run': 'calc',
+      'analysis-script': 'calc',
+      'analysis-script-start': 'calc',
+      'analysis-delegate': 'calc',
+      'analysis-jobs': 'calc',
+      'analysis-job-output': 'calc',
+      'analysis-job-cancel': 'calc',
+      'analysis-job-retry': 'calc',
+      'run-metric': 'calc',
+      'explain-variance': 'calc',
+      'finance-scenario-run': 'calc',
+      'run_metric': 'calc',
+      'explain_variance': 'calc',
+      'finance_scenario_run': 'calc',
+      'workbook-preview': 'verify',
+      'drilldown-fact': 'verify',
+      'open_source_locator': 'verify',
+      'prepare-explanation': 'verify',
+      'validate-explanation': 'verify',
+      'workbook_preview': 'verify',
+      'drilldown_fact': 'verify',
+      'prepare_explanation': 'verify',
+      'validate_explanation': 'verify',
+      'analysis-draft': 'save',
+      'analysis-export': 'save',
+      'analysis-method-save': 'save',
+      'analysis-method-apply': 'save',
+      'workbook-apply': 'save',
+      'save-explanation-draft': 'save',
+      'finance-completion-recover': 'save',
+      'finance-background-save': 'save',
+      'chart-deliverable-save': 'save',
+      'chart-deliverable-open': 'save',
+      'analysis_draft': 'save',
+      'analysis_export': 'save',
+      'analysis_method_save': 'save',
+      'analysis_method_apply': 'save',
+      'workbook_apply': 'save',
+      'save_explanation_draft': 'save',
+      'finance_background_save': 'save',
+      'chart_deliverable_save': 'save',
+      'finance-completion-recoveries': 'read',
+      'finance-background-list': 'read',
+      'finance-adjustment-list': 'read',
+      'report-template-list': 'read',
+      'chart-deliverable-list': 'read',
+      'finance_background_list': 'read',
+      'finance_adjustment_list': 'read',
+      'report_template_list': 'read',
+      'structure_template_list': 'read',
+      'finance-adjustment-save': 'structure',
+      'finance-adjustment-confirm': 'structure',
+      'report-template-apply': 'structure',
+      'analysis-circle-select': 'structure',
+      'structure-proposal-list': 'structure',
+      'structure-proposal-confirm': 'structure',
+      'structure-confirmation-list': 'structure',
+      'structure-acknowledge': 'structure',
+      'structure-reject': 'structure',
+      'structure-withdraw': 'structure',
+      'structure-template-list': 'structure',
+      'structure-template-disable': 'structure',
+      'finance_adjustment_list': 'read',
+      'structure_proposal_list': 'structure',
+      'structure_proposal_confirm': 'structure',
+      'report_template_apply': 'structure',
+    };
+    const STAGE_LABEL = {
+      read: '读取资料',
+      structure: '读取资料',
+      calc: '计算指标',
+      verify: '检查依据',
+      save: '保存结果',
+      other: '处理记录',
+    };
+    const DRAFT_REF_SOURCE = 'foundry-draft';
 
     function FiledChip(props) {
       const row = props.row || {};
@@ -175,6 +381,111 @@ window.__ModuleLoader__.load({
           sha ? jsx.jsx('span', { style: QUIET, children: sha }) : null,
         ],
       });
+    }
+
+    function stageOf(toolName) {
+      return TOOL_STAGE[toolName] || (toolName && (toolName.startsWith('workbook-') || toolName.startsWith('workbook_')) ? 'structure' : 'other');
+    }
+
+    function compactText(value, limit = 180) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      return text.length > limit ? text.slice(0, limit - 1) + '\u2026' : text;
+    }
+
+    function errorText(block) {
+      const err = block && block.error;
+      if (!err) return '';
+      return compactText(err.message || err.code || err.name || JSON.stringify(err));
+    }
+
+    function rawToolPayload(toolName, block, text) {
+      const lines = [];
+      lines.push(`tool: ${toolName}`);
+      if (block && typeof block.argsRaw === 'string' && block.argsRaw.trim()) {
+        lines.push('input:');
+        lines.push(block.argsRaw.trim());
+      }
+      if (block && block.error) {
+        lines.push('error:');
+        try { lines.push(JSON.stringify(block.error, null, 2)); }
+        catch { lines.push(String(block.error)); }
+      }
+      if (text) {
+        lines.push('output:');
+        lines.push(text);
+      }
+      return lines.join('\n');
+    }
+
+    function stageDetailText(toolName, block, text, settled) {
+      if (!settled) return `${toolName} 正在执行。`;
+      if (block && block.isError) {
+        const message = errorText(block) || compactText(text) || '工具返回错误；展开查看原始输入、错误和输出。';
+        return `${message}；展开查看原始输入、错误和输出。`;
+      }
+      if (!text) return `${toolName} 完成；这只是工具阶段状态，不代表财务口径已核验。`;
+      const compact = compactText(text);
+      if (compact && compact.length <= 180) return compact;
+      return '已返回结果；展开查看原始输入和输出。';
+    }
+
+    function FinanceStageRow(props) {
+      const block = (props && props.block) || null;
+      const toolName = (props && props.toolName) || 'finance';
+      const settled = Boolean(block) && 'kind' in block;
+      const text = settled ? resultText(block) : '';
+      const stage = stageOf(toolName);
+      const raw = rawToolPayload(toolName, block, text);
+      return jsx.jsxs('details', {
+        style: { fontSize: 13, lineHeight: 1.6 },
+        open: block?.isError ? true : undefined,
+        children: [
+          jsx.jsxs('summary', {
+            style: { cursor: 'pointer' },
+            children: [
+              STAGE_LABEL[stage] || STAGE_LABEL.other,
+              ' · ',
+              settled ? block.isError ? '需要处理' : '已完成' : '进行中',
+            ],
+          }),
+          jsx.jsx('div', {
+            style: Object.assign({ marginTop: 6, whiteSpace: 'pre-wrap' }, block?.isError ? REFUSED : QUIET),
+            children: stageDetailText(toolName, block, text, settled),
+          }),
+          raw ? jsx.jsxs('details', {
+            style: { marginTop: 6 },
+            children: [
+              jsx.jsx('summary', { style: { cursor: 'pointer' }, children: '查看原始输入/错误/输出' }),
+              jsx.jsx('pre', {
+                style: { marginTop: 6, whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' },
+                children: raw,
+              }),
+            ],
+          }) : null,
+        ],
+      });
+    }
+
+    function registerDraftReferenceSource(ctx) {
+      const source = {
+        trigger: '\u00a7',
+        name: DRAFT_REF_SOURCE,
+        candidates: async () => [],
+        onPick: () => undefined,
+        codec: {
+          clipboardText: (ref) => {
+            try {
+              const value = JSON.parse(ref);
+              return `基于修订 ${value.revision}`;
+            } catch {
+              return '基于修订';
+            }
+          },
+          serialize: (ref) => Promise.resolve(`[[FA_FOUNDRY_DRAFT_REF:${ref}]]`),
+        },
+      };
+      const inputTriggers = ctx.get('inputTriggers');
+      ctx.effect(() => inputTriggers.registerSource(source), 'foundry: draft revision reference source');
     }
 
     /**
@@ -234,7 +545,7 @@ window.__ModuleLoader__.load({
     }
 
     /** The slot registry, and the panel actions that open and close the rail. */
-    const inject = ['slots', 'layout'];
+    const inject = ['slots', 'layout', 'inputTriggers'];
 
     /**
      * Start with the sidebar closed.
@@ -321,6 +632,7 @@ window.__ModuleLoader__.load({
     const SHADOW = -1;
 
     function apply(ctx) {
+      registerDraftReferenceSource(ctx);
       ctx.slots.inject('sidebar.brand.mark', () =>
         ctx.slots.inject('sidebar.brand.name', () =>
           ctx.slots.inject('conversation.hero.brand.mark', function* () {
@@ -342,6 +654,9 @@ window.__ModuleLoader__.load({
       ctx.slots.inject('tool.call.toolview', function* () {
         for (const toolName of Object.keys(RECEIPT_TOOLS)) {
           yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FoundryRow);
+        }
+        for (const toolName of FINANCE_STAGE_TOOLS) {
+          yield ctx.slots.register({ name: 'tool.call.toolview', key: toolName }, FinanceStageRow);
         }
       });
       collapseOnce(ctx);

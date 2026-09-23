@@ -10,7 +10,7 @@ import pytest
 from foundry.analysis import AnalysisStore
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
-from foundry.structure_records import resolve_source
+from foundry.structure_records import assert_confirmable, resolve_source
 from foundry.task import TaskStore
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures" / "structure"))
@@ -262,3 +262,57 @@ def test_an_actor_the_call_layer_does_not_know_is_refused(tmp_path: Path) -> Non
     task = TaskStore(tmp_path / "var").create(title="来源")
     with _pytest.raises(FoundryError, match="manager or assistant"):
         FinanceStore(task, actor="auditor")
+
+
+def test_confirmation_rejects_duplicate_or_overlapping_blocks() -> None:
+    sheet = {
+        "sheet": "预算表",
+        "decision": "table",
+        "selected_block_id": "block_1",
+        "header_row": 2,
+        "start_row": 2,
+        "end_row": 5,
+        "start_column": "A",
+        "end_column": "C",
+        "table_blocks": [
+            {"id": "block_1", "start_row": 2, "end_row": 5, "start_column": "A", "end_column": "C"},
+            {"id": "block_2", "start_row": 4, "end_row": 8, "start_column": "B", "end_column": "D"},
+        ],
+        "columns": [{"letter": "A", "display": "项目", "role": "unknown", "include": True}],
+        "amount_pairs": [],
+    }
+    with pytest.raises(FoundryError, match="duplicate"):
+        assert_confirmable([sheet, {**sheet}])
+
+    with pytest.raises(FoundryError, match="overlapping"):
+        assert_confirmable([
+            sheet,
+            {
+                **sheet,
+                "selected_block_id": "block_2",
+                "start_row": 4,
+                "end_row": 8,
+                "start_column": "B",
+                "end_column": "D",
+            },
+        ])
+
+
+def test_confirmation_requires_reasons_for_excluded_columns() -> None:
+    with pytest.raises(FoundryError, match="excluded columns require a reason"):
+        assert_confirmable([
+            {
+                "sheet": "预算表",
+                "decision": "table",
+                "header_row": 2,
+                "start_row": 2,
+                "end_row": 5,
+                "start_column": "A",
+                "end_column": "C",
+                "columns": [
+                    {"letter": "A", "display": "项目", "role": "unknown", "include": True},
+                    {"letter": "B", "display": "预算", "role": "unknown", "include": False},
+                ],
+                "amount_pairs": [],
+            }
+        ])
