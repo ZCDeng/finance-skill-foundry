@@ -1233,15 +1233,18 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByText(/已载入未保存恢复稿/)).toBeTruthy();
     expect(screen.getByText(/待重检/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '采用引用 1 的结果值' }));
+    fireEvent.change(screen.getByLabelText('重要性绝对金额'), { target: { value: '12000' } });
     fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'prepare-explanation', expect.objectContaining({
       run_ids: [financeRun.id],
+      materiality: { absolute: '12000' },
     })));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'validate-explanation', expect.objectContaining({
       body: '恢复正文 {{fact:fact-recovered}}。',
       run_ids: [financeRun.id],
       fact_ids: ['fact-recovered'],
       claims: recoveryClaims,
+      materiality: { absolute: '12000' },
     })));
     fireEvent.click(screen.getByRole('button', { name: '保存文稿新版' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-completion-recover', expect.objectContaining({
@@ -1251,7 +1254,7 @@ ${canonicalAppendix} 已改写`;
       run_ids: [financeRun.id],
       fact_ids: ['fact-recovered'],
       claims: recoveryClaims,
-      materiality: { absolute: '9000' },
+      materiality: { absolute: '12000' },
       requirements_id: 'req-recovered',
       review_status: 'unreviewed',
     }) })));

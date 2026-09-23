@@ -1398,7 +1398,7 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
   const citedFactIds = explicitFactIds(recovery ? undefined : draft, body, recovery?.fact_ids);
   const boundDatasetIds = Array.from(new Set(draftRuns.flatMap((run) => Object.values(run.bindings ?? {}))));
   const sourceDatasets = datasets.filter((source) => boundDatasetIds.includes(source.id));
-  const materialitySpec = recovery?.materiality ?? materialityToSpec(materiality);
+  const materialitySpec = materialityToSpec(materiality);
   const materialityChanged = !sameMateriality(materiality, draft?.materiality);
   const materialityError = materiality.relative.trim().startsWith('-') ? '相对阈值不能为负数。0.1 表示 10%。' : '';
   const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
