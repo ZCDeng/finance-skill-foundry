@@ -132,6 +132,51 @@ def test_metric_key_matches_only_declared_metric_aliases_for_generic_values(anal
     assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'revenue', 'note': '1'}, 'note')
 
 
+def test_generic_ratio_periods_require_each_declared_period(analysis):
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'two_month_ratios', 'metric': 'ratio',
+                'periods': ['2026-07', '2026-08'], 'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='ratio-periods', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['period', 'metric_key', 'value'],
+        'rows': [
+            {'period': '2026-07', 'metric_key': 'ratio', 'value': '0.8'},
+            {'period': '2026-08', 'metric_key': 'ratio', 'value': '0.9'},
+            {'period': '2026-09', 'metric_key': 'ratio', 'value': '1.0'},
+        ],
+    })
+    first = _claim(run, row=0, column='value', value='0.8')
+    second = _claim(run, row=1, column='value', value='0.9')
+    out_of_scope = _claim(run, row=2, column='value', value='1.0')
+
+    partial = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                            'run_ids': [run['id']], 'claims': [first]})
+    wrong_period = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                 'run_ids': [run['id']], 'claims': [first, out_of_scope]})
+    complete = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                             'run_ids': [run['id']], 'claims': [first, second]})
+
+    assert partial['items'][0]['status'] == 'pending'
+    assert wrong_period['items'][0]['status'] == 'pending'
+    assert complete['items'][0]['status'] == 'answered'
+    assert {location['row'] for location in complete['items'][0]['locations']} == {0, 1}
+    assert complete['provenance']['status'] == 'needs_attention'
+
+    first_location, second_location = sorted(complete['items'][0]['locations'], key=lambda location: location['row'])
+    _verified_source(analysis, {key: first_location[key] for key in ('run_id', 'row', 'column', 'output_hash')})
+    one_source = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                               'run_ids': [run['id']], 'claims': [first, second]})
+    assert one_source['provenance']['status'] == 'needs_attention'
+
+    _verified_source(analysis, {key: second_location[key] for key in ('run_id', 'row', 'column', 'output_hash')})
+    both_sources = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                 'run_ids': [run['id']], 'claims': [first, second]})
+    assert both_sources['provenance']['status'] == 'pass'
+
+
 def test_default_context_scenario_scope_allows_valid_actual_budget_bridge(analysis):
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1', 'organization': 'O1', 'period': '2026-09',

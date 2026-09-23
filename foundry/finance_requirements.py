@@ -263,6 +263,24 @@ def _bound_scopes_match(candidates, expected, row=None):
     return not source_scope or _scope_dict_matches(candidate, source_scope)
 
 
+def _row_period(run, row):
+    if row.get('period') not in (None, ''):
+        return row['period']
+    scopes = run.get('finance_scope', {})
+    if not isinstance(scopes, dict):
+        return None
+    for side in ('actual', 'source'):
+        scope = scopes.get(side)
+        if isinstance(scope, dict) and scope.get('period') not in (None, ''):
+            return scope['period']
+    return None
+
+
+def _period_matches(item, run, row):
+    periods = item.get('periods', [])
+    return not periods or _row_period(run, row) in periods
+
+
 def _matches(item, row, column, run=None):
     if not _dimensions_match(item, row, run or {}):
         return False
@@ -882,7 +900,7 @@ def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
         if not _run_inputs_match_requirement(run, latest):
             continue
         for index, row in enumerate(run.get('result', {}).get('rows', [])):
-            if not _scope_matches(run, row, latest['scope']):
+            if not _scope_matches(run, row, latest['scope']) or not _period_matches(item, run, row):
                 continue
             for column in row:
                 if _account_amount_claim_requires_native_total(item, row, column):
@@ -1021,6 +1039,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
             if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
                 continue
             row = run['result']['rows'][index]
+            if not _period_matches(item, run, row):
+                continue
             group = evidence['groups'].get((run_id, index))
             profit_bridge_locations = _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, latest['scope'])
             if profit_bridge_locations and ('profit_bridge', run_id) not in processed_groups:
@@ -1061,13 +1081,29 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                 locations.append({**location, 'evidence': metadata, 'status': status})
                 statuses.append(status)
         item_status = _item_status(statuses)
+        period_locations = None
+        if result_set is None and item.get('periods'):
+            period_locations = {period: [] for period in item['periods']}
+            for location in locations:
+                run = runs[location['run_id']]
+                row = run['result']['rows'][location['row']]
+                period_locations.get(_row_period(run, row), []).append(location)
+            if not all(
+                any(location['status'] == 'answered' for location in period_locations[period])
+                for period in item['periods']
+            ):
+                item_status = 'pending'
         failed_source = item['id'] in source_failures
         source_matches = [_source_verified(location, checks) for location in locations]
-        source_complete = (
-            bool(source_matches) and all(source_matches)
-            if _profit_bridge_group_required(item)
-            else any(source_matches)
-        )
+        if _profit_bridge_group_required(item):
+            source_complete = bool(source_matches) and all(source_matches)
+        elif period_locations is not None:
+            source_complete = all(
+                any(_source_verified(location, checks) for location in period_locations[period])
+                for period in item['periods']
+            )
+        else:
+            source_complete = any(source_matches)
         sourced = (
             item_status == 'answered'
             and not failed_source
