@@ -20,6 +20,7 @@ type RequirementItem = {
   dimensions: Record<string, unknown>;
   requires_drilldown: boolean;
   periods?: string[];
+  organizations?: string[];
 };
 
 type RequirementMissingInput = {
@@ -122,6 +123,10 @@ function normalizePeriods(value: unknown): string[] {
   return value.map((item) => String(item ?? '').trim()).filter(Boolean);
 }
 
+function itemOrganizations(item: RequirementItem): string[] {
+  return normalizePeriods(item.organizations);
+}
+
 function normalizeMissingInputs(value: unknown): RequirementMissingInput[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -179,6 +184,9 @@ function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
       dimensions: item.dimensions && typeof item.dimensions === 'object' && !Array.isArray(item.dimensions) ? item.dimensions : {},
       requires_drilldown: item.requires_drilldown === true,
       periods: normalizePeriods((item as Record<string, unknown>).periods),
+      ...(Array.isArray((item as Record<string, unknown>).organizations)
+        ? { organizations: normalizePeriods((item as Record<string, unknown>).organizations) }
+        : {}),
     })).filter((item) => item.id && item.metric) : [],
   };
 }
@@ -232,6 +240,11 @@ function shortId(value?: string | null): string {
 
 function validAccountingPeriod(value: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+function validPeriodRange(value: string): boolean {
+  const match = /^(\d{4}-(?:0[1-9]|1[0-2])):(\d{4}-(?:0[1-9]|1[0-2]))$/.exec(value);
+  return Boolean(match && match[1] <= match[2]);
 }
 
 function optionsWithSavedValue(options: SelectOption[], current: unknown, meta = '已保存自定义值'): SelectOption[] {
@@ -321,9 +334,17 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   }, [current, removed]);
   const duplicateIds = useMemo(() => items.some((item, index) => items.findIndex((other) => other.id === item.id) !== index), [items]);
   const hasInvalidDimensions = invalidItemDimensions.size > 0;
+  const organizationConflict = Boolean(scope.organization && items.some((item) => {
+    const organizations = itemOrganizations(item);
+    return organizations.length && (organizations.length !== 1 || organizations[0] !== scope.organization);
+  }));
+  const periodConflict = Boolean(scope.period && items.some((item) => {
+    const periods = itemPeriods(item);
+    return periods.length && (periods.length !== 1 || periods[0] !== scope.period);
+  }));
   const scopeChangedForDraft = Boolean(draftRequirementsId && current?.id && draftRequirementsId !== current.id);
   const canSave = Boolean(taskId && api?.financeCall && question.trim() && items.every((item) => item.metric.trim()) && !duplicateIds
-    && !hasInvalidDimensions && (!removedExisting.length || changeReason.trim()));
+    && !hasInvalidDimensions && !organizationConflict && !periodConflict && (!removedExisting.length || changeReason.trim()));
 
   const setScopeField = (key: keyof RequirementScope, value: string) => setScope((previous) => {
     const next = { ...previous };
@@ -336,7 +357,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   const addItem = () => {
     setItems((previous) => {
       const id = nextItemId(previous);
-      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false, periods: [] }];
+      return [...previous, { id, metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: false, periods: [], organizations: [] }];
     });
   };
   const removeItem = (id: string) => {
@@ -381,6 +402,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
           dimensions: pruneScope(item.dimensions as RequirementScope & Record<string, unknown>),
           requires_drilldown: item.requires_drilldown,
           ...(itemPeriods(item).length ? { periods: itemPeriods(item) } : {}),
+          ...(itemOrganizations(item).length ? { organizations: itemOrganizations(item) } : {}),
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));
@@ -412,6 +434,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     return supportContextStale
       || savedItem.metric !== item.metric
       || !equalStringArrays(savedItem.periods, item.periods)
+      || !equalStringArrays(savedItem.organizations, item.organizations)
       || canonicalJson(savedItem.dimensions) !== canonicalJson(item.dimensions);
   };
 
@@ -439,11 +462,13 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
       <div className="analysis-edit-grid">
         <TextField label="账套" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="ledger 或账套名称" />
-        <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)} placeholder="组织名称" />
+        <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)}
+          help="只填单个共同组织；多组织请清空这里，并在必答指标中逐一添加。" placeholder="单个组织名称" />
         {hasSavedCustomPeriod
           ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
-            help="已保存为自定义范围说明；改成 YYYY-MM 后会恢复年月选择。" placeholder="YYYY-MM 或范围说明" />
-          : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)} />}
+            help="只填各指标共同的单个期间；累计加单月等多期间要求请清空这里，并在指标中逐一添加。" placeholder="YYYY-MM 或范围说明" />
+          : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+            help="只填各指标共同的单个期间；多期间要求请清空这里，并在指标中逐一添加。" />}
         <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
           options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
         <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
@@ -463,6 +488,8 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     </fieldset>
     {duplicateIds ? <p role="alert" className="analysis-message analysis-message--error">要求项 ID 重复，请保留每项稳定且唯一的 ID。</p> : null}
     {hasInvalidDimensions ? <p role="alert" className="analysis-message analysis-message--error">请先修正维度 JSON，再保存要求新版。</p> : null}
+    {organizationConflict ? <p role="alert" className="analysis-message analysis-message--error">上方组织与指标覆盖组织冲突。请清空上方组织，或只保留同一个组织。</p> : null}
+    {periodConflict ? <p role="alert" className="analysis-message analysis-message--error">上方期间与指标适用期间冲突。请清空上方期间，或只保留同一个期间。</p> : null}
     {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
     {message ? <p role="status" className="analysis-message">{message}</p> : null}
     <div className="analysis-actions">
@@ -480,6 +507,8 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
   useEffect(() => setDimensionsText(JSON.stringify(item.dimensions, null, 2)), [item.id, item.dimensions]);
   useEffect(() => onDimensionsValidity(Boolean(dimensions)), [dimensions, onDimensionsValidity]);
   const [nextPeriod, setNextPeriod] = useState('');
+  const [nextPeriodRange, setNextPeriodRange] = useState('');
+  const [nextOrganization, setNextOrganization] = useState('');
   const addPeriod = () => {
     const value = nextPeriod.trim();
     const periods = itemPeriods(item);
@@ -488,7 +517,21 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     setNextPeriod('');
   };
   const periods = itemPeriods(item);
+  const addPeriodRange = () => {
+    const value = nextPeriodRange.trim();
+    if (!validPeriodRange(value) || periods.includes(value)) return;
+    onChange({ periods: [...periods, value] });
+    setNextPeriodRange('');
+  };
   const removePeriod = (period: string) => onChange({ periods: periods.filter((value) => value !== period) });
+  const organizations = itemOrganizations(item);
+  const addOrganization = () => {
+    const value = nextOrganization.trim();
+    if (!value || organizations.includes(value)) return;
+    onChange({ organizations: [...organizations, value] });
+    setNextOrganization('');
+  };
+  const removeOrganization = (organization: string) => onChange({ organizations: organizations.filter((value) => value !== organization) });
   return <article className="analysis-history-row analysis-history-row--static" aria-label={`必答指标 ${index + 1}`}>
     <div className="analysis-edit-grid">
       <SearchableSelect label={`指标 ${index + 1}`} value={item.metric} onChange={(value) => onChange({ metric: value, label: item.label || itemLabel(value) })}
@@ -502,9 +545,22 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
         <AccountingPeriodInput label={`添加期间 ${index + 1}`} value={nextPeriod} onChange={setNextPeriod} />
         <Button variant="outline" type="button" onClick={addPeriod} disabled={!nextPeriod.trim() || periods.includes(nextPeriod.trim())}>添加期间</Button>
       </div>
+      <div className="analysis-actions">
+        <TextField label={`添加累计范围 ${index + 1}`} value={nextPeriodRange} onChange={setNextPeriodRange} placeholder="2026-01:2026-08" />
+        <Button variant="outline" type="button" onClick={addPeriodRange} disabled={!validPeriodRange(nextPeriodRange.trim()) || periods.includes(nextPeriodRange.trim())}>添加累计范围</Button>
+      </div>
       {periods.length ? <div className="analysis-actions" aria-label={`已选期间 ${index + 1}`}>
         {periods.map((period) => <Button variant="outline" key={period} type="button" onClick={() => removePeriod(period)}>{period} ×</Button>)}
-      </div> : <p className="analysis-note">未指定时沿用上方本期范围；可添加多个会计期间。</p>}
+      </div> : <p className="analysis-note">未指定时沿用上方本期范围；可添加单月或累计范围，列出的每个期间都须有结果。</p>}
+    </FieldShell>
+    <FieldShell label="须逐一覆盖的组织">
+      <div className="analysis-actions">
+        <TextField label={`添加组织 ${index + 1}`} value={nextOrganization} onChange={setNextOrganization} placeholder="例如：集团合并、华东区域" />
+        <Button variant="outline" type="button" onClick={addOrganization} disabled={!nextOrganization.trim() || organizations.includes(nextOrganization.trim())}>添加组织</Button>
+      </div>
+      {organizations.length ? <div className="analysis-actions" aria-label={`已选组织 ${index + 1}`}>
+        {organizations.map((organization) => <Button variant="outline" key={organization} type="button" onClick={() => removeOrganization(organization)}>{organization} ×</Button>)}
+      </div> : <p className="analysis-note">未指定时沿用上方单个组织；指定多个后，每个组织与每个适用期间都须有结果。</p>}
     </FieldShell>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {

@@ -229,10 +229,45 @@ describe('requirements panel', () => {
     expect(within(profit).getByText('2026-09 ×')).toBeTruthy();
     fireEvent.change(within(profit).getByLabelText('添加期间 1'), { target: { value: '2026-11' } });
     fireEvent.click(within(profit).getByRole('button', { name: '添加期间' }));
+    fireEvent.change(within(profit).getByLabelText('添加累计范围 1'), { target: { value: '2026-01:2026-08' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加累计范围' }));
+    expect(screen.getByText(/上方期间与指标适用期间冲突/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: /保存要求新版/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
 
     await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
-      items: expect.arrayContaining([expect.objectContaining({ id: 'profit', periods: ['2026-09', '2026-10', '2026-11'] })]),
+      items: expect.arrayContaining([expect.objectContaining({ id: 'profit', periods: ['2026-09', '2026-10', '2026-11', '2026-01:2026-08'] })]),
+    })));
+  });
+
+  it('requires an explicit multi-organization set and clears conflicting shared scope before save', async () => {
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...current, id: 'r-organizations-002', parent_id: current.id, scope: spec?.scope, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [current], current })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+
+    const profit = await screen.findByLabelText('必答指标 1');
+    const organizationInput = within(profit).getByLabelText('添加组织 1');
+    fireEvent.change(organizationInput, { target: { value: '集团合并' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加组织' }));
+    fireEvent.change(organizationInput, { target: { value: '华东区域' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加组织' }));
+
+    expect(within(profit).getByText('集团合并 ×')).toBeTruthy();
+    expect(screen.getByText(/上方组织与指标覆盖组织冲突/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: /保存要求新版/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      scope: expect.not.objectContaining({ organization: '华东' }),
+      items: expect.arrayContaining([expect.objectContaining({
+        id: 'profit', organizations: ['集团合并', '华东区域'],
+      })]),
     })));
   });
 

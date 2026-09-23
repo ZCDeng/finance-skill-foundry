@@ -138,7 +138,7 @@ export const FINANCE_TOOLS = {
   analysis_requirements_save: specTool("analysis-requirements-save", "计算前登记用户要求：问题、范围、必答指标和指定下钻对象。更新必须带当前parent_id，移除项必须说明change_reason，不代表原问题已经完成。返回support由绑定快照核验；requires_input应补资料或字段映射，不能补零。", {
     question: text("用户要回答的管理问题"), context_id: contextId, scope: financeScope,
     bindings: {type:"object", additionalProperties:{type:"string"}}, parent_id: text("当前要求版本id"), change_reason: text("范围或要求调整原因"),
-    items: {type:"array", items:{type:"object", required:["id","metric"], properties:{id:text("稳定要求标识"),metric:text("规范语义键，如profit/revenue/cost/expense/ratio/control_totals/price_quantity、单一科目代码或实际结果列名；不要把公式放入metric，公式放label，分解方法放dimensions.method"),label:text("用户可读的要求"),dimensions:{type:"object"},periods:{type:"array",items:text("要求完整覆盖的期间，例如2026-07"),description:"多个期间使用此集合；dimensions.period仅接受单个期间"},requires_drilldown:{type:"boolean"}}}},
+    items: {type:"array", items:{type:"object", required:["id","metric"], properties:{id:text("稳定要求标识"),metric:text("规范语义键，如profit/revenue/cost/expense/ratio/control_totals/price_quantity、单一科目代码或实际结果列名；不要把公式放入metric，公式放label，分解方法放dimensions.method"),label:text("用户可读的要求"),dimensions:{type:"object"},periods:{type:"array",items:text("要求完整覆盖的期间，例如2026-01:2026-08或2026-08"),description:"每个期间都须有结果；多期间时清空scope.period；dimensions.period仅接受单个期间"},organizations:{type:"array",items:text("须逐一覆盖的组织，例如集团合并或华东"),description:"每个组织与每个期间都须有结果；多组织时清空scope.organization"},requires_drilldown:{type:"boolean"}}}},
   }, ["question","items"]),
   finance_source_list: {
     description: "列出当前会话已授权的文件刷新批次、变化摘要与快照。重复批次不会产生重复数据。旧运行固定原快照；需要更新分析时显式保存新口径。没有真实 ERP 授权时只说明文件或适配合同能力。",

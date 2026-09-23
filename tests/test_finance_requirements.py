@@ -132,18 +132,19 @@ def test_metric_key_matches_only_declared_metric_aliases_for_generic_values(anal
     assert not _matches({'metric': 'revenue', 'dimensions': {}}, {'metric_key': 'revenue', 'note': '1'}, 'note')
 
 
-def test_generic_ratio_periods_require_each_declared_period(analysis):
+@pytest.mark.parametrize('first_period', ['2026-07', '2026-01:2026-08'])
+def test_generic_ratio_periods_require_each_declared_period(analysis, first_period):
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1'},
-        items=[{'id': 'two_month_ratios', 'metric': 'ratio',
-                'periods': ['2026-07', '2026-08'], 'requires_drilldown': True}],
+        items=[{'id': 'two_period_ratios', 'metric': 'ratio',
+                'periods': [first_period, '2026-08'], 'requires_drilldown': True}],
     ))
     run = _run(analysis, id_suffix='ratio-periods', finance_scope={
         'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
     }, result={
         'columns': ['period', 'metric_key', 'value'],
         'rows': [
-            {'period': '2026-07', 'metric_key': 'ratio', 'value': '0.8'},
+            {'period': first_period, 'metric_key': 'ratio', 'value': '0.8'},
             {'period': '2026-08', 'metric_key': 'ratio', 'value': '0.9'},
             {'period': '2026-09', 'metric_key': 'ratio', 'value': '1.0'},
         ],
@@ -175,6 +176,73 @@ def test_generic_ratio_periods_require_each_declared_period(analysis):
     both_sources = check_requirements(analysis, {'requirements_id': requirement['id'],
                                                  'run_ids': [run['id']], 'claims': [first, second]})
     assert both_sources['provenance']['status'] == 'pass'
+
+
+def test_generic_requirement_requires_each_organization_and_period(analysis):
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'regional_ratio', 'metric': 'ratio',
+                'organizations': ['总部', '华东'], 'periods': ['2026-07', '2026-08'],
+                'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='regional-ratio', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['organization', 'period', 'metric_key', 'value'],
+        'rows': [
+            {'organization': organization, 'period': period, 'metric_key': 'ratio', 'value': str(index + 1)}
+            for index, (organization, period) in enumerate([
+                ('总部', '2026-07'), ('总部', '2026-08'),
+                ('华东', '2026-07'), ('华东', '2026-08'),
+                ('华南', '2026-08'),
+            ])
+        ],
+    })
+    claims = [_claim(run, row=index, column='value', value=str(index + 1)) for index in range(5)]
+
+    partial = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                            'run_ids': [run['id']], 'claims': claims[:3]})
+    wrong_organization = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                       'run_ids': [run['id']], 'claims': claims[:3] + claims[4:]})
+    complete = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                             'run_ids': [run['id']], 'claims': claims[:4]})
+
+    assert requirement['items'][0]['organizations'] == ['总部', '华东']
+    assert partial['items'][0]['status'] == 'pending'
+    assert wrong_organization['items'][0]['status'] == 'pending'
+    assert complete['items'][0]['status'] == 'answered'
+    assert {location['row'] for location in complete['items'][0]['locations']} == {0, 1, 2, 3}
+    assert complete['provenance']['status'] == 'needs_attention'
+
+    for location in complete['items'][0]['locations'][:3]:
+        _verified_source(analysis, {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')})
+    one_missing_source = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                                       'run_ids': [run['id']], 'claims': claims[:4]})
+    assert one_missing_source['provenance']['status'] == 'needs_attention'
+
+    last = complete['items'][0]['locations'][3]
+    _verified_source(analysis, {key: last[key] for key in ('run_id', 'row', 'column', 'output_hash')})
+    sourced = check_requirements(analysis, {'requirements_id': requirement['id'],
+                                            'run_ids': [run['id']], 'claims': claims[:4]})
+    assert sourced['provenance']['status'] == 'pass'
+
+
+def test_required_organizations_cannot_contradict_global_organization(analysis):
+    with pytest.raises(FoundryError, match='organizations.*scope.organization'):
+        save_requirements(analysis, spec(
+            scope={'ledger': 'L1', 'organization': '总部'},
+            items=[{'id': 'regional_revenue', 'metric': 'revenue',
+                    'organizations': ['总部', '华东']}],
+        ))
+
+
+def test_required_periods_cannot_contradict_global_period(analysis):
+    with pytest.raises(FoundryError, match='periods.*scope.period'):
+        save_requirements(analysis, spec(
+            scope={'ledger': 'L1', 'period': '2026-01:2026-08'},
+            items=[{'id': 'revenue', 'metric': 'revenue',
+                    'periods': ['2026-01:2026-08', '2026-08']}],
+        ))
 
 
 def test_default_context_scenario_scope_allows_valid_actual_budget_bridge(analysis):
@@ -1309,6 +1377,43 @@ def test_control_totals_rejects_context_narrowed_currency_for_broad_requirement(
     assert sourced['items'][0]['status'] == 'answered'
 
 
+def test_control_totals_requires_each_declared_organization(tmp_path):
+    task = TaskStore(tmp_path / 'var').create(title='跨组织控制合计')
+    service = FinanceStore(task)
+    source = tmp_path / 'regional-control-totals.json'
+    source.write_text(json.dumps([
+        {'ledger': 'control-ledger', 'organization': organization, 'period': '2026-08',
+         'currency': 'CNY', 'unit': '元', 'scenario': 'actual', 'management_account': 'cash',
+         'amount': amount, 'source_row': str(index), 'doc_id': organization, 'line_id': '1'}
+        for index, (organization, amount) in enumerate([('总部', '100'), ('华东', '200')], start=1)
+    ], ensure_ascii=False))
+    dataset = service.analysis.add_dataset(source, name='regional-cash')
+    context = service.save_context({
+        'bindings': {'actual': dataset['id']},
+        'scopes': {'actual': {'ledger': 'control-ledger', 'period': '2026-08', 'scenario': 'actual'}},
+    })
+    requirement = save_requirements(service.analysis, spec(
+        scope={'actual': {'ledger': 'control-ledger', 'period': '2026-08', 'scenario': 'actual'}},
+        items=[{'id': 'regional_cash', 'metric': 'control_totals',
+                'dimensions': {'management_account': 'cash'},
+                'organizations': ['总部', '华东'], 'periods': ['2026-08'],
+                'requires_drilldown': True}],
+    ))
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    claims = [_amount_claim(run, index) for index in range(len(run['result']['rows']))]
+
+    partial = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                    'run_ids': [run['id']], 'claims': claims[:1]})
+    assert partial['items'][0]['status'] == 'pending'
+
+    for index in range(len(run['result']['rows'])):
+        service.drilldown_fact({'run_id': run['id'], 'row': index, 'column': 'amount'})
+    complete = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                     'run_ids': [run['id']], 'claims': claims})
+    assert complete['items'][0]['status'] == 'answered'
+    assert {run['result']['rows'][location['row']]['organization'] for location in complete['items'][0]['locations']} == {'总部', '华东'}
+
+
 def test_control_totals_rejects_partial_row_claims_and_cross_run_stitching(tmp_path):
     service, context = _control_totals_service(tmp_path)
     requirement = _control_requirement(service.analysis)
@@ -1399,6 +1504,38 @@ def test_account_total_periods_set_requires_all_matching_rows_and_sources(tmp_pa
     assert sourced['coverage']['status'] == 'pass'
     assert sourced['provenance']['status'] == 'pass'
     assert sourced['items'][0]['status'] == 'answered'
+
+
+def test_account_total_rejects_metric_filter_narrower_than_requirement(tmp_path):
+    service, context = _control_totals_service(tmp_path)
+    requirement = save_requirements(service.analysis, spec(
+        question='核对8月现金余额，覆盖所有币种',
+        scope={'actual': {'ledger': 'control-ledger', 'organization': '总部',
+                          'period': '2026-08', 'scenario': 'actual'}},
+        items=[{'id': 'cash_all_currencies', 'metric': 'cash',
+                'periods': ['2026-08'], 'requires_drilldown': True}],
+    ))
+    filtered = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['cash'], 'filters': {'currency': 'CNY'},
+    }})
+    service.drilldown_fact({'run_id': filtered['id'], 'row': 0, 'column': 'amount'})
+
+    narrowed = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                     'run_ids': [filtered['id']],
+                                                     'claims': [_amount_claim(filtered, 0)]})
+    assert narrowed['items'][0]['status'] == 'pending'
+    assert narrowed['items'][0]['locations'] == []
+
+    complete = service.run_metric({'context_id': context['id'], 'metric': {
+        'kind': 'account_total', 'accounts': ['cash'],
+    }})
+    for index in range(len(complete['result']['rows'])):
+        service.drilldown_fact({'run_id': complete['id'], 'row': index, 'column': 'amount'})
+    claims = [_amount_claim(complete, index) for index in range(len(complete['result']['rows']))]
+    accepted = check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                     'run_ids': [complete['id']], 'claims': claims})
+    assert accepted['items'][0]['status'] == 'answered'
+    assert {complete['result']['rows'][location['row']]['currency'] for location in accepted['items'][0]['locations']} == {'CNY', 'USD'}
 
 
 def test_price_quantity_metric_name_matches_complete_native_bridge(analysis):
