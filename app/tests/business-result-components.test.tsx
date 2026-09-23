@@ -374,6 +374,43 @@ describe('business result components', () => {
     expect(screen.getByText(/1.23个百分点 → -0.65个百分点/)).toBeTruthy();
   });
 
+  it('renders long-form value regressions with the financial scenario and unit', () => {
+    const previous = run([{ metric_key: 'revenue', value: '325644.0000' }]);
+    const current = run([{ metric_key: 'revenue', value: '344487.0552' }]);
+    render(<RevisionDiff current={current} previous={previous} comparison={{
+      summary: { status: 'needs_attention', issue_count: 2, compared_business_keys: 2 },
+      issues: [{
+        code: 'revision_numeric_regression', severity: 'error', column: 'value',
+        business_key: "{'metric': 'revenue', 'period': '2026-01:2026-08', 'organization': '集团合并', 'scenario': 'actual_ytd', 'unit': '万元'}",
+        old_value: '325644.0000', new_value: '344487.0552',
+      }, {
+        code: 'revision_numeric_regression', severity: 'error', column: 'value',
+        business_key: "{'metric': 'revenue', 'period': '2026-01:2026-08', 'organization': '集团合并', 'scenario': 'achievement_ratio', 'unit': '比率'}",
+        old_value: '0.945301', new_value: '0.938999',
+      }],
+    }} />);
+    expect(screen.getByText('收入 · 累计实际')).toBeTruthy();
+    expect(screen.getByText('收入 · 达成率')).toBeTruthy();
+    expect(screen.getByText(/325,644.00 → 344,487.06/)).toBeTruthy();
+    expect(screen.getByText(/94.53% → 93.90%/)).toBeTruthy();
+  });
+
+  it('shows changed values when a revised run also changed a source hash', () => {
+    const previous = run([{ metric_key: 'revenue', value: '325644.0000' }]);
+    const current = run([{ metric_key: 'revenue', value: '344487.0552' }]);
+    render(<RevisionDiff current={current} previous={previous} comparison={{
+      summary: { status: 'needs_attention', issue_count: 1, compared_business_keys: 1 },
+      issues: [{
+        code: 'revision_basis_changed', severity: 'warning',
+        business_key: "{'metric': 'revenue', 'scenario': 'actual_ytd', 'unit': '万元'}",
+        changed_columns: [{ column: 'value', old_value: '325644.0000', new_value: '344487.0552' }],
+        changed_hash_aliases: [{ kind: 'source_hashes', alias: 'budget' }],
+      }],
+    }} />);
+    expect(screen.getByText(/325,644.00 → 344,487.06/)).toBeTruthy();
+    expect(screen.getByText(/budget/)).toBeTruthy();
+  });
+
 
   it('renders backend revision comparison, affected claims and unresolved issues before local row comparison', () => {
     const previous = run([{ metric_key: 'revenue', actual: '325644' }]);

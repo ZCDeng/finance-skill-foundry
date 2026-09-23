@@ -830,6 +830,16 @@ class FinanceStore:
         recovery_key = _hash({"operation_id": operation["id"], "revision": revision, "draft": draft_spec})
         operations = CompletionOperationStore(self.task, operation["session_id"])
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
+            operation = operations.get(operation["id"])
+            attempt = next((row for row in operation.get("revisions", []) if row.get("revision") == revision), None)
+            if operation.get("status") == "running":
+                raise FoundryError("live completion operation cannot be recovered")
+            if operation.get("status") == "complete":
+                raise FoundryError("completion operation is already complete")
+            if not attempt:
+                raise FoundryError("operation revision has not been reserved")
+            if attempt.get("status") == "reserved" and operation.get("status") not in TERMINAL:
+                raise FoundryError("live completion attempt cannot be recovered")
             previous_by_revision = next((row for row in self.analysis._list("drafts")
                                          if row.get("completion_operation_id") == operation["id"]
                                          and row.get("completion_operation_revision") == revision), None)
@@ -842,6 +852,10 @@ class FinanceStore:
                 settled = operations.settle(operation["id"], revision, previous_by_revision, receipt)
                 return {**previous_by_revision, "completion": receipt, "completion_operation": settled,
                         "replayed": True, "validation_basis": "saved_draft_version"}
+            if int(operation.get("current_revision", 0)) != revision:
+                raise FoundryError("newer completion revision exists")
+            if attempt.get("draft_id") or attempt.get("completion_id"):
+                raise FoundryError("operation revision already saved")
             save_spec = {
                 **draft_spec,
                 "completion_request_key": recovery_key,

@@ -54,6 +54,57 @@ def _run(
     return analysis._write(analysis._object_path("runs", record["id"]), record)
 
 
+def _huachen_value_run(
+    analysis: AnalysisStore,
+    *,
+    actual_value: str,
+    suffix: str,
+    source_hash: str = "source-hash-a",
+) -> dict:
+    record = _new(
+        analysis.task,
+        id=suffix * 32,
+        analysis_id="a" * 32,
+        engine="python",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        bindings={"budget": "dataset-a", "close": "dataset-b"},
+        input_hashes={"budget": "data-hash-a", "close": "data-hash-b"},
+        source_hashes={"budget": source_hash, "close": "source-hash-b"},
+        result={
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "period", "type": "VARCHAR"},
+                {"name": "organization", "type": "VARCHAR"},
+                {"name": "scenario", "type": "VARCHAR"},
+                {"name": "unit", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(38,18)"},
+            ],
+            "rows": [
+                {
+                    "metric_key": "revenue",
+                    "scenario": "actual_ytd",
+                    "period": "2026-01:2026-08",
+                    "organization": "集团合并",
+                    "value": actual_value,
+                    "unit": "万元",
+                },
+                {
+                    "metric_key": "revenue",
+                    "scenario": "budget_ytd",
+                    "period": "2026-01:2026-08",
+                    "organization": "集团合并",
+                    "value": "344487.0552",
+                    "unit": "万元",
+                },
+            ],
+            "row_count": 2,
+            "truncated": False,
+        },
+    )
+    return analysis._write(analysis._object_path("runs", record["id"]), record)
+
+
 def test_revision_compare_flags_unquoted_same_basis_numeric_regression(tmp_path):
     task = TaskStore(tmp_path / "var").create(title="revision compare")
     analysis = AnalysisStore(task)
@@ -86,6 +137,55 @@ def test_revision_compare_flags_unquoted_same_basis_numeric_regression(tmp_path)
     }]
 
 
+def test_revision_compare_flags_huachen_value_column_regression(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _huachen_value_run(analysis, actual_value="325644.0000", suffix="1")
+    new_run = _huachen_value_run(analysis, actual_value="344487.0552", suffix="2")
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入完成情况。", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({
+        "parent_id": parent["id"],
+        "body": "只修正其他收益预算。",
+        "run_ids": [new_run["id"]],
+    })
+
+    issue = next(item for item in revised["revision_comparison"]["issues"] if item["code"] == "revision_numeric_regression")
+    assert issue["column"] == "value"
+    assert issue["old_value"] == "325644.0000"
+    assert issue["new_value"] == "344487.0552"
+
+
+def test_revision_compare_does_not_treat_arbitrary_value_column_as_financial(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _new(
+        analysis.task,
+        id="c" * 32,
+        analysis_id="a" * 32,
+        engine="finance",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        result={"rows": [{"label": "备注", "value": "1"}]},
+    )
+    new_run = _new(
+        analysis.task,
+        id="d" * 32,
+        analysis_id="a" * 32,
+        engine="finance",
+        execution_status="succeeded",
+        reproducibility_status="unverified",
+        result={"rows": [{"label": "备注", "value": "2"}]},
+    )
+    old_run = analysis._write(analysis._object_path("runs", old_run["id"]), old_run)
+    new_run = analysis._write(analysis._object_path("runs", new_run["id"]), new_run)
+    parent = analysis.save_draft({"title": "旧稿", "body": "备注。", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({"parent_id": parent["id"], "body": "备注。", "run_ids": [new_run["id"]]})
+
+    assert revised["revision_comparison"]["summary"]["status"] == "no_comparable_runs"
+
+
 def test_revision_compare_discloses_basis_change_without_numeric_regression(tmp_path):
     task = TaskStore(tmp_path / "var").create(title="revision compare")
     analysis = AnalysisStore(task)
@@ -96,6 +196,38 @@ def test_revision_compare_discloses_basis_change_without_numeric_regression(tmp_
     revised = analysis.save_draft({"parent_id": parent["id"], "body": "新来源", "run_ids": [new_run["id"]]})
 
     assert revised["revision_comparison"]["issues"][0]["code"] == "revision_basis_changed"
+
+
+def test_revision_basis_change_includes_changed_values_and_hash_aliases(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="revision compare")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="1", row_extra={"source": "close workbook"})
+    new_run = _run(
+        analysis,
+        value="344487.0552",
+        suffix="2",
+        source_hash="budget-hash-b",
+        row_extra={"source": "close workbook"},
+    )
+    parent = analysis.save_draft({"body": "旧稿", "run_ids": [old_run["id"]]})
+
+    revised = analysis.save_draft({"parent_id": parent["id"], "body": "新来源", "run_ids": [new_run["id"]]})
+
+    issue = revised["revision_comparison"]["issues"][0]
+    assert issue["code"] == "revision_basis_changed"
+    assert issue["severity"] == "warning"
+    assert issue["changed_columns"] == [{
+        "column": "actual",
+        "old_value": "325644",
+        "new_value": "344487.0552",
+    }]
+    assert issue["changed_hash_aliases"] == [{
+        "kind": "source_hashes",
+        "alias": "budget",
+        "old_value": "source-hash-a",
+        "new_value": "budget-hash-b",
+    }]
+    assert not any(item["code"] == "revision_numeric_regression" for item in revised["revision_comparison"]["issues"])
 
 
 def test_revision_compare_uses_legacy_period_org_and_latest_run_for_regression(tmp_path):

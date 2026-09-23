@@ -145,6 +145,78 @@ def test_recoveries_do_not_resurface_rejected_payload_after_later_saved_revision
     assert list_completion_recoveries(task) == {"recoveries": []}
 
 
+def test_recover_completion_draft_refuses_older_revision_after_later_runtime_save(task):
+    ops = store(task)
+    op = ops.begin("runtime-request-1", policy={"max_repairs": 2})
+    ops.reserve(op["id"], payload={"body": "错误正文"}, call_id="bad-call")
+    ops.reject_attempt(op["id"], 1, {"code": "claim_value_mismatch", "message": "bad"})
+    runtime = FinanceStore(task)
+    runtime.session_id = "session-a"
+    saved = runtime.save_completion_draft(op["id"], "corrected-call", {"body": "已修正正文"})
+
+    with pytest.raises(FoundryError, match="newer completion revision"):
+        FinanceStore(task).recover_completion_draft({
+            "operation_id": op["id"],
+            "revision": 1,
+            "draft": {"body": "旧恢复正文"},
+        })
+
+    drafts = AnalysisStore(task)._list("drafts")
+    completions = AnalysisStore(task)._list("completions")
+    current = store(task).get(op["id"])
+
+    assert [row["id"] for row in drafts] == [saved["id"]]
+    assert len(completions) == 1
+    assert current["revisions"][0]["status"] == "rejected_validation"
+    assert "draft_id" not in current["revisions"][0]
+    assert current["revisions"][1]["draft_id"] == saved["id"]
+
+
+def test_recover_completion_draft_rereads_operation_under_lock_before_saving(task, monkeypatch):
+    from foundry import finance_completion_operations as completion_operations
+
+    ops = store(task)
+    op = ops.begin("runtime-request-1", policy={"max_repairs": 2})
+    ops.reserve(op["id"], payload={"body": "错误正文"}, call_id="bad-call")
+    ops.reject_attempt(op["id"], 1, {"code": "claim_value_mismatch", "message": "bad"})
+    original = completion_operations.get_completion_operation_for_recovery
+    interleaved = False
+
+    def stale_read_then_runtime_save(task_arg, operation_id, clock=None):
+        nonlocal interleaved
+        stale = original(task_arg, operation_id, clock)
+        if not interleaved:
+            interleaved = True
+            runtime = FinanceStore(task_arg)
+            runtime.session_id = "session-a"
+            runtime.save_completion_draft(operation_id, "corrected-call", {"body": "已修正正文"})
+        return stale
+
+    monkeypatch.setattr(
+        completion_operations,
+        "get_completion_operation_for_recovery",
+        stale_read_then_runtime_save,
+    )
+
+    with pytest.raises(FoundryError, match="newer completion revision"):
+        FinanceStore(task).recover_completion_draft({
+            "operation_id": op["id"],
+            "revision": 1,
+            "draft": {"body": "旧恢复正文"},
+        })
+
+    drafts = AnalysisStore(task)._list("drafts")
+    completions = AnalysisStore(task)._list("completions")
+    current = store(task).get(op["id"])
+
+    assert len(drafts) == 1
+    assert len(completions) == 1
+    assert drafts[0]["completion_operation_revision"] == 2
+    assert current["revisions"][0]["status"] == "rejected_validation"
+    assert "draft_id" not in current["revisions"][0]
+    assert current["revisions"][1]["draft_id"] == drafts[0]["id"]
+
+
 def test_recoveries_exclude_settled_and_real_service_saved_before_settle(task):
     ops = store(task)
     settled = ops.begin("settled-request")

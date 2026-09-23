@@ -11,6 +11,8 @@ type BackendRevisionIssue = {
   new_value?: string | number;
   old_basis?: unknown;
   new_basis?: unknown;
+  changed_columns?: { column: string; old_value: string; new_value: string }[];
+  changed_hash_aliases?: { kind: string; alias: string }[];
 };
 
 type BackendRevisionComparison = {
@@ -104,6 +106,15 @@ function statusLabel(status: string): string {
 
 function issueTitle(issue: BackendRevisionIssue): string {
   const key = issue.business_key ? safeBusinessKey(issue.business_key) : '业务指标';
+  if (issue.column === 'value') {
+    const scenario = issue.business_key ? businessKeyField(issue.business_key, 'scenario') : undefined;
+    const scenarioLabels: Record<string, string> = {
+      actual_ytd: '累计实际', budget_ytd: '累计预算', estimated_budget_ytd: '累计估算预算',
+      actual_month: '当月实际', budget_month: '当月预算', variance: '差异',
+      achievement_ratio: '达成率', attainment_pct: '达成率',
+    };
+    return `${formatBusinessValue(key, 'text')} · ${scenarioLabels[scenario ?? ''] ?? scenario ?? '指标值'}`;
+  }
   return issue.column ? `${key} · ${businessColumnLabel(issue.column)}` : key;
 }
 
@@ -116,11 +127,19 @@ function issueSeverity(issue: BackendRevisionIssue): string {
 
 function issueMessage(issue: BackendRevisionIssue): string {
   if (issue.code === 'revision_numeric_regression') {
-    const semantics = columnSemantics(issue.column ?? '');
+    const semantics = issueValueSemantics(issue, issue.column ?? '');
     return `${formatBusinessValue(issue.old_value, semantics)} → ${formatBusinessValue(issue.new_value, semantics)}；${issue.message ?? '同源同口径数值变化。'}`;
   }
   if (issue.code === 'revision_basis_changed') {
-    return issue.message ?? '来源或口径发生变化，未作为同源数值回归处理。';
+    const changes = issue.changed_columns?.map((change) =>
+      `${formatBusinessValue(change.old_value, issueValueSemantics(issue, change.column))} → ${formatBusinessValue(change.new_value, issueValueSemantics(issue, change.column))}`,
+    ) ?? [];
+    const aliases = [...new Set(issue.changed_hash_aliases?.map((item) => item.alias) ?? [])];
+    return [
+      changes.length ? `数值变化：${changes.join('；')}` : '',
+      aliases.length ? `变更资料：${aliases.join('、')}` : '',
+      issue.message ?? '来源或口径发生变化，需核对后说明。',
+    ].filter(Boolean).join('；');
   }
   if (issue.code === 'revision_comparison_ambiguous') {
     return issue.message ?? '业务身份匹配存在歧义，未按行号推断差异。';
@@ -128,7 +147,18 @@ function issueMessage(issue: BackendRevisionIssue): string {
   return issue.message ?? issue.code ?? '修订差异需要复核。';
 }
 
+function issueValueSemantics(issue: BackendRevisionIssue, column: string) {
+  if (column !== 'value') return columnSemantics(column);
+  const scenario = issue.business_key ? businessKeyField(issue.business_key, 'scenario') : undefined;
+  const unit = issue.business_key ? businessKeyField(issue.business_key, 'unit') : undefined;
+  return scenario?.endsWith('_pct') ? 'ratio_pct' : unit === '比率' ? 'ratio' : 'amount';
+}
+
 function safeBusinessKey(value: string): string {
-  const metric = /'metric': '([^']+)'/.exec(value)?.[1] ?? /"metric"\s*:\s*"([^"]+)"/.exec(value)?.[1];
-  return metric ?? value;
+  return businessKeyField(value, 'metric') ?? value;
+}
+
+function businessKeyField(value: string, field: string): string | undefined {
+  return new RegExp(`'${field}': '([^']+)'`).exec(value)?.[1]
+    ?? new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`).exec(value)?.[1];
 }
