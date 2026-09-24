@@ -17,6 +17,7 @@ from typing import Any
 from foundry.analysis_data import (
     MAX_COLUMNS,
     MAX_ROWS,
+    XLSX_SHORTEST_DOUBLE,
     build_table_payload,
     read_exact_numerics,
 )
@@ -126,7 +127,7 @@ def derive_table(data: bytes, declaration: dict[str, Any]) -> dict[str, Any]:
 
     transformation = {
         "format": "xlsx",
-        "numeric_parser": "xlsx-original-xml-decimal",
+        "numeric_parser": XLSX_SHORTEST_DOUBLE,
         "formulas": "cached-values-required",
         "sheet": sheet_name,
         "header_row": header_row,

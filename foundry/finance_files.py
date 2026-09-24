@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry.analysis import AnalysisStore, _assert_id, _hash, _new
+from foundry.analysis_data import archived_numeric_parser
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
 from foundry.locking import exclusive
@@ -146,6 +147,7 @@ class FinanceFiles:
             source_name=dataset["source_name"],
             sheet_name=sheet,
             range_ref=range_ref,
+            numeric_parser=archived_numeric_parser(dataset, source.read_bytes()),
         )
 
     def _verify_run_writes(

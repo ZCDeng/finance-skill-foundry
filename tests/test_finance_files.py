@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from decimal import Decimal
 from pathlib import Path
 
@@ -372,10 +373,13 @@ def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path
     sheet = wb.active
     sheet.title = "Budget"
     sheet["A1"] = "value"
-    sheet["A2"] = 8.1966
+    sheet["A2"] = 8.199999999999999
     sheet["A2"].number_format = "#,##0.00;[Red]-#,##0.00"
     wb.save(source)
     wb.close()
+    # openpyxl stores this double (the same one as 8.2) with a 16-digit tail.
+    with zipfile.ZipFile(source) as archive:
+        assert "<v>8.199999999999999</v>" in archive.read("xl/worksheets/sheet1.xml").decode()
     dataset = analysis.add_dataset(source, name="formatted", metadata={"mode": "workbook"})
 
     preview = FinanceFiles(task).range_preview(
@@ -383,7 +387,7 @@ def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path
     )
     cell = preview["cells"][0]
     assert cell["display"] == "8.20"
-    assert cell["exact"] == "8.1966"
+    assert cell["exact"] == "8.2"
     assert cell["number_format"] == "#,##0.00;[Red]-#,##0.00"
 
 

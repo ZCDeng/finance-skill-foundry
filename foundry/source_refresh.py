@@ -16,7 +16,12 @@ from typing import Any, Protocol
 import uuid
 
 from foundry.analysis import AnalysisStore, _bytes, _hash, _hash_bytes, _new
-from foundry.analysis_data import MAX_ROWS, MAX_SOURCE_BYTES, parse_source
+from foundry.analysis_data import (
+    MAX_ROWS,
+    MAX_SOURCE_BYTES,
+    XLSX_ORIGINAL_DECIMAL,
+    parse_source,
+)
 from foundry.errors import FoundryError
 from foundry.fsutil import write_json_atomic
 from foundry.locking import exclusive
@@ -218,6 +223,11 @@ class SourceRefreshService:
             if file_identity_policy == "business_key"
             else _normalize_snapshot_rows(parsed["rows"], scope_record)
         )
+        literal_rows = (
+            _literal_xlsx_rows(data, metadata or {}, scope_record)
+            if suffix == ".xlsx" and file_identity_policy == "business_key"
+            else None
+        )
         source_hash = _hash_bytes(data)
         return self._publish_rows(
             rows,
@@ -230,6 +240,7 @@ class SourceRefreshService:
             dataset_name=name or source_path.stem,
             checkpoint=None,
             identity_policy=file_identity_policy,
+            literal_rows=literal_rows,
         )
 
     def refresh_transport(
@@ -478,6 +489,7 @@ class SourceRefreshService:
         dataset_name: str,
         checkpoint: dict[str, Any] | None,
         identity_policy: str,
+        literal_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         _reject_secrets(rows)
         _reject_secrets(checkpoint or {})
@@ -497,6 +509,7 @@ class SourceRefreshService:
                     scope_record=scope_record,
                     prior=prior,
                     prior_rows=self._prior_rows(prior),
+                    literal_rows=literal_rows,
                 )
             )
             duplicate = (
@@ -712,6 +725,7 @@ def _prepare_batch(
     scope_record: dict[str, Any],
     prior: dict[str, Any] | None,
     prior_rows: list[dict[str, Any]],
+    literal_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     _reject_secrets(rows)
     # A batch published under snapshot_only filed its rows without business
@@ -728,6 +742,7 @@ def _prepare_batch(
         if rebaselined
         else {row["_source_business_key"]: row for row in prior_rows}
     )
+    literal_by_key = {row["_source_business_key"]: row for row in literal_rows or []}
     deduped: dict[str, dict[str, Any]] = {}
     duplicate_count = 0
     for row in rows:
@@ -760,7 +775,12 @@ def _prepare_batch(
             counts["inserted"] += 1
             final_by_key[key] = row
             changes.append(_change("inserted", key, row, None))
-        elif _comparable_row(previous) != _comparable_row(row):
+        elif _comparable_row(previous) not in (
+            _comparable_row(row),
+            # A batch filed before the shortest-double rule kept each XLSX
+            # literal's digits; read that way, the line may be the one it filed.
+            _comparable_row(literal_by_key.get(key)),
+        ):
             counts["updated"] += 1
             final_by_key[key] = row
             changes.append(_change("updated", key, row, previous))
@@ -801,6 +821,27 @@ def _prepare_batch(
         "prior_snapshot_id": prior.get("dataset_id") if prior else None,
         **({"identity_rebaselined": True} if rebaselined else {}),
     }
+
+
+def _literal_xlsx_rows(
+    data: bytes, metadata: dict[str, Any], scope_record: dict[str, Any]
+) -> list[dict[str, Any]] | None:
+    """The same XLSX export read with each numeric literal's own digits.
+
+    A batch filed before the shortest-double rule stored those digits, so an
+    unchanged re-export matches it only when read the same way. The rows filed
+    now still use the current rule. When the literal reading cannot be built
+    (the old reader refused one of its values), comparison uses the current
+    reading alone.
+    """
+    try:
+        parsed = parse_source(data, ".xlsx", metadata, xlsx_numeric_parser=XLSX_ORIGINAL_DECIMAL)
+    except FoundryError:
+        return None
+    return [
+        _normalize_source_row(row, scope_record, ordinal=index)
+        for index, row in enumerate(parsed["rows"], start=1)
+    ]
 
 
 def _prepare_snapshot_batch(

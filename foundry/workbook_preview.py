@@ -11,7 +11,12 @@ from xml.etree import ElementTree as ET
 
 from openpyxl.utils import get_column_letter, range_boundaries
 
-from foundry.analysis_data import _open_xlsx_archive, excel_number, read_exact_numerics
+from foundry.analysis_data import (
+    XLSX_SHORTEST_DOUBLE,
+    _open_xlsx_archive,
+    read_exact_numerics,
+    xlsx_number_reader,
+)
 from foundry.errors import FoundryError
 from foundry.workbook_bindings import open_workbook_bytes
 
@@ -32,6 +37,7 @@ def preview_workbook_range(
     source_name: str,
     sheet_name: str,
     range_ref: str | None = None,
+    numeric_parser: str = XLSX_SHORTEST_DOUBLE,
 ) -> dict[str, Any]:
     data = source.read_bytes()
     formula_book = open_workbook_bytes(data, data_only=False)
@@ -44,7 +50,7 @@ def preview_workbook_range(
         sheet = formula_book[sheet_name]
         value_sheet = value_book[sheet_name]
         bounds = _resolve_range(sheet, range_ref)
-        exact = _preview_exact_numerics(data, sheet_name)
+        exact = _preview_exact_numerics(data, sheet_name, numeric_parser)
         merged = {
             cell.coordinate
             for merged_range in sheet.merged_cells.ranges
@@ -124,16 +130,19 @@ def _resolve_range(sheet: Any, range_ref: str | None) -> dict[str, int]:
     return {"min_row": min_row, "min_col": min_col, "max_row": max_row, "max_col": max_col}
 
 
-def _preview_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
+def _preview_exact_numerics(data: bytes, sheet_name: str, numeric_parser: str) -> dict[str, Decimal]:
     try:
-        return read_exact_numerics(data, sheet_name)
+        return read_exact_numerics(data, sheet_name, numeric_parser)
     except FoundryError as exc:
         if "formula has no cached value" not in str(exc):
             raise
-        return _read_exact_numerics_without_formula_cache(data, sheet_name)
+        return _read_exact_numerics_without_formula_cache(data, sheet_name, numeric_parser)
 
 
-def _read_exact_numerics_without_formula_cache(data: bytes, sheet_name: str) -> dict[str, Decimal]:
+def _read_exact_numerics_without_formula_cache(
+    data: bytes, sheet_name: str, numeric_parser: str
+) -> dict[str, Decimal]:
+    number = xlsx_number_reader(numeric_parser)
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with _open_xlsx_archive(data) as archive:
         workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
@@ -156,7 +165,7 @@ def _read_exact_numerics_without_formula_cache(data: bytes, sheet_name: str) -> 
             value = cell.find("s:v", ns)
             formula = cell.find("s:f", ns)
             if formula is None and cell.attrib.get("t", "n") == "n" and value is not None and value.text:
-                raw_cells[cell.attrib["r"]] = excel_number(value.text)
+                raw_cells[cell.attrib["r"]] = number(value.text)
             cell.clear()
         return raw_cells
 
