@@ -334,8 +334,34 @@ def _issue(recipe: dict[str, Any], code: str, message: str | None, *, actual: De
         **({"actual": actual_text} if actual_text is not None else {}),
         "location": location,
         "claim": recipe.get("claim", {}),
-        "message": message or f"来源区域 {source_label} 的独立计算为 {actual_text}，运行引用值为 {expected_text}。",
+        **({"suggested_scale": _format_decimal(scale)} if (scale := _unit_scale_hint(actual, expected)) else {}),
+        "message": message or _mismatch_message(source_label, actual_text, expected_text, scale),
     }
+
+
+UNIT_SCALE_EXPONENTS = {3, 4, 6, 8}  # 千元、万元、百万元、亿元
+
+
+def _unit_scale_hint(actual: Decimal | None, expected: Decimal | None) -> Decimal | None:
+    """Scale that turns the source value into the claim when they differ by an exact unit power of ten."""
+    if actual is None or expected is None or actual == 0 or expected == 0 or actual == expected:
+        return None
+    scale = expected / actual
+    exponent = scale.normalize().adjusted()
+    if abs(exponent) in UNIT_SCALE_EXPONENTS and scale == Decimal(1).scaleb(exponent):
+        return scale
+    return None
+
+
+def _mismatch_message(source_label: str, actual_text: str | None, expected_text: str, scale: Decimal | None) -> str:
+    message = f"来源区域 {source_label} 的独立计算为 {actual_text}，运行引用值为 {expected_text}。"
+    if scale is None:
+        return message
+    times = _format_decimal(max(scale, 1 / scale).normalize())
+    return (
+        f"{message}两者恰好相差 {times} 倍，疑似缺少单位换算（如元与万元）；"
+        f"若确属换算，请在该核验规则中设置 scale = {_format_decimal(scale.normalize())}。"
+    )
 
 
 def _claim(value: Any) -> dict[str, Any]:
