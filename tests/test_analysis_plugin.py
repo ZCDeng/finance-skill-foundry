@@ -221,6 +221,11 @@ process.stdout.write(JSON.stringify({
   claimAdditional: draftRecipe.properties.claim.additionalProperties,
   hasTopExpected: Object.hasOwn(draftRecipe.properties, 'expected'),
   hasClaimExpected: Object.hasOwn(draftRecipe.properties.claim.properties, 'expected'),
+  factorFields: [draftRecipe, saveRecipe, validateRecipe].map(recipe => Object.hasOwn(recipe.properties, 'factor_recipe_id')),
+  factorAndScaleExcluded: [draftRecipe, saveRecipe, validateRecipe].every(recipe =>
+    recipe.oneOf[0].not.anyOf.some(rule => JSON.stringify(rule.required) === JSON.stringify(['scale', 'factor_recipe_id']))),
+  ratioFactorExcluded: [draftRecipe, saveRecipe, validateRecipe].every(recipe =>
+    recipe.oneOf[1].not.anyOf.some(rule => JSON.stringify(rule.required) === JSON.stringify(['factor_recipe_id']))),
   oneOfCount: draftRecipe.oneOf.length,
   consistencySourceOneOf: tools['analysis-draft'].parameters.properties.spec.properties.consistency_sources.items.oneOf,
   consistencySourceAdditional: tools['analysis-draft'].parameters.properties.spec.properties.consistency_sources.items.additionalProperties,
@@ -244,6 +249,9 @@ process.stdout.write(JSON.stringify({
     assert result["claimAdditional"] is False
     assert result["hasTopExpected"] is False
     assert result["hasClaimExpected"] is False
+    assert result["factorFields"] == [True, True, True]
+    assert result["factorAndScaleExcluded"] is True
+    assert result["ratioFactorExcluded"] is True
     assert result["oneOfCount"] == 2
     assert result["consistencySourceAdditional"] is False
     assert result["consistencySourceOneOf"][0]["properties"]["kind"]["enum"] == ["number"]

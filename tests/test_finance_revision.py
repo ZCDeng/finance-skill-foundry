@@ -340,6 +340,196 @@ def test_evidence_recipe_zero_and_invalid_ranges_are_not_silent_passes(tmp_path)
     else:
         raise AssertionError("duplicate recipe ids should be rejected")
 
+
+def _factor_workbook_dataset(tmp_path, analysis: AnalysisStore, *, denominator: int = 100):
+    from openpyxl import Workbook
+
+    source = tmp_path / "factor.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "测算"
+    sheet["B2"] = 30
+    sheet["C2"] = denominator
+    sheet["D2"] = 60
+    book.save(source)
+    book.close()
+    return analysis.add_dataset(source, name="factor", metadata={"mode": "workbook"})
+
+
+def _factor_run(analysis: AnalysisStore, *, value: str, suffix: str, metric_key: str = "gross_margin", period: str = "2026-08") -> dict:
+    return _run(
+        analysis,
+        value=value,
+        suffix=suffix,
+        row_extra={"metric_key": metric_key, "metric": metric_key, "period": period},
+    )
+
+
+def _factor_recipe_pair(dataset: dict, factor_run: dict, result_run: dict, *, metric_key: str = "gross_margin", period: str = "2026-08") -> list[dict]:
+    business_key = {"metric_key": metric_key, "period": period, "organization": "集团"}
+    factor = {
+        "id": "gross-margin-factor",
+        "label": "毛利率",
+        "kind": "ratio",
+        "left": {"dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "测算", "range": "B2"},
+        "right": {"dataset_id": dataset["id"], "source_hash": dataset["source_hash"], "sheet": "测算", "range": "C2"},
+        "claim": {"run_id": factor_run["id"], "row": 0, "column": "actual"},
+        "business_key": business_key,
+    }
+    result = {
+        "id": "gross-margin-budget",
+        "label": "毛利预算",
+        "kind": "direct",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "测算",
+        "range": "D2",
+        "factor_recipe_id": "gross-margin-factor",
+        "claim": {"run_id": result_run["id"], "row": 0, "column": "actual"},
+        "business_key": business_key,
+    }
+    return [factor, result]
+
+
+def test_evidence_recipe_factor_recipe_computes_archived_ratio_for_direct_result(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="factor recipe")
+    analysis = AnalysisStore(task)
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.3", suffix="1")
+    result_run = _factor_run(analysis, value="18", suffix="2")
+
+    draft = analysis.save_draft({
+        "title": "正确",
+        "body": "毛利预算18。",
+        "run_ids": [factor_run["id"], result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dataset, factor_run, result_run),
+    })
+
+    assert draft["evidence_report"]["summary"]["status"] == "pass"
+    result = next(item for item in draft["evidence_report"]["results"] if item["recipe_id"] == "gross-margin-budget")
+    assert result["actual"] == "18.0"
+    assert result["expected"] == "18"
+    assert result["factor_recipe_id"] == "gross-margin-factor"
+    assert result["factor_value"] == "0.3"
+
+
+def test_evidence_recipe_factor_recipe_rejects_wrong_metric_identity(tmp_path):
+    from foundry.financial_evidence import evaluate_evidence_recipes
+
+    task = TaskStore(tmp_path / "var").create(title="factor recipe")
+    analysis = AnalysisStore(task)
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.3", suffix="3", metric_key="operating_margin")
+    result_run = _factor_run(analysis, value="18", suffix="4", metric_key="gross_margin")
+    recipes = _factor_recipe_pair(dataset, factor_run, result_run)
+    recipes[0]["business_key"] = {"metric_key": "operating_margin", "period": "2026-08", "organization": "集团"}
+
+    with pytest.raises(FoundryError, match="metric_key and period"):
+        evaluate_evidence_recipes(analysis, recipes)
+
+    with pytest.raises(FoundryError, match="explicit scale"):
+        evaluate_evidence_recipes(analysis, [{**recipes[1], "id": "scaled-dependent", "scale": "0.3"}])
+
+    scaled_factor = _factor_recipe_pair(dataset, _factor_run(analysis, value="30", suffix="5"), result_run)
+    scaled_factor[0]["scale"] = "100"
+    with pytest.raises(FoundryError, match="factor ratio recipe scale"):
+        evaluate_evidence_recipes(analysis, scaled_factor)
+
+
+def test_evidence_recipe_factor_recipe_rejects_mislabeled_claim_rows(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="factor recipe")
+    analysis = AnalysisStore(task)
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.3", suffix="b", metric_key="operating_margin")
+    result_run = _factor_run(analysis, value="18", suffix="c", metric_key="gross_margin")
+    factor_mislabeled = analysis.save_draft({
+        "title": "错误",
+        "body": "毛利预算18。",
+        "run_ids": [factor_run["id"], result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dataset, factor_run, result_run, metric_key="gross_margin"),
+    })
+
+    assert factor_mislabeled["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert any(
+        item["recipe_id"] == "gross-margin-budget" and "business_key metric_key and period" in item["message"]
+        for item in factor_mislabeled["evidence_report"]["issues"]
+    )
+
+    dependent_analysis = AnalysisStore(TaskStore(tmp_path / "dependent-var").create(title="dependent identity"))
+    dependent_dataset = _factor_workbook_dataset(tmp_path, dependent_analysis)
+    dependent_factor_run = _factor_run(dependent_analysis, value="0.3", suffix="d", metric_key="gross_margin")
+    dependent_result_run = _factor_run(dependent_analysis, value="18", suffix="e", metric_key="operating_margin")
+    dependent_mislabeled = dependent_analysis.save_draft({
+        "title": "错误",
+        "body": "毛利预算18。",
+        "run_ids": [dependent_factor_run["id"], dependent_result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dependent_dataset, dependent_factor_run, dependent_result_run, metric_key="gross_margin"),
+    })
+
+    assert dependent_mislabeled["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert any(
+        item["recipe_id"] == "gross-margin-budget" and "business_key metric_key and period" in item["message"]
+        for item in dependent_mislabeled["evidence_report"]["issues"]
+    )
+
+
+def test_evidence_recipe_factor_recipe_requires_factor_claim_to_match_recomputation(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="factor recipe")
+    analysis = AnalysisStore(task)
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.2", suffix="5")
+    result_run = _factor_run(analysis, value="18", suffix="6")
+
+    draft = analysis.save_draft({
+        "title": "错误",
+        "body": "毛利预算18。",
+        "run_ids": [factor_run["id"], result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dataset, factor_run, result_run),
+    })
+
+    assert draft["evidence_report"]["summary"]["status"] == "needs_attention"
+    factor_issue = next(item for item in draft["evidence_report"]["issues"] if item["recipe_id"] == "gross-margin-factor")
+    dependent_issue = next(item for item in draft["evidence_report"]["issues"] if item["recipe_id"] == "gross-margin-budget")
+    assert factor_issue["code"] == "evidence_recipe_mismatch"
+    assert factor_issue["actual"] == "0.3"
+    assert "测算!B2 ÷ 测算!C2" in factor_issue["message"]
+    assert dependent_issue["code"] == "evidence_recipe_unreadable"
+    assert "系数规则未通过归档来源的精确复算" in dependent_issue["message"]
+
+
+def test_evidence_recipe_factor_recipe_preserves_bad_hash_and_zero_denominator_failures(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="factor recipe")
+    analysis = AnalysisStore(task)
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.3", suffix="7")
+    result_run = _factor_run(analysis, value="18", suffix="8")
+    bad_hash = _factor_recipe_pair(dataset, factor_run, result_run)
+    bad_hash[0]["left"]["source_hash"] = "0" * 64
+
+    bad_hash_draft = analysis.save_draft({
+        "title": "坏hash",
+        "body": "毛利预算18。",
+        "run_ids": [factor_run["id"], result_run["id"]],
+        "evidence_recipes": bad_hash,
+    })
+
+    assert bad_hash_draft["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert any("source_hash" in item["message"] for item in bad_hash_draft["evidence_report"]["issues"])
+
+    zero_analysis = AnalysisStore(TaskStore(tmp_path / "zero-var").create(title="zero denominator"))
+    zero_dataset = _factor_workbook_dataset(tmp_path, zero_analysis, denominator=0)
+    zero_factor_run = _factor_run(zero_analysis, value="0.3", suffix="9")
+    zero_result_run = _factor_run(zero_analysis, value="18", suffix="a")
+    zero_draft = zero_analysis.save_draft({
+        "title": "零分母",
+        "body": "毛利预算18。",
+        "run_ids": [zero_factor_run["id"], zero_result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(zero_dataset, zero_factor_run, zero_result_run),
+    })
+
+    assert zero_draft["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert any("denominator is zero" in item["message"] for item in zero_draft["evidence_report"]["issues"])
+
 def test_consistency_rules_read_values_from_authorized_sources(tmp_path):
     from openpyxl import Workbook
 

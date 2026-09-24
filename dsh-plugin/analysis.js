@@ -145,8 +145,8 @@ const evidenceRecipe = {
   required: ["kind", "claim"],
   additionalProperties: false,
   oneOf: [
-    { required: ["kind", "claim", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["direct", "sum"] } }, not: { anyOf: [{ required: ["left"] }, { required: ["right"] }] } },
-    { required: ["kind", "claim", "left", "right"], properties: { kind: { enum: ["diff", "ratio"] } }, not: { anyOf: [{ required: ["dataset_id"] }, { required: ["source_hash"] }, { required: ["sheet"] }, { required: ["range"] }] } },
+    { required: ["kind", "claim", "dataset_id", "source_hash", "sheet", "range"], properties: { kind: { enum: ["direct", "sum"] } }, not: { anyOf: [{ required: ["left"] }, { required: ["right"] }, { required: ["scale", "factor_recipe_id"] }] } },
+    { required: ["kind", "claim", "left", "right"], properties: { kind: { enum: ["diff", "ratio"] } }, not: { anyOf: [{ required: ["dataset_id"] }, { required: ["source_hash"] }, { required: ["sheet"] }, { required: ["range"] }, { required: ["factor_recipe_id"] }] } },
   ],
   properties: {
     id: string("稳定 recipe id，同一文稿内唯一；省略时服务按顺序生成 recipe-N"),
@@ -155,7 +155,8 @@ const evidenceRecipe = {
     ...evidenceSource.properties,
     left: evidenceSource,
     right: evidenceSource,
-    scale: string("可选 Decimal 缩放，默认 1"),
+    scale: string("可选自填 Decimal 缩放，默认 1；只核验乘法，不能证明系数来源"),
+    factor_recipe_id: string("仅 direct/sum 估算可选：引用本批次已由归档数值范围独立复算通过的 ratio recipe；需同一 business_key.metric_key 与 period，不得与 scale 并用"),
     unit: string("展示单位"),
     claim: evidenceClaim,
     business_key: { type: "object", additionalProperties: true },

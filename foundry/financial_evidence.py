@@ -29,7 +29,9 @@ EXCEL_MAX_COLUMN = 16384
 
 def evaluate_evidence_recipes(analysis: Any, recipes: list[Any] | None) -> dict[str, Any]:
     clean = _clean_recipes(recipes)
-    results = [_evaluate_recipe(analysis, recipe) for recipe in clean]
+    recipe_by_id = {recipe["id"]: recipe for recipe in clean}
+    factor_cache: dict[str, Decimal] = {}
+    results = [_evaluate_recipe(analysis, recipe, recipe_by_id, factor_cache) for recipe in clean]
     issues = [result["issue"] for result in results if result.get("issue")]
     status = "not_configured" if not clean else "needs_attention" if issues else "pass"
     return {
@@ -100,6 +102,21 @@ def _clean_recipes(recipes: list[Any] | None) -> list[dict[str, Any]]:
     ids = [recipe["id"] for recipe in cleaned]
     if len(ids) != len(set(ids)):
         raise FoundryError("evidence recipe ids must be unique")
+    by_id = {recipe["id"]: recipe for recipe in cleaned}
+    for recipe in cleaned:
+        factor_id = recipe.get("factor_recipe_id")
+        if not factor_id:
+            continue
+        factor = by_id.get(factor_id)
+        if factor is None:
+            raise FoundryError("factor_recipe_id must reference a same-batch evidence recipe")
+        if factor["kind"] != "ratio":
+            raise FoundryError("factor_recipe_id must reference a ratio evidence recipe")
+        if factor["scale"] != Decimal(1):
+            raise FoundryError("factor ratio recipe scale must be 1")
+        if recipe["id"] == factor_id:
+            raise FoundryError("factor_recipe_id cannot reference itself")
+        _assert_matching_factor_business_key(recipe, factor)
     return cleaned
 
 
@@ -122,6 +139,12 @@ def _clean_recipe(recipe: Any, index: int) -> dict[str, Any]:
     }
     if kind in {"direct", "sum"}:
         cleaned.update(_source(recipe))
+        if recipe.get("factor_recipe_id") is not None:
+            if "scale" in recipe:
+                raise FoundryError("factor_recipe_id cannot be combined with explicit scale")
+            cleaned["factor_recipe_id"] = _text(recipe.get("factor_recipe_id"), "evidence recipe factor_recipe_id")
+    elif recipe.get("factor_recipe_id") is not None:
+        raise FoundryError("factor_recipe_id is only supported on direct and sum evidence recipes")
     else:
         left = recipe.get("left")
         right = recipe.get("right")
@@ -154,21 +177,22 @@ def _source(recipe: dict[str, Any]) -> dict[str, str]:
     return {"dataset_id": dataset_id, "source_hash": source_hash, "sheet": sheet, "range": range_ref.replace("$", "")}
 
 
-def _evaluate_recipe(analysis: Any, recipe: dict[str, Any]) -> dict[str, Any]:
+def _evaluate_recipe(
+    analysis: Any,
+    recipe: dict[str, Any],
+    recipe_by_id: dict[str, dict[str, Any]] | None = None,
+    factor_cache: dict[str, Decimal] | None = None,
+) -> dict[str, Any]:
+    factor_value: Decimal | None = None
     try:
-        if recipe["kind"] == "direct":
-            actual = _single_value(analysis, recipe)
-        elif recipe["kind"] == "sum":
-            actual = _range_sum(analysis, recipe)
-        elif recipe["kind"] == "diff":
-            actual = _source_value(analysis, recipe["left"]) - _source_value(analysis, recipe["right"])
-        elif recipe["kind"] == "ratio":
-            denominator = _source_value(analysis, recipe["right"])
-            if denominator == 0:
-                raise FoundryError("ratio evidence recipe denominator is zero")
-            actual = _source_value(analysis, recipe["left"]) / denominator
-        else:  # pragma: no cover - guarded by clean step
-            raise FoundryError("unsupported evidence recipe kind")
+        if recipe.get("factor_recipe_id"):
+            _assert_claim_business_key(analysis, recipe)
+        actual = _recipe_actual(analysis, recipe)
+        if recipe.get("factor_recipe_id"):
+            if recipe_by_id is None or factor_cache is None:  # pragma: no cover - compatibility guard
+                raise FoundryError("factor recipe context is unavailable")
+            factor_value = _factor_value(analysis, recipe, recipe_by_id, factor_cache)
+            actual = actual * factor_value
         actual = actual * recipe["scale"]
         expected = _claim_expected(analysis, recipe["claim"])
     except FoundryError as exc:
@@ -183,6 +207,7 @@ def _evaluate_recipe(analysis: Any, recipe: dict[str, Any]) -> dict[str, Any]:
             "status": "mismatch",
             "actual": _format_decimal(actual),
             "expected": _format_decimal(expected),
+            **_factor_result_details(recipe, factor_value),
             "issue": _issue(recipe, "evidence_recipe_mismatch", None, actual=actual, expected=expected),
         }
     return {
@@ -190,7 +215,54 @@ def _evaluate_recipe(analysis: Any, recipe: dict[str, Any]) -> dict[str, Any]:
         "status": "pass",
         "actual": _format_decimal(actual),
         "expected": _format_decimal(expected),
+        **_factor_result_details(recipe, factor_value),
     }
+
+
+def _recipe_actual(analysis: Any, recipe: dict[str, Any]) -> Decimal:
+    if recipe["kind"] == "direct":
+        return _single_value(analysis, recipe)
+    if recipe["kind"] == "sum":
+        return _range_sum(analysis, recipe)
+    if recipe["kind"] == "diff":
+        return _source_value(analysis, recipe["left"]) - _source_value(analysis, recipe["right"])
+    if recipe["kind"] == "ratio":
+        return _ratio_value(analysis, recipe)
+    raise FoundryError("unsupported evidence recipe kind")  # pragma: no cover - guarded by clean step
+
+
+def _ratio_value(analysis: Any, recipe: dict[str, Any]) -> Decimal:
+    denominator = _source_value(analysis, recipe["right"])
+    if denominator == 0:
+        raise FoundryError("ratio evidence recipe denominator is zero")
+    return _source_value(analysis, recipe["left"]) / denominator
+
+
+def _factor_value(
+    analysis: Any,
+    dependent: dict[str, Any],
+    recipe_by_id: dict[str, dict[str, Any]],
+    factor_cache: dict[str, Decimal],
+) -> Decimal:
+    factor_id = dependent["factor_recipe_id"]
+    if factor_id in factor_cache:
+        return factor_cache[factor_id]
+    factor = recipe_by_id.get(factor_id)
+    if factor is None or factor["kind"] != "ratio":  # pragma: no cover - guarded by clean step
+        raise FoundryError("factor_recipe_id must reference a ratio evidence recipe")
+    _assert_claim_business_key(analysis, factor)
+    actual = _ratio_value(analysis, factor)
+    expected = _claim_expected(analysis, factor["claim"])
+    if actual != expected:
+        raise FoundryError("系数规则未通过归档来源的精确复算")
+    factor_cache[factor_id] = actual
+    return actual
+
+
+def _factor_result_details(recipe: dict[str, Any], factor_value: Decimal | None) -> dict[str, str]:
+    if not recipe.get("factor_recipe_id") or factor_value is None:
+        return {}
+    return {"factor_recipe_id": recipe["factor_recipe_id"], "factor_value": _format_decimal(factor_value)}
 
 
 def _source_value(analysis: Any, source: dict[str, str]) -> Decimal:
@@ -244,6 +316,14 @@ def _issue(recipe: dict[str, Any], code: str, message: str | None, *, actual: De
     expected_text = _format_decimal(expected) if expected is not None else ""
     actual_text = _format_decimal(actual) if actual is not None else None
     location = _recipe_location(recipe)
+    if recipe["kind"] in {"direct", "sum"}:
+        source_label = f"{location['sheet']}!{location['range']}"
+    else:
+        operator = "÷" if recipe["kind"] == "ratio" else "−"
+        source_label = (
+            f"{location['left']['sheet']}!{location['left']['range']} "
+            f"{operator} {location['right']['sheet']}!{location['right']['range']}"
+        )
     return {
         "code": code,
         "severity": "error",
@@ -254,7 +334,7 @@ def _issue(recipe: dict[str, Any], code: str, message: str | None, *, actual: De
         **({"actual": actual_text} if actual_text is not None else {}),
         "location": location,
         "claim": recipe.get("claim", {}),
-        "message": message or f"来源区域 {location.get('sheet')}!{location.get('range')} 的独立计算为 {actual_text}，运行引用值为 {expected_text}。",
+        "message": message or f"来源区域 {source_label} 的独立计算为 {actual_text}，运行引用值为 {expected_text}。",
     }
 
 
@@ -271,8 +351,7 @@ def _claim(value: Any) -> dict[str, Any]:
 
 def _claim_expected(analysis: Any, claim: dict[str, Any]) -> Decimal:
     try:
-        run = analysis.get_run(claim["run_id"])
-        value = run["result"]["rows"][claim["row"]][claim["column"]]
+        value = _claim_row(analysis, claim)[claim["column"]]
         return _decimal(value, "evidence recipe claim value")
     except FoundryError:
         raise
@@ -280,13 +359,52 @@ def _claim_expected(analysis: Any, claim: dict[str, Any]) -> Decimal:
         raise FoundryError("evidence recipe claim does not point to a numeric run value") from exc
 
 
+def _claim_row(analysis: Any, claim: dict[str, Any]) -> dict[str, Any]:
+    try:
+        run = analysis.get_run(claim["run_id"])
+        row = run["result"]["rows"][claim["row"]]
+    except FoundryError:
+        raise
+    except Exception as exc:
+        raise FoundryError("evidence recipe claim does not point to a run row") from exc
+    if not isinstance(row, dict):
+        raise FoundryError("evidence recipe claim does not point to a run row")
+    return row
+
+
 def _recipe_location(recipe: dict[str, Any]) -> dict[str, Any]:
     if recipe["kind"] in {"direct", "sum"}:
-        return {key: recipe[key] for key in ("dataset_id", "source_hash", "sheet", "range")}
+        location = {key: recipe[key] for key in ("dataset_id", "source_hash", "sheet", "range")}
+        if recipe.get("factor_recipe_id"):
+            location["factor_recipe_id"] = recipe["factor_recipe_id"]
+        return location
     return {
         "left": {key: recipe["left"][key] for key in ("dataset_id", "source_hash", "sheet", "range")},
         "right": {key: recipe["right"][key] for key in ("dataset_id", "source_hash", "sheet", "range")},
     }
+
+
+def _assert_matching_factor_business_key(dependent: dict[str, Any], factor: dict[str, Any]) -> None:
+    dependent_key = dependent.get("business_key") or {}
+    factor_key = factor.get("business_key") or {}
+    if (
+        not dependent_key.get("metric_key")
+        or not dependent_key.get("period")
+        or dependent_key.get("metric_key") != factor_key.get("metric_key")
+        or dependent_key.get("period") != factor_key.get("period")
+    ):
+        raise FoundryError("factor_recipe_id requires matching business_key metric_key and period")
+
+
+def _assert_claim_business_key(analysis: Any, recipe: dict[str, Any]) -> None:
+    business_key = recipe.get("business_key") or {}
+    metric_key = business_key.get("metric_key")
+    period = business_key.get("period")
+    if not metric_key or not period:
+        raise FoundryError("factor_recipe_id requires business_key metric_key and period")
+    row = _claim_row(analysis, recipe["claim"])
+    if row.get("metric_key") != metric_key or row.get("period") != period:
+        raise FoundryError("evidence recipe business_key metric_key and period must match claim row")
 
 
 def _text(value: Any, label: str, *, required: bool = True) -> str:
