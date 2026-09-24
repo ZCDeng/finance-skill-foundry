@@ -61,6 +61,8 @@ const ratioDeltaFieldLabels: Record<string, string> = {
   ratio_delta: '比例变化',
   attainment_delta: '达成率变化',
 };
+const moneyUnitSegments = new Set(['万元', '元', '亿元', '千元', '百万元']);
+const moneyTokens = new Set(['amount', 'revenue', 'cost', 'expense', 'profit', 'cash', 'budget', 'actual', 'variance', 'sales', 'income']);
 const textFieldLabels: Record<string, string> = {
   metric: '指标',
   metric_key: '指标',
@@ -167,8 +169,18 @@ export function selectBusinessResult(analysis: AnalysisRevision, runs: AnalysisR
   return { primary: latestFailure, reason: latestFailure ? 'latest_failure' : 'none', businessRuns, activityRuns, failedRuns };
 }
 
+function hasMoneyUnitSegment(key: string): boolean {
+  return key.split(/[_\-\s/]+/).some((segment) => moneyUnitSegments.has(segment));
+}
+
+// Same rule as the backend: 汇率_影响_万元 / revenue_last_30_days name money, so a 率 driver in the name is not a ratio.
+function namesMoney(key: string): boolean {
+  return hasMoneyUnitSegment(key) || key.split(/[^a-z0-9]+/).some((token) => moneyTokens.has(token));
+}
+
 function isKnownRatioField(key: string): boolean {
-  return key in ratioFieldLabels || key in ratioPctFieldLabels || /达成率|完成率|毛利率|收缴率|比例|率$|率_/.test(key);
+  if (key in ratioFieldLabels || key in ratioPctFieldLabels || /达成率|完成率|比例|率$/.test(key)) return true;
+  return /毛利率|收缴率|率_/.test(key) && !namesMoney(key);
 }
 
 export function columnSemantics(name: string, type?: string): FieldSemantics {
@@ -176,7 +188,7 @@ export function columnSemantics(name: string, type?: string): FieldSemantics {
   if (key in ratioDeltaFieldLabels || key.endsWith('_pp') || key.endsWith('_point_delta')) return 'ratio_delta';
   if (key in ratioPctFieldLabels || key.endsWith('_pct')) return 'ratio_pct';
   if (isKnownRatioField(key)) return 'ratio';
-  if (key in amountFieldLabels || /amount|budget|actual|variance|difference|cost|expense|profit|revenue|income|cash/i.test(key) || /实际|预算|差异|成本|费用|利润|收入|金额|损失/.test(key)) return 'amount';
+  if (key in amountFieldLabels || /amount|budget|actual|variance|difference|cost|expense|profit|revenue|income|cash/i.test(key) || /实际|预算|差异|成本|费用|利润|收入|金额|损失/.test(key) || hasMoneyUnitSegment(key)) return 'amount';
   if (/^(DECIMAL|NUMERIC|HUGEINT|UHUGEINT|UBIGINT|BIGINT|UINTEGER|INTEGER|USMALLINT|SMALLINT|UTINYINT|TINYINT|FLOAT|DOUBLE|REAL|INT\d*)\b/i.test(type ?? '')) return 'amount';
   return 'text';
 }
