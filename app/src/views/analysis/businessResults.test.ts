@@ -143,6 +143,8 @@ describe('business result presentation', () => {
     expect(columnSemantics('attainment')).toBe('ratio');
     expect(columnSemantics('budget_attainment')).toBe('ratio');
     expect(columnSemantics('completion_rate')).toBe('ratio');
+    expect(columnSemantics('营业利润_差异率_同口径', 'DECIMAL(18,6)')).toBe('ratio');
+    expect(columnSemantics('营业利润_差异_同口径_万元', 'DECIMAL(38,4)')).toBe('amount');
     expect(columnSemantics('generic_variance_percent', 'DOUBLE')).toBe('amount');
     const rows = displayRows(run({
       result: {

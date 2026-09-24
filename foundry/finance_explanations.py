@@ -922,14 +922,26 @@ def _is_ratio_column(column: str) -> bool:
         or "比率" in column
         or "达成率" in column
         or "完成率" in column
-        or column.endswith("率")
+        or any(segment.endswith("率") for segment in _column_segments(column))
+    )
+
+
+def _column_segments(column: str) -> list[str]:
+    """营业利润_差异率_同口径 -> [营业利润, 差异率, 同口径]; the unit word can sit mid-name."""
+    return [segment for segment in re.split(r"[_\-\s/]+", column) if segment]
+
+
+def _is_day_column(column: str) -> bool:
+    segments = _column_segments(column)
+    return bool(_column_tokens(column) & {"days", "dso"}) or any(
+        "天数" in segment or segment == "天" for segment in segments
     )
 
 
 def _is_amount_column(column: str) -> bool:
     if column in MONEY_COLUMNS or column in {"numerator_exact", "denominator_exact"}:
         return True
-    if _is_ratio_column(column) or _is_count_column(column):
+    if _is_ratio_column(column) or _is_count_column(column) or _is_day_column(column):
         return False
     tokens = _column_tokens(column)
     if tokens & {"amount", "revenue", "cost", "expense", "profit", "cash", "budget", "actual", "variance"}:
@@ -997,6 +1009,8 @@ def _fact_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict |
         return "%"
     if _is_count_column(column):
         return row.get(f"{column}_unit") or "条"
+    if _is_day_column(column):
+        return row.get(f"{column}_unit") or "天"
     if column in QUANTITY_COLUMNS:
         return (
             row.get(f"{column}_unit")
