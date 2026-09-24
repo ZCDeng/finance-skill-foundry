@@ -1266,6 +1266,10 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
         item_record = {**item, 'status': item_status, 'locations': locations,
                        'source_read_failure': source_failures.get(item['id']),
                        'provenance_status': provenance_status}
+        missing_grains = _missing_grains(item, grain_locations) if item_status != 'answered' else []
+        if missing_grains:
+            item_record['missing_grains'] = missing_grains
+            fixups = [*fixups, _missing_rows_fixup(item, missing_grains)]
         source_fixups = [fixup for location in locations
                          for fixup in [_source_fixup(item, location, checks)] if fixup]
         fixups = _dedupe_fixups([*fixups, *source_fixups])
@@ -1280,6 +1284,31 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
             'coverage': {'status': 'pass' if complete else 'needs_attention'},
             'provenance': {'status': 'pass' if trace_complete else 'needs_attention'},
             'original_requirements_completed': complete and not latest.get('removed_item_ids')}
+
+
+def _missing_grains(item, grain_locations):
+    if not grain_locations:
+        return []
+    keys = [key for key, field in (('organization', 'organizations'), ('period', 'periods'), ('scenario', 'scenarios')) if item.get(field)]
+    return [
+        {key: value for key, value in zip(('organization', 'period', 'scenario'), grain) if key in keys}
+        for grain, members in grain_locations.items()
+        if not any(location['status'] == 'answered' for location in members)
+    ]
+
+
+def _missing_rows_fixup(item, missing_grains):
+    """Tell the writer which cited rows would answer the item; wide tables carry none of these keys."""
+    row_keys = ['metric_key', *[key for key in ('organization', 'period', 'scenario') if key in missing_grains[0]], 'value']
+    return {
+        'code': 'add_requirement_rows',
+        'requirement_item_id': item['id'],
+        'metric': item.get('metric'),
+        'row_keys': row_keys,
+        'missing_count': len(missing_grains),
+        'missing': missing_grains[:12],
+        'reason': 'no_cited_row_for_requested_grain',
+    }
 
 
 def _item_status(statuses):
@@ -1359,6 +1388,19 @@ def _location_matches(candidate, expected):
     return isinstance(candidate, dict) and all(candidate.get(key) == value for key, value in expected.items())
 
 
+def _unanswered_message(item):
+    message = f'尚未提供“{item["label"]}”的计算依据。'
+    missing = item.get('missing_grains') or []
+    if not missing:
+        return message
+    example = '、'.join(str(value) for value in missing[0].values() if value not in (None, ''))
+    keys = '、'.join(key for key in ('organization', 'period', 'scenario') if key in missing[0])
+    return (
+        f'{message}{len(missing)} 个要求组合没有已引用的结果行（如 {example}）；'
+        f'需要含 metric_key、{keys} 和 value 的结果行，并在文稿中引用该数值。'
+    )
+
+
 def augment_quality(analysis, spec, quality):
     requirements = check_requirements(analysis, spec)
     from foundry.finance_requirement_support import with_input_gaps
@@ -1368,7 +1410,7 @@ def augment_quality(analysis, spec, quality):
         issues.append({'code': 'requirements_changed', 'severity': 'warning', 'message': '分析范围已更新，请按当前要求复核文稿。'})
     for item in requirements['items']:
         if item['status'] != 'answered':
-            issues.append({'code': 'requirement_unanswered', 'severity': 'warning', 'message': f'尚未提供“{item["label"]}”的计算依据。', 'requirement_item_id': item['id'],
+            issues.append({'code': 'requirement_unanswered', 'severity': 'warning', 'message': _unanswered_message(item), 'requirement_item_id': item['id'],
                            **({'fixups': item['fixups']} if item.get('fixups') else {})})
         if item['provenance_status'] in {'pending', 'failed'}:
             source_fixups = [fixup for fixup in item.get('fixups', []) if fixup.get('code') == 'verify_source']
