@@ -63,6 +63,42 @@ def metric_catalog():
     return [{"metric": key, "evidence": evidence} for key, evidence in NATIVE_METRICS.items()]
 
 
+ENGINE_TOOLS = {"explain_variance", "run_metric"}
+
+
+def _offers(paths, name):
+    return any(path["path"] == name for path in [*paths["accepted"], *paths["blocked"]])
+
+
+def _offered_evidence(text, paths):
+    """The catalog text narrowed to the paths the checker offers this item, accepted or blocked.
+
+    Engine closure rows carry no scenario, so an amount item with scenarios is never pointed there.
+    """
+    if not paths:
+        return text
+    parts = [part for part in text.split(" / ") if _offers(paths, part.split(" (")[0])]
+    return " / ".join(parts) or text
+
+
+def _paths_evidence(paths):
+    return " / ".join(dict.fromkeys(
+        f"{path['path']} ({path['tool']})" if path.get("tool") in ENGINE_TOOLS else path["path"]
+        for path in [*paths["accepted"], *paths["blocked"]]))
+
+
+def _amount_next_action(item, paths):
+    from foundry.finance_requirements import BLOCKER_TEXT, _path_text
+
+    keys = f"metric_key（{item['metric']}） 和 value"
+    accepted = "；或".join(_path_text(path, keys) for path in paths["accepted"])
+    blocked = "；".join(f"{path['path']}（{'、'.join(BLOCKER_TEXT.get(b, b) for b in path['blockers'])}）"
+                        for path in paths["blocked"])
+    return ("按收入、成本、费用、利润类金额作答" + (f"：{accepted}" if accepted else "") + "。"
+            + (f"当前走不通的路径：{blocked}。" if blocked else "")
+            + "只有脚本输出的数不计为已回答；保留原问题。")
+
+
 def assess_requirement_support(analysis, spec):
     """Describe supported paths without accepting client-authored absence claims.
 
@@ -87,7 +123,7 @@ def assess_requirement_support(analysis, spec):
                              "reason": "snapshot_unverified"})
     reports = []
     source_columns = {column for source in sources for column in source["columns"]}
-    from foundry.finance_requirements import _evidence_environment, _evidence_paths
+    from foundry.finance_requirements import _closed_metric_key, _evidence_environment, _evidence_paths
 
     try:
         environment = _evidence_environment(analysis, spec)
@@ -97,18 +133,23 @@ def assess_requirement_support(analysis, spec):
         metric = canonical_metric(item.get("metric"))
         report = {"requirement_item_id": item.get("id"), "canonical_metric": metric,
                   "status": "requires_execution", "sources": sources}
+        # What can answer this item right now, and what is blocked and why (never a bare tool name).
+        paths = (_evidence_paths(item, environment)
+                 if isinstance(item, dict) and isinstance(item.get("metric"), str) else None)
         if metric not in NATIVE_METRICS:
-            if metric in accounts:
+            if paths and _closed_metric_key(item) and _offers(paths, "evidence_recipe"):
+                # A P&L amount named outside the catalog (利润总额, 销售费用 …): the checker gates it like the
+                # canonical metric, so free SQL/Python result columns alone never answer it.
+                report.update(evidence=_paths_evidence(paths), next_action=_amount_next_action(item, paths))
+            elif metric in accounts:
                 report["evidence"] = "run_metric_result_set (single account_total)"
             elif metric in source_columns:
                 report["evidence"] = "cited_result_row (explicit result column)"
             else:
                 report.update(status="unrecognized", next_action="选择已支持指标，或用SQL/Python计算并声明明确的结果列；保留原问题。")
         else:
-            report["evidence"] = NATIVE_METRICS[metric]
-        if isinstance(item, dict) and isinstance(item.get("metric"), str):
-            # What can answer this item right now, and what is blocked and why (never a bare tool name).
-            paths = _evidence_paths(item, environment)
+            report["evidence"] = _offered_evidence(NATIVE_METRICS[metric], paths)
+        if paths is not None:
             report["accepted_evidence"] = [path["path"] for path in paths["accepted"]]
             if paths["blocked"]:
                 report["blocked_evidence"] = paths["blocked"]

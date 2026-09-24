@@ -44,6 +44,23 @@ RESULT_SET_METRICS = {'control_totals'}
 INTENT_DIMENSION_KEYS = {'dimension', 'scenario_compare'}
 # Amounts that only count as answered when their evidence group closes (profit bridge, run_metric totals).
 CLOSED_EVIDENCE_METRICS = {'profit', 'revenue', 'cost', 'expense'}
+# The item metric is free text, so a P&L amount named outside METRIC_LABELS (利润总额, 主营业务收入, 销售费用,
+# total_revenue …) is recognized by its stem and gated like the canonical metric instead of falling to the
+# script-value rule. A ratio named after an amount (收入达成率, expense_ratio) keeps the phase-1 ratio rule.
+AMOUNT_LABEL_STEMS = (
+    ('profit', ('利润', '毛利', '净利')),
+    ('revenue', ('收入', '营收', '营业额', '销售额')),
+    ('cost', ('成本',)),
+    ('expense', ('费用',)),
+)
+AMOUNT_LABEL_TOKENS = {
+    'profit': 'profit', 'profits': 'profit', 'ebit': 'profit', 'ebitda': 'profit',
+    'revenue': 'revenue', 'revenues': 'revenue', 'sales': 'revenue',
+    'cost': 'cost', 'costs': 'cost', 'cogs': 'cost',
+    'expense': 'expense', 'expenses': 'expense', 'opex': 'expense',
+}
+NON_AMOUNT_LABEL_MARKERS = ('率', '占比', '比例', '比重', '倍数', '人均', '均价', '单价', '%', '％')
+NON_AMOUNT_LABEL_TOKENS = frozenset({'ratio', 'rate', 'margin', 'pct', 'percent', 'percentage', 'share', 'per', 'avg', 'average'})
 PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
 CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
@@ -1183,7 +1200,8 @@ def _result_set_location(location, evidence, status):
 
 
 def _closed_metric_key(item):
-    """The CLOSED amount class an item asks for, by canonical name or any known label (营业收入 → revenue)."""
+    """The CLOSED amount class an item asks for, by canonical name, any known label (营业收入 → revenue) or
+    a P&L amount stem (利润总额 → profit, 销售费用 → expense, total_revenue → revenue)."""
     metric = item.get('metric')
     canonical = _canonical_metric_name(metric)
     if canonical in CLOSED_EVIDENCE_METRICS:
@@ -1192,7 +1210,20 @@ def _closed_metric_key(item):
     for key in sorted(CLOSED_EVIDENCE_METRICS):
         if text in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
             return key
-    return None
+    return _amount_label_class(text)
+
+
+def _amount_label_class(text):
+    if not text or any(text in {str(alias).lower() for alias in aliases} or text == key
+                       for key, aliases in METRIC_LABELS.items() if key not in CLOSED_EVIDENCE_METRICS):
+        return None
+    tokens = re.findall(r'[a-z]+', text)
+    if any(marker in text for marker in NON_AMOUNT_LABEL_MARKERS) or NON_AMOUNT_LABEL_TOKENS & set(tokens):
+        return None
+    for key, stems in AMOUNT_LABEL_STEMS:
+        if any(stem in text for stem in stems):
+            return key
+    return next((AMOUNT_LABEL_TOKENS[token] for token in tokens if token in AMOUNT_LABEL_TOKENS), None)
 
 
 def _location_evidence_status(item, location, member, recipe=None):

@@ -13,6 +13,15 @@ type RequirementScope = {
   unit?: string;
 };
 
+// The assistant's declaration that some grains are estimates or unavailable. The panel does not edit it,
+// but it must survive a manager save: without it a declared estimate falls back to a pending grain.
+type GrainBasis = {
+  basis: string;
+  organizations?: string[];
+  periods?: string[];
+  scenarios?: string[];
+} & Record<string, unknown>;
+
 type RequirementItem = {
   id: string;
   metric: string;
@@ -22,6 +31,7 @@ type RequirementItem = {
   periods?: string[];
   organizations?: string[];
   scenarios?: string[];
+  grain_basis?: GrainBasis[];
 };
 
 type RequirementMissingInput = {
@@ -132,6 +142,34 @@ function itemScenarios(item: RequirementItem): string[] {
   return normalizePeriods(item.scenarios);
 }
 
+const grainBasisLists = ['organizations', 'periods', 'scenarios'] as const;
+
+function normalizeGrainBasis(value: unknown): GrainBasis[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is GrainBasis => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+      && typeof (entry as Record<string, unknown>).basis === 'string')
+    .map((entry) => ({ ...entry }));
+}
+
+// A declaration covers a subset of the item's grains. When the manager removes one of its members the
+// declaration keeps the rest; one left with no member is dropped, because an empty list would widen it
+// to every grain of the item.
+function keptGrainBasis(item: RequirementItem): GrainBasis[] {
+  const lists = { organizations: itemOrganizations(item), periods: itemPeriods(item), scenarios: itemScenarios(item) };
+  return (item.grain_basis ?? []).flatMap((entry) => {
+    const next: GrainBasis = { ...entry };
+    for (const field of grainBasisLists) {
+      const members = entry[field];
+      if (!Array.isArray(members) || !members.length) continue;
+      const kept = members.map(String).filter((member) => lists[field].includes(member));
+      if (!kept.length) return [];
+      next[field] = kept;
+    }
+    return [next];
+  });
+}
+
 function normalizeMissingInputs(value: unknown): RequirementMissingInput[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -194,6 +232,9 @@ function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
         : {}),
       ...(Array.isArray((item as Record<string, unknown>).organizations)
         ? { organizations: normalizePeriods((item as Record<string, unknown>).organizations) }
+        : {}),
+      ...(normalizeGrainBasis((item as Record<string, unknown>).grain_basis).length
+        ? { grain_basis: normalizeGrainBasis((item as Record<string, unknown>).grain_basis) }
         : {}),
     })).filter((item) => item.id && item.metric) : [],
   };
@@ -412,6 +453,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
           ...(itemPeriods(item).length ? { periods: itemPeriods(item) } : {}),
           ...(itemOrganizations(item).length ? { organizations: itemOrganizations(item) } : {}),
           ...(itemScenarios(item).length ? { scenarios: itemScenarios(item) } : {}),
+          ...(keptGrainBasis(item).length ? { grain_basis: keptGrainBasis(item) } : {}),
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));

@@ -22,6 +22,8 @@ PERIOD_RANGE = re.compile(
 )
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
+# A bare year, yyyymm or yyyymmdd written as a row's period.
+PERIOD_IDENTIFIER = re.compile(r"(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])?)?")
 EVIDENCE_APPENDIX_RENDER_VERSION = 1
 WRITING_GUIDANCE = {
     "schema_version": 1,
@@ -434,7 +436,10 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     base_allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
-    ignored_number_spans = _generated_appendix_heading_number_spans(body, prepared)
+    ignored_number_spans = [
+        *_generated_appendix_heading_number_spans(body, prepared),
+        *_generated_appendix_label_number_spans(body, generated_regions, prepared),
+    ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
         if normalized in base_allowed_numbers:
@@ -2231,11 +2236,16 @@ def _rebuilt_input_gap_appendix(
         )
         from foundry.finance_requirements import check_requirements
 
+        # The same claims the save path's provisional check saw: fact claims plus the draft's own claims.
+        claims = [
+            *claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
+            *[claim for claim in spec.get("claims") or [] if isinstance(claim, dict)],
+        ]
         checked = check_requirements(
             analysis,
             {
                 "run_ids": spec.get("run_ids", []),
-                "claims": claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
+                "claims": claims,
                 "requirements_id": requirements_id,
                 "source_read_failures": spec.get("source_read_failures", []),
                 # The draft's own recipes, so the rebuilt appendix matches the quality verdict.
@@ -2459,6 +2469,62 @@ def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[
     for match in re.finditer(r"(?m)^### 结果行 (?P<number>\d+)$", rendered):
         number_span = match.span("number")
         spans.append((start + number_span[0], start + number_span[1]))
+    return spans
+
+
+def _generated_appendix_label_number_spans(
+    body: str, generated_regions: list[dict], prepared: dict
+) -> list[tuple[int, int]]:
+    """Bare period identifiers (2026, 202608) that name a row or a group in the server's own, trusted
+    计算依据 appendix.
+
+    A member line is '- metric / column / scenario / period：value（…）' and a group title may end in
+    key=value segments; those segments name the row and state no value, and the writer cannot edit them.
+    Row names come from the run's own rows, so only a later segment shaped like a period is exempt: the
+    metric name never is, values keep their fact binding, and the same number written anywhere outside a
+    trusted appendix name is still checked.
+    """
+    labels = sorted(
+        {
+            str(label)
+            for group in prepared.get("evidence_groups", [])
+            if isinstance(group, dict) and isinstance(group.get("members"), list)
+            for member in group["members"]
+            if isinstance(member, dict)
+            for label in [member.get("label") or member.get("semantic_role") or member.get("column")]
+            if label not in (None, "")
+        },
+        key=len,
+        reverse=True,
+    )
+    spans = []
+    for region in generated_regions:
+        text = body[region["start"] : region["end"]]
+        for line in re.finditer(r"(?m)^(?:- (?P<member>.*)|### (?P<title>.*))$", text):
+            if line.group("title") is not None:
+                name, start = line.group("title"), line.start("title")
+            else:
+                rest = line.group("member")
+                name = next(
+                    (label for label in labels if rest.startswith(label) and rest[len(label) : len(label) + 1] in {"：", "（"}),
+                    None,
+                )
+                start = line.start("member")
+            if name is not None:
+                spans.extend(_period_segment_spans(name, region["start"] + start))
+    return spans
+
+
+def _period_segment_spans(name: str, base: int) -> list[tuple[int, int]]:
+    spans = []
+    position = 0
+    for index, segment in enumerate(name.split(" / ")):
+        start = base + position
+        position += len(segment) + len(" / ")
+        key, _, value = segment.rpartition("=")
+        offset = len(key) + 1 if key else 0
+        if index and PERIOD_IDENTIFIER.fullmatch(value):
+            spans.append((start + offset, start + offset + len(value)))
     return spans
 
 

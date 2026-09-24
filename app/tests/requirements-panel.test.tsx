@@ -495,4 +495,56 @@ describe('requirements panel', () => {
     expect(within(profit).getByText(/条件已修改，保存后重新检查资料匹配。/)).toBeTruthy();
   });
 
+  describe('grain_basis declarations', () => {
+    // The assistant declares which grains are estimates or unavailable; a manager save that drops the
+    // declaration turns a declared estimate back into a pending grain (estimate_cited_for_source_grain).
+    const declared = {
+      id: 'r-grain-001', question: '华宸 1-8 月收入', context_id: null,
+      scope: { ledger: 'L1', currency: 'CNY', unit: '万元' }, bindings: { budget: 'budget-dataset' },
+      items: [{ id: 'revenue_1_8', metric: 'revenue', label: '收入', dimensions: {}, requires_drilldown: false,
+        organizations: ['集团合并', '华东区域', '华南区域'], periods: ['2026-01:2026-08'], scenarios: ['budget_1_8'],
+        grain_basis: [
+          { basis: 'estimate', organizations: ['华东区域'], method: '区域全年预算 × 集团进度' },
+          { basis: 'estimate', organizations: ['华南区域'], method: '（营业利润 − 其他收益）÷ 合计', factor_reproducible: false, reason: '系数须先减后除' },
+        ] }],
+      parent_id: null,
+    } as unknown as AnalysisRequirementsRecord;
+
+    function mountDeclared() {
+      const financeCall = vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...declared, id: 'r-grain-002', parent_id: declared.id, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [declared], current: declared }));
+      mountBridge({ financeCall });
+      return { financeCall };
+    }
+
+    function savedItems(api: ReturnType<typeof mountDeclared>): Array<Record<string, unknown>> {
+      const call = api.financeCall.mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+      return (call?.[2] as { items: Array<Record<string, unknown>> }).items;
+    }
+
+    it('keeps the declarations when the manager saves an unrelated edit', async () => {
+      const api = mountDeclared();
+      render(<RequirementsPanel taskId={taskId} />);
+      expect(await screen.findByDisplayValue('华宸 1-8 月收入')).toBeTruthy();
+      fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '华宸 1-8 月收入（改问法）' } });
+      fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+      await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+      expect(savedItems(api)[0].grain_basis).toEqual(declared.items[0].grain_basis);
+    });
+
+    it('drops a declaration whose organization the manager removed instead of widening it', async () => {
+      const api = mountDeclared();
+      render(<RequirementsPanel taskId={taskId} />);
+      const revenue = await screen.findByLabelText('必答指标 1');
+      fireEvent.click(within(revenue).getByRole('button', { name: '华南区域 ×' }));
+      fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+      await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+      expect(savedItems(api)[0].organizations).toEqual(['集团合并', '华东区域']);
+      expect(savedItems(api)[0].grain_basis).toEqual([declared.items[0].grain_basis?.[0]]);
+    });
+  });
+
 });

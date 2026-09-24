@@ -330,3 +330,60 @@ def test_circle_select_needs_something_to_revise(tmp_path: Path) -> None:
                 "context_id": blank_context["id"],
             }
         )
+    # The refusal happens before anything is written: no orphan child context.
+    assert [row["id"] for row in fresh._list("contexts")] == [blank_context["id"]]
+
+
+def _table_draft(service):
+    return service.analysis.save_draft(
+        {
+            "title": "经营简报",
+            "document": {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "content": [
+                    {
+                        "type": "table",
+                        "attrs": {"caption": "tbl-expense"},
+                        "content": [
+                            {"type": "tableRow", "content": [{"type": "tableHeader",
+                             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "费用"}]}]}]}
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+
+
+def test_circle_select_carries_a_legacy_drilldown_item_over_without_the_hierarchy_key(tmp_path: Path) -> None:
+    """A requirement saved before phase 1 followed PR #17 and kept dimensions.drilldown. Save now refuses
+    hierarchy dimensions, so 改口径 resaving the same items failed and left a child context behind.
+    The carry-over applies the refusal's own mechanical fix (the same items without the hierarchy key)."""
+    from foundry.analysis import _new
+
+    service, context, _dataset, original = _service(tmp_path)
+    legacy = _new(service.analysis.task, question=original["question"], scope=original["scope"],
+                  bindings=original["bindings"], context_id=context["id"], parent_id=original["id"],
+                  items=[{**original["items"][0], "dimensions": {"drilldown": "城市公司", "product": "物业费"}}],
+                  removed_item_ids=[], change_reason="PR #17 之前保存", selection=None)
+    service.analysis._write(service.analysis._object_path("requirements", legacy["id"]), legacy)
+    draft = _table_draft(service)
+    contexts_before = len(service._list("contexts"))
+
+    revised = service.analysis_circle_select(
+        {
+            "kind": "draft_table",
+            "draft_id": draft["id"],
+            "block_id": "tbl-expense",
+            "range": "A:A",
+            "instruction": "改成开票口径",
+            "context_id": context["id"],
+        }
+    )
+
+    assert revised["requirements"]["parent_id"] == legacy["id"]
+    assert revised["requirements"]["change_reason"] == "改成开票口径"
+    assert revised["requirements"]["items"][0]["dimensions"] == {"product": "物业费"}
+    assert [item["id"] for item in revised["requirements"]["items"]] == ["expense"]
+    assert len(service._list("contexts")) == contexts_before + 1

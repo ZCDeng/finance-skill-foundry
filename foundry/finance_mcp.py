@@ -331,7 +331,7 @@ class FinanceMcpServer:
         except McpRefused:
             raise
         except FoundryError as exc:
-            return _tool_error(str(exc))
+            return _tool_error(str(exc), getattr(exc, "details", None))
         except Exception as exc:
             raise JsonRpcError(-32000, "finance tool failed") from exc
         payload = json_value(result)
@@ -525,7 +525,7 @@ def _tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "analysis_requirements_save",
-            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution. support.items name the accepted_evidence that can answer each item now and the blocked_evidence with its blockers. scope.unit and currency only constrain amount items, never ratio items; the ledger is proven by the bound snapshot hashes and is not copied onto result rows. Hierarchy levels such as drilldown are refused as dimensions; the refusal carries suggested_items that can be resubmitted unchanged.",
+            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution. support.items name the accepted_evidence that can answer each item now and the blocked_evidence with its blockers. scope.unit and currency only constrain amount items, never ratio items; the ledger is proven by the bound snapshot hashes and is not copied onto result rows. Hierarchy levels such as drilldown are refused as dimensions; the refusal's details.suggested_items can be resubmitted unchanged.",
             "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
                 "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
                 "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
@@ -898,10 +898,23 @@ def _tool_result(payload: dict[str, Any], *, is_error: bool) -> dict[str, Any]:
     }
 
 
-def _tool_error(message: str) -> dict[str, Any]:
+# Refusals whose structured details only echo the caller's own request (never a server path) and that the
+# caller needs in order to self-correct; each also has a path-free message for when the text is blanked.
+PUBLIC_REFUSALS = {
+    "requirement_dimension_not_row_filter": (
+        "requirement dimensions hold hierarchy levels, not result-row filters; resubmit details.suggested_items "
+        "unchanged, list each drilldown target in organizations or save it as its own item"
+    ),
+}
+
+
+def _tool_error(message: str, details: Any = None) -> dict[str, Any]:
+    code = details.get("code") if isinstance(details, dict) else None
+    public = details if code in PUBLIC_REFUSALS else None
     if "/" in message or "\\" in message:
-        message = "finance request refused"
-    return _tool_result({"error": "finance request refused", "message": message}, is_error=True)
+        message = PUBLIC_REFUSALS.get(code, "finance request refused")
+    return _tool_result({"error": "finance request refused", "message": message,
+                         **({"details": public} if public else {})}, is_error=True)
 
 
 def _request_id_from_line(line: str) -> str | int | None:

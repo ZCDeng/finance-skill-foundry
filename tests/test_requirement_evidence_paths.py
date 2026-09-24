@@ -828,10 +828,157 @@ def test_recipe_anchors_are_read_for_display_and_do_not_change_the_hash(analysis
         evaluate_evidence_recipes(analysis, [{**monthly.good[0], 'anchors': {'row_label': 'A1:A2'}}])
 
 
+# --- review fixes (PR #23) ---------------------------------------------------------------------------
+
+
+UNLISTED_AMOUNT_LABELS = ['利润总额', '营业总收入', '主营业务收入', '营业总成本', '销售费用', 'total_revenue']
+
+
+def _label_case(analysis, tmp_path, label):
+    close = _workbook(analysis, tmp_path, 'close', {'04·合并利润表': {'B5': 9970000}})
+    requirement = save_requirements(analysis, spec(scope={'ledger': '月结套表'}, bindings={'close': close['id']},
+                                                   items=[{'id': 'p', 'metric': label}]))
+    run = _script_run(analysis, {'close': close}, [{'metric_key': label, 'value': '997', 'unit': '万元', 'currency': 'CNY'}],
+                      suffix='label', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
+    base = {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+            'claims': [_claim(run, row=0, column='value', value='997')]}
+    return SimpleNamespace(close=close, requirement=requirement, run=run, base=base,
+                           recipe=_recipe(close, '04·合并利润表', 'B5', run, 0, scale='0.0001'))
+
+
+@pytest.mark.parametrize('label', UNLISTED_AMOUNT_LABELS)
+def test_common_pnl_labels_outside_the_alias_list_are_gated_as_amounts(analysis, tmp_path, label):
+    """An item saved as 利润总额 / 销售费用 / total_revenue … fell to the non-amount rule, so a plain python
+    value answered it. Decision 1 gates every revenue/profit/cost/expense amount, whatever it is named."""
+    case = _label_case(analysis, tmp_path, label)
+
+    script_only = check_requirements(analysis, case.base)
+    item = _item(script_only)
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] == 'not_applicable'
+    assert script_only['coverage']['status'] == 'needs_attention'
+    assert item['uncounted_grains'] == [{'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']}]
+    assert [path['path'] for path in item['evidence_paths']['accepted']] == ['evidence_recipe']
+    # The support report names the same path, not the free SQL/Python result-column advice.
+    assert support['accepted_evidence'] == ['evidence_recipe']
+    assert support['status'] == 'requires_execution'
+    assert 'SQL/Python' not in support.get('next_action', '')
+    assert 'evidence_recipe' in support['evidence']
+
+    answered = check_requirements(analysis, {**case.base, 'evidence_recipes': [case.recipe]})
+    assert _item(answered)['status'] == 'answered'
+    assert _item(answered)['locations'][0]['evidence']['evidence_basis'] == 'source_value'
+
+
+def test_an_unlisted_pnl_label_answered_by_a_script_value_no_longer_completes_the_draft(analysis, tmp_path):
+    case = _label_case(analysis, tmp_path, '利润总额')
+    service = FinanceStore(analysis.task)
+    draft = service.save_explanation_draft({'body': '利润总额为 997 万元。', 'run_ids': [case.run['id']],
+                                            'claims': case.base['claims']})
+
+    assert _item(draft['explanation_check']['requirements'])['status'] == 'not_applicable'
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+@pytest.mark.parametrize('label', ['收入达成率', '销售费用率', 'expense_ratio', 'other_income'])
+def test_ratio_and_other_labels_keep_the_phase_1_script_rule(analysis, tmp_path, label):
+    """Decision 4: script ratio values are not tightened in phase 1, so the amount gate must not swallow
+    ratios named after an amount, nor non-P&L-class metrics such as other_income."""
+    case = _label_case(analysis, tmp_path, label)
+
+    assert _item(check_requirements(analysis, case.base))['status'] == 'answered'
+
+
+def test_support_evidence_names_only_the_paths_the_checker_offers(analysis, tmp_path):
+    """Engine closure rows carry no scenario, so an amount item with scenarios is never offered that path."""
+    close = _workbook(analysis, tmp_path, 'close', {'04·合并利润表': {'B5': 1}})
+    saved = save_requirements(analysis, spec(scope={'ledger': '月结套表'}, bindings={'close': close['id']}, items=[
+        {'id': 'with_scenarios', 'metric': 'revenue', 'periods': ['2026-08'], 'scenarios': ['actual_2026_08']},
+        {'id': 'plain', 'metric': 'revenue', 'periods': ['2026-08']}]))
+    support = {row['requirement_item_id']: row for row in saved['support']['items']}
+
+    assert support['with_scenarios']['accepted_evidence'] == ['evidence_recipe']
+    assert support['with_scenarios']['evidence'] == 'evidence_recipe'
+    assert 'engine_closure' not in json.dumps(support['with_scenarios'], ensure_ascii=False)
+    # Without scenarios the engine path exists; here it is blocked, and the blocker is stated.
+    assert support['plain']['evidence'] == 'evidence_recipe / engine_closure (explain_variance)'
+    assert [path['path'] for path in support['plain']['blocked_evidence']] == ['engine_closure']
+
+
+def test_claim_cited_estimate_is_labelled_in_the_saved_body_like_a_fact_cited_one(analysis, tmp_path):
+    """The generated appendix came from a provisional check that saw fact_ids only, so an estimate cited
+    through claims reached quality but not the exported body. Decision 2: exports always label 估算."""
+    case = _estimate_case(analysis, tmp_path)
+    service = FinanceStore(analysis.task)
+    draft = service.save_explanation_draft({'body': '华东区域 1-8 月收入预算 112860.000 万元。', 'run_ids': [case.run['id']],
+                                            'claims': case.spec['claims'], 'evidence_recipes': case.spec['evidence_recipes']})
+
+    assert _item(draft['explanation_check']['requirements'])['status'] == 'estimated'
+    assert '## 来源复算依据' in draft['body']
+    assert '估算（经理确认前不计为已回答）：05·区域预算分解!C5 × （01·年度预算总表!B12:C12 ÷ 01·年度预算总表!N12）' in draft['body']
+    assert [issue for issue in draft['explanation_check']['issues'] if issue.get('origin') == 'generated_appendix'] == []
+    revalidated = service.validate_explanation({'draft_id': draft['id']})
+    assert _item(revalidated['requirements'])['status'] == 'estimated'
+    assert [issue for issue in revalidated['issues'] if issue.get('origin') == 'generated_appendix'] == []
+
+
+def test_bare_year_periods_in_the_generated_appendix_do_not_block_the_manager_handoff(analysis, tmp_path):
+    """Huachen fy items: rows with period '2026' printed '… / budget_1_8 / 2026' in the server's own 计算依据
+    appendix, the validator flagged each bare 2026, and the draft could never reach awaiting_manager."""
+    case = _estimate_case(analysis, tmp_path, period='2026')
+    service = FinanceStore(analysis.task)
+    draft = service.save_explanation_draft({'body': '收入说明见附表。', 'run_ids': [case.run['id']],
+                                            'claims': case.spec['claims'], 'evidence_recipes': case.spec['evidence_recipes']})
+    quality = draft['explanation_check']
+
+    assert '/ budget_1_8 / 2026' in draft['body']
+    assert [issue for issue in quality['issues'] if issue['code'] == 'uncited_number'] == []
+    assert _item(quality['requirements'])['status'] == 'estimated'
+    assert draft['completion']['status'] == 'awaiting_manager'
+    assert draft['completion']['stop_reason'] == 'estimate_requires_acceptance'
+    assert draft['completion']['repair_allowed'] is False
+    revalidated = service.validate_explanation({'draft_id': draft['id']})
+    assert [issue for issue in revalidated['issues'] if issue['code'] == 'uncited_number'] == []
+
+
+def test_a_bare_year_the_writer_types_is_still_an_uncited_number(analysis, tmp_path):
+    """Only the server's own appendix labels are exempt; the same number in the manager's prose is checked."""
+    case = _estimate_case(analysis, tmp_path, period='2026')
+    service = FinanceStore(analysis.task)
+    draft = service.save_explanation_draft({'body': '收入预算 2026 见附表。', 'run_ids': [case.run['id']],
+                                            'claims': case.spec['claims'], 'evidence_recipes': case.spec['evidence_recipes']})
+
+    flagged = [issue for issue in draft['explanation_check']['issues'] if issue['code'] == 'uncited_number']
+    assert [(issue['text'], issue['origin']) for issue in flagged] == [('2026', 'manager_body')]
+    assert draft['completion']['status'] != 'awaiting_manager'
+
+
+def test_only_period_shaped_name_segments_of_the_trusted_appendix_are_exempt():
+    """Row names come from the script's own rows, so the exemption is narrow: a later ' / ' segment (or a
+    key=value segment of a group title) shaped like a period. The metric name and other numbers stay checked."""
+    from foundry.finance_explanations import _generated_appendix_label_number_spans
+
+    appendix = ('## 计算依据\n\n### 利润桥闭合依据 / period=2026\n'
+                '- 收入 997 / value / budget / 2026（非可引用：未生成可核验事实）\n'
+                '- revenue / value / budget / 997（非可引用：未生成可核验事实）')
+    body = '正文 2026。\n\n' + appendix
+    regions = [{'section': 'generated_appendix', 'start': body.index('## 计算依据'), 'end': len(body)}]
+    prepared = {'evidence_groups': [{'label': '利润桥闭合依据 / period=2026', 'members': [
+        {'label': '收入 997 / value / budget / 2026'}, {'label': 'revenue / value / budget / 997'}]}]}
+
+    spans = _generated_appendix_label_number_spans(body, regions, prepared)
+
+    assert [(body[start:end], start >= regions[0]['start']) for start, end in sorted(spans)] == [('2026', True), ('2026', True)]
+    assert _generated_appendix_label_number_spans(body, [], prepared) == []
+
+
 # --- helpers ---------------------------------------------------------------------------------------
 
 
-def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_estimate=True):
+def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_estimate=True, period='2026-01:2026-08'):
     """Huachen revenue_1_8 in miniature: group actual/budget and East actual from the source; the East
     1-8 budget exists only as East full-year budget × group 1-8 budget progress (300 ÷ 480 = 0.625)."""
     budget = _workbook(analysis, tmp_path, 'budget', {
@@ -846,10 +993,10 @@ def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_e
         scope={'ledger': '预算工作簿与月结套表', 'currency': 'CNY', 'unit': '万元'},
         bindings={'budget': budget['id'], 'close': close['id']},
         items=[{'id': 'revenue_1_8', 'metric': 'revenue', 'organizations': ['集团合并', '华东区域'],
-                'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8', 'budget_1_8'], 'requires_drilldown': True,
+                'periods': [period], 'scenarios': ['actual_1_8', 'budget_1_8'], 'requires_drilldown': True,
                 **({'grain_basis': grain_basis} if grain_basis else {})}],
     ))
-    base = {'metric_key': 'revenue', 'period': '2026-01:2026-08', 'unit': '万元', 'currency': 'CNY'}
+    base = {'metric_key': 'revenue', 'period': period, 'unit': '万元', 'currency': 'CNY'}
     rows = [
         {**base, 'organization': '集团合并', 'scenario': 'actual_1_8', 'value': '325644'},
         {**base, 'organization': '集团合并', 'scenario': 'budget_1_8', 'value': '300'},
@@ -861,7 +1008,7 @@ def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_e
     run = _script_run(analysis, datasets, rows, suffix='estimate',
                       requirements_id=requirement['id'],
                       requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
-    key = {'metric_key': 'revenue', 'period': '2026-01:2026-08'}
+    key = {'metric_key': 'revenue', 'period': period}
     recipes = [
         _recipe(close, '10·区域经营损益表', 'D11', run, 0, recipe_id='group_actual'),
         _recipe(budget, '01·年度预算总表', 'B12:C12', run, 1, kind='sum', recipe_id='group_budget'),

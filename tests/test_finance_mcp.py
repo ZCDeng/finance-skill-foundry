@@ -458,6 +458,40 @@ def test_tool_business_errors_are_tool_errors_not_protocol_auth_denials(tmp_path
     assert "scenario kind" in response["result"]["structuredContent"]["message"]
 
 
+@pytest.mark.parametrize("label", ["营业收入实际与预算", "营业收入（实际/预算）"])
+def test_hierarchy_dimension_refusal_keeps_suggested_items_even_when_an_item_has_a_slash(tmp_path: Path, label: str) -> None:
+    """The message sanitizer blanks any error text with '/' or '\\\\' (it must never leak a path). One
+    label such as 营业收入（实际/预算） then erased the refusal's reason and suggested_items, although the
+    tool description promises items the MCP client can resubmit unchanged."""
+    fixture = _seed(tmp_path, title="alpha", session="alpha-session", organization="华东", profit="30")
+    grant = create_stdio_grant(
+        fixture["store"].var_root,
+        task_id=fixture["task"].id,
+        session_id=fixture["session"],
+        snapshot_ids=[fixture["dataset"]["id"]],
+        context_ids=[fixture["context"]["id"]],
+    )
+    items = [{"id": "revenue", "metric": "revenue", "label": label, "dimensions": {"drilldown": "城市公司"}}]
+    client = McpClient(grant["env"])
+    try:
+        _handshake(client)
+        refused = client.request(4, "tools/call", {"name": "analysis_requirements_save", "arguments": {
+            "context_id": fixture["context"]["id"], "question": "解释收入", "items": items}})["result"]
+        suggested = refused["structuredContent"]["details"]["suggested_items"]
+        resubmitted = client.request(5, "tools/call", {"name": "analysis_requirements_save", "arguments": {
+            "context_id": fixture["context"]["id"], "question": "解释收入", "items": suggested}})["result"]
+    finally:
+        client.close()
+
+    assert refused["isError"] is True
+    assert refused["structuredContent"]["details"]["code"] == "requirement_dimension_not_row_filter"
+    assert suggested[0]["dimensions"] == {}
+    assert suggested[0]["label"] == label
+    assert "hierarchy levels" in refused["structuredContent"]["message"]
+    assert resubmitted["isError"] is False
+    assert resubmitted["structuredContent"]["items"][0]["dimensions"] == {}
+
+
 def test_protocol_state_params_and_message_size_are_strict(tmp_path: Path) -> None:
     fixture = _seed(tmp_path, title="strict", session="strict-session", organization="华东", profit="30")
     grant = create_stdio_grant(

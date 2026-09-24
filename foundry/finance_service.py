@@ -962,15 +962,38 @@ class FinanceStore:
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
+        auto_claims = claims_for_facts(prepared["facts"], fact_ids)
+        claims = []
+        for claim in _dedupe_explanation_claims(
+            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
+        ):
+            if not isinstance(claim, dict):
+                raise FoundryError("claims must contain objects")
+            claim = dict(claim)
+            if claim.get("dataset_id"):
+                self._authorize({"source": claim["dataset_id"]})
+            if claim.get("basis") == "calculation" and claim.get("run_id"):
+                run = self.analysis.get_run(claim["run_id"])
+                self._authorize(run["bindings"])
+                if run.get("engine") == "finance":
+                    claim.update(
+                        finance_context_id=run["finance_context_id"],
+                        finance_scope=run["finance_scope"],
+                        metric_id=claim.get("column"),
+                        account_map_id=run.get("account_map_id"),
+                    )
+            claims.append(claim)
         # Read actual requested evidence before evaluating the final draft. The draft's recipes are
-        # evaluated once here; the same server-computed report reaches save_draft.
+        # evaluated once here; the same server-computed report reaches save_draft. The provisional
+        # check sees the same claims as the final one, so a cell cited through claims (not fact_ids)
+        # still reaches the generated appendix and its 估算 label.
         from foundry.finance_requirements import check_requirements
         from foundry.finance_requirement_support import evidence_basis_appendix, with_input_gaps, input_gap_appendix
         from foundry.financial_evidence import evaluate_evidence_recipes
         evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
         recipe_report = evaluate_evidence_recipes(self.analysis, evidence_recipes)
         provisional = check_requirements(self.analysis, {
-            "run_ids": run_ids, "claims": claims_for_facts(prepared["facts"], fact_ids),
+            "run_ids": run_ids, "claims": claims,
             "requirements_id": spec.get("requirements_id", parent.get("requirements_id")),
             "evidence_recipes": evidence_recipes,
         }, _recipe_report=recipe_report)
@@ -1008,27 +1031,6 @@ class FinanceStore:
                     except FoundryError as exc:
                         source_read_failures.append({"requirement_item_id": item["id"],
                                                      "location": location, "message": str(exc)})
-        auto_claims = claims_for_facts(prepared["facts"], fact_ids)
-        claims = []
-        for claim in _dedupe_explanation_claims(
-            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
-        ):
-            if not isinstance(claim, dict):
-                raise FoundryError("claims must contain objects")
-            claim = dict(claim)
-            if claim.get("dataset_id"):
-                self._authorize({"source": claim["dataset_id"]})
-            if claim.get("basis") == "calculation" and claim.get("run_id"):
-                run = self.analysis.get_run(claim["run_id"])
-                self._authorize(run["bindings"])
-                if run.get("engine") == "finance":
-                    claim.update(
-                        finance_context_id=run["finance_context_id"],
-                        finance_scope=run["finance_scope"],
-                        metric_id=claim.get("column"),
-                        account_map_id=run.get("account_map_id"),
-                    )
-            claims.append(claim)
         check_deadline()
         save_spec = {
             **spec,
@@ -1817,7 +1819,7 @@ class FinanceStore:
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
-        from foundry.finance_requirements import latest_requirements
+        from foundry.finance_requirements import _without_hierarchy, latest_requirements
 
         reject_forbidden_spec(spec)
         kind = spec.get("kind")
@@ -1850,6 +1852,20 @@ class FinanceStore:
             selection["block_id"] = str(spec["block_id"]).strip()
         else:
             selection["binding_id"] = str(spec["binding_id"])
+        if not latest:
+            # 改口径 revises a stated scope. With none on file the instruction
+            # would be filed as the analytical question, and every later reader
+            # would take 「按区域拆开」 for what was asked. Refused before the
+            # child context is written, so nothing is left behind.
+            raise FoundryError(
+                "circle-select revises an existing analysis; none has been stated yet"
+            )
+        # The items carry over unchanged, except that a record saved before phase 1 may still hold a
+        # hierarchy level (dimensions.drilldown, PR #17). Save refuses those keys and suggests the same
+        # items without them; the carry-over applies that suggestion so 改口径 does not fail on a key
+        # that no longer matched any row.
+        items = [_without_hierarchy(item) if isinstance(item, dict) and isinstance(item.get("dimensions"), dict) else item
+                 for item in latest.get("items") or []]
         child = self.save_context(
             {
                 "parent_id": context["id"],
@@ -1860,17 +1876,10 @@ class FinanceStore:
                 "account_map_id": context.get("account_map_id"),
             }
         )
-        if not latest:
-            # 改口径 revises a stated scope. With none on file the instruction
-            # would be filed as the analytical question, and every later reader
-            # would take 「按区域拆开」 for what was asked.
-            raise FoundryError(
-                "circle-select revises an existing analysis; none has been stated yet"
-            )
         req_spec = {
             "context_id": child["id"],
             "question": latest.get("question") or instruction,
-            "items": latest.get("items") or [],
+            "items": items,
             "change_reason": instruction,
             "selection": selection,
         }
