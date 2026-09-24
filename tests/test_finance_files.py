@@ -372,7 +372,7 @@ def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path
     sheet = wb.active
     sheet.title = "Budget"
     sheet["A1"] = "value"
-    sheet["A2"] = 8.199999999999999
+    sheet["A2"] = 8.1966
     sheet["A2"].number_format = "#,##0.00;[Red]-#,##0.00"
     wb.save(source)
     wb.close()
@@ -383,7 +383,7 @@ def test_range_preview_formats_display_value_but_keeps_exact_raw_number(tmp_path
     )
     cell = preview["cells"][0]
     assert cell["display"] == "8.20"
-    assert cell["exact"] == "8.199999999999999"
+    assert cell["exact"] == "8.1966"
     assert cell["number_format"] == "#,##0.00;[Red]-#,##0.00"
 
 

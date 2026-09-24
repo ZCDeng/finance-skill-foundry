@@ -15,7 +15,7 @@ from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
 from openpyxl.utils.cell import get_column_letter, range_boundaries
 
-from foundry.analysis_data import MAX_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, json_value
+from foundry.analysis_data import MAX_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, excel_number, json_value
 from foundry.errors import FoundryError
 
 REPORT_FORMATS = {"docx", "pdf", "html", "md", "xlsx"}
@@ -944,7 +944,7 @@ def _raw_xlsx_cells(data: bytes, sheet_name: str | None) -> dict[str, Decimal]:
                         continue
                     value = cell.find("s:v", ns)
                     if cell.attrib.get("t", "n") == "n" and value is not None and value.text:
-                        raw[cell.attrib["r"]] = Decimal(value.text)
+                        raw[cell.attrib["r"]] = excel_number(value.text)
                     cell.clear()
                 return raw
             finally:

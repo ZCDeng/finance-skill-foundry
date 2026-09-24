@@ -99,11 +99,27 @@ def _column_letter(cell) -> str:
     return ""
 
 
+def excel_number(text: str) -> Decimal:
+    """Exact Decimal for an XLSX numeric literal.
+
+    Excel stores numbers as IEEE doubles and some writers serialise them with
+    17 significant digits (``64441.376900000001``). That literal and the
+    shortest round-trip form (``64441.3769``) name the same double, so the
+    shortest form is used; literals that already round-trip keep their digits.
+    """
+    literal = Decimal(text)
+    if not literal.is_finite():
+        return literal
+    shortest = Decimal(repr(float(literal)))
+    return literal if shortest == literal else shortest
+
+
 def read_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
     """Cell coordinate -> exact Decimal, read from the sheet XML.
 
     openpyxl hands back floats; a ledger needs the digits the file actually
-    stores, so numeric cells are read from the original XML instead.
+    stores, so numeric cells are read from the original XML instead and
+    normalised to the shortest form of the stored double (see excel_number).
     """
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with _open_xlsx_archive(data) as archive:
@@ -136,7 +152,7 @@ def read_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
                     f"worksheet error at {sheet_name}!{cell.attrib.get('r')}"
                 )
             if cell.attrib.get("t", "n") == "n" and v is not None and v.text:
-                raw_cells[cell.attrib["r"]] = Decimal(v.text)
+                raw_cells[cell.attrib["r"]] = excel_number(v.text)
             cell.clear()
         return raw_cells
 
