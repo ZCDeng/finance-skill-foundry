@@ -485,6 +485,23 @@ def test_background_list_defaults_to_current_period_and_handles_null_source_pare
     assert child["parent_id"] == current["id"]
 
 
+def test_spaced_and_en_dash_periods_are_not_uncited_numbers():
+    """Huachen rerun wrote 「1–8 月」 and 「2026 年 08 月」; 48 of 54 warnings were these."""
+    from foundry.finance_explanations import _body_numbers
+
+    def texts(body):
+        return [item["text"] for item in _body_numbers(body)]
+
+    assert texts("集团 1–8 月营业收入 325644.0000 万元") == ["325644.0000"]
+    assert texts("1—8月利润21086") == ["21086"]
+    assert texts("2026 年 08 月月结套表") == []
+    assert texts("差异 -6106.3769 万元，8 月单月") == ["-6106.3769"]
+    assert texts("收入 – 18843 万元") == ["18843"]
+    assert texts("增长 5 个百分点") == ["5"]
+    assert texts("预算工作簿 09 表的「全年预算」列，月结套表 10 表 D5") == []
+    assert texts("09·预算执行分析 收入 344487.0552") == ["344487.0552"]
+
+
 def test_numeric_tokens_cover_percent_chinese_and_avoid_substrings(service):
     from foundry.finance_explanations import _body_numbers, _numbers_from_text
     assert _numbers_from_text('58.33%') == {'0.5833'}
