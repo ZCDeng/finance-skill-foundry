@@ -11,7 +11,7 @@ from xml.etree import ElementTree as ET
 
 from openpyxl.utils import get_column_letter, range_boundaries
 
-from foundry.analysis_data import _open_xlsx_archive, read_exact_numerics
+from foundry.analysis_data import _open_xlsx_archive, excel_number, read_exact_numerics
 from foundry.errors import FoundryError
 from foundry.workbook_bindings import open_workbook_bytes
 
@@ -156,7 +156,7 @@ def _read_exact_numerics_without_formula_cache(data: bytes, sheet_name: str) -> 
             value = cell.find("s:v", ns)
             formula = cell.find("s:f", ns)
             if formula is None and cell.attrib.get("t", "n") == "n" and value is not None and value.text:
-                raw_cells[cell.attrib["r"]] = Decimal(value.text)
+                raw_cells[cell.attrib["r"]] = excel_number(value.text)
             cell.clear()
         return raw_cells
 
