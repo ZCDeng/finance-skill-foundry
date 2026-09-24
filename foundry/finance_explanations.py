@@ -334,7 +334,12 @@ def _appendix_member_label(state: str, fact: dict | None) -> str:
     return "非可引用：未生成可核验事实"
 
 
-def validate_explanation(analysis, spec: dict) -> dict:
+def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: dict | None = None) -> dict:
+    """Check a draft; evidence recipes are evaluated here, never read from a caller's evidence_report.
+
+    `_requirement_recipe_report` lets save_draft hand over the report it computed for its own recipes so
+    the generated appendix is rebuilt from the same requirement check without a second evaluation.
+    """
     if not isinstance(spec, dict):
         raise FoundryError("explanation spec must be an object")
     draft = analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
@@ -352,8 +357,12 @@ def validate_explanation(analysis, spec: dict) -> dict:
         [r for r in runs if r.get("execution_status") == "succeeded"],
         materiality=spec.get("materiality", draft.get("materiality", {})),
     )
+    from foundry.financial_evidence import evaluate_evidence_recipes
+
+    evidence_report = evaluate_evidence_recipes(analysis, {**draft, **spec}.get("evidence_recipes", []))
     generated_regions = _trusted_generated_appendix_regions(
-        analysis, body, {**draft, **spec}, prepared
+        analysis, body, {**draft, **spec}, prepared,
+        recipe_report=_requirement_recipe_report if _requirement_recipe_report is not None else evidence_report,
     )
     facts = prepared["facts"]
     by_id = {fact["id"]: fact for fact in facts}
@@ -471,17 +480,15 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 }
             )
     merged = {**draft, **spec, "run_ids": run_ids}
-    evidence_recipes = merged.get("evidence_recipes", [])
     consistency_rules = merged.get("consistency_rules", [])
     consistency_sources = merged.get("consistency_sources", {})
     from foundry.analysis import _quality_status_dimensions, _revision_quality_issues
     from foundry.finance_revision import compare_draft_runs
     from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
-    from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+    from foundry.financial_evidence import prepare_consistency_inputs
 
     parent = analysis.get_draft(merged["parent_id"]) if merged.get("parent_id") else {}
     revision_comparison = compare_draft_runs(analysis, parent, {"run_ids": run_ids})
-    evidence_report = evaluate_evidence_recipes(analysis, evidence_recipes)
     resolved_rules, consistency_source_auth = prepare_consistency_inputs(
         analysis, consistency_rules, consistency_sources
     )
@@ -2154,7 +2161,7 @@ def _allowed_numbers(facts: list[dict]) -> set[str]:
 
 
 def _trusted_generated_appendix_regions(
-    analysis, body: str, spec: dict, prepared: dict
+    analysis, body: str, spec: dict, prepared: dict, *, recipe_report: dict | None = None
 ) -> list[dict]:
     appendix = spec.get("evidence_appendix")
     meta = spec.get("evidence_appendix_meta")
@@ -2165,7 +2172,7 @@ def _trusted_generated_appendix_regions(
     rebuilt_base = render_evidence_appendix(prepared).get("body", "")
     if not isinstance(rebuilt_base, str) or not rebuilt_base:
         return []
-    rebuilt_gap = _rebuilt_input_gap_appendix(analysis, spec, prepared)
+    rebuilt_gap = _rebuilt_input_gap_appendix(analysis, spec, prepared, recipe_report)
     if rebuilt_gap is None:
         return []
     rebuilt = rebuilt_base + rebuilt_gap
@@ -2209,13 +2216,16 @@ def _canonical_report_markdown(markdown: str) -> str | None:
         return None
 
 
-def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | None:
+def _rebuilt_input_gap_appendix(
+    analysis, spec: dict, prepared: dict, recipe_report: dict | None = None
+) -> str | None:
     requirements_id = spec.get("requirements_id")
     if not requirements_id:
         return ""
     try:
         requirements = analysis._get("requirements", requirements_id)
         from foundry.finance_requirement_support import (
+            evidence_basis_appendix,
             input_gap_appendix,
             with_input_gaps,
         )
@@ -2228,10 +2238,14 @@ def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | N
                 "claims": claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
                 "requirements_id": requirements_id,
                 "source_read_failures": spec.get("source_read_failures", []),
+                # The draft's own recipes, so the rebuilt appendix matches the quality verdict.
+                "evidence_recipes": spec.get("evidence_recipes", []),
             },
             _requirements_record=requirements,
+            _recipe_report=recipe_report,
         )
-        return input_gap_appendix(with_input_gaps(analysis, checked))
+        checked = with_input_gaps(analysis, checked)
+        return input_gap_appendix(checked) + evidence_basis_appendix(checked)
     except FoundryError:
         return None
     except (OSError, ValueError, KeyError, TypeError):

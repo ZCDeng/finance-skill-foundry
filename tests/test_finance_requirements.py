@@ -27,8 +27,10 @@ def spec(**updates):
 
 
 def _run(analysis, **updates):
+    # Closure only counts for finance-engine runs; a script run must say engine='python' explicitly.
     record = _new(
         analysis.task,
+        engine='finance',
         execution_status='succeeded',
         output_hash='hash-' + updates.get('id_suffix', '1'),
         bindings={'actual': 'actual-dataset', 'budget': 'budget-dataset'},
@@ -339,73 +341,149 @@ def test_pending_grain_requirement_names_missing_combinations_and_row_keys(analy
     assert len(complete['items'][0]['missing_grains']) == 2
 
 
-def test_cited_rows_missing_dimension_and_scope_fields_are_named_and_fixing_them_answers(analysis):
-    """Huachen rerun: long-form rows had metric_key/organization/period/scenario/value but no
-    drilldown dimension and no ledger/currency (the run had no finance_scope), so nothing matched.
-    The named fields must be exactly what makes the matcher accept the row."""
+def _workbook(analysis, tmp_path, name, sheets):
+    """An archived workbook snapshot, as the manager files it; recipes recompute from its bytes."""
+    from openpyxl import Workbook
+
+    book = Workbook()
+    for index, (title, cells) in enumerate(sheets.items()):
+        sheet = book.active if index == 0 else book.create_sheet()
+        sheet.title = title
+        for coordinate, value in cells.items():
+            sheet[coordinate] = value
+    source = tmp_path / f'{name}.xlsx'
+    book.save(source)
+    book.close()
+    return analysis.add_dataset(source, name=name, metadata={'mode': 'workbook'})
+
+
+def _script_run(analysis, datasets, rows, *, suffix, **updates):
+    """A python run on the requirement's own bound snapshots; it has no finance_scope."""
+    record = _new(
+        analysis.task,
+        engine='python',
+        execution_status='succeeded',
+        reproducibility_status='unverified',
+        assumptions=[],
+        output_hash='script-' + suffix,
+        bindings={alias: dataset['id'] for alias, dataset in datasets.items()},
+        input_hashes={alias: dataset['data_hash'] for alias, dataset in datasets.items()},
+        source_hashes={alias: dataset['source_hash'] for alias, dataset in datasets.items()},
+        result={'columns': list(dict.fromkeys(key for row in rows for key in row)), 'rows': rows},
+    )
+    record.update(updates)
+    return analysis._write(analysis._object_path('runs', record['id']), record)
+
+
+def _recipe(dataset, sheet, cell_range, run, row, *, kind='direct', recipe_id=None, **extra):
+    return {'id': recipe_id or f'{kind}-{row}', 'kind': kind, 'dataset_id': dataset['id'],
+            'source_hash': dataset['source_hash'], 'sheet': sheet, 'range': cell_range,
+            'claim': {'run_id': run['id'], 'row': row, 'column': 'value'}, **extra}
+
+
+def test_cited_rows_missing_dimension_and_scope_fields_are_named_and_fixing_them_answers(analysis, tmp_path):
+    """Huachen rerun: long-form rows had metric_key/organization/period/scenario/value but not the
+    dimension and scope fields the matcher needs, so nothing matched. The named fields must be exactly
+    what makes the matcher accept the row. Decision 1 changed two things here: a hierarchy level such
+    as drilldown is refused at save time (it is no longer a field to stamp on rows), and the ledger of a
+    run without finance_scope is proven by its bound snapshot hashes, so it is never named as a row field."""
     from foundry.finance_requirements import _unanswered_message
 
+    source = _workbook(analysis, tmp_path, 'budget', {'预算': {'A1': '其他收益'}})
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'},
-        items=[{'id': 'attainment_1_8', 'metric': 'ratio', 'dimensions': {'drilldown': '城市公司'},
+        bindings={'budget': source['id']},
+        items=[{'id': 'other_income_1_8', 'metric': 'other_income', 'dimensions': {'product': '物业费'},
                 'organizations': ['集团合并'], 'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8'],
                 'requires_drilldown': False}],
     ))
-    bare = {'metric_key': 'ratio', 'organization': '集团合并', 'period': '2026-01:2026-08',
-            'scenario': 'actual_1_8', 'value': '0.945301', 'unit': '万元'}
-    run = _run(analysis, id_suffix='long-form', finance_scope=None, result={
-        'columns': [*bare, 'drilldown', 'ledger', 'currency'],
-        'rows': [bare, {**bare, 'drilldown': '城市公司', 'ledger': 'L1', 'currency': 'CNY'}],
-    })
+    bare = {'metric_key': 'other_income', 'organization': '集团合并', 'period': '2026-01:2026-08',
+            'scenario': 'actual_1_8', 'value': '2902.5', 'unit': '万元'}
+    run = _script_run(analysis, {'budget': source}, [bare, {**bare, 'product': '物业费', 'currency': 'CNY'}],
+                      suffix='long-form')
 
     gap = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
-                                        'claims': [_claim(run, row=0, column='value', value='0.945301')]})
+                                        'claims': [_claim(run, row=0, column='value', value='2902.5')]})
     item = gap['items'][0]
     fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
 
     assert item['status'] == 'pending'
-    assert item['row_field_gaps'] == {'drilldown': '城市公司', 'ledger': 'L1', 'currency': 'CNY'}
-    assert fixup['row_fields'] == {'drilldown': '城市公司'}
-    assert fixup['scope_fields'] == {'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'}
+    assert item['row_field_gaps'] == {'product': '物业费', 'currency': 'CNY'}
+    assert fixup['row_fields'] == {'product': '物业费'}
+    assert fixup['scope_fields'] == {'currency': 'CNY', 'unit': '万元'}
+    assert fixup['row_keys'] == ['metric_key', 'organization', 'period', 'scenario', 'product', 'value']
+    assert fixup['metric_key'] == 'other_income'
     assert fixup['reason'] == 'cited_rows_miss_required_fields'
     assert 'requires_closed_evidence' not in fixup
-    assert '已引用的行还缺少或不一致的字段：drilldown=城市公司、currency=CNY、ledger=L1。' in _unanswered_message(item)
+    assert '已引用的行还缺少或不一致的字段：product=物业费、currency=CNY。' in _unanswered_message(item)
+    assert 'ledger' not in _unanswered_message(item)
 
     fixed = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
-                                          'claims': [_claim(run, row=1, column='value', value='0.945301')]})
+                                          'claims': [_claim(run, row=1, column='value', value='2902.5')]})
     assert fixed['items'][0]['status'] == 'answered'
     assert 'missing_grains' not in fixed['items'][0]
 
 
-def test_revenue_requirement_says_script_value_rows_need_closed_finance_runs(analysis):
-    """PR #15 told the writer to add metric_key/.../value rows; for revenue/profit/cost/expense such rows
-    never count (no closure group), so the message must point at run_metric / explain_variance instead."""
+def test_revenue_script_rows_need_a_source_recipe_and_never_point_at_run_metric(analysis, tmp_path):
+    """PR #17 pointed revenue/profit/cost/expense items at run_metric, whose management_pnl rows can never
+    close for these metrics. Decision 1: a cited cell backed by a passing, server-evaluated direct/sum/diff
+    recipe is answered evidence; the guidance names that path and the exact cells, and following it answers."""
     from foundry.finance_requirements import _unanswered_message
 
+    budget = _workbook(analysis, tmp_path, 'budget', {'预算': {'B12': 40000.5, 'C12': 4163.1526}})
+    close = _workbook(analysis, tmp_path, 'close', {'利润表': {'C5': 3256440000}})
     requirement = save_requirements(analysis, spec(
-        scope={'ledger': 'L1'},
+        scope={'ledger': '华宸物业预算工作簿与月结套表', 'currency': 'CNY', 'unit': '万元'},
+        bindings={'budget': budget['id'], 'close': close['id']},
         items=[{'id': 'revenue_1_8', 'metric': 'revenue',
-                'organizations': ['集团合并'], 'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8'],
-                'requires_drilldown': False}],
+                'organizations': ['集团合并'], 'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8', 'budget_1_8'],
+                'requires_drilldown': True}],
     ))
-    row = {'metric_key': 'revenue', 'organization': '集团合并', 'period': '2026-01:2026-08',
-           'scenario': 'actual_1_8', 'value': '325644.0000', 'ledger': 'L1'}
-    run = _run(analysis, id_suffix='script-values', finance_scope=None, result={'columns': list(row), 'rows': [row]})
+    rows = [
+        {'metric_key': 'revenue', 'organization': '集团合并', 'period': '2026-01:2026-08', 'scenario': 'actual_1_8',
+         'value': '325644.0000', 'unit': '万元', 'currency': 'CNY'},
+        {'metric_key': 'revenue', 'organization': '集团合并', 'period': '2026-01:2026-08', 'scenario': 'budget_1_8',
+         'value': '44163.6526', 'unit': '万元', 'currency': 'CNY'},
+    ]
+    run = _script_run(analysis, {'budget': budget, 'close': close}, rows, suffix='script-values')
+    claims = [_claim(run, row=0, column='value', value='325644.0000'),
+              _claim(run, row=1, column='value', value='44163.6526')]
+    base = {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims}
 
-    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
-                                           'claims': [_claim(run, row=0, column='value', value='325644.0000')]})
+    result = check_requirements(analysis, base)
     item = result['items'][0]
     fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
     message = _unanswered_message(item)
 
-    assert item['status'] != 'answered'
-    assert item['unclosed_cited_rows'] == 1
-    assert 'row_field_gaps' not in item
+    assert item['status'] == 'pending'
+    assert 'missing_grains' not in item
+    assert item['uncounted_grains'] == [
+        {'organization': '集团合并', 'period': '2026-01:2026-08', 'scenario': 'actual_1_8',
+         'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']},
+        {'organization': '集团合并', 'period': '2026-01:2026-08', 'scenario': 'budget_1_8',
+         'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']},
+    ]
+    assert fixup['reason'] == 'cited_result_not_counted'
     assert fixup['requires_closed_evidence'] is True
-    assert fixup['accepted_tools'] == ['run_metric', 'explain_variance']
-    assert 'run_metric 或 explain_variance' in message
-    assert '本稿已引用的 1 个匹配数值因缺少闭合规则未计入。' in message
-    assert '需要含 metric_key' not in message
+    assert fixup['accepted_evidence'] == ['evidence_recipe']
+    assert [(cell['row'], cell['value']) for cell in fixup['evidence_recipe_cells']] == [(0, '325644.0000'), (1, '44163.6526')]
+    assert 'run_metric' not in json.dumps(item['fixups'], ensure_ascii=False)
+    assert 'run_metric' not in message
+    assert 'evidence_recipe（direct、sum 或 diff' in message
+    assert '只有脚本输出，没有通过的来源复算规则' in message
+
+    # Follow the fixup literally: one passing direct/sum recipe per listed cell, sources in the bindings.
+    recipes = [
+        _recipe(close, '利润表', 'C5', run, 0, scale='0.0001', recipe_id='actual'),
+        _recipe(budget, '预算', 'B12:C12', run, 1, kind='sum', recipe_id='budget'),
+    ]
+    answered = check_requirements(analysis, {**base, 'evidence_recipes': recipes})
+    item = answered['items'][0]
+    assert item['status'] == 'answered'
+    assert [location['evidence']['evidence_basis'] for location in item['locations']] == ['source_value', 'source_calculation']
+    assert all(location['evidence']['mapping_review'] == 'unreviewed' for location in item['locations'])
+    assert item['provenance_status'] == 'verified'
+    assert answered['coverage']['status'] == 'pass'
 
 
 def test_metric_key_pin_allows_long_form_ratio_rows_for_exact_scenario(analysis):
@@ -1264,6 +1342,7 @@ def _pq_run(analysis, *, method='base_weights_with_interaction', product='商品
         ]
     record = _new(
         analysis.task,
+        engine='finance',
         execution_status='succeeded',
         output_hash='pq-hash-' + method + '-' + product + '-' + period + '-' + binding_value,
         bindings=bindings or {scope_alias: binding_value},

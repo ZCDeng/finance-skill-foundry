@@ -20,6 +20,7 @@ const messages: Record<string, string> = {
   uncited_number: '正文数字尚未关联计算依据', missing_required_fact: '关键事实尚未引用',
   missing_dataset_citation: '资料来源尚未关联', unknown_fact: '引用已不属于当前计算结果',
   claim_value_mismatch: '引用值与运行结果不一致', revision_numeric_regression: '新修订改变了既有业务数值',
+  requirement_estimated: '估算：来源区域 × 系数区域推算，非源表直接数；经理确认前不计为已回答',
 };
 function sources(value: unknown): SourceRange[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -27,7 +28,7 @@ function sources(value: unknown): SourceRange[] {
   if (typeof row.dataset_id === 'string' && typeof row.sheet === 'string' && typeof row.range === 'string') {
     return [{ dataset_id: row.dataset_id, sheet: row.sheet, range: row.range, ...(typeof row.source_hash === 'string' ? { source_hash: row.source_hash } : {}) }];
   }
-  return ['left', 'right', 'reference'].flatMap((key) => sources(row[key]));
+  return ['left', 'right', 'reference', 'factor'].flatMap((key) => sources(row[key]));
 }
 function statusText(key: typeof dimensions[number][0], status: string | undefined, success: string, pending: string): string {
   if (['pass', 'passed', 'succeeded', 'verified', 'reviewed', 'approved'].includes(status ?? '')) return success;

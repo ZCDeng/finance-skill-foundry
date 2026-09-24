@@ -16,24 +16,27 @@ METHOD_ALIASES = {
     "收入-成本-费用": "revenue_minus_cost_minus_expense",
     "收入减成本减费用": "revenue_minus_cost_minus_expense",
 }
+# Evidence that can answer each native metric, not a tool to try: run_metric management_pnl rows never
+# close for revenue/profit/cost/expense, so amounts are answered by a cited cell with a passing
+# direct/sum/diff evidence recipe, or by explain_variance engine closure (items without scenarios).
 NATIVE_METRICS = {
-    "management_pnl": "run_metric",
-    "profit": "run_metric / explain_variance",
-    "revenue": "run_metric / explain_variance",
-    "cost": "run_metric / explain_variance",
-    "expense": "run_metric / explain_variance",
-    "ratio": "run_metric / explain_variance",
-    "account_total": "run_metric",
-    "control_totals": "run_metric",
-    "price_quantity": "explain_variance",
-    "amount_change": "explain_variance",
-    "total_variance": "explain_variance",
-    "quantity_contribution": "explain_variance",
-    "price_contribution": "explain_variance",
-    "interaction": "explain_variance",
-    "residual": "explain_variance",
-    "open_amount": "finance_scenario_run (receivables_aging)",
-    "closing_cash": "finance_scenario_run (cash_13_weeks)",
+    "management_pnl": "cited_result_row",
+    "profit": "evidence_recipe / engine_closure (explain_variance)",
+    "revenue": "evidence_recipe / engine_closure (explain_variance)",
+    "cost": "evidence_recipe / engine_closure (explain_variance)",
+    "expense": "evidence_recipe / engine_closure (explain_variance)",
+    "ratio": "cited_result_row",
+    "account_total": "run_metric_result_set (run_metric)",
+    "control_totals": "run_metric_result_set (run_metric)",
+    "price_quantity": "price_quantity_bridge (explain_variance)",
+    "amount_change": "engine_closure (explain_variance)",
+    "total_variance": "price_quantity_bridge (explain_variance)",
+    "quantity_contribution": "price_quantity_bridge (explain_variance)",
+    "price_contribution": "price_quantity_bridge (explain_variance)",
+    "interaction": "price_quantity_bridge (explain_variance)",
+    "residual": "price_quantity_bridge (explain_variance)",
+    "open_amount": "cited_result_row (finance_scenario_run receivables_aging)",
+    "closing_cash": "cited_result_row (finance_scenario_run cash_13_weeks)",
 }
 
 
@@ -57,7 +60,7 @@ def canonical_dimensions(dimensions):
 
 
 def metric_catalog():
-    return [{"metric": key, "tool": tool} for key, tool in NATIVE_METRICS.items()]
+    return [{"metric": key, "evidence": evidence} for key, evidence in NATIVE_METRICS.items()]
 
 
 def assess_requirement_support(analysis, spec):
@@ -84,19 +87,31 @@ def assess_requirement_support(analysis, spec):
                              "reason": "snapshot_unverified"})
     reports = []
     source_columns = {column for source in sources for column in source["columns"]}
+    from foundry.finance_requirements import _evidence_environment, _evidence_paths
+
+    try:
+        environment = _evidence_environment(analysis, spec)
+    except (FoundryError, OSError, ValueError, KeyError, TypeError):
+        environment = {"workbook_sources": [], "finance_context": None, "structure_pending": []}
     for item in spec.get("items", []):
         metric = canonical_metric(item.get("metric"))
         report = {"requirement_item_id": item.get("id"), "canonical_metric": metric,
                   "status": "requires_execution", "sources": sources}
         if metric not in NATIVE_METRICS:
             if metric in accounts:
-                report["tool"] = "run_metric (single account_total)"
+                report["evidence"] = "run_metric_result_set (single account_total)"
             elif metric in source_columns:
-                report["tool"] = "analysis-save / analysis-run (explicit result column)"
+                report["evidence"] = "cited_result_row (explicit result column)"
             else:
                 report.update(status="unrecognized", next_action="选择已支持指标，或用SQL/Python计算并声明明确的结果列；保留原问题。")
         else:
-            report["tool"] = NATIVE_METRICS[metric]
+            report["evidence"] = NATIVE_METRICS[metric]
+        if isinstance(item, dict) and isinstance(item.get("metric"), str):
+            # What can answer this item right now, and what is blocked and why (never a bare tool name).
+            paths = _evidence_paths(item, environment)
+            report["accepted_evidence"] = [path["path"] for path in paths["accepted"]]
+            if paths["blocked"]:
+                report["blocked_evidence"] = paths["blocked"]
         if failures:
             report.update(status="unverified", failures=failures,
                           next_action="先恢复并核验绑定快照，不能将读取失败当成数据不存在。")
@@ -106,7 +121,7 @@ def assess_requirement_support(analysis, spec):
                 "quantity_then_price", "base_weights_with_interaction"
             }
         ):
-            report.update(tool="explain_variance", status="requires_execution")
+            report.update(evidence=NATIVE_METRICS["price_quantity"], status="requires_execution")
             if not sources:
                 report.update(status="unverified", next_action="先绑定已授权资料，再检查量价字段。")
             else:
@@ -147,3 +162,53 @@ def input_gap_appendix(requirements):
     return "\n\n## 待补资料\n\n" + "\n".join(dict.fromkeys(
         "- 量价分解待补齐：" + item["input_gap"]["next_action"] for item in gaps
     ))
+
+
+EVIDENCE_BASIS_LABELS = {
+    "source_value": "来源原值（单元格选择待复核）",
+    "source_calculation": "来源计算（单元格选择待复核）",
+    "estimate": "估算（经理确认前不计为已回答）",
+}
+
+
+def evidence_basis_appendix(requirements):
+    """Recipe-backed cells grouped by server-derived evidence_basis; estimates show their formula.
+
+    Only item ids and sheet!range references are written, so the generated appendix adds no business
+    numbers that would need their own citation.
+    """
+    lines = []
+    for item in requirements.get("items", []):
+        groups = {}
+        for location in item.get("locations", []):
+            evidence = location.get("evidence") or {}
+            basis = evidence.get("evidence_basis")
+            if basis not in EVIDENCE_BASIS_LABELS or location.get("status") not in {"answered", "estimated"}:
+                continue
+            groups.setdefault(basis, []).append(_basis_formula(evidence))
+        if not groups:
+            continue
+        lines.append(f"- {item['id']}（{item.get('metric')}）")
+        for basis, label in EVIDENCE_BASIS_LABELS.items():
+            if basis in groups:
+                lines.append(f"  - {label}：" + "；".join(dict.fromkeys(groups[basis])))
+    if not lines:
+        return ""
+    return "\n\n## 来源复算依据\n\n" + "\n".join(lines)
+
+
+def _basis_formula(evidence):
+    text = _range_text(evidence.get("recipe_location"), evidence.get("recipe_kind"))
+    if evidence.get("recipe_scale") not in (None, "1"):
+        text += "（单位换算）"
+    factor = (evidence.get("factor") or {}).get("location")
+    return f"{text} × （{_range_text(factor, 'ratio')}）" if factor else text
+
+
+def _range_text(location, kind=None):
+    if not isinstance(location, dict):
+        return ""
+    if isinstance(location.get("left"), dict) and isinstance(location.get("right"), dict):
+        operator = "÷" if kind == "ratio" else "−"
+        return f"{_range_text(location['left'])} {operator} {_range_text(location['right'])}"
+    return f"{location.get('sheet')}!{location.get('range')}"

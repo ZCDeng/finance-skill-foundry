@@ -962,15 +962,20 @@ class FinanceStore:
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
-        # Read actual requested evidence before evaluating the final draft.
+        # Read actual requested evidence before evaluating the final draft. The draft's recipes are
+        # evaluated once here; the same server-computed report reaches save_draft.
         from foundry.finance_requirements import check_requirements
-        from foundry.finance_requirement_support import with_input_gaps, input_gap_appendix
+        from foundry.finance_requirement_support import evidence_basis_appendix, with_input_gaps, input_gap_appendix
+        from foundry.financial_evidence import evaluate_evidence_recipes
+        evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
+        recipe_report = evaluate_evidence_recipes(self.analysis, evidence_recipes)
         provisional = check_requirements(self.analysis, {
             "run_ids": run_ids, "claims": claims_for_facts(prepared["facts"], fact_ids),
             "requirements_id": spec.get("requirements_id", parent.get("requirements_id")),
-        })
+            "evidence_recipes": evidence_recipes,
+        }, _recipe_report=recipe_report)
         provisional = with_input_gaps(self.analysis, provisional)
-        appendix["body"] += input_gap_appendix(provisional)
+        appendix["body"] += input_gap_appendix(provisional) + evidence_basis_appendix(provisional)
         appendix_meta = evidence_appendix_metadata(
             appendix["body"], base_body=appendix_base_body
         )
@@ -1038,7 +1043,7 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report)
 
         from foundry.finance_completion import record_completion
 
@@ -1114,8 +1119,11 @@ class FinanceStore:
         current = latest_requirements(self.analysis)
         if current:
             self._authorize(current.get("bindings", {}))
-        merged = {**draft, **spec, "run_ids": run_ids}
-        return augment_quality(self.analysis, merged, validate_explanation_payload(self.analysis, merged))
+        # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
+        # evaluated again by validate_explanation and only that fresh report reaches coverage.
+        merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
+        quality = validate_explanation_payload(self.analysis, merged)
+        return augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"])
 
     def finance_background_save(self, spec):
         if not isinstance(spec, dict):

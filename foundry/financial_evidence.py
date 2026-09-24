@@ -14,7 +14,7 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 
-from foundry.analysis import _hash_bytes
+from foundry.analysis import _hash, _hash_bytes
 from foundry.analysis_data import archived_numeric_parser, read_exact_numerics
 from foundry.errors import FoundryError
 
@@ -23,15 +23,31 @@ MAX_RECIPE_CELLS = 8000
 MAX_RECIPE_COUNT = 256
 MAX_CONSISTENCY_SOURCE_COUNT = 256
 MAX_CONSISTENCY_RULE_COUNT = 256
+MAX_RECIPE_ANCHORS = 4
 EXCEL_MAX_ROW = 1048576
 EXCEL_MAX_COLUMN = 16384
+# What a passing recipe proves about its claim cell. Only the first two are source evidence; an
+# estimate needs a factor, and a free-form scale proves only a multiplication (never a source value).
+SOURCE_VALUE = "source_value"
+SOURCE_CALCULATION = "source_calculation"
+ESTIMATE = "estimate"
+COEFFICIENT_UNBOUND = "coefficient_unbound"
 
 
 def evaluate_evidence_recipes(analysis: Any, recipes: list[Any] | None) -> dict[str, Any]:
     clean = _clean_recipes(recipes)
     recipe_by_id = {recipe["id"]: recipe for recipe in clean}
     factor_cache: dict[str, Decimal] = {}
-    results = [_evaluate_recipe(analysis, recipe, recipe_by_id, factor_cache) for recipe in clean]
+    results = [
+        {
+            **_evaluate_recipe(analysis, recipe, recipe_by_id, factor_cache),
+            **_recipe_identity(recipe, recipe_by_id),
+            **_anchor_details(analysis, recipe),
+        }
+        for recipe in clean
+    ]
+    for result in results:
+        result["evidence_class"] = recipe_evidence_class(recipe_by_id[result["recipe_id"]], result["status"])
     issues = [result["issue"] for result in results if result.get("issue")]
     status = "not_configured" if not clean else "needs_attention" if issues else "pass"
     return {
@@ -44,6 +60,100 @@ def evaluate_evidence_recipes(analysis: Any, recipes: list[Any] | None) -> dict[
         "results": results,
         "issues": issues,
     }
+
+
+def recipe_evidence_class(recipe: dict[str, Any], status: str) -> str | None:
+    """What a recipe result proves about its claim cell; None unless it passed.
+
+    A factor-bound recipe is an estimate. A scale that is neither 1 nor an exact unit power
+    (千/万/百万/亿) is a hand-written coefficient that only proves a multiplication. A ratio
+    recipe is a source calculation of a ratio; callers must not let it prove an amount.
+    """
+    if status != "pass":
+        return None
+    if recipe.get("factor_recipe_id"):
+        return ESTIMATE
+    if not _is_unit_scale(recipe["scale"]):
+        return COEFFICIENT_UNBOUND
+    return SOURCE_VALUE if recipe["kind"] == "direct" else SOURCE_CALCULATION
+
+
+def _is_unit_scale(scale: Decimal) -> bool:
+    if scale == 1:
+        return True
+    if not scale.is_finite() or scale <= 0:
+        return False
+    sign, digits, exponent = _significand(scale)
+    return digits == (1,) and abs(exponent) in UNIT_SCALE_EXPONENTS
+
+
+def _recipe_identity(recipe: dict[str, Any], recipe_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Server-side facts about a recipe that requirement checks read instead of trusting a caller."""
+    factor = recipe_by_id.get(recipe.get("factor_recipe_id") or "")
+    return {
+        "kind": recipe["kind"],
+        "claim": dict(recipe["claim"]),
+        "scale": _format_decimal(recipe["scale"]),
+        "recipe_hash": recipe_hash(recipe),
+        "source_refs": _source_refs(recipe),
+        **(
+            {
+                "factor": {
+                    "recipe_id": factor["id"],
+                    "recipe_hash": recipe_hash(factor),
+                    "source_refs": _source_refs(factor),
+                    "location": _recipe_location(factor),
+                }
+            }
+            if factor
+            else {}
+        ),
+        "location": _recipe_location(recipe),
+    }
+
+
+def recipe_hash(recipe: dict[str, Any]) -> str:
+    """Hash of the cleaned recipe that decides the result; display-only anchors are excluded."""
+    return _hash({key: value for key, value in recipe.items() if key != "anchors"})
+
+
+def _source_refs(recipe: dict[str, Any]) -> list[dict[str, str]]:
+    sources = [recipe] if recipe["kind"] in {"direct", "sum"} else [recipe["left"], recipe["right"]]
+    return [{key: source[key] for key in ("dataset_id", "source_hash", "sheet", "range")} for source in sources]
+
+
+def _anchor_details(analysis: Any, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Archived label/header text next to the recipe range, for a manager to read; never a pass/fail input."""
+    anchors = recipe.get("anchors") or {}
+    if not anchors:
+        return {}
+    source = recipe if recipe["kind"] in {"direct", "sum"} else recipe["left"]
+    details = {}
+    for name, cell in anchors.items():
+        reference = {"dataset_id": source["dataset_id"], "source_hash": source["source_hash"], "sheet": source["sheet"], "range": cell}
+        try:
+            dataset = _read_authorized_dataset(analysis, reference)
+            details[name] = _archived_workbook_text_cell(analysis, dataset, reference)
+        except (FoundryError, OSError, ValueError, KeyError) as exc:
+            details[name] = {"sheet": source["sheet"], "range": cell, "error": str(exc)}
+    return {"anchors": details}
+
+
+def _clean_anchors(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or len(value) > MAX_RECIPE_ANCHORS:
+        raise FoundryError(f"evidence recipe anchors must be an object with at most {MAX_RECIPE_ANCHORS} cells")
+    anchors = {}
+    for name, cell in value.items():
+        label = _text(name, "evidence recipe anchor name")
+        reference = _text(cell, "evidence recipe anchor cell").replace("$", "")
+        try:
+            min_col, min_row, max_col, max_row = range_boundaries(reference)
+        except ValueError as exc:
+            raise FoundryError("evidence recipe anchor must be a single A1 cell") from exc
+        if None in {min_col, min_row} or min_col != max_col or min_row != max_row:
+            raise FoundryError("evidence recipe anchor must be a single A1 cell")
+        anchors[label[:40]] = reference
+    return anchors
 
 
 def recipe_dataset_ids(recipes: list[Any] | None) -> set[str]:
@@ -137,6 +247,8 @@ def _clean_recipe(recipe: Any, index: int) -> dict[str, Any]:
         "claim": _claim(recipe.get("claim")),
         "business_key": recipe.get("business_key") if isinstance(recipe.get("business_key"), dict) else {},
     }
+    if recipe.get("anchors") is not None:
+        cleaned["anchors"] = _clean_anchors(recipe.get("anchors"))
     if kind in {"direct", "sum"}:
         cleaned.update(_source(recipe))
         if recipe.get("factor_recipe_id") is not None:
@@ -202,11 +314,13 @@ def _evaluate_recipe(
             "issue": _issue(recipe, "evidence_recipe_unreadable", str(exc), actual=None, expected=None),
         }
     if actual != expected:
+        rounded = _rounding_hint(actual, expected)
         return {
             "recipe_id": recipe["id"],
             "status": "mismatch",
             "actual": _format_decimal(actual),
             "expected": _format_decimal(expected),
+            **({"precision_hint": FULL_PRECISION_REQUIRED} if rounded else {}),
             **_factor_result_details(recipe, factor_value),
             "issue": _issue(
                 recipe,
@@ -215,6 +329,7 @@ def _evaluate_recipe(
                 actual=actual,
                 expected=expected,
                 scale_hint=_accepts_scale(recipe, recipe_by_id),
+                precision_hint=rounded,
             ),
         }
     return {
@@ -329,6 +444,7 @@ def _issue(
     actual: Decimal | None,
     expected: Decimal | None,
     scale_hint: bool = False,
+    precision_hint: bool = False,
 ) -> dict[str, Any]:
     expected_text = _format_decimal(expected) if expected is not None else ""
     actual_text = _format_decimal(actual) if actual is not None else None
@@ -342,6 +458,13 @@ def _issue(
             f"{location['left']['sheet']}!{location['left']['range']} "
             f"{operator} {location['right']['sheet']}!{location['right']['range']}"
         )
+    if message is None:
+        message = _mismatch_message(source_label, actual_text, expected_text, recipe["scale"], exponent)
+        if precision_hint:
+            message += (
+                "运行引用值与独立计算值按引用值的小数位舍入后一致，差异来自运行结果被舍入；"
+                "请在运行结果中保存完整精度的数值（展示时再舍入），精确比对不放宽。"
+            )
     return {
         "code": code,
         "severity": "error",
@@ -353,11 +476,44 @@ def _issue(
         "location": location,
         "claim": recipe.get("claim", {}),
         **({"suggested_scale": _format_decimal(_shifted(recipe["scale"], exponent))} if exponent is not None else {}),
-        "message": message or _mismatch_message(source_label, actual_text, expected_text, recipe["scale"], exponent),
+        **({"precision_hint": FULL_PRECISION_REQUIRED} if precision_hint else {}),
+        "message": message,
     }
 
 
 UNIT_SCALE_EXPONENTS = {3, 4, 6, 8}  # 千元、万元、百万元、亿元
+FULL_PRECISION_REQUIRED = "full_precision_required"
+
+
+def _rounding_hint(actual: Decimal | None, expected: Decimal | None) -> bool:
+    """Whether the claimed value is the independent value rounded to the claim's own decimals.
+
+    Like _unit_scale_hint this only explains a mismatch; the comparison stays exact. Both half-up
+    and half-even rounding are recognised, since scripts and SQL engines differ.
+    """
+    if actual is None or expected is None or not actual.is_finite() or not expected.is_finite():
+        return False
+    if actual == expected:
+        return False
+    sign, digits, actual_exponent = actual.as_tuple()
+    exponent = expected.as_tuple().exponent
+    if actual_exponent >= exponent:
+        return False
+    # Rounded on the digit tuple (like _unit_scale_hint) so extreme exponents cannot overflow.
+    dropped_count = exponent - actual_exponent
+    if dropped_count > len(digits):
+        kept, dropped = 0, (0,)
+    else:
+        kept = int("".join(map(str, digits[: len(digits) - dropped_count])) or "0")
+        dropped = digits[len(digits) - dropped_count :]
+    first, rest = dropped[0], any(dropped[1:])
+    half_up = first >= 5
+    half_even = first > 5 or (first == 5 and (rest or kept % 2 == 1))
+    for round_up in {half_up, half_even}:
+        value = kept + (1 if round_up else 0)
+        if Decimal((sign, tuple(int(char) for char in str(value)), exponent)) == expected:
+            return True
+    return False
 
 
 def _accepts_scale(recipe: dict[str, Any], recipe_by_id: dict[str, dict[str, Any]] | None) -> bool:

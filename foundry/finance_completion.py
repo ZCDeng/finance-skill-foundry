@@ -5,7 +5,16 @@ from foundry.analysis import _hash, _new
 from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
-COMPLETION_POLICY_VERSION = 4
+COMPLETION_POLICY_VERSION = 5
+# Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
+MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
+COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
+MANAGER_REASON_TEXT = {
+    'estimate_requires_acceptance': '估算组合待经理确认是否按估算列示',
+    'unavailable_declared': '声明为资料缺失的组合待经理确认',
+    'estimate_factor_not_reproducible': '估算系数无法由归档单元格复算，需经理决定口径',
+    'structure_pending_confirmation': '工作簿结构待经理确认',
+}
 
 
 def record_completion(analysis, draft, quality):
@@ -41,6 +50,24 @@ def record_completion(analysis, draft, quality):
     if awaiting_input:
         issues.extend({'code': 'verified_input_gap', 'requirement_item_id': key,
                        'message': gaps[key]['next_action']} for key in sorted(remaining))
+    # Only estimates, manager-declared gaps or a structure the manager must confirm are left: the
+    # assistant stops instead of spending repairs on something only the manager can decide.
+    waiting = {item['id']: item.get('awaiting_manager') or [] for item in requirements.get('items', [])
+               if item.get('id') in remaining and item.get('awaiting_manager')}
+    awaiting_manager = (
+        not awaiting_input and bool(waiting) and remaining <= (waiting.keys() | gaps.keys())
+        and not requirements.get('scope_changed') and not stale_runs
+        and quality.get('checks', {}).get('numbers', {}).get('status') == 'pass'
+        and all(issue.get('code') in MANAGER_WAIT_ISSUES and issue.get('requirement_item_id') in remaining
+                for issue in issues)
+    )
+    manager_reasons = sorted({reason for reasons in waiting.values() for reason in reasons})
+    if awaiting_manager:
+        issues.extend({'code': 'awaiting_manager', 'requirement_item_id': key, 'reasons': waiting[key],
+                       'message': '剩余事项需要经理处理：'
+                       + '、'.join(MANAGER_REASON_TEXT.get(reason, reason) for reason in waiting[key])
+                       + '。助手不再自动修补，本轮答复如实说明这些待经理处理的事项。'}
+                      for key in sorted(waiting))
     if stale_runs:
         issues.append({'code': 'requirements_run_outdated', 'run_ids': sorted(stale_runs),
                        'message': '这些运行未绑定当前要求，且无法证明语义兼容。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
@@ -63,12 +90,18 @@ def record_completion(analysis, draft, quality):
                       or not analysis._get('requirements', requirement_id).get('items')
                       or requirements.get('coverage', {}).get('status') in {None, 'not_assessed'})
         complete = (quality['status'] == 'pass' and not unassessed
-                    and requirements.get('coverage', {}).get('status') == 'pass'
-                    and requirements.get('provenance', {}).get('status') == 'pass'
+                    and requirements.get('coverage', {}).get('status') in COVERAGE_COMPLETE
+                    and requirements.get('provenance', {}).get('status') in COVERAGE_COMPLETE
                     and not stale_runs)
         stalled = bool(history) and history[-1].get('issue_fingerprint') == issue_fingerprint and not complete
         exhausted = len(history) >= MAX_REPAIRS
-        status = 'complete' if complete else 'awaiting_input' if awaiting_input else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available'
+        status = ('complete' if complete else 'awaiting_input' if awaiting_input
+                  else 'awaiting_manager' if awaiting_manager and not unassessed
+                  else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available')
+        stop_reason = ('complete' if complete else 'verified_input_gap' if awaiting_input
+                       else ('estimate_requires_acceptance' if 'estimate_requires_acceptance' in manager_reasons
+                             else 'manager_decision_required') if status == 'awaiting_manager'
+                       else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None)
         actions = [{'code': issue.get('code'), 'message': issue.get('message'),
                     **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
                     **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {}),
@@ -82,9 +115,11 @@ def record_completion(analysis, draft, quality):
                       reused_run_ids=sorted(reused_runs), run_hashes=run_hashes, chain_key=chain_key,
                       input_key=input_key, issue_fingerprint=issue_fingerprint,
                       status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
-                      response_status='ended_with_limitations' if awaiting_input else 'complete' if complete else 'needs_review',
+                      response_status=('ended_with_limitations' if awaiting_input or status == 'awaiting_manager'
+                                       else 'complete' if complete else 'needs_review'),
                       original_requirements_completed=bool(requirements.get('original_requirements_completed')) and complete,
                       repair_allowed=status in {'repair_available','needs_requirements'} and not exhausted and not stalled,
-                      stop_reason='complete' if complete else 'verified_input_gap' if awaiting_input else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None,
+                      stop_reason=stop_reason,
+                      **({'manager_reasons': manager_reasons} if status == 'awaiting_manager' else {}),
                       actions=actions, checks=quality.get('checks', {}))
         return analysis._write_locked(analysis._object_path('completions', record['id']), record)

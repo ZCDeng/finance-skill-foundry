@@ -525,11 +525,19 @@ def _tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "analysis_requirements_save",
-            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution.",
+            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution. support.items name the accepted_evidence that can answer each item now and the blocked_evidence with its blockers. scope.unit and currency only constrain amount items, never ratio items; the ledger is proven by the bound snapshot hashes and is not copied onto result rows. Hierarchy levels such as drilldown are refused as dimensions; the refusal carries suggested_items that can be resubmitted unchanged.",
             "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
                 "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
                 "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
-                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "organizations": {"type": "array", "items": text, "description": "Every organization that must be covered, crossed with every requested period. Leave shared scope.organization empty for a multi-organization requirement."}, "requires_drilldown": {"type": "boolean"}}},
+                    "id": text, "metric": text, "label": text,
+                    "dimensions": {"type": "object", "description": "Result-row filter fields the cited row must carry verbatim (metric_key, management_account, product) and the method/dimension/scenario_compare intents. Hierarchy levels such as drilldown are not dimensions: list each drilldown target in organizations or save it as its own item; use requires_drilldown for per-cell source tracing."},
+                    "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "organizations": {"type": "array", "items": text, "description": "Every organization that must be covered, crossed with every requested period. Leave shared scope.organization empty for a multi-organization requirement."},
+                    "scenarios": {"type": "array", "items": text, "description": "Every result scenario key that must be covered, as the run rows state it."},
+                    "requires_drilldown": {"type": "boolean"},
+                    "grain_basis": {"type": "array", "description": "Optional declarations for grains the source does not state. basis=estimate needs method; only those grains accept a factor_recipe_id estimate, which stays estimated and is never answered. If no recipe can reproduce the coefficient, set factor_reproducible=false with a reason: the grain stays pending for the manager and must not be filled with another coefficient. basis=unavailable needs a reason and only counts as missing data after the manager confirms it.", "items": {"type": "object", "required": ["basis"], "properties": {
+                        "basis": {"type": "string", "enum": ["estimate", "unavailable"]},
+                        "organizations": {"type": "array", "items": text}, "periods": {"type": "array", "items": text}, "scenarios": {"type": "array", "items": text},
+                        "method": text, "factor_reproducible": {"type": "boolean"}, "reason": text}}}}},
                 },
             }},
         },
@@ -602,7 +610,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "validate_explanation",
             "title": "Validate finance explanation draft",
-            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. It also returns independent readability suggestions for dense paragraphs or inline formula stacking. It does not approve the draft.",
+            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. evidence_recipes are re-evaluated against the archived snapshots by the server; a supplied evidence_report is ignored. It also returns independent readability suggestions for dense paragraphs or inline formula stacking. It does not approve the draft.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -668,7 +676,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_explanation_draft",
             "title": "Save finance explanation draft",
-            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. Keep {{fact:FACT_ID}} where each number appears; use chapter-end footnotes such as [^1] for source locations, not as numeric placeholders. The returned quality keeps finance checks separate from readability suggestions, and completion preserves editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete.",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. Keep {{fact:FACT_ID}} where each number appears; use chapter-end footnotes such as [^1] for source locations, not as numeric placeholders. The returned quality keeps finance checks separate from readability suggestions, and completion preserves editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete. A revenue, cost, expense or profit requirement is answered only by a finance-engine explain_variance closure (not for items with scenarios) or by a cited run cell with a passing direct/sum/diff evidence recipe whose sources are the requirement's bound snapshots and whose scale is 1 or an exact unit power; script output, script-built closures and run_metric management_pnl rows do not count, ratio recipes never prove amounts, and factor recipes only reach estimated for grains declared as estimates. Keep full precision in run results, write the requirement metric as metric_key and currency/unit on rows, and never copy the ledger text onto rows. awaiting_manager means only estimates awaiting acceptance, declared gaps or a structure awaiting the manager remain; stop repairing and report them.",
             "inputSchema": {
                 "type": "object",
                 "required": ["body"],

@@ -36,6 +36,8 @@ def requirement_semantics(analysis, record):
             'requires_drilldown': item.get('requires_drilldown', False),
             **({'organizations': sorted(set(item['organizations']))} if item.get('organizations') else {}),
             **({'scenarios': sorted(set(item['scenarios']))} if item.get('scenarios') else {}),
+            # Declaring a grain as estimate or unavailable changes what can answer it.
+            **({'grain_basis': item['grain_basis']} if item.get('grain_basis') else {}),
         } for item in record.get('items', [])], key=lambda item: item['id']),
     }
     return {'semantic_version': SEMANTIC_VERSION, 'semantic_basis': basis,
