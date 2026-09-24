@@ -2436,7 +2436,12 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
             continue
         before = body[match.start() - 1 : match.start()]
         after = body[match.end() : match.end() + 1]
-        if (before and before in "-/年月日") or (after and after in "-/年月日"):
+        if (before and before in "-–—/年月日") or (after and after in "-–—/年月日"):
+            continue
+        # 中文排版常在数字与年/月/日之间加空格：「1–8 月」「2026 年 08 月」。
+        spaced_before = body[: match.start()].rstrip(" \u00a0\u2009\u202f\u3000")[-1:]
+        spaced_after = body[match.end() :].lstrip(" \u00a0\u2009\u202f\u3000")[:1]
+        if (spaced_before and spaced_before in "年月日") or (spaced_after and spaced_after in "年月日"):
             continue
         if _is_spreadsheet_reference_number(body, match):
             continue
@@ -2454,7 +2459,7 @@ def _is_spreadsheet_reference_number(body: str, match: re.Match[str]) -> bool:
         return bool(re.match(r"\$?[A-Za-z]{1,3}\$?[1-9]\d*\b", tail))
     if after == "·":
         return bool(re.match(r"[\u4e00-\u9fff]+", tail))
-    return False
+    return bool(re.match(r"[ \u00a0\u3000]?表", body[match.end() :]))
 
 
 def _numbers_from_text(text: str) -> set[str]:
