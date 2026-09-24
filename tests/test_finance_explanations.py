@@ -1032,6 +1032,116 @@ def test_mid_name_rate_and_day_columns_do_not_inherit_the_amount_unit(service):
     assert facts["应收周转天数_年化"]["semantics"]["role"] != "amount"
 
 
+def test_money_unit_segment_beats_a_rate_driver_segment(service):
+    """毛利率_影响_万元 is a 万元 impact of the margin rate, not a rate shown ×100."""
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "abababababababababababababababab",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "华东区域", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "区域", "type": "VARCHAR"},
+                {"name": "毛利率_影响_万元", "type": "DECIMAL(38,4)"},
+                {"name": "汇率_影响_万元", "type": "DECIMAL(38,4)"},
+                {"name": "利率_影响_万元", "type": "DECIMAL(38,4)"},
+                {"name": "营业利润_差异率_同口径", "type": "DECIMAL(18,6)"},
+                {"name": "收缴率_实际", "type": "DECIMAL(18,6)"},
+            ],
+            "rows": [{
+                "区域": "华东区域",
+                "毛利率_影响_万元": "-120.5",
+                "汇率_影响_万元": "35.2",
+                "利率_影响_万元": "-8.4",
+                "营业利润_差异率_同口径": "-0.106551",
+                "收缴率_实际": "0.902000",
+            }],
+        },
+    })
+
+    facts = {fact["column"]: fact for fact in prepare_explanation(store.analysis, [run])["facts"]}
+
+    for column, display in (
+        ("毛利率_影响_万元", "-120.5 万元"),
+        ("汇率_影响_万元", "35.2 万元"),
+        ("利率_影响_万元", "-8.4 万元"),
+    ):
+        assert facts[column]["unit"] == "万元", column
+        assert facts[column]["display_value"] == display
+        assert facts[column]["semantics"]["role"] == "amount", column
+    assert facts["营业利润_差异率_同口径"]["unit"] == "%"
+    assert facts["营业利润_差异率_同口径"]["display_value"] == "-10.66%"
+    assert facts["收缴率_实际"]["unit"] == "%"
+    assert facts["收缴率_实际"]["display_value"] == "90.20%"
+
+    margin = facts["毛利率_影响_万元"]
+    stated = store.validate_explanation({
+        "body": "毛利率变化对毛利的影响为 -120.5 万元。",
+        "run_ids": [run["id"]],
+        "fact_ids": [margin["id"]],
+        "materiality": {"absolute": "1000"},
+    })
+    as_percent = store.validate_explanation({
+        "body": "毛利率影响-12,050.00%。",
+        "run_ids": [run["id"]],
+        "claims": [_presentation_claim_for_fact(margin, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})],
+    })
+
+    assert not any(issue["code"] == "fact_unit_mismatch" for issue in stated["issues"]), stated["issues"]
+    assert any(
+        issue["code"] == "invalid_presentation" and issue["reason"] == "percent_requires_ratio_fact"
+        for issue in as_percent["issues"]
+    )
+
+
+def test_money_column_over_a_day_window_keeps_the_amount_unit(service):
+    """revenue_last_30_days is money over 30 days; only a day count takes 天."""
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "华东区域", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "区域", "type": "VARCHAR"},
+                {"name": "revenue_last_30_days", "type": "DECIMAL(38,4)"},
+                {"name": "ar_amount_over_90_days", "type": "DECIMAL(38,4)"},
+                {"name": "应收_逾期_90_天_万元", "type": "DECIMAL(38,4)"},
+                {"name": "应收周转天数_年化", "type": "DECIMAL(18,2)"},
+            ],
+            "rows": [{
+                "区域": "华东区域",
+                "revenue_last_30_days": "1484.9515",
+                "ar_amount_over_90_days": "1234567.5",
+                "应收_逾期_90_天_万元": "88.5",
+                "应收周转天数_年化": "90.73",
+            }],
+        },
+    })
+
+    facts = {fact["column"]: fact for fact in prepare_explanation(store.analysis, [run])["facts"]}
+
+    for column, display in (
+        ("revenue_last_30_days", "1,484.9515 万元"),
+        ("ar_amount_over_90_days", "1,234,567.5 万元"),
+        ("应收_逾期_90_天_万元", "88.5 万元"),
+    ):
+        assert facts[column]["unit"] == "万元", column
+        assert facts[column]["display_value"] == display
+        assert facts[column]["semantics"]["role"] == "amount", column
+    assert facts["应收周转天数_年化"]["unit"] == "天"
+    assert facts["应收周转天数_年化"]["display_value"] == "90.73 天"
+    assert facts["应收周转天数_年化"]["semantics"]["role"] != "amount"
+
+
 def test_chinese_wide_result_uses_run_scope_unit_without_leaking_to_ratio(service):
     from foundry.finance_explanations import prepare_explanation
 

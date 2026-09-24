@@ -157,6 +157,29 @@ describe('business result presentation', () => {
     expect(rows[0]).toMatchObject({ 指标: '收入', 达成率: '93.90%' });
   });
 
+  it('lets a money unit or amount word beat a 率 driver or day window in the name', () => {
+    for (const name of ['毛利率_影响_万元', '汇率_影响_万元', '利率_影响_万元', 'revenue_last_30_days', 'ar_amount_over_90_days', '应收_逾期_90_天_万元']) {
+      expect(columnSemantics(name, 'DECIMAL(38,4)'), name).toBe('amount');
+      expect(columnSemantics(name), name).toBe('amount');
+    }
+    expect(columnSemantics('营业利润_差异率_同口径', 'DECIMAL(18,6)')).toBe('ratio');
+    expect(columnSemantics('收缴率_实际', 'DECIMAL(18,6)')).toBe('ratio');
+    expect(columnSemantics('毛利率_实际', 'DECIMAL(18,6)')).toBe('ratio');
+    const rows = displayRows(run({
+      result: {
+        columns: [
+          { name: '区域', type: 'VARCHAR' },
+          { name: '汇率_影响_万元', type: 'DECIMAL(38,4)' },
+          { name: '营业利润_差异率_同口径', type: 'DECIMAL(18,6)' },
+        ],
+        rows: [{ 区域: '华东区域', 汇率_影响_万元: '35.2', 营业利润_差异率_同口径: '-0.106551' }],
+        row_count: 1,
+        truncated: false,
+      },
+    }));
+    expect(rows[0]).toMatchObject({ 汇率_影响_万元: '35.20', 营业利润_差异率_同口径: '-10.66%' });
+  });
+
   it('keeps explicit pct fields as already-percent values', () => {
     expect(formatBusinessValue('94.53', 'ratio_pct')).toBe('94.53%');
     const rows = displayRows(run({

@@ -54,6 +54,11 @@ MONEY_COLUMNS = {
     "residual",
 }
 RATIO_COLUMNS = {"ratio", "ratio_exact", "cost_rate_pct", "gross_margin_pct"}
+MONEY_UNIT_SEGMENTS = {"万元", "元", "亿元", "千元", "百万元"}
+MONEY_TOKENS = {
+    "amount", "revenue", "cost", "expense", "profit", "cash",
+    "budget", "actual", "variance", "sales", "income",
+}
 EXACT_VALUE_COLUMNS = {"numerator_exact", "denominator_exact", "ratio_exact"}
 COUNT_COLUMNS = {"row_count"}
 QUANTITY_COLUMNS = {"quantity", "actual_quantity", "baseline_quantity", "quantity_change"}
@@ -922,7 +927,12 @@ def _is_ratio_column(column: str) -> bool:
         or "比率" in column
         or "达成率" in column
         or "完成率" in column
-        or any(segment.endswith("率") for segment in _column_segments(column))
+        or column.endswith("率")
+        # 汇率_影响_万元 names a 率 driver but holds money; the money word wins.
+        or (
+            any(segment.endswith("率") for segment in _column_segments(column))
+            and not _names_money(column)
+        )
     )
 
 
@@ -931,7 +941,16 @@ def _column_segments(column: str) -> list[str]:
     return [segment for segment in re.split(r"[_\-\s/]+", column) if segment]
 
 
+def _names_money(column: str) -> bool:
+    """A money unit segment (…_万元) or an English amount word (revenue_…) says the column is money."""
+    return bool(_column_tokens(column) & MONEY_TOKENS) or any(
+        segment in MONEY_UNIT_SEGMENTS for segment in _column_segments(column)
+    )
+
+
 def _is_day_column(column: str) -> bool:
+    if _names_money(column):
+        return False  # revenue_last_30_days, 应收_逾期_90_天_万元: money over a day window
     segments = _column_segments(column)
     return bool(_column_tokens(column) & {"days", "dso"}) or any(
         "天数" in segment or segment == "天" for segment in segments
@@ -945,6 +964,8 @@ def _is_amount_column(column: str) -> bool:
         return False
     tokens = _column_tokens(column)
     if tokens & {"amount", "revenue", "cost", "expense", "profit", "cash", "budget", "actual", "variance"}:
+        return True
+    if any(segment in MONEY_UNIT_SEGMENTS for segment in _column_segments(column)):
         return True
     return any(
         token in column
