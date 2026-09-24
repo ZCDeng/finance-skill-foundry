@@ -339,6 +339,75 @@ def test_pending_grain_requirement_names_missing_combinations_and_row_keys(analy
     assert len(complete['items'][0]['missing_grains']) == 2
 
 
+def test_cited_rows_missing_dimension_and_scope_fields_are_named_and_fixing_them_answers(analysis):
+    """Huachen rerun: long-form rows had metric_key/organization/period/scenario/value but no
+    drilldown dimension and no ledger/currency (the run had no finance_scope), so nothing matched.
+    The named fields must be exactly what makes the matcher accept the row."""
+    from foundry.finance_requirements import _unanswered_message
+
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'},
+        items=[{'id': 'attainment_1_8', 'metric': 'ratio', 'dimensions': {'drilldown': '城市公司'},
+                'organizations': ['集团合并'], 'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8'],
+                'requires_drilldown': False}],
+    ))
+    bare = {'metric_key': 'ratio', 'organization': '集团合并', 'period': '2026-01:2026-08',
+            'scenario': 'actual_1_8', 'value': '0.945301', 'unit': '万元'}
+    run = _run(analysis, id_suffix='long-form', finance_scope=None, result={
+        'columns': [*bare, 'drilldown', 'ledger', 'currency'],
+        'rows': [bare, {**bare, 'drilldown': '城市公司', 'ledger': 'L1', 'currency': 'CNY'}],
+    })
+
+    gap = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                        'claims': [_claim(run, row=0, column='value', value='0.945301')]})
+    item = gap['items'][0]
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+
+    assert item['status'] == 'pending'
+    assert item['row_field_gaps'] == {'drilldown': '城市公司', 'ledger': 'L1', 'currency': 'CNY'}
+    assert fixup['row_fields'] == {'drilldown': '城市公司'}
+    assert fixup['scope_fields'] == {'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'}
+    assert fixup['reason'] == 'cited_rows_miss_required_fields'
+    assert 'requires_closed_evidence' not in fixup
+    assert '已引用的行还缺少或不一致的字段：drilldown=城市公司、currency=CNY、ledger=L1。' in _unanswered_message(item)
+
+    fixed = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                          'claims': [_claim(run, row=1, column='value', value='0.945301')]})
+    assert fixed['items'][0]['status'] == 'answered'
+    assert 'missing_grains' not in fixed['items'][0]
+
+
+def test_revenue_requirement_says_script_value_rows_need_closed_finance_runs(analysis):
+    """PR #15 told the writer to add metric_key/.../value rows; for revenue/profit/cost/expense such rows
+    never count (no closure group), so the message must point at run_metric / explain_variance instead."""
+    from foundry.finance_requirements import _unanswered_message
+
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'revenue_1_8', 'metric': 'revenue',
+                'organizations': ['集团合并'], 'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8'],
+                'requires_drilldown': False}],
+    ))
+    row = {'metric_key': 'revenue', 'organization': '集团合并', 'period': '2026-01:2026-08',
+           'scenario': 'actual_1_8', 'value': '325644.0000', 'ledger': 'L1'}
+    run = _run(analysis, id_suffix='script-values', finance_scope=None, result={'columns': list(row), 'rows': [row]})
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                           'claims': [_claim(run, row=0, column='value', value='325644.0000')]})
+    item = result['items'][0]
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+    message = _unanswered_message(item)
+
+    assert item['status'] != 'answered'
+    assert item['unclosed_cited_rows'] == 1
+    assert 'row_field_gaps' not in item
+    assert fixup['requires_closed_evidence'] is True
+    assert fixup['accepted_tools'] == ['run_metric', 'explain_variance']
+    assert 'run_metric 或 explain_variance' in message
+    assert '本稿已引用的 1 个匹配数值因缺少闭合规则未计入。' in message
+    assert '需要含 metric_key' not in message
+
+
 def test_metric_key_pin_allows_long_form_ratio_rows_for_exact_scenario(analysis):
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1'},

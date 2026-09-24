@@ -42,6 +42,8 @@ PRICE_QUANTITY_REQUIRED_COLUMNS = (
 )
 RESULT_SET_METRICS = {'control_totals'}
 INTENT_DIMENSION_KEYS = {'dimension', 'scenario_compare'}
+# Amounts that only count as answered when their evidence group closes (profit bridge, run_metric totals).
+CLOSED_EVIDENCE_METRICS = {'profit', 'revenue', 'cost', 'expense'}
 PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
 CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
@@ -888,13 +890,13 @@ def _location_evidence_status(item, location, member):
         return 'missing_data', metadata
     if member.get('member_state') == 'not_applicable':
         return 'not_applicable', metadata
-    if member.get('closure_status') == 'unsupported' and item.get('metric') in {'profit', 'revenue', 'cost', 'expense'}:
+    if member.get('closure_status') == 'unsupported' and item.get('metric') in CLOSED_EVIDENCE_METRICS:
         return 'not_applicable', metadata
     if member.get('group_status') == 'missing_data':
         return 'missing_data', metadata
     if member.get('group_status') in {'scope_mismatch', 'unit_mismatch', 'closure_mismatch'}:
         return 'missing_data', metadata
-    if member.get('group_status') == 'unsupported' and item.get('metric') in {'profit', 'revenue', 'cost', 'expense'}:
+    if member.get('group_status') == 'unsupported' and item.get('metric') in CLOSED_EVIDENCE_METRICS:
         return 'not_applicable', metadata
     return 'answered', metadata
 
@@ -1268,8 +1270,14 @@ def check_requirements(analysis, spec, *, _requirements_record=None):
                        'provenance_status': provenance_status}
         missing_grains = _missing_grains(item, grain_locations) if item_status != 'answered' else []
         if missing_grains:
+            required_fields = _required_row_fields(item, latest.get('scope') or {})
+            field_gaps, unclosed = _cited_row_field_gaps(item, latest, runs, claimed, required_fields, evidence)
             item_record['missing_grains'] = missing_grains
-            fixups = [*fixups, _missing_rows_fixup(item, missing_grains)]
+            if field_gaps:
+                item_record['row_field_gaps'] = field_gaps
+            if unclosed:
+                item_record['unclosed_cited_rows'] = unclosed
+            fixups = [*fixups, _missing_rows_fixup(item, missing_grains, required_fields, field_gaps)]
         source_fixups = [fixup for location in locations
                          for fixup in [_source_fixup(item, location, checks)] if fixup]
         fixups = _dedupe_fixups([*fixups, *source_fixups])
@@ -1297,17 +1305,73 @@ def _missing_grains(item, grain_locations):
     ]
 
 
-def _missing_rows_fixup(item, missing_grains):
+def _required_row_fields(item, scope):
+    """Fixed fields a cited row must carry besides metric/grain/value: non-intent dimensions and, when the
+    run has no finance_scope, the requirement scope (see _scope_matches' row fallback)."""
+    fields = {}
+    dimensions = item.get('dimensions') if isinstance(item.get('dimensions'), dict) else {}
+    for key, value in dimensions.items():
+        if key not in {'method', *INTENT_DIMENSION_KEYS}:
+            fields[key] = value
+    grain_keys = {'organization', 'period', 'scenario'}
+    for key, value in (_comparison_scopes(scope)['actual'] if scope else {}).items():
+        if key not in grain_keys:
+            fields.setdefault(key, value)
+    return fields
+
+
+def _cited_row_field_gaps(item, latest, runs, claimed, required_fields, evidence):
+    """Why already-cited, grain-matching rows do not answer the item: fields they miss, and how many
+    matched fully but have no closed evidence group (only counted for CLOSED_EVIDENCE_METRICS)."""
+    metric_only = {**item, 'dimensions': {}}
+    gaps = {}
+    unclosed = 0
+    for run_id, index, column in claimed:
+        run = runs.get(run_id)
+        if not run or not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+            continue
+        row = run['result']['rows'][index]
+        if not _requested_grain_matches(item, run, row) or not _matches(metric_only, row, column, run):
+            continue
+        dimensions_ok = _dimensions_match(item, row, run)
+        scope_ok = _scope_matches(run, row, latest.get('scope') or {})
+        if dimensions_ok and scope_ok:
+            location = {'run_id': run_id, 'row': index, 'column': column}
+            status, _ = _location_evidence_status(item, location, evidence['members'].get((run_id, index, column)))
+            if status == 'not_applicable' and item.get('metric') in CLOSED_EVIDENCE_METRICS:
+                unclosed += 1
+            continue
+        for key, value in required_fields.items():
+            is_dimension = key in (item.get('dimensions') or {})
+            if (is_dimension and dimensions_ok) or (not is_dimension and scope_ok):
+                continue
+            if row.get(key) != value:
+                gaps[key] = value
+    return gaps, unclosed
+
+
+def _missing_rows_fixup(item, missing_grains, required_fields=None, field_gaps=None):
     """Tell the writer which cited rows would answer the item; wide tables carry none of these keys."""
-    row_keys = ['metric_key', *[key for key in ('organization', 'period', 'scenario') if key in missing_grains[0]], 'value']
+    required_fields = required_fields or {}
+    dimensions = item.get('dimensions') if isinstance(item.get('dimensions'), dict) else {}
+    dimension_fields = {key: value for key, value in required_fields.items() if key in dimensions}
+    scope_fields = {key: value for key, value in required_fields.items() if key not in dimensions}
+    row_keys = ['metric_key', *[key for key in ('organization', 'period', 'scenario') if key in missing_grains[0]],
+                *dimension_fields, 'value']
     return {
         'code': 'add_requirement_rows',
         'requirement_item_id': item['id'],
         'metric': item.get('metric'),
         'row_keys': row_keys,
+        **({'row_fields': dimension_fields} if dimension_fields else {}),
+        # Scope may come from the run's finance_scope instead of every row.
+        **({'scope_fields': scope_fields} if scope_fields else {}),
+        **({'cited_row_field_gaps': field_gaps} if field_gaps else {}),
+        **({'requires_closed_evidence': True, 'accepted_tools': ['run_metric', 'explain_variance']}
+           if item.get('metric') in CLOSED_EVIDENCE_METRICS else {}),
         'missing_count': len(missing_grains),
         'missing': missing_grains[:12],
-        'reason': 'no_cited_row_for_requested_grain',
+        'reason': 'cited_rows_miss_required_fields' if field_gaps else 'no_cited_row_for_requested_grain',
     }
 
 
@@ -1395,10 +1459,24 @@ def _unanswered_message(item):
         return message
     example = '、'.join(str(value) for value in missing[0].values() if value not in (None, ''))
     keys = '、'.join(key for key in ('organization', 'period', 'scenario') if key in missing[0])
-    return (
-        f'{message}{len(missing)} 个要求组合没有已引用的结果行（如 {example}）；'
-        f'需要含 metric_key、{keys} 和 value 的结果行，并在文稿中引用该数值。'
-    )
+    if item.get('metric') in CLOSED_EVIDENCE_METRICS:
+        message = (
+            f'{message}{len(missing)} 个要求组合没有可计入的已引用结果（如 {example}）；'
+            '收入、成本、费用、利润类要求只接受 run_metric 或 explain_variance 生成、可复算闭合的财务运行结果，'
+            '脚本整理的单列数值行不计为已回答。'
+        )
+        if item.get('unclosed_cited_rows'):
+            message += f'本稿已引用的 {item["unclosed_cited_rows"]} 个匹配数值因缺少闭合规则未计入。'
+    else:
+        message = (
+            f'{message}{len(missing)} 个要求组合没有已引用的结果行（如 {example}）；'
+            f'需要含 metric_key、{keys} 和 value 的结果行，并在文稿中引用该数值。'
+        )
+    gaps = item.get('row_field_gaps') or {}
+    if gaps:
+        fields = '、'.join(f'{key}={value}' for key, value in gaps.items())
+        message += f'已引用的行还缺少或不一致的字段：{fields}。'
+    return message
 
 
 def augment_quality(analysis, spec, quality):
