@@ -17,6 +17,9 @@ FACT_TOKEN = re.compile(r"\{\{fact:([0-9a-f]{64})\}\}")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![A-Za-z0-9_.])")
 CLOSURE_EXPR = re.compile(r"(?P<expr>[-+]?\d+(?:\.\d+)?(?:\s*[+\-−]\s*\d+(?:\.\d+)?)+\s*=\s*[-+]?\d+(?:\.\d+)?)")
 DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
+PERIOD_RANGE = re.compile(
+    r"(?<![\d.,])\d+[ \u00a0\u2009\u202f\u3000]*[-–—~至到][ \u00a0\u2009\u202f\u3000]*\d+[ \u00a0\u2009\u202f\u3000]*[年月日]"
+)
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 EVIDENCE_APPENDIX_RENDER_VERSION = 1
@@ -2428,6 +2431,8 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
     ]
     ignored_spans = ignored_spans + footnote_spans + footnote_definition_spans
     date_spans = [match.span() for match in DATE_SPAN.finditer(body)]
+    # 「1–8 月」「1 至 8 月」是期间；「差异–500」「5–8 亿元」「——21086」仍是金额。
+    date_spans += [match.span() for match in PERIOD_RANGE.finditer(body)]
     values = []
     for match in NUMBER.finditer(body):
         if any(_overlaps(match.span(), span) for span in ignored_spans):
@@ -2436,12 +2441,12 @@ def _body_numbers(body: str, *, ignored_spans: list[tuple[int, int]] | None = No
             continue
         before = body[match.start() - 1 : match.start()]
         after = body[match.end() : match.end() + 1]
-        if (before and before in "-–—/年月日") or (after and after in "-–—/年月日"):
+        if (before and before in "-/年月日") or (after and after in "-/年月日"):
             continue
-        # 中文排版常在数字与年/月/日之间加空格：「1–8 月」「2026 年 08 月」。
-        spaced_before = body[: match.start()].rstrip(" \u00a0\u2009\u202f\u3000")[-1:]
+        # 中文排版常在数字与年/月/日之间加空格：「8 月」「2026 年 08 月」。只有写在年/月/日前面的
+        # 整数是年月日本身；「本月 120 万元」「75% 年度预算」里的数字仍要核对。
         spaced_after = body[match.end() :].lstrip(" \u00a0\u2009\u202f\u3000")[:1]
-        if (spaced_before and spaced_before in "年月日") or (spaced_after and spaced_after in "年月日"):
+        if spaced_after and spaced_after in "年月日" and match.group(0).isdigit():
             continue
         if _is_spreadsheet_reference_number(body, match):
             continue
@@ -2459,7 +2464,8 @@ def _is_spreadsheet_reference_number(body: str, match: re.Match[str]) -> bool:
         return bool(re.match(r"\$?[A-Za-z]{1,3}\$?[1-9]\d*\b", tail))
     if after == "·":
         return bool(re.match(r"[\u4e00-\u9fff]+", tail))
-    return bool(re.match(r"[ \u00a0\u3000]?表", body[match.end() :]))
+    # 「09 表的」是表号；「500 表明」「850表示」是金额后面接动词。
+    return bool(re.match(r"[ \u00a0\u3000]?表(?![示明现达述态彰])", body[match.end() :]))
 
 
 def _numbers_from_text(text: str) -> set[str]:
