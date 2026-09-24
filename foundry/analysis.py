@@ -972,6 +972,7 @@ class AnalysisStore:
         if "fact_ids" not in spec and fact_ids and set(runs) != set(parent.get("run_ids", [])):
             # A revision that swaps its runs must not carry the parent's facts from runs it no longer cites.
             fact_ids = _fact_ids_in_runs(self, fact_ids, runs, materiality)
+        from foundry.finance_completion import COMPLETION_POLICY_VERSION
         from foundry.finance_revision import compare_draft_runs
         from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
         from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
@@ -1064,6 +1065,8 @@ class AnalysisStore:
             revision_comparison=revision_comparison,
             explanation_check=explanation_check,
             quality=explanation_check,
+            # The completion policy this check was computed under; a replay never reuses an older one.
+            check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
             execution_status=execution_status,
             reproducibility_status=reproducibility,

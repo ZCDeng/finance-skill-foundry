@@ -1023,5 +1023,409 @@ def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_e
     values = ['325644', '300', '109742.028', '112860.000', '0.625']
     rows_cited = range(5) if cite_estimate else (0, 1, 2)
     claims = [_claim(run, row=index, column='value', value=values[index]) for index in rows_cited]
-    return SimpleNamespace(requirement=requirement, run=run, spec={
+    return SimpleNamespace(requirement=requirement, run=run, budget=budget, spec={
         'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims, 'evidence_recipes': recipes})
+
+
+# --- review fixes, round 2 (PR #23) -----------------------------------------------------------------
+
+
+def _non_amount_estimate(analysis, tmp_path, metric, *, declare=True):
+    """The same workbook, rows and recipes as a revenue estimate, on an item that is not a P&L amount."""
+    book = _workbook(analysis, tmp_path, 'book', {'S': {'F5': 1200, 'G1': 2, 'G2': 4}})
+    declared = [{'basis': 'estimate', 'scenarios': ['budget_1_8'], 'method': '全年预算 × 2/4'}] if declare else []
+    requirement = save_requirements(analysis, spec(
+        scope={'currency': 'CNY', 'unit': '万元'}, bindings={'book': book['id']},
+        items=[{'id': 'item', 'metric': metric, 'scenarios': ['budget_1_8'], 'requires_drilldown': False,
+                **({'grain_basis': declared} if declared else {})}]))
+    key = {'metric_key': metric, 'period': '2026-01:2026-08'}
+    rows = [{'metric_key': metric, 'scenario': 'budget_1_8', 'period': '2026-01:2026-08', 'value': '600',
+             'currency': 'CNY', 'unit': '万元'},
+            {'metric_key': metric, 'scenario': 'factor', 'period': '2026-01:2026-08', 'value': '0.5'}]
+    run = _script_run(analysis, {'book': book}, rows, suffix='non-amount', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
+
+    def cell(reference):
+        return {'dataset_id': book['id'], 'source_hash': book['source_hash'], 'sheet': 'S', 'range': reference}
+
+    recipes = [
+        {'id': 'f', 'kind': 'ratio', 'claim': {'run_id': run['id'], 'row': 1, 'column': 'value'},
+         'left': cell('G1'), 'right': cell('G2'), 'business_key': key},
+        {'id': 'd', 'kind': 'direct', **cell('F5'), 'claim': {'run_id': run['id'], 'row': 0, 'column': 'value'},
+         'factor_recipe_id': 'f', 'business_key': key},
+    ]
+    return SimpleNamespace(requirement=requirement, run=run, recipes=recipes,
+                           claims=[_claim(run, row=0, column='value', value='600')])
+
+
+@pytest.mark.parametrize('metric', ['other_income', '其他收益', 'management_pnl'])
+def test_a_declared_estimate_on_a_non_amount_item_is_estimated_and_labelled(analysis, tmp_path, metric):
+    """The non-amount branch dropped the factor recipe (estimate is not a source basis) and answered the
+    grain as script output: coverage passed and the export lost its 估算 line. A factor recipe gives
+    `estimated`, never answered, whatever the metric."""
+    case = _non_amount_estimate(analysis, tmp_path, metric)
+    service = FinanceStore(analysis.task)
+    fact_ids = [fact['id'] for fact in service.prepare_explanation({'run_ids': [case.run['id']]})['facts']]
+    draft = service.save_explanation_draft({'body': '1-8 月预算见附表。', 'run_ids': [case.run['id']],
+                                            'fact_ids': fact_ids, 'claims': case.claims,
+                                            'evidence_recipes': case.recipes})
+    quality = draft['explanation_check']
+    item = _item(quality['requirements'])
+
+    assert item['status'] == 'estimated'
+    assert [location['evidence']['evidence_basis'] for location in item['locations']] == ['estimate']
+    assert quality['requirements']['coverage']['status'] == 'needs_attention'
+    assert 'requirement_estimated' in [issue['code'] for issue in quality['issues']]
+    assert '估算（经理确认前不计为已回答）：S!F5 × （S!G1 ÷ S!G2）' in draft['body']
+    assert draft['completion']['status'] == 'awaiting_manager'
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+def test_an_undeclared_estimate_on_a_non_amount_item_is_not_answered_either(analysis, tmp_path):
+    case = _non_amount_estimate(analysis, tmp_path, 'other_income', declare=False)
+    item = _item(check_requirements(analysis, {'requirements_id': case.requirement['id'], 'run_ids': [case.run['id']],
+                                               'claims': case.claims, 'evidence_recipes': case.recipes}))
+
+    assert item['status'] == 'pending'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'estimate_cited_for_source_grain'
+    # Without any recipe the phase-1 script rule for non-amount values is unchanged (decision 4).
+    plain = _item(check_requirements(analysis, {'requirements_id': case.requirement['id'], 'run_ids': [case.run['id']],
+                                                'claims': case.claims}))
+    assert plain['status'] == 'answered'
+
+
+@pytest.mark.parametrize('label', ['net_income', 'operating_income', '管理费', '销售费', '财务费', '净收益'])
+def test_more_common_pnl_amount_names_are_gated(analysis, tmp_path, label):
+    """net_income, operating_income, 净收益 and 管理费/销售费/财务费 (written without 用) fell to the
+    non-amount rule, so one cited python cell answered them and the draft completed."""
+    case = _label_case(analysis, tmp_path, label)
+    service = FinanceStore(analysis.task)
+
+    assert _item(check_requirements(analysis, case.base))['status'] == 'not_applicable'
+    draft = service.save_explanation_draft({'body': '金额为 997 万元。', 'run_ids': [case.run['id']],
+                                            'claims': case.base['claims']})
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+    assert _item(check_requirements(analysis, {**case.base, 'evidence_recipes': [case.recipe]}))['status'] == 'answered'
+
+
+@pytest.mark.parametrize('label', ['sales_volume', 'sales_quantity', 'sales_qty', 'sales_count', '销量', '销售数量'])
+def test_quantities_named_after_sales_keep_the_phase_1_script_rule(analysis, tmp_path, label):
+    """AMOUNT_LABEL_TOKENS maps `sales` to revenue, so sales_volume was gated as a revenue amount and
+    offered paths that never produce a quantity. A quantity is not an amount (decision 4)."""
+    case = _label_case(analysis, tmp_path, label)
+
+    assert _item(check_requirements(analysis, case.base))['status'] == 'answered'
+
+
+def _ledger_account_case(tmp_path, account):
+    """A finance context over a ledger, and an item asking for one management account with dimensions.period."""
+    rows = [
+        {'ledger': 'L', 'organization': '总部', 'period': period, 'currency': 'CNY', 'unit': '元', 'scenario': 'actual',
+         'management_account': account, 'amount': amount, 'source_row': str(index), 'doc_id': f'D{index}', 'line_id': '1'}
+        for index, (period, amount) in enumerate((('2026-07', '100'), ('2026-08', '110')), start=1)]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope}, title='ledger')
+    requirement = save_requirements(service.analysis, {
+        'question': f'8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'account_08', 'metric': account, 'dimensions': {'period': '2026-08'}, 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'account_total', 'accounts': [account]}})
+    index = next(index for index, row in enumerate(run['result']['rows']) if row.get('period') == '2026-08')
+    claim = {'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': 'amount',
+             'value': run['result']['rows'][index]['amount']}
+    return SimpleNamespace(service=service, context=context, bindings=bindings, requirement=requirement, run=run,
+                           claims=[claim], index=index)
+
+
+@pytest.mark.parametrize('account', ['管理费用', '销售费用', '主营业务成本', 'cash'])
+def test_the_finance_engines_own_account_total_still_answers_an_account_item(tmp_path, account):
+    """Before the label gate, run_metric account_total was the accepted path for an account-name item
+    with dimensions.period; the gate caught 费用/成本/收入-named accounts, labelled the engine's own amount
+    script output and pointed the writer at explain_variance."""
+    case = _ledger_account_case(tmp_path, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [case.run['id']], 'claims': case.claims})
+    item = _item(result)
+    support = case.requirement['support']['items'][0]
+
+    assert case.run['engine'] == 'finance'
+    assert item['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+    assert support['accepted_evidence'][0] == 'run_metric_account_total'
+    if 'next_action' in support:
+        assert support['next_action'].index('run_metric') < support['next_action'].find('explain_variance') or \
+            'explain_variance' not in support['next_action']
+
+
+def test_a_script_copy_of_the_account_total_is_still_not_counted(tmp_path):
+    case = _ledger_account_case(tmp_path, '管理费用')
+    analysis = case.service.analysis
+    row = {'management_account': '管理费用', 'period': '2026-08', 'amount': '110'}
+    record = _new(analysis.task, engine='python', execution_status='succeeded', reproducibility_status='unverified',
+                  assumptions=[], output_hash='script-account', bindings=case.run['bindings'],
+                  input_hashes=case.run.get('input_hashes'), source_hashes=case.run.get('source_hashes'),
+                  result={'columns': list(row), 'rows': [row]})
+    script = analysis._write(analysis._object_path('runs', record['id']), record)
+    item = _item(check_requirements(analysis, {'requirements_id': case.requirement['id'], 'run_ids': [script['id']],
+                                               'claims': [_claim(script, row=0, column='amount', value='110')]}))
+
+    assert item['status'] != 'answered'
+
+
+def test_an_engine_amount_that_is_not_counted_is_not_labelled_script_output(analysis):
+    save_requirements(analysis, spec(items=[{'id': 'revenue', 'metric': 'revenue', 'scenarios': ['actual'],
+                                             'requires_drilldown': False}]))
+    run = _run(analysis, id_suffix='engine-values', result={
+        'columns': ['metric_key', 'scenario', 'value'],
+        'rows': [{'metric_key': 'revenue', 'scenario': 'actual', 'value': '120'}]})
+    item = _item(check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run, row=0, column='value', value='120')]}))
+
+    assert item['status'] != 'answered'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+
+
+def _replay_spec(analysis, tmp_path):
+    close = _workbook(analysis, tmp_path, 'close', {'04·合并利润表': {'B33': 9970000}})
+    requirement = save_requirements(analysis, spec(scope={'ledger': '月结套表'}, bindings={'close': close['id']},
+                                                   items=[{'id': 'profit', 'metric': 'profit', 'requires_drilldown': False}]))
+    bridge = [{'metric': 'revenue', 'actual': '1999', 'baseline': '1000', 'contribution': '999'},
+              {'metric': 'cost', 'actual': '1', 'baseline': '2', 'contribution': '-1'},
+              {'metric': 'expense', 'actual': '1', 'baseline': '2', 'contribution': '-1'},
+              {'metric': 'profit', 'actual': '1997', 'baseline': '1000', 'contribution': '997'}]
+    run = _script_run(analysis, {'close': close}, bridge, suffix='bridge', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'],
+                      result={'method': 'revenue_minus_cost_minus_expense',
+                              'columns': ['metric', 'actual', 'baseline', 'contribution'], 'rows': bridge})
+    return {'body': '利润变动 997。', 'run_ids': [run['id']], 'claims': [_claim(run, row=3, value='997')]}
+
+
+def _as_saved_before_policy_5(analysis, draft):
+    """Rewrite the stored draft as one saved before this PR: its check answered the item from a script-built
+    bridge, and it carries no record of the policy it was checked under."""
+    from foundry.analysis import _hash
+    from foundry.fsutil import write_json_atomic
+
+    path = analysis._object_path('drafts', draft['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items()
+              if key not in {'check_policy_version', '_integrity_hash'}}
+    check = stored['explanation_check']
+    requirements = {**check['requirements'], 'coverage': {'status': 'pass'}, 'provenance': {'status': 'pass'},
+                    'original_requirements_completed': True,
+                    'items': [{**item, 'status': 'answered'} for item in check['requirements']['items']]}
+    old = {**check, 'status': 'pass', 'issues': [], 'requirements': requirements,
+           'checks': {'numbers': {'status': 'pass'}, 'coverage': {'status': 'pass'}, 'provenance': {'status': 'pass'}}}
+    record = {**stored, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+    return record
+
+
+def test_replaying_a_draft_checked_under_an_older_policy_rechecks_it(analysis, tmp_path):
+    """A byte-identical resend found the pre-PR draft and stamped a policy-5 `complete` receipt from the
+    verdict computed under the old rules, while a fresh validate said the script bridge does not count."""
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+
+    service = FinanceStore(analysis.task)
+    request = _replay_spec(analysis, tmp_path)
+    first = service.save_explanation_draft(request)
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION
+    _as_saved_before_policy_5(analysis, first)
+
+    again = service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert again['id'] != first['id']
+    assert _item(again['explanation_check']['requirements'])['status'] != 'answered'
+    assert again['completion']['status'] != 'complete'
+    assert again['completion']['original_requirements_completed'] is False
+    assert not [row for row in analysis._list('completions')
+                if row['draft_id'] == first['id'] and row['status'] == 'complete']
+    # A draft checked under the current policy still replays without a new version.
+    third = service.save_explanation_draft(request)
+    assert third['replayed'] is True
+    assert third['id'] == again['id']
+
+
+def test_a_runtime_retry_of_a_draft_checked_under_an_older_policy_rechecks_it(analysis, tmp_path):
+    from foundry.analysis import _hash
+    from foundry.finance_completion_operations import CompletionOperationStore
+    from foundry.fsutil import write_json_atomic
+
+    service = FinanceStore(analysis.task)
+    service.session_id = 'session-a'
+    operation = CompletionOperationStore(analysis.task, 'session-a').begin('利润说明')
+    request = _replay_spec(analysis, tmp_path)
+    first = service.save_completion_draft(operation['id'], 'call-1', request)
+    _as_saved_before_policy_5(analysis, first)
+    # The pre-PR save wrote the draft and stopped before the receipt settled the attempt.
+    path = analysis.task.root / 'analysis' / 'completion_operations' / f"{operation['id']}.json"
+    raw = json.loads(path.read_text())
+    raw.pop('_integrity_hash')
+    for attempt in raw['revisions']:
+        attempt.pop('draft_id', None)
+        attempt.pop('completion_id', None)
+    raw['_integrity_hash'] = _hash(raw)
+    write_json_atomic(path, raw)
+
+    again = service.save_completion_draft(operation['id'], 'call-1', request)
+
+    assert again['id'] != first['id']
+    assert _item(again['explanation_check']['requirements'])['status'] != 'answered'
+    assert again['completion']['status'] != 'complete'
+    assert not [row for row in analysis._list('completions')
+                if row['draft_id'] == first['id'] and row['status'] == 'complete']
+
+
+def test_a_declared_estimate_grain_is_told_to_use_a_factor_recipe(analysis, tmp_path):
+    """Huachen revenue_1_8: the East 1-8 budget is declared an estimate. When its cited row went missing,
+    or its coefficient was written as scale, the hint only offered direct/sum/diff with a unit scale,
+    which can never reach the promised `estimated`."""
+    case = _estimate_case(analysis, tmp_path)
+    claims = [claim for claim in case.spec['claims'] if claim['row'] != 3]
+    item = _item(check_requirements(analysis, {**case.spec, 'claims': claims}))
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+    message = _unanswered_message(item)
+
+    assert item['missing_grains'] == [{'organization': '华东区域', 'period': '2026-01:2026-08', 'scenario': 'budget_1_8'}]
+    assert fixup['estimate_grains'] == item['missing_grains']
+    assert fixup['estimate_evidence']['factor_recipe_kind'] == 'ratio'
+    assert 'factor_recipe_id' in message
+    assert '只计为估算' in message
+
+    scaled = [recipe for recipe in case.spec['evidence_recipes'] if recipe['id'] != 'east_budget_estimate']
+    scaled.append(_recipe(case.budget, '05·区域预算分解', 'C5', case.run, 3, scale='0.625', recipe_id='east_budget_scaled'))
+    item = _item(check_requirements(analysis, {**case.spec, 'evidence_recipes': scaled}))
+    fixup = next(f for f in item['fixups'] if f.get('reason') == 'cited_result_not_counted')
+
+    assert item['uncounted_grains'][0]['reasons'] == ['recipe_coefficient_unbound']
+    assert fixup['estimate_grains'] == [{'organization': '华东区域', 'period': '2026-01:2026-08', 'scenario': 'budget_1_8'}]
+    assert 'factor_recipe_id' in _unanswered_message(item)
+
+
+def test_a_grain_the_source_lacks_is_told_how_to_declare_it_and_following_that_reaches_the_manager(analysis, tmp_path):
+    """profit_1_8 regional budgets: nothing in the bound workbooks states them, but the hint only offered
+    source recipes and never grain_basis, so literal compliance could not reach needs_manager."""
+    case = _estimate_case(analysis, tmp_path, declare=False, cite_estimate=False)
+    item = _item(check_requirements(analysis, case.spec))
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+    message = _unanswered_message(item)
+
+    assert fixup['if_source_lacks_value']['field'] == 'grain_basis'
+    assert 'grain_basis' in message and 'factor_reproducible' in message
+
+    record = case.requirement
+    declared = save_requirements(analysis, spec(
+        question=record['question'], scope=record['scope'], bindings=record['bindings'], parent_id=record['id'],
+        items=[{**record['items'][0], 'grain_basis': [
+            {'basis': 'estimate', 'organizations': ['华东区域'], 'scenarios': ['budget_1_8'],
+             'method': '（营业利润预算 − 其他收益预算）÷ 区域营业利润预算合计', 'factor_reproducible': False,
+             'reason': '系数须先相减再相除，现有规则写不出'}]}]))
+    after = _item(check_requirements(analysis, {**case.spec, 'requirements_id': declared['id']}))
+    assert after['status'] == 'pending'
+    assert after['awaiting_manager'] == ['estimate_factor_not_reproducible']
+
+
+def test_uncounted_fixup_lists_only_cells_that_did_not_count(analysis, tmp_path):
+    """An estimated cell was listed as a cell to repair, with a null reason, next to the one cell that really
+    did not count."""
+    case = _estimate_case(analysis, tmp_path)
+    recipes = [recipe for recipe in case.spec['evidence_recipes'] if recipe['id'] != 'group_budget']
+    recipes.append(_recipe(case.budget, '01·年度预算总表', 'N12', case.run, 1, scale='0.625', recipe_id='group_budget_scaled'))
+    item = _item(check_requirements(analysis, {**case.spec, 'evidence_recipes': recipes}))
+    fixup = next(f for f in item['fixups'] if f.get('reason') == 'cited_result_not_counted')
+
+    assert [location['status'] for location in item['locations'] if location['row'] == 3] == ['estimated']
+    assert fixup['not_counted_count'] == 1
+    assert [(cell['row'], cell['not_counted_reason']) for cell in fixup['evidence_recipe_cells']] == [
+        (1, 'recipe_coefficient_unbound')]
+
+
+def test_an_estimate_cited_on_a_grain_declared_non_reproducible_gets_no_empty_fixup(analysis, tmp_path):
+    case = _estimate_case(analysis, tmp_path, declaration={
+        'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'basis': 'estimate',
+        'method': '（Σ营业利润预算 − Σ其他收益预算）÷ 区域营业利润预算合计',
+        'factor_reproducible': False, 'reason': '系数须先相减再相除，现有规则写不出'})
+    item = _item(check_requirements(analysis, case.spec))
+    east_budget = next(location for location in item['locations'] if location['row'] == 3)
+
+    assert item['awaiting_manager'] == ['estimate_factor_not_reproducible']
+    assert east_budget['evidence']['not_counted_reason'] == 'estimate_factor_declared_not_reproducible'
+    assert [f for f in item['fixups'] if f['code'] == 'estimate_cited_for_source_grain'] == []
+
+
+def test_blockers_the_assistant_can_clear_do_not_tell_it_to_stop(analysis, tmp_path):
+    """A CSV-bound revenue item with no finance context: both paths are blocked, but no_finance_context is
+    the assistant's to clear with finance_context_save, and completion still offers repairs."""
+    path = tmp_path / 'rev.csv'
+    path.write_text('organization,period,revenue\n华东,2026-08,120.5\n', encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='rev')
+    requirement = save_requirements(analysis, {'question': '8月华东收入', 'bindings': {'rev': dataset['id']},
+                                               'items': [{'id': 'rev_08', 'metric': 'revenue', 'dimensions': {'period': '2026-08'},
+                                                          'requires_drilldown': False}]})
+    run = _script_run(analysis, {'rev': dataset}, [{'metric_key': 'revenue', 'period': '2026-08', 'value': '120.5'}],
+                      suffix='csv', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
+    saved = FinanceStore(analysis.task).save_explanation_draft({
+        'body': '华东8月收入 120.5。', 'run_ids': [run['id']],
+        'claims': [_claim(run, row=0, column='value', value='120.5')]})
+    action = next(action for action in saved['completion']['actions'] if action['code'] == 'requirement_unanswered')
+
+    assert saved['completion']['status'] == 'repair_available'
+    assert saved['completion']['repair_allowed'] is True
+    assert '助手不要重复计算' not in action['message']
+    assert 'finance_context_save' in action['message']
+
+
+def _legacy_drilldown_record(analysis, bindings, items):
+    record = _new(analysis.task, question='华宸 1-8 月', scope={'ledger': '月结套表', 'unit': '万元'}, bindings=bindings,
+                  context_id=None, parent_id=None, removed_item_ids=[], change_reason='', selection=None, items=items)
+    return analysis._write(analysis._object_path('requirements', record['id']), record)
+
+
+def test_the_scope_card_can_save_over_a_legacy_drilldown_record(analysis, tmp_path):
+    """AnalysisScopeCard resends the current items unchanged with a new scope. On a record saved before
+    phase 1 the items still hold dimensions.drilldown, and the save was refused with a 2–3k character
+    assistant message the card cannot act on. A key carried over from the parent is dropped as the
+    refusal itself suggests; a newly written one is still refused."""
+    close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'A5': '华东区域'}})
+    legacy = _legacy_drilldown_record(analysis, {'close': close['id']}, [
+        {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '收入', 'dimensions': {'drilldown': '城市公司'},
+         'periods': ['2026-01:2026-08'], 'requires_drilldown': False},
+        {'id': 'profit_1_8', 'metric': 'profit', 'label': '利润', 'dimensions': {'drilldown': '城市公司'},
+         'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
+    service = FinanceStore(analysis.task)
+    listed = service.analysis_requirements_list({})['current']
+
+    saved = service.analysis_requirements_save({
+        'question': listed['question'], 'scope': {**listed['scope'], 'granularity': '月'}, 'bindings': listed['bindings'],
+        'parent_id': listed['id'], 'change_reason': '更新分析前置口径。', 'items': listed['items']})
+
+    assert saved['parent_id'] == legacy['id']
+    assert [item['dimensions'] for item in saved['items']] == [{}, {}]
+    assert [(warning['code'], warning['requirement_item_id']) for warning in saved['authoring_warnings']] == [
+        ('hierarchy_dimension_dropped', 'revenue_1_8'), ('hierarchy_dimension_dropped', 'profit_1_8')]
+    with pytest.raises(FoundryError, match='hierarchy levels'):
+        service.analysis_requirements_save({
+            'question': saved['question'], 'scope': saved['scope'], 'bindings': saved['bindings'], 'parent_id': saved['id'],
+            'items': [{**saved['items'][0], 'dimensions': {'drilldown': '城市公司'}}, saved['items'][1]]})
+
+
+def test_a_legacy_drilldown_item_is_not_handed_to_the_manager_while_the_assistant_can_revise_it(analysis, tmp_path, monkeypatch):
+    from foundry.structure_records import PENDING_CONFIRMATION
+
+    monkeypatch.setattr(FinanceStore, 'dataset_structure_state', lambda self, dataset_id: PENDING_CONFIRMATION)
+    source = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'D11': 1}})
+    record = _legacy_drilldown_record(analysis, {'close': source['id']}, [
+        {'id': 'control_totals', 'metric': 'control_totals', 'label': '区域与城市公司小计勾稽',
+         'dimensions': {'drilldown': '城市公司'}, 'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
+    request = {'requirements_id': record['id'], 'run_ids': [], 'claims': []}
+    item = _item(check_requirements(analysis, request))
+    quality = augment_quality(analysis, request, {'status': 'pass', 'issues': []})
+    completion = record_completion(analysis, {'id': 'l' * 32, 'content_hash': 'legacy', 'run_ids': []}, quality)
+    action = next(action for action in completion['actions'] if action['code'] == 'requirement_unanswered')
+
+    assert 'awaiting_manager' not in item
+    assert 'revise_requirement_dimension' in [fixup['code'] for fixup in item['fixups']]
+    assert completion['status'] == 'repair_available'
+    assert completion['repair_allowed'] is True
+    assert '助手不要重复计算' not in action['message']

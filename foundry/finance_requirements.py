@@ -48,19 +48,30 @@ CLOSED_EVIDENCE_METRICS = {'profit', 'revenue', 'cost', 'expense'}
 # total_revenue …) is recognized by its stem and gated like the canonical metric instead of falling to the
 # script-value rule. A ratio named after an amount (收入达成率, expense_ratio) keeps the phase-1 ratio rule.
 AMOUNT_LABEL_STEMS = (
-    ('profit', ('利润', '毛利', '净利')),
+    ('profit', ('利润', '毛利', '净利', '净收益')),
     ('revenue', ('收入', '营收', '营业额', '销售额')),
     ('cost', ('成本',)),
-    ('expense', ('费用',)),
+    # 管理费/销售费/财务费/研发费 are the same expense lines written without 用.
+    ('expense', ('费用', '管理费', '销售费', '财务费', '研发费')),
 )
 AMOUNT_LABEL_TOKENS = {
-    'profit': 'profit', 'profits': 'profit', 'ebit': 'profit', 'ebitda': 'profit',
+    'profit': 'profit', 'profits': 'profit', 'ebit': 'profit', 'ebitda': 'profit', 'earnings': 'profit',
     'revenue': 'revenue', 'revenues': 'revenue', 'sales': 'revenue',
     'cost': 'cost', 'costs': 'cost', 'cogs': 'cost',
     'expense': 'expense', 'expenses': 'expense', 'opex': 'expense',
 }
-NON_AMOUNT_LABEL_MARKERS = ('率', '占比', '比例', '比重', '倍数', '人均', '均价', '单价', '%', '％')
-NON_AMOUNT_LABEL_TOKENS = frozenset({'ratio', 'rate', 'margin', 'pct', 'percent', 'percentage', 'share', 'per', 'avg', 'average'})
+# `income` alone is too loose (other_income is its own class); these qualified forms are profit.
+AMOUNT_LABEL_TOKEN_PAIRS = {
+    ('net', 'income'): 'profit', ('operating', 'income'): 'profit',
+    ('gross', 'income'): 'profit', ('pretax', 'income'): 'profit',
+}
+# Ratios and quantities (sales_volume, 销量) are not amounts, whatever amount word they contain.
+NON_AMOUNT_LABEL_MARKERS = ('率', '占比', '比例', '比重', '倍数', '人均', '均价', '单价', '%', '％',
+                            '数量', '销量', '销售量', '件数', '台数', '人数')
+NON_AMOUNT_LABEL_TOKENS = frozenset({
+    'ratio', 'rate', 'margin', 'pct', 'percent', 'percentage', 'share', 'per', 'avg', 'average',
+    'volume', 'volumes', 'quantity', 'quantities', 'qty', 'units', 'count', 'headcount',
+})
 PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
 CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
@@ -182,11 +193,12 @@ def save_requirements(analysis, spec):
         if grain_basis:
             normalized_item['grain_basis'] = grain_basis
         normalized.append(normalized_item)
+    normalized, carried_over = _drop_carried_over_hierarchy(analysis, spec.get('parent_id'), normalized)
     hierarchy = {item['id']: _hierarchy_dimensions(item) for item in normalized if _hierarchy_dimensions(item)}
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
     # Read before taking the task lock: scanning workbook text is slow and only ever warns.
-    warnings = _organization_warnings(analysis, normalized, bindings)
+    warnings = [*carried_over, *_organization_warnings(analysis, normalized, bindings)]
     with exclusive(analysis.task.lock_path, timeout=10):
         parent = latest_requirements(analysis)
         if parent and spec.get('parent_id') != parent['id']:
@@ -218,6 +230,33 @@ def _hierarchy_dimensions(item):
 def _without_hierarchy(item):
     keys = _hierarchy_dimensions(item)
     return {**item, 'dimensions': {key: value for key, value in item.get('dimensions', {}).items() if key not in keys}}
+
+
+def _drop_carried_over_hierarchy(analysis, parent_id, items):
+    """Drop a hierarchy level an item carries over unchanged from its parent record (saved before phase 1).
+
+    Callers that only carry items over (the scope card, circle-select) cannot edit them, and the refusal
+    below would only suggest the same items without those keys. A key the writer adds or changes is
+    still refused. The dropped keys are recorded as authoring warnings on the new version.
+    """
+    if not parent_id or not any(_hierarchy_dimensions(item) for item in items):
+        return items, []
+    try:
+        parent = analysis._get('requirements', parent_id)
+    except FoundryError:
+        return items, []  # the version check under the task lock reports a missing parent
+    previous = {item.get('id'): item for item in parent.get('items') or [] if isinstance(item, dict)}
+    kept, warnings = [], []
+    for item in items:
+        keys = _hierarchy_dimensions(item)
+        if keys and keys == _hierarchy_dimensions(previous.get(item['id']) or {}):
+            named = '、'.join(f'{key}={value}' for key, value in keys.items())
+            warnings.append({'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'], 'keys': keys,
+                             'message': f'旧版要求的维度 {named} 是下钻层级，不是结果行字段，新版已去掉；'
+                                        '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
+            item = _without_hierarchy(item)
+        kept.append(item)
+    return kept, warnings
 
 
 def _reject_hierarchy_dimensions(items, hierarchy):
@@ -753,6 +792,7 @@ def _prepared_evidence(analysis, runs):
                 # Only the finance engine's own closure is evidence; a script that builds a
                 # bridge-shaped table which adds up (999/-1/-1/997) is shown, never counted.
                 'engine_closed': engine == 'finance' and closure_status == 'passed',
+                'engine_output': engine == 'finance',
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
@@ -1223,15 +1263,19 @@ def _amount_label_class(text):
     for key, stems in AMOUNT_LABEL_STEMS:
         if any(stem in text for stem in stems):
             return key
-    return next((AMOUNT_LABEL_TOKENS[token] for token in tokens if token in AMOUNT_LABEL_TOKENS), None)
+    pair = next((AMOUNT_LABEL_TOKEN_PAIRS[bigram] for bigram in zip(tokens, tokens[1:])
+                 if bigram in AMOUNT_LABEL_TOKEN_PAIRS), None)
+    return pair or next((AMOUNT_LABEL_TOKENS[token] for token in tokens if token in AMOUNT_LABEL_TOKENS), None)
 
 
-def _location_evidence_status(item, location, member, recipe=None):
+def _location_evidence_status(item, location, member, recipe=None, *, native_total=False):
     """Status and server-derived evidence_basis of one cited cell.
 
-    An amount (revenue/profit/cost/expense) counts only on engine closure (engine == 'finance') or a
-    passing, cited, in-binding direct/sum/diff recipe with a unit scale; a factor recipe reaches
-    `estimated`; script output, script-built closures, ratio recipes and free scales are not counted.
+    An amount (revenue/profit/cost/expense) counts only on engine closure (engine == 'finance'), on the
+    finance engine's own run_metric account_total for exactly this account (`native_total`), or on a
+    passing, cited, in-binding direct/sum/diff recipe with a unit scale. A factor recipe reaches
+    `estimated` for every metric, never answered; script output, script-built closures, ratio recipes and
+    free scales are not counted for amounts.
     """
     if not member and not recipe:
         return 'pending', {'evidence_basis': None, 'not_counted_reason': 'no_evidence_record'}
@@ -1259,27 +1303,38 @@ def _location_evidence_status(item, location, member, recipe=None):
             source_recipe and member.get('group_type') == 'calculation_row'):
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
     engine_closed = bool(member.get('engine_closed')) and member.get('group_status') == 'complete'
+    estimate = bool(recipe and recipe.get('counted') and recipe['evidence_class'] == 'estimate')
     if _closed_metric_key(item) is None:
-        # Non-amount items keep their current rule (script ratio values are a recorded phase-1 gap).
+        # Non-amount items keep their current rule (script ratio values are a recorded phase-1 gap),
+        # except that a cell the writer backed with a factor recipe is an estimate, never an answer.
         counted = recipe if (recipe or {}).get('counted') and recipe['evidence_class'] in SOURCE_EVIDENCE_BASES else None
+        if estimate and not engine_closed:
+            return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
         if not member and not counted:
             return 'pending', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'no_evidence_record'}
-        basis = 'engine_closed' if engine_closed else counted['evidence_class'] if counted else 'script_output'
+        basis = 'engine_closed' if engine_closed else counted['evidence_class'] if counted else _output_basis(member)
         return 'answered', {**metadata, 'evidence_basis': basis}
     if source_recipe:
         return 'answered', {**metadata, 'evidence_basis': recipe['evidence_class']}
     if engine_closed:
         return 'answered', {**metadata, 'evidence_basis': 'engine_closed'}
-    if recipe and recipe.get('counted') and recipe['evidence_class'] == 'estimate':
+    if native_total and member.get('engine_output'):
+        # The finance engine's own total of exactly this account (not a script's copy of it).
+        return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
+    if estimate:
         return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
     return 'not_applicable', {**metadata, 'evidence_basis': _uncounted_basis(member),
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
 
 
+def _output_basis(member):
+    return 'engine_output' if member.get('engine_output') else 'script_output'
+
+
 def _uncounted_basis(member):
-    if member.get('closure_status') == 'passed':
+    if member.get('closure_status') == 'passed' and not member.get('engine_output'):
         return 'internal_only'
-    return 'script_output' if member else None
+    return _output_basis(member) if member else None
 
 
 def _amount_not_counted_reason(member, recipe):
@@ -1287,6 +1342,8 @@ def _amount_not_counted_reason(member, recipe):
         return recipe['rejected_reason']
     if recipe and recipe.get('counted') and recipe.get('kind') == 'ratio':
         return 'ratio_recipe_cannot_prove_amount'
+    if member.get('engine_output'):
+        return 'engine_output_without_closure'
     if member.get('closure_status') == 'passed':
         return 'script_closure_not_counted'
     return 'script_output_without_recipe'
@@ -1308,9 +1365,10 @@ def _recipe_metadata(recipe):
     }
 
 
-def _cell_evidence_status(item, location, evidence):
+def _cell_evidence_status(item, location, evidence, *, native_total=False):
     key = (location['run_id'], location['row'], location['column'])
-    return _location_evidence_status(item, location, evidence['members'].get(key), (evidence.get('recipes') or {}).get(key))
+    return _location_evidence_status(item, location, evidence['members'].get(key), (evidence.get('recipes') or {}).get(key),
+                                     native_total=native_total)
 
 
 def _claim_fixup(item, run, row_index, row, column, evidence, reason='valid_candidate_not_claimed'):
@@ -1629,13 +1687,14 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 continue
             if _profit_bridge_group_required(item):
                 continue
-            account_total_match = _account_total_requirement_matches(analysis, item, run, row, column)
+            account_total_match = (_account_total_requirement_matches(analysis, item, run, row, column)
+                                   and _requirement_scope_matches(run, row, item, latest))
             generic_match_allowed = not _account_amount_claim_requires_native_total(item, row, column)
-            if (account_total_match and _requirement_scope_matches(run, row, item, latest)) or (
+            if account_total_match or (
                 generic_match_allowed and _matches(item, row, column, run) and _requirement_scope_matches(run, row, item, latest)
             ):
                 location = {'run_id': run_id, 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
-                status, metadata = _cell_evidence_status(item, location, evidence)
+                status, metadata = _cell_evidence_status(item, location, evidence, native_total=account_total_match)
                 locations.append({**location, 'evidence': metadata, 'status': status})
         if result_set is None:
             # An estimate only counts where the item declared that grain an estimate (grain_basis).
@@ -1734,9 +1793,12 @@ def _with_declared_basis(item, location, runs):
     declared = _declared_basis(item, grain)
     if declared and declared['basis'] == 'estimate' and declared.get('factor_reproducible', True):
         return location
+    # A grain declared non-reproducible waits for the manager's basis; a reproducible factor cited anyway
+    # is another coefficient standing in for it (decision 3), not a source grain cited with an estimate.
+    reason = ('estimate_factor_declared_not_reproducible'
+              if declared and declared['basis'] == 'estimate' else 'estimate_cited_for_source_grain')
     # PRD R04: where the source has the number, an estimate does not answer it.
-    return {**location, 'status': 'pending',
-            'evidence': {**location['evidence'], 'not_counted_reason': 'estimate_cited_for_source_grain'}}
+    return {**location, 'status': 'pending', 'evidence': {**location['evidence'], 'not_counted_reason': reason}}
 
 
 def _grain_state(item, grain, members):
@@ -1809,17 +1871,20 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
                 and _scope_identity_keys(_item_scope(item, latest.get('scope') or {})) and not _requirement_sources(latest)):
             record['ledger_identity'] = 'unproven_without_bound_snapshots'
         if missing and _requested_grains(item) is not None:
-            fixups = [*fixups, _missing_rows_fixup(item, missing, required_fields, field_gaps, paths, route)]
+            fixups = [*fixups, {**_missing_rows_fixup(item, missing, required_fields, field_gaps, paths, route),
+                                **_grain_basis_guidance(item, missing, paths)}]
         if uncounted:
-            fixups = [*fixups, _uncounted_rows_fixup(item, record['locations'], uncounted, paths, route, runs)]
+            uncounted_keys = {grain for grain, state in grain_states.items() if state == 'uncounted'}
+            fixups = [*fixups, {**_uncounted_rows_fixup(item, record['locations'], uncounted, paths, route, runs, uncounted_keys),
+                                **_grain_basis_guidance(item, uncounted, paths)}]
     if result_set and paths['blocked'] and not paths['accepted']:
         fixups = [*fixups, _blocked_path_fixup(item, paths)]
-    if any(location['evidence'].get('not_counted_reason') == 'estimate_cited_for_source_grain'
-           for location in record['locations']):
+    cited_for_source = [grain for grain in uncounted if 'estimate_cited_for_source_grain' in grain['reasons']]
+    if cited_for_source:
         fixups = [*fixups, {
             'code': 'estimate_cited_for_source_grain',
             'requirement_item_id': item['id'],
-            'grains': [grain for grain in uncounted if 'estimate_cited_for_source_grain' in grain['reasons']][:12],
+            'grains': cited_for_source[:12],
             'reason': 'estimate_cited_for_source_grain',
         }]
     for entry in declared:
@@ -1832,7 +1897,9 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
             'needs_manager': True,
             'reason': entry['state'],
         }]
-    reasons = _manager_reasons(grain_states, paths, result_set, record['status'])
+    # A hierarchy dimension on an old record is the assistant's to revise first (revise_requirement_dimension);
+    # until then the item cannot be answered whatever the manager confirms, so it is not handed over.
+    reasons = [] if _hierarchy_dimensions(item) else _manager_reasons(grain_states, paths, result_set, record['status'])
     if reasons:
         record['awaiting_manager'] = reasons
     return record, fixups
@@ -1907,7 +1974,7 @@ def _evidence_environment(analysis, latest, runs=None):
         and (not dataset_ids or set((run.get('bindings') or {}).values()) & set(dataset_ids))
         for run in runs.values()
     )
-    workbooks = []
+    workbooks, accounts = [], set()
     for dataset_id in dataset_ids:
         try:
             dataset = analysis.read_dataset(dataset_id)
@@ -1915,6 +1982,9 @@ def _evidence_environment(analysis, latest, runs=None):
             continue
         if dataset.get('kind') == 'workbook' and str(dataset.get('source_file') or '').lower().endswith('.xlsx'):
             workbooks.append(dataset_id)
+        # Management accounts the finance engine can total on its own (run_metric account_total).
+        accounts.update(str(row['management_account']) for row in dataset.get('rows') or []
+                        if isinstance(row, dict) and row.get('management_account') not in (None, ''))
     finance_context, pending = None, []
     try:
         from foundry.finance_service import FinanceStore
@@ -1928,7 +1998,8 @@ def _evidence_environment(analysis, latest, runs=None):
                    if store.dataset_structure_state(dataset_id) == PENDING_CONFIRMATION]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         finance_context = True if engine_runs else None
-    return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending}
+    return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending,
+            'accounts': sorted(accounts)}
 
 
 def _engine_blockers(environment):
@@ -1966,18 +2037,41 @@ def _evidence_paths(item, environment):
         engine({'path': 'price_quantity_bridge', 'tool': 'explain_variance', 'method': route['required_method']})
     elif route.get('required_method') is not None:
         accepted.append({'path': 'method_run', 'method': route['required_method']})
-    elif _closed_metric_key(item) is not None:
-        recipe = {'path': 'evidence_recipe', 'tool': 'save_explanation_draft.evidence_recipes',
-                  'recipe_kinds': ['direct', 'sum', 'diff'], 'scale': 'one_or_unit_power'}
-        if environment.get('workbook_sources'):
-            accepted.append(recipe)
-        else:
-            blocked.append({**recipe, 'blockers': ['no_workbook_source']})
-        if not item.get('scenarios'):
-            engine({'path': 'engine_closure', 'tool': 'explain_variance'})
     else:
-        accepted.append({'path': 'cited_result_row'})
-    return {'accepted': accepted, 'blocked': blocked}
+        if _ledger_account_item(item, environment):
+            # The engine's own total of this one account answers it (see _account_total_requirement_matches).
+            engine({'path': 'run_metric_account_total', 'tool': 'run_metric', 'metric_kind': 'account_total',
+                    'account': item['metric']})
+        if _closed_metric_key(item) is not None:
+            recipe = {'path': 'evidence_recipe', 'tool': 'save_explanation_draft.evidence_recipes',
+                      'recipe_kinds': ['direct', 'sum', 'diff'], 'scale': 'one_or_unit_power'}
+            if environment.get('workbook_sources'):
+                accepted.append(recipe)
+            else:
+                blocked.append({**recipe, 'blockers': ['no_workbook_source']})
+            if not item.get('scenarios'):
+                engine({'path': 'engine_closure', 'tool': 'explain_variance'})
+        else:
+            accepted.append({'path': 'cited_result_row'})
+    paths = {'accepted': accepted, 'blocked': blocked}
+    if not kind and not route and any(entry.get('basis') == 'estimate' and entry.get('factor_reproducible', True)
+                                      for entry in item.get('grain_basis') or []):
+        # Grains declared estimates reach `estimated` (never answered) by a factor recipe on the archive.
+        estimate = {'path': 'estimate_recipe', 'tool': 'save_explanation_draft.evidence_recipes',
+                    'recipe_kinds': ['direct', 'sum'], 'scale': 'one_or_unit_power',
+                    'factor_recipe_kind': 'ratio', 'reaches': 'estimated'}
+        paths['estimate'] = estimate if environment.get('workbook_sources') else {**estimate, 'blockers': ['no_workbook_source']}
+    return paths
+
+
+def _ledger_account_item(item, environment):
+    metric = item.get('metric')
+    return (
+        isinstance(metric, str)
+        and _canonical_metric_name(metric) not in METRIC_LABELS
+        and _canonical_metric_name(metric) not in RESULT_SET_METRICS
+        and metric in (environment.get('accounts') or ())
+    )
 
 
 def _revise_dimension_fixup(item):
@@ -2071,13 +2165,18 @@ def _missing_rows_fixup(item, missing_grains, required_fields, field_gaps, paths
     }
 
 
-def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs):
-    """Grains whose cited results matched the item but did not count, each with its statuses and reasons."""
+def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncounted_keys):
+    """Grains whose cited results matched the item but did not count, each with its statuses and reasons.
+
+    evidence_recipe_cells lists only the cells of those grains that did not count: an estimated cell, or a
+    cell of a grain another cell already answers, is not something to repair.
+    """
     recipe_cells = []
     if any(path['path'] == 'evidence_recipe' for path in paths['accepted']):
         for location in locations:
             reason = location['evidence'].get('not_counted_reason')
-            if location['status'] == 'answered' or reason == 'estimate_cited_for_source_grain':
+            if (location['status'] in {'answered', 'estimated'} or reason == 'estimate_cited_for_source_grain'
+                    or _location_grain(item, location, runs) not in uncounted_keys):
                 continue
             row = runs[location['run_id']]['result']['rows'][location['row']]
             recipe_cells.append({'run_id': location['run_id'], 'row': location['row'], 'column': location['column'],
@@ -2092,6 +2191,48 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs):
         'not_counted': uncounted[:12],
         'reason': 'cited_result_not_counted',
     }
+
+
+# Uncounted reasons that show the writer is estimating a grain; a missing grain always qualifies.
+ESTIMATING_REASONS = frozenset({'recipe_coefficient_unbound', 'estimate_cited_for_source_grain'})
+DECLARE_GRAIN_BASIS = {
+    'tool': 'analysis_requirements_save', 'field': 'grain_basis', 'with': 'parent_id',
+    'options': [{'basis': 'estimate', 'requires': ['method'], 'then': 'estimate_recipe'},
+                {'basis': 'estimate', 'factor_reproducible': False, 'requires': ['method', 'reason'], 'then': 'manager'},
+                {'basis': 'unavailable', 'requires': ['reason'], 'then': 'manager'}],
+    'never_answers': True,
+}
+
+
+def _grain_key(grain):
+    return tuple(grain.get(key) for key in GRAIN_KEYS)
+
+
+def _reproducible_estimate_declared(item, grain):
+    declared = _declared_basis(item, _grain_key(grain))
+    return bool(declared and declared['basis'] == 'estimate' and declared.get('factor_reproducible', True))
+
+
+def _needs_grain_basis_hint(item, grain):
+    """A closed-metric grain with no declaration that nothing counted for, where the source may lack it."""
+    return (
+        _closed_metric_key(item) is not None
+        and _declared_basis(item, _grain_key(grain)) is None
+        and ('reasons' not in grain or bool(set(grain['reasons']) & ESTIMATING_REASONS))
+    )
+
+
+def _grain_basis_guidance(item, grains, paths):
+    """How the grains the source does not state are handled: a declared estimate grain needs a factor
+    recipe (it reaches `estimated`, never answered); an undeclared one is declared in grain_basis first."""
+    guidance = {}
+    estimates = [{key: grain[key] for key in GRAIN_KEYS if key in grain}
+                 for grain in grains if _reproducible_estimate_declared(item, grain)]
+    if estimates and paths.get('estimate'):
+        guidance.update(estimate_grains=estimates[:12], estimate_evidence=paths['estimate'])
+    if any(_needs_grain_basis_hint(item, grain) for grain in grains):
+        guidance['if_source_lacks_value'] = DECLARE_GRAIN_BASIS
+    return guidance
 
 
 def _blocked_path_fixup(item, paths):
@@ -2226,12 +2367,15 @@ def _location_matches(candidate, expected):
 NOT_COUNTED_TEXT = {
     'script_output_without_recipe': '只有脚本输出，没有通过的来源复算规则',
     'script_closure_not_counted': '闭合由脚本自行算出，只作展示，不计为引擎闭合',
+    'engine_output_without_closure': '财务引擎的这项输出没有闭合规则，也没有通过的来源复算规则',
     'recipe_failed': '复算规则未通过',
     'recipe_failed_precision': '复算规则因运行值被舍入而未通过，需在运行结果中保存完整精度',
-    'recipe_coefficient_unbound': '复算规则的 scale 不是 1 或单位换算，只证明了乘法',
+    'recipe_coefficient_unbound': ('复算规则的 scale 不是 1 或单位换算，只证明了乘法'
+                                   '（系数要写成一条 ratio 规则，由 factor_recipe_id 引用，且只对 grain_basis 声明为估算的组合计为估算）'),
     'ratio_recipe_cannot_prove_amount': 'ratio 规则不能证明金额',
     'recipe_source_outside_bindings': '复算规则的来源不在本要求绑定的资料快照内',
     'estimate_cited_for_source_grain': '该组合未在 grain_basis 声明为估算，却引用了估算值',
+    'estimate_factor_declared_not_reproducible': '该组合已声明系数无法复算，引用的估算不计入，等经理决定口径',
     'evidence_incomplete': '证据缺项、口径或单位不一致，或复算不闭合',
     'method_not_applicable': '计算方法未定义该项',
     'no_evidence_record': '该数值没有对应的证据记录',
@@ -2271,6 +2415,9 @@ def _path_text(path, keys):
         return f'引用 method 为 {path["method"]} 的运行产出的含 {keys} 的结果行'
     if name == 'run_metric_result_set':
         return f'在财务口径上运行 run_metric（{path["metric_kind"]}），并引用范围内全部结果行的 amount'
+    if name == 'run_metric_account_total':
+        return (f'在财务口径上运行 run_metric（kind 为 account_total，accounts 只列“{path["account"]}”），'
+                '并引用要求期间那一行的 amount')
     return f'需要含 {keys} 的结果行，并在文稿中引用该数值'
 
 
@@ -2320,13 +2467,27 @@ def _unanswered_message(item):
             message += '可计入的依据：' + '；或'.join(_path_text(path, keys) for path in paths['accepted']) + '。'
         if _closed_metric_key(item) is not None and any(path['path'] == 'evidence_recipe' for path in paths['accepted']):
             message += '收入、成本、费用、利润类的脚本输出和脚本自行算出的闭合本身都不计为已回答。'
+        estimates = [grain for grain in [*missing, *uncounted] if _reproducible_estimate_declared(item, grain)]
+        if estimates and paths.get('estimate'):
+            message += (_grain_count(estimates, '已在 grain_basis 声明为估算')
+                        + '：引用该格的结果行，附一条 direct 或 sum 规则（scale 只能是 1 或单位换算），并用 factor_recipe_id '
+                        '引用本批次一条通过的 ratio 规则作系数，系数不写进 scale；这些组合只计为估算，经理确认前不计为已回答。')
+        if any(_needs_grain_basis_hint(item, grain) for grain in [*missing, *uncounted]):
+            message += ('若绑定资料里确实没有某个组合的数：用 parent_id 重新保存要求，在该项 grain_basis 里声明这个组合。'
+                        '系数能由归档单元格复算时声明 estimate 并写 method，再按估算附规则；系数写不出时声明 estimate、'
+                        'factor_reproducible:false 并写 reason；资料缺失时声明 unavailable 并写 reason。'
+                        '声明只让该组合计为估算或交经理确认，不计为已回答。')
     blocked = paths.get('blocked') or []
     if blocked and status != 'answered':
         texts = [f'{path.get("tool") or path["path"]}（{"、".join(BLOCKER_TEXT.get(b, b) for b in path["blockers"])}）'
                  for path in blocked]
         message += '当前走不通的路径：' + '；'.join(texts) + '。'
-        if not paths['accepted']:
+        blockers = {blocker for path in blocked for blocker in path['blockers']}
+        if not paths['accepted'] and item.get('awaiting_manager'):
+            # Only when nothing is left for the assistant (see _manager_reasons); completion stops too.
             message += '需经理先处理上述阻塞，助手不要重复计算。'
+        elif not paths['accepted'] and 'no_finance_context' in blockers:
+            message += '可先用 finance_context_save 为绑定资料保存财务口径，再按被阻塞的引擎路径计算。'
     gaps = item.get('row_field_gaps') or {}
     if gaps:
         fields = '、'.join(f'{key}={value}' for key, value in gaps.items())

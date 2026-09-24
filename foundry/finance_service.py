@@ -744,8 +744,8 @@ class FinanceStore:
                 message = error.get("message") if isinstance(error.get("message"), str) else "completion validation failed"
                 raise FoundryError(message)
             key = _hash({"operation_id": operation_id, "call_id": call_id})
-            previous = next((row for row in self.analysis._list("drafts")
-                             if row.get("completion_request_key") == key), None)
+            previous = _replayable_draft([row for row in self.analysis._list("drafts")
+                                          if row.get("completion_request_key") == key], attempt)
             if previous:
                 for run_id in previous.get("run_ids", []):
                     self._authorize(self.analysis.get_run(run_id)["bindings"])
@@ -840,12 +840,13 @@ class FinanceStore:
                 raise FoundryError("operation revision has not been reserved")
             if attempt.get("status") == "reserved" and operation.get("status") not in TERMINAL:
                 raise FoundryError("live completion attempt cannot be recovered")
-            previous_by_revision = next((row for row in self.analysis._list("drafts")
-                                         if row.get("completion_operation_id") == operation["id"]
-                                         and row.get("completion_operation_revision") == revision), None)
+            saved_by_revision = [row for row in self.analysis._list("drafts")
+                                 if row.get("completion_operation_id") == operation["id"]
+                                 and row.get("completion_operation_revision") == revision]
+            if any(row.get("completion_request_key") != recovery_key for row in saved_by_revision):
+                raise FoundryError("completion recovery already saved with a different payload")
+            previous_by_revision = _replayable_draft(saved_by_revision, attempt)
             if previous_by_revision:
-                if previous_by_revision.get("completion_request_key") != recovery_key:
-                    raise FoundryError("completion recovery already saved with a different payload")
                 receipt = (self.analysis._get("completions", attempt["completion_id"])
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
@@ -888,8 +889,8 @@ class FinanceStore:
             if requirements:
                 self._authorize(requirements.get("bindings", {}))
             key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
-            previous = next((row for row in self.analysis._list("drafts")
-                             if row.get("completion_request_key") == key), None)
+            previous = _replayable_draft([row for row in self.analysis._list("drafts")
+                                          if row.get("completion_request_key") == key])
             if previous:
                 self._authorize_evidence_recipes(previous.get("evidence_recipes", []))
                 self._authorize_consistency_sources(previous.get("consistency_sources", {}))
@@ -1886,6 +1887,20 @@ class FinanceStore:
         req_spec["parent_id"] = latest["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
+
+
+def _replayable_draft(drafts, attempt=None):
+    """The saved draft a retry of the same request may return instead of saving again.
+
+    A settled attempt returns the draft it settled with (its receipt is already written). Otherwise only
+    a draft whose check was computed under the current completion policy is replayed: a verdict from
+    older rules must not be stamped into a current-policy receipt, so such a request is checked again.
+    """
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+
+    if attempt and attempt.get("completion_id"):
+        return next((row for row in drafts if row.get("id") == attempt.get("draft_id")), drafts[0] if drafts else None)
+    return next((row for row in reversed(drafts) if row.get("check_policy_version") == COMPLETION_POLICY_VERSION), None)
 
 
 def _dedupe_explanation_claims(claims):
