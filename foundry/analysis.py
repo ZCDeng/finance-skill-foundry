@@ -120,6 +120,14 @@ def _quality_status_dimensions(
         },
     }
 
+def _fact_ids_in_runs(analysis: Any, fact_ids: list, runs: dict[str, dict], materiality: Any) -> list:
+    from foundry.finance_explanations import prepare_explanation
+
+    succeeded = [run for run in runs.values() if run.get("execution_status") == "succeeded"]
+    available = {fact["id"] for fact in prepare_explanation(analysis, succeeded, materiality=materiality)["facts"]}
+    return [fact_id for fact_id in fact_ids if fact_id in available]
+
+
 def _revision_quality_issues(comparison: dict) -> list[dict]:
     issues = []
     for item in comparison.get("issues", []):
@@ -952,6 +960,9 @@ class AnalysisStore:
 
         current_requirements = latest_requirements(self)
         requirements_id = spec.get("requirements_id", parent.get("requirements_id")) or (current_requirements or {}).get("id")
+        if "fact_ids" not in spec and fact_ids and set(runs) != set(parent.get("run_ids", [])):
+            # A revision that swaps its runs must not carry the parent's facts from runs it no longer cites.
+            fact_ids = _fact_ids_in_runs(self, fact_ids, runs, materiality)
         explanation_check = validate_explanation(
             self,
             {

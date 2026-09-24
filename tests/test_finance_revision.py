@@ -956,3 +956,23 @@ def test_runtime_cannot_promote_professional_review_and_edits_reset_review(tmp_p
     assert spoofed["status_dimensions"]["professional_review"]["status"] == "unreviewed"
     child = analysis.save_draft({"parent_id": reviewed["id"], "body": "数字改了。", "review_status": "reviewed"})
     assert child["review_status"] == "unreviewed"
+
+
+def test_revision_that_swaps_runs_does_not_inherit_facts_from_dropped_runs(tmp_path):
+    """Huachen rerun: a child saved with only a new run_ids list kept 296 parent fact_ids -> 296 unknown_fact."""
+    from foundry.finance_explanations import prepare_explanation
+
+    task = TaskStore(tmp_path / "var").create(title="fact inheritance")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="1")
+    new_run = _run(analysis, value="325644", suffix="2")
+    old_fact_ids = [fact["id"] for fact in prepare_explanation(analysis, [old_run])["facts"]]
+    assert old_fact_ids
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入完成情况。", "run_ids": [old_run["id"]], "fact_ids": old_fact_ids})
+
+    swapped = analysis.save_draft({"parent_id": parent["id"], "body": "收入完成情况。", "run_ids": [new_run["id"]]})
+    same_runs = analysis.save_draft({"parent_id": parent["id"], "body": "收入完成情况。"})
+
+    assert swapped["fact_ids"] == []
+    assert not [issue for issue in swapped["quality"]["issues"] if issue["code"] == "unknown_fact"]
+    assert same_runs["fact_ids"] == old_fact_ids
