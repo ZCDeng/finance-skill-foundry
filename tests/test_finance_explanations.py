@@ -1032,6 +1032,47 @@ def test_mid_name_rate_and_day_columns_do_not_inherit_the_amount_unit(service):
     assert facts["应收周转天数_年化"]["semantics"]["role"] != "amount"
 
 
+def test_unit_named_in_the_column_beats_the_row_and_scope_unit(service):
+    """Review of the #12 fix: 单方物业费_元 in a 万元 run was labelled 万元 (10,000x off), so a draft writing
+    “2.013412 万元” passed and the correct “2.013412 元” was flagged."""
+    from foundry.finance_explanations import prepare_explanation, validate_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "cacacacacacacacacacacacacacacaca",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "华东区域", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "区域", "type": "VARCHAR"},
+                {"name": "单方物业费_元", "type": "DECIMAL(18,6)"},
+                {"name": "收入_1-8月实际_万元", "type": "DECIMAL(38,4)"},
+                {"name": "毛利率_actual", "type": "DECIMAL(18,6)"},
+                {"name": "单位", "type": "VARCHAR"},
+            ],
+            "rows": [{"区域": "华东区域", "单方物业费_元": "2.013412", "收入_1-8月实际_万元": "109742.0280",
+                      "毛利率_actual": "0.25", "单位": "万元"}],
+        },
+    })
+
+    facts = {fact["column"]: fact for fact in prepare_explanation(store.analysis, [run])["facts"]}
+
+    assert facts["单方物业费_元"]["unit"] == "元"
+    assert facts["单方物业费_元"]["display_value"] == "2.013412 元"
+    assert facts["收入_1-8月实际_万元"]["unit"] == "万元"
+    assert facts["毛利率_actual"]["semantics"]["role"] == "amount"  # English amount word vetoes the mid-name 率
+
+    fact_id = facts["单方物业费_元"]["id"]
+    def unit_issues(body):
+        check = validate_explanation(store.analysis, {"body": body, "run_ids": [run["id"]], "fact_ids": [fact_id], "claims": []})
+        return [issue for issue in check["issues"] if issue["code"] == "fact_unit_mismatch"]
+
+    assert unit_issues("华东单方物业费为 2.013412 万元。")
+    assert not unit_issues("华东单方物业费为 2.013412 元。")
+
+
 def test_money_unit_segment_beats_a_rate_driver_segment(service):
     """毛利率_影响_万元 is a 万元 impact of the margin rate, not a rate shown ×100."""
     from foundry.finance_explanations import prepare_explanation

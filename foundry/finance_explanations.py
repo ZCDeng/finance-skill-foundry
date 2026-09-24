@@ -1016,9 +1016,16 @@ def _run_scope_unit(run: dict | None) -> Any:
     return None
 
 
+def _named_money_unit(column: str) -> str | None:
+    """单方物业费_元 in a 万元 run is still 元: a unit the column name states beats the row/scope unit."""
+    named = [segment for segment in _column_segments(column) if segment in MONEY_UNIT_SEGMENTS]
+    return named[-1] if named else None
+
+
 def _amount_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict | None) -> Any:
     return (
         row.get(f"{column}_unit")
+        or _named_money_unit(column)
         or _row_unit(row)
         or column_defs.get(column, {}).get("unit")
         or _run_scope_unit(run)
