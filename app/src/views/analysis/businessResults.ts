@@ -168,7 +168,7 @@ export function selectBusinessResult(analysis: AnalysisRevision, runs: AnalysisR
 }
 
 function isKnownRatioField(key: string): boolean {
-  return key in ratioFieldLabels || key in ratioPctFieldLabels || /达成率|完成率|毛利率|收缴率|比例|率$/.test(key);
+  return key in ratioFieldLabels || key in ratioPctFieldLabels || /达成率|完成率|毛利率|收缴率|比例|率$|率_/.test(key);
 }
 
 export function columnSemantics(name: string, type?: string): FieldSemantics {

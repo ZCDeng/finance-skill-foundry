@@ -972,6 +972,49 @@ def test_chinese_wide_result_reads_row_unit_and_keeps_ratio_percent(service):
     assert members["收入_达成率_1_8月"]["semantic_role"] == "ratio"
 
 
+def test_mid_name_rate_and_day_columns_do_not_inherit_the_amount_unit(service):
+    """Huachen rerun: 差异率_同口径 / 收缴率_实际 / 应收周转天数 were shown as 万元."""
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "efefefefefefefefefefefefefefefef",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "scope": {"organization": "华东区域", "unit": "万元"},
+        "result": {
+            "columns": [
+                {"name": "区域", "type": "VARCHAR"},
+                {"name": "营业利润_差异_同口径_万元", "type": "DECIMAL(38,4)"},
+                {"name": "营业利润_差异率_同口径", "type": "DECIMAL(18,6)"},
+                {"name": "收缴率_实际", "type": "DECIMAL(18,6)"},
+                {"name": "应收周转天数_年化", "type": "DECIMAL(18,2)"},
+            ],
+            "rows": [{
+                "区域": "华东区域",
+                "营业利润_差异_同口径_万元": "-1484.9515",
+                "营业利润_差异率_同口径": "-0.106551",
+                "收缴率_实际": "0.902000",
+                "应收周转天数_年化": "90.73",
+            }],
+        },
+    })
+
+    facts = {fact["column"]: fact for fact in prepare_explanation(store.analysis, [run])["facts"]}
+
+    assert facts["营业利润_差异_同口径_万元"]["unit"] == "万元"
+    assert facts["营业利润_差异_同口径_万元"]["display_value"] == "-1,484.9515 万元"
+    assert facts["营业利润_差异率_同口径"]["unit"] == "%"
+    assert facts["营业利润_差异率_同口径"]["display_value"] == "-10.66%"
+    assert facts["营业利润_差异率_同口径"]["semantics"]["role"] == "ratio"
+    assert facts["收缴率_实际"]["unit"] == "%"
+    assert facts["收缴率_实际"]["display_value"] == "90.20%"
+    assert facts["应收周转天数_年化"]["unit"] == "天"
+    assert facts["应收周转天数_年化"]["display_value"] == "90.73 天"
+    assert facts["应收周转天数_年化"]["semantics"]["role"] != "amount"
+
+
 def test_chinese_wide_result_uses_run_scope_unit_without_leaking_to_ratio(service):
     from foundry.finance_explanations import prepare_explanation
 
