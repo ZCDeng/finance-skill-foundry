@@ -694,6 +694,149 @@ def test_non_unit_mismatch_has_no_scale_hint(tmp_path):
     assert _unit_scale_hint(Decimal("0"), Decimal("500000")) is None
 
 
+def _income_statement_dataset(tmp_path, analysis: AnalysisStore, *, value=5000000000) -> dict:
+    from openpyxl import Workbook
+
+    source = tmp_path / "income.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "04·合并利润表"
+    sheet["F5"] = value
+    book.save(source)
+    book.close()
+    return analysis.add_dataset(source, name="income", metadata={"mode": "workbook"})
+
+
+def _le_revenue_recipe(dataset: dict, run: dict, **extra) -> dict:
+    return {
+        "id": "le-revenue",
+        "label": "全年预算列（LE 收入）",
+        "kind": "direct",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "04·合并利润表",
+        "range": "F5",
+        "claim": {"run_id": run["id"], "row": 0, "column": "actual"},
+        **extra,
+    }
+
+
+def _mismatch(draft: dict, recipe_id: str) -> dict:
+    issue = next(item for item in draft["evidence_report"]["issues"] if item["recipe_id"] == recipe_id)
+    assert issue["code"] == "evidence_recipe_mismatch"
+    return issue
+
+
+def test_unit_scale_hint_names_the_total_scale_when_the_recipe_already_has_one(tmp_path):
+    """F5 is 元 and the recipe already converts to 万元 (0.0001), but the run cites 亿元."""
+    analysis = AnalysisStore(TaskStore(tmp_path / "var").create(title="existing scale"))
+    dataset = _income_statement_dataset(tmp_path, analysis)
+    yi_run = _run(analysis, value="50", suffix="1")
+    recipe = _le_revenue_recipe(dataset, yi_run, scale="0.0001")
+
+    wrong = analysis.save_draft({"title": "亿元", "body": "LE 收入50。", "run_ids": [yi_run["id"]], "evidence_recipes": [recipe]})
+    issue = _mismatch(wrong, "le-revenue")
+    assert issue["suggested_scale"] == "0.00000001"
+    assert "相差 10000 倍" in issue["message"]
+    assert "疑似单位换算有误" in issue["message"]
+    assert "scale = 0.00000001" in issue["message"]
+    fixed = analysis.save_draft({"title": "亿元", "body": "LE 收入50。", "run_ids": [yi_run["id"]], "evidence_recipes": [{**recipe, "scale": issue["suggested_scale"]}]})
+    assert fixed["evidence_report"]["summary"]["status"] == "pass"
+
+    # Reverse direction: the run cites 元, so the existing 万元 conversion has to go.
+    yuan_run = _run(analysis, value="5000000000", suffix="2")
+    reverse = _le_revenue_recipe(dataset, yuan_run, scale="0.0001")
+    wrong = analysis.save_draft({"title": "元", "body": "LE 收入5000000000。", "run_ids": [yuan_run["id"]], "evidence_recipes": [reverse]})
+    issue = _mismatch(wrong, "le-revenue")
+    assert issue["suggested_scale"] == "1"
+    assert "scale = 1。" in issue["message"]
+    fixed = analysis.save_draft({"title": "元", "body": "LE 收入5000000000。", "run_ids": [yuan_run["id"]], "evidence_recipes": [{**reverse, "scale": issue["suggested_scale"]}]})
+    assert fixed["evidence_report"]["summary"]["status"] == "pass"
+
+
+def test_factor_pair_mismatch_keeps_plain_message_without_scale_hint(tmp_path):
+    """Neither the factor-bound recipe nor its factor ratio may carry a scale, so neither is told to set one."""
+    analysis = AnalysisStore(TaskStore(tmp_path / "var").create(title="factor scale hint"))
+    dataset = _factor_workbook_dataset(tmp_path, analysis)
+    factor_run = _factor_run(analysis, value="0.3", suffix="1")
+    wan_run = _factor_run(analysis, value="0.0018", suffix="2")
+
+    dependent = analysis.save_draft({
+        "title": "毛利预算",
+        "body": "毛利预算0.0018。",
+        "run_ids": [factor_run["id"], wan_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dataset, factor_run, wan_run),
+    })
+    issue = _mismatch(dependent, "gross-margin-budget")
+    assert "suggested_scale" not in issue
+    assert issue["message"] == "来源区域 测算!D2 的独立计算为 18.0，运行引用值为 0.0018。"
+
+    percent_run = _factor_run(analysis, value="3000", suffix="3")
+    result_run = _factor_run(analysis, value="18", suffix="4")
+    factor = analysis.save_draft({
+        "title": "毛利率",
+        "body": "毛利率3000，毛利预算18。",
+        "run_ids": [percent_run["id"], result_run["id"]],
+        "evidence_recipes": _factor_recipe_pair(dataset, percent_run, result_run),
+    })
+    issue = _mismatch(factor, "gross-margin-factor")
+    assert "suggested_scale" not in issue
+    assert issue["message"] == "来源区域 测算!B2 ÷ 测算!C2 的独立计算为 0.3，运行引用值为 3000。"
+
+    # The same ratio outside a factor pair may take a scale, so it keeps the hint and the retry passes.
+    standalone = {**_factor_recipe_pair(dataset, percent_run, result_run)[0], "id": "standalone-margin"}
+    alone = analysis.save_draft({"title": "毛利率", "body": "毛利率3000。", "run_ids": [percent_run["id"]], "evidence_recipes": [standalone]})
+    issue = _mismatch(alone, "standalone-margin")
+    assert issue["suggested_scale"] == "10000"
+    fixed = analysis.save_draft({"title": "毛利率", "body": "毛利率3000。", "run_ids": [percent_run["id"]], "evidence_recipes": [{**standalone, "scale": issue["suggested_scale"]}]})
+    assert fixed["evidence_report"]["summary"]["status"] == "pass"
+
+
+def test_unit_scale_hint_requires_identical_digits_and_sign(tmp_path):
+    from foundry.financial_evidence import _unit_scale_hint
+
+    # Within 1e-28 of a unit power: a 28-digit division would round these onto 10^k.
+    assert _unit_scale_hint(Decimal("5000000000"), Decimal("499999.99999999999999999999999999999")) is None
+    assert _unit_scale_hint(Decimal("5000000000"), Decimal("500000.00000000000000000000001")) is None
+    assert _unit_scale_hint(Decimal("3"), Decimal("0.0029999999999999999999999999999")) is None
+    # Float tails near a unit power; the last two have trailing-digit gaps of exactly 10^3 and 10^4.
+    assert _unit_scale_hint(Decimal("3185"), Decimal("31850000.5")) is None
+    assert _unit_scale_hint(Decimal("64441.376900000001"), Decimal("644413769")) is None
+    assert _unit_scale_hint(Decimal("64441.3769"), Decimal("644413769.0000001")) is None
+    assert _unit_scale_hint(Decimal("3185"), Decimal("31860000")) is None
+    # Opposite signs, and a power of ten that is not a unit step.
+    assert _unit_scale_hint(Decimal("-5000000000"), Decimal("500000")) is None
+    assert _unit_scale_hint(Decimal("1"), Decimal("100000")) is None
+    # Exact unit powers in both directions, including negative values and trailing zeros.
+    assert _unit_scale_hint(Decimal("5000000000"), Decimal("500000.0000")) == -4
+    assert _unit_scale_hint(Decimal("500000"), Decimal("5000000000")) == 4
+    assert _unit_scale_hint(Decimal("-3185"), Decimal("-3.185")) == -3
+    assert _unit_scale_hint(Decimal("-2.5"), Decimal("-2500000.00")) == 6
+    assert _unit_scale_hint(Decimal("64441.3769"), Decimal("644413769")) == 4
+    assert _unit_scale_hint(Decimal("1.5"), Decimal("150000000")) == 8
+
+
+def test_unit_scale_hint_never_crashes_on_extreme_exponents(tmp_path):
+    from foundry.financial_evidence import _unit_scale_hint, evaluate_evidence_recipes
+
+    assert _unit_scale_hint(Decimal("1E-300"), Decimal("1E+999999")) is None
+    assert _unit_scale_hint(Decimal("1E-1000000"), Decimal("1000")) is None
+    assert _unit_scale_hint(Decimal("1E+999995"), Decimal("1E+1000003")) == 8
+    assert _unit_scale_hint(Decimal("Infinity"), Decimal("5")) is None
+
+    analysis = AnalysisStore(TaskStore(tmp_path / "var").create(title="extreme scale"))
+    dataset = _income_statement_dataset(tmp_path, analysis, value=1)
+    run = _run(analysis, value="1000", suffix="1")
+    draft = analysis.save_draft({"title": "极端", "body": "收入1000。", "run_ids": [run["id"]], "evidence_recipes": [_le_revenue_recipe(dataset, run, scale="1E-1000000")]})
+    assert draft["evidence_report"]["summary"]["status"] == "needs_attention"
+    assert "suggested_scale" not in _mismatch(draft, "le-revenue")
+
+    # An exact unit gap on top of a huge existing scale: the total is built without context arithmetic.
+    huge_run = _run(analysis, value="1E+1000007", suffix="2")
+    report = evaluate_evidence_recipes(analysis, [_le_revenue_recipe(dataset, huge_run, scale="1E+999999")])
+    assert report["issues"][0]["suggested_scale"] == "1" + "0" * 1000007
+
+
 def test_consistency_text_source_can_read_archived_workbook_single_cell(tmp_path):
     from openpyxl import Workbook
 

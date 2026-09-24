@@ -208,7 +208,14 @@ def _evaluate_recipe(
             "actual": _format_decimal(actual),
             "expected": _format_decimal(expected),
             **_factor_result_details(recipe, factor_value),
-            "issue": _issue(recipe, "evidence_recipe_mismatch", None, actual=actual, expected=expected),
+            "issue": _issue(
+                recipe,
+                "evidence_recipe_mismatch",
+                None,
+                actual=actual,
+                expected=expected,
+                scale_hint=_accepts_scale(recipe, recipe_by_id),
+            ),
         }
     return {
         "recipe_id": recipe["id"],
@@ -312,9 +319,18 @@ def _exact_values(analysis: Any, source: dict[str, str]) -> dict[str, Decimal]:
     return read_exact_numerics(data, source["sheet"])
 
 
-def _issue(recipe: dict[str, Any], code: str, message: str | None, *, actual: Decimal | None, expected: Decimal | None) -> dict[str, Any]:
+def _issue(
+    recipe: dict[str, Any],
+    code: str,
+    message: str | None,
+    *,
+    actual: Decimal | None,
+    expected: Decimal | None,
+    scale_hint: bool = False,
+) -> dict[str, Any]:
     expected_text = _format_decimal(expected) if expected is not None else ""
     actual_text = _format_decimal(actual) if actual is not None else None
+    exponent = _unit_scale_hint(actual, expected) if scale_hint else None
     location = _recipe_location(recipe)
     if recipe["kind"] in {"direct", "sum"}:
         source_label = f"{location['sheet']}!{location['range']}"
@@ -334,33 +350,68 @@ def _issue(recipe: dict[str, Any], code: str, message: str | None, *, actual: De
         **({"actual": actual_text} if actual_text is not None else {}),
         "location": location,
         "claim": recipe.get("claim", {}),
-        **({"suggested_scale": _format_decimal(scale)} if (scale := _unit_scale_hint(actual, expected)) else {}),
-        "message": message or _mismatch_message(source_label, actual_text, expected_text, scale),
+        **({"suggested_scale": _format_decimal(_shifted(recipe["scale"], exponent))} if exponent is not None else {}),
+        "message": message or _mismatch_message(source_label, actual_text, expected_text, recipe["scale"], exponent),
     }
 
 
 UNIT_SCALE_EXPONENTS = {3, 4, 6, 8}  # 千元、万元、百万元、亿元
 
 
-def _unit_scale_hint(actual: Decimal | None, expected: Decimal | None) -> Decimal | None:
-    """Scale that turns the source value into the claim when they differ by an exact unit power of ten."""
-    if actual is None or expected is None or actual == 0 or expected == 0 or actual == expected:
+def _accepts_scale(recipe: dict[str, Any], recipe_by_id: dict[str, dict[str, Any]] | None) -> bool:
+    """A factor-bound recipe and the ratio it references must keep scale 1 (see _clean_recipes)."""
+    if recipe.get("factor_recipe_id"):
+        return False
+    return not any(other.get("factor_recipe_id") == recipe["id"] for other in (recipe_by_id or {}).values())
+
+
+def _unit_scale_hint(actual: Decimal | None, expected: Decimal | None) -> int | None:
+    """Power k with expected == actual × 10^k exactly, when k is a unit step (千/万/百万/亿).
+
+    Signs and significant digits are compared instead of dividing, so rounding at the
+    context precision cannot fake an exact power and extreme exponents cannot overflow.
+    """
+    if actual is None or expected is None or not actual.is_finite() or not expected.is_finite():
         return None
-    scale = expected / actual
-    exponent = scale.normalize().adjusted()
-    if abs(exponent) in UNIT_SCALE_EXPONENTS and scale == Decimal(1).scaleb(exponent):
-        return scale
-    return None
+    if actual == 0 or expected == 0:
+        return None
+    actual_sign, actual_digits, actual_exponent = _significand(actual)
+    expected_sign, expected_digits, expected_exponent = _significand(expected)
+    if actual_sign != expected_sign or actual_digits != expected_digits:
+        return None
+    exponent = expected_exponent - actual_exponent
+    return exponent if abs(exponent) in UNIT_SCALE_EXPONENTS else None
 
 
-def _mismatch_message(source_label: str, actual_text: str | None, expected_text: str, scale: Decimal | None) -> str:
+def _significand(value: Decimal) -> tuple[int, tuple[int, ...], int]:
+    """Sign, digits without trailing zeros and the matching exponent; exact, unlike normalize()."""
+    sign, digits, exponent = value.as_tuple()
+    kept = len(digits)
+    while kept > 1 and digits[kept - 1] == 0:
+        kept -= 1
+    return sign, digits[:kept], exponent + len(digits) - kept
+
+
+def _shifted(value: Decimal, exponent: int) -> Decimal:
+    """value × 10^exponent, built from the digit tuple so no context rounding or overflow applies."""
+    sign, digits, value_exponent = _significand(value)
+    return Decimal((sign, digits, value_exponent + exponent))
+
+
+def _mismatch_message(
+    source_label: str,
+    actual_text: str | None,
+    expected_text: str,
+    scale: Decimal,
+    exponent: int | None,
+) -> str:
     message = f"来源区域 {source_label} 的独立计算为 {actual_text}，运行引用值为 {expected_text}。"
-    if scale is None:
+    if exponent is None:
         return message
-    times = _format_decimal(max(scale, 1 / scale).normalize())
+    cause = "缺少单位换算" if scale == 1 else "单位换算有误"
     return (
-        f"{message}两者恰好相差 {times} 倍，疑似缺少单位换算（如元与万元）；"
-        f"若确属换算，请在该核验规则中设置 scale = {_format_decimal(scale.normalize())}。"
+        f"{message}两者恰好相差 {10 ** abs(exponent)} 倍，疑似{cause}（如元与万元）；"
+        f"若确属换算，请在该核验规则中设置 scale = {_format_decimal(_shifted(scale, exponent))}。"
     )
 
 
