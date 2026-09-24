@@ -305,6 +305,40 @@ def test_generic_requirement_requires_each_declared_scenario_grain(analysis):
     assert sourced['provenance']['status'] == 'pass'
 
 
+def test_pending_grain_requirement_names_missing_combinations_and_row_keys(analysis):
+    """Huachen rerun: wide 收入_1-8月实际_万元 rows answered nothing and the warning said only “尚未提供”."""
+    from foundry.finance_requirements import _unanswered_message
+
+    requirement = save_requirements(analysis, spec(
+        scope={'ledger': 'L1'},
+        items=[{'id': 'scenario_ratio', 'metric': 'ratio',
+                'organizations': ['总部'], 'periods': ['2026-08'], 'scenarios': ['actual', 'budget'],
+                'requires_drilldown': True}],
+    ))
+    run = _run(analysis, id_suffix='scenario-missing', finance_scope={
+        'actual': {'ledger': 'L1'}, 'budget': {'ledger': 'L1'},
+    }, result={
+        'columns': ['organization', 'period', 'scenario', 'metric_key', 'value'],
+        'rows': [
+            {'organization': '总部', 'period': '2026-08', 'scenario': 'actual', 'metric_key': 'ratio', 'value': '0.8'},
+        ],
+    })
+
+    partial = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                            'claims': [_claim(run, row=0, column='value', value='0.8')]})
+    item = partial['items'][0]
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+
+    assert item['status'] == 'pending'
+    assert item['missing_grains'] == [{'organization': '总部', 'period': '2026-08', 'scenario': 'budget'}]
+    assert fixup['missing_count'] == 1
+    assert fixup['row_keys'] == ['metric_key', 'organization', 'period', 'scenario', 'value']
+    assert '1 个要求组合没有已引用的结果行（如 总部、2026-08、budget）' in _unanswered_message(item)
+
+    complete = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': []})
+    assert len(complete['items'][0]['missing_grains']) == 2
+
+
 def test_metric_key_pin_allows_long_form_ratio_rows_for_exact_scenario(analysis):
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1'},
