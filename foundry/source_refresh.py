@@ -836,12 +836,13 @@ def _literal_xlsx_rows(
     """
     try:
         parsed = parse_source(data, ".xlsx", metadata, xlsx_numeric_parser=XLSX_ORIGINAL_DECIMAL)
+        return [
+            _normalize_source_row(row, scope_record, ordinal=index)
+            for index, row in enumerate(parsed["rows"], start=1)
+        ]
     except FoundryError:
+        # A literal spelling can fail a scope check the current reading passes (2026.0799999999999 vs 2026.08).
         return None
-    return [
-        _normalize_source_row(row, scope_record, ordinal=index)
-        for index, row in enumerate(parsed["rows"], start=1)
-    ]
 
 
 def _prepare_snapshot_batch(

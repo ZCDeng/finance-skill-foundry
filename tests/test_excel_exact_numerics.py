@@ -382,3 +382,31 @@ def test_refresh_reports_an_unchanged_re_export_as_unchanged(tmp_path, monkeypat
     third = refresh.refresh_file(path, scope=_refresh_scope(), name="ledger")
     assert third["change_counts"]["updated"] == 1
     assert third["change_counts"]["unchanged"] == 1
+
+
+def test_refresh_falls_back_when_the_literal_reading_fails_a_scope_check(tmp_path):
+    """Review of this fix: a period cell spelled 2026.0799999999999 (the double for 2026.08) made the literal
+    reading raise the scope-period error outside the fallback, so even the first refresh failed."""
+    from dataclasses import replace
+
+    task = TaskStore(tmp_path / "var").create(title="refresh literal scope")
+    refresh = SourceRefreshService(task)
+    path = tmp_path / "ledger.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "预算"
+    sheet.append(["document_id", "line_id", "amount", "period"])
+    sheet.append(["JV-1", "1", 1, 1])
+    buffer = io.BytesIO()
+    book.save(buffer)
+    path.write_bytes(_rewrite_literals(buffer.getvalue(), "预算", {"D2": "2026.0799999999999"}))
+
+    first = refresh.refresh_file(path, scope=replace(_refresh_scope(), period="2026.08"), name="ledger")
+
+    assert first["change_counts"]["inserted"] == 1
+
+
+def test_exponent_literal_without_a_dot_is_normalised_not_kept_as_an_integer():
+    """Ruling (1) keeps only literals with no '.', 'e' or 'E'; an exponent form is a fraction in disguise."""
+    assert excel_number("64441376900000001E-12") == Decimal("64441.3769")
+    assert excel_number("1790234567890123457") == Decimal("1790234567890123457")
