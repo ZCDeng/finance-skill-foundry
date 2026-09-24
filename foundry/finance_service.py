@@ -957,7 +957,8 @@ class FinanceStore:
         if "fact_ids" not in spec and set(run_ids) != set(parent.get("run_ids", [])):
             # Same rule as AnalysisStore.save_draft: swapped runs must not carry the parent's facts.
             available = {fact["id"] for fact in prepared["facts"]}
-            explicit_fact_ids = [fact_id for fact_id in explicit_fact_ids if fact_id in available]
+            explicit_fact_ids = [fact_id for fact_id in explicit_fact_ids
+                                 if not isinstance(fact_id, str) or fact_id in available]
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))

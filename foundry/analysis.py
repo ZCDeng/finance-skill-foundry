@@ -125,7 +125,8 @@ def _fact_ids_in_runs(analysis: Any, fact_ids: list, runs: dict[str, dict], mate
 
     succeeded = [run for run in runs.values() if run.get("execution_status") == "succeeded"]
     available = {fact["id"] for fact in prepare_explanation(analysis, succeeded, materiality=materiality)["facts"]}
-    return [fact_id for fact_id in fact_ids if fact_id in available]
+    # Non-string ids are kept so validate_explanation still reports them as unknown_fact.
+    return [fact_id for fact_id in fact_ids if not isinstance(fact_id, str) or fact_id in available]
 
 
 def _revision_quality_issues(comparison: dict) -> list[dict]:
