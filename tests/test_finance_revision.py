@@ -1119,3 +1119,55 @@ def test_revision_that_swaps_runs_does_not_inherit_facts_from_dropped_runs(tmp_p
     assert swapped["fact_ids"] == []
     assert not [issue for issue in swapped["quality"]["issues"] if issue["code"] == "unknown_fact"]
     assert same_runs["fact_ids"] == old_fact_ids
+
+
+def test_service_save_path_does_not_inherit_facts_from_dropped_runs(tmp_path):
+    """Review of PR #16: the MCP/CLI save_explanation_draft path copied parent fact_ids itself, skipping the filter."""
+    from foundry.finance_explanations import prepare_explanation
+    from foundry.finance_service import FinanceStore
+
+    task = TaskStore(tmp_path / "var").create(title="service fact inheritance")
+    analysis = AnalysisStore(task)
+    service = FinanceStore(task)
+
+    def finance_run(suffix):
+        record = _new(
+            analysis.task, id=suffix * 32, analysis_id="a" * 32, engine="finance",
+            finance_context_id="c" * 32, account_map_id=None, assumptions={},
+            execution_status="succeeded", reproducibility_status="unverified",
+            bindings={"budget": "d" * 32}, input_hashes={"budget": "data-hash-a"},
+            source_hashes={"budget": "source-hash-a"},
+            finance_scope={"budget": {"period": "2026-01..2026-08", "scenario": "BUD", "organization": "集团",
+                                      "unit": "万元", "currency": "CNY"}},
+            result={"columns": [{"name": "metric"}, {"name": "actual"}],
+                    "rows": [{"metric_key": "revenue", "metric": "收入", "actual": "325644", "unit": "万元",
+                              "currency": "CNY"}],
+                    "row_count": 1, "truncated": False},
+        )
+        return analysis._write(analysis._object_path("runs", record["id"]), record)
+
+    old_run, new_run = finance_run("1"), finance_run("2")
+    old_ids = [fact["id"] for fact in prepare_explanation(analysis, [old_run])["facts"]]
+    parent = service.save_explanation_draft({"title": "旧稿", "body": "收入完成情况。",
+                                             "run_ids": [old_run["id"]], "fact_ids": old_ids})
+
+    swapped = service.save_explanation_draft({"parent_id": parent["id"], "body": "收入完成情况。",
+                                              "run_ids": [new_run["id"]], "claims": []})
+    same_runs = service.save_explanation_draft({"parent_id": parent["id"], "body": "收入完成情况。"})
+
+    assert not set(old_ids) & set(swapped["fact_ids"])
+    assert not [issue for issue in swapped["quality"]["issues"] if issue["code"] == "unknown_fact"]
+    assert set(old_ids) <= set(same_runs["fact_ids"])
+
+
+def test_swapped_runs_with_malformed_inherited_fact_id_report_instead_of_crashing(tmp_path):
+    """Review of PR #16: a stored non-string fact id made the new filter raise a bare TypeError."""
+    task = TaskStore(tmp_path / "var").create(title="malformed fact id")
+    analysis = AnalysisStore(task)
+    old_run = _run(analysis, value="325644", suffix="1")
+    new_run = _run(analysis, value="325644", suffix="2")
+    parent = analysis.save_draft({"title": "旧稿", "body": "收入。", "run_ids": [old_run["id"]], "fact_ids": [{}]})
+
+    child = analysis.save_draft({"parent_id": parent["id"], "body": "收入。", "run_ids": [new_run["id"]]})
+
+    assert [issue["code"] for issue in child["quality"]["issues"]].count("unknown_fact") == 1
