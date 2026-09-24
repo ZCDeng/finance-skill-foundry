@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from foundry.analysis import AnalysisStore, _new
@@ -646,6 +648,51 @@ def test_huachen_direct_source_recipe_accepts_3185_and_rejects_proportional_3063
     assert issue["actual"] == "3185"
     assert issue["expected"] == "3063.0494"
     assert issue["location"]["range"] == "B36"
+
+def test_exact_unit_power_mismatch_suggests_scale_and_scaled_retry_passes(tmp_path):
+    """Huachen rerun: 04·合并利润表!F5 is 元 (5000000000), the run cites 万元 (500000)."""
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="unit scale hint")
+    analysis = AnalysisStore(task)
+    source = tmp_path / "close.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "04·合并利润表"
+    sheet["F5"] = 5000000000
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name="close", metadata={"mode": "workbook"})
+    run = _run(analysis, value="500000.0000", suffix="d")
+    recipe = {
+        "id": "le-revenue",
+        "label": "全年预算列（LE 收入）",
+        "kind": "direct",
+        "dataset_id": dataset["id"],
+        "source_hash": dataset["source_hash"],
+        "sheet": "04·合并利润表",
+        "range": "F5",
+        "claim": {"run_id": run["id"], "row": 0, "column": "actual"},
+    }
+
+    missing = analysis.save_draft({"title": "缺换算", "body": "LE 收入500000.0000。", "run_ids": [run["id"]], "evidence_recipes": [recipe]})
+    issue = next(item for item in missing["quality"]["issues"] if item["code"] == "evidence_recipe_mismatch")
+    assert issue["suggested_scale"] == "0.0001"
+    assert "相差 10000 倍" in issue["message"]
+    assert "scale = 0.0001" in issue["message"]
+
+    fixed = analysis.save_draft({"title": "已换算", "body": "LE 收入500000.0000。", "run_ids": [run["id"]], "evidence_recipes": [{**recipe, "scale": issue["suggested_scale"]}]})
+    assert fixed["evidence_report"]["summary"]["status"] == "pass"
+
+
+def test_non_unit_mismatch_has_no_scale_hint(tmp_path):
+    from foundry.financial_evidence import _unit_scale_hint
+
+    assert _unit_scale_hint(Decimal("3185"), Decimal("3063.0494")) is None
+    assert _unit_scale_hint(Decimal("100"), Decimal("1000")) is None
+    assert _unit_scale_hint(Decimal("64441.376900000001"), Decimal("64441.3769")) is None
+    assert _unit_scale_hint(Decimal("0"), Decimal("500000")) is None
+
 
 def test_consistency_text_source_can_read_archived_workbook_single_cell(tmp_path):
     from openpyxl import Workbook
