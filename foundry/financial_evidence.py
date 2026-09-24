@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 
 from foundry.analysis import _hash_bytes
-from foundry.analysis_data import read_exact_numerics
+from foundry.analysis_data import archived_numeric_parser, read_exact_numerics
 from foundry.errors import FoundryError
 
 RECIPE_KINDS = {"direct", "sum", "diff", "ratio"}
@@ -316,7 +316,9 @@ def _exact_values(analysis: Any, source: dict[str, str]) -> dict[str, Decimal]:
     if dataset.get("source_hash") != source["source_hash"]:
         raise FoundryError("evidence recipe source_hash does not match archived snapshot")
     data = _dataset_bytes(analysis, dataset, source)
-    return read_exact_numerics(data, source["sheet"])
+    # The rule the snapshot was filed under, so a run computed from its stored
+    # rows is checked against the same reading of the same bytes.
+    return read_exact_numerics(data, source["sheet"], archived_numeric_parser(dataset, data))
 
 
 def _issue(

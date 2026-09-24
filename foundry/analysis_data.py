@@ -7,7 +7,7 @@ import io
 import json
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
@@ -21,6 +21,13 @@ MAX_COLUMNS = 256
 NUMERIC = re.compile(r"^[+-]?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$")
 DECIMAL_TYPE = re.compile(r"^DECIMAL\(38,(\d|[12]\d|3[0-8])\)$")
 SUPPORTED = {".csv", ".json", ".xlsx", ".md", ".txt"}
+# How a snapshot read its XLSX numeric literals. A snapshot stores the values
+# it read, so re-reading its archived bytes must use the rule it was filed under.
+XLSX_SHORTEST_DOUBLE = "xlsx-shortest-double"
+# The literal digits. Snapshots filed before the shortest-double rule carry this
+# label; so do snapshots filed under that rule before it had a label of its own.
+# archived_numeric_parser tells the two apart.
+XLSX_ORIGINAL_DECIMAL = "xlsx-original-xml-decimal"
 
 
 def load_json(text: str) -> Any:
@@ -106,21 +113,35 @@ def excel_number(text: str) -> Decimal:
     17 significant digits (``64441.376900000001``). That literal and the
     shortest round-trip form (``64441.3769``) name the same double, so the
     shortest form is used; literals that already round-trip keep their digits.
+    An integer literal is kept as written: writers emit int64 IDs verbatim, and
+    above 2**53 two different IDs would otherwise become one double.
     """
     literal = Decimal(text)
-    if not literal.is_finite():
+    if not literal.is_finite() or not any(mark in text for mark in ".eE"):
         return literal
     shortest = Decimal(repr(float(literal)))
     return literal if shortest == literal else shortest
 
 
-def read_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
+def xlsx_number_reader(numeric_parser: str) -> Callable[[str], Decimal]:
+    if numeric_parser == XLSX_SHORTEST_DOUBLE:
+        return excel_number
+    if numeric_parser == XLSX_ORIGINAL_DECIMAL:
+        return Decimal
+    raise FoundryError(f"unknown XLSX numeric parser: {numeric_parser}")
+
+
+def read_exact_numerics(
+    data: bytes, sheet_name: str, numeric_parser: str = XLSX_SHORTEST_DOUBLE
+) -> dict[str, Decimal]:
     """Cell coordinate -> exact Decimal, read from the sheet XML.
 
     openpyxl hands back floats; a ledger needs the digits the file actually
     stores, so numeric cells are read from the original XML instead and
     normalised to the shortest form of the stored double (see excel_number).
+    An archived snapshot passes the rule it was filed under instead.
     """
+    number = xlsx_number_reader(numeric_parser)
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with _open_xlsx_archive(data) as archive:
         workbook_xml = ET.fromstring(archive.read("xl/workbook.xml"))
@@ -152,12 +173,49 @@ def read_exact_numerics(data: bytes, sheet_name: str) -> dict[str, Decimal]:
                     f"worksheet error at {sheet_name}!{cell.attrib.get('r')}"
                 )
             if cell.attrib.get("t", "n") == "n" and v is not None and v.text:
-                raw_cells[cell.attrib["r"]] = excel_number(v.text)
+                raw_cells[cell.attrib["r"]] = number(v.text)
             cell.clear()
         return raw_cells
 
 
-def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
+def archived_numeric_parser(dataset: dict, data: bytes) -> str:
+    """The rule that re-reads an archived snapshot's bytes the way it filed them.
+
+    Under XLSX_ORIGINAL_DECIMAL a snapshot holds either literal digits or, if it
+    was filed while the shortest-double rule still used that label, the shortest
+    form. Its rows tell which. A stored value equal to the literal digits of a
+    numeric cell in its own source row, where the shortest form differs, can only
+    have come from the literal reader. With no such value the two rules agree on
+    every stored cell. Any other snapshot either names the shortest-double rule
+    or stored no sheet values (a workbook snapshot has no label), so the current
+    rule reads it.
+    """
+    transformation = dataset.get("transformation") or {}
+    rows = dataset.get("rows") or []
+    if transformation.get("numeric_parser") != XLSX_ORIGINAL_DECIMAL or not rows:
+        return XLSX_SHORTEST_DOUBLE
+    sheet_name = transformation["sheet"]
+    literal = read_exact_numerics(data, sheet_name, XLSX_ORIGINAL_DECIMAL)
+    shortest = read_exact_numerics(data, sheet_name, XLSX_SHORTEST_DOUBLE)
+    changed: dict[int, set[Decimal]] = {}
+    for coordinate, value in literal.items():
+        if value != shortest[coordinate]:
+            number = int(re.search(r"\d+$", coordinate).group())
+            changed.setdefault(number, set()).add(value)
+    for row, number in zip(rows, transformation.get("source_row_numbers") or []):
+        for stored in row.values():
+            try:
+                value = Decimal(str(stored))
+            except InvalidOperation:
+                continue
+            if value.is_finite() and value in changed.get(number, ()):
+                return XLSX_ORIGINAL_DECIMAL
+    return XLSX_SHORTEST_DOUBLE
+
+
+def _xlsx(
+    data: bytes, metadata: dict, numeric_parser: str = XLSX_SHORTEST_DOUBLE
+) -> tuple[list[str], list[dict], dict]:
     with _open_xlsx_archive(data):
         book = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
         try:
@@ -169,7 +227,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                 sheet.max_row or 0
             ) > MAX_ROWS + 1:
                 raise FoundryError("worksheet exceeds row/column limits")
-            raw_cells = read_exact_numerics(data, sheet_name)
+            raw_cells = read_exact_numerics(data, sheet_name, numeric_parser)
             rows = []
             source_row_numbers = []
             headers = None
@@ -230,7 +288,7 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
                 {
                     "sheet": sheet_name,
                     "header_row": 1,
-                    "numeric_parser": "xlsx-original-xml-decimal",
+                    "numeric_parser": numeric_parser,
                     "formulas": "cached-values-required",
                     "source_row_numbers": source_row_numbers,
                     "header_columns": header_columns,
@@ -240,7 +298,13 @@ def _xlsx(data: bytes, metadata: dict) -> tuple[list[str], list[dict], dict]:
             book.close()
 
 
-def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
+def parse_source(
+    data: bytes,
+    suffix: str,
+    metadata: dict,
+    *,
+    xlsx_numeric_parser: str = XLSX_SHORTEST_DOUBLE,
+) -> dict:
     if suffix not in SUPPORTED:
         raise FoundryError(
             f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
@@ -301,7 +365,7 @@ def parse_source(data: bytes, suffix: str, metadata: dict) -> dict:
                 and workbook["transformation"]["sheet_count"] > 1
             ):
                 return workbook
-            headers, rows, detail = _xlsx(data, metadata)
+            headers, rows, detail = _xlsx(data, metadata, xlsx_numeric_parser)
             transformation.update(detail)
         else:
             parsed = load_json(data.decode("utf-8-sig"))
