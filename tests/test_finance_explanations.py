@@ -496,10 +496,87 @@ def test_spaced_and_en_dash_periods_are_not_uncited_numbers():
     assert texts("1—8月利润21086") == ["21086"]
     assert texts("2026 年 08 月月结套表") == []
     assert texts("差异 -6106.3769 万元，8 月单月") == ["-6106.3769"]
-    assert texts("收入 – 18843 万元") == ["18843"]
+    assert texts("1 至 8 月、1~8月、10 到 12 月、1 - 8 月、1 – 8 日") == []
     assert texts("增长 5 个百分点") == ["5"]
     assert texts("预算工作簿 09 表的「全年预算」列，月结套表 10 表 D5") == []
     assert texts("09·预算执行分析 收入 344487.0552") == ["344487.0552"]
+
+
+def test_amounts_written_after_period_words_are_still_numbers():
+    """Only the number in front of 年/月/日 is the period; 「本月 120 万元」 is an amount."""
+    from foundry.finance_explanations import _body_numbers
+
+    def texts(body):
+        return [item["text"] for item in _body_numbers(body)]
+
+    assert texts("本月 120 万元") == ["120"]
+    assert texts("费用 12 月 21086 万元") == ["21086"]
+    assert texts("全年 500 万元") == ["500"]
+    assert texts("较上月 -300 万元") == ["-300"]
+    assert texts("8 月单月 41,469.6 万元") == ["41,469.6"]
+    assert texts("完成 75% 年度预算") == ["75%"]
+
+
+def test_dashes_hide_only_numbers_inside_a_period_range():
+    from foundry.finance_explanations import _body_numbers
+
+    def texts(body):
+        return [item["text"] for item in _body_numbers(body)]
+
+    assert texts("差异–500万元") == ["500"]
+    assert texts("结论——21086 万元的利润缺口") == ["21086"]
+    assert texts("收入区间 5–8 亿元") == ["5", "8"]
+    assert texts("收入区间 5—8 亿元，1–8 月") == ["5", "8"]
+    # The ASCII hyphen keeps the adjacency rule it had before en-dash periods were handled.
+    assert texts("差异-500万元") == ["-500"]
+    assert texts("收入区间 5-8 亿元") == []
+
+
+@pytest.mark.parametrize("verb", ["示", "明", "现", "达", "述", "态", "彰"])
+def test_sheet_number_rule_does_not_swallow_amounts_before_biao_verbs(verb):
+    from foundry.finance_explanations import _body_numbers
+
+    assert [item["text"] for item in _body_numbers(f"超支 500 表{verb}控制失效")] == ["500"]
+    assert [item["text"] for item in _body_numbers(f"库存 850表{verb}积压")] == ["850"]
+    assert [item["text"] for item in _body_numbers("预算工作簿 09 表的「全年预算」列，月结套表 10 表 D5")] == []
+
+
+def test_period_words_dashes_and_biao_verbs_do_not_hide_draft_numbers(service):
+    store, context = service
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    row_count = next(fact for fact in prepared["facts"] if fact["column"] == "row_count")
+    amount = next(
+        fact
+        for fact in prepared["facts"]
+        if fact["column"] == "amount" and fact["value"] == "120"
+    )
+
+    def check(body):
+        return store.validate_explanation({
+            "body": body,
+            "run_ids": [run["id"]],
+            "fact_ids": [amount["id"], row_count["id"]],
+            "materiality": {"absolute": "1000"},
+        })
+
+    good = check("控制合计金额本月 120 万元，记录数 1 条。")
+    wrong_unit = check("控制合计金额本月 120 亿元，记录数 1 条。")
+
+    assert good["status"] == "pass", good["issues"]
+    assert wrong_unit["status"] == "needs_attention"
+    assert any(issue["code"] == "fact_unit_mismatch" for issue in wrong_unit["issues"])
+    for tail, number in (
+        ("上月 999 万元", "999"),
+        ("差异–500万元", "500"),
+        ("超支 500 表明控制失效", "500"),
+        ("完成 87% 年度预算", "87%"),
+    ):
+        checked = check(f"控制合计金额 120 万元，记录数 1 条，{tail}。")
+        assert checked["status"] == "needs_attention", tail
+        assert [
+            issue["text"] for issue in checked["issues"] if issue["code"] == "uncited_number"
+        ] == [number], checked["issues"]
 
 
 def test_numeric_tokens_cover_percent_chinese_and_avoid_substrings(service):
