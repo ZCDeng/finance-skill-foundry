@@ -42,6 +42,12 @@ describe('EvidenceQuality', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看源区域 01·年度预算总表!N12' }));
     expect(screen.getByRole('region', { name: '源区域预览' }).textContent).toBe('budget/01·年度预算总表/N12');
   });
+  it('shows the manager a plain scope-change note, not the assistant repin instruction', () => {
+    const issue = { code: 'requirements_changed', severity: 'warning', message: '分析范围已更新，请按当前要求复核文稿：文稿按要求版本 a 撰写，当前版本为 b。修订文稿时同时传 parent_id 和 requirements_id=b；只传 parent_id 的修订沿用旧版本，本提示不会消失。' };
+    render(<EvidenceQuality taskId="task" issues={[issue]} />);
+    expect(screen.getByText(/^分析范围已更新，请按当前要求复核文稿。 · 1 条原始问题$/, { selector: 'summary' })).toBeTruthy();
+    expect(screen.queryByText(/requirements_id/, { selector: 'summary' })).toBeNull();
+  });
   it('does not show prior pass status after an edit', () => {
     render(<EvidenceQuality taskId="task" stale dimensions={{ source_validation: { status: 'pass' }, professional_review: { status: 'reviewed' } }} issues={[]} />);
     expect(screen.queryByText('源数据核验通过')).toBeNull();

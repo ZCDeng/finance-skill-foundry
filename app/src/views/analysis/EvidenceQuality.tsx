@@ -21,6 +21,8 @@ const messages: Record<string, string> = {
   missing_dataset_citation: '资料来源尚未关联', unknown_fact: '引用已不属于当前计算结果',
   claim_value_mismatch: '引用值与运行结果不一致', revision_numeric_regression: '新修订改变了既有业务数值',
   requirement_estimated: '估算：来源区域 × 系数区域推算，非源表直接数；经理确认前不计为已回答',
+  // The server message also tells the assistant which requirements_id a revision must name.
+  requirements_changed: '分析范围已更新，请按当前要求复核文稿。',
 };
 function sources(value: unknown): SourceRange[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];

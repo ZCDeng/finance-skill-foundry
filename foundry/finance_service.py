@@ -923,6 +923,9 @@ class FinanceStore:
             raise FoundryError("runtime drafts cannot mark professional review complete")
         if parent.get("requirements_id"):
             self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
+        if spec.get("requirements_id"):
+            # The tools expose requirements_id so a revision can name the current version (repin_requirements).
+            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")

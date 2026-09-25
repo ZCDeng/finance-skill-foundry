@@ -3096,7 +3096,7 @@ def test_a_draft_policy_9_completed_with_a_second_unbacked_value_is_checked_agai
     draft_request = {'title': '8月收入', 'body': '8 月营业收入实际 52000.0000 万元，预算 44163.6526 万元。',
                      **{key: request[key] for key in ('run_ids', 'claims', 'evidence_recipes', 'requirements_id')}}
     first = service.save_explanation_draft(draft_request)
-    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 10
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION
     path = analysis._object_path('drafts', first['id'])
     stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
     check = stored['explanation_check']
@@ -3128,6 +3128,592 @@ def test_tool_descriptions_state_the_round_7_rules():
     assert 'A workbook bound beside a table the engine reads blocks nothing' in draft
     assert '没有金额列的表' in tools and '没有金额列的表' in preset
     assert 'engine_run_does_not_cover_requirement' in draft and 'engine_run_does_not_cover_requirement' in tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
+        encoding='utf-8') == preset
+
+
+# --- review fixes, round 8 (PR #23) -----------------------------------------------------------------
+
+
+def _pnl_account_case(tmp_path, account):
+    """A ledger whose management account is named like a P&L line; 2026-08 is 110 + 5 = 115."""
+    rows = [{'ledger': 'L', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+             'scenario': 'actual', 'management_account': account, 'amount': amount, 'source_row': str(index),
+             'doc_id': f'D{index}', 'line_id': '1'}
+            for index, amount in enumerate(('110', '5'), start=1)]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope},
+                                                            title=f'pnl-{account}')
+    requirement = save_requirements(service.analysis, {
+        'question': f'8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'line_08', 'metric': account, 'organizations': ['总部'], 'periods': ['2026-08'],
+                   'scenarios': ['actual'], 'requires_drilldown': False}]})
+    return SimpleNamespace(service=service, context=context, requirement=requirement)
+
+
+def _account_total_claim(service, context, account, filters=None, period='2026-08'):
+    metric = {'kind': 'account_total', 'accounts': [account], **({'filters': filters} if filters else {})}
+    run = service.run_metric({'context_id': context['id'], 'metric': metric})
+    index = next(index for index, row in enumerate(run['result']['rows']) if row.get('period') == period)
+    return run, {'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': 'amount',
+                 'value': run['result']['rows'][index]['amount']}
+
+
+@pytest.mark.parametrize('filters', [None, {'source_row': 2}])
+@pytest.mark.parametrize('account', ['revenue', 'cost', 'expense', 'profit'])
+def test_run_metric_account_total_does_not_answer_a_revenue_cost_expense_or_profit_item(tmp_path, account, filters):
+    """Round 8: decision 1 answers the four P&L lines only by engine closure or a source recipe, and neither
+    the support record nor the message offers account_total for them. A cited run_metric account_total cell
+    still answered them, filters included: a source_row filter gave 5 for a 2026-08 total of 115, and the
+    draft completed with original_requirements_completed True."""
+    from decimal import Decimal
+
+    case = _pnl_account_case(tmp_path, account)
+    run, claim = _account_total_claim(case.service, case.context, account, filters)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': [claim]})
+    item = _item(result)
+    draft = case.service.save_explanation_draft({'title': 't', 'body': f'8 月{account} {claim["value"]} 元。',
+                                                 'run_ids': [run['id']], 'claims': [claim]})
+
+    assert run['engine'] == 'finance' and Decimal(claim['value']) == Decimal('5' if filters else '115')
+    assert item['status'] == 'pending'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'engine_output_without_closure'
+    assert result['coverage']['status'] == 'needs_attention'
+    assert 'run_metric_account_total' not in case.requirement['support']['items'][0]['accepted_evidence']
+    assert 'account_total' not in _unanswered_message(item)
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+def _filtered_ledger_case(tmp_path, account='管理费用'):
+    """A ledger account item with dimensions.period; 2026-08 is 110 (source row 2) + 5 (source row 3) = 115."""
+    rows = [{'ledger': 'L', 'organization': '总部', 'period': period, 'currency': 'CNY', 'unit': '元', 'scenario': 'actual',
+             'management_account': account, 'amount': amount, 'source_row': str(index), 'doc_id': f'D{index}',
+             'line_id': '1', 'product': product}
+            for index, (period, amount, product) in enumerate(
+                (('2026-07', '100', '物业费'), ('2026-08', '110', '物业费'), ('2026-08', '5', '车位')), start=1)]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope}, title='ledger-f')
+    requirement = save_requirements(service.analysis, {
+        'question': f'8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'account_08', 'metric': account, 'dimensions': {'period': '2026-08'}, 'requires_drilldown': False}]})
+    return SimpleNamespace(service=service, context=context, requirement=requirement, account=account)
+
+
+@pytest.mark.parametrize('filters, value', [({'source_row': 3}, '5'), ({'source_row': [2]}, '110')])
+def test_a_filtered_account_total_does_not_answer_a_ledger_account_item(tmp_path, filters, value):
+    """Same defect on a ledger account item (on main too): the native account total never looked at the
+    run's filters, so a total over one source row answered the account's 8 月 amount of 115."""
+    from decimal import Decimal
+
+    case = _filtered_ledger_case(tmp_path)
+    run, claim = _account_total_claim(case.service, case.context, case.account, filters)
+    item = _item(check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                            'run_ids': [run['id']], 'claims': [claim]}))
+
+    assert Decimal(claim['value']) == Decimal(value)
+    assert item['status'] == 'pending'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'metric_filters_differ'
+    assert 'filters' in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('filters', [None, {'period': '2026-08'}, {'organization': '总部'}])
+def test_an_account_total_filtered_only_to_the_items_own_scope_still_answers(tmp_path, filters):
+    """Opposite direction: the engine's own total of the account, unfiltered or filtered only to the
+    requirement's own period or organization, still answers a ledger account item."""
+    from decimal import Decimal
+
+    case = _filtered_ledger_case(tmp_path)
+    run, claim = _account_total_claim(case.service, case.context, case.account, filters)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': [claim]})
+
+    assert Decimal(claim['value']) == Decimal('115')
+    assert _item(result)['status'] == 'answered'
+    assert _item(result)['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+    assert result['coverage']['status'] == 'pass'
+
+
+def _estimate_beside_source(analysis, tmp_path, *, cite_estimate=True):
+    """_estimate_case plus a sixth row that states 华东区域 budget_1_8 as 05!C5 (180576) by a direct recipe."""
+    case = _estimate_case(analysis, tmp_path)
+    close = analysis.read_dataset(case.run['bindings']['close'])
+    extra = {'metric_key': 'revenue', 'period': '2026-01:2026-08', 'unit': '万元', 'currency': 'CNY',
+             'organization': '华东区域', 'scenario': 'budget_1_8', 'value': '180576'}
+    run = _script_run(analysis, {'budget': case.budget, 'close': close}, [*case.run['result']['rows'], extra],
+                      suffix='beside', requirements_id=case.requirement['id'],
+                      requirements_semantic_fingerprint=case.requirement['semantic_fingerprint'])
+    recipes = [{**recipe, 'claim': {**recipe['claim'], 'run_id': run['id']}} for recipe in case.spec['evidence_recipes']
+               if cite_estimate or recipe['id'] != 'east_budget_estimate']
+    recipes.append(_recipe(case.budget, '05·区域预算分解', 'C5', run, 5, recipe_id='east_source'))
+    claims = [{**claim, 'run_id': run['id']} for claim in case.spec['claims'] if cite_estimate or claim['row'] != 3]
+    claims.append(_claim(run, row=5, column='value', value='180576'))
+    return SimpleNamespace(requirement=case.requirement, run=run, spec={
+        'requirements_id': case.requirement['id'], 'run_ids': [run['id']], 'claims': claims, 'evidence_recipes': recipes})
+
+
+def test_an_unaccepted_estimate_cited_beside_a_source_value_of_its_grain_is_not_answered(analysis, tmp_path):
+    """Round 8: a declared estimate grain whose draft also cites a source-backed number (a different one)
+    was answered, so coverage passed and the draft completed with an estimate no manager accepted. A grain
+    is only as good as every number the draft cites for it: the estimate keeps it `estimated`."""
+    case = _estimate_beside_source(analysis, tmp_path)
+    result = check_requirements(analysis, case.spec)
+    item = _item(result)
+    east = next(grain for grain in item.get('estimated_grains', []) if grain.get('organization') == '华东区域')
+    draft = FinanceStore(analysis.task).save_explanation_draft({
+        'body': '华东区域 1-8 月收入预算。', **{key: case.spec[key] for key in ('run_ids', 'claims', 'evidence_recipes')}})
+    issues = [issue['code'] for issue in draft['explanation_check']['issues']]
+
+    assert item['status'] == 'estimated'
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['original_requirements_completed'] is False
+    assert east['scenario'] == 'budget_1_8' and east['accepted'] is False
+    assert east['locations'] == [{'run_id': case.run['id'], 'row': 3, 'column': 'value'}]
+    assert 'requirement_estimated' in issues
+    assert (draft['completion']['status'], draft['completion']['stop_reason']) == (
+        'awaiting_manager', 'estimate_requires_acceptance')
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+def test_the_source_value_alone_still_answers_its_grain(analysis, tmp_path):
+    """Opposite direction: dropping the estimate leaves the grain to the source-backed number."""
+    case = _estimate_beside_source(analysis, tmp_path, cite_estimate=False)
+    result = check_requirements(analysis, case.spec)
+
+    assert _item(result)['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
+
+
+def _ungrained_estimate(analysis, tmp_path, *, cite_estimate=True):
+    """An item without grain lists: one cell backed by S!F5 (1200), one estimated as S!F5 × S!G1/S!G2."""
+    book = _workbook(analysis, tmp_path, 'book', {'S': {'F5': 1200, 'G1': 2, 'G2': 4}})
+    requirement = save_requirements(analysis, spec(
+        scope={'currency': 'CNY', 'unit': '万元'}, bindings={'book': book['id']},
+        items=[{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False,
+                'grain_basis': [{'basis': 'estimate', 'method': '全年 × 2/4'}]}]))
+    key = {'metric_key': 'revenue', 'period': '2026-01:2026-08'}
+    base = {'metric_key': 'revenue', 'period': '2026-01:2026-08'}
+    rows = [{**base, 'value': '1200', 'currency': 'CNY', 'unit': '万元'},
+            {**base, 'value': '600', 'currency': 'CNY', 'unit': '万元'},
+            {**base, 'scenario': 'factor', 'value': '0.5'}]
+    run = _script_run(analysis, {'book': book}, rows, suffix='ungrained', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
+
+    def cell(reference):
+        return {'dataset_id': book['id'], 'source_hash': book['source_hash'], 'sheet': 'S', 'range': reference}
+
+    recipes = [{'id': 'source', 'kind': 'direct', **cell('F5'), 'claim': {'run_id': run['id'], 'row': 0, 'column': 'value'}},
+               {'id': 'f', 'kind': 'ratio', 'claim': {'run_id': run['id'], 'row': 2, 'column': 'value'},
+                'left': cell('G1'), 'right': cell('G2'), 'business_key': key},
+               {'id': 'estimate', 'kind': 'direct', **cell('F5'), 'claim': {'run_id': run['id'], 'row': 1, 'column': 'value'},
+                'factor_recipe_id': 'f', 'business_key': key}]
+    claims = [_claim(run, row=0, column='value', value='1200')]
+    if cite_estimate:
+        claims.append(_claim(run, row=1, column='value', value='600'))
+    return {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims, 'evidence_recipes': recipes}
+
+
+def test_an_item_without_grain_lists_is_estimated_when_it_cites_an_estimate_beside_a_source_value(analysis, tmp_path):
+    result = check_requirements(analysis, _ungrained_estimate(analysis, tmp_path))
+    item = _item(result)
+
+    assert [location['status'] for location in item['locations']] == ['answered', 'estimated']
+    assert item['status'] == 'estimated'
+    assert result['coverage']['status'] == 'needs_attention'
+
+
+def test_an_item_without_grain_lists_is_answered_by_its_source_value_alone(analysis, tmp_path):
+    result = check_requirements(analysis, _ungrained_estimate(analysis, tmp_path, cite_estimate=False))
+
+    assert _item(result)['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
+
+
+def _typed_columns(rows):
+    return [{'name': name, 'nullable': name not in {'metric_key', 'value'},
+             'type': 'DECIMAL(38,28)' if name == 'value' else 'DECIMAL(38,4)' if name == 'variance' else 'VARCHAR'}
+            for name in dict.fromkeys(key for row in rows for key in row)]
+
+
+def _variance_column_case(analysis, tmp_path, mode):
+    """Huachen stage B in miniature: revenue_1_8 (declared estimate for 华东区域 budget_1_8) plus a ratio item.
+    The writer adds a `variance` column (actual − budget) to the 集团合并 actual row only; the stored run pads
+    that column with null on every other row, as run_script does."""
+    case = _estimate_case(analysis, tmp_path)
+    current = case.requirement
+    period = '2026-01:2026-08'
+    progress = {'id': 'progress', 'metric': 'ratio', 'organizations': ['集团合并'], 'periods': [period],
+                'scenarios': ['achievement_ratio'], 'dimensions': {'metric_key': 'revenue'}, 'requires_drilldown': False}
+    requirement = save_requirements(analysis, spec(
+        question=current['question'], scope=current['scope'], bindings=current['bindings'], parent_id=current['id'],
+        items=[*current['items'], progress]))
+    rows = [dict(row) for row in case.run['result']['rows']]
+    rows.append({'metric_key': 'revenue', 'organization': '集团合并', 'period': period, 'scenario': 'achievement_ratio',
+                 'value': '1085.48', 'unit': '-'})
+    for index, row in enumerate(rows):
+        row['variance'] = '325344' if index == 0 else None
+    close = analysis.read_dataset(case.run['bindings']['close'])
+    run = _script_run(analysis, {'budget': case.budget, 'close': close}, rows, suffix=f'variance-{mode}',
+                      requirements_id=requirement['id'], requirements_semantic_fingerprint=requirement['semantic_fingerprint'],
+                      result={'columns': _typed_columns(rows), 'rows': rows})
+    recipes = [{**recipe, 'claim': {**recipe['claim'], 'run_id': run['id']}} for recipe in case.spec['evidence_recipes']]
+    claims = [{**claim, 'run_id': run['id']} for claim in case.spec['claims']]
+    claims.append(_claim(run, row=5, column='value', value='1085.48'))
+    if mode in {'cite', 'diff'}:
+        claims.append(_claim(run, row=0, column='variance', value='325344'))
+    if mode == 'diff':
+        close_d11 = {'dataset_id': close['id'], 'source_hash': close['source_hash'], 'sheet': '10·区域经营损益表', 'range': 'D11'}
+        budget_b12 = {'dataset_id': case.budget['id'], 'source_hash': case.budget['source_hash'],
+                      'sheet': '01·年度预算总表', 'range': 'B12:C12'}
+        recipes.append({'id': 'variance', 'kind': 'diff', 'left': close_d11, 'right': budget_b12,
+                        'claim': {'run_id': run['id'], 'row': 0, 'column': 'variance'}})
+    return SimpleNamespace(requirement=requirement, run=run, spec={
+        'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims, 'evidence_recipes': recipes})
+
+
+@pytest.mark.parametrize('mode', ['drop', 'diff'])
+def test_a_numeric_column_on_another_row_does_not_void_estimates_or_ratio_rows(analysis, tmp_path, mode):
+    """Round 8 (Huachen stage B): one row got a `variance` column, the stored run padded it with null on every
+    other row, and each plain result row became a missing_data group. The factor-estimate cells and the ratio
+    rows then stopped counting, and neither backing the variance (diff) nor dropping its claim brought them
+    back; the message never named the padded column. A plain result row has no closure rule, so an empty
+    sibling column says nothing about a cited cell of it."""
+    case = _variance_column_case(analysis, tmp_path, mode)
+    result = check_requirements(analysis, case.spec)
+    revenue, progress = _item(result, 'revenue_1_8'), _item(result, 'progress')
+    completion = _completion(FinanceStore(analysis.task), case.spec, f'variance-{mode}')
+
+    assert case.run['result']['rows'][3]['variance'] is None
+    assert revenue['status'] == 'estimated'
+    assert [location['status'] for location in revenue['locations'] if location['row'] == 3] == ['estimated']
+    assert progress['status'] == 'answered'
+    assert 'uncounted_grains' not in revenue
+    assert (completion['status'], completion['stop_reason']) == ('awaiting_manager', 'estimate_requires_acceptance')
+
+
+def test_an_unbacked_extra_column_only_unanswers_its_own_grain(analysis, tmp_path):
+    """The round-7 rule still holds for the cited variance itself: it is a script value for the 集团合并
+    actual grain, so only that grain is not counted; the estimates and the ratio row are unaffected."""
+    case = _variance_column_case(analysis, tmp_path, 'cite')
+    result = check_requirements(analysis, case.spec)
+    revenue, progress = _item(result, 'revenue_1_8'), _item(result, 'progress')
+
+    assert revenue['status'] == 'pending'
+    assert [(grain['organization'], grain['scenario'], grain['reasons']) for grain in revenue['uncounted_grains']] == [
+        ('集团合并', 'actual_1_8', ['script_output_without_recipe'])]
+    assert progress['status'] == 'answered'
+
+
+def test_an_empty_member_of_a_rule_bearing_group_still_voids_its_cited_cell(analysis):
+    """Opposite direction: a ratio row (numerator/denominator/ratio) has a closure rule, so a missing
+    denominator still leaves its cited ratio as missing_data."""
+    save_requirements(analysis, spec(scope={}, items=[{'id': 'ratio', 'metric': 'ratio', 'requires_drilldown': False}]))
+    full = _script_run(analysis, {}, [{'numerator': '3', 'denominator': '6', 'ratio': '0.5'}], suffix='ratio-full')
+    empty = _script_run(analysis, {}, [{'numerator': '3', 'denominator': None, 'ratio': '0.5'}], suffix='ratio-empty')
+
+    def status(run):
+        item = _item(check_requirements(analysis, {'run_ids': [run['id']],
+                                                   'claims': [_claim(run, row=0, column='ratio', value='0.5')]}))
+        return item['status'], [location['status'] for location in item['locations']]
+
+    assert status(full) == ('answered', ['answered'])
+    assert status(empty) == ('missing_data', ['missing_data'])
+
+
+def test_an_engine_run_whose_rows_lack_the_requirements_ledger_currency_and_unit_names_them(tmp_path):
+    """Round 8 (Huachen GL variant): after the scopes stated organization and period as the round-7 message
+    advised, the one result row covered the grain, but the message still said the grain had no result row
+    and named no blank field. The row lacked the requirement's ledger, currency and unit, which the check
+    compares and the blank-field scan never looked at. Following the new message answers."""
+    required = {'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'}
+    table = [{'management_account': 'revenue', '科目代码': '6001', 'amount': '120', 'source_row': 1}]
+    grain = {'organization': '集团合并', 'period': '2026-08'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'gl': table}, {'gl': grain}, title='gl-scope')
+    requirement = service.analysis_requirements_save({
+        'question': '区域与集团合计勾稽', 'context_id': context['id'], 'scope': required,
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'organizations': ['集团合并'],
+                   'periods': ['2026-08'], 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    _verify_run_column(service, run, 'amount')
+    item = _item(check_requirements(service.analysis, _control_totals_request(
+        service, requirement, [run], _claims_for_columns(run, 'amount'))))
+    gap = item['engine_runs'][-1]
+    message = _unanswered_message(item)
+
+    assert {key: run['result']['rows'][0].get(key) for key in grain} == grain
+    assert gap['blank_fields'] == ['currency', 'ledger', 'unit']
+    assert gap['required_scope'] == required
+    assert 'missing_grains' not in gap
+    assert gap['out_of_scope_grains'] == [grain]
+    assert '没有结果行' not in message
+    assert '行上 currency、ledger、unit 为空' in message and 'currency=CNY、ledger=L1、unit=万元' in message
+
+    rescoped = service.save_context({'bindings': bindings, 'scopes': {'gl': {**grain, **required}}})
+    rerun = service.run_metric({'context_id': rescoped['id'], 'metric': {'kind': 'control_totals'},
+                                'requirements_id': requirement['id']})
+    _verify_run_column(service, rerun, 'amount')
+    answered = check_requirements(service.analysis, _control_totals_request(
+        service, requirement, [rerun], _claims_for_columns(rerun, 'amount')))
+    assert _item(answered)['status'] == 'answered'
+
+
+def test_an_engine_run_whose_rows_state_another_unit_says_which(tmp_path):
+    """A row that states a field differently from the requirement is named with the required value; it is
+    neither blank nor a grain without rows."""
+    table = [{'management_account': 'revenue', 'organization': '集团合并', 'period': '2026-08', 'ledger': 'L1',
+              'currency': 'CNY', 'unit': '元', 'amount': '1200000', 'source_row': 1}]
+    service, context, _bindings = _finance_service_from_rows(tmp_path, {'gl': table}, {}, title='gl-unit')
+    requirement = service.analysis_requirements_save({
+        'question': '勾稽', 'context_id': context['id'], 'scope': {'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'},
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'organizations': ['集团合并'],
+                   'periods': ['2026-08'], 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    item = _item(check_requirements(service.analysis, _control_totals_request(service, requirement, [run])))
+    gap = item['engine_runs'][-1]
+
+    assert run['result']['rows'][0]['unit'] == '元'
+    assert 'blank_fields' not in gap
+    assert gap['differing_fields'] == {'unit': '万元'}
+    assert 'unit' in _unanswered_message(item) and '没有结果行' not in _unanswered_message(item)
+
+
+MAPPED_SCOPE = {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'}
+
+
+def _mapped_column_case(tmp_path, rows_by_alias, items):
+    """A requirement bound to detail tables whose amount column has a name the default reading does not know,
+    saved before any finance context (the preset's order)."""
+    task = TaskStore(tmp_path / 'var').create(title='mapped')
+    analysis = AnalysisStore(task)
+    bindings = {}
+    for alias, rows in rows_by_alias.items():
+        path = tmp_path / f'{alias}.json'
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+        bindings[alias] = analysis.add_dataset(path, name=alias)['id']
+    service = FinanceStore(task)
+    requirement = service.analysis_requirements_save({'question': '控制数', 'scope': MAPPED_SCOPE, 'bindings': bindings,
+                                                      'items': items})
+    return SimpleNamespace(service=service, analysis=analysis, bindings=bindings, requirement=requirement,
+                           request={'requirements_id': requirement['id'], 'run_ids': [], 'claims': []})
+
+
+def test_a_detail_table_whose_amount_column_needs_a_field_map_is_the_assistants_to_open(tmp_path):
+    """Round 8: a GL table whose amounts sit under 本期发生额 was rowless for the default reading, so every
+    engine path was blocked with bindings_without_engine_rows, handed to the manager, and the tools said not to
+    save a finance context. One finance_context_save with policies.field_map on the same binding opens it."""
+    rows = [{**MAPPED_SCOPE, 'scenario': 'actual', 'management_account': account, '本期发生额': amount, 'source_row': index}
+            for index, (account, amount) in enumerate((('revenue', '120'), ('cost', '80')), start=1)]
+    case = _mapped_column_case(tmp_path, {'gl': rows},
+                               [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}])
+    item = _item(check_requirements(case.analysis, case.request))
+    blocked = item['evidence_paths']['blocked']
+    message = _unanswered_message(item)
+    completion = _completion(case.service, case.request, 'mapped-before')
+    support = case.requirement['support']['items'][0]
+
+    assert [(path['path'], path['blockers']) for path in blocked] == [('run_metric_result_set', ['amount_column_unmapped'])]
+    assert blocked[0]['amount_columns'] == {'gl': ['本期发生额']}
+    assert 'awaiting_manager' not in item
+    assert 'field_map' in message and '本期发生额' in message and 'finance_context_save' in message
+    assert '助手不要重复计算' not in message
+    assert support['blocked_evidence'][0]['blockers'] == ['amount_column_unmapped']
+    assert (completion['status'], completion['repair_allowed']) == ('repair_available', True)
+
+    context = case.service.save_context({'bindings': case.bindings, 'scopes': {'gl': {**MAPPED_SCOPE, 'scenario': 'actual'}},
+                                         'policies': {'gl': {'field_map': {'amount': '本期发生额'}}}})
+    opened = _item(check_requirements(case.analysis, case.request))
+    run = case.service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                                   'requirements_id': case.requirement['id']})
+    _verify_run_column(case.service, run, 'amount')
+    answered = check_requirements(case.analysis, {**case.request, 'run_ids': [run['id']],
+                                                  'claims': _claims_for_columns(run, 'amount')})
+
+    assert [path['path'] for path in opened['evidence_paths']['accepted']] == ['run_metric_result_set']
+    assert run['bindings'] == case.requirement['bindings'] and len(run['result']['rows']) == 2
+    assert _item(answered)['status'] == 'answered' and answered['coverage']['status'] == 'pass'
+
+
+def test_a_revenue_item_on_tables_whose_amount_column_needs_a_field_map_is_opened_by_the_assistant(tmp_path):
+    rows = {side: [{**MAPPED_SCOPE, 'scenario': side, 'management_account': account, '本期发生额': amount, 'source_row': index}
+                   for index, (account, amount) in enumerate(pairs, start=1)]
+            for side, pairs in (('actual', (('revenue', '120'), ('cost', '50'), ('expense', '20'))),
+                                ('budget', (('revenue', '100'), ('cost', '40'), ('expense', '10'))))}
+    case = _mapped_column_case(tmp_path, rows, [{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False}])
+    item = _item(check_requirements(case.analysis, case.request))
+    completion = _completion(case.service, case.request, 'mapped-revenue')
+
+    assert ('engine_closure', ['amount_column_unmapped']) in [
+        (path['path'], path['blockers']) for path in item['evidence_paths']['blocked']]
+    assert 'awaiting_manager' not in item
+    assert 'field_map' in _unanswered_message(item)
+    assert completion['repair_allowed'] is True
+
+    context = case.service.save_context({
+        'bindings': case.bindings, 'scopes': {side: {**MAPPED_SCOPE, 'scenario': side} for side in rows},
+        'policies': {side: {'field_map': {'amount': '本期发生额'}} for side in rows}})
+    run = case.service.explain_variance({'context_id': context['id']})
+    index = next(index for index, row in enumerate(run['result']['rows']) if row.get('metric') == 'revenue')
+    answered = check_requirements(case.analysis, {**case.request, 'run_ids': [run['id']], 'claims': [
+        _claim(run, row=index, column='contribution', value=run['result']['rows'][index]['contribution'])]})
+    assert _item(answered)['status'] == 'answered'
+
+
+def test_a_table_without_accounts_or_an_amount_column_is_still_the_managers(tmp_path):
+    """Opposite direction: the Huachen regional sheets (region × budget columns, no account column) still give
+    the engine nothing a field map could fix, so they stay bindings_without_engine_rows for the manager."""
+    case = _mapped_column_case(tmp_path, {'regional_budget': REGIONAL_TABLE},
+                               [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}])
+    item = _item(check_requirements(case.analysis, case.request))
+
+    assert [(path['path'], path['blockers']) for path in item['evidence_paths']['blocked']] == [
+        ('run_metric_result_set', ['bindings_without_engine_rows'])]
+    assert item['awaiting_manager'] == ['bindings_without_engine_rows']
+
+
+def _legacy_revenue(tmp_path):
+    analysis = AnalysisStore(TaskStore(tmp_path / 'var').create(title='legacy'))
+    budget = _workbook(analysis, tmp_path, 'budget', {'01·年度预算总表': {'A12': '营业收入', 'I12': 44163.6526}})
+    close = _workbook(analysis, tmp_path, 'close', {'04·合并利润表': {'B5': 414696250}})
+    datasets = {'budget': budget, 'close': close}
+    legacy = _legacy_drilldown_record(analysis, {alias: dataset['id'] for alias, dataset in datasets.items()}, [
+        {'id': 'revenue_2026_08', 'metric': 'revenue', 'label': '8月收入', 'dimensions': {'drilldown': '城市公司'},
+         'organizations': ['集团合并'], 'periods': ['2026-08'], 'scenarios': ['actual_2026_08', 'budget_2026_08'],
+         'requires_drilldown': False}])
+    return analysis, datasets, legacy
+
+
+def _legacy_draft(run, datasets, **extra):
+    claims = [_claim(run, row=0, column='value', value='44163.6526'), _claim(run, row=1, column='value', value='41469.6250')]
+    recipes = [_recipe(datasets['budget'], '01·年度预算总表', 'I12', run, 0, recipe_id='budget'),
+               _recipe(datasets['close'], '04·合并利润表', 'B5', run, 1, scale='0.0001', recipe_id='actual')]
+    return {'title': '8月收入', 'body': '8月收入预算 44163.6526 万元，实际 41469.6250 万元。', 'run_ids': [run['id']],
+            'claims': claims, 'evidence_recipes': recipes, **extra}
+
+
+def _fixup(saved, code):
+    return next(fixup for action in saved['completion']['actions'] for fixup in action.get('fixups', [])
+                if fixup['code'] == code)
+
+
+def test_a_draft_revision_after_a_legacy_requirement_revision_can_complete(tmp_path):
+    """Round 8: revise_requirement_dimension sends the assistant to re-save the requirement; its next draft
+    revision (parent_id, as the tool says) inherited the legacy requirements_id, so scope_changed stayed
+    True, requirements_changed said nothing about requirements_id (which neither tool schema exposed) and
+    the next repair stalled. The fixups now name the version to pass, and following them completes."""
+    analysis, datasets, legacy = _legacy_revenue(tmp_path)
+    service = FinanceStore(analysis.task)
+    first_run = _script_run(analysis, datasets, REVENUE_ROWS, suffix='legacy-1', requirements_id=legacy['id'])
+    first = service.save_explanation_draft(_legacy_draft(first_run, datasets))
+    revise = _fixup(first, 'revise_requirement_dimension')
+    listed = service.analysis_requirements_list({})['current']
+    current = service.analysis_requirements_save({'question': listed['question'], 'scope': listed['scope'],
+                                                  'bindings': listed['bindings'], 'parent_id': listed['id'],
+                                                  'items': [revise['suggested_item']]})
+    run = _script_run(analysis, datasets, REVENUE_ROWS, suffix='legacy-2', requirements_id=current['id'],
+                      requirements_semantic_fingerprint=current['semantic_fingerprint'])
+
+    pinned = service.save_explanation_draft(_legacy_draft(run, datasets, parent_id=first['id']))
+    repin = _fixup(pinned, 'repin_requirements')
+    followed = service.save_explanation_draft(_legacy_draft(run, datasets, parent_id=pinned['id'],
+                                                            requirements_id=repin['requirements_id']))
+
+    assert 'requirements_id' in revise['after_save']
+    assert pinned['requirements_id'] == legacy['id']
+    assert pinned['explanation_check']['requirements']['scope_changed'] is True
+    assert repin['requirements_id'] == current['id'] and repin['draft_requirements_id'] == legacy['id']
+    changed = next(action for action in pinned['completion']['actions'] if action['code'] == 'requirements_changed')
+    assert 'requirements_id' in changed['message'] and current['id'] in changed['message']
+    assert followed['requirements_id'] == current['id']
+    assert followed['explanation_check']['requirements']['scope_changed'] is False
+    assert followed['completion']['status'] == 'complete'
+
+
+def test_a_revision_that_names_no_requirements_id_keeps_its_parents_pin(tmp_path):
+    """Opposite direction: a revision without requirements_id is still checked as written for its parent's
+    version (the manager's edits keep the 旧范围 banner); only naming the version re-pins it."""
+    analysis, datasets, legacy = _legacy_revenue(tmp_path)
+    service = FinanceStore(analysis.task)
+    first_run = _script_run(analysis, datasets, REVENUE_ROWS, suffix='legacy-1', requirements_id=legacy['id'])
+    first = service.save_explanation_draft(_legacy_draft(first_run, datasets))
+    listed = service.analysis_requirements_list({})['current']
+    service.analysis_requirements_save({'question': listed['question'], 'scope': listed['scope'],
+                                        'bindings': listed['bindings'], 'parent_id': listed['id'],
+                                        'items': [_fixup(first, 'revise_requirement_dimension')['suggested_item']]})
+
+    revised = service.save_explanation_draft(_legacy_draft(first_run, datasets, parent_id=first['id']))
+
+    assert revised['requirements_id'] == legacy['id']
+    assert revised['explanation_check']['requirements']['scope_changed'] is True
+    assert revised['completion']['status'] != 'complete'
+
+
+def test_the_draft_tools_expose_requirements_id():
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')
+
+    assert 'requirements_id' in draft['inputSchema']['properties']
+    assert 'requirements_id' in draft['description']
+    section = tools[tools.index('save_explanation_draft: specTool'):tools.index('finance_background_save: specTool')]
+    assert 'requirements_id: text(' in section
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+def test_a_draft_policy_10_completed_on_a_revenue_account_total_is_checked_again(tmp_path):
+    """Policy 10 completed a revenue draft that cited run_metric account_total. The rule changed, so a resend
+    must not replay that verdict."""
+    from foundry.analysis import _hash
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+    from foundry.fsutil import write_json_atomic
+
+    case = _pnl_account_case(tmp_path, 'revenue')
+    run, claim = _account_total_claim(case.service, case.context, 'revenue')
+    request = {'title': 't', 'body': f'8 月营业收入 {claim["value"]} 元。', 'run_ids': [run['id']], 'claims': [claim]}
+    first = case.service.save_explanation_draft(request)
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 11
+    analysis = case.service.analysis
+    path = analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'status': 'pass', 'issues': [], 'requirements': {
+        **check['requirements'], 'coverage': {'status': 'pass'}, 'original_requirements_completed': True,
+        'items': [{**item, 'status': 'answered'} for item in check['requirements']['items']]}}
+    record = {**stored, 'check_policy_version': 10, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = case.service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert _item(again['explanation_check']['requirements'])['status'] == 'pending'
+    assert again['completion']['status'] != 'complete'
+
+
+def test_tool_descriptions_state_the_round_8_rules():
+    """The tools say which paths answer: account_total only for ledger-account names and only unfiltered (or
+    filtered to the requirement itself); an estimate beside another number stays an estimate; a detail table
+    whose amount column needs a field_map is the assistant's to open; a revision names requirements_id."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert 'not revenue/cost/expense/profit, which only (1) and (2) answer' in draft
+    assert '不是 revenue、cost、expense、profit 这类规范指标名；这四项只按①②作答' in tools
+    assert 'revenue、cost、expense、profit四项不走这条路' in preset
+    assert 'filters may only restate' in draft and 'filters 只能写要求本身的组织、期间、情景或维度' in tools
+    assert 'keeps the grain estimated until the manager accepts it' in draft
+    assert '该组合仍按估算计' in tools and '该组合仍按估算计' in preset
+    for text in (draft, tools, preset):
+        assert 'amount_column_unmapped' in text and 'field_map' in text
+    assert 'requirements_id names the current one' in draft
+    assert 'requirements_id 为当前版本 id' in tools and 'requirements_id为当前版本id' in preset
+    assert 'required_scope' in draft and 'required_scope' in tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
         encoding='utf-8') == preset

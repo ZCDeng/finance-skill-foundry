@@ -15,7 +15,11 @@ MAX_REPAIRS = 2
 # 10: review round 7 needs every value a draft cites for a grain to count, compares a quotient that does not
 #     terminate to full (28-digit) precision instead of the server's own rounding, reads engine readability
 #     from the finance normaliser and blocks engine paths only when no bound snapshot gives the engine rows.
-COMPLETION_POLICY_VERSION = 10
+# 11: review round 8 stops run_metric account_total from answering revenue/profit/cost/expense items or a
+#     filtered part of an account, keeps a grain estimated while an estimate sits beside a different answered
+#     number, stops empty sibling columns of a plain result row from voiding its cells, and hands a detail table
+#     whose amount column needs a field_map to the assistant (amount_column_unmapped) instead of the manager.
+COMPLETION_POLICY_VERSION = 11
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
