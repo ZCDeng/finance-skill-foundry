@@ -541,6 +541,25 @@ def test_sheet_number_rule_does_not_swallow_amounts_before_biao_verbs(verb):
     assert [item["text"] for item in _body_numbers("预算工作簿 09 表的「全年预算」列，月结套表 10 表 D5")] == []
 
 
+def test_a_number_matching_several_facts_names_the_first_cited_fact_not_a_hash_order_one(service):
+    """Review round 6 (pre-existing): the referenced facts were a set of fact-id strings, so which of two
+    same-valued facts a fact_unit_mismatch named followed PYTHONHASHSEED, and the completion
+    issue_fingerprint changed across restarts for the same draft. The first cited fact is named."""
+    store, context = service
+    first, second = (store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}}) for _ in range(2))
+    facts = store.prepare_explanation({"run_ids": [first["id"], second["id"]]})["facts"]
+    a, b = (next(f for f in facts if f["run_id"] == run["id"] and f["column"] == "amount" and f["value"] == "120")
+            for run in (first, second))
+
+    def named(fact_ids):
+        check = store.validate_explanation({"body": "控制合计金额本月 120 亿元。", "run_ids": [first["id"], second["id"]],
+                                            "fact_ids": fact_ids, "materiality": {"absolute": "1000"}})
+        return [issue["fact_id"] for issue in check["issues"] if issue["code"] == "fact_unit_mismatch"]
+
+    assert named([a["id"], b["id"]]) == [a["id"]]
+    assert named([b["id"], a["id"]]) == [b["id"]]
+
+
 def test_period_words_dashes_and_biao_verbs_do_not_hide_draft_numbers(service):
     store, context = service
     run = store.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})

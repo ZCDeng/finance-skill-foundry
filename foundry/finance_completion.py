@@ -10,7 +10,9 @@ MAX_REPAIRS = 2
 #    counts structured_aggregate output for amounts outside revenue/profit/cost/expense.
 # 8: review round 5 matches a finance run on several bound inputs (cash_13_weeks on receipts + payments)
 #    when every input lies in the requirement scope, and reports out-of-scope inputs as not counted.
-COMPLETION_POLICY_VERSION = 8
+# 9: review round 6 blocks engine paths on bindings the engine reads no rows from (workbook files) and hands
+#    them to the manager; only a context or finance run on exactly the requirement's bindings counts.
+COMPLETION_POLICY_VERSION = 9
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
@@ -19,6 +21,7 @@ MANAGER_REASON_TEXT = {
     'unavailable_declared': '声明为资料缺失的组合待经理确认',
     'estimate_factor_not_reproducible': '估算系数无法由归档单元格复算，需经理决定口径',
     'structure_pending_confirmation': '工作簿结构待经理确认',
+    'bindings_without_engine_rows': '要求绑定的资料财务引擎读不到数据行，需经理决定绑定哪份表快照或改用其他依据',
 }
 
 

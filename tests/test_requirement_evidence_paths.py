@@ -39,6 +39,7 @@ from test_finance_requirements import (
     _require_pq,
     _run,
     _script_run,
+    _verify_run_column,
     _workbook,
     spec,
 )
@@ -752,9 +753,11 @@ def test_structure_awaiting_confirmation_hands_result_sets_to_the_manager(analys
     controls, revenue = _item(result, 'control_totals'), _item(result, 'revenue')
     blocked = next(f for f in controls['fixups'] if f['code'] == 'evidence_path_blocked')
 
-    assert controls['awaiting_manager'] == ['structure_pending_confirmation']
+    # Confirming the structure alone would not open the engine path: the requirement is bound to the workbook
+    # files, which give the engine no rows (review round 6).
+    assert controls['awaiting_manager'] == ['bindings_without_engine_rows', 'structure_pending_confirmation']
     assert blocked['needs_manager'] is True
-    assert blocked['blocked_evidence'][0]['blockers'] == ['structure_pending_confirmation', 'no_finance_context']
+    assert blocked['blocked_evidence'][0]['blockers'] == ['structure_pending_confirmation', 'bindings_without_engine_rows']
     assert '工作簿结构待经理确认' in _unanswered_message(controls)
     # The recipe path does not need the structure, so the revenue item stays the assistant's to fix.
     assert revenue['evidence_paths']['accepted'][0]['path'] == 'evidence_recipe'
@@ -772,7 +775,126 @@ def test_structure_awaiting_confirmation_hands_result_sets_to_the_manager(analys
     completion = record_completion(analysis, {'id': 'c' * 32, 'content_hash': 'controls', 'run_ids': []}, quality)
     assert completion['status'] == 'awaiting_manager'
     assert completion['stop_reason'] == 'manager_decision_required'
-    assert completion['manager_reasons'] == ['structure_pending_confirmation']
+    assert completion['manager_reasons'] == ['bindings_without_engine_rows', 'structure_pending_confirmation']
+
+
+def _control_totals_on_workbooks(analysis, tmp_path):
+    budget = _workbook(analysis, tmp_path, 'budget', {'01·年度预算总表': {'A12': '营业收入', 'I12': 44163.6526}})
+    close = _workbook(analysis, tmp_path, 'close', {'04·合并利润表': {'A5': '营业收入', 'B5': 414696250}})
+    bindings = {'budget': budget['id'], 'close': close['id']}
+    requirement = save_requirements(analysis, spec(scope={'ledger': '预算工作簿 + 月结套表'}, bindings=bindings, items=[
+        {'id': 'control_totals', 'metric': 'control_totals', 'label': '区域与集团合计勾稽',
+         'organizations': ['集团合并'], 'periods': ['2026-01:2026-08']}]))
+    return bindings, requirement
+
+
+def test_engine_paths_are_not_offered_on_bound_workbooks_the_engine_reads_no_rows_from(analysis, tmp_path):
+    """Review round 6 (Huachen): once the manager had confirmed the workbook structures, control_totals told
+    the assistant to save a finance context for the bound data and run run_metric. The requirement is bound
+    to the workbook files, which give the engine no rows: the context saved cleanly, run_metric returned 0
+    rows, the run was then offered as the accepted path, and completion kept spending repairs on it."""
+    bindings, requirement = _control_totals_on_workbooks(analysis, tmp_path)
+    service = FinanceStore(analysis.task)
+    # The old guidance, followed literally.
+    context = service.save_context({'bindings': bindings})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    assert run['result']['rows'] == []
+
+    request = {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': []}
+    item = _item(check_requirements(analysis, request))
+    message = _unanswered_message(item)
+    blocked = next(f for f in item['fixups'] if f['code'] == 'evidence_path_blocked')
+
+    assert item['status'] == 'pending'
+    assert item['evidence_paths']['accepted'] == []
+    assert [(path['path'], path['blockers']) for path in item['evidence_paths']['blocked']] == [
+        ('run_metric_result_set', ['bindings_without_engine_rows'])]
+    assert item['awaiting_manager'] == ['bindings_without_engine_rows']
+    assert blocked['needs_manager'] is True
+    assert '财务引擎从中读不到数据行' in message
+    assert '助手不要重复计算' in message
+    assert 'finance_context_save' not in message and '可计入的依据' not in message
+
+    quality = augment_quality(analysis, request, {'status': 'pass', 'issues': []})
+    completion = record_completion(analysis, {'id': 'w' * 32, 'content_hash': 'workbooks', 'run_ids': [run['id']]}, quality)
+    assert completion['status'] == 'awaiting_manager'
+    assert completion['repair_allowed'] is False
+    assert completion['manager_reasons'] == ['bindings_without_engine_rows']
+
+    support = service.analysis_requirements_save({**{key: requirement[key] for key in ('question', 'scope', 'bindings', 'items')},
+                                                  'parent_id': requirement['id']})['support']['items'][0]
+    assert support['accepted_evidence'] == []
+    assert support['blocked_evidence'][0]['blockers'] == ['bindings_without_engine_rows']
+
+
+def test_a_context_on_other_snapshots_does_not_unblock_the_engine_path(analysis, tmp_path):
+    """The other reading of the old guidance: a context on table snapshots the requirement is not bound to.
+    Its runs never count (run bindings differ), so it must not turn the engine path into an accepted one."""
+    bindings, requirement = _control_totals_on_workbooks(analysis, tmp_path)
+    path = tmp_path / 'rows.json'
+    path.write_text(json.dumps([{'ledger': 'L1', 'organization': '集团合并', 'period': '2026-08', 'currency': 'CNY',
+                                 'unit': '万元', 'management_account': 'revenue', 'amount': '1'}]), encoding='utf-8')
+    table = analysis.add_dataset(path, name='table')
+    service = FinanceStore(analysis.task)
+    service.save_context({'bindings': {'budget': table['id'], 'close': bindings['close']}})
+
+    item = _item(check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [], 'claims': []}))
+
+    assert item['evidence_paths']['accepted'] == []
+    assert item['evidence_paths']['blocked'][0]['blockers'] == ['bindings_without_engine_rows']
+    assert 'finance_context_save' not in _unanswered_message(item)
+
+
+def test_engine_paths_on_bound_tables_stay_open_and_answer_when_followed(tmp_path):
+    """Opposite direction: a requirement bound to tables the engine reads keeps run_metric as its accepted
+    path, only a context on exactly those bindings counts as one, and following the path answers."""
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path,
+        {'actual': [{'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元',
+                     'scenario': 'actual', 'management_account': 'revenue', 'amount': '120', 'source_row': 1}],
+         'budget': [{'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元',
+                     'scenario': 'budget', 'management_account': 'revenue', 'amount': '100', 'source_row': 1}]},
+        {'actual': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'actual'},
+         'budget': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元', 'scenario': 'budget'}},
+        title='tables')
+    analysis = service.analysis
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算控制数对照', 'scope': {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09',
+                                                 'currency': 'CNY', 'unit': '万元'},
+        'bindings': bindings, 'items': [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}]})
+    item = _item(check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [], 'claims': []}))
+    assert [path['path'] for path in item['evidence_paths']['accepted']] == ['run_metric_result_set']
+    assert item['evidence_paths']['blocked'] == []
+    assert 'awaiting_manager' not in item
+
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+    answered = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                             'claims': _claims_for_columns(run, 'amount')})
+    assert _item(answered)['status'] == 'answered'
+
+
+def test_a_context_on_part_of_the_bindings_is_not_a_finance_context_for_the_requirement(tmp_path):
+    """A context that covers only one of two bound tables cannot produce a run with the requirement's
+    bindings, so the engine path stays blocked on no_finance_context (the assistant's to clear)."""
+    rows = {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元',
+            'management_account': 'revenue', 'source_row': 1}
+    service, _context, bindings = _finance_service_from_rows(
+        tmp_path, {'actual': [{**rows, 'scenario': 'actual', 'amount': '120'}]},
+        {'actual': {'ledger': 'L1', 'scenario': 'actual'}}, title='partial')
+    path = tmp_path / 'budget.json'
+    path.write_text(json.dumps([{**rows, 'scenario': 'budget', 'amount': '100'}]), encoding='utf-8')
+    budget = service.analysis.add_dataset(path, name='budget')
+    requirement = service.analysis_requirements_save({
+        'question': '实际与预算控制数对照', 'scope': {'ledger': 'L1'},
+        'bindings': {**bindings, 'budget': budget['id']},
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}]})
+    item = _item(check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [], 'claims': []}))
+
+    assert item['evidence_paths']['blocked'][0]['blockers'] == ['no_finance_context']
+    assert 'awaiting_manager' not in item
+    assert 'finance_context_save' in _unanswered_message(item)
 
 
 # --- draft saving ----------------------------------------------------------------------------------
@@ -2227,6 +2349,93 @@ def test_a_scope_level_an_earlier_version_dropped_is_dropped_again_not_refused(a
         with pytest.raises(FoundryError) as refused:
             save_requirements(analysis, spec(scope=scope, parent_id=third['id'], items=third['items']))
         assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
+
+
+def _context_with_level(tmp_path, level):
+    """A finance context whose scope holds a hierarchy level (finance_context_save accepts any key)."""
+    task = TaskStore(tmp_path / 'ctx-var').create(title='口径')
+    service = FinanceStore(task)
+    path = tmp_path / 'g1.json'
+    path.write_text(json.dumps([{'ledger': 'L1', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY',
+                                 'unit': '万元', 'management_account': 'expense', 'amount': '20'}]), encoding='utf-8')
+    dataset = service.analysis.add_dataset(path, name='g1')
+    scope = {'ledger': 'L1', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元', **level}
+    context = service.save_context({'bindings': {'actual': dataset['id']}, 'scopes': {'actual': scope}})
+    return service, context
+
+
+EXPENSE_ITEM = {'id': 'expense', 'metric': 'expense', 'label': '费用', 'dimensions': {}, 'requires_drilldown': False}
+
+
+def test_a_first_save_seeded_from_a_contexts_scope_drops_the_contexts_hierarchy_level(tmp_path):
+    """Review round 6: RequirementsPanel seeds its scope from the selected context and resends every key.
+    A context whose scope held drilldown=城市公司 made the first save refused as a newly written level, and
+    the panel has no field to remove it; analysis_requirements_save with only context_id fell back to the
+    same scope and was refused too. A level the context itself holds is carried over, not written."""
+    service, context = _context_with_level(tmp_path, {'drilldown': '城市公司', 'granularity': '区域'})
+    panel = {'question': '解释费用', 'scope': dict(context['scopes']['actual']), 'bindings': context['bindings'],
+             'context_id': context['id'], 'items': [EXPENSE_ITEM]}
+
+    first = service.analysis_requirements_save(panel)
+    fallback = service.analysis_requirements_save({'question': '解释费用', 'context_id': context['id'],
+                                                   'parent_id': first['id'], 'items': [EXPENSE_ITEM]})
+
+    for saved in (first, fallback):
+        assert 'drilldown' not in saved['scope']
+        # granularity only describes the analysis and is kept.
+        assert saved['scope']['granularity'] == '区域'
+        assert saved['scope']['organization'] == '华东'
+        warning = next(w for w in saved['authoring_warnings'] if w['code'] == 'hierarchy_scope_dropped')
+        assert warning['keys'] == {'drilldown': '城市公司'}
+        assert '财务口径' in warning['message']
+
+
+def test_a_level_the_context_does_not_hold_is_still_refused(tmp_path):
+    """Opposite direction: only the context's own (key, value) is carried over. Another value, another level,
+    a context without levels, or a save with no context still refuse a hierarchy level written into scope."""
+    service, context = _context_with_level(tmp_path, {'drilldown': '城市公司'})
+    plain_service, plain = _context_with_level(tmp_path / 'plain', {})
+    cases = [
+        (service, {'context_id': context['id'], 'scope': {**context['scopes']['actual'], 'drilldown': '项目'}}),
+        (service, {'context_id': context['id'], 'scope': {**context['scopes']['actual'], 'level': '城市公司'}}),
+        (plain_service, {'context_id': plain['id'], 'scope': {**plain['scopes']['actual'], 'drilldown': '城市公司'}}),
+        (service, {'bindings': context['bindings'], 'scope': dict(context['scopes']['actual'])}),
+    ]
+    for store, extra in cases:
+        with pytest.raises(FoundryError) as refused:
+            store.analysis_requirements_save({'question': '解释费用', 'items': [EXPENSE_ITEM], **extra})
+        assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
+        assert store.analysis._list('requirements') == []
+
+
+def test_the_panel_leaves_out_exactly_the_scope_levels_save_refuses():
+    """RequirementsPanel keeps its own copy of the refused scope levels for the context seed; it must not drift."""
+    import re
+
+    from foundry.finance_requirements import SCOPE_REFUSED_HIERARCHY_KEYS
+
+    panel = (ROOT / 'app' / 'src' / 'views' / 'analysis' / 'RequirementsPanel.tsx').read_text(encoding='utf-8')
+    listed = re.search(r'contextOnlyScopeLevels = new Set\(\[([^\]]*)\]\)', panel).group(1)
+    assert set(re.findall(r"'([^']+)'", listed)) == set(SCOPE_REFUSED_HIERARCHY_KEYS)
+    assert 'granularity' not in listed
+
+
+def test_tool_descriptions_say_engine_paths_need_bound_rows():
+    """Round 6: the engine paths answer only when the bound snapshots give the engine rows; the tools say so,
+    and say that contexts or runs on the confirmed table snapshots do not count."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert 'bindings_without_engine_rows' in tools and 'bindings_without_engine_rows' in draft
+    assert '表快照上保存财务口径或运行都不计入' in tools
+    assert 'never counts (other bindings)' in draft
+    assert '引擎读不到行' in preset
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
+        encoding='utf-8') == preset
 
 
 def test_tool_descriptions_name_the_aggregate_and_price_quantity_paths_and_exact_decimals():

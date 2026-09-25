@@ -688,12 +688,16 @@ class FinanceStore:
         parent = latest_requirements(self.analysis)
         if parent:
             self._authorize(parent.get("bindings", {}))
+        context_scopes = None
         if spec.get("context_id"):
             context = self._read("contexts", spec["context_id"])
             spec = {**spec, "bindings": context["bindings"],
                     "scope": spec.get("scope", self._primary_scope(context.get("scopes", {})))}
+            # A hierarchy level the context's own scope holds is carried over into the requirement scope
+            # (the panel seeds from it), so save drops it instead of refusing it as newly written.
+            context_scopes = [scope for scope in (context.get("scopes") or {}).values() if isinstance(scope, dict)]
         self._authorize(spec.get("bindings", {}))
-        return save_requirements(self.analysis, spec)
+        return save_requirements(self.analysis, spec, _context_scopes=context_scopes)
 
     def analysis_requirements_list(self, spec):
         records = self.analysis._list("requirements")

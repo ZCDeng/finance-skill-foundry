@@ -193,6 +193,51 @@ describe('requirements panel', () => {
     expect(saveCall?.[2]?.scope).not.toHaveProperty('organization');
   });
 
+  it('does not seed a hierarchy level it cannot show from the context scope into the first save', async () => {
+    // Review round 6: the context scope held drilldown, the panel has no field for it, and every save
+    // resent it; the server refuses a newly written level. granularity is a scope field of its own and stays.
+    const seeded = { id: contextId, name: '口径', bindings: { actual: 'ds' },
+      scopes: { actual: { ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', unit: '万元', drilldown: '城市公司', granularity: '区域' } } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => {
+        if (command === 'analysis-requirements-list') return ok({ requirements: [], current: null });
+        if (command === 'list-finance-context') return ok({ task_id: taskId, datasets: [], contexts: [seeded], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
+        if (command === 'analysis-requirements-save') return ok({ id: 'r-ctx-001', question: spec?.question, context_id: contextId, scope: spec?.scope, bindings: spec?.bindings, items: spec?.items, parent_id: null } as Record<string, unknown>);
+        return ok({});
+      }),
+    });
+    render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
+
+    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '解释费用' } });
+    fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+    const saveCall = vi.mocked(api.financeCall).mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+    expect(saveCall?.[2]?.scope).not.toHaveProperty('drilldown');
+    expect(saveCall?.[2]?.scope).toEqual({ ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', unit: '万元', granularity: '区域' });
+  });
+
+  it('still resends a stored record scope key it does not show, so the server can record the drop', async () => {
+    // Opposite direction: only the context seed is cleaned. A stored record's scope round-trips unchanged;
+    // the server drops a legacy level carried over from the parent and records it in authoring_warnings.
+    const legacy: AnalysisRequirementsRecord = { ...current, scope: { ...current.scope, drilldown: '城市公司' } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command) => command === 'analysis-requirements-save'
+        ? ok({ ...legacy, id: 'r-current-009', parent_id: legacy.id } as unknown as Record<string, unknown>)
+        : ok({ requirements: [legacy], current: legacy })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+    await screen.findByDisplayValue('解释本期利润差异并下钻利润');
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      parent_id: legacy.id,
+      scope: expect.objectContaining({ drilldown: '城市公司' }),
+    })));
+  });
+
   it('passes the edited working scope to the discussion callback', async () => {
     const onDiscuss = vi.fn();
     mountBridge();

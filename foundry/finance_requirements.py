@@ -112,8 +112,9 @@ GRAIN_LISTS = (('organization', 'organizations'), ('period', 'periods'), ('scena
 GRAIN_BASIS_KINDS = ('estimate', 'unavailable')
 # Evidence classes that answer an amount; an estimate only ever reaches `estimated`.
 SOURCE_EVIDENCE_BASES = frozenset({'engine_closed', 'source_value', 'source_calculation'})
-# Blockers only the manager can clear; everything else stays a repairable gap.
-MANAGER_BLOCKERS = frozenset({'structure_pending_confirmation'})
+# Blockers only the manager can clear; everything else stays a repairable gap. Which data a requirement is
+# bound to is the manager's call, so bindings the engine reads no rows from are hers to change.
+MANAGER_BLOCKERS = frozenset({'structure_pending_confirmation', 'bindings_without_engine_rows'})
 
 
 def _canonical_metric_name(metric):
@@ -136,8 +137,10 @@ def latest_requirements(analysis):
     return records[-1] if records else None
 
 
-def save_requirements(analysis, spec):
-    prepared = prepare_requirements(analysis, spec)
+def save_requirements(analysis, spec, *, _context_scopes=None):
+    """`_context_scopes` are the scopes of the finance context the caller loaded for spec['context_id']
+    (finance_service); a spec cannot supply them."""
+    prepared = prepare_requirements(analysis, spec, _context_scopes=_context_scopes)
     question, scope, bindings = prepared['question'], prepared['scope'], prepared['bindings']
     normalized, selection = prepared['items'], prepared['selection']
     # Read before taking the task lock: scanning workbook text is slow and only ever warns.
@@ -156,7 +159,7 @@ def save_requirements(analysis, spec):
         return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
 
 
-def prepare_requirements(analysis, spec):
+def prepare_requirements(analysis, spec, *, _context_scopes=None):
     """Validate and normalize a requirements spec without writing anything; raises what save would refuse.
 
     circle-select calls it before writing its child context, so a refused save leaves nothing behind.
@@ -244,7 +247,7 @@ def prepare_requirements(analysis, spec):
     hierarchy = {item['id']: _hierarchy_dimensions(item) for item in normalized if _hierarchy_dimensions(item)}
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
-    scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope)
+    scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope, _context_scopes)
     _version_change(analysis, spec, normalized)
     return {'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings,
             'selection': selection, 'warnings': [*carried_over, *scope_dropped]}
@@ -338,16 +341,27 @@ def _earlier_scope_levels(analysis, parent_id):
     return held
 
 
-def _scope_hierarchy(analysis, parent_id, scope):
+def _level_key(key, value):
+    import json
+
+    return key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _scope_hierarchy(analysis, parent_id, scope, context_scopes=None):
     """Refuse a hierarchy level newly written into scope, as for dimensions; drop and record one carried
-    over from the parent version, or resent after an earlier version dropped it."""
+    over from the parent version, resent after an earlier version dropped it, or seeded from the finance
+    context the requirement is saved with (RequirementsPanel seeds its scope from the context's scope and
+    has no field for the level; finance_context_save accepts any key)."""
     import json
 
     written = _scope_levels(scope)
     legacy = _scope_levels((_parent_record(analysis, parent_id) or {}).get('scope'))
     earlier = _earlier_scope_levels(analysis, parent_id) if written else set()
+    held = {_level_key(key, value) for context_scope in context_scopes or () for key, value in _scope_levels(context_scope).items()}
+    from_context = {key: value for key, value in written.items()
+                    if _level_key(key, value) in held and _level_key(key, value) not in earlier}
     new = {key: value for key, value in written.items()
-           if (key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)) not in earlier}
+           if _level_key(key, value) not in earlier and key not in from_context}
     if new:
         suggested = {key: value for key, value in scope.items() if key not in written}
         named = ', '.join(f'{key}={value}' for key, value in new.items())
@@ -358,14 +372,21 @@ def _scope_hierarchy(analysis, parent_id, scope):
         )
         error.details = {'code': 'requirement_scope_not_row_filter', 'keys': sorted(new), 'suggested_scope': suggested}
         raise error
-    dropped = {**legacy, **written}
-    if not dropped:
+    dropped = {key: value for key, value in {**legacy, **written}.items() if key not in from_context}
+    warnings = []
+    if dropped:
+        named = '、'.join(f'{key}={value}' for key, value in dropped.items())
+        warnings.append({'code': 'hierarchy_scope_dropped', 'keys': dropped,
+                         'message': f'旧版要求范围里的 {named} 是下钻层级，不是结果行字段，新版已去掉；'
+                                    '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
+    if from_context:
+        named = '、'.join(f'{key}={value}' for key, value in from_context.items())
+        warnings.append({'code': 'hierarchy_scope_dropped', 'keys': from_context, 'source': 'finance_context',
+                         'message': f'财务口径范围里的 {named} 是下钻层级，不是结果行字段，要求范围不带它；'
+                                    '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
+    if not warnings:
         return scope, []
-    named = '、'.join(f'{key}={value}' for key, value in dropped.items())
-    return {key: value for key, value in scope.items() if key not in written}, [{
-        'code': 'hierarchy_scope_dropped', 'keys': dropped,
-        'message': f'旧版要求范围里的 {named} 是下钻层级，不是结果行字段，新版已去掉；'
-                   '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'}]
+    return {key: value for key, value in scope.items() if key not in written}, warnings
 
 
 def _reject_hierarchy_dimensions(items, hierarchy):
@@ -2281,20 +2302,20 @@ def _estimate_accepted(acceptances, item, grain, location):
 
 def _evidence_environment(analysis, latest, runs=None):
     """What the requirement's bound data allows right now: archived workbooks for recipes, and whether the
-    finance engine can run on it (a saved finance context or finance runs on these snapshots, and
-    structures the manager has confirmed)."""
-    dataset_ids = [value for value in (latest.get('bindings') or {}).values() if isinstance(value, str)]
+    finance engine can run on it (every bound snapshot gives the engine rows, a saved finance context or
+    finance runs on exactly these bindings, and structures the manager has confirmed)."""
+    bindings = latest.get('bindings') or {}
+    dataset_ids = [value for value in bindings.values() if isinstance(value, str)]
     if runs is None:
         try:
             runs = {run['id']: run for run in analysis._list('runs') if run.get('execution_status') == 'succeeded'}
         except FoundryError:
             runs = {}
-    engine_runs = any(
-        run.get('engine') == 'finance'
-        and (not dataset_ids or set((run.get('bindings') or {}).values()) & set(dataset_ids))
-        for run in runs.values()
-    )
-    workbooks, tables, accounts = [], [], set()
+    # Only a run on the requirement's own bindings is ever counted (_bindings_match), so only such a run
+    # or context makes an engine path available.
+    engine_runs = any(run.get('engine') == 'finance' and _bindings_match(bindings, run.get('bindings') or {})
+                      for run in runs.values())
+    workbooks, tables, rowless, accounts = [], [], [], set()
     for dataset_id in dataset_ids:
         try:
             dataset = analysis.read_dataset(dataset_id)
@@ -2306,6 +2327,11 @@ def _evidence_environment(analysis, latest, runs=None):
             workbooks.append(dataset_id)
         if isinstance(dataset.get('rows'), list) and dataset['rows']:
             tables.append(dataset_id)
+        else:
+            # A workbook file (or an empty table) gives the finance engine no rows: a context on it saves
+            # cleanly and every run on it is empty. The table snapshots a structure confirmation files are
+            # other datasets, and runs on them never carry this requirement's bindings.
+            rowless.append(dataset_id)
         # Management accounts the finance engine can total on its own (run_metric account_total).
         accounts.update(str(row['management_account']) for row in dataset.get('rows') or []
                         if isinstance(row, dict) and row.get('management_account') not in (None, ''))
@@ -2317,13 +2343,13 @@ def _evidence_environment(analysis, latest, runs=None):
         store = FinanceStore(analysis.task)
         contexts = store._list('contexts')
         finance_context = bool(latest.get('context_id')) or engine_runs or any(
-            not dataset_ids or set((context.get('bindings') or {}).values()) & set(dataset_ids) for context in contexts)
+            _bindings_match(bindings, context.get('bindings') or {}) for context in contexts)
         pending = [dataset_id for dataset_id in dataset_ids
                    if store.dataset_structure_state(dataset_id) == PENDING_CONFIRMATION]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         finance_context = True if engine_runs else None
     return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending,
-            'accounts': sorted(accounts),
+            'rowless_bindings': rowless, 'accounts': sorted(accounts),
             # structured_aggregate reads exactly one snapshot, so it can meet only a single-binding requirement.
             'aggregate_sources': tables if len(dataset_ids) == 1 else []}
 
@@ -2332,7 +2358,10 @@ def _engine_blockers(environment):
     blockers = []
     if environment.get('structure_pending'):
         blockers.append('structure_pending_confirmation')
-    if environment.get('finance_context') is False:
+    if environment.get('rowless_bindings'):
+        # A finance context on these bindings would not help: the engine still reads no rows from them.
+        blockers.append('bindings_without_engine_rows')
+    elif environment.get('finance_context') is False:
         blockers.append('no_finance_context')
     return blockers
 
@@ -2740,6 +2769,8 @@ NOT_COUNTED_TEXT = {
 BLOCKER_TEXT = {
     'structure_pending_confirmation': '工作簿结构待经理确认',
     'no_finance_context': '尚无覆盖这些资料的财务口径',
+    'bindings_without_engine_rows': ('本要求绑定的资料快照是工作簿文件或空表，财务引擎从中读不到数据行；'
+                                     '结构确认生成的表快照不是本要求绑定的资料，在其上的运行不计入'),
     'no_workbook_source': '绑定资料中没有可复算的归档工作簿',
 }
 

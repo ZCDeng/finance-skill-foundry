@@ -370,7 +370,9 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     by_id = {fact["id"]: fact for fact in facts}
     by_location = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts}
     issues: list[dict] = []
-    referenced = set()
+    # Cited order, not a set: which of two same-valued facts an issue names must not follow PYTHONHASHSEED
+    # (the completion issue_fingerprint hashes these issues).
+    referenced: dict[str, None] = {}
     for fact_id in fact_ids:
         if (
             not isinstance(fact_id, str)
@@ -386,7 +388,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
                 }
             )
         else:
-            referenced.add(fact_id)
+            referenced.setdefault(fact_id)
     for claim in claims:
         if not isinstance(claim, dict) or claim.get("basis") not in BASIS:
             issues.append(
@@ -399,7 +401,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
             continue
         fact = by_id.get(claim.get("fact_id")) if claim.get("fact_id") else None
         if fact:
-            referenced.add(fact["id"])
+            referenced.setdefault(fact["id"])
             if any(
                 claim.get(key) != fact[key]
                 for key in ("run_id", "row", "column", "value")
@@ -419,7 +421,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
             else:
                 bound_fact = by_location.get((claim.get("run_id"), claim.get("row"), claim.get("column")))
                 if bound_fact:
-                    referenced.add(bound_fact["id"])
+                    referenced.setdefault(bound_fact["id"])
                 else:
                     issues.append({"code": "unknown_fact", "severity": "error", "message": "引用位置没有可核验的数值事实。"})
             if claim.get("fact_id"):
@@ -456,7 +458,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
                 }
             )
     required = set(_required_fact_ids(facts))
-    missing_required = sorted(required - referenced)
+    missing_required = sorted(required - referenced.keys())
     for fact_id in missing_required:
         issues.append(
             {
