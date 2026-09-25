@@ -3452,7 +3452,7 @@ def augment_quality(analysis, spec, quality, *, _recipe_report=None):
                            **({'fixups': source_fixups} if source_fixups else {})})
     # Exports write 估算 beside each estimate the text states; one the text may state unbound cannot be labelled.
     from foundry.report_projection import estimate_label_issues
-    issues.extend(estimate_label_issues(spec, requirements, quality.get('issues', [])))
+    issues.extend(estimate_label_issues(spec, requirements, quality.get('issues', []), quality.get('facts')))
     return {**quality, 'issues': issues, 'status': 'needs_attention' if issues else quality['status'],
             'requirements': requirements,
             'checks': {'numbers': {'status': quality['status']}, 'coverage': requirements['coverage'], 'provenance': requirements['provenance']}}

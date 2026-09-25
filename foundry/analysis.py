@@ -1000,7 +1000,7 @@ class AnalysisStore:
             _requirement_recipe_report=evidence_report,
         )
         explanation_check = augment_quality(self, {
-            "body": body, "run_ids": list(runs), "claims": claims,
+            "body": body, "title": title, "limitations": limitations, "run_ids": list(runs), "claims": claims,
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
             "evidence_recipes": evidence_recipes,
@@ -1375,13 +1375,17 @@ class AnalysisStore:
                         ["Reproducibility", projection["reproducibility_status"]],
                     ]:
                         _append_excel(sheet, row)
+                    from foundry.report_projection import ESTIMATE_LABEL, estimate_cells
+
                     if projection.get("document"):
-                        for sheet_name, rows in report_document_excel_rows(projection["document"], projection).items():
+                        # The projection's 估算 labels get the room it gave them beyond the text limit.
+                        headroom = len(ESTIMATE_LABEL) * projection.get("estimate_labels", 0)
+                        for sheet_name, rows in report_document_excel_rows(
+                            projection["document"], projection, text_headroom=headroom
+                        ).items():
                             structured_sheet = workbook.create_sheet(sheet_name)
                             for row in rows:
                                 _append_excel(structured_sheet, row)
-                    from foundry.report_projection import ESTIMATE_LABEL, estimate_cells
-
                     # Cells of grains the server's requirement check for this draft found `estimated`.
                     estimates = estimate_cells((draft.get("quality") or {}).get("requirements"))
                     for number, run in enumerate(runs, start=1):

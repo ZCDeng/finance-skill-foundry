@@ -391,6 +391,12 @@ describe('report document converters', () => {
     const roundTrip = documentToMarkdown((await importReport(buffer, 'docx', { ...source, format: 'docx', name: 'estimate.docx' })).document!);
     expect(roundTrip).toContain('117,814.56 万元（估算）');
     expect(roundTrip).toContain('117,814.5625（估算）');
+
+    // The projection labels an estimate the title states; the title reaches every format as given.
+    const title = '华东区域 1-8 月同期预算 117,814.56 万元（估算）';
+    expect(renderReportHtml(doc, title, options)).toContain(`<h1>${title}</h1>`);
+    const titled = await exportDocx(doc, title, undefined, options);
+    expect(await (await JSZip.loadAsync(titled)).file('word/document.xml')!.async('string')).toContain(title);
   });
 });
 

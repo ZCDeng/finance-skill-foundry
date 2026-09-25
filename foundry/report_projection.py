@@ -8,11 +8,12 @@ business document.
 
 from __future__ import annotations
 
+import bisect
 import copy
 import hashlib
 import json
 import re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from foundry.errors import FoundryError
@@ -26,11 +27,22 @@ from foundry.report_documents import (
 
 REPORT_PROJECTION_MODES = {"management", "audit"}
 ESTIMATE_LABEL = "（估算）"
-# A unit written right after a number stays with it; the label goes after the unit.
-_UNIT_AFTER = re.compile(r"[^\S\n]?(?:百万元|亿元|万元|千元|元)")
-_LABEL_AFTER = re.compile(r"[^\S\n]*[（(]?[^\S\n]*估算")
-_LABEL_BEFORE = ("估算", "估算值", "估算数", "（估算）", "(估算)")
-_BEFORE_FILLER = re.compile(r"[\s：:为是约]*$")
+# The whole unit written right after a number stays with it (万, 万元, 万元人民币, 元/吨); the label goes after it.
+_UNIT_AFTER = re.compile(
+    r"[^\S\n]?(?:(?:百万|千万|亿|万|千)(?:美元|港元|欧元|元)?|美元|港元|欧元|元)(?:人民币)?"
+    r"(?:/(?:平方米|平米|千克|公斤|公里|小时|人|吨|月|年|日|天|户|台|件|次|股|份|辆|套|间|个|座|张))?"
+)
+# 估算 said right after the number or its unit: in brackets (（估算）, （按集团进度估算）) or as the rest of the
+# clause (估算, ，系估算). A negation there (非估算, 估算口径不适用) is no label.
+_LABEL_AFTER = re.compile(
+    r"[^\S\n]*(?:[（(](?P<note>[^（）()\n]{0,20})[）)]"
+    r"|[，,]?[^\S\n]*(?P<said>(?:系|为|属|是|均为|均系|即|按[^\d。；;，,、！？!?\n|（）()]{0,10}?)?估算[值数]?)"
+    r"(?=[^\S\n]*(?:[。；;，,、！？!?）)|\n]|$)))"
+)
+# 估算 said right before the number, in the same clause: 估算 117,814.57, （估算值）117,814.57, 估算为 117,814.57.
+_LABEL_BEFORE = re.compile(r"(?:估算[值数]?|[（(]估算[值数]?[）)])[\s：:为是约]*$")
+_CLAUSE_BREAK = re.compile(r"[。；;，,、！？!?\n|]")
+_NEGATION = re.compile(r"[非不未无没否]")
 # Stands in for an inline image when inline nodes are read as text.
 _OBJECT = chr(0xFFFC)
 
@@ -42,7 +54,9 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
     base = _draft_document(draft)
     document = _dedupe_leading_title(base, title)
     # Estimates are the cells the server's requirement check stored for this draft found `estimated`.
-    cited = _cited_numbers(draft.get("claims"), estimate_cells(_stored_requirements(draft)))
+    quality = draft.get("quality") if isinstance(draft.get("quality"), dict) else {}
+    cited = _cited_numbers(draft.get("claims"), estimate_cells(quality.get("requirements")), quality.get("facts"))
+    title = _label_text(title, cited)
     limitations = [
         _label_text(str(item).strip(), cited)
         for item in draft.get("limitations", [])
@@ -63,17 +77,19 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
             document = _append_markdown(document, "审计质量与证据记录", audit_appendix)
     sources = _compact_sources(document, resolved_datasets)
     unplaced = [
-        issue.get("message") for issue in (draft.get("quality") or {}).get("issues", []) or []
+        issue.get("message") for issue in quality.get("issues", []) or []
         if isinstance(issue, dict) and issue.get("code") == "estimate_label_unplaced" and issue.get("message")
     ]
     if unplaced:
         document = _append_markdown(document, "估算标注待核对", "\n".join(f"- {item}" for item in unplaced))
     if limitations:
         document = _append_markdown(document, "局限与待确认事项", "\n".join(f"- {item}" for item in limitations))
-    document = _label_estimates(document, cited)
-    document = _append_markdown(document, "导出身份与来源", _identity_appendix(draft, mode, sources))
+    document, labels = _label_estimates(document, cited)
+    # The labels are the server's text, so they get room beyond the text limit; the author's text does not.
+    headroom = len(ESTIMATE_LABEL) * labels
+    document = _append_markdown(document, "导出身份与来源", _identity_appendix(draft, mode, sources), text_headroom=headroom)
 
-    body = report_document_markdown(document, title=title).strip()
+    body = report_document_markdown(document, title=title, text_headroom=headroom).strip()
     if marker:
         body = f"{marker}\n\n{body}" if body else marker
     body += "\n"
@@ -92,6 +108,8 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
         "document": document,
         "limitations": limitations,
         "sources": sources,
+        # How many （估算） labels the document text carries beyond the author's text (see text_headroom).
+        **({"estimate_labels": labels} if labels else {}),
     }
     projection_hash = _hash(projection_base)
     return {
@@ -115,9 +133,9 @@ def estimate_cells(requirements: Any) -> dict[tuple[Any, Any, Any], dict[str, An
             if not isinstance(grain, dict):
                 continue
             for location in grain.get("locations") or []:
-                if not isinstance(location, dict):
+                key = _cell_key(location)
+                if key is None:
                     continue
-                key = (location.get("run_id"), location.get("row"), location.get("column"))
                 cells.setdefault(key, {
                     "requirement_item_id": item.get("id"),
                     "label": item.get("label") or item.get("metric") or item.get("id"),
@@ -128,27 +146,37 @@ def estimate_cells(requirements: Any) -> dict[tuple[Any, Any, Any], dict[str, An
     return cells
 
 
-def estimate_label_issues(spec: dict[str, Any], requirements: Any, issues: list[Any]) -> list[dict[str, Any]]:
+def estimate_label_issues(
+    spec: dict[str, Any], requirements: Any, issues: list[Any], facts: Any = None
+) -> list[dict[str, Any]]:
     """Fail loud where an estimate cannot be labelled in the export.
 
-    An estimate is labelled where the manager-facing text writes its cited value (or the claim's
-    presentation of it). It cannot be labelled when the text states it only as a number bound to no claim
-    (uncited_number), or as a number a counted cell also states, where no one can tell which it is.
+    An estimate is labelled where the manager-facing text (body, limitations, title) writes its cited value
+    (or the claim's presentation of it). It cannot be labelled when the text states it only as a number bound
+    to no cell (uncited_number, or any such number the number check does not read: in limitations, the title,
+    or beside '/'), or as a number a counted cell also states, where no one can tell which it is.
     """
     cells = estimate_cells(requirements)
     if not cells:
         return []
     body = str(spec.get("body") or "")
-    unbound = list(dict.fromkeys(
-        str(issue.get("text", "")) for issue in issues
-        if isinstance(issue, dict) and issue.get("code") == "uncited_number"
-        and issue.get("origin", "manager_body") == "manager_body"
-        and not _unbound_number_says_estimate(body, issue)
-    ))[:10]
+    cited = _cited_numbers(spec.get("claims"), cells, facts)
     located: set[tuple[Any, Any, Any]] = set()
     ambiguous: dict[tuple[Any, Any, Any], list[str]] = {}
-    _label_inline([{"type": "text", "text": _without_trusted_appendix(body, spec)}],
-                  _cited_numbers(spec.get("claims"), cells), located, ambiguous)
+    scanned: list[str] = []
+    limitations = spec.get("limitations")
+    texts = [_without_trusted_appendix(body, spec),
+             *(str(item).strip() for item in (limitations if isinstance(limitations, list) else [])),
+             str(spec.get("title") or "")]
+    for text in texts:
+        _label_inline([{"type": "text", "text": text}], cited, located, ambiguous, scanned)
+    unbound = list(dict.fromkeys([
+        *(str(issue.get("text", "")) for issue in issues
+          if isinstance(issue, dict) and issue.get("code") == "uncited_number"
+          and issue.get("origin", "manager_body") == "manager_body"
+          and not _unbound_number_says_estimate(body, issue)),
+        *scanned,
+    ]))[:10]
     result = []
     for key, cell in cells.items():
         if key in located or not (unbound or key in ambiguous):
@@ -162,8 +190,9 @@ def estimate_label_issues(spec: dict[str, Any], requirements: Any, issues: list[
                        "未标注“（估算）”。请在估算值旁写明“估算”，或用 presentation 以不同小数位展示估算值。")
         else:
             detail = {"uncited_numbers": unbound}
-            message = (subject + "正文里找不到它引用的数值，导出无法在数值旁标注“（估算）”。正文有未绑定引用的数字："
-                       + "、".join(unbound) + "；若其中有这个估算值，请用 claim 绑定到该单元格（舍入展示时写 presentation），"
+            message = (subject + "正文、局限和标题里找不到它引用的数值，导出无法在数值旁标注“（估算）”。"
+                       "文稿有未绑定引用的数字：" + "、".join(unbound)
+                       + "；若其中有这个估算值，请用 claim 绑定到该单元格（舍入展示时写 presentation），"
                        "或在数值旁写明“估算”。")
         result.append({
             "code": "estimate_label_unplaced",
@@ -177,58 +206,84 @@ def estimate_label_issues(spec: dict[str, Any], requirements: Any, issues: list[
     return result
 
 
-def _stored_requirements(draft: dict[str, Any]) -> Any:
-    quality = draft.get("quality")
-    return quality.get("requirements") if isinstance(quality, dict) else None
+def _cell_key(record: Any) -> tuple[str, int, str] | None:
+    """(run_id, row, column) of a claim, fact or location; None when it names no cell (the number check
+    reports a malformed claim location, invalid_claim_location)."""
+    if not isinstance(record, dict):
+        return None
+    run_id, row, column = record.get("run_id"), record.get("row"), record.get("column")
+    if isinstance(run_id, str) and isinstance(column, str) and isinstance(row, int) and not isinstance(row, bool):
+        return run_id, row, column
+    return None
 
 
-def _cited_numbers(claims: Any, estimates: dict[tuple[Any, Any, Any], dict[str, Any]]) -> dict[str, Any]:
-    """How the text may write each cited cell, and which cited cells are estimates.
+def _cited_numbers(claims: Any, estimates: dict[tuple[Any, Any, Any], dict[str, Any]], facts: Any = None) -> dict[str, Any]:
+    """Which cells of the draft's runs each number in the text can be, and which of those are estimates.
 
-    A number is matched first as written (the claim value or its presentation, commas aside), then by
-    value, the rule the number check binds text with. Matching as written keeps an estimate shown as
-    0.00 apart from a counted 0.
+    A number is matched by value, the rule the number check binds text with, against the cited claims and
+    every numeric cell of the runs (the stored check's facts): a counted cell the text states without a
+    claim of its own is still counted. Where an estimate and a counted cell have the same value, only a
+    form the claim's presentation gives the estimate and no counted cell is written in (0.00 beside a
+    counted 0) tells them apart.
     """
-    from foundry.finance_explanations import _normalize_number, _presentation_number
+    from foundry.finance_explanations import _allowed_numbers, _normalize_number, _presentation_number
 
-    cited: dict[str, Any] = {"estimates": estimates, "text": {}, "value": {}}
+    cited: dict[str, Any] = {"estimates": estimates, "value": {}, "shown": {}}
     if not estimates:
         return cited
-    for claim in claims if isinstance(claims, list) else []:
-        if not isinstance(claim, dict) or claim.get("basis") != "calculation" or claim.get("value") in (None, ""):
-            continue
-        key = (claim.get("run_id"), claim.get("row"), claim.get("column"))
-        texts, values = {str(claim["value"])}, {_normalize_number(str(claim["value"]))}
-        presentation = claim.get("presentation")
-        if isinstance(presentation, dict) and presentation.get("scale") == "identity":
-            shown, _issue = _presentation_number(claim, {name: claim.get(name) for name in ("run_id", "row", "column", "value")})
-            if shown:
-                values.add(shown["number"])
-                texts.add(format(Decimal(shown["number"]), f".{presentation['decimal_places']}f"))
-        for form in texts:
-            cited["text"].setdefault(form, set()).add(key)
+
+    def add(key: tuple[str, int, str], values: set[str], shown: set[str]) -> None:
         for form in values:
             cited["value"].setdefault(form, set()).add(key)
+        for form in shown:
+            cited["shown"].setdefault(form.replace(",", ""), set()).add(key)
+
+    for claim in claims if isinstance(claims, list) else []:
+        key = _cell_key(claim)
+        if key is None or claim.get("basis") != "calculation" or claim.get("value") in (None, ""):
+            continue
+        values, shown = {_normalize_number(str(claim["value"]))}, set()
+        presentation = claim.get("presentation")
+        if isinstance(presentation, dict) and presentation.get("scale") == "identity":
+            result, _issue = _presentation_number(claim, {name: claim.get(name) for name in ("run_id", "row", "column", "value")})
+            if result:
+                values.add(result["number"])
+                shown.add(format(Decimal(result["number"]), f".{presentation['decimal_places']}f"))
+        # A counted cell's value as written is a form the text may use for it.
+        add(key, values, shown if key in estimates else shown | {str(claim["value"])})
+    for fact in facts if isinstance(facts, list) else []:
+        key = _cell_key(fact)
+        if key is None:
+            continue
+        try:
+            values = _allowed_numbers([fact])
+        except (KeyError, TypeError, AttributeError, InvalidOperation):
+            continue
+        add(key, values, set() if key in estimates else {str(fact.get("value"))})
     return cited
 
 
-def _label_estimates(document: dict[str, Any], cited: dict[str, Any]) -> dict[str, Any]:
-    """Write （估算） beside every estimate number in prose and tables; code blocks are data, not prose."""
+def _label_estimates(document: dict[str, Any], cited: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Write （估算） beside every estimate number in prose and tables; code blocks are data, not prose.
+
+    Returns the labelled document and how many labels it gained."""
     if not cited["estimates"]:
-        return document
+        return document, 0
     labelled = copy.deepcopy(validate_report_document(document))
+    count = 0
 
     def walk(nodes: list[dict[str, Any]]) -> None:
+        nonlocal count
         for node in nodes:
             if node.get("type") == "codeBlock":
                 continue
             children = node.get("content") or []
             if any(child.get("type") == "text" for child in children):
-                _label_inline(children, cited, set())
+                count += _label_inline(children, cited, set())
             walk([child for child in children if child.get("type") not in INLINE_TYPES])
 
     walk(labelled.get("content", []))
-    return validate_report_document(labelled)
+    return validate_report_document(labelled, text_headroom=len(ESTIMATE_LABEL) * count), count
 
 
 def _label_text(text: str, cited: dict[str, Any]) -> str:
@@ -237,33 +292,52 @@ def _label_text(text: str, cited: dict[str, Any]) -> str:
     return node["text"]
 
 
+def _numbers(text: str) -> list[dict[str, Any]]:
+    """Numbers as the number check reads them, and also those it skips beside '/' (实际/预算 a/b)."""
+    from foundry.finance_explanations import DATE_SPAN, _body_numbers
+
+    # A '/' inside a date (2026/08/31) still keeps its numbers a date.
+    return _body_numbers(text.replace("/", " "), ignored_spans=[match.span() for match in DATE_SPAN.finditer(text)])
+
+
 def _label_inline(
     children: list[dict[str, Any]],
     cited: dict[str, Any],
     located: set[tuple[Any, Any, Any]],
     ambiguous: dict[tuple[Any, Any, Any], list[str]] | None = None,
-) -> None:
-    """Label estimate numbers in one run of inline nodes, read as the text a reader sees."""
-    from foundry.finance_explanations import _body_numbers, _normalize_number
+    unbound: list[str] | None = None,
+) -> int:
+    """Label estimate numbers in one run of inline nodes, read as the text a reader sees; returns the labels
+    written. `unbound` collects the numbers that are no cell of the runs and say nothing of 估算 beside them."""
+    from foundry.finance_explanations import _normalize_number
 
     if not cited["estimates"]:
-        return
+        return 0
     offsets: list[int] = []
     pieces: list[str] = []
+    total = 0
     for child in children:
-        offsets.append(sum(len(piece) for piece in pieces))
-        pieces.append(str(child.get("text", "")) if child.get("type") == "text" else "\n" if child.get("type") == "hardBreak" else _OBJECT)
+        piece = str(child.get("text", "")) if child.get("type") == "text" else "\n" if child.get("type") == "hardBreak" else _OBJECT
+        offsets.append(total)
+        pieces.append(piece)
+        total += len(piece)
     text = "".join(pieces)
     points = set()
-    for token in _body_numbers(text):
-        cells = cited["text"].get(token["text"].replace(",", "")) or cited["value"].get(_normalize_number(token["text"])) or set()
+    for token in _numbers(text):
+        cells = cited["value"].get(_normalize_number(token["text"])) or set()
         estimates = {cell for cell in cells if cell in cited["estimates"]}
+        if estimates and len(estimates) < len(cells):
+            # A counted cell has the same value: only a form that is the estimate's own tells which is meant.
+            shown = cited["shown"].get(token["text"].replace(",", "")) or set()
+            if shown and shown <= estimates:
+                cells = estimates = shown
         if not estimates:
+            if not cells and unbound is not None and not _labelled_beside(text, token["start"], token["end"]):
+                unbound.append(token["text"])
             continue
         if _labelled_beside(text, token["start"], token["end"]):
             located.update(estimates)
         elif len(estimates) < len(cells):
-            # A counted cell states the same number: which one the text means cannot be told.
             if ambiguous is not None:
                 for cell in estimates:
                     ambiguous.setdefault(cell, []).append(token["text"])
@@ -272,18 +346,23 @@ def _label_inline(
             unit = _UNIT_AFTER.match(text, token["end"])
             points.add(unit.end() if unit else token["end"])
     for point in sorted(points, reverse=True):
-        # The character before the label is the number's (or its unit's), so it sits in a text node.
-        index = next(i for i in range(len(children) - 1, -1, -1)
-                     if children[i].get("type") == "text" and offsets[i] < point <= offsets[i] + len(pieces[i]))
+        # The character before the label ends the number or its unit, so it sits in a text node.
+        index = bisect.bisect_right(offsets, point - 1) - 1
         cut = point - offsets[index]
         children[index]["text"] = children[index]["text"][:cut] + ESTIMATE_LABEL + children[index]["text"][cut:]
+    return len(points)
 
 
 def _labelled_beside(text: str, start: int, end: int) -> bool:
+    """Whether the text already says 估算 beside this number, in its own clause and not negated."""
     unit = _UNIT_AFTER.match(text, end)
-    if _LABEL_AFTER.match(text, unit.end() if unit else end):
-        return True
-    return _BEFORE_FILLER.sub("", text[max(0, start - 16):start]).endswith(_LABEL_BEFORE)
+    after = _LABEL_AFTER.match(text, unit.end() if unit else end)
+    if after:
+        said = after.group("said") or after.group("note") or ""
+        if "估算" in said and not _NEGATION.search(said):
+            return True
+    clause = _CLAUSE_BREAK.split(text[max(0, start - 16):start])[-1]
+    return bool(_LABEL_BEFORE.search(clause)) and not _NEGATION.search(clause)
 
 
 def _unbound_number_says_estimate(body: str, issue: dict[str, Any]) -> bool:
@@ -351,17 +430,17 @@ def _node_suffix_matches(content: list[dict[str, Any]], suffix: list[dict[str, A
     return _stable_json(content[-len(suffix):]) == _stable_json(suffix)
 
 
-def _append_markdown(document: dict[str, Any], heading: str, markdown: str) -> dict[str, Any]:
+def _append_markdown(document: dict[str, Any], heading: str, markdown: str, *, text_headroom: int = 0) -> dict[str, Any]:
     if not markdown.strip():
         return document
     addition = markdown.strip()
     if not addition.startswith("#"):
         addition = f"## {heading}\n\n{addition}"
-    extended = copy.deepcopy(validate_report_document(document))
+    extended = copy.deepcopy(validate_report_document(document, text_headroom=text_headroom))
     if extended.get("content"):
         extended["content"].append({"type": "horizontalRule"})
     extended["content"].extend(report_nodes_from_markdown(addition))
-    return validate_report_document(extended)
+    return validate_report_document(extended, text_headroom=text_headroom)
 
 
 

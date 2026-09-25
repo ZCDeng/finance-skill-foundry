@@ -103,7 +103,11 @@ def validate_report_source(source: Any) -> dict[str, Any]:
     }
 
 
-def validate_report_document(document: Any, *, registered_source_ids: set[str] | None = None) -> dict[str, Any]:
+def validate_report_document(
+    document: Any, *, registered_source_ids: set[str] | None = None, text_headroom: int = 0
+) -> dict[str, Any]:
+    """`text_headroom` is room beyond the text limit for text the server itself writes into an export
+    (the 估算 labels of a report projection); the author's own text never gets it."""
     if not isinstance(document, dict):
         raise FoundryError("report document must be an object")
     if document.get("schema_version") != 1:
@@ -126,7 +130,7 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
     content = document.get("content")
     if not isinstance(content, list):
         raise FoundryError("report document content must be an array")
-    budget = {"nodes": 0, "text": 0}
+    budget = {"nodes": 0, "text": 0, "limit": MAX_DOCUMENT_TEXT + max(0, text_headroom)}
     clean_content: list[dict[str, Any]] = []
     for node in content:
         normalized = _validate_node(node, source_ids, registered_source_ids, budget, parent=None)
@@ -134,7 +138,7 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
             clean_content.extend(normalized.get("content", []))
         else:
             clean_content.append(normalized)
-    if budget["text"] > MAX_DOCUMENT_TEXT:
+    if budget["text"] > budget["limit"]:
         raise FoundryError("report document text exceeds 1 MiB limit")
     result = {
         "schema_version": 1,
@@ -169,7 +173,7 @@ def _validate_node(
     if attrs:
         clean["attrs"] = attrs
     if node_type == "text":
-        text = _text(node.get("text", ""), "report text", maximum=MAX_DOCUMENT_TEXT)
+        text = _text(node.get("text", ""), "report text", maximum=budget["limit"])
         budget["text"] += len(text)
         clean["text"] = text
         marks = []
@@ -320,8 +324,8 @@ def _paragraph_plain_text(node: dict[str, Any]) -> str:
     return _render_inline(_flat_inline(node.get("content", []))).strip()
 
 
-def report_document_markdown(document: dict[str, Any], *, title: str | None = None) -> str:
-    clean = validate_report_document(document)
+def report_document_markdown(document: dict[str, Any], *, title: str | None = None, text_headroom: int = 0) -> str:
+    clean = validate_report_document(document, text_headroom=text_headroom)
     blocks: list[str] = []
     if title:
         blocks.append("# " + title.strip())
@@ -735,8 +739,10 @@ def _node_source_columns(node: dict[str, Any]) -> list[Any]:
     return [attrs.get("source_id"), attrs.get("sheet"), attrs.get("range"), attrs.get("page")]
 
 
-def report_document_excel_rows(document: dict[str, Any], draft: dict[str, Any]) -> dict[str, list[list[Any]]]:
-    clean = validate_report_document(document)
+def report_document_excel_rows(
+    document: dict[str, Any], draft: dict[str, Any], *, text_headroom: int = 0
+) -> dict[str, list[list[Any]]]:
+    clean = validate_report_document(document, text_headroom=text_headroom)
     overview = [["字段", "值"]]
     for label, value in (
         ("标题", draft.get("title", "")),
