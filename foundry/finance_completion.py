@@ -6,7 +6,9 @@ from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
 # 6: review round 3 inverted the amount gate (every item but a known non-amount is gated).
-COMPLETION_POLICY_VERSION = 6
+# 7: review round 4 gates quantity/area names that also name an amount (price_volume, revenue_by_area) and
+#    counts structured_aggregate output for amounts outside revenue/profit/cost/expense.
+COMPLETION_POLICY_VERSION = 7
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}

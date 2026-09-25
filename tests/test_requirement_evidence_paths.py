@@ -1,11 +1,12 @@
 """Phase 1 requirement evidence paths (decisions of 2026-09-24).
 
 Every requirement is an amount unless it is a known non-amount (a ratio, an item asking only for ratio
-scenarios, a count or a physical quantity). Script values never answer an amount. An amount is answered by
-a cited cell backed by a passing, server-evaluated direct/sum/diff recipe on the requirement's own snapshots
-with a unit scale; by finance-engine closure (revenue/profit/cost/expense items without scenarios); by the
-finance engine's own run_metric account_total of an account item, or its run_metric result set; and, outside
-revenue/profit/cost/expense, by the finance engine's own output of that amount.
+scenarios, a count or a physical quantity whose name names no amount). Script values never answer an amount.
+An amount is answered by a cited cell backed by a passing, server-evaluated direct/sum/diff recipe on the
+requirement's own snapshots with a unit scale; by finance-engine closure (revenue/profit/cost/expense items
+without scenarios, and the price-quantity bridge); by the finance engine's own run_metric account_total of an
+account item, or its run_metric result set; and, outside revenue/profit/cost/expense and the price-quantity
+bridge, by the finance engine's own output of that amount or a server-side structured_aggregate of it.
 Every tightening has its opposite here, and every piece of guidance is followed literally once.
 """
 import json
@@ -1823,3 +1824,427 @@ def test_resubmitting_the_refusals_suggested_items_records_the_dropped_legacy_le
     again = save_requirements(analysis, spec(scope=saved['scope'], bindings=saved['bindings'], parent_id=saved['id'],
                                              items=saved['items']))
     assert 'authoring_warnings' not in again
+
+
+# --- review fixes, round 4 (PR #23) -----------------------------------------------------------------
+#
+# The head-word exemption read price_quantity, price_volume and revenue_by_area as physical quantities.
+# A count, quantity or area head now exempts a name only when nothing else in it names an amount
+# (sales_volume stays a quantity; sales_price_volume is a price-volume bridge, revenue_by_area a split of
+# revenue). Ratio heads keep decision 4's phase-1 script rule whatever they are a ratio of.
+
+
+PRICE_VOLUME_AND_AREA_SPLITS = ['price_quantity', 'revenue_price_quantity', 'price_volume', 'sales_price_volume',
+                                'revenue_by_area', 'profit_by_area', 'revenue/area', '收入按面积']
+
+
+@pytest.mark.parametrize('label', PRICE_VOLUME_AND_AREA_SPLITS)
+def test_price_volume_bridges_and_amounts_split_by_area_are_gated_not_read_as_quantities(analysis, tmp_path, label):
+    """A python cell (999-style, no recipe) answered these items, coverage passed and the draft completed,
+    because the last word (quantity/volume/area) made them physical quantities."""
+    case = _label_case(analysis, tmp_path, label)
+    result = check_requirements(analysis, case.base)
+    item = _item(result)
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] == 'not_applicable'
+    assert item['uncounted_grains'] == [{'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']}]
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['original_requirements_completed'] is False
+    # The support report no longer offers a plain cited row, and its evidence names only offered paths.
+    assert 'cited_result_row' not in support['accepted_evidence']
+    offered = {*support['accepted_evidence'], *(path['path'] for path in support.get('blocked_evidence', []))}
+    assert {part.split(' (')[0] for part in support['evidence'].split(' / ')} <= offered
+    draft = FinanceStore(analysis.task).save_explanation_draft({'body': '金额为 997 万元。', 'run_ids': [case.run['id']],
+                                                                'claims': case.base['claims']})
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+    # The recipe path the guidance names answers it.
+    answered = _item(check_requirements(analysis, {**case.base, 'evidence_recipes': [case.recipe]}))
+    assert answered['status'] == 'answered'
+    assert answered['locations'][0]['evidence']['evidence_basis'] == 'source_value'
+
+
+def test_a_draft_that_policy_6_completed_on_a_price_volume_name_is_checked_again(analysis, tmp_path):
+    """Under completion policy 6 a script value answered price_volume and the draft completed. The narrowed
+    quantity exemption changes that verdict, so a resend must not replay the policy-6 draft."""
+    from foundry.analysis import _hash
+    from foundry.fsutil import write_json_atomic
+
+    case = _label_case(analysis, tmp_path, 'price_volume')
+    service = FinanceStore(analysis.task)
+    request = {'body': '量价影响为 997 万元。', 'run_ids': [case.run['id']], 'claims': case.base['claims']}
+    first = service.save_explanation_draft(request)
+    path = analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'status': 'pass', 'issues': [], 'requirements': {
+        **check['requirements'], 'coverage': {'status': 'pass'}, 'original_requirements_completed': True,
+        'items': [{**item, 'status': 'answered'} for item in check['requirements']['items']]}}
+    record = {**stored, 'check_policy_version': 6, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert again['completion']['status'] != 'complete'
+    assert again['completion']['original_requirements_completed'] is False
+
+
+def test_every_native_metric_but_ratio_is_gated_as_an_amount():
+    from foundry.finance_requirement_support import NATIVE_METRICS
+    from foundry.finance_requirements import _closed_metric_key
+
+    exempt = [metric for metric in NATIVE_METRICS if _closed_metric_key({'metric': metric}) is None]
+
+    assert exempt == ['ratio']
+    # A price and a volume named together is the price-quantity bridge, which engine closure or a recipe answers.
+    for label in ('price_quantity', 'price_volume', 'sales_price_volume', 'price_volume_mix', '价量分析'):
+        assert _closed_metric_key({'metric': label}) == 'price_quantity', label
+
+
+def test_a_price_quantity_item_is_offered_the_engine_bridge_and_only_the_engine_bridge_closes_it(analysis):
+    """price_quantity is the price-quantity bridge (NATIVE_METRICS). Its support report named the bridge while
+    accepting a plain cited row; the guidance now names the bridge and the recipe, and a python copy of the
+    engine's bridge still does not answer."""
+    requirement = _require_pq(analysis, metric='price_quantity', dimensions={'product': '商品A'})
+    support = requirement['support']['items'][0]
+    engine = _pq_run(analysis)
+    record = _new(analysis.task, engine='python', execution_status='succeeded', output_hash='pq-python-copy',
+                  bindings=engine['bindings'], finance_scope=engine['finance_scope'], result=engine['result'])
+    script = analysis._write(analysis._object_path('runs', record['id']), record)
+
+    def check(run):
+        return _item(check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': _pq_claims(run)}))
+
+    offered = {*support['accepted_evidence'], *(path['path'] for path in support.get('blocked_evidence', []))}
+    assert 'cited_result_row' not in offered
+    assert {'price_quantity_bridge', 'evidence_recipe'} <= offered
+    assert {part.split(' (')[0] for part in support['evidence'].split(' / ')} <= offered
+    assert check(script)['status'] != 'answered'
+    answered = check(engine)
+    assert answered['status'] == 'answered'
+    assert {location['evidence']['evidence_basis'] for location in answered['locations']} == {'engine_closed'}
+
+
+QUANTITIES_AND_RATIOS_OF_AMOUNTS = ['sales_volume', 'sales_units', 'sales_headcount', 'floor_area', '销售面积', '销售数量',
+                                    'revenue_growth_rate', 'price_change_ratio', '价格变动率', 'profit_margin_pct']
+
+
+@pytest.mark.parametrize('label', QUANTITIES_AND_RATIOS_OF_AMOUNTS)
+def test_quantities_and_ratios_of_amounts_keep_the_phase_1_script_rule(analysis, tmp_path, label):
+    """Opposite direction: a quantity that sales qualifies, an area, and any ratio (decision 4) stay exempt."""
+    case = _label_case(analysis, tmp_path, label)
+
+    assert _item(check_requirements(analysis, case.base))['status'] == 'answered'
+
+
+def test_a_cited_script_estimate_without_a_recipe_is_told_how_to_declare_its_grain(analysis, tmp_path):
+    """Huachen revenue_1_8/profit_1_8 regional budgets: the script emits 区域全年预算 × 进度率 and cites it.
+    No archived cell holds the value, yet the message and the fixup only offered a direct/sum/diff recipe;
+    the grain_basis route that reaches the spec outcome appeared only after a wrong turn."""
+    case = _estimate_case(analysis, tmp_path, declare=False, cite_estimate=False)
+    claims = [*case.spec['claims'], _claim(case.run, row=3, column='value', value='112860.000')]
+    item = _item(check_requirements(analysis, {**case.spec, 'claims': claims}))
+    fixup = next(f for f in item['fixups'] if f.get('reason') == 'cited_result_not_counted')
+    message = _unanswered_message(item)
+
+    assert item['uncounted_grains'] == [{'organization': '华东区域', 'period': '2026-01:2026-08', 'scenario': 'budget_1_8',
+                                         'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']}]
+    assert [cell['row'] for cell in fixup['evidence_recipe_cells']] == [3]
+    assert fixup['if_source_lacks_value']['field'] == 'grain_basis'
+    assert 'grain_basis' in message and 'factor_reproducible' in message
+
+    # Following it: declared an estimate with a factor recipe, the grain reaches `estimated` (never answered)…
+    record = case.requirement
+    declared = save_requirements(analysis, spec(
+        question=record['question'], scope=record['scope'], bindings=record['bindings'], parent_id=record['id'],
+        items=[{**record['items'][0], 'grain_basis': [
+            {'basis': 'estimate', 'organizations': ['华东区域'], 'scenarios': ['budget_1_8'],
+             'method': '区域全年收入预算 × 集团1-8月收入预算进度'}]}]))
+    estimate = {**_recipe(case.budget, '05·区域预算分解', 'C5', case.run, 3, recipe_id='east_budget_estimate'),
+                'factor_recipe_id': 'phasing', 'business_key': {'metric_key': 'revenue', 'period': '2026-01:2026-08'}}
+    estimated = _item(check_requirements(analysis, {**case.spec, 'requirements_id': declared['id'], 'claims': claims,
+                                                    'evidence_recipes': [*case.spec['evidence_recipes'], estimate]}))
+    assert estimated['status'] == 'estimated'
+    assert estimated['awaiting_manager'] == ['estimate_requires_acceptance']
+
+    # …and declared non-reproducible, it waits for the manager.
+    manager = save_requirements(analysis, spec(
+        question=record['question'], scope=record['scope'], bindings=record['bindings'], parent_id=declared['id'],
+        items=[{**record['items'][0], 'grain_basis': [
+            {'basis': 'estimate', 'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'method': '预算 × 62.20%',
+             'factor_reproducible': False, 'reason': '系数须先相减再相除，现有规则写不出'}]}]))
+    pending = _item(check_requirements(analysis, {**case.spec, 'requirements_id': manager['id'], 'claims': claims}))
+    assert pending['status'] == 'pending'
+    assert pending['awaiting_manager'] == ['estimate_factor_not_reproducible']
+
+
+def test_a_grain_whose_cited_value_the_source_states_is_not_offered_grain_basis(analysis, monthly):
+    """Opposite direction: a rounded run value, or a recipe on a snapshot outside the bindings, shows the source
+    has the number; the fix is full precision or the bound snapshot, never declaring the grain an estimate."""
+    rows = [REVENUE_ROWS[0], {**REVENUE_ROWS[1], 'value': '41469.63'}]
+    rounded_run = _script_run(analysis, monthly.datasets, rows, suffix='rounded-hint')
+    rounded = _item(_check(analysis, monthly, run=rounded_run, claims=[
+        _claim(rounded_run, row=0, column='value', value='44163.6526'), _claim(rounded_run, row=1, column='value', value='41469.63')],
+        recipes=[_recipe(monthly.budget, '01·年度预算总表', 'I12', rounded_run, 0, recipe_id='budget'),
+                 _recipe(monthly.close, '04·合并利润表', 'B5', rounded_run, 1, scale='0.0001', recipe_id='actual')]))
+    outside = _item(_check(analysis, monthly, recipes=[
+        monthly.good[0], _recipe(monthly.outside, '04·合并利润表', 'B5', monthly.run, 1, scale='0.0001', recipe_id='outside')]))
+
+    for item, reason in ((rounded, 'recipe_failed_precision'), (outside, 'recipe_source_outside_bindings')):
+        assert item['uncounted_grains'][0]['reasons'] == [reason]
+        assert not any(fixup.get('if_source_lacks_value') for fixup in item['fixups'])
+        assert 'grain_basis' not in _unanswered_message(item)
+
+
+def _float_estimate_case(analysis, tmp_path, *, factor_value, estimate_value):
+    """Huachen revenue_1_8 East budget: 05!C5 × (Σ01!B12:I12 ÷ 01!N12), the factor written as a ratio recipe."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    book = _workbook(analysis, tmp_path, 'budget', {'S': {'F5': 180576, 'G1': 344487.0552, 'G2': 527999.9999}})
+    requirement = save_requirements(analysis, spec(
+        scope={'currency': 'CNY', 'unit': '万元'}, bindings={'budget': book['id']},
+        items=[{'id': 'revenue_1_8', 'metric': 'revenue', 'scenarios': ['budget_1_8'], 'requires_drilldown': False,
+                'grain_basis': [{'basis': 'estimate', 'scenarios': ['budget_1_8'], 'method': '区域全年预算 × 进度'}]}]))
+    rows = [{'metric_key': 'revenue', 'scenario': 'budget_1_8', 'period': '2026-01:2026-08', 'value': estimate_value,
+             'currency': 'CNY', 'unit': '万元'},
+            {'metric_key': 'revenue', 'scenario': 'progress', 'period': '2026-01:2026-08', 'value': factor_value}]
+    run = _script_run(analysis, {'budget': book}, rows, suffix='float-' + factor_value)
+
+    def cell(reference):
+        return {'dataset_id': book['id'], 'source_hash': book['source_hash'], 'sheet': 'S', 'range': reference}
+
+    key = {'metric_key': 'revenue', 'period': '2026-01:2026-08'}
+    recipes = [{'id': 'factor', 'kind': 'ratio', 'claim': {'run_id': run['id'], 'row': 1, 'column': 'value'},
+                'left': cell('G1'), 'right': cell('G2'), 'business_key': key},
+               {'id': 'estimate', 'kind': 'direct', **cell('F5'), 'factor_recipe_id': 'factor', 'business_key': key,
+                'claim': {'run_id': run['id'], 'row': 0, 'column': 'value'}}]
+    return SimpleNamespace(recipes=recipes, spec={
+        'requirements_id': requirement['id'], 'run_ids': [run['id']], 'evidence_recipes': recipes,
+        'claims': [_claim(run, row=0, column='value', value=estimate_value)]})
+
+
+def test_a_float_computed_factor_and_estimate_get_the_full_precision_hint(analysis, tmp_path):
+    """A python script computes the factor and the estimate in float. Its repr is not a decimal rounding of
+    the exact value, so the ratio failed with no precision_hint, the estimate failed as plain recipe_failed,
+    and the message never said to keep full precision although precision was the only cause."""
+    from decimal import Decimal
+
+    from foundry.financial_evidence import _rounding_hint
+
+    factor = 344487.0552 / 527999.9999
+    case = _float_estimate_case(analysis, tmp_path, factor_value=repr(factor), estimate_value=repr(180576 * factor))
+    report = evaluate_evidence_recipes(analysis, case.recipes)
+    results = {result['recipe_id']: result for result in report['results']}
+    item = _item(check_requirements(analysis, case.spec))
+
+    assert _rounding_hint(Decimal('117814.5729007133660796805618'), Decimal(repr(180576 * factor)))
+    assert results['factor']['status'] == 'mismatch'
+    assert results['factor']['precision_hint'] == 'full_precision_required'
+    assert results['estimate']['status'] == 'unreadable'
+    assert results['estimate']['precision_hint'] == 'full_precision_required'
+    assert all('完整精度' in issue['message'] for issue in report['issues'])
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'recipe_failed_precision'
+    assert '保存完整精度' in _unanswered_message(item)
+
+    # Stored at full precision, the same recipes reach `estimated`.
+    exact = Decimal('344487.0552') / Decimal('527999.9999')
+    other = AnalysisStore(TaskStore(tmp_path / 'full-var').create(title='全精度'))
+    full = _float_estimate_case(other, tmp_path / 'full', factor_value=str(exact), estimate_value=str(180576 * exact))
+    assert _item(check_requirements(other, full.spec))['status'] == 'estimated'
+
+
+def test_a_value_off_by_more_than_float_error_gets_no_precision_hint(analysis, tmp_path):
+    """Opposite direction: the hint only explains a precision loss; a wrong factor is a plain failure."""
+    from decimal import Decimal
+
+    from foundry.financial_evidence import _rounding_hint
+
+    factor = 344487.0552 / 527999.9999
+    case = _float_estimate_case(analysis, tmp_path, factor_value='0.6524376046690999', estimate_value=repr(180576 * factor))
+    results = {result['recipe_id']: result for result in evaluate_evidence_recipes(analysis, case.recipes)['results']}
+    item = _item(check_requirements(analysis, case.spec))
+
+    assert not _rounding_hint(Decimal('117814.5729007133660796805618'), Decimal('117814.5729008'))
+    # Seventeen digits like a float repr, but 1e-9 away: about 70 ulps, not float noise.
+    assert not _rounding_hint(Decimal('117814.5729007133660796805618'), Decimal('117814.57290171336'))
+    assert not _rounding_hint(Decimal('0.6524376046690222736115572488'), Decimal('0.6524376046690999'))
+    assert 'precision_hint' not in results['factor']
+    assert 'precision_hint' not in results['estimate']
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'recipe_failed'
+
+
+def _aggregate_case(tmp_path, metric):
+    """A JSON dataset bound to the requirement and a server-side structured_aggregate of 华东's amount."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    task = TaskStore(tmp_path / f'{metric}-var').create(title='汇总')
+    analysis = AnalysisStore(task)
+    path = tmp_path / f'{metric}.json'
+    path.write_text(json.dumps([{'region': '华东', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+                                {'region': '华南', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}],
+                               ensure_ascii=False), encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='actual')
+    requirement = save_requirements(analysis, {'question': f'华东{metric}', 'bindings': {'actual': dataset['id']},
+                                               'items': [{'id': 'east', 'metric': metric, 'requires_drilldown': True}]})
+    definition = analysis.save_analysis({'question': f'华东{metric}', 'engine': 'structured_aggregate',
+                                         'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
+                                             'dataset_alias': 'actual', 'group_by': ['region'],
+                                             'filters': [{'field': 'region', 'op': 'eq', 'value': '华东'}],
+                                             'measures': [{'name': metric, 'field': 'amount', 'aggregation': 'sum'}],
+                                             'dedupe': {'policy': 'none'}}})
+    run = analysis.run_analysis(definition['id'])
+    claim = {'basis': 'calculation', 'run_id': run['id'], 'row': 0, 'column': metric, 'value': run['result']['rows'][0][metric]}
+    return SimpleNamespace(analysis=analysis, service=FinanceStore(task), dataset=dataset, requirement=requirement,
+                           run=run, claim=claim, spec={'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                       'claims': [claim]})
+
+
+def test_a_structured_aggregate_answers_an_amount_outside_the_pnl_lines(tmp_path):
+    """A server-side structured_aggregate is not a script: its cell answered other_income on main and
+    drilldown_fact verifies it. The inverted gate called it script output, told the writer 只有脚本输出, and
+    sent it to a verify_source step that could not fix anything."""
+    case = _aggregate_case(tmp_path, 'other_income')
+    before = _item(check_requirements(case.analysis, case.spec))
+
+    assert before['status'] == 'answered'
+    assert before['locations'][0]['evidence']['evidence_basis'] == 'aggregate_output'
+    assert 'aggregate_output' in [path['path'] for path in before['evidence_paths']['accepted']]
+    assert [fixup['code'] for fixup in before['fixups']] == ['verify_source']
+
+    case.service.drilldown_fact({'run_id': case.run['id'], 'row': 0, 'column': 'other_income'})
+    after = check_requirements(case.analysis, case.spec)
+    assert _item(after)['provenance_status'] == 'verified'
+    assert after['coverage']['status'] == 'pass'
+    draft = case.service.save_explanation_draft({'body': '华东其他收益 120.5 万元。', 'run_ids': [case.run['id']],
+                                                 'claims': case.spec['claims']})
+    assert draft['completion']['status'] == 'complete'
+    support = case.requirement['support']['items'][0]
+    assert 'aggregate_output' in support['accepted_evidence']
+
+
+def test_a_script_copy_of_an_aggregate_or_an_aggregated_pnl_line_is_still_not_counted(tmp_path):
+    """Opposite direction: a python copy of the aggregate cell is script output, and a revenue/profit/cost/expense
+    amount still needs engine closure or a recipe (decision 1), aggregate or not."""
+    case = _aggregate_case(tmp_path, 'other_income')
+    copy = _script_run(case.analysis, {'actual': case.dataset}, case.run['result']['rows'], suffix='aggregate-copy')
+    script = _item(check_requirements(case.analysis, {**case.spec, 'run_ids': [copy['id']],
+                                                      'claims': [{**case.claim, 'run_id': copy['id']}]}))
+    assert script['status'] == 'not_applicable'
+    assert script['locations'][0]['evidence']['not_counted_reason'] == 'script_output_without_recipe'
+
+    # The price-quantity bridge is closed only by the finance engine, so an aggregate named after it is not it.
+    for metric in ('revenue', 'price_quantity', 'price_volume'):
+        aggregated = _aggregate_case(tmp_path / metric, metric)
+        item = _item(check_requirements(aggregated.analysis, aggregated.spec))
+        assert item['status'] == 'not_applicable', metric
+        assert item['locations'][0]['evidence']['evidence_basis'] == 'aggregate_output'
+        assert item['locations'][0]['evidence']['not_counted_reason'] == 'aggregate_output_without_closure'
+        assert 'aggregate_output' not in [path['path'] for path in item['evidence_paths']['accepted']]
+        assert '只有脚本输出' not in _unanswered_message(item)
+        assert [fixup['code'] for fixup in item['fixups'] if fixup['code'] == 'verify_source'] == []
+
+
+def _table_xlsx_case(analysis, tmp_path):
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = '利润表'
+    sheet['A1'], sheet['B1'] = '项目', '本年累计'
+    sheet['A2'], sheet['B2'] = '营业收入', 3256440000
+    source = tmp_path / 'close.xlsx'
+    book.save(source)
+    book.close()
+    dataset = analysis.add_dataset(source, name='close')  # one sheet, the default mode: filed as a table
+    requirement = save_requirements(analysis, {'question': '1-8月收入', 'scope': {'currency': 'CNY', 'unit': '万元'},
+                                               'bindings': {'close': dataset['id']},
+                                               'items': [{'id': 'revenue_1_8', 'metric': 'revenue', 'periods': ['2026-01:2026-08']}]})
+    rows = [{'metric_key': 'revenue', 'period': '2026-01:2026-08', 'value': '325644.0000', 'unit': '万元', 'currency': 'CNY'}]
+    run = _script_run(analysis, {'close': dataset}, rows, suffix='table-xlsx')
+    return SimpleNamespace(dataset=dataset, requirement=requirement, run=run,
+                           spec={'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                 'claims': [_claim(run, row=0, column='value', value='325644.0000')]},
+                           recipe=_recipe(dataset, '利润表', 'B2', run, 0, scale='0.0001'))
+
+
+def test_a_single_sheet_xlsx_filed_as_a_table_offers_the_recipe_path_that_answers(analysis, tmp_path):
+    """The recipe path was reported blocked (no_workbook_source) for an XLSX filed as a table, while a recipe on
+    that file answers: evaluate_evidence_recipes reads any archived XLSX bytes."""
+    case = _table_xlsx_case(analysis, tmp_path)
+    support = case.requirement['support']['items'][0]
+    item = _item(check_requirements(analysis, case.spec))
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+    message = _unanswered_message(item)
+
+    assert case.dataset['kind'] == 'table'
+    assert support['accepted_evidence'] == ['evidence_recipe']
+    assert 'no_workbook_source' not in json.dumps(support.get('blocked_evidence', []))
+    assert fixup['accepted_evidence'] == ['evidence_recipe']
+    assert 'no_workbook_source' not in json.dumps(fixup.get('blocked_evidence', []))
+    assert '没有可复算的归档工作簿' not in message
+    assert 'evidence_recipe' in message
+    assert _item(check_requirements(analysis, {**case.spec, 'evidence_recipes': [case.recipe]}))['status'] == 'answered'
+
+
+def test_a_csv_or_json_binding_still_reports_the_recipe_path_blocked(analysis, tmp_path):
+    """Opposite direction: without archived XLSX bytes no recipe can read a cell."""
+    path = tmp_path / 'rev.json'
+    path.write_text(json.dumps([{'organization': '华东', 'period': '2026-08', 'revenue': '120.5'}], ensure_ascii=False),
+                    encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='rev')
+    requirement = save_requirements(analysis, {'question': '8月华东收入', 'bindings': {'rev': dataset['id']},
+                                               'items': [{'id': 'rev_08', 'metric': 'revenue'}]})
+    blocked = requirement['support']['items'][0]['blocked_evidence']
+
+    assert ('evidence_recipe', ['no_workbook_source']) in [(path['path'], path['blockers']) for path in blocked]
+
+
+def test_a_scope_level_an_earlier_version_dropped_is_dropped_again_not_refused(analysis):
+    """The scope card kept the legacy drilldown it loaded at mount and resent it on the next save. The parent
+    version had already dropped it, so the save was refused and the manager's edit was lost."""
+    legacy = _new(analysis.task, question='华宸 1-8 月', scope={'ledger': 'L1', 'unit': '万元', 'drilldown': '城市公司'},
+                  bindings={}, context_id=None, parent_id=None, removed_item_ids=[], change_reason='', selection=None,
+                  items=[{'id': 'profit', 'metric': 'profit', 'label': 'profit', 'dimensions': {}, 'requires_drilldown': True}])
+    analysis._write(analysis._object_path('requirements', legacy['id']), legacy)
+    first = save_requirements(analysis, spec(scope={**legacy['scope'], 'period': '2026-08'}, parent_id=legacy['id'],
+                                             items=legacy['items']))
+    second = save_requirements(analysis, spec(scope={**legacy['scope'], 'period': '2026-08', 'currency': 'CNY'},
+                                              parent_id=first['id'], items=first['items']))
+    third = save_requirements(analysis, spec(scope={**second['scope'], 'drilldown': '城市公司'},
+                                             parent_id=second['id'], items=second['items']))
+
+    assert first['scope'] == {'ledger': 'L1', 'unit': '万元', 'period': '2026-08'}
+    assert second['scope'] == {'ledger': 'L1', 'unit': '万元', 'period': '2026-08', 'currency': 'CNY'}
+    assert [warning['code'] for warning in second['authoring_warnings']] == ['hierarchy_scope_dropped']
+    # Two versions after the drop, a stale copy is still recognised as the legacy level.
+    assert 'drilldown' not in third['scope']
+    assert [warning['code'] for warning in third['authoring_warnings']] == ['hierarchy_scope_dropped']
+
+    # Opposite direction: another value, or a level no earlier version had, is newly written and refused.
+    for scope in ({**third['scope'], 'drilldown': '区域'}, {**third['scope'], 'level': '城市公司'}):
+        with pytest.raises(FoundryError) as refused:
+            save_requirements(analysis, spec(scope=scope, parent_id=third['id'], items=third['items']))
+        assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
+
+
+def test_tool_descriptions_name_the_aggregate_and_price_quantity_paths_and_exact_decimals():
+    """Round 4 changed what answers: structured aggregates answer amounts outside the four P&L lines, the
+    price-quantity bridge answers price_quantity, and float-computed run values fail like rounded ones."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    for text in (tools, draft, preset):
+        assert 'structured_aggregate' in text
+        assert 'price_quantity' in text
+        assert 'revenue_by_area' in text
+    assert '不要用二进制浮点数' in tools and '不要用二进制浮点数' in preset
+    assert 'not binary floats' in draft
+    assert 'drilldown_fact 只核查 finance 引擎和 structured_aggregate 的行' in tools
+    assert 'drilldown_fact only verifies finance-engine and structured_aggregate rows' in draft
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
+        encoding='utf-8') == preset

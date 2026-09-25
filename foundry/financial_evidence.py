@@ -8,6 +8,7 @@ source truth.
 from __future__ import annotations
 
 import io
+import math
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -313,10 +314,15 @@ def _evaluate_recipe(
         actual = actual * recipe["scale"]
         expected = _claim_expected(analysis, recipe["claim"])
     except FoundryError as exc:
+        # A factor that failed only on the precision of its run value makes the dependent fail for the
+        # same reason; say so, so the fix (full precision) is named where the dependent is reported.
+        rounded = bool(getattr(exc, "precision_hint", False))
         return {
             "recipe_id": recipe["id"],
             "status": "unreadable",
-            "issue": _issue(recipe, "evidence_recipe_unreadable", str(exc), actual=None, expected=None),
+            **({"precision_hint": FULL_PRECISION_REQUIRED} if rounded else {}),
+            "issue": _issue(recipe, "evidence_recipe_unreadable", str(exc), actual=None, expected=None,
+                            precision_hint=rounded),
         }
     if actual != expected:
         rounded = _rounding_hint(actual, expected)
@@ -381,7 +387,9 @@ def _factor_value(
     actual = _ratio_value(analysis, factor)
     expected = _claim_expected(analysis, factor["claim"])
     if actual != expected:
-        raise FoundryError("系数规则未通过归档来源的精确复算")
+        error = FoundryError("系数规则未通过归档来源的精确复算")
+        error.precision_hint = _rounding_hint(actual, expected)
+        raise error
     factor_cache[factor_id] = actual
     return actual
 
@@ -467,9 +475,15 @@ def _issue(
         message = _mismatch_message(source_label, actual_text, expected_text, recipe["scale"], exponent)
         if precision_hint:
             message += (
-                "运行引用值与独立计算值按引用值的小数位舍入后一致，差异来自运行结果被舍入；"
-                "请在运行结果中保存完整精度的数值（展示时再舍入），精确比对不放宽。"
+                "运行引用值与独立计算值只差舍入（按引用值的小数位舍入，或脚本用二进制浮点数计算），"
+                "差异来自运行结果的精度损失；请用精确小数（如 Decimal）计算，并在运行结果中保存完整精度的数值"
+                "（展示时再舍入），精确比对不放宽。"
             )
+    elif precision_hint:
+        message = message.rstrip("。") + "。" + (
+            "所引用的系数规则只因运行值的精度损失（舍入或二进制浮点数）而未通过；请用精确小数计算系数和估算，"
+            "并在运行结果中保存完整精度的数值，精确比对不放宽。"
+        )
     return {
         "code": code,
         "severity": "error",
@@ -491,7 +505,8 @@ FULL_PRECISION_REQUIRED = "full_precision_required"
 
 
 def _rounding_hint(actual: Decimal | None, expected: Decimal | None) -> bool:
-    """Whether the claimed value is the independent value rounded to the claim's own decimals.
+    """Whether the claimed value is the independent value with its precision lost: rounded to the claim's
+    own decimals, or computed as a binary float by the script that wrote the run.
 
     Like _unit_scale_hint this only explains a mismatch; the comparison stays exact. Both half-up
     and half-even rounding are recognised, since scripts and SQL engines differ.
@@ -500,6 +515,31 @@ def _rounding_hint(actual: Decimal | None, expected: Decimal | None) -> bool:
         return False
     if actual == expected:
         return False
+    return _decimal_rounding(actual, expected) or _float_rounding(actual, expected)
+
+
+# A float result drifts from the exact value by a few units in the last place per operation; 16 ulps covers a
+# short chain (a factor, then a product) and is far below any difference a wrong cell or value produces.
+FLOAT_ROUNDING_ULPS = 16
+
+
+def _float_rounding(actual: Decimal, expected: Decimal) -> bool:
+    """Whether the claimed value is what a script computing in binary floats would write (its repr).
+
+    Such a value is not a decimal rounding of the exact one (repr(0.1 + 0.2) is 0.30000000000000004), so the
+    decimal check misses it. The claim must carry a double's worth of digits and sit within a few ulps.
+    """
+    try:
+        claimed = float(expected)
+    except (OverflowError, ValueError):  # pragma: no cover - finite Decimal always converts
+        return False
+    if not math.isfinite(claimed) or claimed == 0 or len(expected.as_tuple().digits) < 15:
+        return False
+    tolerance = Decimal(math.ulp(claimed)) * FLOAT_ROUNDING_ULPS
+    return abs(actual - expected) <= tolerance
+
+
+def _decimal_rounding(actual: Decimal, expected: Decimal) -> bool:
     sign, digits, actual_exponent = actual.as_tuple()
     exponent = expected.as_tuple().exponent
     if actual_exponent >= exponent:

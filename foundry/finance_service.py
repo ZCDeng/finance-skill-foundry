@@ -1820,7 +1820,9 @@ class FinanceStore:
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
-        from foundry.finance_requirements import _without_hierarchy, latest_requirements
+        from foundry.finance_requirements import (
+            SCOPE_REFUSED_HIERARCHY_KEYS, _without_hierarchy, latest_requirements, prepare_requirements,
+        )
 
         reject_forbidden_spec(spec)
         kind = spec.get("kind")
@@ -1867,6 +1869,23 @@ class FinanceStore:
         # that no longer matched any row.
         items = [_without_hierarchy(item) if isinstance(item, dict) and isinstance(item.get("dimensions"), dict) else item
                  for item in latest.get("items") or []]
+        # The requirement scope comes from the context, and a context saved before phase 1 may still hold a
+        # drilldown level (finance_context_save accepts any key; the engine ignores it). Save refuses a scope
+        # level no earlier version had, so the carried scope leaves those keys behind, as the items do.
+        scope = {key: value for key, value in self._primary_scope(context.get("scopes", {})).items()
+                 if str(key).strip().lower() not in SCOPE_REFUSED_HIERARCHY_KEYS}
+        req_spec = {
+            "question": latest.get("question") or instruction,
+            "scope": scope,
+            "items": items,
+            "change_reason": instruction,
+            "selection": selection,
+            "parent_id": latest["id"],
+        }
+        # Every refusal of the requirement save must come before the child context is written, or each
+        # refused click leaves a context no requirement references.
+        self._authorize(context["bindings"])
+        prepare_requirements(self.analysis, {**req_spec, "bindings": context["bindings"]})
         child = self.save_context(
             {
                 "parent_id": context["id"],
@@ -1877,14 +1896,7 @@ class FinanceStore:
                 "account_map_id": context.get("account_map_id"),
             }
         )
-        req_spec = {
-            "context_id": child["id"],
-            "question": latest.get("question") or instruction,
-            "items": items,
-            "change_reason": instruction,
-            "selection": selection,
-        }
-        req_spec["parent_id"] = latest["id"]
+        req_spec["context_id"] = child["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
 

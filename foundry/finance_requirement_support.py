@@ -19,8 +19,9 @@ METHOD_ALIASES = {
 # Evidence that can answer each native metric, not a tool to try. Every metric but a ratio, count or
 # quantity is an amount: script values never answer it. run_metric management_pnl rows never close for
 # revenue/profit/cost/expense, so those are answered by a cited cell with a passing direct/sum/diff
-# evidence recipe, or by explain_variance engine closure (items without scenarios); the other amounts
-# the engine states itself (engine_output) or a recipe proves.
+# evidence recipe, or by explain_variance engine closure (items without scenarios); price_quantity by the
+# engine's price-quantity bridge or a recipe; the other amounts the engine states itself (engine_output), a
+# server-side structured_aggregate states (aggregate_output), or a recipe proves.
 NATIVE_METRICS = {
     "management_pnl": "evidence_recipe",
     "profit": "evidence_recipe / engine_closure (explain_variance)",
@@ -30,7 +31,7 @@ NATIVE_METRICS = {
     "ratio": "cited_result_row",
     "account_total": "run_metric_result_set (run_metric)",
     "control_totals": "run_metric_result_set (run_metric)",
-    "price_quantity": "price_quantity_bridge (explain_variance)",
+    "price_quantity": "price_quantity_bridge (explain_variance) / evidence_recipe",
     "amount_change": "engine_output (explain_variance) / evidence_recipe",
     "total_variance": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
     "quantity_contribution": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
@@ -168,7 +169,7 @@ def assess_requirement_support(analysis, spec):
                 "quantity_then_price", "base_weights_with_interaction"
             }
         ):
-            report.update(evidence=NATIVE_METRICS["price_quantity"], status="requires_execution")
+            report.update(evidence=_offered_evidence(NATIVE_METRICS["price_quantity"], paths), status="requires_execution")
             if not sources:
                 report.update(status="unverified", next_action="先绑定已授权资料，再检查量价字段。")
             else:

@@ -124,6 +124,39 @@ describe('business result components', () => {
     expect(financeCall).toHaveBeenCalledTimes(2);
   });
 
+  it('sends the scope the server saved on the next save, not a legacy level the server dropped', async () => {
+    // A pre-phase-1 record kept drilldown in scope. The first save drops it (hierarchy_scope_dropped); the card
+    // kept the copy it loaded at mount and resent it, so every later save was refused.
+    const items = [{ id: 'profit', metric: 'profit', label: '利润', dimensions: {}, requires_drilldown: true }];
+    const current = {
+      id: 'legacy-scope', question: '解释利润',
+      scope: { ledger: 'L1', unit: '万元', drilldown: '城市公司' }, bindings: { actual: 'actual-dataset' }, items,
+    };
+    const saved: Record<string, unknown>[] = [];
+    const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'analysis-requirements-list') return ok({ current });
+      saved.push(spec ?? {});
+      const scope = Object.fromEntries(Object.entries((spec?.scope ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'drilldown'));
+      return ok({ ...current, id: `saved-scope-${saved.length}`, scope, authoring_warnings: [{ code: 'hierarchy_scope_dropped' }] });
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    render(<AnalysisScopeCard taskId={taskId} question="解释利润" datasets={[dataset]} />);
+    expect(await screen.findByDisplayValue('万元')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('分析口径期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
+    await screen.findByText('已保存口径版本 saved-scope-。');
+    fireEvent.change(screen.getByLabelText('分析口径币种'), { target: { value: 'CNY' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
+    await waitFor(() => expect(saved).toHaveLength(2));
+
+    expect(saved[0]).toMatchObject({ parent_id: 'legacy-scope', scope: { ledger: 'L1', unit: '万元', period: '2026-08', drilldown: '城市公司' } });
+    expect(saved[1]).toMatchObject({ parent_id: 'saved-scope-1', items, scope: { ledger: 'L1', unit: '万元', period: '2026-08', currency: 'CNY' } });
+    expect(saved[1].scope).not.toHaveProperty('drilldown');
+    // The fields show what was stored.
+    expect((screen.getByLabelText('分析口径期间') as HTMLInputElement).value).toBe('2026-08');
+    expect((screen.getByLabelText('分析口径币种') as HTMLInputElement).value).toBe('CNY');
+  });
+
   it('toggles periods while preserving exact amount, ratio, percentage-point and source detail text', () => {
     const onSources = vi.fn();
     render(<BusinessResultView run={run([

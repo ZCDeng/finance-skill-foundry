@@ -45,6 +45,10 @@ INTENT_DIMENSION_KEYS = {'dimension', 'scenario_compare'}
 # The P&L lines whose amounts need engine closure (or the engine's own account total, or a source recipe);
 # the finance engine's plain output of these lines does not count (run_metric management_pnl rows never close).
 CLOSED_EVIDENCE_METRICS = {'profit', 'revenue', 'cost', 'expense'}
+# Amounts that only engine closure or a source recipe answer: the four P&L lines and the price-quantity
+# bridge (price_quantity, price_volume …), which only the finance engine's explain_variance bridge closes.
+# Engine or aggregate output of these names is not their answer.
+CLOSURE_OR_RECIPE_AMOUNTS = CLOSED_EVIDENCE_METRICS | {'price_quantity'}
 # The amount gate is inverted: every item is an amount unless it is a known non-amount (below). The item
 # metric is free text, so these stems and tokens only pick the P&L class used in guidance (利润总额 → profit,
 # NetProfit → profit); a name they miss is still gated, as the plain class 'amount'.
@@ -69,15 +73,19 @@ AMOUNT_LABEL_TOKEN_PAIRS = {
 # counts and physical quantities. They are recognised by the head of the name (its last word), so 汇率损益
 # or business_units_revenue stay amounts; an unrecognised name is never exempt.
 NON_AMOUNT_METRICS = frozenset({'ratio'})
-NON_AMOUNT_LABEL_SUFFIXES = (
-    '率', '占比', '比例', '比重', '比率', '倍数', '%', '％',
-    '数量', '销量', '销售量', '件数', '台数', '人数', '户数', '次数', '个数', '天数', '面积',
-)
-NON_AMOUNT_HEAD_TOKENS = frozenset({
-    'ratio', 'ratios', 'rate', 'rates', 'pct', 'percent', 'percentage',
+RATIO_LABEL_SUFFIXES = ('率', '占比', '比例', '比重', '比率', '倍数', '%', '％')
+QUANTITY_LABEL_SUFFIXES = ('数量', '销量', '销售量', '件数', '台数', '人数', '户数', '次数', '个数', '天数', '面积')
+RATIO_HEAD_TOKENS = frozenset({'ratio', 'ratios', 'rate', 'rates', 'pct', 'percent', 'percentage'})
+QUANTITY_HEAD_TOKENS = frozenset({
     'volume', 'volumes', 'quantity', 'quantities', 'qty', 'units', 'count', 'counts', 'headcount',
     'days', 'area', 'sqm',
 })
+# A count, quantity or area head exempts a name only when nothing else in it names an amount: price_quantity,
+# sales_price_volume and 价量 are price-volume bridges, revenue_by_area and 收入按面积 split an amount by area.
+# Only `sales` right before the head is a qualifier of the quantity (sales_volume, sales_units).
+AMOUNT_MARKER_WORDS = frozenset({'price', 'prices', 'pricing', 'amount', 'amounts', 'value', 'values'})
+AMOUNT_MARKER_STEMS = ('价', '金额')
+QUANTITY_QUALIFIERS = frozenset({'sales'})
 # Amounts outside the four P&L lines that a finance-engine run states itself (see NATIVE_METRICS).
 ENGINE_OUTPUT_AMOUNTS = {
     'open_amount': {'tool': 'finance_scenario_run', 'scenario_kind': 'receivables_aging', 'column': 'open_amount'},
@@ -128,6 +136,31 @@ def latest_requirements(analysis):
 
 
 def save_requirements(analysis, spec):
+    prepared = prepare_requirements(analysis, spec)
+    question, scope, bindings = prepared['question'], prepared['scope'], prepared['bindings']
+    normalized, selection = prepared['items'], prepared['selection']
+    # Read before taking the task lock: scanning workbook text is slow and only ever warns.
+    warnings = [*prepared['warnings'], *_organization_warnings(analysis, normalized, bindings)]
+    with exclusive(analysis.task.lock_path, timeout=10):
+        parent, removed, reason = _version_change(analysis, spec, normalized)
+        assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
+        from foundry.finance_requirement_semantics import requirement_semantics
+        semantics = requirement_semantics(analysis, {**assessed_spec, 'removed_item_ids': removed})
+        record = _new(analysis.task, **semantics, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
+                      items=normalized, parent_id=(parent or {}).get('id'),
+                      removed_item_ids=removed, change_reason=reason, selection=selection,
+                      support=_assess_requirement_support(analysis, assessed_spec),
+                      **({'authoring_warnings': warnings} if warnings else {}),
+                      content_hash=_hash({'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}))
+        return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
+
+
+def prepare_requirements(analysis, spec):
+    """Validate and normalize a requirements spec without writing anything; raises what save would refuse.
+
+    circle-select calls it before writing its child context, so a refused save leaves nothing behind.
+    The version checks run again under the task lock when the record is written.
+    """
     if not isinstance(spec, dict):
         raise FoundryError('analysis requirements must be an object')
     question = _safe_text(spec.get('question'), 'requirements question', required=True, maximum=10000)
@@ -211,29 +244,24 @@ def save_requirements(analysis, spec):
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
     scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope)
-    # Read before taking the task lock: scanning workbook text is slow and only ever warns.
-    warnings = [*carried_over, *scope_dropped, *_organization_warnings(analysis, normalized, bindings)]
-    with exclusive(analysis.task.lock_path, timeout=10):
-        parent = latest_requirements(analysis)
-        if parent and spec.get('parent_id') != parent['id']:
-            raise FoundryError('requirements update must reference the latest version')
-        if not parent and spec.get('parent_id'):
-            raise FoundryError('requirements parent does not exist')
-        newly_removed = {item['id'] for item in (parent or {}).get('items', [])} - seen
-        removed = sorted(set((parent or {}).get('removed_item_ids', [])) | newly_removed)
-        reason = _safe_text(spec.get('change_reason', ''), 'requirements change reason', maximum=2000)
-        if newly_removed and not reason.strip():
-            raise FoundryError('removing requirements requires a change reason')
-        assessed_spec = {**spec, 'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}
-        from foundry.finance_requirement_semantics import requirement_semantics
-        semantics = requirement_semantics(analysis, {**assessed_spec, 'removed_item_ids': removed})
-        record = _new(analysis.task, **semantics, question=question, scope=scope, bindings=bindings, context_id=spec.get("context_id"),
-                      items=normalized, parent_id=(parent or {}).get('id'),
-                      removed_item_ids=removed, change_reason=reason, selection=selection,
-                      support=_assess_requirement_support(analysis, assessed_spec),
-                      **({'authoring_warnings': warnings} if warnings else {}),
-                      content_hash=_hash({'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings}))
-        return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
+    _version_change(analysis, spec, normalized)
+    return {'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings,
+            'selection': selection, 'warnings': [*carried_over, *scope_dropped]}
+
+
+def _version_change(analysis, spec, items):
+    """The parent this save must name and the item ids it removes; save calls it again under the task lock."""
+    parent = latest_requirements(analysis)
+    if parent and spec.get('parent_id') != parent['id']:
+        raise FoundryError('requirements update must reference the latest version')
+    if not parent and spec.get('parent_id'):
+        raise FoundryError('requirements parent does not exist')
+    newly_removed = {item['id'] for item in (parent or {}).get('items', [])} - {item['id'] for item in items}
+    removed = sorted(set((parent or {}).get('removed_item_ids', [])) | newly_removed)
+    reason = _safe_text(spec.get('change_reason', ''), 'requirements change reason', maximum=2000)
+    if newly_removed and not reason.strip():
+        raise FoundryError('removing requirements requires a change reason')
+    return parent, removed, reason
 
 
 def _hierarchy_dimensions(item):
@@ -286,19 +314,40 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items):
 SCOPE_REFUSED_HIERARCHY_KEYS = HIERARCHY_DIMENSION_KEYS - {'granularity'}
 
 
+def _scope_levels(values):
+    return {key: value for key, value in (values or {}).items()
+            if str(key).strip().lower() in SCOPE_REFUSED_HIERARCHY_KEYS} if isinstance(values, dict) else {}
+
+
+def _earlier_scope_levels(analysis, parent_id):
+    """Every (key, value) hierarchy level held by the parent version or any version before it.
+
+    A client that loaded a legacy record (the scope card loads once) may resend a level that an earlier save
+    already dropped; that is the same legacy level, not a newly written one.
+    """
+    import json
+
+    seen, held = set(), set()
+    record = _parent_record(analysis, parent_id)
+    while record and record.get('id') not in seen:
+        seen.add(record.get('id'))
+        held.update((key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
+                    for key, value in _scope_levels(record.get('scope')).items())
+        record = _parent_record(analysis, record.get('parent_id'))
+    return held
+
+
 def _scope_hierarchy(analysis, parent_id, scope):
     """Refuse a hierarchy level newly written into scope, as for dimensions; drop and record one carried
-    over from the parent version (or already dropped from it)."""
-    def levels(values):
-        return {key: value for key, value in (values or {}).items()
-                if str(key).strip().lower() in SCOPE_REFUSED_HIERARCHY_KEYS} if isinstance(values, dict) else {}
+    over from the parent version, or resent after an earlier version dropped it."""
+    import json
 
-    written = levels(scope)
-    legacy = levels((_parent_record(analysis, parent_id) or {}).get('scope'))
-    new = {key: value for key, value in written.items() if legacy.get(key) != value}
+    written = _scope_levels(scope)
+    legacy = _scope_levels((_parent_record(analysis, parent_id) or {}).get('scope'))
+    earlier = _earlier_scope_levels(analysis, parent_id) if written else set()
+    new = {key: value for key, value in written.items()
+           if (key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)) not in earlier}
     if new:
-        import json
-
         suggested = {key: value for key, value in scope.items() if key not in written}
         named = ', '.join(f'{key}={value}' for key, value in new.items())
         error = FoundryError(
@@ -308,11 +357,12 @@ def _scope_hierarchy(analysis, parent_id, scope):
         )
         error.details = {'code': 'requirement_scope_not_row_filter', 'keys': sorted(new), 'suggested_scope': suggested}
         raise error
-    if not legacy:
+    dropped = {**legacy, **written}
+    if not dropped:
         return scope, []
-    named = '、'.join(f'{key}={value}' for key, value in legacy.items())
+    named = '、'.join(f'{key}={value}' for key, value in dropped.items())
     return {key: value for key, value in scope.items() if key not in written}, [{
-        'code': 'hierarchy_scope_dropped', 'keys': legacy,
+        'code': 'hierarchy_scope_dropped', 'keys': dropped,
         'message': f'旧版要求范围里的 {named} 是下钻层级，不是结果行字段，新版已去掉；'
                    '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'}]
 
@@ -852,6 +902,9 @@ def _prepared_evidence(analysis, runs):
                 # bridge-shaped table which adds up (999/-1/-1/997) is shown, never counted.
                 'engine_closed': engine == 'finance' and closure_status == 'passed',
                 'engine_output': engine == 'finance',
+                # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
+                # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
+                'aggregate_output': engine == 'structured_aggregate',
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
@@ -1303,8 +1356,10 @@ def _closed_metric_key(item, scenario=None):
 
     Every item is an amount unless its metric is a ratio, a count or a physical quantity, or it asks only
     for ratio scenarios (achievement_ratio …); `scenario`, the cited row's scenario, exempts that one grain
-    of an item that lists it. A recognised P&L name gives its class (营业收入 → revenue, NetProfit → profit);
-    any other name, including one nothing here recognises, is the class 'amount' and is gated all the same.
+    of an item that lists it. A count or quantity whose name also names an amount (price_volume,
+    revenue_by_area) is an amount. A recognised P&L name gives its class (营业收入 → revenue, NetProfit →
+    profit, price_volume → price_quantity); any other name, including one nothing here recognises, is the
+    class 'amount' and is gated all the same.
     """
     if _known_non_amount(item, scenario):
         return None
@@ -1339,18 +1394,45 @@ def _non_amount_label(text):
         if '%' in match.group(1) or '％' in match.group(1):
             return True
         head = head[:match.start()]
-    if head.endswith(NON_AMOUNT_LABEL_SUFFIXES):
-        return True
     words = _label_words(head)
-    return bool(words) and not re.search(r'[\u4e00-\u9fff]\s*$', head) and words[-1] in NON_AMOUNT_HEAD_TOKENS
+    english_head = words[-1] if words and not re.search(r'[\u4e00-\u9fff]\s*$', head) else None
+    # Any ratio is exempt, whatever it is a ratio of (decision 4): 毛利率, revenue_growth_rate.
+    if head.endswith(RATIO_LABEL_SUFFIXES) or english_head in RATIO_HEAD_TOKENS:
+        return True
+    if head.endswith(QUANTITY_LABEL_SUFFIXES) or english_head in QUANTITY_HEAD_TOKENS:
+        return not _names_an_amount(head, words)
+    return False
+
+
+def _price_volume_name(text):
+    """price_quantity, price_volume_mix, 价量分析 …: a price and a volume named together is the price-quantity bridge."""
+    words = set(_label_words(text))
+    if words & {'price', 'prices', 'pricing'} and words & {'volume', 'volumes', 'quantity', 'quantities', 'qty'}:
+        return True
+    return '价量' in text or '量价' in text
+
+
+def _names_an_amount(text, words):
+    """Whether a name with a count/quantity/area head also names an amount (price_volume, revenue_by_area)."""
+    if len(words) >= 2 and words[-2] in QUANTITY_QUALIFIERS:
+        words = [*words[:-2], words[-1]]  # sales_volume: `sales` qualifies the quantity
+    if any(word in AMOUNT_LABEL_TOKENS or word in AMOUNT_MARKER_WORDS for word in words):
+        return True
+    if any(bigram in AMOUNT_LABEL_TOKEN_PAIRS for bigram in zip(words, words[1:])):
+        return True
+    return any(stem in text for _key, stems in AMOUNT_LABEL_STEMS for stem in stems) or any(
+        stem in text for stem in AMOUNT_MARKER_STEMS)
 
 
 def _pnl_class(metric):
-    """revenue/profit/cost/expense when the name is recognisably one of those lines, else None (guidance only)."""
+    """revenue/profit/cost/expense when the name is recognisably one of those lines, price_quantity for a
+    price-quantity bridge, else None."""
     canonical = _canonical_metric_name(metric)
     if canonical in CLOSED_EVIDENCE_METRICS:
         return canonical
     text = str(metric or '').strip()
+    if canonical == 'price_quantity' or _price_volume_name(text):
+        return 'price_quantity'
     lowered = text.lower()
     for key in sorted(CLOSED_EVIDENCE_METRICS):
         if lowered in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
@@ -1373,7 +1455,8 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
     Every item except a known non-amount (see _closed_metric_key) is an amount. An amount counts only on
     engine closure (engine == 'finance'), on the finance engine's own run_metric account_total for exactly
     this account (`native_total`), on a passing, cited, in-binding direct/sum/diff recipe with a unit
-    scale, or, for an amount outside revenue/profit/cost/expense, on the finance engine's own output of it.
+    scale, or, for an amount outside revenue/profit/cost/expense and the price-quantity bridge, on the
+    finance engine's own output of it or a server-side structured_aggregate of the bound snapshot.
     A factor recipe reaches `estimated` for every metric, never answered; script output, script-built
     closures, ratio recipes and free scales are not counted for amounts.
     """
@@ -1422,18 +1505,25 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
     if native_total and member.get('engine_output'):
         # The finance engine's own total of exactly this account (not a script's copy of it).
         return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
-    if amount not in CLOSED_EVIDENCE_METRICS and member.get('engine_output') and not estimate:
+    if amount not in CLOSURE_OR_RECIPE_AMOUNTS and _server_output(member) and not estimate:
         # Outside the four P&L lines the engine's own output of the amount (finance_scenario_run,
-        # run_metric columns) is the engine's answer; only revenue/profit/cost/expense need closure.
-        return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
+        # run_metric columns) or a server-side structured aggregate of the bound snapshot answers it;
+        # only revenue/profit/cost/expense need closure or a recipe (decision 1).
+        return 'answered', {**metadata, 'evidence_basis': _output_basis(member)}
     if estimate:
         return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
     return 'not_applicable', {**metadata, 'evidence_basis': _uncounted_basis(member),
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
 
 
+def _server_output(member):
+    return bool(member.get('engine_output') or member.get('aggregate_output'))
+
+
 def _output_basis(member):
-    return 'engine_output' if member.get('engine_output') else 'script_output'
+    if member.get('engine_output'):
+        return 'engine_output'
+    return 'aggregate_output' if member.get('aggregate_output') else 'script_output'
 
 
 def _uncounted_basis(member):
@@ -1449,6 +1539,8 @@ def _amount_not_counted_reason(member, recipe):
         return 'ratio_recipe_cannot_prove_amount'
     if member.get('engine_output'):
         return 'engine_output_without_closure'
+    if member.get('aggregate_output'):
+        return 'aggregate_output_without_closure'
     if member.get('closure_status') == 'passed':
         return 'script_closure_not_counted'
     return 'script_output_without_recipe'
@@ -1537,6 +1629,10 @@ def _source_fixup(item, location, checks, run=None, *, required=False):
     if not fact_id:
         return None
     base = {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')}
+    if not required and location.get('status') not in {'answered', 'estimated'}:
+        # Tracing a cell that does not count changes nothing (an aggregated revenue stays uncounted after
+        # drilldown_fact); the item's own fixups say what would count. Result-set rows are always traced.
+        return None
     if run is not None and run.get('engine') not in DRILLDOWN_VERIFIABLE_ENGINES:
         if location.get('status') != 'answered':
             return None
@@ -2142,14 +2238,18 @@ def _evidence_environment(analysis, latest, runs=None):
         and (not dataset_ids or set((run.get('bindings') or {}).values()) & set(dataset_ids))
         for run in runs.values()
     )
-    workbooks, accounts = [], set()
+    workbooks, tables, accounts = [], [], set()
     for dataset_id in dataset_ids:
         try:
             dataset = analysis.read_dataset(dataset_id)
         except (FoundryError, OSError, ValueError, KeyError, TypeError):
             continue
-        if dataset.get('kind') == 'workbook' and str(dataset.get('source_file') or '').lower().endswith('.xlsx'):
+        # evaluate_evidence_recipes reads the archived XLSX bytes whatever the snapshot was filed as
+        # (a one-sheet workbook is filed as a table by default).
+        if str(dataset.get('source_file') or '').lower().endswith('.xlsx'):
             workbooks.append(dataset_id)
+        if isinstance(dataset.get('rows'), list) and dataset['rows']:
+            tables.append(dataset_id)
         # Management accounts the finance engine can total on its own (run_metric account_total).
         accounts.update(str(row['management_account']) for row in dataset.get('rows') or []
                         if isinstance(row, dict) and row.get('management_account') not in (None, ''))
@@ -2167,7 +2267,9 @@ def _evidence_environment(analysis, latest, runs=None):
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         finance_context = True if engine_runs else None
     return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending,
-            'accounts': sorted(accounts)}
+            'accounts': sorted(accounts),
+            # structured_aggregate reads exactly one snapshot, so it can meet only a single-binding requirement.
+            'aggregate_sources': tables if len(dataset_ids) == 1 else []}
 
 
 def _engine_blockers(environment):
@@ -2215,6 +2317,15 @@ def _evidence_paths(item, environment):
             if native:
                 # An amount the finance engine states itself (not one of the four P&L lines).
                 engine({'path': 'engine_output', **native})
+            if _canonical_metric_name(item.get('metric')) == 'price_quantity':
+                # The price-quantity bridge closes only on the finance engine (_price_quantity_requirement_matches).
+                engine({'path': 'price_quantity_bridge', 'tool': 'explain_variance',
+                        'methods': sorted(PRICE_QUANTITY_METHODS)})
+            if _closed_metric_key(item) not in CLOSURE_OR_RECIPE_AMOUNTS and environment.get('aggregate_sources'):
+                # A server-side aggregate of the bound snapshot answers amounts outside the four P&L lines
+                # and the price-quantity bridge.
+                accepted.append({'path': 'aggregate_output', 'tool': 'analysis-save', 'engine': 'structured_aggregate',
+                                 'measure': item['metric']})
             recipe = {'path': 'evidence_recipe', 'tool': 'save_explanation_draft.evidence_recipes',
                       'recipe_kinds': ['direct', 'sum', 'diff'], 'scale': 'one_or_unit_power'}
             if environment.get('workbook_sources'):
@@ -2369,8 +2480,15 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncoun
     }
 
 
-# Uncounted reasons that show the writer is estimating a grain; a missing grain always qualifies.
-ESTIMATING_REASONS = frozenset({'recipe_coefficient_unbound', 'estimate_cited_for_source_grain'})
+# Uncounted reasons where the source may not state the grain's value, so declaring it in grain_basis can be
+# the way on: the writer is estimating (a coefficient, an undeclared estimate, a ratio standing in for the
+# amount), or cited a script value that no recipe ties to an archived cell (Huachen's 区域全年预算 × 进度率).
+# A missing grain always qualifies. A rounded value, a recipe on an unbound snapshot or a run on other
+# bindings shows the source does hold the number, so those never get the hint.
+ESTIMATING_REASONS = frozenset({
+    'recipe_coefficient_unbound', 'estimate_cited_for_source_grain', 'ratio_recipe_cannot_prove_amount',
+    'script_output_without_recipe', 'recipe_failed',
+})
 DECLARE_GRAIN_BASIS = {
     'tool': 'analysis_requirements_save', 'field': 'grain_basis', 'with': 'parent_id',
     'options': [{'basis': 'estimate', 'requires': ['method'], 'then': 'estimate_recipe'},
@@ -2544,8 +2662,11 @@ NOT_COUNTED_TEXT = {
     'script_output_without_recipe': '只有脚本输出，没有通过的来源复算规则',
     'script_closure_not_counted': '闭合由脚本自行算出，只作展示，不计为引擎闭合',
     'engine_output_without_closure': '财务引擎的这项输出没有闭合规则，也没有通过的来源复算规则',
+    'aggregate_output_without_closure': ('服务端汇总（structured_aggregate）的这项输出不是闭合结果，也没有通过的来源复算规则；'
+                                         '收入、成本、费用、利润和量价拆分要引擎闭合或来源复算'),
     'recipe_failed': '复算规则未通过',
-    'recipe_failed_precision': '复算规则因运行值被舍入而未通过，需在运行结果中保存完整精度',
+    'recipe_failed_precision': ('复算规则因运行值的精度损失（被舍入，或脚本用二进制浮点数计算）而未通过，'
+                                '需用精确小数计算并在运行结果中保存完整精度'),
     'recipe_coefficient_unbound': ('复算规则的 scale 不是 1 或单位换算，只证明了乘法'
                                    '（系数要写成一条 ratio 规则，由 factor_recipe_id 引用，且只对 grain_basis 声明为估算的组合计为估算）'),
     'ratio_recipe_cannot_prove_amount': 'ratio 规则不能证明金额',
@@ -2586,7 +2707,8 @@ def _path_text(path, keys):
         return ('引用 explain_variance 按 revenue_minus_cost_minus_expense 生成的利润桥，'
                 '收入、成本、费用、利润四行的 contribution 都要引用')
     if name == 'price_quantity_bridge':
-        return (f'引用 explain_variance 按 {path["method"]} 生成的同一行 total_variance、'
+        method = path.get('method') or ' 或 '.join(path.get('methods') or [])
+        return (f'引用 explain_variance 按 {method} 生成的同一行 total_variance、'
                 'quantity_contribution、price_contribution 和 interaction')
     if name == 'method_run':
         return f'引用 method 为 {path["method"]} 的运行产出的含 {keys} 的结果行'
@@ -2596,6 +2718,9 @@ def _path_text(path, keys):
     if name == 'run_metric_account_total':
         return (f'在财务口径上运行 run_metric（kind 为 account_total，accounts 只列“{path["account"]}”），'
                 '并引用要求期间那一行的 amount')
+    if name == 'aggregate_output':
+        return (f'用 analysis-save 保存 engine 为 structured_aggregate 的汇总计划（只绑定本要求的那份资料快照，'
+                f'度量列命名为 {path["measure"]}），用 analysis-run 运行后引用该列的汇总结果，再用 drilldown_fact 核查来源')
     if name == 'engine_output':
         kind = f'（{path["scenario_kind"]}）' if path.get('scenario_kind') else ''
         return f'引用 {path["tool"]}{kind} 在财务口径上产出的 {path["column"]} 结果'
