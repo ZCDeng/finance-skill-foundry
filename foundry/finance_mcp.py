@@ -331,7 +331,7 @@ class FinanceMcpServer:
         except McpRefused:
             raise
         except FoundryError as exc:
-            return _tool_error(str(exc))
+            return _tool_error(str(exc), getattr(exc, "details", None))
         except Exception as exc:
             raise JsonRpcError(-32000, "finance tool failed") from exc
         payload = json_value(result)
@@ -525,11 +525,19 @@ def _tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "analysis_requirements_save",
-            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution.",
+            "description": "Before calculation, persist versioned user question, scope, required semantic metrics and requested drilldowns. Removing items requires a change reason; it does not complete the original question. Returned support is independently checked against bound snapshots; requires_input asks for data or field mapping, never zero substitution. support.items name the accepted_evidence that can answer each item now and the blocked_evidence with its blockers. scope.unit and currency only constrain amount items, never ratio items; the ledger is proven by the bound snapshot hashes and is not copied onto result rows. The hierarchy level drilldown (or drill_down) is refused as a dimension (a key named level or group_by is an ordinary row filter); the refusal's details.suggested_items can be resubmitted unchanged. A level carried over unchanged from the parent version (compared key by key) is dropped from the new version and recorded in authoring_warnings; like removing an item, dropping a level leaves the original requirement incomplete, and completion names it as hierarchy_dimension_dropped. Hierarchy levels written into scope are refused the same way (details.suggested_scope can be resubmitted); scope.granularity only describes the analysis and never filters rows.",
             "inputSchema": {"type": "object", "required": ["context_id", "question", "items"], "properties": {
                 "context_id": context_id, "question": text, "scope": scope_schema, "parent_id": text, "change_reason": text,
                 "items": {"type": "array", "items": {"type": "object", "required": ["id", "metric"], "properties": {
-                    "id": text, "metric": text, "label": text, "dimensions": {"type": "object"}, "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "organizations": {"type": "array", "items": text, "description": "Every organization that must be covered, crossed with every requested period. Leave shared scope.organization empty for a multi-organization requirement."}, "requires_drilldown": {"type": "boolean"}}},
+                    "id": text, "metric": text, "label": text,
+                    "dimensions": {"type": "object", "description": "Result-row filter fields the cited row must carry verbatim (metric_key, management_account, product) and the method/dimension/scenario_compare intents. The hierarchy level drilldown (or drill_down) is not a dimension: list each drilldown target in organizations or save it as its own item; use requires_drilldown for per-cell source tracing."},
+                    "periods": {"type": "array", "items": text, "description": "All periods the requirement must cover; dimensions.period remains scalar."}, "organizations": {"type": "array", "items": text, "description": "Every organization that must be covered, crossed with every requested period. Leave shared scope.organization empty for a multi-organization requirement."},
+                    "scenarios": {"type": "array", "items": text, "description": "Every result scenario key that must be covered, as the run rows state it."},
+                    "requires_drilldown": {"type": "boolean"},
+                    "grain_basis": {"type": "array", "description": "Optional declarations for grains the source does not state. basis=estimate needs method; only those grains accept a factor_recipe_id estimate, which stays estimated and is never answered. If no recipe can reproduce the coefficient, set factor_reproducible=false with a reason: the grain stays pending for the manager and must not be filled with another coefficient. basis=unavailable needs a reason and only counts as missing data after the manager confirms it.", "items": {"type": "object", "required": ["basis"], "properties": {
+                        "basis": {"type": "string", "enum": ["estimate", "unavailable"]},
+                        "organizations": {"type": "array", "items": text}, "periods": {"type": "array", "items": text}, "scenarios": {"type": "array", "items": text},
+                        "method": text, "factor_reproducible": {"type": "boolean"}, "reason": text}}}}},
                 },
             }},
         },
@@ -602,7 +610,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "validate_explanation",
             "title": "Validate finance explanation draft",
-            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. It also returns independent readability suggestions for dense paragraphs or inline formula stacking. It does not approve the draft.",
+            "description": "Check the current draft body against granted fact ids, run cells, exact values, display rounding, units, directions, registered requirements, provenance and completeness. evidence_recipes are re-evaluated against the archived snapshots by the server; a supplied evidence_report is ignored. It also returns independent readability suggestions for dense paragraphs or inline formula stacking. It does not approve the draft.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -668,7 +676,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_explanation_draft",
             "title": "Save finance explanation draft",
-            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. Keep {{fact:FACT_ID}} where each number appears; use chapter-end footnotes such as [^1] for source locations, not as numeric placeholders. The returned quality keeps finance checks separate from readability suggestions, and completion preserves editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete.",
+            "description": "Save a task-local explanation draft linked to granted finance runs and source claims. Keep {{fact:FACT_ID}} where each number appears; use chapter-end footnotes such as [^1] for source locations, not as numeric placeholders. The returned quality keeps finance checks separate from readability suggestions, and completion preserves editable drafts, repair_allowed, stop_reason such as no_progress, and the bounded two-repair workflow. awaiting_input with verified_input_gap ends this reply with a verified data or mapping gap; original requirements remain incomplete. Every requirement is an amount except ratios, items that only ask for ratio scenarios, counts and physical quantities such as sales_volume; an unrecognised metric name is an amount too, and so is a quantity or area whose name also names an amount (price_volume, revenue_by_area). An amount is answered by: (1) a cited run cell with a passing direct/sum/diff evidence recipe whose sources are the requirement's bound snapshots and whose scale is 1 or an exact unit power; (2) a finance-engine explain_variance closure, only for metric revenue/cost/expense/profit on items without scenarios; (3) for an item whose metric is a ledger account name (not revenue/cost/expense/profit, which only (1) and (2) answer), the finance engine's run_metric account_total row (accounts listing only that account; filters may only restate the requirement's own organization, period, scenario or dimensions, and a total filtered to a voucher, product or source row does not count); (4) for account items that list periods/organizations and for control_totals, the run_metric result set: cite every row's amount and check each row with drilldown_fact; (5) for amounts other than revenue/cost/expense/profit and the price-quantity bridge (price_quantity, price_volume and other names that pair a price with a volume), the finance engine's own output of that metric (finance_scenario_run open_amount, closing_cash) or that metric's column in a server-side structured_aggregate run (a declarative plan saved in the app, not a script) on the requirement's single bound snapshot; (6) for metric price_quantity, the finance engine's explain_variance price-quantity bridge (total_variance, quantity_contribution, price_contribution and interaction of one row), or a recipe as in (1). Every value the draft cites for a requirement grain must count on one of these paths: a counted cell never vouches for another value cited for the same grain, so back the extra value or drop it from the body and claims; an estimate cited beside another counted value keeps the grain estimated until the manager accepts it. Script output and script-built closures never count for an amount, run_metric management_pnl rows do not count for revenue/cost/expense/profit, ratio recipes never prove amounts, and factor recipes only reach estimated for grains declared as estimates (a unit scale may sit next to the factor; the coefficient belongs in the ratio recipe). A run counts only when it binds the requirement's snapshots under the requirement's alias names (any alias when the requirement has one binding); rebind_run names them. A finance-engine run counts only when the scope of every bound input in its finance_scope matches the requirement scope (a cash_13_weeks run on receipts and payments: both); rescope_run names that scope. The finance-engine paths (2)-(6) need at least one bound snapshot the finance engine reads rows from (a column named amount, 金额, 发生额 or 本期金额, columns named revenue, cost or expense, or a column the finance context maps to amount; Chinese headers such as 营业收入 or 营业成本 are not read). When no bound snapshot does (workbook files, empty tables, tables whose columns carry none of these names, such as a regional budget sheet or a city-company detail table), they are blocked with bindings_without_engine_rows for the manager, and a context or run on other snapshots never counts (other bindings), so do not save a finance context or rerun for them. A detail table that carries an account column but keeps its amounts under another column name (本期发生额, 本月数) is blocked with amount_column_unmapped instead and lists amount_columns: the assistant opens it by saving a finance context on the same bindings whose policies.field_map maps that column to amount, then takes the blocked path. A workbook bound beside a table the engine reads blocks nothing. When a run_metric result set on the requirement's bindings still does not answer, engine_run_does_not_cover_requirement names the run, the fields blank on every row and in its scopes or stated differently from the requirement (ledger, currency and unit included; required_scope gives the required values), the unmapped accounts, and the grains without rows or with rows outside the requirement scope; rerunning it unchanged gives the same rows, so state those fields in the binding's scopes when the whole table shares them; for another unit keep the table's own unit in scopes and set the binding's policies.<alias>.target_unit to the required unit (target_unit in the result names it), which converts the amounts, whereas relabelling scopes.unit does not. Compute with exact decimals (not binary floats) and keep full precision in run results (a value that terminates must equal the recipe exactly; a quotient that does not terminate, from a ratio recipe or a factor estimate, must keep at least 28 significant digits, Python Decimal's default, in any order of operations; a run stores a numeric column as DECIMAL(38), so the longest integer part plus the longest decimal part in one column must stay within 38 digits or the run fails, e.g. at most 32 decimal places for a factor beside 6-digit amounts), write the requirement metric as metric_key and currency/unit on every row (only a finance-engine run's finance_scope stands in for row fields; a script or SQL run's scope is not read), and never copy the ledger text onto rows. A script cell is traced to its source by the recipe add_source_recipe names; drilldown_fact only verifies finance-engine and structured_aggregate rows. Revise a draft with parent_id; a revision keeps its parent's requirements version unless requirements_id names the current one (repin_requirements, revise_requirement_dimension). awaiting_manager means only estimates awaiting acceptance, declared gaps, a structure awaiting the manager or bindings the engine reads no rows from remain; stop repairing and report them.",
             "inputSchema": {
                 "type": "object",
                 "required": ["body"],
@@ -679,6 +687,7 @@ def _tools() -> list[dict[str, Any]]:
                     "fact_ids": {"type": "array", "items": text},
                     "claims": {"type": "array", "items": {"type": "object"}},
                     "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    "requirements_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
                 },
                 "additionalProperties": True,
             },
@@ -890,10 +899,27 @@ def _tool_result(payload: dict[str, Any], *, is_error: bool) -> dict[str, Any]:
     }
 
 
-def _tool_error(message: str) -> dict[str, Any]:
+# Refusals whose structured details only echo the caller's own request (never a server path) and that the
+# caller needs in order to self-correct; each also has a path-free message for when the text is blanked.
+PUBLIC_REFUSALS = {
+    "requirement_dimension_not_row_filter": (
+        "requirement dimensions hold hierarchy levels, not result-row filters; resubmit details.suggested_items "
+        "unchanged, list each drilldown target in organizations or save it as its own item"
+    ),
+    "requirement_scope_not_row_filter": (
+        "requirement scope holds hierarchy levels, not result-row filters; resubmit details.suggested_scope "
+        "unchanged, list each drilldown target in organizations or save it as its own item"
+    ),
+}
+
+
+def _tool_error(message: str, details: Any = None) -> dict[str, Any]:
+    code = details.get("code") if isinstance(details, dict) else None
+    public = details if code in PUBLIC_REFUSALS else None
     if "/" in message or "\\" in message:
-        message = "finance request refused"
-    return _tool_result({"error": "finance request refused", "message": message}, is_error=True)
+        message = PUBLIC_REFUSALS.get(code, "finance request refused")
+    return _tool_result({"error": "finance request refused", "message": message,
+                         **({"details": public} if public else {})}, is_error=True)
 
 
 def _request_id_from_line(line: str) -> str | int | None:

@@ -22,6 +22,8 @@ PERIOD_RANGE = re.compile(
 )
 FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
+# A bare year, yyyymm or yyyymmdd written as a row's period.
+PERIOD_IDENTIFIER = re.compile(r"(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])?)?")
 EVIDENCE_APPENDIX_RENDER_VERSION = 1
 WRITING_GUIDANCE = {
     "schema_version": 1,
@@ -334,7 +336,12 @@ def _appendix_member_label(state: str, fact: dict | None) -> str:
     return "非可引用：未生成可核验事实"
 
 
-def validate_explanation(analysis, spec: dict) -> dict:
+def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: dict | None = None) -> dict:
+    """Check a draft; evidence recipes are evaluated here, never read from a caller's evidence_report.
+
+    `_requirement_recipe_report` lets save_draft hand over the report it computed for its own recipes so
+    the generated appendix is rebuilt from the same requirement check without a second evaluation.
+    """
     if not isinstance(spec, dict):
         raise FoundryError("explanation spec must be an object")
     draft = analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
@@ -352,14 +359,20 @@ def validate_explanation(analysis, spec: dict) -> dict:
         [r for r in runs if r.get("execution_status") == "succeeded"],
         materiality=spec.get("materiality", draft.get("materiality", {})),
     )
+    from foundry.financial_evidence import evaluate_evidence_recipes
+
+    evidence_report = evaluate_evidence_recipes(analysis, {**draft, **spec}.get("evidence_recipes", []))
     generated_regions = _trusted_generated_appendix_regions(
-        analysis, body, {**draft, **spec}, prepared
+        analysis, body, {**draft, **spec}, prepared,
+        recipe_report=_requirement_recipe_report if _requirement_recipe_report is not None else evidence_report,
     )
     facts = prepared["facts"]
     by_id = {fact["id"]: fact for fact in facts}
     by_location = {(fact["run_id"], fact["row"], fact["column"]): fact for fact in facts}
     issues: list[dict] = []
-    referenced = set()
+    # Cited order, not a set: which of two same-valued facts an issue names must not follow PYTHONHASHSEED
+    # (the completion issue_fingerprint hashes these issues).
+    referenced: dict[str, None] = {}
     for fact_id in fact_ids:
         if (
             not isinstance(fact_id, str)
@@ -375,7 +388,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 }
             )
         else:
-            referenced.add(fact_id)
+            referenced.setdefault(fact_id)
     for claim in claims:
         if not isinstance(claim, dict) or claim.get("basis") not in BASIS:
             issues.append(
@@ -388,7 +401,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
             continue
         fact = by_id.get(claim.get("fact_id")) if claim.get("fact_id") else None
         if fact:
-            referenced.add(fact["id"])
+            referenced.setdefault(fact["id"])
             if any(
                 claim.get(key) != fact[key]
                 for key in ("run_id", "row", "column", "value")
@@ -408,7 +421,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
             else:
                 bound_fact = by_location.get((claim.get("run_id"), claim.get("row"), claim.get("column")))
                 if bound_fact:
-                    referenced.add(bound_fact["id"])
+                    referenced.setdefault(bound_fact["id"])
                 else:
                     issues.append({"code": "unknown_fact", "severity": "error", "message": "引用位置没有可核验的数值事实。"})
             if claim.get("fact_id"):
@@ -425,7 +438,11 @@ def validate_explanation(analysis, spec: dict) -> dict:
     base_allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
-    ignored_number_spans = _generated_appendix_heading_number_spans(body, prepared)
+    ignored_number_spans = [
+        *_generated_appendix_heading_number_spans(body, prepared),
+        *_generated_appendix_label_number_spans(body, generated_regions, prepared),
+        *_generated_appendix_reference_spans(body, generated_regions),
+    ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
         if normalized in base_allowed_numbers:
@@ -442,7 +459,7 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 }
             )
     required = set(_required_fact_ids(facts))
-    missing_required = sorted(required - referenced)
+    missing_required = sorted(required - referenced.keys())
     for fact_id in missing_required:
         issues.append(
             {
@@ -471,17 +488,15 @@ def validate_explanation(analysis, spec: dict) -> dict:
                 }
             )
     merged = {**draft, **spec, "run_ids": run_ids}
-    evidence_recipes = merged.get("evidence_recipes", [])
     consistency_rules = merged.get("consistency_rules", [])
     consistency_sources = merged.get("consistency_sources", {})
     from foundry.analysis import _quality_status_dimensions, _revision_quality_issues
     from foundry.finance_revision import compare_draft_runs
     from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
-    from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+    from foundry.financial_evidence import prepare_consistency_inputs
 
     parent = analysis.get_draft(merged["parent_id"]) if merged.get("parent_id") else {}
     revision_comparison = compare_draft_runs(analysis, parent, {"run_ids": run_ids})
-    evidence_report = evaluate_evidence_recipes(analysis, evidence_recipes)
     resolved_rules, consistency_source_auth = prepare_consistency_inputs(
         analysis, consistency_rules, consistency_sources
     )
@@ -2154,7 +2169,7 @@ def _allowed_numbers(facts: list[dict]) -> set[str]:
 
 
 def _trusted_generated_appendix_regions(
-    analysis, body: str, spec: dict, prepared: dict
+    analysis, body: str, spec: dict, prepared: dict, *, recipe_report: dict | None = None
 ) -> list[dict]:
     appendix = spec.get("evidence_appendix")
     meta = spec.get("evidence_appendix_meta")
@@ -2165,9 +2180,10 @@ def _trusted_generated_appendix_regions(
     rebuilt_base = render_evidence_appendix(prepared).get("body", "")
     if not isinstance(rebuilt_base, str) or not rebuilt_base:
         return []
-    rebuilt_gap = _rebuilt_input_gap_appendix(analysis, spec, prepared)
-    if rebuilt_gap is None:
+    rebuilt_requirement = _rebuilt_input_gap_appendix(analysis, spec, prepared, recipe_report)
+    if rebuilt_requirement is None:
         return []
+    rebuilt_gap, references = rebuilt_requirement
     rebuilt = rebuilt_base + rebuilt_gap
     expected = evidence_appendix_metadata(rebuilt, base_body=rebuilt_base)
     if any(meta.get(key) != expected[key] for key in ("body_sha256", "base_body_sha256")):
@@ -2191,6 +2207,8 @@ def _trusted_generated_appendix_regions(
             "section": "generated_appendix",
             "start": start,
             "end": start + len(rendered),
+            # Item headings and sheet!range formulas the server wrote in 来源复算依据 (no values).
+            "references": references,
         }
     ]
 
@@ -2209,33 +2227,48 @@ def _canonical_report_markdown(markdown: str) -> str | None:
         return None
 
 
-def _rebuilt_input_gap_appendix(analysis, spec: dict, prepared: dict) -> str | None:
+def _rebuilt_input_gap_appendix(
+    analysis, spec: dict, prepared: dict, recipe_report: dict | None = None
+) -> tuple[str, list[str]] | None:
+    """The requirement part of the generated appendix (待补资料 and 来源复算依据) and the references the
+    来源复算依据 section writes; None when the requirement check itself fails."""
     requirements_id = spec.get("requirements_id")
     if not requirements_id:
-        return ""
+        return "", []
     try:
         requirements = analysis._get("requirements", requirements_id)
         from foundry.finance_requirement_support import (
+            evidence_basis_appendix,
+            evidence_basis_references,
             input_gap_appendix,
             with_input_gaps,
         )
         from foundry.finance_requirements import check_requirements
 
+        # The same claims the save path's provisional check saw: fact claims plus the draft's own claims.
+        claims = [
+            *claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
+            *[claim for claim in spec.get("claims") or [] if isinstance(claim, dict)],
+        ]
         checked = check_requirements(
             analysis,
             {
                 "run_ids": spec.get("run_ids", []),
-                "claims": claims_for_facts(prepared.get("facts", []), spec.get("fact_ids", [])),
+                "claims": claims,
                 "requirements_id": requirements_id,
                 "source_read_failures": spec.get("source_read_failures", []),
+                # The draft's own recipes, so the rebuilt appendix matches the quality verdict.
+                "evidence_recipes": spec.get("evidence_recipes", []),
             },
             _requirements_record=requirements,
+            _recipe_report=recipe_report,
         )
-        return input_gap_appendix(with_input_gaps(analysis, checked))
+        checked = with_input_gaps(analysis, checked)
+        return input_gap_appendix(checked) + evidence_basis_appendix(checked), evidence_basis_references(checked)
     except FoundryError:
         return None
     except (OSError, ValueError, KeyError, TypeError):
-        return ""
+        return "", []
 
 
 def _readability_suggestions(body: str, generated_regions: list[dict]) -> dict:
@@ -2445,6 +2478,83 @@ def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[
     for match in re.finditer(r"(?m)^### 结果行 (?P<number>\d+)$", rendered):
         number_span = match.span("number")
         spans.append((start + number_span[0], start + number_span[1]))
+    return spans
+
+
+def _generated_appendix_label_number_spans(
+    body: str, generated_regions: list[dict], prepared: dict
+) -> list[tuple[int, int]]:
+    """Bare period identifiers (2026, 202608) that name a row or a group in the server's own, trusted
+    计算依据 appendix.
+
+    A member line is '- metric / column / scenario / period：value（…）' and a group title may end in
+    key=value segments; those segments name the row and state no value, and the writer cannot edit them.
+    Row names come from the run's own rows, so only a later segment shaped like a period is exempt: the
+    metric name never is, values keep their fact binding, and the same number written anywhere outside a
+    trusted appendix name is still checked.
+    """
+    labels = sorted(
+        {
+            str(label)
+            for group in prepared.get("evidence_groups", [])
+            if isinstance(group, dict) and isinstance(group.get("members"), list)
+            for member in group["members"]
+            if isinstance(member, dict)
+            for label in [member.get("label") or member.get("semantic_role") or member.get("column")]
+            if label not in (None, "")
+        },
+        key=len,
+        reverse=True,
+    )
+    spans = []
+    for region in generated_regions:
+        text = body[region["start"] : region["end"]]
+        for line in re.finditer(r"(?m)^(?:- (?P<member>.*)|### (?P<title>.*))$", text):
+            if line.group("title") is not None:
+                name, start = line.group("title"), line.start("title")
+            else:
+                rest = line.group("member")
+                name = next(
+                    (label for label in labels if rest.startswith(label) and rest[len(label) : len(label) + 1] in {"：", "（"}),
+                    None,
+                )
+                start = line.start("member")
+            if name is not None:
+                spans.extend(_period_segment_spans(name, region["start"] + start))
+    return spans
+
+
+def _generated_appendix_reference_spans(body: str, generated_regions: list[dict]) -> list[tuple[int, int]]:
+    """Where the trusted appendix writes a 来源复算依据 reference (an item heading or a sheet!range formula).
+
+    Those texts name archived cells and requirement keys, never values, but a sheet name can hold a year
+    (2026预算!B5) the number scan would read. Only occurrences inside a trusted region are exempt; the same
+    reference in the writer's prose is still checked.
+    """
+    spans = []
+    for region in generated_regions:
+        text = body[region["start"] : region["end"]]
+        for reference in region.get("references") or []:
+            if not reference:
+                continue
+            position = text.find(reference)
+            while position >= 0:
+                start = region["start"] + position
+                spans.append((start, start + len(reference)))
+                position = text.find(reference, position + len(reference))
+    return spans
+
+
+def _period_segment_spans(name: str, base: int) -> list[tuple[int, int]]:
+    spans = []
+    position = 0
+    for index, segment in enumerate(name.split(" / ")):
+        start = base + position
+        position += len(segment) + len(" / ")
+        key, _, value = segment.rpartition("=")
+        offset = len(key) + 1 if key else 0
+        if index and PERIOD_IDENTIFIER.fullmatch(value):
+            spans.append((start + offset, start + offset + len(value)))
     return spans
 
 

@@ -13,6 +13,15 @@ type RequirementScope = {
   unit?: string;
 };
 
+// The assistant's declaration that some grains are estimates or unavailable. The panel does not edit it,
+// but it must survive a manager save: without it a declared estimate falls back to a pending grain.
+type GrainBasis = {
+  basis: string;
+  organizations?: string[];
+  periods?: string[];
+  scenarios?: string[];
+} & Record<string, unknown>;
+
 type RequirementItem = {
   id: string;
   metric: string;
@@ -22,6 +31,7 @@ type RequirementItem = {
   periods?: string[];
   organizations?: string[];
   scenarios?: string[];
+  grain_basis?: GrainBasis[];
 };
 
 type RequirementMissingInput = {
@@ -112,11 +122,19 @@ function pruneScope(value: RequirementScope & Record<string, unknown>): Requirem
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== '' && item !== undefined && item !== null)) as RequirementScope & Record<string, unknown>;
 }
 
+// Hierarchy levels a finance context may hold (finance_context_save accepts any key) but a requirement scope
+// refuses (SCOPE_REFUSED_HIERARCHY_KEYS in foundry/finance_requirements.py). The panel has no field for them,
+// so a context seed must not carry them into a save the manager cannot correct. granularity stays, and so does
+// a key such as level, which may be a real row column the scope filters on.
+const contextOnlyScopeLevels = new Set(['drilldown', 'drill_down']);
+
 function primaryContextScope(payload: FinanceContextState | null | undefined, selectedContextId?: string): { scope: RequirementScope & Record<string, unknown>; bindings: Record<string, string> } {
   const context = payload?.contexts?.find((item) => item.id === selectedContextId);
   if (!context) return { scope: { ...blankScope }, bindings: {} };
   const firstScope = Object.values(context.scopes ?? {}).find((item) => item && typeof item === 'object' && !Array.isArray(item));
-  return { scope: normalizeScope(firstScope), bindings: context.bindings ?? {} };
+  const seeded = Object.fromEntries(Object.entries(normalizeScope(firstScope))
+    .filter(([key]) => !contextOnlyScopeLevels.has(key.trim().toLowerCase()))) as RequirementScope & Record<string, unknown>;
+  return { scope: seeded, bindings: context.bindings ?? {} };
 }
 
 function normalizePeriods(value: unknown): string[] {
@@ -130,6 +148,34 @@ function itemOrganizations(item: RequirementItem): string[] {
 
 function itemScenarios(item: RequirementItem): string[] {
   return normalizePeriods(item.scenarios);
+}
+
+const grainBasisLists = ['organizations', 'periods', 'scenarios'] as const;
+
+function normalizeGrainBasis(value: unknown): GrainBasis[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is GrainBasis => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+      && typeof (entry as Record<string, unknown>).basis === 'string')
+    .map((entry) => ({ ...entry }));
+}
+
+// A declaration covers a subset of the item's grains. When the manager removes one of its members the
+// declaration keeps the rest; one left with no member is dropped, because an empty list would widen it
+// to every grain of the item.
+function keptGrainBasis(item: RequirementItem): GrainBasis[] {
+  const lists = { organizations: itemOrganizations(item), periods: itemPeriods(item), scenarios: itemScenarios(item) };
+  return (item.grain_basis ?? []).flatMap((entry) => {
+    const next: GrainBasis = { ...entry };
+    for (const field of grainBasisLists) {
+      const members = entry[field];
+      if (!Array.isArray(members) || !members.length) continue;
+      const kept = members.map(String).filter((member) => lists[field].includes(member));
+      if (!kept.length) return [];
+      next[field] = kept;
+    }
+    return [next];
+  });
 }
 
 function normalizeMissingInputs(value: unknown): RequirementMissingInput[] {
@@ -194,6 +240,9 @@ function normalizeRecord(value: unknown): AnalysisRequirementsRecord | null {
         : {}),
       ...(Array.isArray((item as Record<string, unknown>).organizations)
         ? { organizations: normalizePeriods((item as Record<string, unknown>).organizations) }
+        : {}),
+      ...(normalizeGrainBasis((item as Record<string, unknown>).grain_basis).length
+        ? { grain_basis: normalizeGrainBasis((item as Record<string, unknown>).grain_basis) }
         : {}),
     })).filter((item) => item.id && item.metric) : [],
   };
@@ -412,6 +461,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
           ...(itemPeriods(item).length ? { periods: itemPeriods(item) } : {}),
           ...(itemOrganizations(item).length ? { organizations: itemOrganizations(item) } : {}),
           ...(itemScenarios(item).length ? { scenarios: itemScenarios(item) } : {}),
+          ...(keptGrainBasis(item).length ? { grain_basis: keptGrainBasis(item) } : {}),
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));

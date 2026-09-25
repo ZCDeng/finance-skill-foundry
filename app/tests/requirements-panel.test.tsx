@@ -193,6 +193,76 @@ describe('requirements panel', () => {
     expect(saveCall?.[2]?.scope).not.toHaveProperty('organization');
   });
 
+  it('does not seed a hierarchy level it cannot show from the context scope into the first save', async () => {
+    // Review round 6: the context scope held drilldown, the panel has no field for it, and every save
+    // resent it; the server refuses a newly written level. granularity is a scope field of its own and stays.
+    const seeded = { id: contextId, name: '口径', bindings: { actual: 'ds' },
+      scopes: { actual: { ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', unit: '万元', drilldown: '城市公司', granularity: '区域' } } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => {
+        if (command === 'analysis-requirements-list') return ok({ requirements: [], current: null });
+        if (command === 'list-finance-context') return ok({ task_id: taskId, datasets: [], contexts: [seeded], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
+        if (command === 'analysis-requirements-save') return ok({ id: 'r-ctx-001', question: spec?.question, context_id: contextId, scope: spec?.scope, bindings: spec?.bindings, items: spec?.items, parent_id: null } as Record<string, unknown>);
+        return ok({});
+      }),
+    });
+    render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
+
+    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '解释费用' } });
+    fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+    const saveCall = vi.mocked(api.financeCall).mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+    expect(saveCall?.[2]?.scope).not.toHaveProperty('drilldown');
+    expect(saveCall?.[2]?.scope).toEqual({ ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', unit: '万元', granularity: '区域' });
+  });
+
+  it('seeds a context scope key named like a level, which may be a real row column, into the first save', async () => {
+    // Review round 9: the seed also dropped level, breakdown, group_by and hierarchy. Only drilldown is a
+    // hierarchy level the server refuses; a 职级 column named level filters rows, so dropping it widened the scope.
+    const seeded = { id: contextId, name: '口径', bindings: { actual: 'ds' },
+      scopes: { actual: { ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', level: 'P7', drill_down: '城市公司' } } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => {
+        if (command === 'analysis-requirements-list') return ok({ requirements: [], current: null });
+        if (command === 'list-finance-context') return ok({ task_id: taskId, datasets: [], contexts: [seeded], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
+        if (command === 'analysis-requirements-save') return ok({ id: 'r-ctx-002', question: spec?.question, context_id: contextId, scope: spec?.scope, bindings: spec?.bindings, items: spec?.items, parent_id: null } as Record<string, unknown>);
+        return ok({});
+      }),
+    });
+    render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
+
+    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: 'P7 人数' } });
+    fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+    const saveCall = vi.mocked(api.financeCall).mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+    expect(saveCall?.[2]?.scope).toEqual({ ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', level: 'P7' });
+  });
+
+  it('still resends a stored record scope key it does not show, so the server can record the drop', async () => {
+    // Opposite direction: only the context seed is cleaned. A stored record's scope round-trips unchanged;
+    // the server drops a legacy level carried over from the parent and records it in authoring_warnings.
+    const legacy: AnalysisRequirementsRecord = { ...current, scope: { ...current.scope, drilldown: '城市公司' } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command) => command === 'analysis-requirements-save'
+        ? ok({ ...legacy, id: 'r-current-009', parent_id: legacy.id } as unknown as Record<string, unknown>)
+        : ok({ requirements: [legacy], current: legacy })),
+    });
+    render(<RequirementsPanel taskId={taskId} />);
+    await screen.findByDisplayValue('解释本期利润差异并下钻利润');
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      parent_id: legacy.id,
+      scope: expect.objectContaining({ drilldown: '城市公司' }),
+    })));
+  });
+
   it('passes the edited working scope to the discussion callback', async () => {
     const onDiscuss = vi.fn();
     mountBridge();
@@ -493,6 +563,58 @@ describe('requirements panel', () => {
 
     expect(within(profit).queryByText(/请补充预算资料。/)).toBeNull();
     expect(within(profit).getByText(/条件已修改，保存后重新检查资料匹配。/)).toBeTruthy();
+  });
+
+  describe('grain_basis declarations', () => {
+    // The assistant declares which grains are estimates or unavailable; a manager save that drops the
+    // declaration turns a declared estimate back into a pending grain (estimate_cited_for_source_grain).
+    const declared = {
+      id: 'r-grain-001', question: '华宸 1-8 月收入', context_id: null,
+      scope: { ledger: 'L1', currency: 'CNY', unit: '万元' }, bindings: { budget: 'budget-dataset' },
+      items: [{ id: 'revenue_1_8', metric: 'revenue', label: '收入', dimensions: {}, requires_drilldown: false,
+        organizations: ['集团合并', '华东区域', '华南区域'], periods: ['2026-01:2026-08'], scenarios: ['budget_1_8'],
+        grain_basis: [
+          { basis: 'estimate', organizations: ['华东区域'], method: '区域全年预算 × 集团进度' },
+          { basis: 'estimate', organizations: ['华南区域'], method: '（营业利润 − 其他收益）÷ 合计', factor_reproducible: false, reason: '系数须先减后除' },
+        ] }],
+      parent_id: null,
+    } as unknown as AnalysisRequirementsRecord;
+
+    function mountDeclared() {
+      const financeCall = vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...declared, id: 'r-grain-002', parent_id: declared.id, items: spec?.items } as Record<string, unknown>)
+        : ok({ requirements: [declared], current: declared }));
+      mountBridge({ financeCall });
+      return { financeCall };
+    }
+
+    function savedItems(api: ReturnType<typeof mountDeclared>): Array<Record<string, unknown>> {
+      const call = api.financeCall.mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+      return (call?.[2] as { items: Array<Record<string, unknown>> }).items;
+    }
+
+    it('keeps the declarations when the manager saves an unrelated edit', async () => {
+      const api = mountDeclared();
+      render(<RequirementsPanel taskId={taskId} />);
+      expect(await screen.findByDisplayValue('华宸 1-8 月收入')).toBeTruthy();
+      fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '华宸 1-8 月收入（改问法）' } });
+      fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+      await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+      expect(savedItems(api)[0].grain_basis).toEqual(declared.items[0].grain_basis);
+    });
+
+    it('drops a declaration whose organization the manager removed instead of widening it', async () => {
+      const api = mountDeclared();
+      render(<RequirementsPanel taskId={taskId} />);
+      const revenue = await screen.findByLabelText('必答指标 1');
+      fireEvent.click(within(revenue).getByRole('button', { name: '华南区域 ×' }));
+      fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+      await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+      expect(savedItems(api)[0].organizations).toEqual(['集团合并', '华东区域']);
+      expect(savedItems(api)[0].grain_basis).toEqual([declared.items[0].grain_basis?.[0]]);
+    });
   });
 
 });

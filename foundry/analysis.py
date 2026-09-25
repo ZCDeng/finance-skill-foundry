@@ -33,7 +33,10 @@ from foundry.report_documents import report_document_excel_rows
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions"}
+# estimate_acceptances holds a manager's acceptance of a specific estimate recipe (phase 2 adds the
+# manager-only command); requirement checks only read it and never create one.
+KINDS = {"revisions", "runs", "drafts", "methods", "requirements", "evidence_checks", "completions",
+         "estimate_acceptances"}
 REPORT_EXPORT_FORMATS = {"md", "xlsx", "docx", "pdf", "html"}
 RESULT_ROLES = {"business", "activity", "probe", "preanalysis", "calculation", "draft_support", "audit_check"}
 REVIEW = {"unreviewed", "reviewed", "accepted"}
@@ -817,7 +820,12 @@ class AnalysisStore:
                 sources[record["id"]] = self._report_source_public(record)
         return sources
 
-    def save_draft(self, spec: dict) -> dict:
+    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None) -> dict:
+        """Save an immutable draft version.
+
+        `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
+        with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
+        """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
         parent = self.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
@@ -964,6 +972,17 @@ class AnalysisStore:
         if "fact_ids" not in spec and fact_ids and set(runs) != set(parent.get("run_ids", [])):
             # A revision that swaps its runs must not carry the parent's facts from runs it no longer cites.
             fact_ids = _fact_ids_in_runs(self, fact_ids, runs, materiality)
+        from foundry.finance_completion import COMPLETION_POLICY_VERSION
+        from foundry.finance_revision import compare_draft_runs
+        from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
+        from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
+
+        # Evaluate this draft's recipes once, before requirement coverage reads them: coverage may
+        # only use recipe results the server computed in this call.
+        evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
+        evidence_report = (
+            _recipe_report if _recipe_report is not None else evaluate_evidence_recipes(self, evidence_recipes)
+        )
         explanation_check = validate_explanation(
             self,
             {
@@ -976,22 +995,20 @@ class AnalysisStore:
                 "evidence_appendix": evidence_appendix,
                 "evidence_appendix_meta": evidence_appendix_meta,
             },
+            # Recipe issues are added below from the same report; validate only needs it to rebuild
+            # the generated appendix exactly as the requirement check sees it.
+            _requirement_recipe_report=evidence_report,
         )
-        evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
         explanation_check = augment_quality(self, {
             "body": body, "run_ids": list(runs), "claims": claims,
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
             "evidence_recipes": evidence_recipes,
-        }, explanation_check)
+        }, explanation_check, _recipe_report=evidence_report)
         consistency_rules = spec.get("consistency_rules", parent.get("consistency_rules", []))
         consistency_sources = spec.get("consistency_sources", parent.get("consistency_sources", {}))
-        from foundry.finance_revision import compare_draft_runs
-        from foundry.financial_consistency import consistency_quality_issues, evaluate_consistency_rules
-        from foundry.financial_evidence import evaluate_evidence_recipes, prepare_consistency_inputs
 
         revision_comparison = compare_draft_runs(self, parent, {"run_ids": list(runs)})
-        evidence_report = evaluate_evidence_recipes(self, evidence_recipes)
         resolved_rules, consistency_source_auth = prepare_consistency_inputs(self, consistency_rules, consistency_sources)
         consistency_report = evaluate_consistency_rules(
             resolved_rules,
@@ -1048,6 +1065,8 @@ class AnalysisStore:
             revision_comparison=revision_comparison,
             explanation_check=explanation_check,
             quality=explanation_check,
+            # The completion policy this check was computed under; a replay never reuses an older one.
+            check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
             execution_status=execution_status,
             reproducibility_status=reproducibility,

@@ -330,3 +330,137 @@ def test_circle_select_needs_something_to_revise(tmp_path: Path) -> None:
                 "context_id": blank_context["id"],
             }
         )
+    # The refusal happens before anything is written: no orphan child context.
+    assert [row["id"] for row in fresh._list("contexts")] == [blank_context["id"]]
+
+
+def _table_draft(service):
+    return service.analysis.save_draft(
+        {
+            "title": "经营简报",
+            "document": {
+                "schema_version": 1,
+                "template_version": "annual-v1",
+                "content": [
+                    {
+                        "type": "table",
+                        "attrs": {"caption": "tbl-expense"},
+                        "content": [
+                            {"type": "tableRow", "content": [{"type": "tableHeader",
+                             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "费用"}]}]}]}
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+
+
+def test_circle_select_carries_a_legacy_drilldown_item_over_without_the_hierarchy_key(tmp_path: Path) -> None:
+    """A requirement saved before phase 1 followed PR #17 and kept dimensions.drilldown. Save now refuses
+    hierarchy dimensions, so 改口径 resaving the same items failed and left a child context behind.
+    The carry-over applies the refusal's own mechanical fix (the same items without the hierarchy key)."""
+    from foundry.analysis import _new
+
+    service, context, _dataset, original = _service(tmp_path)
+    legacy = _new(service.analysis.task, question=original["question"], scope=original["scope"],
+                  bindings=original["bindings"], context_id=context["id"], parent_id=original["id"],
+                  items=[{**original["items"][0], "dimensions": {"drilldown": "城市公司", "product": "物业费"}}],
+                  removed_item_ids=[], change_reason="PR #17 之前保存", selection=None)
+    service.analysis._write(service.analysis._object_path("requirements", legacy["id"]), legacy)
+    draft = _table_draft(service)
+    contexts_before = len(service._list("contexts"))
+
+    revised = service.analysis_circle_select(
+        {
+            "kind": "draft_table",
+            "draft_id": draft["id"],
+            "block_id": "tbl-expense",
+            "range": "A:A",
+            "instruction": "改成开票口径",
+            "context_id": context["id"],
+        }
+    )
+
+    assert revised["requirements"]["parent_id"] == legacy["id"]
+    assert revised["requirements"]["change_reason"] == "改成开票口径"
+    assert revised["requirements"]["items"][0]["dimensions"] == {"product": "物业费"}
+    assert [item["id"] for item in revised["requirements"]["items"]] == ["expense"]
+    assert len(service._list("contexts")) == contexts_before + 1
+    # The dropped level is recorded on the new version, as for any other save over a legacy record
+    # (review round 3: circle-select dropped it with nothing recorded).
+    assert [(warning["code"], warning["requirement_item_id"], warning["keys"])
+            for warning in revised["requirements"]["authoring_warnings"]] == [
+        ("hierarchy_dimension_dropped", "expense", {"drilldown": "城市公司"})]
+
+
+def test_circle_select_over_a_record_without_hierarchy_records_no_drop(tmp_path: Path) -> None:
+    service, context, _dataset, _original = _service(tmp_path)
+    draft = _table_draft(service)
+
+    revised = service.analysis_circle_select({"kind": "draft_table", "draft_id": draft["id"], "block_id": "tbl-expense",
+                                              "range": "A:A", "instruction": "改成开票口径", "context_id": context["id"]})
+
+    assert "hierarchy_dimension_dropped" not in json.dumps(revised["requirements"].get("authoring_warnings", []))
+
+
+def _legacy_context(tmp_path: Path, *, context_scope: dict, requirement_scope: dict, items: list | None = None):
+    """A pre-phase-1 finance context whose scope holds a hierarchy key (finance_context_save accepts any key)
+    and a legacy requirement saved with it; ReportEditor passes that context on every 改口径 click."""
+    from foundry.analysis import _new
+
+    task = TaskStore(tmp_path / "var").create(title="圈选")
+    service = FinanceStore(task)
+    path = tmp_path / "g1.json"
+    path.write_text(json.dumps([{**SCOPE, "management_account": "expense", "amount": "20"}]), encoding="utf-8")
+    dataset = service.analysis.add_dataset(path, name="g1")
+    context = service.save_context({"bindings": {"actual": dataset["id"]}, "scopes": {"actual": context_scope}})
+    legacy = _new(task, question="解释费用", scope=requirement_scope, bindings={"actual": dataset["id"]},
+                  context_id=context["id"], parent_id=None, removed_item_ids=[], change_reason="", selection=None,
+                  items=items or [{"id": "expense", "metric": "expense", "label": "expense",
+                                   "dimensions": {"drilldown": "城市公司"}, "requires_drilldown": False}])
+    service.analysis._write(service.analysis._object_path("requirements", legacy["id"]), legacy)
+    spec = {"kind": "draft_table", "draft_id": _table_draft(service)["id"], "block_id": "tbl-expense",
+            "range": "selection", "instruction": "改成开票口径", "context_id": context["id"]}
+    return service, context, spec
+
+
+@pytest.mark.parametrize("requirement_has_level", [True, False])
+def test_repeated_circle_select_over_a_context_scope_holding_a_hierarchy_key_saves_each_time(
+    tmp_path: Path, requirement_has_level: bool
+) -> None:
+    """The carried-over context scope kept drilldown=城市公司. The second click (or the first, when the legacy
+    requirement's own scope lacked it) was refused as a newly written scope level, after the child context
+    had been written, so every click left an orphan context and the panel showed no current requirement."""
+    context_scope = {**SCOPE, "drilldown": "城市公司", "granularity": "区域"}
+    service, context, spec = _legacy_context(
+        tmp_path, context_scope=context_scope, requirement_scope=context_scope if requirement_has_level else SCOPE)
+
+    for _click in range(3):
+        contexts, records = len(service._list("contexts")), len(service.analysis._list("requirements"))
+        revised = service.analysis_circle_select(spec)
+        requirement = revised["requirements"]
+
+        assert "drilldown" not in requirement["scope"]
+        # granularity only describes the analysis and is kept (review round 3).
+        assert requirement["scope"]["granularity"] == "区域"
+        assert requirement["context_id"] == revised["context"]["id"]
+        assert len(service._list("contexts")) == contexts + 1
+        assert len(service.analysis._list("requirements")) == records + 1
+        latest = service._list("contexts")[-1]
+        assert service.analysis_requirements_list({"context_id": latest["id"]})["current"]["id"] == requirement["id"]
+
+
+def test_circle_select_refused_by_the_requirement_check_writes_no_child_context(tmp_path: Path) -> None:
+    """Every refusal of the requirement save came after save_context, so a refused click left a context that
+    no requirement references. The requirement is now validated before the child context is written."""
+    items = [{"id": "expense", "metric": "expense", "label": "expense", "dimensions": {},
+              "periods": ["2026-07", "2026-08"], "requires_drilldown": False}]
+    scope = {key: value for key, value in SCOPE.items() if key != "period"}
+    service, context, spec = _legacy_context(tmp_path, context_scope=SCOPE, requirement_scope=scope, items=items)
+    contexts = [row["id"] for row in service._list("contexts")]
+
+    with pytest.raises(FoundryError, match="conflict with scope.period"):
+        service.analysis_circle_select(spec)
+
+    assert [row["id"] for row in service._list("contexts")] == contexts

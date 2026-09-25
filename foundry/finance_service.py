@@ -688,12 +688,16 @@ class FinanceStore:
         parent = latest_requirements(self.analysis)
         if parent:
             self._authorize(parent.get("bindings", {}))
+        context_scopes = None
         if spec.get("context_id"):
             context = self._read("contexts", spec["context_id"])
             spec = {**spec, "bindings": context["bindings"],
                     "scope": spec.get("scope", self._primary_scope(context.get("scopes", {})))}
+            # A hierarchy level the context's own scope holds is carried over into the requirement scope
+            # (the panel seeds from it), so save drops it instead of refusing it as newly written.
+            context_scopes = [scope for scope in (context.get("scopes") or {}).values() if isinstance(scope, dict)]
         self._authorize(spec.get("bindings", {}))
-        return save_requirements(self.analysis, spec)
+        return save_requirements(self.analysis, spec, _context_scopes=context_scopes)
 
     def analysis_requirements_list(self, spec):
         records = self.analysis._list("requirements")
@@ -744,8 +748,8 @@ class FinanceStore:
                 message = error.get("message") if isinstance(error.get("message"), str) else "completion validation failed"
                 raise FoundryError(message)
             key = _hash({"operation_id": operation_id, "call_id": call_id})
-            previous = next((row for row in self.analysis._list("drafts")
-                             if row.get("completion_request_key") == key), None)
+            previous = _replayable_draft([row for row in self.analysis._list("drafts")
+                                          if row.get("completion_request_key") == key], attempt)
             if previous:
                 for run_id in previous.get("run_ids", []):
                     self._authorize(self.analysis.get_run(run_id)["bindings"])
@@ -840,12 +844,13 @@ class FinanceStore:
                 raise FoundryError("operation revision has not been reserved")
             if attempt.get("status") == "reserved" and operation.get("status") not in TERMINAL:
                 raise FoundryError("live completion attempt cannot be recovered")
-            previous_by_revision = next((row for row in self.analysis._list("drafts")
-                                         if row.get("completion_operation_id") == operation["id"]
-                                         and row.get("completion_operation_revision") == revision), None)
+            saved_by_revision = [row for row in self.analysis._list("drafts")
+                                 if row.get("completion_operation_id") == operation["id"]
+                                 and row.get("completion_operation_revision") == revision]
+            if any(row.get("completion_request_key") != recovery_key for row in saved_by_revision):
+                raise FoundryError("completion recovery already saved with a different payload")
+            previous_by_revision = _replayable_draft(saved_by_revision, attempt)
             if previous_by_revision:
-                if previous_by_revision.get("completion_request_key") != recovery_key:
-                    raise FoundryError("completion recovery already saved with a different payload")
                 receipt = (self.analysis._get("completions", attempt["completion_id"])
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
@@ -888,8 +893,8 @@ class FinanceStore:
             if requirements:
                 self._authorize(requirements.get("bindings", {}))
             key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
-            previous = next((row for row in self.analysis._list("drafts")
-                             if row.get("completion_request_key") == key), None)
+            previous = _replayable_draft([row for row in self.analysis._list("drafts")
+                                          if row.get("completion_request_key") == key])
             if previous:
                 self._authorize_evidence_recipes(previous.get("evidence_recipes", []))
                 self._authorize_consistency_sources(previous.get("consistency_sources", {}))
@@ -918,6 +923,9 @@ class FinanceStore:
             raise FoundryError("runtime drafts cannot mark professional review complete")
         if parent.get("requirements_id"):
             self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
+        if spec.get("requirements_id"):
+            # The tools expose requirements_id so a revision can name the current version (repin_requirements).
+            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
@@ -962,15 +970,43 @@ class FinanceStore:
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
-        # Read actual requested evidence before evaluating the final draft.
+        auto_claims = claims_for_facts(prepared["facts"], fact_ids)
+        claims = []
+        for claim in _dedupe_explanation_claims(
+            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
+        ):
+            if not isinstance(claim, dict):
+                raise FoundryError("claims must contain objects")
+            claim = dict(claim)
+            if claim.get("dataset_id"):
+                self._authorize({"source": claim["dataset_id"]})
+            if claim.get("basis") == "calculation" and claim.get("run_id"):
+                run = self.analysis.get_run(claim["run_id"])
+                self._authorize(run["bindings"])
+                if run.get("engine") == "finance":
+                    claim.update(
+                        finance_context_id=run["finance_context_id"],
+                        finance_scope=run["finance_scope"],
+                        metric_id=claim.get("column"),
+                        account_map_id=run.get("account_map_id"),
+                    )
+            claims.append(claim)
+        # Read actual requested evidence before evaluating the final draft. The draft's recipes are
+        # evaluated once here; the same server-computed report reaches save_draft. The provisional
+        # check sees the same claims as the final one, so a cell cited through claims (not fact_ids)
+        # still reaches the generated appendix and its 估算 label.
         from foundry.finance_requirements import check_requirements
-        from foundry.finance_requirement_support import with_input_gaps, input_gap_appendix
+        from foundry.finance_requirement_support import evidence_basis_appendix, with_input_gaps, input_gap_appendix
+        from foundry.financial_evidence import evaluate_evidence_recipes
+        evidence_recipes = spec.get("evidence_recipes", parent.get("evidence_recipes", []))
+        recipe_report = evaluate_evidence_recipes(self.analysis, evidence_recipes)
         provisional = check_requirements(self.analysis, {
-            "run_ids": run_ids, "claims": claims_for_facts(prepared["facts"], fact_ids),
+            "run_ids": run_ids, "claims": claims,
             "requirements_id": spec.get("requirements_id", parent.get("requirements_id")),
-        })
+            "evidence_recipes": evidence_recipes,
+        }, _recipe_report=recipe_report)
         provisional = with_input_gaps(self.analysis, provisional)
-        appendix["body"] += input_gap_appendix(provisional)
+        appendix["body"] += input_gap_appendix(provisional) + evidence_basis_appendix(provisional)
         appendix_meta = evidence_appendix_metadata(
             appendix["body"], base_body=appendix_base_body
         )
@@ -1003,27 +1039,6 @@ class FinanceStore:
                     except FoundryError as exc:
                         source_read_failures.append({"requirement_item_id": item["id"],
                                                      "location": location, "message": str(exc)})
-        auto_claims = claims_for_facts(prepared["facts"], fact_ids)
-        claims = []
-        for claim in _dedupe_explanation_claims(
-            [*auto_claims, *spec.get("claims", parent.get("claims", []))]
-        ):
-            if not isinstance(claim, dict):
-                raise FoundryError("claims must contain objects")
-            claim = dict(claim)
-            if claim.get("dataset_id"):
-                self._authorize({"source": claim["dataset_id"]})
-            if claim.get("basis") == "calculation" and claim.get("run_id"):
-                run = self.analysis.get_run(claim["run_id"])
-                self._authorize(run["bindings"])
-                if run.get("engine") == "finance":
-                    claim.update(
-                        finance_context_id=run["finance_context_id"],
-                        finance_scope=run["finance_scope"],
-                        metric_id=claim.get("column"),
-                        account_map_id=run.get("account_map_id"),
-                    )
-            claims.append(claim)
         check_deadline()
         save_spec = {
             **spec,
@@ -1038,7 +1053,7 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report)
 
         from foundry.finance_completion import record_completion
 
@@ -1114,8 +1129,11 @@ class FinanceStore:
         current = latest_requirements(self.analysis)
         if current:
             self._authorize(current.get("bindings", {}))
-        merged = {**draft, **spec, "run_ids": run_ids}
-        return augment_quality(self.analysis, merged, validate_explanation_payload(self.analysis, merged))
+        # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
+        # evaluated again by validate_explanation and only that fresh report reaches coverage.
+        merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
+        quality = validate_explanation_payload(self.analysis, merged)
+        return augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"])
 
     def finance_background_save(self, spec):
         if not isinstance(spec, dict):
@@ -1809,7 +1827,9 @@ class FinanceStore:
 
     def analysis_circle_select(self, spec):
         from foundry.circle_select import authorize_workbook, match_draft_table, reject_forbidden_spec
-        from foundry.finance_requirements import latest_requirements
+        from foundry.finance_requirements import (
+            SCOPE_REFUSED_HIERARCHY_KEYS, _without_hierarchy, latest_requirements, prepare_requirements,
+        )
 
         reject_forbidden_spec(spec)
         kind = spec.get("kind")
@@ -1842,6 +1862,37 @@ class FinanceStore:
             selection["block_id"] = str(spec["block_id"]).strip()
         else:
             selection["binding_id"] = str(spec["binding_id"])
+        if not latest:
+            # 改口径 revises a stated scope. With none on file the instruction
+            # would be filed as the analytical question, and every later reader
+            # would take 「按区域拆开」 for what was asked. Refused before the
+            # child context is written, so nothing is left behind.
+            raise FoundryError(
+                "circle-select revises an existing analysis; none has been stated yet"
+            )
+        # The items carry over unchanged, except that a record saved before phase 1 may still hold a
+        # hierarchy level (dimensions.drilldown, PR #17). Save refuses those keys and suggests the same
+        # items without them; the carry-over applies that suggestion so 改口径 does not fail on a key
+        # that no longer matched any row.
+        items = [_without_hierarchy(item) if isinstance(item, dict) and isinstance(item.get("dimensions"), dict) else item
+                 for item in latest.get("items") or []]
+        # The requirement scope comes from the context, and a context saved before phase 1 may still hold a
+        # drilldown level (finance_context_save accepts any key; the engine ignores it). Save refuses a scope
+        # level no earlier version had, so the carried scope leaves those keys behind, as the items do.
+        scope = {key: value for key, value in self._primary_scope(context.get("scopes", {})).items()
+                 if str(key).strip().lower() not in SCOPE_REFUSED_HIERARCHY_KEYS}
+        req_spec = {
+            "question": latest.get("question") or instruction,
+            "scope": scope,
+            "items": items,
+            "change_reason": instruction,
+            "selection": selection,
+            "parent_id": latest["id"],
+        }
+        # Every refusal of the requirement save must come before the child context is written, or each
+        # refused click leaves a context no requirement references.
+        self._authorize(context["bindings"])
+        prepare_requirements(self.analysis, {**req_spec, "bindings": context["bindings"]})
         child = self.save_context(
             {
                 "parent_id": context["id"],
@@ -1852,23 +1903,23 @@ class FinanceStore:
                 "account_map_id": context.get("account_map_id"),
             }
         )
-        if not latest:
-            # 改口径 revises a stated scope. With none on file the instruction
-            # would be filed as the analytical question, and every later reader
-            # would take 「按区域拆开」 for what was asked.
-            raise FoundryError(
-                "circle-select revises an existing analysis; none has been stated yet"
-            )
-        req_spec = {
-            "context_id": child["id"],
-            "question": latest.get("question") or instruction,
-            "items": latest.get("items") or [],
-            "change_reason": instruction,
-            "selection": selection,
-        }
-        req_spec["parent_id"] = latest["id"]
+        req_spec["context_id"] = child["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
+
+
+def _replayable_draft(drafts, attempt=None):
+    """The saved draft a retry of the same request may return instead of saving again.
+
+    A settled attempt returns the draft it settled with (its receipt is already written). Otherwise only
+    a draft whose check was computed under the current completion policy is replayed: a verdict from
+    older rules must not be stamped into a current-policy receipt, so such a request is checked again.
+    """
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+
+    if attempt and attempt.get("completion_id"):
+        return next((row for row in drafts if row.get("id") == attempt.get("draft_id")), drafts[0] if drafts else None)
+    return next((row for row in reversed(drafts) if row.get("check_policy_version") == COMPLETION_POLICY_VERSION), None)
 
 
 def _dedupe_explanation_claims(claims):

@@ -27,6 +27,18 @@ function scopeValue(scope: Record<string, unknown> | undefined, key: string, fal
 }
 
 const editableScopeKeys = ['period', 'granularity', 'unit', 'currency', 'scenario', 'organization'] as const;
+type EditableScope = Record<(typeof editableScopeKeys)[number], string>;
+
+// The fields and the carried keys always mirror the stored record: a save may drop a legacy key (a
+// drilldown level), and resending the copy loaded earlier would be refused on the next save.
+function editableScope(scope: Record<string, unknown> | undefined): EditableScope {
+  return Object.fromEntries(editableScopeKeys.map((key) => [key, scopeValue(scope, key)])) as EditableScope;
+}
+
+function carriedScope(scope: Record<string, unknown> | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(scope ?? {}).filter(([key]) => !editableScopeKeys.includes(key as (typeof editableScopeKeys)[number])));
+}
+
 const itemScopeKeys = [
   { field: 'period', itemField: 'periods', label: '期间' },
   { field: 'organization', itemField: 'organizations', label: '组织' },
@@ -49,7 +61,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
   onSaved?(record: ScopeRecord): void;
 }) {
   const [current, setCurrent] = useState<ScopeRecord | null>(null);
-  const [scope, setScope] = useState<Record<(typeof editableScopeKeys)[number], string>>({ period: '', granularity: '', unit: '', currency: '', scenario: '', organization: '' });
+  const [scope, setScope] = useState<EditableScope>(() => editableScope(undefined));
   const [extraScope, setExtraScope] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -69,16 +81,8 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       const payload = unwrap(answer as Answer<RequirementsList>);
       const next = payload.current ?? null;
       setCurrent(next);
-      const allScope = next?.scope ?? {};
-      setScope({
-        period: scopeValue(next?.scope, 'period'),
-        granularity: scopeValue(next?.scope, 'granularity'),
-        unit: scopeValue(next?.scope, 'unit'),
-        currency: scopeValue(next?.scope, 'currency'),
-        scenario: scopeValue(next?.scope, 'scenario'),
-        organization: scopeValue(next?.scope, 'organization'),
-      });
-      setExtraScope(Object.fromEntries(Object.entries(allScope).filter(([key]) => !editableScopeKeys.includes(key as (typeof editableScopeKeys)[number]))));
+      setScope(editableScope(next?.scope));
+      setExtraScope(carriedScope(next?.scope));
     }).catch((reason: unknown) => {
       if (request.current !== seq) return;
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -106,6 +110,8 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       }) as Answer<ScopeRecord>);
       if (saveRequest.current !== seq) return;
       setCurrent(record);
+      setScope(editableScope(record.scope));
+      setExtraScope(carriedScope(record.scope));
       setMessage(`已保存口径版本 ${record.id.slice(0, 12)}。`);
       onSaved?.(record);
     } catch (reason) {
