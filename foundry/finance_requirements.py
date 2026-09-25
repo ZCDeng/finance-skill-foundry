@@ -100,10 +100,12 @@ CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
     'management_account', 'account_id', 'account_code',
 )
-# Hierarchy levels say how far to drill, not which result row answers; a row cannot carry them.
-HIERARCHY_DIMENSION_KEYS = frozenset({
-    'drilldown', 'drill_down', 'breakdown', 'granularity', 'level', 'group_by', 'hierarchy',
-})
+# Hierarchy levels say how far to drill, not which result row answers; a row cannot carry them. Only the
+# drilldown key PR #17 told writers to stamp on rows is one (decision 1): a key named level, breakdown,
+# group_by, hierarchy or granularity may be a real row column (a 职级 column), and filters rows as on main.
+HIERARCHY_DIMENSION_KEYS = frozenset({'drilldown', 'drill_down'})
+# The scope card's 粒度 (scope.granularity) describes the analysis; neither it nor a drilldown level filters rows.
+SCOPE_NON_FILTER_KEYS = HIERARCHY_DIMENSION_KEYS | {'granularity'}
 # Book identity a run without finance_scope proves by its bound snapshot hashes, not by row text.
 LEDGER_IDENTITY_KEYS = frozenset({'ledger', 'ledger_id', 'tenant_id'})
 # A ratio has no money unit or currency; the shared scope's unit/currency only constrain amounts.
@@ -296,7 +298,9 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items):
 
     The scope card carries items over unchanged and cannot edit them; circle-select and a resubmitted
     refusal's suggested_items arrive already without the level. Either way the dropped level is recorded
-    as an authoring warning on the new version. A key the writer adds or changes is still refused.
+    as an authoring warning on the new version. Levels are compared one key at a time, so a sibling the panel
+    pruned (a null value) or the writer removed does not turn the untouched one into a new level. A key the
+    writer adds or changes is still refused, and only it is named.
     """
     parent = _parent_record(analysis, parent_id)
     previous = {item.get('id'): item for item in (parent or {}).get('items') or [] if isinstance(item, dict)}
@@ -306,19 +310,48 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items):
     for item in items:
         keys = _hierarchy_dimensions(item)
         legacy = _hierarchy_dimensions(previous.get(item['id']) or {})
-        if legacy and keys in ({}, legacy):
-            named = '、'.join(f'{key}={value}' for key, value in legacy.items())
-            warnings.append({'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'], 'keys': legacy,
-                             'message': f'旧版要求的维度 {named} 是下钻层级，不是结果行字段，新版已去掉；'
-                                        '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
-            item = _without_hierarchy(item)
+        carried = {key for key, value in keys.items() if key in legacy and legacy[key] == value}
+        if legacy and (carried or not keys):
+            dropped = {key: value for key, value in legacy.items() if value not in (None, '')}
+            if dropped:
+                named = '、'.join(f'{key}={value}' for key, value in dropped.items())
+                warnings.append({'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'],
+                                 'keys': dropped,
+                                 'message': f'旧版要求的维度 {named} 是下钻层级，不是结果行字段，新版已去掉；'
+                                            '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
+            item = {**item, 'dimensions': {key: value for key, value in item.get('dimensions', {}).items()
+                                           if key not in carried}}
         kept.append(item)
     return kept, warnings
 
 
+def _dropped_hierarchy(analysis, latest):
+    """{item id: levels} an earlier version of this requirement held for an item the latest version still
+    lists without them.
+
+    A save refuses every newly written level, so any level an earlier version held is a legacy one (PR #17),
+    and a version without it asks for less than the user did: like a removed item, the original requirement
+    stays incomplete, whichever save (the manager's scope card or panel, 改口径, the assistant's resubmitted
+    suggested_items) dropped it.
+    """
+    current = {item['id']: _hierarchy_dimensions(item) for item in latest.get('items') or [] if isinstance(item, dict)}
+    dropped, seen = {}, {latest.get('id')}
+    record = _parent_record(analysis, latest.get('parent_id'))
+    while record and record.get('id') not in seen:
+        seen.add(record.get('id'))
+        for item in record.get('items') or []:
+            if not isinstance(item, dict) or item.get('id') not in current:
+                continue
+            for key, value in _hierarchy_dimensions(item).items():
+                if value not in (None, '') and current[item['id']].get(key) != value:
+                    dropped.setdefault(item['id'], {}).setdefault(key, value)
+        record = _parent_record(analysis, record.get('parent_id'))
+    return dropped
+
+
 # The scope card's 粒度 (scope.granularity) describes the analysis and is kept; it never filters rows
-# (_item_scope, _row_scope). The other hierarchy keys in scope are a drilldown moved out of dimensions.
-SCOPE_REFUSED_HIERARCHY_KEYS = HIERARCHY_DIMENSION_KEYS - {'granularity'}
+# (_item_scope, _row_scope). A drilldown key in scope is a drilldown moved out of dimensions.
+SCOPE_REFUSED_HIERARCHY_KEYS = HIERARCHY_DIMENSION_KEYS
 
 
 def _scope_levels(values):
@@ -540,11 +573,82 @@ def _has_finance_scope(run):
     return isinstance(scopes, dict) and bool(scopes)
 
 
+# The finance normaliser (run_metric, explain_variance other than the price-quantity bridge) converts each bound
+# input's amounts to its context policy's target_unit; scenario runs and the bridge read source rows unconverted.
+UNIT_CONVERTING_OPERATIONS = frozenset({'metric', 'variance'})
+
+
+def _unit_converting_run(analysis, run):
+    """Whether the finance normaliser wrote this run's amounts, so its context's policies.<alias>.target_unit
+    converted them (run_metric, explain_variance other than the price-quantity bridge)."""
+    if not run.get('analysis_id'):
+        return False
+    try:
+        revision = analysis.get_analysis(run['analysis_id'])
+    except FoundryError:
+        return False
+    spec = revision.get('finance_spec') if isinstance(revision.get('finance_spec'), dict) else {}
+    return (revision.get('finance_context_id') == run.get('finance_context_id')
+            and revision.get('operation') in UNIT_CONVERTING_OPERATIONS
+            and not (revision.get('operation') == 'variance' and spec.get('kind') == 'price_quantity'))
+
+
+def _engine_output_units(run, context):
+    """{alias: unit} for the bound inputs whose amounts the engine wrote in another unit than the one their
+    finance_scope states (the source table's own unit), because the context set policies.<alias>.target_unit."""
+    policies = (context or {}).get('policies') if isinstance((context or {}).get('policies'), dict) else {}
+    scopes = run.get('finance_scope') if isinstance(run.get('finance_scope'), dict) else {}
+    units = {}
+    for alias, scope in scopes.items():
+        policy = policies.get(alias) if isinstance(policies.get(alias), dict) else {}
+        target = str(policy.get('target_unit') or '').strip()
+        if target and isinstance(scope, dict) and scope.get('unit') not in (None, '', target):
+            units[alias] = target
+    return units
+
+
+def _with_engine_output_units(analysis, runs):
+    """Mark each finance run the normaliser wrote (_unit_converting) and, where its context converted an
+    input's amounts, the unit the engine wrote them in; _finance_scopes reads it wherever a run's scope is
+    compared with the requirement, and only a converting run is offered target_unit (_unit_conversion)."""
+    finance = [run for run in runs.values() if run.get('engine') == 'finance' and run.get('finance_context_id')
+               and _has_finance_scope(run)]
+    if not finance:
+        return runs
+    try:
+        from foundry.finance_service import FinanceStore
+
+        contexts = {context.get('id'): context for context in FinanceStore(analysis.task)._list('contexts')}
+    except (FoundryError, OSError, ValueError, KeyError, TypeError):
+        return runs
+    marked = dict(runs)
+    for run in finance:
+        if not _unit_converting_run(analysis, run):
+            continue
+        units = _engine_output_units(run, contexts.get(run['finance_context_id']))
+        marked[run['id']] = {**run, '_unit_converting': True, **({'_engine_output_units': units} if units else {})}
+    return marked
+
+
+def _finance_scopes(run):
+    """A finance run's finance_scope with each converted input's unit read as the unit the engine wrote.
+
+    finance_scope records the scopes the context states for its inputs, so a table in 元 converted with
+    policies.<alias>.target_unit=万元 still states 元 there; its rows and amounts are in 万元.
+    """
+    scopes = run.get('finance_scope') if isinstance(run.get('finance_scope'), dict) else {}
+    units = run.get('_engine_output_units') or {}
+    if not units:
+        return scopes
+    return {alias: ({**scope, 'unit': units[alias]} if alias in units and isinstance(scope, dict) else scope)
+            for alias, scope in scopes.items()}
+
+
 def _item_scope(item, scope):
     """The requirement scope that applies to this item. A hierarchy level (scope.granularity from the scope
     card's 粒度) describes the analysis and never filters rows; a known non-amount (a ratio, a count, a
     quantity) carries no money unit or currency."""
-    scope = _scope_without(scope if isinstance(scope, dict) else {}, HIERARCHY_DIMENSION_KEYS)
+    scope = _scope_without(scope if isinstance(scope, dict) else {}, SCOPE_NON_FILTER_KEYS)
     if not _known_non_amount(item):
         return scope
     return _scope_without(scope, AMOUNT_ONLY_SCOPE_KEYS)
@@ -552,7 +656,7 @@ def _item_scope(item, scope):
 
 def _row_scope(scope):
     """The requirement scope rows and run scopes are compared with: hierarchy levels are not row filters."""
-    return _scope_without(scope if isinstance(scope, dict) else {}, HIERARCHY_DIMENSION_KEYS)
+    return _scope_without(scope if isinstance(scope, dict) else {}, SCOPE_NON_FILTER_KEYS)
 
 
 def _scope_without(scope, keys):
@@ -599,7 +703,7 @@ def _scope_matches(run, row, scope):
     if not scope:
         return True
     expected = _comparison_scopes(scope)
-    scopes = run.get('finance_scope') or {}
+    scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else (run.get('finance_scope') or {})
     if isinstance(scopes, dict):
         actual_scope = row.get('actual_scope') if isinstance(row.get('actual_scope'), dict) else scopes.get('actual')
         baseline_scope = (
@@ -1146,8 +1250,9 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
         if not _metric_filters_cover_requirement(metric, item, scope):
             tried.append(_engine_run_gap(item, run, scope, 'metric_filters_differ'))
             continue
-        if _run_scope_is_narrower_than_requirement(run, item, scope):
-            tried.append(_engine_run_gap(item, run, scope, 'run_scope_narrower'))
+        narrower = _run_scope_narrower_fields(run, item, scope)
+        if narrower:
+            tried.append({**_engine_run_gap(item, run, scope, 'run_scope_narrower'), 'narrower_scope': narrower})
             continue
         rows = _result_set_required_rows(item, run, scope)
         if rows and _result_set_comparison_complete(kind, item, latest, run, rows):
@@ -1203,7 +1308,11 @@ def _engine_run_gap(item, run, scope, reason):
     blank = [key for key in keys if all(_run_row_value(run, row, key) in (None, '') for row in rows)]
     differing = {key: value for key, value in expected.items() if key not in listed and key not in blank
                  and any(_run_row_value(run, row, key) not in (None, '', value) for row in rows)}
-    required = {key: expected[key] for key in [*blank, *differing] if key in expected}
+    # Rows in another unit are converted (policies.<alias>.target_unit), never relabelled: stating the required
+    # unit in scopes would label the source amounts with it unconverted, so it is not offered as a scope value.
+    required = {key: expected[key] for key in [*blank, *differing] if key in expected
+                and not (key == 'unit' and key in differing)}
+    conversion = _unit_conversion(run, expected.get('unit')) if 'unit' in blank or 'unit' in differing else {}
     unmapped = sum(row.get('management_account') == UNMAPPED_ACCOUNT for row in rows)
     requested = _requested_grains(item) or {}
     present = {_row_grain(item, run, row) for row in rows}
@@ -1215,9 +1324,28 @@ def _engine_run_gap(item, run, scope, reason):
             **({'blank_fields': blank} if blank else {}),
             **({'differing_fields': differing} if differing else {}),
             **({'required_scope': required} if required else {}),
+            **conversion,
             **({'unmapped_accounts': unmapped} if unmapped else {}),
             **({'missing_grains': missing[:12]} if missing else {}),
             **({'out_of_scope_grains': unscoped[:12]} if unscoped else {})}
+
+
+def _unit_conversion(run, unit):
+    """The target_unit a finance run's context must set, and on which aliases, for its amounts to be in `unit`:
+    the aliases whose scope states another unit, else every bound alias. Only a run the normaliser wrote
+    converts; a scenario run or the price-quantity bridge reads source amounts as they are."""
+    if unit in (None, '') or not run.get('_unit_converting'):
+        return {}
+    scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else {}
+    aliases = [alias for alias, scope in scopes.items() if isinstance(scope, dict)
+               and scope.get('unit') not in (None, '', unit)] or sorted(scopes)
+    return {'target_unit': unit, **({'target_unit_aliases': aliases} if aliases else {})}
+
+
+def _unit_conversion_text(unit, aliases):
+    paths = '、'.join(f'policies.{alias}.target_unit' for alias in aliases or ['<绑定别名>'])
+    return (f'金额单位要按 {unit} 列示时：scopes 的 unit 只写表本身的金额单位，再用 finance_context_save 在 {paths} '
+            f'写 {unit}，由财务引擎换算金额后重跑；只把 scopes 的 unit 改成 {unit} 不会换算金额，数会错。')
 
 
 def _run_row_value(run, row, key):
@@ -1225,7 +1353,7 @@ def _run_row_value(run, row, key):
     (every bound input's scope) states."""
     if row.get(key) not in (None, ''):
         return row[key]
-    scopes = run.get('finance_scope') if isinstance(run.get('finance_scope'), dict) else {}
+    scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else {}
     values = {str(value) for scope in scopes.values() if isinstance(scope, dict)
               for value in [scope.get(key)] if value not in (None, '')}
     if len(values) > 1:
@@ -1283,31 +1411,40 @@ def _metric_filters_cover_requirement(metric, item, scope):
 
 
 def _run_scope_is_narrower_than_requirement(run, item, scope):
-    scopes = (run.get('finance_scope') or {})
-    if not isinstance(scopes, dict):
-        return False
+    return bool(_run_scope_narrower_fields(run, item, scope))
+
+
+def _run_scope_narrower_fields(run, item, scope):
+    """The values a finance run's bound scopes state that the requirement does not share (key: stated value).
+
+    A converted input is read in the unit the engine wrote (_finance_scopes), not its source unit.
+    """
+    if not isinstance(run.get('finance_scope'), dict):
+        return {}
+    scopes = _finance_scopes(run)
     expected = _comparison_scopes(scope)
     periods = set(item.get('periods', []))
     scenarios = set(item.get('scenarios', []))
+    narrower = {}
     for candidate in scopes.values():
         if not isinstance(candidate, dict):
             continue
         for key, value in candidate.items():
-            if value in (None, ''):
+            if value in (None, '') or key in narrower:
                 continue
             if key in expected['actual'] or key in expected['source']:
                 expected_value = expected['actual'].get(key, expected['source'].get(key))
                 if expected_value != value:
-                    return True
+                    narrower[key] = value
                 continue
             if key == 'organization' and item.get('organizations'):
-                if set(item['organizations']) == {value}:
-                    continue
-                return True
+                if set(item['organizations']) != {value}:
+                    narrower[key] = value
+                continue
             if key == 'scenario' and scenarios:
-                if value in scenarios:
-                    continue
-                return True
+                if value not in scenarios:
+                    narrower[key] = value
+                continue
             if (
                 key == 'scenario'
                 and _result_set_kind(item) == 'control_totals'
@@ -1318,14 +1455,14 @@ def _run_scope_is_narrower_than_requirement(run, item, scope):
                 continue
             if key in item.get('dimensions', {}):
                 if item['dimensions'][key] != value:
-                    return True
+                    narrower[key] = value
                 continue
             if key == 'period' and periods:
-                if periods == {value}:
-                    continue
-                return True
-            return True
-    return False
+                if periods != {value}:
+                    narrower[key] = value
+                continue
+            narrower[key] = value
+    return narrower
 
 
 def _result_set_required_rows(item, run, scope):
@@ -1982,7 +2119,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
     selected = latest if _requirements_record and latest.get('id') == selected_id else analysis._get('requirements', selected_id)
     # Public checks use current obligations; only internal appendix reconstruction
     # supplies an immutable historical record to recover its original text.
-    runs = {r['id']: r for r in analysis._list('runs') if r.get('execution_status') == 'succeeded'}
+    runs = _with_engine_output_units(
+        analysis, {r['id']: r for r in analysis._list('runs') if r.get('execution_status') == 'succeeded'})
     evidence = _prepared_evidence(analysis, runs)
     # Recipe results are computed by the server in this call (or handed over by an internal caller
     # that just computed them); spec['evidence_report'] is never read.
@@ -2008,6 +2146,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
     source_failures = _source_read_failures(spec.get('source_read_failures', []))
     environment = _evidence_environment(analysis, latest, runs)
     acceptances = _estimate_acceptances(analysis, latest)
+    dropped_hierarchy = _dropped_hierarchy(analysis, latest)
     items = []
     for item in latest['items']:
         locations = []
@@ -2133,6 +2272,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
         if hierarchy:
             item_record['hierarchy_dimensions'] = hierarchy
             fixups = [*fixups, _revise_dimension_fixup(item)]
+        if dropped_hierarchy.get(item['id']):
+            item_record['dropped_hierarchy'] = dropped_hierarchy[item['id']]
         if item_status != 'answered':
             item_record, fixups = _unanswered_details(
                 item, item_record, fixups, latest, runs, claimed_cells, evidence, grain_states, paths, acceptances,
@@ -2162,8 +2303,10 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                          else 'needs_attention'},
             'provenance': {'status': 'pass' if trace_complete else 'pass_with_accepted_estimates' if trace_with_estimates
                            else 'needs_attention'},
-            # Accepted estimates never complete the original requirements.
-            'original_requirements_completed': complete and not latest.get('removed_item_ids')}
+            # Accepted estimates never complete the original requirements; nor does a version that removed an
+            # item or dropped a level the user asked for (_dropped_hierarchy).
+            'original_requirements_completed': (complete and not latest.get('removed_item_ids')
+                                                and not dropped_hierarchy)}
 
 
 def _bindings_mismatch_location(run, index, column):
@@ -2180,7 +2323,7 @@ def _out_of_scope_inputs(run, item, latest):
     row stating another period is another grain, not a run to redo, and a comparison run's unnamed sides
     are ambiguous rather than out of scope, so neither is reported here.
     """
-    scopes = run.get('finance_scope') if isinstance(run.get('finance_scope'), dict) else {}
+    scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else {}
     if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'baseline', 'budget', 'source')):
         return []
     expected = _comparison_scopes(_item_scope(item, latest.get('scope') or {}))['actual']
@@ -2344,11 +2487,23 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
                                  if location['evidence'].get('not_counted_reason') == 'run_scope_differs'))
     if rescope:
         record['required_scope'] = _item_scope(item, latest.get('scope') or {})
+        # An input in another unit is converted (policies.<alias>.target_unit), never relabelled in its scope.
+        unit = _comparison_scopes(record['required_scope'])['actual'].get('unit')
+        conversions = [conversion for run_id in rescope[:12]
+                       if any(isinstance(scope, dict) and scope.get('unit') not in (None, '', unit)
+                              for scope in _finance_scopes(runs[run_id]).values())
+                       for conversion in [_unit_conversion(runs[run_id], unit)] if conversion] if unit else []
+        if conversions:
+            record['unit_conversion'] = {
+                'target_unit': unit,
+                'target_unit_aliases': sorted({alias for conversion in conversions
+                                               for alias in conversion.get('target_unit_aliases', [])})}
         fixups = [*fixups, {
             'code': 'rescope_run',
             'requirement_item_id': item['id'],
             # Rerun on a finance context whose every bound alias's scope is this scope.
             'required_scope': record['required_scope'],
+            **record.get('unit_conversion', {}),
             'runs': [{'run_id': run_id, 'finance_scope': runs[run_id].get('finance_scope') or {}}
                      for run_id in rescope[:12]],
             'reason': 'run_scope_differs',
@@ -3020,8 +3175,9 @@ BLOCKER_TEXT = {
     'structure_pending_confirmation': '工作簿结构待经理确认',
     'no_finance_context': '尚无覆盖这些资料的财务口径',
     'bindings_without_engine_rows': ('本要求绑定的资料快照都读不出财务引擎的数据行（工作簿文件、空表，'
-                                     '或没有金额列、也没有收入成本费用列的表，如区域预算分解表）；'
-                                     '未绑定到本要求的表快照上的运行不计入，需经理改绑到引擎能读的明细表或改用其他依据'),
+                                     '或列名都不是引擎读取的名称的表：引擎只读列名为 amount、金额、发生额或本期金额的金额列，'
+                                     '或列名恰为 revenue、cost、expense 的列，营业收入预算、营业成本等中文列名读不到）；'
+                                     '未绑定到本要求的表快照上的运行不计入，需经理改绑到有上述列的明细表或改用其他依据'),
     'no_workbook_source': '绑定资料中没有可复算的归档工作簿',
     'amount_column_unmapped': '绑定的明细表有科目列，但金额所在列的列名不是财务引擎默认读取的金额列名',
 }
@@ -3037,9 +3193,14 @@ ENGINE_RUN_TEXT = {
 
 
 def _engine_runs_text(runs):
-    parts, required = [], {}
+    parts, required, conversion = [], {}, None
     for run in runs[-3:]:
         text = f'运行 {run["run_id"]} 读到 {run["rows"]} 行，{ENGINE_RUN_TEXT.get(run["reason"], run["reason"])}'
+        if run.get('narrower_scope'):
+            named = '、'.join(f'{key}={value}' for key, value in run['narrower_scope'].items())
+            text += f'（财务口径 scopes 里的 {named} 不是要求范围的值）'
+        if run.get('target_unit'):
+            conversion = (run['target_unit'], run.get('target_unit_aliases'))
         if run.get('blank_fields'):
             text += f'，行上 {"、".join(run["blank_fields"])} 为空（财务口径的 scopes 里也没有写）'
         if run.get('differing_fields'):
@@ -3056,7 +3217,8 @@ def _engine_runs_text(runs):
     return ('已在本要求的绑定上运行过 run_metric，结果不计入：' + '；'.join(parts) + '。原样重跑只会得到同样的行：'
             '整张表属于同一组织、期间、情景、账套、币种或单位时，可用 finance_context_save 在该绑定的 scopes 里写明'
             + (f'（要求范围：{named}）' if named else '') + '后重跑；'
-            '未映射的科目要先有科目映射；绑定资料本身没有这些字段时，需经理改绑或改用其他依据。')
+            '未映射的科目要先有科目映射；绑定资料本身没有这些字段时，需经理改绑或改用其他依据。'
+            + (_unit_conversion_text(*conversion) if conversion else ''))
 
 
 def _grain_example(grain):
@@ -3164,6 +3326,9 @@ def _unanswered_message(item):
             message += (f'要让这些结果计入，须在每个绑定别名的口径都与本要求范围一致{f"（{named}）" if named else ""}'
                         '的财务口径上重新运行，'
                         '一个输入的口径不同，运行结果的口径就无法证明；这不是结果行上补字段能解决的。')
+            if item.get('unit_conversion'):
+                message += _unit_conversion_text(item['unit_conversion']['target_unit'],
+                                                 item['unit_conversion'].get('target_unit_aliases'))
         estimates = [grain for grain in [*missing, *uncounted] if _reproducible_estimate_declared(item, grain)]
         if estimates and paths.get('estimate'):
             message += (_grain_count(estimates, '已在 grain_basis 声明为估算')

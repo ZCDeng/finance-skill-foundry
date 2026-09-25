@@ -19,7 +19,10 @@ MAX_REPAIRS = 2
 #     filtered part of an account, keeps a grain estimated while an estimate sits beside a different answered
 #     number, stops empty sibling columns of a plain result row from voiding its cells, and hands a detail table
 #     whose amount column needs a field_map to the assistant (amount_column_unmapped) instead of the manager.
-COMPLETION_POLICY_VERSION = 11
+# 12: review round 9 filters rows on dimensions named level/breakdown/group_by/hierarchy again (only drilldown is
+#     a hierarchy level), keeps the original requirement incomplete when a version dropped a legacy level, and
+#     compares a finance run converted with policies.target_unit in the unit the engine wrote.
+COMPLETION_POLICY_VERSION = 12
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
@@ -28,9 +31,18 @@ MANAGER_REASON_TEXT = {
     'unavailable_declared': '声明为资料缺失的组合待经理确认',
     'estimate_factor_not_reproducible': '估算系数无法由归档单元格复算，需经理决定口径',
     'structure_pending_confirmation': '工作簿结构待经理确认',
-    'bindings_without_engine_rows': ('要求绑定的资料财务引擎都读不到数据行（工作簿文件、空表或没有金额列的表），'
-                                     '需经理改绑到引擎能读的明细表（带金额或收入、成本、费用列）或改用其他依据'),
+    'bindings_without_engine_rows': ('要求绑定的资料财务引擎都读不到数据行（工作簿文件、空表，或列名都不是引擎读取的名称的表），'
+                                     '需经理改绑到引擎能读的明细表或改用其他依据：引擎只读列名为 amount、金额、发生额或本期金额的金额列，'
+                                     '或列名恰为 revenue、cost、expense 的列；营业收入、营业成本、期间费用这类中文列名读不到'),
 }
+
+
+def _dropped_hierarchy_action(item):
+    named = '、'.join(f'{key}={value}' for key, value in item['dropped_hierarchy'].items())
+    return {'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'],
+            'keys': item['dropped_hierarchy'],
+            'message': (f'原要求“{item.get("label") or item["id"]}”按 {named} 下钻，现行要求版本已去掉这一层级，'
+                        '本稿没有按它逐一作答，原始要求记为未完成；答复须如实说明。')}
 
 
 def record_completion(analysis, draft, quality):
@@ -125,6 +137,10 @@ def record_completion(analysis, draft, quality):
                    for issue in issues]
         if unassessed:
             actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})
+        # A level the user asked for that a later version dropped: not a repair (the level is not a row field),
+        # but the reply must say the original requirement is not complete (original_requirements_completed).
+        actions.extend(_dropped_hierarchy_action(item) for item in requirements.get('items', [])
+                       if item.get('dropped_hierarchy'))
         record = _new(analysis.task, draft_id=draft['id'], draft_content_hash=draft['content_hash'],
                       completion_policy_version=COMPLETION_POLICY_VERSION,
                       requirements_id=requirement_id, requirements_semantic_fingerprint=semantic_fingerprint,

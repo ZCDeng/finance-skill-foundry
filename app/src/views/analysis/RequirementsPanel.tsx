@@ -124,8 +124,9 @@ function pruneScope(value: RequirementScope & Record<string, unknown>): Requirem
 
 // Hierarchy levels a finance context may hold (finance_context_save accepts any key) but a requirement scope
 // refuses (SCOPE_REFUSED_HIERARCHY_KEYS in foundry/finance_requirements.py). The panel has no field for them,
-// so a context seed must not carry them into a save the manager cannot correct. granularity stays.
-const contextOnlyScopeLevels = new Set(['drilldown', 'drill_down', 'breakdown', 'level', 'group_by', 'hierarchy']);
+// so a context seed must not carry them into a save the manager cannot correct. granularity stays, and so does
+// a key such as level, which may be a real row column the scope filters on.
+const contextOnlyScopeLevels = new Set(['drilldown', 'drill_down']);
 
 function primaryContextScope(payload: FinanceContextState | null | undefined, selectedContextId?: string): { scope: RequirementScope & Record<string, unknown>; bindings: Record<string, string> } {
   const context = payload?.contexts?.find((item) => item.id === selectedContextId);

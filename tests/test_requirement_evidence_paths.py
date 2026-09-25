@@ -1935,7 +1935,7 @@ def test_resubmitting_the_refusals_suggested_items_records_the_dropped_legacy_le
     legacy = _legacy_drilldown_record(analysis, {'close': close['id']}, [
         {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '收入', 'dimensions': {'drilldown': '城市公司'},
          'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
-    items = [*legacy['items'], {'id': 'region_split', 'metric': 'revenue', 'dimensions': {'level': '区域'}}]
+    items = [*legacy['items'], {'id': 'region_split', 'metric': 'revenue', 'dimensions': {'drill_down': '区域'}}]
     with pytest.raises(FoundryError) as refused:
         save_requirements(analysis, spec(scope=legacy['scope'], bindings=legacy['bindings'], parent_id=legacy['id'], items=items))
 
@@ -2346,7 +2346,7 @@ def test_a_scope_level_an_earlier_version_dropped_is_dropped_again_not_refused(a
     assert [warning['code'] for warning in third['authoring_warnings']] == ['hierarchy_scope_dropped']
 
     # Opposite direction: another value, or a level no earlier version had, is newly written and refused.
-    for scope in ({**third['scope'], 'drilldown': '区域'}, {**third['scope'], 'level': '城市公司'}):
+    for scope in ({**third['scope'], 'drilldown': '区域'}, {**third['scope'], 'drill_down': '城市公司'}):
         with pytest.raises(FoundryError) as refused:
             save_requirements(analysis, spec(scope=scope, parent_id=third['id'], items=third['items']))
         assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
@@ -2398,7 +2398,7 @@ def test_a_level_the_context_does_not_hold_is_still_refused(tmp_path):
     plain_service, plain = _context_with_level(tmp_path / 'plain', {})
     cases = [
         (service, {'context_id': context['id'], 'scope': {**context['scopes']['actual'], 'drilldown': '项目'}}),
-        (service, {'context_id': context['id'], 'scope': {**context['scopes']['actual'], 'level': '城市公司'}}),
+        (service, {'context_id': context['id'], 'scope': {**context['scopes']['actual'], 'drill_down': '城市公司'}}),
         (plain_service, {'context_id': plain['id'], 'scope': {**plain['scopes']['actual'], 'drilldown': '城市公司'}}),
         (service, {'bindings': context['bindings'], 'scope': dict(context['scopes']['actual'])}),
     ]
@@ -2466,7 +2466,7 @@ def test_tool_descriptions_name_the_aggregate_and_price_quantity_paths_and_exact
 SCENARIO_SCOPE = {'ledger': 'L1', 'organization': 'O1', 'currency': 'CNY', 'unit': '万元'}
 
 
-def _scenario_case(tmp_path, kind, aliases, *, scopes=None, requirement_scope=None):
+def _scenario_case(tmp_path, kind, aliases, *, scopes=None, requirement_scope=None, policies=None):
     """A finance context binding `aliases`, a requirement saved on it (the context's scope unless
     `requirement_scope`), and one finance_scenario_run of `kind` with every engine-amount cell cited:
     closing_cash for cash_13_weeks, open_amount for receivables_aging."""
@@ -2486,7 +2486,8 @@ def _scenario_case(tmp_path, kind, aliases, *, scopes=None, requirement_scope=No
         path.write_text(json.dumps(data[alias], ensure_ascii=False), encoding='utf-8')
         bindings[alias] = service.analysis.add_dataset(path, name=alias)['id']
     context = service.save_context({'bindings': bindings,
-                                    'scopes': scopes or {alias: dict(SCENARIO_SCOPE) for alias in bindings}})
+                                    'scopes': scopes or {alias: dict(SCENARIO_SCOPE) for alias in bindings},
+                                    'policies': policies or {}})
     column = 'closing_cash' if kind == 'cash_13_weeks' else 'open_amount'
     requirement = service.analysis_requirements_save({
         'context_id': context['id'], 'question': column, 'items': [{'id': 'amount', 'metric': column}],
@@ -3017,7 +3018,7 @@ def test_bound_tables_the_finance_engine_reads_no_rows_from_are_handed_to_the_ma
     assert [(path['path'], path['blockers']) for path in item['evidence_paths']['blocked']] == [
         ('run_metric_result_set', ['bindings_without_engine_rows'])]
     assert item['awaiting_manager'] == ['bindings_without_engine_rows']
-    assert '没有金额列' in message and '助手不要重复计算' in message
+    assert '列名都不是引擎读取的名称' in message and '助手不要重复计算' in message
     assert '可计入的依据' not in message and 'finance_context_save' not in message
     assert requirement['support']['items'][0]['accepted_evidence'] == []
     completion = _completion(service, request, 'regional')
@@ -3126,7 +3127,7 @@ def test_tool_descriptions_state_the_round_7_rules():
     assert '同一个要求组合引用的每个数都要按上述依据计入' in tools and '同一要求组合引用的每个数都要计入' in preset
     assert '28 significant digits' in draft and '28 位有效数字' in tools and '28位有效数字' in preset
     assert 'A workbook bound beside a table the engine reads blocks nothing' in draft
-    assert '没有金额列的表' in tools and '没有金额列的表' in preset
+    assert '列名都不是上述名称的表' in tools and '没有金额列的表' in preset
     assert 'engine_run_does_not_cover_requirement' in draft and 'engine_run_does_not_cover_requirement' in tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
@@ -3675,7 +3676,7 @@ def test_a_draft_policy_10_completed_on_a_revenue_account_total_is_checked_again
     run, claim = _account_total_claim(case.service, case.context, 'revenue')
     request = {'title': 't', 'body': f'8 月营业收入 {claim["value"]} 元。', 'run_ids': [run['id']], 'claims': [claim]}
     first = case.service.save_explanation_draft(request)
-    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 11
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION >= 11
     analysis = case.service.analysis
     path = analysis._object_path('drafts', first['id'])
     stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
@@ -3717,3 +3718,398 @@ def test_tool_descriptions_state_the_round_8_rules():
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
         encoding='utf-8') == preset
+
+
+# --- review fixes, round 9 (PR #23): regressions against main ---------------------------------------
+#
+# Only drilldown/drill_down are hierarchy levels (the spec names drilldown): a real row column named level,
+# breakdown, group_by, hierarchy or granularity filters rows again, as on main. A legacy level sent back
+# unchanged is recognised key by key. A dropped legacy level keeps the original requirement incomplete and is
+# named. A finance run converted with policies.target_unit is compared in the unit the engine wrote, and a
+# unit difference is repaired by converting, never by relabelling the scope. The column and precision hints
+# say exactly what the engine reads and what a run can store.
+
+
+def _headcount_run(analysis, key):
+    rows = [{'metric_key': 'headcount', key: 'P7', 'value': '12'}, {'metric_key': 'headcount', key: 'P8', 'value': '5'}]
+    record = _new(analysis.task, engine='sql', execution_status='succeeded', output_hash='h', bindings={},
+                  result={'columns': ['metric_key', key, 'value'], 'rows': rows})
+    return analysis._write(analysis._object_path('runs', record['id']), record)
+
+
+def _headcount_item(analysis, requirement, run, row):
+    value = run['result']['rows'][row]['value']
+    claim = {'basis': 'calculation', 'run_id': run['id'], 'row': row, 'column': 'value', 'value': value}
+    return _item(check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                               'claims': [claim]}))
+
+
+@pytest.mark.parametrize('key', ['level', 'breakdown', 'group_by', 'hierarchy', 'granularity'])
+def test_a_dimension_named_like_a_level_filters_rows(analysis, key):
+    """Round 9: a dimension named level, breakdown, group_by, hierarchy or granularity was taken for a
+    hierarchy level by its name alone. A real 职级 column could not be required: the save was refused and
+    its suggested_items dropped the filter, so the P8 row (5) answered 'P7 人数'. Main filtered rows on it."""
+    run = _headcount_run(analysis, key)
+    requirement = save_requirements(analysis, {'question': 'P7 职级人数', 'scope': {}, 'items': [
+        {'id': 'p7', 'metric': 'headcount', 'label': 'P7 人数', 'dimensions': {key: 'P7'}}]})
+
+    assert requirement['items'][0]['dimensions'] == {key: 'P7'}
+    assert 'authoring_warnings' not in requirement
+    assert _headcount_item(analysis, requirement, run, 0)['status'] == 'answered'
+    assert _headcount_item(analysis, requirement, run, 1)['status'] != 'answered'
+
+
+@pytest.mark.parametrize('key', ['drilldown', 'drill_down', 'DrillDown'])
+def test_a_drilldown_dimension_is_still_refused(analysis, key):
+    """Opposite direction (decision 1): drilldown stays a hierarchy level and is refused on save."""
+    with pytest.raises(FoundryError) as refused:
+        save_requirements(analysis, {'question': '城市公司收入', 'scope': {}, 'items': [
+            {'id': 'rev', 'metric': 'revenue', 'dimensions': {key: '城市公司'}}]})
+
+    assert refused.value.details['code'] == 'requirement_dimension_not_row_filter'
+    assert refused.value.details['suggested_items'][0]['dimensions'] == {}
+
+
+def test_a_stored_level_filter_keeps_answering_and_survives_a_carry_over_save(analysis):
+    """Round 9: a record stored with dimensions.level (as main saved it) went from answered to pending with
+    revise_requirement_dimension, and a panel save that only reworded the question stripped the filter with
+    a hierarchy_dimension_dropped warning, after which the P8 row answered 'P7 人数'."""
+    run = _headcount_run(analysis, 'level')
+    stored = _new(analysis.task, question='P7 职级人数', scope={}, bindings={}, context_id=None, parent_id=None,
+                  removed_item_ids=[], change_reason='', selection=None,
+                  items=[{'id': 'p7', 'metric': 'headcount', 'label': 'P7 人数', 'dimensions': {'level': 'P7'},
+                          'requires_drilldown': False}])
+    stored = analysis._write(analysis._object_path('requirements', stored['id']), stored)
+
+    before = _headcount_item(analysis, stored, run, 0)
+    saved = save_requirements(analysis, {'question': 'P7 职级人数（8月）', 'scope': {}, 'parent_id': stored['id'],
+                                         'change_reason': '更新分析前置口径。', 'items': stored['items']})
+
+    assert before['status'] == 'answered'
+    assert 'revise_requirement_dimension' not in [fixup['code'] for fixup in before.get('fixups', [])]
+    assert saved['items'][0]['dimensions'] == {'level': 'P7'}
+    assert 'authoring_warnings' not in saved
+    assert _headcount_item(analysis, saved, run, 0)['status'] == 'answered'
+    assert _headcount_item(analysis, saved, run, 1)['status'] != 'answered'
+
+
+def test_a_scope_level_filters_rows_and_only_a_drilldown_scope_is_refused(analysis):
+    """The same name list filtered the scope: scope.level was refused on save and ignored on rows. Only
+    drilldown/drill_down are scope levels now; granularity still only describes the analysis."""
+    run = _headcount_run(analysis, 'level')
+    requirement = save_requirements(analysis, {'question': 'P7 职级人数', 'scope': {'level': 'P7', 'granularity': '月'},
+                                               'items': [{'id': 'p7', 'metric': 'headcount', 'label': 'P7 人数'}]})
+
+    assert requirement['scope'] == {'level': 'P7', 'granularity': '月'}
+    assert _headcount_item(analysis, requirement, run, 0)['status'] == 'answered'
+    assert _headcount_item(analysis, requirement, run, 1)['status'] != 'answered'
+    for key in ('drilldown', 'drill_down'):
+        with pytest.raises(FoundryError) as refused:
+            save_requirements(analysis, {'question': 'P7 职级人数', 'scope': {**requirement['scope'], key: '城市公司'},
+                                         'parent_id': requirement['id'], 'items': requirement['items']})
+        assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
+
+
+LEGACY_SIBLING_LEVELS = [
+    # RequirementsPanel's pruneScope strips a null or empty sibling before it saves.
+    ({'drilldown': '城市公司', 'drill_down': None}, {'drilldown': '城市公司'}),
+    ({'drilldown': '城市公司', 'drill_down': ''}, {'drilldown': '城市公司'}),
+    # The manager deletes one of two legacy levels in the 维度 editor and leaves the other untouched.
+    ({'drilldown': '城市公司', 'drill_down': '区域'}, {'drilldown': '城市公司'}),
+    ({'drilldown': '城市公司', 'drill_down': '区域'}, {'drill_down': '区域', 'product': '物业费'}),
+]
+
+
+@pytest.mark.parametrize(('stored', 'sent'), LEGACY_SIBLING_LEVELS)
+def test_a_legacy_level_sent_back_unchanged_is_dropped_key_by_key(analysis, tmp_path, stored, sent):
+    """Round 9: the carry-over compared an item's whole hierarchy dict with its parent's, so a panel save that
+    pruned a null sibling, or removed one of two legacy levels, was refused over the untouched drilldown; the
+    scope card, which sends items raw, saved the same record fine."""
+    close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'A5': '华东区域'}})
+    legacy = _legacy_drilldown_record(analysis, {'close': close['id']}, [
+        {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '收入', 'dimensions': stored,
+         'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
+
+    saved = save_requirements(analysis, spec(scope=legacy['scope'], bindings=legacy['bindings'], parent_id=legacy['id'],
+                                             items=[{**legacy['items'][0], 'dimensions': sent}]))
+
+    assert saved['items'][0]['dimensions'] == {key: value for key, value in sent.items() if key not in stored}
+    dropped = [warning for warning in saved['authoring_warnings'] if warning['code'] == 'hierarchy_dimension_dropped']
+    assert [warning['keys'] for warning in dropped] == [
+        {key: value for key, value in stored.items() if value not in (None, '')}]
+
+
+def test_a_changed_or_added_level_beside_a_carried_one_is_refused_naming_only_it(analysis, tmp_path):
+    """Opposite direction: a level the writer adds or changes is still refused, and only it is named."""
+    close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'A5': '华东区域'}})
+    legacy = _legacy_drilldown_record(analysis, {'close': close['id']}, [
+        {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '收入', 'dimensions': {'drilldown': '城市公司'},
+         'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
+    for sent, named in (({'drilldown': '区域'}, ['drilldown']),
+                        ({'drilldown': '城市公司', 'drill_down': '项目'}, ['drill_down'])):
+        with pytest.raises(FoundryError) as refused:
+            save_requirements(analysis, spec(scope=legacy['scope'], bindings=legacy['bindings'], parent_id=legacy['id'],
+                                             items=[{**legacy['items'][0], 'dimensions': sent}]))
+        assert refused.value.details['code'] == 'requirement_dimension_not_row_filter'
+        assert refused.value.details['items'] == [{'requirement_item_id': 'revenue_1_8', 'keys': named}]
+        assert refused.value.details['suggested_items'][0]['dimensions'] == {}
+
+
+def _save_over(service, listed, items):
+    """What AnalysisScopeCard sends: the current items with a new scope."""
+    return service.analysis_requirements_save({
+        'question': listed['question'], 'scope': {**listed['scope'], 'granularity': '月'}, 'bindings': listed['bindings'],
+        'parent_id': listed['id'], 'change_reason': '更新分析前置口径。', 'items': items})
+
+
+def _revenue_draft_request(analysis, datasets, saved, suffix):
+    run = _script_run(analysis, datasets, REVENUE_ROWS, suffix=suffix, requirements_id=saved['id'],
+                      requirements_semantic_fingerprint=saved['semantic_fingerprint'])
+    return _legacy_draft(run, datasets)
+
+
+@pytest.mark.parametrize('route', ['scope_card', 'suggested_item'])
+def test_a_dropped_legacy_level_keeps_the_original_requirement_incomplete_and_is_named(tmp_path, route):
+    """Round 9: a manager save over a legacy record (scope card, panel label edit, 改口径) drops
+    dimensions.drilldown and recorded it only in authoring_warnings, which nothing reads. The revise fixup
+    never fired again and a region-grain answer completed with original_requirements_completed=True, although
+    nobody decided to give up the 城市公司 breakdown. The assistant's own resubmission of the suggested item
+    ends the same way. The dropped level now keeps the original incomplete and completion names it."""
+    analysis, datasets, _legacy = _legacy_revenue(tmp_path)
+    service = FinanceStore(analysis.task)
+    listed = service.analysis_requirements_list({})['current']
+    items = listed['items'] if route == 'scope_card' else [{**item, 'dimensions': {}} for item in listed['items']]
+
+    saved = _save_over(service, listed, items)
+    draft = service.save_explanation_draft(_revenue_draft_request(analysis, datasets, saved, 'dropped-' + route))
+    requirements = draft['explanation_check']['requirements']
+    notice = next(action for action in draft['completion']['actions'] if action['code'] == 'hierarchy_dimension_dropped')
+
+    assert saved['items'][0]['dimensions'] == {} and saved['removed_item_ids'] == []
+    assert _item(requirements)['status'] == 'answered'
+    assert _item(requirements)['dropped_hierarchy'] == {'drilldown': '城市公司'}
+    assert requirements['original_requirements_completed'] is False
+    assert draft['completion']['status'] == 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+    assert notice['requirement_item_id'] == 'revenue_2026_08'
+    assert '城市公司' in notice['message'] and 'drilldown' in notice['message']
+    # A later version still carries the drop: it is read from the whole version chain.
+    again = _save_over(service, saved, saved['items'])
+    later = service.save_explanation_draft(_revenue_draft_request(analysis, datasets, again, 'later-' + route))
+    assert later['completion']['original_requirements_completed'] is False
+
+
+def test_a_requirement_that_never_held_a_level_still_completes_the_original(tmp_path):
+    """Opposite direction: the same saves and draft over a record without a hierarchy level complete the
+    original requirement and name nothing."""
+    analysis, datasets, legacy = _legacy_revenue(tmp_path)
+    plain = _legacy_drilldown_record(analysis, legacy['bindings'], [{**legacy['items'][0], 'dimensions': {}}])
+    service = FinanceStore(analysis.task)
+
+    saved = _save_over(service, plain, plain['items'])
+    draft = service.save_explanation_draft(_revenue_draft_request(analysis, datasets, saved, 'never'))
+
+    assert 'dropped_hierarchy' not in _item(draft['explanation_check']['requirements'])
+    assert draft['completion']['status'] == 'complete'
+    assert draft['completion']['original_requirements_completed'] is True
+    assert 'hierarchy_dimension_dropped' not in [action['code'] for action in draft['completion']['actions']]
+
+
+def test_a_draft_policy_11_completed_over_a_dropped_level_is_checked_again(tmp_path):
+    """Policy 11 completed the original requirement over a dropped legacy level; a resend must not replay it."""
+    from foundry.analysis import _hash
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+    from foundry.fsutil import write_json_atomic
+
+    analysis, datasets, _legacy = _legacy_revenue(tmp_path)
+    service = FinanceStore(analysis.task)
+    listed = service.analysis_requirements_list({})['current']
+    request = _revenue_draft_request(analysis, datasets, _save_over(service, listed, listed['items']), 'policy-11')
+    first = service.save_explanation_draft(request)
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 12
+    path = analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'requirements': {**check['requirements'], 'original_requirements_completed': True}}
+    record = {**stored, 'check_policy_version': 11, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert again['explanation_check']['requirements']['original_requirements_completed'] is False
+    assert again['completion']['original_requirements_completed'] is False
+
+
+GL_YUAN_ROW = {**{key: value for key, value in GL_ROW.items() if key != 'unit'}, 'amount': '1200000'}
+
+
+def _yuan_gl(tmp_path, title, *, policies=None):
+    """Huachen's GL detail: amounts in 元 with no unit column; the context states the table's true unit."""
+    scope = {**CONTROL_SCOPE, 'scenario': 'actual', 'unit': '元'}
+    service, _context, bindings = _finance_service_from_rows(tmp_path, {'gl': [GL_YUAN_ROW]}, {'gl': scope}, title=title)
+    context = service.save_context({'bindings': bindings, 'scopes': {'gl': scope}, 'policies': policies or {}})
+    return service, context
+
+
+def _yuan_control_totals(tmp_path, title, *, policies=None):
+    service, context = _yuan_gl(tmp_path, title, policies=policies)
+    requirement = service.analysis_requirements_save({
+        'question': '集团合计勾稽', 'context_id': context['id'], 'scope': CONTROL_SCOPE,
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'organizations': ['O1'], 'periods': ['2026-09'],
+                   'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    _verify_run_column(service, run, 'amount')
+    item = _item(check_requirements(service.analysis, _control_totals_request(
+        service, requirement, [run], _claims_for_columns(run, 'amount'))))
+    return SimpleNamespace(service=service, requirement=requirement, run=run, item=item)
+
+
+def test_a_run_the_engine_converted_with_target_unit_answers_in_the_unit_it_wrote(tmp_path):
+    """Round 9 (Huachen control_totals on 03·GL月结分录清单): the table is in 元, the requirement in 万元.
+    A context stating the true unit with policies.gl.target_unit=万元 makes the engine write 万元 rows with
+    converted amounts, but the check compared the context's source unit (元) and rejected them as
+    run_scope_narrower, with a message that named no field."""
+    case = _yuan_control_totals(tmp_path, 'gl-target', policies={'gl': {'target_unit': '万元'}})
+
+    assert [(row['unit'], row['amount']) for row in case.run['result']['rows']] == [('万元', '120')]
+    assert case.item['status'] == 'answered'
+
+
+def test_a_unit_difference_is_repaired_by_converting_not_by_relabelling_the_scope(tmp_path):
+    """Round 9: for a run in 元 the message said to write （要求范围：unit=万元） into the binding's scopes. Doing
+    that labels 元 amounts 万元 without converting them (10,000 times the true value). The message now names
+    policies.<alias>.target_unit and keeps unit out of the scope values it asks for."""
+    case = _yuan_control_totals(tmp_path, 'gl-yuan')
+    gap = case.item['engine_runs'][-1]
+    message = _unanswered_message(case.item)
+
+    assert case.item['status'] != 'answered'
+    assert [row['unit'] for row in case.run['result']['rows']] == ['元']
+    assert gap['differing_fields'] == {'unit': '万元'}
+    assert 'unit' not in (gap.get('required_scope') or {})
+    assert gap['target_unit'] == '万元'
+    assert 'policies.gl.target_unit' in message
+    assert 'unit=万元）后重跑' not in message
+    # Following the message converts the amounts and answers (the test above).
+
+
+def test_a_run_scope_narrower_than_the_requirement_names_the_field(tmp_path):
+    """Round 9: run_scope_narrower named no field when the narrowing sat in the context's scopes; it now names
+    each scope value the requirement does not share."""
+    table = [GL_ROW, {**GL_ROW, 'organization': 'O2', 'source_row': 2}]
+    service, context, _bindings = _finance_service_from_rows(tmp_path, {'gl': table},
+                                                             {'gl': {**CONTROL_SCOPE, 'scenario': 'actual'}}, title='narrow')
+    requirement = service.analysis_requirements_save({
+        'question': '勾稽', 'context_id': context['id'],
+        'scope': {key: value for key, value in CONTROL_SCOPE.items() if key != 'organization'},
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'organizations': ['O1', 'O2'],
+                   'periods': ['2026-09'], 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    item = _item(check_requirements(service.analysis, _control_totals_request(service, requirement, [run])))
+    gap = item['engine_runs'][-1]
+
+    assert gap['reason'] == 'run_scope_narrower'
+    assert gap['narrower_scope'] == {'organization': 'O1'}
+    assert 'organization=O1' in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('policies', [None, {'gl': {'target_unit': '万元'}}])
+def test_a_rescope_over_a_unit_difference_names_target_unit(tmp_path, policies):
+    """The rescope_run message named the required scope (unit=万元 included) as what every bound input's scope
+    must state; for an input in 元 it names target_unit too, so the fix converts instead of relabelling. A run
+    the engine already converted is in the requirement scope and is not sent to rescope."""
+    service, context = _yuan_gl(tmp_path, 'gl-rescope', policies=policies)
+    requirement = service.analysis_requirements_save({
+        'question': '收入', 'context_id': context['id'], 'scope': CONTROL_SCOPE,
+        'items': [{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    item = _item(check_requirements(service.analysis, _control_totals_request(
+        service, requirement, [run], _claims_for_columns(run, 'amount'))))
+    rescope = [fixup for fixup in item.get('fixups', []) if fixup['code'] == 'rescope_run']
+
+    if policies:
+        assert rescope == []
+    else:
+        assert rescope[0]['target_unit'] == '万元'
+        assert 'policies.gl.target_unit' in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('policies', [None, {'payments': {'target_unit': '万元'}}])
+def test_a_scenario_run_on_an_input_in_another_unit_is_not_counted_or_offered_target_unit(tmp_path, policies):
+    """Opposite direction: finance_scenario_run reads source amounts as they are, whatever the context's
+    target_unit says, so an input in 元 still leaves its output unproven, and target_unit is not offered."""
+    scopes = {'receipts': dict(SCENARIO_SCOPE), 'payments': {**SCENARIO_SCOPE, 'unit': '元'}}
+    case = _scenario_case(tmp_path, 'cash_13_weeks', ('receipts', 'payments'), scopes=scopes,
+                          requirement_scope=SCENARIO_SCOPE, policies=policies)
+    item = _item(check_requirements(case.analysis, case.spec))
+    rescope = next(fixup for fixup in item['fixups'] if fixup['code'] == 'rescope_run')
+
+    assert item['status'] == 'pending'
+    assert {location['evidence']['not_counted_reason'] for location in item['locations']} == {'run_scope_differs'}
+    assert 'target_unit' not in rescope
+    assert 'target_unit' not in _unanswered_message(item)
+
+
+def test_the_rebind_hint_names_the_column_names_the_engine_reads():
+    """Round 9: bindings_without_engine_rows told the manager to rebind to a table 带金额或收入、成本、费用列 and
+    gave 区域预算分解表 as a table without 收入成本费用列. It has 营业收入预算/营业成本预算/期间费用预算 columns;
+    the engine reads only columns named amount/金额/发生额/本期金额 or revenue/cost/expense, so a manager who
+    rebound to 城市公司明细表 (营业收入/营业成本/期间费用) got the same blocker again."""
+    from foundry.finance_completion import MANAGER_REASON_TEXT
+    from foundry.finance_mcp import _tools
+    from foundry.finance_requirements import BLOCKER_TEXT, _engine_reads_rows
+
+    chinese = {'rows': [{'organization': '华东', '营业收入': '10', '营业成本': '6', '期间费用': '2'}]}
+    english = {'rows': [{'organization': '华东', 'revenue': '10', 'cost': '6', 'expense': '2'}]}
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert _engine_reads_rows(chinese, [({}, {})]) is False
+    assert _engine_reads_rows(english, [({}, {})]) is True
+    for text in (MANAGER_REASON_TEXT['bindings_without_engine_rows'], BLOCKER_TEXT['bindings_without_engine_rows'], tools):
+        assert 'amount、金额、发生额或本期金额' in text and 'revenue、cost、expense' in text
+        assert '收入成本费用列' not in text and '收入、成本、费用列' not in text
+    assert 'named amount, 金额, 发生额 or 本期金额' in draft and 'named revenue, cost or expense' in draft
+    assert 'tables without an amount column such as a regional budget sheet' not in draft
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+def test_tool_descriptions_state_the_round_9_rules():
+    """A dropped level leaves the original requirement incomplete, and a unit difference is converted with
+    policies.<alias>.target_unit; the tools say both."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    described = {tool['name']: tool['description'] for tool in _tools()}
+
+    assert 'hierarchy_dimension_dropped' in described['analysis_requirements_save']
+    assert 'hierarchy_dimension_dropped' in tools and '逐个键比较' in tools
+    assert 'policies.<alias>.target_unit' in described['save_explanation_draft']
+    assert 'policies.<别名>.target_unit' in tools and '只改 unit 标签不会换算' in tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+def test_the_precision_guidance_states_the_decimal_38_cap_a_run_stores():
+    """Round 9: the guidance said 更高精度…都可以, but a run stores a numeric column as DECIMAL(38): a factor at
+    33 significant digits beside 6-digit 万元 amounts fails the run. The texts now state the cap."""
+    from foundry.analysis_data import parse_source
+    from foundry.finance_mcp import _tools
+    from foundry.financial_evidence import PRECISION_RULE
+
+    def column(factor_digits):
+        rows = [{'value': '180576.0000'}, {'value': '0.' + '6' * factor_digits}]
+        return parse_source(json.dumps(rows).encode('utf-8'), '.json', {})
+
+    column(32)
+    with pytest.raises(FoundryError, match=r'DECIMAL\(38\)'):
+        column(33)
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+    for text in (PRECISION_RULE, tools):
+        assert '更高精度' not in text and 'DECIMAL(38)' in text
+    assert 'higher precision' not in draft and 'DECIMAL(38)' in draft
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools

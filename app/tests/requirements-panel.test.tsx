@@ -219,6 +219,31 @@ describe('requirements panel', () => {
     expect(saveCall?.[2]?.scope).toEqual({ ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', unit: '万元', granularity: '区域' });
   });
 
+  it('seeds a context scope key named like a level, which may be a real row column, into the first save', async () => {
+    // Review round 9: the seed also dropped level, breakdown, group_by and hierarchy. Only drilldown is a
+    // hierarchy level the server refuses; a 职级 column named level filters rows, so dropping it widened the scope.
+    const seeded = { id: contextId, name: '口径', bindings: { actual: 'ds' },
+      scopes: { actual: { ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', level: 'P7', drill_down: '城市公司' } } };
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => {
+        if (command === 'analysis-requirements-list') return ok({ requirements: [], current: null });
+        if (command === 'list-finance-context') return ok({ task_id: taskId, datasets: [], contexts: [seeded], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
+        if (command === 'analysis-requirements-save') return ok({ id: 'r-ctx-002', question: spec?.question, context_id: contextId, scope: spec?.scope, bindings: spec?.bindings, items: spec?.items, parent_id: null } as Record<string, unknown>);
+        return ok({});
+      }),
+    });
+    render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
+
+    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: 'P7 人数' } });
+    fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.anything()));
+    const saveCall = vi.mocked(api.financeCall).mock.calls.find(([, command]) => command === 'analysis-requirements-save');
+    expect(saveCall?.[2]?.scope).toEqual({ ledger: 'L1', organization: '华东', period: '2026-08', currency: 'CNY', level: 'P7' });
+  });
+
   it('still resends a stored record scope key it does not show, so the server can record the drop', async () => {
     // Opposite direction: only the context seed is cleaned. A stored record's scope round-trips unchanged;
     // the server drops a legacy level carried over from the parent and records it in authoring_warnings.
