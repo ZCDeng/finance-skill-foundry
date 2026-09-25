@@ -5,7 +5,8 @@ from foundry.analysis import _hash, _new
 from foundry.locking import exclusive
 
 MAX_REPAIRS = 2
-COMPLETION_POLICY_VERSION = 5
+# 6: review round 3 inverted the amount gate (every item but a known non-amount is gated).
+COMPLETION_POLICY_VERSION = 6
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}

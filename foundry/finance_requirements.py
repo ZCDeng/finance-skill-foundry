@@ -42,13 +42,14 @@ PRICE_QUANTITY_REQUIRED_COLUMNS = (
 )
 RESULT_SET_METRICS = {'control_totals'}
 INTENT_DIMENSION_KEYS = {'dimension', 'scenario_compare'}
-# Amounts that only count as answered when their evidence group closes (profit bridge, run_metric totals).
+# The P&L lines whose amounts need engine closure (or the engine's own account total, or a source recipe);
+# the finance engine's plain output of these lines does not count (run_metric management_pnl rows never close).
 CLOSED_EVIDENCE_METRICS = {'profit', 'revenue', 'cost', 'expense'}
-# The item metric is free text, so a P&L amount named outside METRIC_LABELS (利润总额, 主营业务收入, 销售费用,
-# total_revenue …) is recognized by its stem and gated like the canonical metric instead of falling to the
-# script-value rule. A ratio named after an amount (收入达成率, expense_ratio) keeps the phase-1 ratio rule.
+# The amount gate is inverted: every item is an amount unless it is a known non-amount (below). The item
+# metric is free text, so these stems and tokens only pick the P&L class used in guidance (利润总额 → profit,
+# NetProfit → profit); a name they miss is still gated, as the plain class 'amount'.
 AMOUNT_LABEL_STEMS = (
-    ('profit', ('利润', '毛利', '净利', '净收益')),
+    ('profit', ('利润', '毛利', '净利', '净收益', '盈利', '亏损')),
     ('revenue', ('收入', '营收', '营业额', '销售额')),
     ('cost', ('成本',)),
     # 管理费/销售费/财务费/研发费 are the same expense lines written without 用.
@@ -60,18 +61,30 @@ AMOUNT_LABEL_TOKENS = {
     'cost': 'cost', 'costs': 'cost', 'cogs': 'cost',
     'expense': 'expense', 'expenses': 'expense', 'opex': 'expense',
 }
-# `income` alone is too loose (other_income is its own class); these qualified forms are profit.
 AMOUNT_LABEL_TOKEN_PAIRS = {
     ('net', 'income'): 'profit', ('operating', 'income'): 'profit',
     ('gross', 'income'): 'profit', ('pretax', 'income'): 'profit',
 }
-# Ratios and quantities (sales_volume, 销量) are not amounts, whatever amount word they contain.
-NON_AMOUNT_LABEL_MARKERS = ('率', '占比', '比例', '比重', '倍数', '人均', '均价', '单价', '%', '％',
-                            '数量', '销量', '销售量', '件数', '台数', '人数')
-NON_AMOUNT_LABEL_TOKENS = frozenset({
-    'ratio', 'rate', 'margin', 'pct', 'percent', 'percentage', 'share', 'per', 'avg', 'average',
-    'volume', 'volumes', 'quantity', 'quantities', 'qty', 'units', 'count', 'headcount',
+# Known non-amounts, the only items the gate exempts: ratios (decision 4 keeps their phase-1 script rule),
+# counts and physical quantities. They are recognised by the head of the name (its last word), so 汇率损益
+# or business_units_revenue stay amounts; an unrecognised name is never exempt.
+NON_AMOUNT_METRICS = frozenset({'ratio'})
+NON_AMOUNT_LABEL_SUFFIXES = (
+    '率', '占比', '比例', '比重', '比率', '倍数', '%', '％',
+    '数量', '销量', '销售量', '件数', '台数', '人数', '户数', '次数', '个数', '天数', '面积',
+)
+NON_AMOUNT_HEAD_TOKENS = frozenset({
+    'ratio', 'ratios', 'rate', 'rates', 'pct', 'percent', 'percentage',
+    'volume', 'volumes', 'quantity', 'quantities', 'qty', 'units', 'count', 'counts', 'headcount',
+    'days', 'area', 'sqm',
 })
+# Amounts outside the four P&L lines that a finance-engine run states itself (see NATIVE_METRICS).
+ENGINE_OUTPUT_AMOUNTS = {
+    'open_amount': {'tool': 'finance_scenario_run', 'scenario_kind': 'receivables_aging', 'column': 'open_amount'},
+    'closing_cash': {'tool': 'finance_scenario_run', 'scenario_kind': 'cash_13_weeks', 'column': 'closing_cash'},
+    **{column: {'tool': 'explain_variance', 'column': column} for column in (
+        'amount_change', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction', 'residual')},
+}
 PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
 CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
@@ -197,8 +210,9 @@ def save_requirements(analysis, spec):
     hierarchy = {item['id']: _hierarchy_dimensions(item) for item in normalized if _hierarchy_dimensions(item)}
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
+    scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope)
     # Read before taking the task lock: scanning workbook text is slow and only ever warns.
-    warnings = [*carried_over, *_organization_warnings(analysis, normalized, bindings)]
+    warnings = [*carried_over, *scope_dropped, *_organization_warnings(analysis, normalized, bindings)]
     with exclusive(analysis.task.lock_path, timeout=10):
         parent = latest_requirements(analysis)
         if parent and spec.get('parent_id') != parent['id']:
@@ -232,31 +246,75 @@ def _without_hierarchy(item):
     return {**item, 'dimensions': {key: value for key, value in item.get('dimensions', {}).items() if key not in keys}}
 
 
-def _drop_carried_over_hierarchy(analysis, parent_id, items):
-    """Drop a hierarchy level an item carries over unchanged from its parent record (saved before phase 1).
-
-    Callers that only carry items over (the scope card, circle-select) cannot edit them, and the refusal
-    below would only suggest the same items without those keys. A key the writer adds or changes is
-    still refused. The dropped keys are recorded as authoring warnings on the new version.
-    """
-    if not parent_id or not any(_hierarchy_dimensions(item) for item in items):
-        return items, []
+def _parent_record(analysis, parent_id):
+    if not parent_id:
+        return None
     try:
-        parent = analysis._get('requirements', parent_id)
+        return analysis._get('requirements', parent_id)
     except FoundryError:
-        return items, []  # the version check under the task lock reports a missing parent
-    previous = {item.get('id'): item for item in parent.get('items') or [] if isinstance(item, dict)}
+        return None  # the version check under the task lock reports a missing parent
+
+
+def _drop_carried_over_hierarchy(analysis, parent_id, items):
+    """Drop a hierarchy level an item carries over unchanged from its parent record (saved before phase 1),
+    and record every legacy level the new version no longer has.
+
+    The scope card carries items over unchanged and cannot edit them; circle-select and a resubmitted
+    refusal's suggested_items arrive already without the level. Either way the dropped level is recorded
+    as an authoring warning on the new version. A key the writer adds or changes is still refused.
+    """
+    parent = _parent_record(analysis, parent_id)
+    previous = {item.get('id'): item for item in (parent or {}).get('items') or [] if isinstance(item, dict)}
+    if not any(_hierarchy_dimensions(item) for item in previous.values()):
+        return items, []
     kept, warnings = [], []
     for item in items:
         keys = _hierarchy_dimensions(item)
-        if keys and keys == _hierarchy_dimensions(previous.get(item['id']) or {}):
-            named = '、'.join(f'{key}={value}' for key, value in keys.items())
-            warnings.append({'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'], 'keys': keys,
+        legacy = _hierarchy_dimensions(previous.get(item['id']) or {})
+        if legacy and keys in ({}, legacy):
+            named = '、'.join(f'{key}={value}' for key, value in legacy.items())
+            warnings.append({'code': 'hierarchy_dimension_dropped', 'requirement_item_id': item['id'], 'keys': legacy,
                              'message': f'旧版要求的维度 {named} 是下钻层级，不是结果行字段，新版已去掉；'
                                         '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'})
             item = _without_hierarchy(item)
         kept.append(item)
     return kept, warnings
+
+
+# The scope card's 粒度 (scope.granularity) describes the analysis and is kept; it never filters rows
+# (_item_scope, _row_scope). The other hierarchy keys in scope are a drilldown moved out of dimensions.
+SCOPE_REFUSED_HIERARCHY_KEYS = HIERARCHY_DIMENSION_KEYS - {'granularity'}
+
+
+def _scope_hierarchy(analysis, parent_id, scope):
+    """Refuse a hierarchy level newly written into scope, as for dimensions; drop and record one carried
+    over from the parent version (or already dropped from it)."""
+    def levels(values):
+        return {key: value for key, value in (values or {}).items()
+                if str(key).strip().lower() in SCOPE_REFUSED_HIERARCHY_KEYS} if isinstance(values, dict) else {}
+
+    written = levels(scope)
+    legacy = levels((_parent_record(analysis, parent_id) or {}).get('scope'))
+    new = {key: value for key, value in written.items() if legacy.get(key) != value}
+    if new:
+        import json
+
+        suggested = {key: value for key, value in scope.items() if key not in written}
+        named = ', '.join(f'{key}={value}' for key, value in new.items())
+        error = FoundryError(
+            f'requirement scope holds hierarchy levels, not result-row filters ({named}). List each drilldown '
+            'target in organizations or save it as its own item; use requires_drilldown for per-cell source '
+            'tracing. suggested_scope=' + json.dumps(suggested, ensure_ascii=False)
+        )
+        error.details = {'code': 'requirement_scope_not_row_filter', 'keys': sorted(new), 'suggested_scope': suggested}
+        raise error
+    if not legacy:
+        return scope, []
+    named = '、'.join(f'{key}={value}' for key, value in legacy.items())
+    return {key: value for key, value in scope.items() if key not in written}, [{
+        'code': 'hierarchy_scope_dropped', 'keys': legacy,
+        'message': f'旧版要求范围里的 {named} 是下钻层级，不是结果行字段，新版已去掉；'
+                   '如需按下钻对象逐一作答，请把它们列入 organizations 或另立要求项。'}]
 
 
 def _reject_hierarchy_dimensions(items, hierarchy):
@@ -407,18 +465,19 @@ def _has_finance_scope(run):
     return isinstance(scopes, dict) and bool(scopes)
 
 
-def _is_ratio_item(item):
-    metric = item.get('metric')
-    return _canonical_metric_name(metric) == 'ratio' or str(metric or '').strip().lower() in {
-        str(alias).lower() for alias in METRIC_LABELS['ratio']}
-
-
 def _item_scope(item, scope):
-    """The requirement scope that applies to this item: a ratio carries no money unit or currency."""
-    scope = scope if isinstance(scope, dict) else {}
-    if not _is_ratio_item(item):
+    """The requirement scope that applies to this item. A hierarchy level (scope.granularity from the scope
+    card's 粒度) describes the analysis and never filters rows; a known non-amount (a ratio, a count, a
+    quantity) carries no money unit or currency."""
+    scope = _scope_without(scope if isinstance(scope, dict) else {}, HIERARCHY_DIMENSION_KEYS)
+    if not _known_non_amount(item):
         return scope
     return _scope_without(scope, AMOUNT_ONLY_SCOPE_KEYS)
+
+
+def _row_scope(scope):
+    """The requirement scope rows and run scopes are compared with: hierarchy levels are not row filters."""
+    return _scope_without(scope if isinstance(scope, dict) else {}, HIERARCHY_DIMENSION_KEYS)
 
 
 def _scope_without(scope, keys):
@@ -967,11 +1026,11 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
             continue
         if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
             continue
-        if not _metric_filters_cover_requirement(metric, item, latest['scope']):
+        if not _metric_filters_cover_requirement(metric, item, _row_scope(latest['scope'])):
             continue
-        if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
+        if _run_scope_is_narrower_than_requirement(run, item, _row_scope(latest['scope'])):
             continue
-        rows = _result_set_required_rows(item, run, latest['scope'])
+        rows = _result_set_required_rows(item, run, _row_scope(latest['scope']))
         if rows and _result_set_comparison_complete(kind, item, latest, run, rows):
             bases.append((run, rows))
     if not bases:
@@ -1239,43 +1298,84 @@ def _result_set_location(location, evidence, status):
     return {**location, 'evidence': metadata, 'status': status}
 
 
-def _closed_metric_key(item):
-    """The CLOSED amount class an item asks for, by canonical name, any known label (营业收入 → revenue) or
-    a P&L amount stem (利润总额 → profit, 销售费用 → expense, total_revenue → revenue)."""
+def _closed_metric_key(item, scenario=None):
+    """The amount class an item is gated as, or None for a known non-amount.
+
+    Every item is an amount unless its metric is a ratio, a count or a physical quantity, or it asks only
+    for ratio scenarios (achievement_ratio …); `scenario`, the cited row's scenario, exempts that one grain
+    of an item that lists it. A recognised P&L name gives its class (营业收入 → revenue, NetProfit → profit);
+    any other name, including one nothing here recognises, is the class 'amount' and is gated all the same.
+    """
+    if _known_non_amount(item, scenario):
+        return None
+    return _pnl_class(item.get('metric')) or 'amount'
+
+
+def _known_non_amount(item, scenario=None):
     metric = item.get('metric')
+    if _canonical_metric_name(metric) in NON_AMOUNT_METRICS or str(metric or '').strip().lower() in {
+            str(alias).lower() for alias in METRIC_LABELS['ratio']}:
+        return True
+    scenarios = [str(value).strip().lower() for value in item.get('scenarios') or []]
+    if scenarios and all(value in RATIO_SCENARIOS for value in scenarios):
+        return True
+    if scenarios and isinstance(scenario, str) and scenario.strip().lower() in RATIO_SCENARIOS:
+        return True
+    return _non_amount_label(str(metric or ''))
+
+
+def _label_words(text):
+    """Lowercase English words of a label, camelCase split (NetProfit → net, profit)."""
+    return re.findall(r'[a-z]+', re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', text).lower())
+
+
+def _non_amount_label(text):
+    head = text.strip()
+    while True:
+        # A trailing （%） or (次) names the unit: a percentage is a ratio; otherwise read the name before it.
+        match = re.search(r'\s*[（(]([^（）()]*)[)）]\s*$', head)
+        if not match:
+            break
+        if '%' in match.group(1) or '％' in match.group(1):
+            return True
+        head = head[:match.start()]
+    if head.endswith(NON_AMOUNT_LABEL_SUFFIXES):
+        return True
+    words = _label_words(head)
+    return bool(words) and not re.search(r'[\u4e00-\u9fff]\s*$', head) and words[-1] in NON_AMOUNT_HEAD_TOKENS
+
+
+def _pnl_class(metric):
+    """revenue/profit/cost/expense when the name is recognisably one of those lines, else None (guidance only)."""
     canonical = _canonical_metric_name(metric)
     if canonical in CLOSED_EVIDENCE_METRICS:
         return canonical
-    text = str(metric or '').strip().lower()
+    text = str(metric or '').strip()
+    lowered = text.lower()
     for key in sorted(CLOSED_EVIDENCE_METRICS):
-        if text in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
+        if lowered in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
             return key
-    return _amount_label_class(text)
-
-
-def _amount_label_class(text):
-    if not text or any(text in {str(alias).lower() for alias in aliases} or text == key
-                       for key, aliases in METRIC_LABELS.items() if key not in CLOSED_EVIDENCE_METRICS):
-        return None
-    tokens = re.findall(r'[a-z]+', text)
-    if any(marker in text for marker in NON_AMOUNT_LABEL_MARKERS) or NON_AMOUNT_LABEL_TOKENS & set(tokens):
-        return None
+    if any(lowered in {str(alias).lower() for alias in aliases} or lowered == key
+           for key, aliases in METRIC_LABELS.items() if key not in CLOSED_EVIDENCE_METRICS):
+        return None  # other_income and its aliases are amounts of their own class
     for key, stems in AMOUNT_LABEL_STEMS:
         if any(stem in text for stem in stems):
             return key
-    pair = next((AMOUNT_LABEL_TOKEN_PAIRS[bigram] for bigram in zip(tokens, tokens[1:])
+    words = _label_words(text)
+    pair = next((AMOUNT_LABEL_TOKEN_PAIRS[bigram] for bigram in zip(words, words[1:])
                  if bigram in AMOUNT_LABEL_TOKEN_PAIRS), None)
-    return pair or next((AMOUNT_LABEL_TOKENS[token] for token in tokens if token in AMOUNT_LABEL_TOKENS), None)
+    return pair or next((AMOUNT_LABEL_TOKENS[word] for word in words if word in AMOUNT_LABEL_TOKENS), None)
 
 
-def _location_evidence_status(item, location, member, recipe=None, *, native_total=False):
+def _location_evidence_status(item, location, member, recipe=None, *, native_total=False, scenario=None):
     """Status and server-derived evidence_basis of one cited cell.
 
-    An amount (revenue/profit/cost/expense) counts only on engine closure (engine == 'finance'), on the
-    finance engine's own run_metric account_total for exactly this account (`native_total`), or on a
-    passing, cited, in-binding direct/sum/diff recipe with a unit scale. A factor recipe reaches
-    `estimated` for every metric, never answered; script output, script-built closures, ratio recipes and
-    free scales are not counted for amounts.
+    Every item except a known non-amount (see _closed_metric_key) is an amount. An amount counts only on
+    engine closure (engine == 'finance'), on the finance engine's own run_metric account_total for exactly
+    this account (`native_total`), on a passing, cited, in-binding direct/sum/diff recipe with a unit
+    scale, or, for an amount outside revenue/profit/cost/expense, on the finance engine's own output of it.
+    A factor recipe reaches `estimated` for every metric, never answered; script output, script-built
+    closures, ratio recipes and free scales are not counted for amounts.
     """
     if not member and not recipe:
         return 'pending', {'evidence_basis': None, 'not_counted_reason': 'no_evidence_record'}
@@ -1293,9 +1393,10 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
     if member.get('member_state') == 'not_applicable':
         return 'not_applicable', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'method_not_applicable'}
+    amount = _closed_metric_key(item, scenario)
     source_recipe = bool(
         recipe and recipe.get('counted') and recipe['evidence_class'] in SOURCE_EVIDENCE_BASES
-        and recipe.get('kind') != 'ratio' and _closed_metric_key(item) is not None
+        and recipe.get('kind') != 'ratio' and amount is not None
     )
     # A plain result row has no closure rule: an empty sibling column says nothing about a cell that a
     # source recipe recomputes, so only rule-bearing groups (bridges, ratios) can void it.
@@ -1304,8 +1405,8 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
     engine_closed = bool(member.get('engine_closed')) and member.get('group_status') == 'complete'
     estimate = bool(recipe and recipe.get('counted') and recipe['evidence_class'] == 'estimate')
-    if _closed_metric_key(item) is None:
-        # Non-amount items keep their current rule (script ratio values are a recorded phase-1 gap),
+    if amount is None:
+        # Known non-amounts keep their current rule (script ratio values are a recorded phase-1 gap),
         # except that a cell the writer backed with a factor recipe is an estimate, never an answer.
         counted = recipe if (recipe or {}).get('counted') and recipe['evidence_class'] in SOURCE_EVIDENCE_BASES else None
         if estimate and not engine_closed:
@@ -1320,6 +1421,10 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'answered', {**metadata, 'evidence_basis': 'engine_closed'}
     if native_total and member.get('engine_output'):
         # The finance engine's own total of exactly this account (not a script's copy of it).
+        return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
+    if amount not in CLOSED_EVIDENCE_METRICS and member.get('engine_output') and not estimate:
+        # Outside the four P&L lines the engine's own output of the amount (finance_scenario_run,
+        # run_metric columns) is the engine's answer; only revenue/profit/cost/expense need closure.
         return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
     if estimate:
         return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
@@ -1365,15 +1470,15 @@ def _recipe_metadata(recipe):
     }
 
 
-def _cell_evidence_status(item, location, evidence, *, native_total=False):
+def _cell_evidence_status(item, location, evidence, *, native_total=False, row=None):
     key = (location['run_id'], location['row'], location['column'])
     return _location_evidence_status(item, location, evidence['members'].get(key), (evidence.get('recipes') or {}).get(key),
-                                     native_total=native_total)
+                                     native_total=native_total, scenario=(row or {}).get('scenario'))
 
 
-def _claim_fixup(item, run, row_index, row, column, evidence, reason='valid_candidate_not_claimed'):
+def _claim_fixup(item, run, row_index, row, column, evidence, reason='valid_candidate_not_claimed', *, native_total=False):
     location = {'run_id': run['id'], 'row': row_index, 'column': column, 'output_hash': run.get('output_hash')}
-    status, metadata = _cell_evidence_status(item, location, evidence)
+    status, metadata = _cell_evidence_status(item, location, evidence, native_total=native_total, row=row)
     fact_id = metadata.get('fact_id')
     if status != 'answered' or not fact_id:
         return None
@@ -1388,30 +1493,67 @@ def _claim_fixup(item, run, row_index, row, column, evidence, reason='valid_cand
 
 
 def _run_inputs_match_requirement(run, requirement):
+    """The run read the requirement's recorded snapshots (same dataset, data and source hashes).
+
+    Like _bindings_match, a requirement with a single binding accepts that snapshot under any run alias;
+    with several bindings each snapshot must sit under the requirement's own alias.
+    """
     basis = requirement.get('semantic_basis') if isinstance(requirement, dict) else None
     sources = basis.get('sources') if isinstance(basis, dict) else None
     if not sources:
         return True
+    run_bindings = run.get('bindings') or {}
+    single = len(requirement.get('bindings') or {}) == 1
     for alias, source in sources.items():
-        if ((run.get('bindings') or {}).get(alias) != source.get('dataset_id')
-                or (run.get('input_hashes') or {}).get(alias) != source.get('data_hash')
-                or (run.get('source_hashes') or {}).get(alias) != source.get('source_hash')):
+        aliases = [alias, *sorted(name for name, dataset_id in run_bindings.items()
+                                  if single and name != alias and dataset_id == source.get('dataset_id'))]
+        if not any(_run_alias_reads(run, name, source) for name in aliases):
             return False
     return True
 
 
-def _source_fixup(item, location, checks):
-    if not item.get('requires_drilldown') or _location_provenance(location, checks):
+def _run_alias_reads(run, alias, source):
+    return ((run.get('bindings') or {}).get(alias) == source.get('dataset_id')
+            and (run.get('input_hashes') or {}).get(alias) == source.get('data_hash')
+            and (run.get('source_hashes') or {}).get(alias) == source.get('source_hash'))
+
+
+# Fixups that trace a cell to its source: drilldown_fact for engine rows, a source recipe for script rows.
+SOURCE_FIXUP_CODES = frozenset({'verify_source', 'add_source_recipe'})
+# Runs whose rows drilldown_fact can record as verified (finance_service.drilldown_fact trusted_run).
+DRILLDOWN_VERIFIABLE_ENGINES = frozenset({'finance', 'structured_aggregate'})
+
+
+def _source_fixup(item, location, checks, run=None, *, required=False):
+    """How to trace a cited cell to its source, when the item (or its result set) needs that.
+
+    drilldown_fact only verifies finance-engine and verified-aggregate rows; on a script cell it returns
+    'missing', so script cells are pointed at a passing source recipe instead, and only when the cell
+    already counts (an uncounted cell's own fixups say what would count, which also traces it).
+    """
+    if not (item.get('requires_drilldown') or required) or _location_provenance(location, checks):
         return None
     fact_id = (location.get('evidence') or {}).get('fact_id')
     if not fact_id:
         return None
+    base = {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')}
+    if run is not None and run.get('engine') not in DRILLDOWN_VERIFIABLE_ENGINES:
+        if location.get('status') != 'answered':
+            return None
+        return {
+            'code': 'add_source_recipe',
+            'requirement_item_id': item['id'],
+            'location': base,
+            'fact_id': fact_id,
+            'recipe_kinds': ['direct', 'sum', 'diff', 'ratio'],
+            'reason': 'script_cell_traced_by_recipe',
+        }
     return {
         'code': 'verify_source',
         'requirement_item_id': item['id'],
-        'location': {key: location[key] for key in ('run_id', 'row', 'column', 'output_hash')},
+        'location': base,
         'fact_id': fact_id,
-        'reason': 'drilldown_required',
+        'reason': 'drilldown_required' if item.get('requires_drilldown') else 'result_set_requires_source_check',
     }
 
 
@@ -1444,11 +1586,11 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
             continue
         if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
             continue
-        if not _metric_filters_cover_requirement(metric, item, latest['scope']):
+        if not _metric_filters_cover_requirement(metric, item, _row_scope(latest['scope'])):
             continue
-        if _run_scope_is_narrower_than_requirement(run, item, latest['scope']):
+        if _run_scope_is_narrower_than_requirement(run, item, _row_scope(latest['scope'])):
             continue
-        rows = _result_set_required_rows(item, run, latest['scope'])
+        rows = _result_set_required_rows(item, run, _row_scope(latest['scope']))
         if not rows:
             continue
         if run.get('result', {}).get('truncated'):
@@ -1465,7 +1607,9 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
         for index, row in rows:
             if (run['id'], index, 'amount') in claimed:
                 continue
-            claim = _claim_fixup(item, run, index, row, 'amount', evidence)
+            # The finance engine's own run_metric rows are what the result set counts (see
+            # _result_set_requirement_status), whatever amount class the item's name has.
+            claim = _claim_fixup(item, run, index, row, 'amount', evidence, native_total=True)
             if not claim:
                 row_fixups = []
                 break
@@ -1474,7 +1618,8 @@ def _result_set_candidate_fixups(analysis, item, latest, runs, checks, evidence,
                 {'run_id': run['id'], 'row': index, 'column': 'amount', 'output_hash': run.get('output_hash')},
                 evidence, 'answered'
             )
-            source = _source_fixup(item, location, checks)
+            # The result set only answers once every row is source-checked, requires_drilldown or not.
+            source = _source_fixup(item, location, checks, run, required=True)
             if source:
                 source_fixups.append(source)
         fixups.extend(row_fixups)
@@ -1505,7 +1650,7 @@ def _price_quantity_candidate_fixups(item, latest, runs, checks, evidence, claim
                         {'run_id': run['id'], 'row': index, 'column': member['column'], 'output_hash': run.get('output_hash')},
                         evidence, 'answered'
                     )
-                    source = _source_fixup(item, location, checks)
+                    source = _source_fixup(item, location, checks, run)
                     if source:
                         fixups.append(source)
     return fixups
@@ -1534,8 +1679,8 @@ def _generic_candidate_fixups(item, latest, runs, checks, evidence, claimed):
                 if claim:
                     fixups.append(claim)
                     location = {'run_id': run['id'], 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
-                    status, metadata = _cell_evidence_status(item, location, evidence)
-                    source = _source_fixup(item, {**location, 'evidence': metadata, 'status': status}, checks)
+                    status, metadata = _cell_evidence_status(item, location, evidence, row=row)
+                    source = _source_fixup(item, {**location, 'evidence': metadata, 'status': status}, checks, run)
                     if source:
                         fixups.append(source)
     return fixups
@@ -1550,16 +1695,16 @@ def _profit_bridge_candidate_fixups(analysis, item, latest, runs, checks, eviden
             continue
         if not _run_inputs_match_requirement(run, latest):
             continue
-        if _profit_bridge_native_group(analysis, item, run, evidence, latest['scope']) is None:
+        if _profit_bridge_native_group(analysis, item, run, evidence, _row_scope(latest['scope'])) is None:
             continue
-        for location in _profit_bridge_candidate_locations(analysis, item, run, evidence, latest['scope']):
+        for location in _profit_bridge_candidate_locations(analysis, item, run, evidence, _row_scope(latest['scope'])):
             key = (location['run_id'], location['row'], location['column'])
             if key not in claimed:
                 row = run['result']['rows'][location['row']]
                 claim = _claim_fixup(item, run, location['row'], row, location['column'], evidence)
                 if claim:
                     fixups.append(claim)
-            source = _source_fixup(item, _result_set_location(location, evidence, 'answered'), checks)
+            source = _source_fixup(item, _result_set_location(location, evidence, 'answered'), checks, run)
             if source:
                 fixups.append(source)
     return fixups
@@ -1660,13 +1805,16 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
             if result_set is not None:
                 break
             run = runs[run_id]
-            if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
-                continue
             row = run['result']['rows'][index]
             if not _requested_grain_matches(item, run, row):
                 continue
+            if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
+                # Cited, about this item, but on other bindings: say so (ruling (a)), never "no cited row".
+                if _matches(item, row, column, run):
+                    locations.append(_bindings_mismatch_location(run, index, column))
+                continue
             group = evidence['groups'].get((run_id, index))
-            profit_bridge_locations = _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, latest['scope'])
+            profit_bridge_locations = _profit_bridge_locations(analysis, item, run, claimed_by_row, evidence, _row_scope(latest['scope']))
             if profit_bridge_locations and ('profit_bridge', run_id) not in processed_groups:
                 processed_groups.add(('profit_bridge', run_id))
                 for location in profit_bridge_locations:
@@ -1694,7 +1842,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 generic_match_allowed and _matches(item, row, column, run) and _requirement_scope_matches(run, row, item, latest)
             ):
                 location = {'run_id': run_id, 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
-                status, metadata = _cell_evidence_status(item, location, evidence, native_total=account_total_match)
+                status, metadata = _cell_evidence_status(item, location, evidence, native_total=account_total_match, row=row)
                 locations.append({**location, 'evidence': metadata, 'status': status})
         if result_set is None:
             # An estimate only counts where the item declared that grain an estimate (grain_basis).
@@ -1742,7 +1890,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
             )
         fixups = _requirement_fixups(analysis, item, latest, fixup_runs, checks, evidence, claimed)
         if item_status == 'answered':
-            fixups = [fixup for fixup in fixups if fixup.get('code') == 'verify_source']
+            fixups = [fixup for fixup in fixups if fixup.get('code') in SOURCE_FIXUP_CODES]
         item_record = {**item, 'status': item_status, 'locations': locations,
                        'source_read_failure': source_failures.get(item['id']),
                        'provenance_status': provenance_status}
@@ -1759,7 +1907,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 result_set is not None,
             )
         source_fixups = [fixup for location in locations
-                         for fixup in [_source_fixup(item, location, checks)] if fixup]
+                         for fixup in [_source_fixup(item, location, checks, runs.get(location['run_id']),
+                                                     required=result_set is not None)] if fixup]
         fixups = _dedupe_fixups([*fixups, *source_fixups])
         if fixups:
             item_record['fixups'] = fixups
@@ -1783,6 +1932,13 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                            else 'needs_attention'},
             # Accepted estimates never complete the original requirements.
             'original_requirements_completed': complete and not latest.get('removed_item_ids')}
+
+
+def _bindings_mismatch_location(run, index, column):
+    """A cited cell about the item on a run whose bindings differ from the requirement's: never counted
+    (the run is not proven to have read the requirement's snapshots under their names), always reported."""
+    return {'run_id': run['id'], 'row': index, 'column': column, 'output_hash': run.get('output_hash'),
+            'evidence': {'evidence_basis': None, 'not_counted_reason': 'run_bindings_differ'}, 'status': 'pending'}
 
 
 def _with_declared_basis(item, location, runs):
@@ -1877,6 +2033,18 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
             uncounted_keys = {grain for grain, state in grain_states.items() if state == 'uncounted'}
             fixups = [*fixups, {**_uncounted_rows_fixup(item, record['locations'], uncounted, paths, route, runs, uncounted_keys),
                                 **_grain_basis_guidance(item, uncounted, paths)}]
+    rebind = list(dict.fromkeys(location['run_id'] for location in record['locations']
+                                if location['evidence'].get('not_counted_reason') == 'run_bindings_differ'))
+    if rebind:
+        record['required_bindings'] = dict(latest.get('bindings') or {})
+        fixups = [*fixups, {
+            'code': 'rebind_run',
+            'requirement_item_id': item['id'],
+            # Bind every requirement snapshot under the requirement's own alias (one binding: any alias).
+            'required_bindings': dict(latest.get('bindings') or {}),
+            'runs': [{'run_id': run_id, 'bindings': dict(runs[run_id].get('bindings') or {})} for run_id in rebind[:12]],
+            'reason': 'run_bindings_differ',
+        }]
     if result_set and paths['blocked'] and not paths['accepted']:
         fixups = [*fixups, _blocked_path_fixup(item, paths)]
     cited_for_source = [grain for grain in uncounted if 'estimate_cited_for_source_grain' in grain['reasons']]
@@ -2043,13 +2211,19 @@ def _evidence_paths(item, environment):
             engine({'path': 'run_metric_account_total', 'tool': 'run_metric', 'metric_kind': 'account_total',
                     'account': item['metric']})
         if _closed_metric_key(item) is not None:
+            native = ENGINE_OUTPUT_AMOUNTS.get(_canonical_metric_name(item.get('metric')))
+            if native:
+                # An amount the finance engine states itself (not one of the four P&L lines).
+                engine({'path': 'engine_output', **native})
             recipe = {'path': 'evidence_recipe', 'tool': 'save_explanation_draft.evidence_recipes',
                       'recipe_kinds': ['direct', 'sum', 'diff'], 'scale': 'one_or_unit_power'}
             if environment.get('workbook_sources'):
                 accepted.append(recipe)
             else:
                 blocked.append({**recipe, 'blockers': ['no_workbook_source']})
-            if not item.get('scenarios'):
+            # explain_variance rows name the canonical lines (revenue/cost/expense/profit) and carry no
+            # scenario, so closure is offered only where _metric_matches can meet those rows.
+            if not item.get('scenarios') and _canonical_metric_name(item.get('metric')) in CLOSED_EVIDENCE_METRICS:
                 engine({'path': 'engine_closure', 'tool': 'explain_variance'})
         else:
             accepted.append({'path': 'cited_result_row'})
@@ -2155,8 +2329,9 @@ def _missing_rows_fixup(item, missing_grains, required_fields, field_gaps, paths
             # The row's metric_key names the requirement's own metric unless a dimension pins it.
             **({'metric_key': _canonical_metric_name(item.get('metric'))} if 'metric_key' not in dimension_fields else {}),
             **({'row_fields': dimension_fields} if dimension_fields else {}),
-            # Scope may come from the run's finance_scope instead of every row.
-            **({'scope_fields': scope_fields} if scope_fields else {})} if uses_rows else {}),
+            # On every row: only a finance-engine run's finance_scope stands in for row fields, and a script
+            # or SQL run has none (its run.scope metadata is not read by requirement matching).
+            **({'scope_fields': scope_fields, 'scope_fields_on': 'rows'} if scope_fields else {})} if uses_rows else {}),
         **({'cited_row_field_gaps': field_gaps} if field_gaps else {}),
         **_path_fields(item, paths, route),
         'missing_count': len(missing_grains),
@@ -2175,7 +2350,8 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncoun
     if any(path['path'] == 'evidence_recipe' for path in paths['accepted']):
         for location in locations:
             reason = location['evidence'].get('not_counted_reason')
-            if (location['status'] in {'answered', 'estimated'} or reason == 'estimate_cited_for_source_grain'
+            if (location['status'] in {'answered', 'estimated'}
+                    or reason in {'estimate_cited_for_source_grain', 'run_bindings_differ'}
                     or _location_grain(item, location, runs) not in uncounted_keys):
                 continue
             row = runs[location['run_id']]['result']['rows'][location['row']]
@@ -2376,6 +2552,7 @@ NOT_COUNTED_TEXT = {
     'recipe_source_outside_bindings': '复算规则的来源不在本要求绑定的资料快照内',
     'estimate_cited_for_source_grain': '该组合未在 grain_basis 声明为估算，却引用了估算值',
     'estimate_factor_declared_not_reproducible': '该组合已声明系数无法复算，引用的估算不计入，等经理决定口径',
+    'run_bindings_differ': '运行绑定的资料与本要求的绑定不一致，这个运行的结果不计入',
     'evidence_incomplete': '证据缺项、口径或单位不一致，或复算不闭合',
     'method_not_applicable': '计算方法未定义该项',
     'no_evidence_record': '该数值没有对应的证据记录',
@@ -2414,10 +2591,14 @@ def _path_text(path, keys):
     if name == 'method_run':
         return f'引用 method 为 {path["method"]} 的运行产出的含 {keys} 的结果行'
     if name == 'run_metric_result_set':
-        return f'在财务口径上运行 run_metric（{path["metric_kind"]}），并引用范围内全部结果行的 amount'
+        return (f'在财务口径上运行 run_metric（{path["metric_kind"]}），引用范围内全部结果行的 amount，'
+                '并逐行用 drilldown_fact 核查来源')
     if name == 'run_metric_account_total':
         return (f'在财务口径上运行 run_metric（kind 为 account_total，accounts 只列“{path["account"]}”），'
                 '并引用要求期间那一行的 amount')
+    if name == 'engine_output':
+        kind = f'（{path["scenario_kind"]}）' if path.get('scenario_kind') else ''
+        return f'引用 {path["tool"]}{kind} 在财务口径上产出的 {path["column"]} 结果'
     return f'需要含 {keys} 的结果行，并在文稿中引用该数值'
 
 
@@ -2466,7 +2647,11 @@ def _unanswered_message(item):
         if paths['accepted']:
             message += '可计入的依据：' + '；或'.join(_path_text(path, keys) for path in paths['accepted']) + '。'
         if _closed_metric_key(item) is not None and any(path['path'] == 'evidence_recipe' for path in paths['accepted']):
-            message += '收入、成本、费用、利润类的脚本输出和脚本自行算出的闭合本身都不计为已回答。'
+            message += '金额类要求（比率、数量、人数等以外的一切指标）的脚本输出和脚本自行算出的闭合本身都不计为已回答。'
+        if item.get('required_bindings'):
+            named = '、'.join(f'{alias}={dataset_id}' for alias, dataset_id in item['required_bindings'].items())
+            message += (f'要让这些结果计入，运行须按本要求的绑定重新运行（{named}）：别名与快照都要一致，'
+                        '要求只有一个绑定时别名不限。')
         estimates = [grain for grain in [*missing, *uncounted] if _reproducible_estimate_declared(item, grain)]
         if estimates and paths.get('estimate'):
             message += (_grain_count(estimates, '已在 grain_basis 声明为估算')
@@ -2477,6 +2662,9 @@ def _unanswered_message(item):
                         '系数能由归档单元格复算时声明 estimate 并写 method，再按估算附规则；系数写不出时声明 estimate、'
                         'factor_reproducible:false 并写 reason；资料缺失时声明 unavailable 并写 reason。'
                         '声明只让该组合计为估算或交经理确认，不计为已回答。')
+    elif paths['accepted'] and status != 'answered' and not estimated and not item.get('declared_grains'):
+        # A result set has no per-grain detail; still name what answers it.
+        message += '可计入的依据：' + '；或'.join(_path_text(path, 'value') for path in paths['accepted']) + '。'
     blocked = paths.get('blocked') or []
     if blocked and status != 'answered':
         texts = [f'{path.get("tool") or path["path"]}（{"、".join(BLOCKER_TEXT.get(b, b) for b in path["blockers"])}）'
@@ -2491,7 +2679,8 @@ def _unanswered_message(item):
     gaps = item.get('row_field_gaps') or {}
     if gaps:
         fields = '、'.join(f'{key}={value}' for key, value in gaps.items())
-        message += f'已引用的行还缺少或不一致的字段：{fields}。'
+        message += (f'已引用的行还缺少或不一致的字段：{fields}。这些字段写在每一条结果行上；'
+                    '脚本和 SQL 运行没有 finance_scope，运行的 scope 设置不参与要求核对。')
     if item.get('ledger_identity') == 'unproven_without_bound_snapshots':
         message += '没有财务口径的运行只能用本要求绑定快照的哈希证明账套，本要求没有记录绑定快照，行上的账套文字不计入。'
     return message
@@ -2565,7 +2754,7 @@ def augment_quality(analysis, spec, quality, *, _recipe_report=None):
                            **({'fixups': item['fixups']} if item.get('fixups') else {})})
             issues.extend(_estimated_issues(item))
         if item['provenance_status'] in {'pending', 'failed'}:
-            source_fixups = [fixup for fixup in item.get('fixups', []) if fixup.get('code') == 'verify_source']
+            source_fixups = [fixup for fixup in item.get('fixups', []) if fixup.get('code') in SOURCE_FIXUP_CODES]
             issues.append({'code': 'requested_source_missing', 'severity': 'warning', 'message': f'尚未完成“{item["label"]}”的指定来源核查。', 'requirement_item_id': item['id'],
                            **({'fixups': source_fixups} if source_fixups else {})})
     return {**quality, 'issues': issues, 'status': 'needs_attention' if issues else quality['status'],

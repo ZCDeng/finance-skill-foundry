@@ -386,10 +386,12 @@ def test_cited_rows_missing_dimension_and_scope_fields_are_named_and_fixing_them
     dimension and scope fields the matcher needs, so nothing matched. The named fields must be exactly
     what makes the matcher accept the row. Decision 1 changed two things here: a hierarchy level such
     as drilldown is refused at save time (it is no longer a field to stamp on rows), and the ledger of a
-    run without finance_scope is proven by its bound snapshot hashes, so it is never named as a row field."""
+    run without finance_scope is proven by its bound snapshot hashes, so it is never named as a row field.
+    Review round 3 inverted the amount gate: other_income is an amount, so the fixed row also needs the
+    source recipe the guidance names (a script value alone no longer answers it)."""
     from foundry.finance_requirements import _unanswered_message
 
-    source = _workbook(analysis, tmp_path, 'budget', {'预算': {'A1': '其他收益'}})
+    source = _workbook(analysis, tmp_path, 'budget', {'预算': {'A1': '其他收益', 'B1': 2902.5}})
     requirement = save_requirements(analysis, spec(
         scope={'ledger': 'L1', 'currency': 'CNY', 'unit': '万元'},
         bindings={'budget': source['id']},
@@ -414,12 +416,17 @@ def test_cited_rows_missing_dimension_and_scope_fields_are_named_and_fixing_them
     assert fixup['row_keys'] == ['metric_key', 'organization', 'period', 'scenario', 'product', 'value']
     assert fixup['metric_key'] == 'other_income'
     assert fixup['reason'] == 'cited_rows_miss_required_fields'
-    assert 'requires_closed_evidence' not in fixup
+    assert fixup['requires_closed_evidence'] is True
+    assert fixup['accepted_evidence'] == ['evidence_recipe']
     assert '已引用的行还缺少或不一致的字段：product=物业费、currency=CNY。' in _unanswered_message(item)
     assert 'ledger' not in _unanswered_message(item)
 
-    fixed = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
-                                          'claims': [_claim(run, row=1, column='value', value='2902.5')]})
+    cited = {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+             'claims': [_claim(run, row=1, column='value', value='2902.5')]}
+    script_only = check_requirements(analysis, cited)['items'][0]
+    assert script_only['status'] == 'pending'
+    assert script_only['uncounted_grains'][0]['reasons'] == ['script_output_without_recipe']
+    fixed = check_requirements(analysis, {**cited, 'evidence_recipes': [_recipe(source, '预算', 'B1', run, 1)]})
     assert fixed['items'][0]['status'] == 'answered'
     assert 'missing_grains' not in fixed['items'][0]
 

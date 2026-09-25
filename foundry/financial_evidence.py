@@ -252,8 +252,13 @@ def _clean_recipe(recipe: Any, index: int) -> dict[str, Any]:
     if kind in {"direct", "sum"}:
         cleaned.update(_source(recipe))
         if recipe.get("factor_recipe_id") is not None:
-            if "scale" in recipe:
-                raise FoundryError("factor_recipe_id cannot be combined with explicit scale")
+            # A unit conversion (元 → 万元) may sit next to the factor; a coefficient may not, it belongs in
+            # the referenced ratio recipe, where it is recomputed from the archive.
+            if "scale" in recipe and not _is_unit_scale(cleaned["scale"]):
+                raise FoundryError(
+                    "factor_recipe_id cannot be combined with an explicit scale other than 1 or a unit power "
+                    "(千/万/百万/亿); put the coefficient in the referenced ratio recipe"
+                )
             cleaned["factor_recipe_id"] = _text(recipe.get("factor_recipe_id"), "evidence recipe factor_recipe_id")
     elif recipe.get("factor_recipe_id") is not None:
         raise FoundryError("factor_recipe_id is only supported on direct and sum evidence recipes")

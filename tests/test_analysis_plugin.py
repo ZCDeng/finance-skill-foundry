@@ -222,7 +222,8 @@ process.stdout.write(JSON.stringify({
   hasTopExpected: Object.hasOwn(draftRecipe.properties, 'expected'),
   hasClaimExpected: Object.hasOwn(draftRecipe.properties.claim.properties, 'expected'),
   factorFields: [draftRecipe, saveRecipe, validateRecipe].map(recipe => Object.hasOwn(recipe.properties, 'factor_recipe_id')),
-  factorAndScaleExcluded: [draftRecipe, saveRecipe, validateRecipe].every(recipe =>
+  // Review round 3: a unit scale (元 → 万元) may sit next to factor_recipe_id; the server refuses any other scale.
+  factorAndScaleExcluded: [draftRecipe, saveRecipe, validateRecipe].some(recipe =>
     recipe.oneOf[0].not.anyOf.some(rule => JSON.stringify(rule.required) === JSON.stringify(['scale', 'factor_recipe_id']))),
   ratioFactorExcluded: [draftRecipe, saveRecipe, validateRecipe].every(recipe =>
     recipe.oneOf[1].not.anyOf.some(rule => JSON.stringify(rule.required) === JSON.stringify(['factor_recipe_id']))),
@@ -250,7 +251,7 @@ process.stdout.write(JSON.stringify({
     assert result["hasTopExpected"] is False
     assert result["hasClaimExpected"] is False
     assert result["factorFields"] == [True, True, True]
-    assert result["factorAndScaleExcluded"] is True
+    assert result["factorAndScaleExcluded"] is False
     assert result["ratioFactorExcluded"] is True
     assert result["oneOfCount"] == 2
     assert result["consistencySourceAdditional"] is False

@@ -16,11 +16,13 @@ METHOD_ALIASES = {
     "收入-成本-费用": "revenue_minus_cost_minus_expense",
     "收入减成本减费用": "revenue_minus_cost_minus_expense",
 }
-# Evidence that can answer each native metric, not a tool to try: run_metric management_pnl rows never
-# close for revenue/profit/cost/expense, so amounts are answered by a cited cell with a passing
-# direct/sum/diff evidence recipe, or by explain_variance engine closure (items without scenarios).
+# Evidence that can answer each native metric, not a tool to try. Every metric but a ratio, count or
+# quantity is an amount: script values never answer it. run_metric management_pnl rows never close for
+# revenue/profit/cost/expense, so those are answered by a cited cell with a passing direct/sum/diff
+# evidence recipe, or by explain_variance engine closure (items without scenarios); the other amounts
+# the engine states itself (engine_output) or a recipe proves.
 NATIVE_METRICS = {
-    "management_pnl": "cited_result_row",
+    "management_pnl": "evidence_recipe",
     "profit": "evidence_recipe / engine_closure (explain_variance)",
     "revenue": "evidence_recipe / engine_closure (explain_variance)",
     "cost": "evidence_recipe / engine_closure (explain_variance)",
@@ -29,14 +31,14 @@ NATIVE_METRICS = {
     "account_total": "run_metric_result_set (run_metric)",
     "control_totals": "run_metric_result_set (run_metric)",
     "price_quantity": "price_quantity_bridge (explain_variance)",
-    "amount_change": "engine_closure (explain_variance)",
-    "total_variance": "price_quantity_bridge (explain_variance)",
-    "quantity_contribution": "price_quantity_bridge (explain_variance)",
-    "price_contribution": "price_quantity_bridge (explain_variance)",
-    "interaction": "price_quantity_bridge (explain_variance)",
-    "residual": "price_quantity_bridge (explain_variance)",
-    "open_amount": "cited_result_row (finance_scenario_run receivables_aging)",
-    "closing_cash": "cited_result_row (finance_scenario_run cash_13_weeks)",
+    "amount_change": "engine_output (explain_variance) / evidence_recipe",
+    "total_variance": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
+    "quantity_contribution": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
+    "price_contribution": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
+    "interaction": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
+    "residual": "price_quantity_bridge (explain_variance) / engine_output (explain_variance) / evidence_recipe",
+    "open_amount": "engine_output (finance_scenario_run receivables_aging) / evidence_recipe",
+    "closing_cash": "engine_output (finance_scenario_run cash_13_weeks) / evidence_recipe",
 }
 
 
@@ -63,7 +65,7 @@ def metric_catalog():
     return [{"metric": key, "evidence": evidence} for key, evidence in NATIVE_METRICS.items()]
 
 
-ENGINE_TOOLS = {"explain_variance", "run_metric"}
+ENGINE_TOOLS = {"explain_variance", "run_metric", "finance_scenario_run"}
 
 
 def _offers(paths, name):
@@ -94,9 +96,9 @@ def _amount_next_action(item, paths):
     accepted = "；或".join(_path_text(path, keys) for path in paths["accepted"])
     blocked = "；".join(f"{path['path']}（{'、'.join(BLOCKER_TEXT.get(b, b) for b in path['blockers'])}）"
                         for path in paths["blocked"])
-    return ("按收入、成本、费用、利润类金额作答" + (f"：{accepted}" if accepted else "") + "。"
+    return ("按金额类要求作答（比率、数量、人数等以外的指标都按金额核验）" + (f"：{accepted}" if accepted else "") + "。"
             + (f"当前走不通的路径：{blocked}。" if blocked else "")
-            + "只有脚本输出的数不计为已回答；保留原问题。")
+            + "只有脚本或 SQL 输出的数不计为已回答；保留原问题。")
 
 
 def assess_requirement_support(analysis, spec):
@@ -123,7 +125,7 @@ def assess_requirement_support(analysis, spec):
                              "reason": "snapshot_unverified"})
     reports = []
     source_columns = {column for source in sources for column in source["columns"]}
-    from foundry.finance_requirements import _closed_metric_key, _evidence_environment, _evidence_paths
+    from foundry.finance_requirements import _closed_metric_key, _evidence_environment, _evidence_paths, _pnl_class
 
     try:
         environment = _evidence_environment(analysis, spec)
@@ -138,9 +140,13 @@ def assess_requirement_support(analysis, spec):
                  if isinstance(item, dict) and isinstance(item.get("metric"), str) else None)
         if metric not in NATIVE_METRICS:
             if paths and _closed_metric_key(item) and _offers(paths, "evidence_recipe"):
-                # A P&L amount named outside the catalog (利润总额, 销售费用 …): the checker gates it like the
-                # canonical metric, so free SQL/Python result columns alone never answer it.
+                # Every name but a ratio, count or quantity is gated as an amount (利润总额, NetProfit, a name
+                # nothing recognises …), so free SQL/Python result columns alone never answer it.
                 report.update(evidence=_paths_evidence(paths), next_action=_amount_next_action(item, paths))
+                if _pnl_class(item.get("metric")) is None and metric not in accounts and metric not in source_columns:
+                    report.update(status="unrecognized", next_action=(
+                        "未识别的指标按金额核验：可选择已支持指标，或用SQL/Python计算并声明明确的结果列，再按下述依据作答。"
+                        + report["next_action"]))
             elif metric in accounts:
                 report["evidence"] = "run_metric_result_set (single account_total)"
             elif metric in source_columns:

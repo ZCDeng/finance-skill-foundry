@@ -1,10 +1,15 @@
 """Phase 1 requirement evidence paths (decisions of 2026-09-24).
 
-Revenue/profit/cost/expense are answered only by finance-engine closure or by a cited cell backed by a
-passing, server-evaluated direct/sum/diff recipe on the requirement's own snapshots with a unit scale.
+Every requirement is an amount unless it is a known non-amount (a ratio, an item asking only for ratio
+scenarios, a count or a physical quantity). Script values never answer an amount. An amount is answered by
+a cited cell backed by a passing, server-evaluated direct/sum/diff recipe on the requirement's own snapshots
+with a unit scale; by finance-engine closure (revenue/profit/cost/expense items without scenarios); by the
+finance engine's own run_metric account_total of an account item, or its run_metric result set; and, outside
+revenue/profit/cost/expense, by the finance engine's own output of that amount.
 Every tightening has its opposite here, and every piece of guidance is followed literally once.
 """
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -35,6 +40,8 @@ from test_finance_requirements import (
     _workbook,
     spec,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -883,10 +890,11 @@ def test_an_unlisted_pnl_label_answered_by_a_script_value_no_longer_completes_th
     assert draft['completion']['original_requirements_completed'] is False
 
 
-@pytest.mark.parametrize('label', ['收入达成率', '销售费用率', 'expense_ratio', 'other_income'])
+@pytest.mark.parametrize('label', ['收入达成率', '销售费用率', 'expense_ratio'])
 def test_ratio_and_other_labels_keep_the_phase_1_script_rule(analysis, tmp_path, label):
     """Decision 4: script ratio values are not tightened in phase 1, so the amount gate must not swallow
-    ratios named after an amount, nor non-P&L-class metrics such as other_income."""
+    ratios named after an amount. (other_income left this list in review round 3: it is an amount, and
+    the inverted gate covers it; see GATED_AMOUNT_LABELS.)"""
     case = _label_case(analysis, tmp_path, label)
 
     assert _item(check_requirements(analysis, case.base))['status'] == 'answered'
@@ -978,12 +986,13 @@ def test_only_period_shaped_name_segments_of_the_trusted_appendix_are_exempt():
 # --- helpers ---------------------------------------------------------------------------------------
 
 
-def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_estimate=True, period='2026-01:2026-08'):
+def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_estimate=True, period='2026-01:2026-08',
+                   east_budget=180576, estimate_extra=None):
     """Huachen revenue_1_8 in miniature: group actual/budget and East actual from the source; the East
     1-8 budget exists only as East full-year budget × group 1-8 budget progress (300 ÷ 480 = 0.625)."""
     budget = _workbook(analysis, tmp_path, 'budget', {
         '01·年度预算总表': {'B12': 100, 'C12': 200, 'N12': 480},
-        '05·区域预算分解': {'C5': 180576},
+        '05·区域预算分解': {'C5': east_budget},
     })
     close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'D5': 109742.028, 'D11': 325644}})
     grain_basis = [declaration or {'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'basis': 'estimate',
@@ -1019,7 +1028,7 @@ def _estimate_case(analysis, tmp_path, *, declare=True, declaration=None, cite_e
     ]
     if cite_estimate:
         recipes.append({**_recipe(budget, '05·区域预算分解', 'C5', run, 3, recipe_id='east_budget_estimate'),
-                        'factor_recipe_id': 'phasing', 'business_key': key})
+                        'factor_recipe_id': 'phasing', 'business_key': key, **(estimate_extra or {})})
     values = ['325644', '300', '109742.028', '112860.000', '0.625']
     rows_cited = range(5) if cite_estimate else (0, 1, 2)
     claims = [_claim(run, row=index, column='value', value=values[index]) for index in rows_cited]
@@ -1088,10 +1097,12 @@ def test_an_undeclared_estimate_on_a_non_amount_item_is_not_answered_either(anal
 
     assert item['status'] == 'pending'
     assert item['locations'][0]['evidence']['not_counted_reason'] == 'estimate_cited_for_source_grain'
-    # Without any recipe the phase-1 script rule for non-amount values is unchanged (decision 4).
+    # Review round 3 inverted the amount gate: other_income is an amount, so its plain script value
+    # does not answer either (only ratios, counts and quantities keep the phase-1 script rule).
     plain = _item(check_requirements(analysis, {'requirements_id': case.requirement['id'], 'run_ids': [case.run['id']],
                                                 'claims': case.claims}))
-    assert plain['status'] == 'answered'
+    assert plain['status'] == 'pending'
+    assert plain['uncounted_grains'][0]['reasons'] == ['script_output_without_recipe']
 
 
 @pytest.mark.parametrize('label', ['net_income', 'operating_income', '管理费', '销售费', '财务费', '净收益'])
@@ -1429,3 +1440,386 @@ def test_a_legacy_drilldown_item_is_not_handed_to_the_manager_while_the_assistan
     assert completion['status'] == 'repair_available'
     assert completion['repair_allowed'] is True
     assert '助手不要重复计算' not in action['message']
+
+
+# --- review fixes, round 3 (PR #23) -----------------------------------------------------------------
+#
+# Rounds 1-3 each found P&L names that slipped past a list of amount names. The gate is now inverted:
+# every item is an amount unless it is a known non-amount (a ratio, an item asking only for ratio
+# scenarios, a count or a physical quantity). A name the gate does not recognise is gated.
+
+
+GATED_AMOUNT_LABELS = [
+    # camelCase and Chinese P&L names that rounds 1-2 missed
+    'NetProfit', 'netProfit', 'TotalRevenue', 'CostOfSales', 'GrossProfit', 'OperatingIncome', 'NetIncome', '盈利',
+    # names nothing recognises: gated all the same, never exempt
+    'PBT', 'SG&A', 'turnover', 'custom_formula', 'gross_margin',
+    # amounts outside revenue/profit/cost/expense
+    'other_income', '其他收益',
+    # 率 inside an amount name is not a ratio (exchange gains and losses)
+    '汇率损益',
+]
+
+
+@pytest.mark.parametrize('label', GATED_AMOUNT_LABELS)
+def test_every_item_that_is_not_a_known_non_amount_is_gated(analysis, tmp_path, label):
+    case = _label_case(analysis, tmp_path, label)
+    item = _item(check_requirements(analysis, case.base))
+
+    assert item['status'] == 'not_applicable'
+    assert item['uncounted_grains'] == [{'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe']}]
+    draft = FinanceStore(analysis.task).save_explanation_draft({'body': '金额为 997 万元。', 'run_ids': [case.run['id']],
+                                                                'claims': case.base['claims']})
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+    # The path the guidance names answers it.
+    assert _item(check_requirements(analysis, {**case.base, 'evidence_recipes': [case.recipe]}))['status'] == 'answered'
+
+
+@pytest.mark.parametrize('label, key', [
+    ('NetProfit', 'profit'), ('GrossProfit', 'profit'), ('OperatingIncome', 'profit'), ('NetIncome', 'profit'),
+    ('盈利', 'profit'), ('TotalRevenue', 'revenue'), ('CostOfSales', 'cost'), ('PBT', 'amount'), ('custom_formula', 'amount'),
+])
+def test_a_recognised_pnl_name_keeps_its_class_and_anything_else_is_a_plain_amount(label, key):
+    from foundry.finance_requirements import _closed_metric_key
+
+    assert _closed_metric_key({'metric': label}) == key
+
+
+KNOWN_NON_AMOUNT_LABELS = [
+    'ratio', '收入达成率', '销售费用率', 'expense_ratio', 'grossMarginRate', '毛利率（%）', '收入占比',
+    'sales_volume', '销量', 'headcount', 'order_count', '人数', '管理面积',
+]
+
+
+@pytest.mark.parametrize('label', KNOWN_NON_AMOUNT_LABELS)
+def test_known_non_amounts_keep_the_phase_1_script_rule(analysis, tmp_path, label):
+    """Decision 4 leaves script ratio values alone in phase 1; counts and physical quantities are not money."""
+    case = _label_case(analysis, tmp_path, label)
+
+    assert _item(check_requirements(analysis, case.base))['status'] == 'answered'
+
+
+def test_only_an_item_that_asks_for_ratio_scenarios_is_a_ratio(analysis, tmp_path):
+    source = _workbook(analysis, tmp_path, 'budget', {'预算': {'A1': '收入'}})
+    requirement = save_requirements(analysis, spec(scope={'ledger': '预算工作簿'}, bindings={'budget': source['id']}, items=[
+        {'id': 'attainment', 'metric': 'revenue', 'scenarios': ['achievement_ratio']},
+        {'id': 'mixed', 'metric': 'revenue', 'scenarios': ['actual', 'achievement_ratio']},
+        {'id': 'amount', 'metric': 'revenue'}]))
+    rows = [{'metric_key': 'revenue', 'scenario': 'achievement_ratio', 'value': '0.94'},
+            {'metric_key': 'revenue', 'scenario': 'actual', 'value': '120'}]
+    run = _script_run(analysis, {'budget': source}, rows, suffix='ratio-scenarios')
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': [
+        _claim(run, row=0, column='value', value='0.94'), _claim(run, row=1, column='value', value='120')]})
+    mixed = _item(result, 'mixed')
+
+    assert _item(result, 'attainment')['status'] == 'answered'
+    # The ratio grain keeps the script rule; the amount grain of the same item does not.
+    assert mixed['status'] == 'pending'
+    assert mixed['uncounted_grains'] == [{'scenario': 'actual', 'statuses': ['not_applicable'],
+                                          'reasons': ['script_output_without_recipe']}]
+    # An item that asks for the amount is not answered by a ratio row that happens to name it.
+    assert _item(result, 'amount')['status'] == 'not_applicable'
+
+
+def test_a_draft_that_policy_5_completed_on_an_ungated_name_is_checked_again(analysis, tmp_path):
+    """Under completion policy 5 a script value answered NetProfit and the draft completed. The inverted
+    gate changes that verdict, so a resend must not replay the policy-5 draft."""
+    from foundry.analysis import _hash
+    from foundry.fsutil import write_json_atomic
+
+    case = _label_case(analysis, tmp_path, 'NetProfit')
+    service = FinanceStore(analysis.task)
+    request = {'body': '净利润为 997 万元。', 'run_ids': [case.run['id']], 'claims': case.base['claims']}
+    first = service.save_explanation_draft(request)
+    path = analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'status': 'pass', 'issues': [], 'requirements': {
+        **check['requirements'], 'coverage': {'status': 'pass'}, 'original_requirements_completed': True,
+        'items': [{**item, 'status': 'answered'} for item in check['requirements']['items']]}}
+    record = {**stored, 'check_policy_version': 5, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert again['completion']['status'] != 'complete'
+    assert again['completion']['original_requirements_completed'] is False
+
+
+def test_a_finance_engine_cell_answers_an_amount_outside_revenue_profit_cost_expense(analysis):
+    """Script values never answer an amount; the engine's own output of a non-P&L-line amount still does.
+    revenue/profit/cost/expense keep the literal closure rule (see the engine-output test above)."""
+    save_requirements(analysis, spec(items=[{'id': 'income', 'metric': 'other_income', 'requires_drilldown': False}]))
+    rows = {'columns': ['metric_key', 'value'], 'rows': [{'metric_key': 'other_income', 'value': '12'}]}
+    engine = _run(analysis, id_suffix='engine-other-income', result=rows)
+    script = _run(analysis, id_suffix='script-other-income', engine='python', result=rows)
+
+    def check(run):
+        return _item(check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run, row=0, column='value', value='12')]}))
+
+    assert check(engine)['status'] == 'answered'
+    assert check(engine)['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+    assert check(script)['status'] == 'not_applicable'
+
+
+def _result_set_account_case(tmp_path, account, *, drilldown):
+    rows = [
+        {'ledger': 'L', 'organization': '总部', 'period': period, 'currency': 'CNY', 'unit': '元', 'scenario': 'actual',
+         'management_account': account, 'amount': amount, 'source_row': str(index), 'doc_id': f'D{index}', 'line_id': '1'}
+        for index, (period, amount) in enumerate((('2026-07', '100'), ('2026-08', '110')), start=1)]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope}, title='ledger78')
+    requirement = save_requirements(service.analysis, {
+        'question': f'7-8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'account_78', 'metric': account, 'periods': ['2026-07', '2026-08'], 'requires_drilldown': drilldown}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'account_total', 'accounts': [account]}})
+    return SimpleNamespace(service=service, requirement=requirement, run=run,
+                           spec={'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': []})
+
+
+@pytest.mark.parametrize('drilldown', [False, True])
+@pytest.mark.parametrize('account', ['管理费用', '主营业务成本', '主营业务收入', 'cash'])
+def test_a_result_set_account_item_names_its_rows_and_following_that_answers(tmp_path, account, drilldown):
+    """The amount gate made _claim_fixup reject the engine's own account_total cells, so a 费用/成本/收入
+    account item listing periods lost every add_calculation_claim and verify_source fixup. The result set
+    needs every row cited and source-checked, so the source check is named even without requires_drilldown."""
+    case = _result_set_account_case(tmp_path, account, drilldown=drilldown)
+    analysis = case.service.analysis
+    pending = _item(check_requirements(analysis, case.spec))
+    codes = [fixup['code'] for fixup in pending['fixups']]
+
+    assert pending['status'] == 'pending'
+    assert codes.count('add_calculation_claim') == 2
+    assert codes.count('verify_source') == 2
+    assert 'run_metric' in _unanswered_message(pending)
+
+    claims = [{'basis': 'calculation', **{key: fixup[key] for key in ('run_id', 'row', 'column', 'value')}}
+              for fixup in pending['fixups'] if fixup['code'] == 'add_calculation_claim']
+    for fixup in pending['fixups']:
+        if fixup['code'] == 'verify_source':
+            case.service.drilldown_fact({key: fixup['location'][key] for key in ('run_id', 'row', 'column')})
+    done = check_requirements(analysis, {**case.spec, 'claims': claims})
+    assert _item(done)['status'] == 'answered'
+    assert done['coverage']['status'] == 'pass'
+
+
+def test_a_run_on_the_single_bound_snapshot_under_another_alias_proves_the_ledger(analysis, tmp_path):
+    """_bindings_match lets a single-binding requirement be met by a run that binds the same snapshot under
+    its own alias, but the ledger check looked the snapshot up by the requirement's alias, so the cited row
+    was dropped and reported as never cited."""
+    source = _workbook(analysis, tmp_path, 'actual', {'PL': {'B7': 414696250}})
+    requirement = save_requirements(analysis, spec(scope={'ledger': 'L1'}, bindings={'actual': source['id']}, items=[
+        {'id': 'ratio', 'metric': 'ratio', 'requires_drilldown': False},
+        {'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False}]))
+    rows = [{'metric_key': 'ratio', 'value': '0.9453'}, {'metric_key': 'revenue', 'value': '41469.6250'}]
+
+    def check(run):
+        return check_requirements(analysis, {
+            'requirements_id': requirement['id'], 'run_ids': [run['id']],
+            'claims': [_claim(run, row=0, column='value', value='0.9453'), _claim(run, row=1, column='value', value='41469.6250')],
+            'evidence_recipes': [_recipe(source, 'PL', 'B7', run, 1, scale='0.0001')]})
+
+    renamed = check(_script_run(analysis, {'ledger_rows': source}, rows, suffix='renamed-alias'))
+    assert _item(renamed, 'ratio')['status'] == 'answered'
+    assert _item(renamed, 'revenue')['status'] == 'answered'
+
+    # The same alias on a different snapshot proves nothing.
+    stale = check(_script_run(analysis, {'ledger_rows': source}, rows, suffix='stale-alias',
+                              input_hashes={'ledger_rows': '0' * 64}))
+    assert _item(stale, 'ratio')['status'] == 'pending'
+    assert _item(stale, 'revenue')['status'] == 'pending'
+
+
+@pytest.mark.parametrize('aliases', [('bud', 'clo'), ('budget',), ('close', 'budget')])
+def test_a_cited_run_whose_bindings_differ_is_reported_as_not_counted_and_says_how_to_rebind(analysis, monthly, aliases):
+    """A run on the requirement's own snapshots under other alias names, or on only one of two, was dropped
+    silently: the message said nothing was cited and offered grain_basis for values the source states."""
+    # renamed aliases, only one of the two snapshots, and the two snapshots under each other's alias
+    run = _script_run(analysis, dict(zip(aliases, [monthly.budget, monthly.close])), REVENUE_ROWS, suffix='-'.join(aliases))
+    recipes = [_recipe(monthly.budget, '01·年度预算总表', 'I12', run, 0, recipe_id='budget'),
+               _recipe(monthly.close, '04·合并利润表', 'B5', run, 1, scale='0.0001', recipe_id='actual')]
+    claims = [_claim(run, row=0, column='value', value='44163.6526'), _claim(run, row=1, column='value', value='41469.6250')]
+    item = _item(_check(analysis, monthly, recipes=recipes, claims=claims, run=run))
+    rebind = next(f for f in item['fixups'] if f['code'] == 'rebind_run')
+    message = _unanswered_message(item)
+
+    assert item['status'] == 'pending'
+    assert 'missing_grains' not in item
+    assert {reason for grain in item['uncounted_grains'] for reason in grain['reasons']} == {'run_bindings_differ'}
+    assert rebind['required_bindings'] == monthly.requirement['bindings']
+    assert rebind['runs'] == [{'run_id': run['id'], 'bindings': run['bindings']}]
+    assert '没有已引用的结果行' not in message
+    assert 'grain_basis' not in message
+    assert '运行绑定' in message
+    assert not any(f.get('if_source_lacks_value') for f in item['fixups'])
+    # Following it: the same rows on a run bound exactly as the requirement answer.
+    assert _item(_check(analysis, monthly, recipes=monthly.good))['status'] == 'answered'
+
+
+def test_an_estimate_whose_source_is_in_yuan_takes_a_unit_scale_next_to_its_factor(analysis, tmp_path):
+    """The estimate hint allowed scale 1 or a unit conversion, but any scale next to factor_recipe_id made
+    the whole save fail, so an estimate from a 元 source could not be written at all."""
+    case = _estimate_case(analysis, tmp_path, east_budget=1805760000, estimate_extra={'scale': '0.0001'})
+    service = FinanceStore(analysis.task)
+    draft = service.save_explanation_draft({'body': '华东区域 1-8 月收入预算为估算。', 'run_ids': [case.run['id']],
+                                            'claims': case.spec['claims'], 'evidence_recipes': case.spec['evidence_recipes']})
+    item = _item(draft['explanation_check']['requirements'])
+    east = next(location for location in item['locations'] if location['row'] == 3)
+
+    assert item['status'] == 'estimated'
+    assert east['evidence']['evidence_basis'] == 'estimate'
+    assert east['evidence']['recipe_scale'] == '0.0001'
+
+    # A coefficient written as scale next to a factor is still refused: it belongs in the ratio recipe.
+    coefficient = [{**recipe, 'scale': '0.625'} if recipe['id'] == 'east_budget_estimate' else recipe
+                   for recipe in case.spec['evidence_recipes']]
+    with pytest.raises(FoundryError, match='unit'):
+        service.save_explanation_draft({'body': '估算。', 'run_ids': [case.run['id']], 'claims': case.spec['claims'],
+                                        'evidence_recipes': coefficient})
+
+
+def test_script_cells_are_never_sent_to_drilldown_fact(analysis, tmp_path):
+    """drilldown_fact can only verify finance-engine or verified-aggregate rows; for a python cell it
+    returns 'missing', so a verify_source fixup on it can never be satisfied."""
+    case = _estimate_case(analysis, tmp_path, declare=False)
+    item = _item(check_requirements(analysis, case.spec))
+    quality = augment_quality(analysis, case.spec, {'status': 'pass', 'issues': []})
+    source_issue = next(issue for issue in quality['issues'] if issue['code'] == 'requested_source_missing')
+
+    assert item['provenance_status'] == 'pending'
+    assert [fixup for fixup in item['fixups'] if fixup['code'] == 'verify_source'] == []
+    assert 'verify_source' not in json.dumps(source_issue)
+
+
+def test_an_answered_script_ratio_cell_is_traced_by_a_recipe_not_by_drilldown(analysis, tmp_path):
+    source = _workbook(analysis, tmp_path, 'budget', {'S': {'G1': 2, 'G2': 4}})
+    requirement = save_requirements(analysis, spec(scope={'ledger': '预算工作簿'}, bindings={'budget': source['id']},
+                                                   items=[{'id': 'ratio', 'metric': 'ratio', 'requires_drilldown': True}]))
+    run = _script_run(analysis, {'budget': source}, [{'metric_key': 'ratio', 'value': '0.5'}], suffix='traced-ratio')
+    base = {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': [_claim(run, row=0, column='value', value='0.5')]}
+    item = _item(check_requirements(analysis, base))
+
+    assert item['status'] == 'answered'
+    assert item['provenance_status'] == 'pending'
+    assert [fixup['code'] for fixup in item['fixups']] == ['add_source_recipe']
+    assert item['fixups'][0]['location']['row'] == 0
+
+    ratio = {'id': 'r', 'kind': 'ratio', 'claim': {'run_id': run['id'], 'row': 0, 'column': 'value'},
+             'left': {'dataset_id': source['id'], 'source_hash': source['source_hash'], 'sheet': 'S', 'range': 'G1'},
+             'right': {'dataset_id': source['id'], 'source_hash': source['source_hash'], 'sheet': 'S', 'range': 'G2'}}
+    traced = _item(check_requirements(analysis, {**base, 'evidence_recipes': [ratio]}))
+    assert traced['provenance_status'] == 'verified'
+    assert 'fixups' not in traced
+
+
+def test_scope_fields_are_asked_on_rows_because_a_script_runs_scope_is_not_read(analysis, tmp_path):
+    """The draft tool said currency/unit could sit in finance_scope, but a script run's only scope setting
+    is stored as run.scope, which requirement matching never reads."""
+    source = _workbook(analysis, tmp_path, 'budget', {'预算': {'N41': 43499.9999}})
+    grain = {'organization': '集团合并', 'period': '2026', 'scenario': 'budget_bud_fy'}
+    requirement = save_requirements(analysis, spec(scope={'ledger': '预算工作簿', 'currency': 'CNY', 'unit': '万元'},
+                                                   bindings={'budget': source['id']},
+                                                   items=[{'id': 'fy_profit', 'metric': 'profit', 'organizations': ['集团合并'],
+                                                           'periods': ['2026'], 'scenarios': ['budget_bud_fy'],
+                                                           'requires_drilldown': False}]))
+    run = _script_run(analysis, {'budget': source}, [{'metric_key': 'profit', **grain, 'value': '43499.9999'}],
+                      suffix='run-scope', scope={'currency': 'CNY', 'unit': '万元'})
+    item = _item(check_requirements(analysis, {
+        'requirements_id': requirement['id'], 'run_ids': [run['id']],
+        'claims': [_claim(run, row=0, column='value', value='43499.9999')],
+        'evidence_recipes': [_recipe(source, '预算', 'N41', run, 0)]}))
+    fixup = next(f for f in item['fixups'] if f['code'] == 'add_requirement_rows')
+
+    assert item['status'] == 'pending'
+    assert item['row_field_gaps'] == {'currency': 'CNY', 'unit': '万元'}
+    assert fixup['scope_fields_on'] == 'rows'
+    assert '写在每一条结果行上' in _unanswered_message(item)
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    assert '或 finance_scope 里' not in tools
+
+
+def test_tool_descriptions_name_every_path_that_answers_an_amount():
+    """The descriptions said amounts were answered 'only' by explain_variance closure or a recipe, while
+    the checker also answers them with run_metric account_total, run_metric result sets and, for amounts
+    outside revenue/profit/cost/expense, the finance engine's own output."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert '只由两种依据' not in tools
+    assert 'answered only by' not in draft
+    for text in (tools, draft):
+        assert 'account_total' in text
+        assert 'result set' in text or '结果集' in text
+        assert 'explain_variance' in text
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+def test_a_scope_granularity_is_not_a_row_filter(analysis, monthly):
+    """AnalysisScopeCard saves 粒度 as scope.granularity. The checker then required it on every row, the
+    fixup said to stamp it (the PR #17 pattern decision 1 reverses) and a real engine closure never counted."""
+    record = monthly.requirement
+    granular = save_requirements(analysis, spec(question=record['question'], bindings=record['bindings'],
+                                                scope={**record['scope'], 'granularity': '城市公司'},
+                                                parent_id=record['id'], items=record['items']))
+    case = SimpleNamespace(**{**vars(monthly), 'requirement': granular})
+    unbacked = _item(_check(analysis, case))
+    backed = _item(_check(analysis, case, recipes=monthly.good))
+
+    assert 'granularity' not in json.dumps(unbacked.get('fixups', []), ensure_ascii=False)
+    assert 'granularity' not in unbacked.get('row_field_gaps', {})
+    assert backed['status'] == 'answered'
+
+
+def test_an_engine_closure_answers_under_a_scope_that_states_a_granularity(analysis):
+    save_requirements(analysis, spec(scope={'ledger': 'L1', 'granularity': '城市公司'},
+                                     items=[{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False}]))
+    run = _run(analysis, id_suffix='granular-closure')
+
+    item = _item(check_requirements(analysis, {'run_ids': [run['id']], 'claims': [_claim(run, row=0, value='20')]}))
+
+    assert item['status'] == 'answered'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'engine_closed'
+
+
+def test_a_drilldown_written_into_scope_is_refused_like_a_dimension(analysis):
+    with pytest.raises(FoundryError) as refused:
+        save_requirements(analysis, spec(scope={'ledger': 'L1', 'drilldown': '城市公司'}))
+    assert refused.value.details['code'] == 'requirement_scope_not_row_filter'
+    assert refused.value.details['suggested_scope'] == {'ledger': 'L1'}
+    # A granularity is the scope card's own field and stays; it just never filters rows.
+    first = save_requirements(analysis, spec(scope={'ledger': 'L1', 'granularity': '月'}))
+    assert first['scope']['granularity'] == '月'
+
+    # A level carried over unchanged from an old record is dropped and recorded, as for dimensions.
+    legacy = _new(analysis.task, question='华宸 1-8 月', scope={'ledger': '月结套表', 'drilldown': '城市公司'}, bindings={},
+                  context_id=None, parent_id=first['id'], removed_item_ids=[], change_reason='', selection=None,
+                  items=first['items'])
+    analysis._write(analysis._object_path('requirements', legacy['id']), legacy)
+    saved = save_requirements(analysis, spec(scope=legacy['scope'], parent_id=legacy['id'], items=legacy['items']))
+    assert saved['scope'] == {'ledger': '月结套表'}
+    assert [warning['code'] for warning in saved['authoring_warnings']] == ['hierarchy_scope_dropped']
+
+
+def test_resubmitting_the_refusals_suggested_items_records_the_dropped_legacy_level(analysis, tmp_path):
+    """The refusal names only the newly added level, and its suggested_items already lack the legacy one,
+    so resubmitting them unchanged dropped 城市公司 with nothing recorded on the new version."""
+    close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'A5': '华东区域'}})
+    legacy = _legacy_drilldown_record(analysis, {'close': close['id']}, [
+        {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '收入', 'dimensions': {'drilldown': '城市公司'},
+         'periods': ['2026-01:2026-08'], 'requires_drilldown': False}])
+    items = [*legacy['items'], {'id': 'region_split', 'metric': 'revenue', 'dimensions': {'level': '区域'}}]
+    with pytest.raises(FoundryError) as refused:
+        save_requirements(analysis, spec(scope=legacy['scope'], bindings=legacy['bindings'], parent_id=legacy['id'], items=items))
+
+    saved = save_requirements(analysis, spec(scope=legacy['scope'], bindings=legacy['bindings'], parent_id=legacy['id'],
+                                             items=refused.value.details['suggested_items']))
+    assert [(warning['code'], warning['requirement_item_id']) for warning in saved['authoring_warnings']] == [
+        ('hierarchy_dimension_dropped', 'revenue_1_8')]
+    # A save with no hierarchy anywhere records nothing.
+    again = save_requirements(analysis, spec(scope=saved['scope'], bindings=saved['bindings'], parent_id=saved['id'],
+                                             items=saved['items']))
+    assert 'authoring_warnings' not in again

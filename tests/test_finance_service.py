@@ -714,7 +714,7 @@ def test_completion_requests_fresh_run_after_requirements_revision(finance):
     assert stopped['status'] == 'repair_available'
     assert stopped['actions'][0]['code'] == 'requirements_run_outdated'
     assert stopped['actions'][0]['run_ids'] == [old_run['id']]
-    assert stopped['completion_policy_version'] == 5
+    assert stopped['completion_policy_version'] == 6
     assert record_completion(service.analysis, draft, quality)['id'] == stopped['id']
 
     fresh_run = service.explain_variance({'context_id': context['id']})

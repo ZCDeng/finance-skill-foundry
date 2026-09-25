@@ -387,3 +387,18 @@ def test_circle_select_carries_a_legacy_drilldown_item_over_without_the_hierarch
     assert revised["requirements"]["items"][0]["dimensions"] == {"product": "物业费"}
     assert [item["id"] for item in revised["requirements"]["items"]] == ["expense"]
     assert len(service._list("contexts")) == contexts_before + 1
+    # The dropped level is recorded on the new version, as for any other save over a legacy record
+    # (review round 3: circle-select dropped it with nothing recorded).
+    assert [(warning["code"], warning["requirement_item_id"], warning["keys"])
+            for warning in revised["requirements"]["authoring_warnings"]] == [
+        ("hierarchy_dimension_dropped", "expense", {"drilldown": "城市公司"})]
+
+
+def test_circle_select_over_a_record_without_hierarchy_records_no_drop(tmp_path: Path) -> None:
+    service, context, _dataset, _original = _service(tmp_path)
+    draft = _table_draft(service)
+
+    revised = service.analysis_circle_select({"kind": "draft_table", "draft_id": draft["id"], "block_id": "tbl-expense",
+                                              "range": "A:A", "instruction": "改成开票口径", "context_id": context["id"]})
+
+    assert "hierarchy_dimension_dropped" not in json.dumps(revised["requirements"].get("authoring_warnings", []))
