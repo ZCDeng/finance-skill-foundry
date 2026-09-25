@@ -94,6 +94,7 @@ ENGINE_OUTPUT_AMOUNTS = {
         'amount_change', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction', 'residual')},
 }
 PROFIT_BRIDGE_REQUIRED_LINES = ('revenue', 'cost', 'expense', 'profit')
+VARIANCE_RESULT_DOMAIN = 'foundry.finance.variance.v1'
 CONTROL_TOTAL_COMPARISON_GRAIN_KEYS = (
     'ledger', 'ledger_id', 'organization', 'organization_id', 'period', 'currency', 'unit',
     'management_account', 'account_id', 'account_code',
@@ -602,7 +603,7 @@ def _scope_matches(run, row, scope):
             return _scope_dict_matches(_merge_scope_with_row(source_scope, row, expected['source']), expected['source'])
         bound_scopes = [scope for scope in scopes.values() if isinstance(scope, dict)]
         if bound_scopes:
-            return _bound_scopes_match(bound_scopes, expected, row)
+            return _bound_scopes_match(bound_scopes, expected, row, comparison=_comparison_run(run))
     return _scope_dict_matches(row, expected['actual']) or (
         isinstance(scopes, dict) and _scope_dict_matches(scopes, expected['source'])
     )
@@ -659,14 +660,30 @@ def _merge_scope_with_row(scope, row, expected):
     return merged
 
 
-def _bound_scopes_match(candidates, expected, row=None):
-    if len(candidates) != 1:
+def _comparison_run(run):
+    return (run.get('result') or {}).get('domain') == VARIANCE_RESULT_DOMAIN
+
+
+def _bound_scopes_match(candidates, expected, row=None, *, comparison=False):
+    """A finance_scope keyed by binding alias matches when every bound input lies in the requirement scope.
+
+    A cash_13_weeks run on receipts and payments, or a receivables_aging run on invoices and activity,
+    derives its rows from all of its inputs; its output is in the requirement scope only when each of them
+    is. An input in another scope (or a row stating another value) leaves the output's scope unproven.
+    A comparison (explain_variance) run with several inputs named other than actual/baseline stays
+    ambiguous: nothing says which input is which side.
+    """
+    if not candidates or (comparison and len(candidates) != 1):
         return False
-    candidate = _merge_scope_with_row(candidates[0], row or {}, expected['actual'])
+    return all(_bound_scope_matches(candidate, expected, row) for candidate in candidates)
+
+
+def _bound_scope_matches(bound, expected, row=None):
+    candidate = _merge_scope_with_row(bound, row or {}, expected['actual'])
     if not _scope_dict_matches(candidate, expected['actual']):
         return False
     baseline_scope = expected['baseline']
-    if baseline_scope and not _scope_dict_matches(candidates[0], baseline_scope):
+    if baseline_scope and not _scope_dict_matches(bound, baseline_scope):
         return False
     source_scope = expected['source']
     return not source_scope or _scope_dict_matches(candidate, source_scope)
@@ -1931,15 +1948,19 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 continue
             if _profit_bridge_group_required(item):
                 continue
-            account_total_match = (_account_total_requirement_matches(analysis, item, run, row, column)
-                                   and _requirement_scope_matches(run, row, item, latest))
-            generic_match_allowed = not _account_amount_claim_requires_native_total(item, row, column)
-            if account_total_match or (
-                generic_match_allowed and _matches(item, row, column, run) and _requirement_scope_matches(run, row, item, latest)
-            ):
+            account_total_candidate = _account_total_requirement_matches(analysis, item, run, row, column)
+            generic_candidate = (not _account_amount_claim_requires_native_total(item, row, column)
+                                 and _matches(item, row, column, run))
+            scope_ok = (account_total_candidate or generic_candidate) and _requirement_scope_matches(run, row, item, latest)
+            if scope_ok:
                 location = {'run_id': run_id, 'row': index, 'column': column, 'output_hash': run.get('output_hash')}
-                status, metadata = _cell_evidence_status(item, location, evidence, native_total=account_total_match, row=row)
+                status, metadata = _cell_evidence_status(item, location, evidence, native_total=account_total_candidate,
+                                                         row=row)
                 locations.append({**location, 'evidence': metadata, 'status': status})
+            elif (account_total_candidate or generic_candidate) and _out_of_scope_inputs(run, item, latest):
+                # The run read inputs outside the requirement scope, which no row field repairs: report the
+                # cited cell as not counted (ruling (a)), never as "no cited row".
+                locations.append(_scope_mismatch_location(run, index, column))
         if result_set is None:
             # An estimate only counts where the item declared that grain an estimate (grain_basis).
             locations = [_with_declared_basis(item, location, runs) for location in locations]
@@ -2035,6 +2056,28 @@ def _bindings_mismatch_location(run, index, column):
     (the run is not proven to have read the requirement's snapshots under their names), always reported."""
     return {'run_id': run['id'], 'row': index, 'column': column, 'output_hash': run.get('output_hash'),
             'evidence': {'evidence_basis': None, 'not_counted_reason': 'run_bindings_differ'}, 'status': 'pending'}
+
+
+def _out_of_scope_inputs(run, item, latest):
+    """Aliases of a finance run's bound inputs whose own scope states another value than the requirement.
+
+    Only alias-keyed scopes of runs that combine their inputs (scenario results, run_metric) are read: a
+    row stating another period is another grain, not a run to redo, and a comparison run's unnamed sides
+    are ambiguous rather than out of scope, so neither is reported here.
+    """
+    scopes = run.get('finance_scope') if isinstance(run.get('finance_scope'), dict) else {}
+    if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'baseline', 'budget', 'source')):
+        return []
+    expected = _comparison_scopes(_item_scope(item, latest.get('scope') or {}))['actual']
+    return [alias for alias, bound in scopes.items() if isinstance(bound, dict) and any(
+        bound.get(key) not in (None, '') and bound[key] != value for key, value in expected.items())]
+
+
+def _scope_mismatch_location(run, index, column):
+    """A cited cell about the item on a finance run whose finance_scope (every bound input's scope) is not
+    the requirement scope: never counted, always reported, and repaired only by a run on in-scope inputs."""
+    return {'run_id': run['id'], 'row': index, 'column': column, 'output_hash': run.get('output_hash'),
+            'evidence': {'evidence_basis': None, 'not_counted_reason': 'run_scope_differs'}, 'status': 'pending'}
 
 
 def _with_declared_basis(item, location, runs):
@@ -2140,6 +2183,19 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
             'required_bindings': dict(latest.get('bindings') or {}),
             'runs': [{'run_id': run_id, 'bindings': dict(runs[run_id].get('bindings') or {})} for run_id in rebind[:12]],
             'reason': 'run_bindings_differ',
+        }]
+    rescope = list(dict.fromkeys(location['run_id'] for location in record['locations']
+                                 if location['evidence'].get('not_counted_reason') == 'run_scope_differs'))
+    if rescope:
+        record['required_scope'] = _item_scope(item, latest.get('scope') or {})
+        fixups = [*fixups, {
+            'code': 'rescope_run',
+            'requirement_item_id': item['id'],
+            # Rerun on a finance context whose every bound alias's scope is this scope.
+            'required_scope': record['required_scope'],
+            'runs': [{'run_id': run_id, 'finance_scope': runs[run_id].get('finance_scope') or {}}
+                     for run_id in rescope[:12]],
+            'reason': 'run_scope_differs',
         }]
     if result_set and paths['blocked'] and not paths['accepted']:
         fixups = [*fixups, _blocked_path_fixup(item, paths)]
@@ -2406,6 +2462,8 @@ def _cited_row_field_gaps(item, latest, runs, claimed_cells, required_fields):
         run = runs.get(run_id)
         if not run or not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
             continue
+        if _out_of_scope_inputs(run, item, latest):
+            continue  # rerun on in-scope inputs (rescope_run); no row field repairs it
         row = run['result']['rows'][index]
         if not _requested_grain_matches(item, run, row) or not _metric_matches(item, row, column):
             continue
@@ -2462,7 +2520,7 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncoun
         for location in locations:
             reason = location['evidence'].get('not_counted_reason')
             if (location['status'] in {'answered', 'estimated'}
-                    or reason in {'estimate_cited_for_source_grain', 'run_bindings_differ'}
+                    or reason in {'estimate_cited_for_source_grain', 'run_bindings_differ', 'run_scope_differs'}
                     or _location_grain(item, location, runs) not in uncounted_keys):
                 continue
             row = runs[location['run_id']]['result']['rows'][location['row']]
@@ -2674,6 +2732,7 @@ NOT_COUNTED_TEXT = {
     'estimate_cited_for_source_grain': '该组合未在 grain_basis 声明为估算，却引用了估算值',
     'estimate_factor_declared_not_reproducible': '该组合已声明系数无法复算，引用的估算不计入，等经理决定口径',
     'run_bindings_differ': '运行绑定的资料与本要求的绑定不一致，这个运行的结果不计入',
+    'run_scope_differs': '财务引擎运行的 finance_scope 里有绑定输入的口径与本要求的范围不一致，这个运行的结果不计入',
     'evidence_incomplete': '证据缺项、口径或单位不一致，或复算不闭合',
     'method_not_applicable': '计算方法未定义该项',
     'no_evidence_record': '该数值没有对应的证据记录',
@@ -2777,6 +2836,11 @@ def _unanswered_message(item):
             named = '、'.join(f'{alias}={dataset_id}' for alias, dataset_id in item['required_bindings'].items())
             message += (f'要让这些结果计入，运行须按本要求的绑定重新运行（{named}）：别名与快照都要一致，'
                         '要求只有一个绑定时别名不限。')
+        if item.get('required_scope'):
+            named = '、'.join(f'{key}={value}' for key, value in _comparison_scopes(item['required_scope'])['actual'].items())
+            message += (f'要让这些结果计入，须在每个绑定别名的口径都与本要求范围一致{f"（{named}）" if named else ""}'
+                        '的财务口径上重新运行，'
+                        '一个输入的口径不同，运行结果的口径就无法证明；这不是结果行上补字段能解决的。')
         estimates = [grain for grain in [*missing, *uncounted] if _reproducible_estimate_declared(item, grain)]
         if estimates and paths.get('estimate'):
             message += (_grain_count(estimates, '已在 grain_basis 声明为估算')

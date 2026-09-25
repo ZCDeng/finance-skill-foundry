@@ -8,7 +8,9 @@ MAX_REPAIRS = 2
 # 6: review round 3 inverted the amount gate (every item but a known non-amount is gated).
 # 7: review round 4 gates quantity/area names that also name an amount (price_volume, revenue_by_area) and
 #    counts structured_aggregate output for amounts outside revenue/profit/cost/expense.
-COMPLETION_POLICY_VERSION = 7
+# 8: review round 5 matches a finance run on several bound inputs (cash_13_weeks on receipts + payments)
+#    when every input lies in the requirement scope, and reports out-of-scope inputs as not counted.
+COMPLETION_POLICY_VERSION = 8
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}

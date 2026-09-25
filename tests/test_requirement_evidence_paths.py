@@ -19,6 +19,7 @@ from foundry.analysis import AnalysisStore, _new
 from foundry.errors import FoundryError
 from foundry.finance_completion import record_completion
 from foundry.finance_requirements import (
+    _scope_matches,
     _unanswered_message,
     augment_quality,
     check_requirements,
@@ -2248,3 +2249,168 @@ def test_tool_descriptions_name_the_aggregate_and_price_quantity_paths_and_exact
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
         encoding='utf-8') == preset
+
+
+# --- round 5: a finance run on several bound inputs ------------------------------------------------
+
+SCENARIO_SCOPE = {'ledger': 'L1', 'organization': 'O1', 'currency': 'CNY', 'unit': '万元'}
+
+
+def _scenario_case(tmp_path, kind, aliases, *, scopes=None, requirement_scope=None):
+    """A finance context binding `aliases`, a requirement saved on it (the context's scope unless
+    `requirement_scope`), and one finance_scenario_run of `kind` with every engine-amount cell cited:
+    closing_cash for cash_13_weeks, open_amount for receivables_aging."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    service = FinanceStore(TaskStore(tmp_path / 'var').create(title=kind))
+    data = {
+        'receipts': [{'id': 'R1', 'date': '2026-09-25', 'amount': '100'}],
+        'payments': [{'id': 'P1', 'date': '2026-09-28', 'amount': '60'}],
+        'invoices': [{'id': 'I1', **SCENARIO_SCOPE, 'issue_date': '2026-08-01', 'due_date': '2026-08-01',
+                      'amount': '100'}],
+        'activity': [{'id': 'A1', 'invoice_id': 'I1', 'kind': 'payment', **SCENARIO_SCOPE,
+                      'effective_date': '2026-08-20', 'amount': '40'}],
+    }
+    bindings = {}
+    for alias in aliases:
+        path = tmp_path / f'{alias}.json'
+        path.write_text(json.dumps(data[alias], ensure_ascii=False), encoding='utf-8')
+        bindings[alias] = service.analysis.add_dataset(path, name=alias)['id']
+    context = service.save_context({'bindings': bindings,
+                                    'scopes': scopes or {alias: dict(SCENARIO_SCOPE) for alias in bindings}})
+    column = 'closing_cash' if kind == 'cash_13_weeks' else 'open_amount'
+    requirement = service.analysis_requirements_save({
+        'context_id': context['id'], 'question': column, 'items': [{'id': 'amount', 'metric': column}],
+        **({'scope': requirement_scope} if requirement_scope else {})})
+    inputs = ({'opening_cash': '50', 'start_date': '2026-09-24', 'actual_cutoff': '2026-09-23'}
+              if kind == 'cash_13_weeks' else {'as_of': '2026-09-05'})
+    scenario = service.save_scenario({'context_id': context['id'], 'kind': kind, 'label': kind,
+                                      'inputs': {**inputs, 'scope': SCENARIO_SCOPE}})
+    run = service.run_scenario({'scenario_id': scenario['id']})
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': column, 'value': row[column]}
+              for index, row in enumerate(run['result']['rows']) if row.get(column) not in (None, '')]
+    return SimpleNamespace(service=service, analysis=service.analysis, run=run, requirement=requirement,
+                           claims=claims, column=column,
+                           spec={'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims})
+
+
+@pytest.mark.parametrize('kind, aliases', [
+    ('cash_13_weeks', ('receipts',)), ('cash_13_weeks', ('receipts', 'payments')),
+    ('receivables_aging', ('invoices',)), ('receivables_aging', ('invoices', 'activity')),
+])
+def test_a_finance_run_on_every_bound_input_in_the_requirement_scope_answers_its_engine_amount(tmp_path, kind, aliases):
+    """The guidance names finance_scenario_run closing_cash/open_amount, but a run binding both inputs
+    (receipts + payments, invoices + activity) has a finance_scope keyed by both aliases, and the matcher
+    refused every run with more than one bound scope: the cited cells stayed pending as 没有已引用的结果行
+    while the message repeated the same path."""
+    case = _scenario_case(tmp_path, kind, aliases)
+    result = check_requirements(case.analysis, case.spec)
+    item = _item(result)
+
+    assert case.run['engine'] == 'finance' and sorted(case.run['finance_scope']) == sorted(aliases)
+    assert 'engine_output' in case.requirement['support']['items'][0]['accepted_evidence']
+    assert case.claims
+    assert item['status'] == 'answered'
+    assert len(item['locations']) == len(case.claims)
+    assert {location['evidence']['evidence_basis'] for location in item['locations']} == {'engine_output'}
+    assert result['coverage']['status'] == 'pass'
+
+    facts = case.service.prepare_explanation({'run_ids': [case.run['id']]})['facts']
+    body = '、'.join('{{fact:%s}}' % fact['id'] for fact in facts if fact.get('column') == case.column) + '。'
+    draft = case.service.save_explanation_draft({'title': case.column, 'body': body, 'run_ids': [case.run['id']],
+                                                 'requirements_id': case.requirement['id']})
+    assert _item(draft['explanation_check']['requirements'])['status'] == 'answered'
+    assert 'requirement_unanswered' not in [issue.get('code') for issue in draft['explanation_check']['issues']]
+
+
+@pytest.mark.parametrize('payments, requirement_scope', [
+    ({**SCENARIO_SCOPE, 'unit': '元'}, SCENARIO_SCOPE),
+    ({**SCENARIO_SCOPE, 'ledger': 'L2'}, SCENARIO_SCOPE),
+    (SCENARIO_SCOPE, {**SCENARIO_SCOPE, 'unit': '元'}),
+])
+def test_a_finance_run_with_a_bound_input_outside_the_requirement_scope_is_cited_but_not_counted(
+        tmp_path, payments, requirement_scope):
+    """Opposite direction: every bound input must lie in the requirement scope. One input in another unit or
+    ledger (or a requirement in another unit than all of them) leaves the output's scope unproven, so the
+    cells do not count; they are reported as cited but not counted with the scope the run needs (ruling
+    (a)), never as uncited."""
+    scopes = {'receipts': dict(SCENARIO_SCOPE), 'payments': dict(payments)}
+    case = _scenario_case(tmp_path, 'cash_13_weeks', ('receipts', 'payments'), scopes=scopes,
+                          requirement_scope=requirement_scope)
+    item = _item(check_requirements(case.analysis, case.spec))
+
+    assert case.claims
+    assert item['status'] == 'pending'
+    assert len(item['locations']) == len(case.claims)
+    assert {location['evidence']['not_counted_reason'] for location in item['locations']} == {'run_scope_differs'}
+    assert 'missing_grains' not in item
+    assert item['uncounted_grains'][0]['reasons'] == ['run_scope_differs']
+    fixup = next(fixup for fixup in item['fixups'] if fixup['code'] == 'rescope_run')
+    assert fixup['required_scope'] == requirement_scope
+    assert fixup['runs'] == [{'run_id': case.run['id'], 'finance_scope': scopes}]
+    # A finance run's inputs are fixed by rerunning, not by row fields: no row-field advice for it.
+    assert 'row_field_gaps' not in item
+    message = _unanswered_message(item)
+    assert '没有已引用的结果行' not in message
+    assert '已引用了结果但未计入' in message and 'finance_scope' in message
+
+
+def test_a_draft_that_policy_7_left_pending_on_a_two_input_finance_run_is_checked_again(tmp_path):
+    """Under completion policy 7 a finance run on two bound inputs never matched a scoped requirement, so the
+    draft stayed pending. The rule changed, so a resend must not replay that verdict."""
+    from foundry.analysis import _hash
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+    from foundry.fsutil import write_json_atomic
+
+    case = _scenario_case(tmp_path, 'cash_13_weeks', ('receipts', 'payments'))
+    facts = case.service.prepare_explanation({'run_ids': [case.run['id']]})['facts']
+    request = {'title': '现金', 'run_ids': [case.run['id']], 'requirements_id': case.requirement['id'],
+               'body': '、'.join('{{fact:%s}}' % fact['id'] for fact in facts if fact.get('column') == 'closing_cash')}
+    first = case.service.save_explanation_draft(request)
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION
+    path = case.analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'status': 'needs_attention', 'requirements': {
+        **check['requirements'], 'coverage': {'status': 'needs_attention'}, 'original_requirements_completed': False,
+        'items': [{**item, 'status': 'pending', 'locations': []} for item in check['requirements']['items']]}}
+    record = {**stored, 'check_policy_version': 7, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = case.service.save_explanation_draft(request)
+
+    assert again.get('replayed') is not True
+    assert _item(again['explanation_check']['requirements'])['status'] == 'answered'
+
+
+def test_bound_scopes_keyed_by_alias_match_only_when_every_one_is_in_the_requirement_scope():
+    scope = {'ledger': 'L1', 'organization': 'O1', 'unit': '万元'}
+    row = {'closing_cash': '90', 'ledger': 'L1', 'organization': 'O1', 'unit': '万元'}
+
+    def run(**scopes):
+        return {'finance_scope': scopes}
+
+    assert _scope_matches(run(receipts=scope), row, scope)
+    assert _scope_matches(run(receipts=scope, payments=scope), row, scope)
+    assert not _scope_matches(run(receipts=scope, payments={**scope, 'unit': '元'}), row, scope)
+    assert not _scope_matches(run(receipts=scope, payments=scope), {**row, 'organization': 'O2'}, scope)
+    assert not _scope_matches(run(receipts={**scope, 'ledger': 'L2'}, payments={**scope, 'ledger': 'L2'}), row, scope)
+    # Several bound scopes match exactly when each would match as the run's only bound scope.
+    others = [scope, {**scope, 'unit': '元'}, {'ledger': 'L1', 'organization': 'O1'}, {'unit': '万元'}, {}]
+    for other in others:
+        assert _scope_matches(run(receipts=scope, payments=other), row, scope) == _scope_matches(
+            run(payments=other), row, scope)
+    # A comparison run's inputs named other than actual/baseline stay ambiguous, as on main.
+    variance = {**run(pq=scope, other=scope), 'result': {'domain': 'foundry.finance.variance.v1'}}
+    assert not _scope_matches(variance, row, scope)
+    assert _scope_matches({**run(pq=scope), 'result': {'domain': 'foundry.finance.variance.v1'}}, row, scope)
+
+
+def test_tool_descriptions_say_every_bound_input_of_a_finance_run_must_lie_in_the_requirement_scope():
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert 'every bound input' in draft and 'rescope_run' in draft
+    assert '每个绑定别名的口径' in tools and 'rescope_run' in tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
