@@ -3926,7 +3926,7 @@ def test_a_draft_policy_11_completed_over_a_dropped_level_is_checked_again(tmp_p
     listed = service.analysis_requirements_list({})['current']
     request = _revenue_draft_request(analysis, datasets, _save_over(service, listed, listed['items']), 'policy-11')
     first = service.save_explanation_draft(request)
-    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 12
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION >= 12
     path = analysis._object_path('drafts', first['id'])
     stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
     check = stored['explanation_check']

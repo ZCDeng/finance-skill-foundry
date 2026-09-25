@@ -358,6 +358,40 @@ describe('report document converters', () => {
     expect(documentXml).toContain('续表');
     expect(relationships).toContain('image');
   });
+
+  it('keeps the projection 估算 labels beside their numbers in HTML, print HTML and DOCX exports', async () => {
+    // The backend projection writes （估算） beside estimate numbers; renderers must carry it unchanged.
+    const doc: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-01:2026-08', currency: 'CNY', unit: '万元' },
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '华东区域 1-8 月收入实际 109,742.028 万元，同期预算 117,814.56 万元（估算）。' }] },
+        { type: 'table', content: [
+          { type: 'tableRow', content: ['区域', '1-8 月实际', '1-8 月预算'].map((text) => cell('tableHeader', text)) },
+          { type: 'tableRow', content: [cell('tableCell', '集团合并'), cell('tableCell', '325,644', { textAlign: 'right' }), cell('tableCell', '300', { textAlign: 'right' })] },
+          { type: 'tableRow', content: [cell('tableCell', '华东区域'), cell('tableCell', '109,742.028', { textAlign: 'right' }), cell('tableCell', '117,814.5625（估算）', { textAlign: 'right' })] },
+        ] },
+      ],
+    };
+    const options = { marker: '分析草稿·待复核', contentMode: 'management', projectionHash: 'e'.repeat(64) };
+
+    for (const html of [renderReportHtml(doc, '区域收入', options), renderReportHtml(doc, '区域收入', { print: true, ...options })]) {
+      expect(html).toContain('同期预算 117,814.56 万元（估算）。');
+      expect(html).toContain('<td class="num"><p>117,814.5625（估算）</p></td>');
+      expect(html).toContain('<td class="num"><p>109,742.028</p></td>');
+      expect(html).not.toContain('109,742.028（估算）');
+    }
+
+    const buffer = await exportDocx(doc, '区域收入', undefined, options);
+    const documentXml = await (await JSZip.loadAsync(buffer)).file('word/document.xml')!.async('string');
+    expect(documentXml).toContain('同期预算 117,814.56 万元（估算）。');
+    expect(documentXml).toContain('117,814.5625（估算）');
+    expect(documentXml).not.toContain('109,742.028（估算）');
+    const roundTrip = documentToMarkdown((await importReport(buffer, 'docx', { ...source, format: 'docx', name: 'estimate.docx' })).document!);
+    expect(roundTrip).toContain('117,814.56 万元（估算）');
+    expect(roundTrip).toContain('117,814.5625（估算）');
+  });
 });
 
 function minimalPdf(text: string): Buffer {

@@ -1004,6 +1004,8 @@ class AnalysisStore:
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
             "evidence_recipes": evidence_recipes,
+            "evidence_appendix": evidence_appendix,
+            "evidence_appendix_meta": evidence_appendix_meta,
         }, explanation_check, _recipe_report=evidence_report)
         consistency_rules = spec.get("consistency_rules", parent.get("consistency_rules", []))
         consistency_sources = spec.get("consistency_sources", parent.get("consistency_sources", {}))
@@ -1308,11 +1310,11 @@ class AnalysisStore:
                         f"Status: {projection['publication_status']}; review: {projection['review_status']}",
                         f"Content SHA-256: {projection['content_hash']}",
                     ]
-                    if draft["limitations"]:
+                    if projection["limitations"]:
                         lines += [
                             "",
                             "局限：",
-                            *["- " + str(v) for v in draft["limitations"]],
+                            *["- " + str(v) for v in projection["limitations"]],
                         ]
                     for run in runs:
                         lines += [
@@ -1378,12 +1380,16 @@ class AnalysisStore:
                             structured_sheet = workbook.create_sheet(sheet_name)
                             for row in rows:
                                 _append_excel(structured_sheet, row)
+                    from foundry.report_projection import ESTIMATE_LABEL, estimate_cells
+
+                    # Cells of grains the server's requirement check for this draft found `estimated`.
+                    estimates = estimate_cells((draft.get("quality") or {}).get("requirements"))
                     for number, run in enumerate(runs, start=1):
                         target = workbook.create_sheet("Result " + str(number))
                         result = run.get("result") or {"columns": [], "rows": []}
                         columns = [c["name"] for c in result["columns"]]
                         _append_excel(target, columns)
-                        for row in result["rows"]:
+                        for row_index, row in enumerate(result["rows"]):
                             row_start = target.max_row + 1
                             _append_excel(
                                 target,
@@ -1408,6 +1414,12 @@ class AnalysisStore:
                                     put_number(cell, value)
                                 else:
                                     cell.comment = Comment("超过 Excel 可安全保留的数值精度，按精确文本保存。", "Foundry")
+                            for column_index, column in enumerate(columns, start=1):
+                                cell = target.cell(row_start, column_index)
+                                if (run["id"], row_index, column) in estimates and cell.value not in (None, ""):
+                                    # The value stays what the run computed; its display carries the label.
+                                    shown = cell.number_format if cell.data_type == "n" else "@"
+                                    cell.number_format = f'{shown}"{ESTIMATE_LABEL}"'
                         evidence = workbook.create_sheet("Evidence " + str(number))
                         for key in [
                             "id",
