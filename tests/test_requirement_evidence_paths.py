@@ -812,7 +812,7 @@ def test_engine_paths_are_not_offered_on_bound_workbooks_the_engine_reads_no_row
         ('run_metric_result_set', ['bindings_without_engine_rows'])]
     assert item['awaiting_manager'] == ['bindings_without_engine_rows']
     assert blocked['needs_manager'] is True
-    assert '财务引擎从中读不到数据行' in message
+    assert '读不出财务引擎的数据行' in message
     assert '助手不要重复计算' in message
     assert 'finance_context_save' not in message and '可计入的依据' not in message
 
@@ -2122,10 +2122,11 @@ def test_a_grain_whose_cited_value_the_source_states_is_not_offered_grain_basis(
         assert 'grain_basis' not in _unanswered_message(item)
 
 
-def _float_estimate_case(analysis, tmp_path, *, factor_value, estimate_value):
+def _float_estimate_case(analysis, tmp_path, *, factor_value, estimate_value, source=180576, left=344487.0552,
+                         right=527999.9999):
     """Huachen revenue_1_8 East budget: 05!C5 × (Σ01!B12:I12 ÷ 01!N12), the factor written as a ratio recipe."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    book = _workbook(analysis, tmp_path, 'budget', {'S': {'F5': 180576, 'G1': 344487.0552, 'G2': 527999.9999}})
+    book = _workbook(analysis, tmp_path, 'budget', {'S': {'F5': source, 'G1': left, 'G2': right}})
     requirement = save_requirements(analysis, spec(
         scope={'currency': 'CNY', 'unit': '万元'}, bindings={'budget': book['id']},
         items=[{'id': 'revenue_1_8', 'metric': 'revenue', 'scenarios': ['budget_1_8'], 'requires_drilldown': False,
@@ -2430,9 +2431,9 @@ def test_tool_descriptions_say_engine_paths_need_bound_rows():
     draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
 
     assert 'bindings_without_engine_rows' in tools and 'bindings_without_engine_rows' in draft
-    assert '表快照上保存财务口径或运行都不计入' in tools
+    assert '在其他快照上保存财务口径或运行都不计入' in tools
     assert 'never counts (other bindings)' in draft
-    assert '引擎读不到行' in preset
+    assert '引擎路径交经理' in preset
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
         encoding='utf-8') == preset
@@ -2623,3 +2624,510 @@ def test_tool_descriptions_say_every_bound_input_of_a_finance_run_must_lie_in_th
     assert 'every bound input' in draft and 'rescope_run' in draft
     assert '每个绑定别名的口径' in tools and 'rescope_run' in tools
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+# --- review fixes, round 7 (PR #23) -----------------------------------------------------------------
+
+
+def _second_value_request(analysis, case, rows, recipes_for, *, suffix):
+    run = _script_run(analysis, case.datasets, rows, suffix=suffix, requirements_id=case.requirement['id'],
+                      requirements_semantic_fingerprint=case.requirement['semantic_fingerprint'])
+    claims = [_claim(run, row=index, column='value', value=row['value']) for index, row in enumerate(rows)]
+    recipes = [_recipe(dataset, sheet, cell, run, row, recipe_id=f'r{row}', **extra)
+               for row, (dataset, sheet, cell, extra) in recipes_for.items()]
+    return run, {'requirements_id': case.requirement['id'], 'run_ids': [run['id']], 'claims': claims,
+                 'evidence_recipes': recipes}
+
+
+def test_a_script_only_value_cited_beside_a_counted_one_keeps_the_grain_unanswered(analysis, monthly):
+    """Round 7: revenue_2026_08's actual grain was answered by 04!B5 × 0.0001 while the draft also cited a
+    fabricated 52000.0000 for the same grain from a script row with no recipe. The grain stayed answered,
+    coverage and provenance passed, and the completion saved complete although the body said 52000.0000.
+    Every value the draft cites for a grain must count."""
+    fake = {**REVENUE_ROWS[1], 'value': '52000.0000'}
+    run, request = _second_value_request(analysis, monthly, [*REVENUE_ROWS, fake], {
+        0: (monthly.budget, '01·年度预算总表', 'I12', {}),
+        1: (monthly.close, '04·合并利润表', 'B5', {'scale': '0.0001'})}, suffix='second-value')
+    result = check_requirements(analysis, request)
+    item = _item(result)
+
+    assert item['status'] == 'pending'
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['original_requirements_completed'] is False
+    assert [(location['row'], location['status']) for location in item['locations']] == [
+        (0, 'answered'), (1, 'answered'), (2, 'not_applicable')]
+    assert item['uncounted_grains'] == [{'organization': '集团合并', 'period': '2026-08', 'scenario': 'actual_2026_08',
+                                          'statuses': ['not_applicable'], 'reasons': ['script_output_without_recipe'],
+                                          'counted_cells': 1}]
+    assert 'missing_grains' not in item and 'awaiting_manager' not in item
+    fixup = next(fixup for fixup in item['fixups'] if fixup['reason'] == 'cited_result_not_counted')
+    assert fixup['evidence_recipe_cells'] == [{'run_id': run['id'], 'row': 2, 'column': 'value', 'value': '52000.0000',
+                                                'not_counted_reason': 'script_output_without_recipe'}]
+    # The source states this grain (another cited cell counts), so declaring it an estimate is no way out.
+    assert 'if_source_lacks_value' not in fixup
+    message = _unanswered_message(item)
+    assert '同一组合另有已计入的引用' in message and 'grain_basis' not in message
+
+    service = FinanceStore(analysis.task)
+    saved = service.save_explanation_draft({'title': '8月收入', 'body': '8 月营业收入实际 52000.0000 万元，预算 44163.6526 万元。',
+                                            **{key: request[key] for key in ('run_ids', 'claims', 'evidence_recipes',
+                                                                              'requirements_id')}})
+    assert saved['explanation_check']['checks']['coverage']['status'] == 'needs_attention'
+    assert saved['completion']['status'] == 'repair_available'
+    assert saved['completion']['original_requirements_completed'] is False
+
+    # Following the fixup literally: drop the value nothing backs, and the counted cells answer the grain.
+    kept = check_requirements(analysis, {**request, 'claims': request['claims'][:2]})
+    assert _item(kept)['status'] == 'answered'
+    assert kept['coverage']['status'] == 'pass'
+
+
+@pytest.mark.parametrize('lists', [
+    {'organizations': ['集团合并'], 'periods': ['2026-08']},
+    {'periods': ['2026-08']},
+    {},
+])
+def test_an_item_without_scenarios_needs_every_cited_value_of_its_grain_to_count(analysis, monthly, lists):
+    """The same gap on an item without scenario lists: actual and budget fall in one grain, and a recipe on
+    the budget cell answered it while the reported actual was script-only. The opposite direction: once
+    both cited cells are backed, the item is answered."""
+    requirement = save_requirements(analysis, spec(
+        parent_id=monthly.requirement['id'], question='8 月营业收入', scope={'ledger': '华宸', 'currency': 'CNY', 'unit': '万元'},
+        bindings={alias: dataset['id'] for alias, dataset in monthly.datasets.items()},
+        items=[{'id': 'revenue_2026_08', 'metric': 'revenue', 'requires_drilldown': True, **lists}]))
+    case = SimpleNamespace(**{**vars(monthly), 'requirement': requirement})
+    budget_only = {0: (monthly.budget, '01·年度预算总表', 'I12', {})}
+    _script, script_actual = _second_value_request(
+        analysis, case, [REVENUE_ROWS[0], {**REVENUE_ROWS[1], 'value': '52000.0000'}], budget_only,
+        suffix='no-scenario-' + '-'.join(lists))
+    item = _item(check_requirements(analysis, script_actual))
+
+    assert item['status'] != 'answered'
+    assert [location['status'] for location in item['locations']] == ['answered', 'not_applicable']
+    assert item['uncounted_grains'][0]['counted_cells'] == 1
+
+    _backed, both = _second_value_request(analysis, case, REVENUE_ROWS, {
+        **budget_only, 1: (monthly.close, '04·合并利润表', 'B5', {'scale': '0.0001'})},
+        suffix='no-scenario-backed-' + '-'.join(lists))
+    assert _item(check_requirements(analysis, both))['status'] == 'answered'
+
+
+def test_two_script_values_for_one_ratio_grain_keep_the_phase_1_ratio_rule(analysis, tmp_path):
+    """Opposite direction: a ratio's script value still counts in phase 1 (decision 4), so two cited ratio
+    values for one grain leave it answered; only amounts need every cited value backed."""
+    book = _workbook(analysis, tmp_path, 'book', {'S': {'B5': 1}})
+    requirement = save_requirements(analysis, spec(
+        scope={}, bindings={'book': book['id']},
+        items=[{'id': 'progress', 'metric': 'ratio', 'periods': ['2026-08'], 'requires_drilldown': False}]))
+    rows = [{'metric_key': 'ratio', 'period': '2026-08', 'value': '0.9390'},
+            {'metric_key': 'ratio', 'period': '2026-08', 'value': '0.9391'}]
+    run = _script_run(analysis, {'book': book}, rows, suffix='ratio-two')
+    item = _item(check_requirements(analysis, {
+        'requirements_id': requirement['id'], 'run_ids': [run['id']],
+        'claims': [_claim(run, row=index, column='value', value=row['value']) for index, row in enumerate(rows)]}))
+
+    assert item['status'] == 'answered'
+
+
+def test_a_cited_restatement_of_a_counted_number_does_not_unanswer_the_grain(tmp_path):
+    """Opposite direction: an explain_variance revenue row closes on its contribution, and a writer who also
+    cites that row's amount_change and profit_impact (the same 20, cells with no closure of their own) states
+    no new number. Only a cited value no counted cell states keeps the grain open."""
+    from foundry.finance_requirements import _matches
+
+    scope = {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'}
+    rows = {side: [{**scope, 'scenario': side, 'management_account': account, 'amount': amount, 'source_row': index}
+                   for index, (account, amount) in enumerate(pairs, start=1)]
+            for side, pairs in (('actual', (('revenue', '120'), ('cost', '50'), ('expense', '20'))),
+                                ('budget', (('revenue', '100'), ('cost', '40'), ('expense', '10'))))}
+    service, context, _bindings = _finance_service_from_rows(
+        tmp_path, rows, {side: {**scope, 'scenario': side} for side in rows}, title='restated')
+    requirement = service.analysis_requirements_save({'question': '收入差异', 'context_id': context['id'], 'scope': scope,
+                                                      'items': [{'id': 'revenue', 'metric': 'revenue',
+                                                                 'requires_drilldown': False}]})
+    run = service.explain_variance({'context_id': context['id']})
+    item_spec = requirement['items'][0]
+    cells = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': column, 'value': value}
+             for index, row in enumerate(run['result']['rows']) for column, value in row.items()
+             if isinstance(value, str) and _matches(item_spec, row, column, run)]
+    item = _item(check_requirements(service.analysis, {'requirements_id': requirement['id'],
+                                                       'run_ids': [run['id']], 'claims': cells}))
+
+    assert sorted(cell['column'] for cell in cells) == ['amount_change', 'contribution', 'profit_impact']
+    assert {location['column']: location['status'] for location in item['locations']} == {
+        'amount_change': 'pending', 'contribution': 'answered', 'profit_impact': 'pending'}
+    assert item['status'] == 'answered'
+
+
+def _exact_decimal_estimate(source, *, prec=None, order='factor_first', left='344487.0552', right='527999.9999'):
+    """The factor and the estimate as a script computing in exact Decimal writes them."""
+    from decimal import Decimal, localcontext
+
+    source, left, right = Decimal(source), Decimal(left), Decimal(right)
+    with localcontext() as context:
+        if prec:
+            context.prec = prec
+        factor = left / right
+        estimate = source * factor if order == 'factor_first' else source / right * left
+    return str(factor), str(estimate)
+
+
+@pytest.mark.parametrize('prec, order', [
+    (None, 'factor_first'), (30, 'factor_first'), (40, 'factor_first'), (None, 'divide_first'), (30, 'divide_first'),
+])
+def test_a_factor_estimate_computed_in_exact_decimals_reaches_estimated_whatever_its_precision_or_order(
+        analysis, tmp_path, prec, order):
+    """Round 7 (Huachen revenue_1_8): the assistant followed the estimate guidance and computed in exact
+    Decimal at full precision. At 30 digits (more precise than the server's 28) the ratio recipe failed, and
+    computed as C ÷ N12 × ΣB12:I12 the estimates failed on the last digit; both were reported as precision
+    loss, and redoing the computation as the message asked gave the same result. A quotient that does not
+    terminate has no exact decimal, so a value that keeps at least 28 significant digits and agrees with the
+    exact quotient to that precision passes, however it was computed."""
+    factor, estimate = _exact_decimal_estimate(123457, prec=prec, order=order)
+    case = _float_estimate_case(analysis, tmp_path, factor_value=factor, estimate_value=estimate, source=123457)
+    results = {result['recipe_id']: result for result in evaluate_evidence_recipes(analysis, case.recipes)['results']}
+    item = _item(check_requirements(analysis, case.spec))
+
+    assert (results['factor']['status'], results['estimate']['status']) == ('pass', 'pass')
+    assert item['status'] == 'estimated'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'estimate'
+    quality = augment_quality(analysis, case.spec, {'status': 'pass', 'issues': []})
+    completion = record_completion(analysis, {'id': 'q' * 32, 'content_hash': f'{prec}-{order}', 'run_ids': []}, quality)
+    assert (completion['status'], completion['stop_reason']) == ('awaiting_manager', 'estimate_requires_acceptance')
+
+
+def test_the_last_digit_of_the_alternative_order_really_differs_from_the_servers_own_quotient():
+    """The case above is not vacuous: at the default precision the two orders disagree in the last digit."""
+    assert _exact_decimal_estimate(123457)[1] != _exact_decimal_estimate(123457, order='divide_first')[1]
+
+
+def _quotient_digit_changed(text, position):
+    digits = [index for index, char in enumerate(text) if char.isdigit()]
+    index = digits[position - 1]
+    return text[:index] + str((int(text[index]) + 1) % 10) + text[index + 1:]
+
+
+@pytest.mark.parametrize('label, factor, estimate, reason, hint', [
+    # Rounded for display: still a precision failure (decision 1), with the hint.
+    ('display rounding', '0.6524', None, 'recipe_failed_precision', True),
+    # An exact rounding at 20 digits keeps less than a Decimal context's precision: still rounded.
+    ('20 digits', _exact_decimal_estimate(123457, prec=20)[0], _exact_decimal_estimate(123457, prec=20)[1],
+     'recipe_failed_precision', True),
+    # 28 digits, but wrong in the 20th: a different number, not a precision loss.
+    ('wrong digit', _quotient_digit_changed(_exact_decimal_estimate(123457)[0], 20), None, 'recipe_failed', False),
+])
+def test_a_rounded_or_wrong_quotient_still_fails(analysis, tmp_path, label, factor, estimate, reason, hint):
+    """Opposite direction: agreement to full precision is the only tolerance. A rounded quotient still fails
+    with the full-precision hint, and a 28-digit value that is wrong gets no hint (it is not a float repr)."""
+    estimate = estimate or _exact_decimal_estimate(123457)[1]
+    case = _float_estimate_case(analysis, tmp_path, factor_value=factor, estimate_value=estimate, source=123457)
+    results = {result['recipe_id']: result for result in evaluate_evidence_recipes(analysis, case.recipes)['results']}
+    item = _item(check_requirements(analysis, case.spec))
+
+    assert results['factor']['status'] == 'mismatch', label
+    assert ('precision_hint' in results['factor']) is hint, label
+    assert item['status'] == 'pending', label
+    assert item['locations'][0]['evidence']['not_counted_reason'] == reason, label
+    if hint:
+        assert '28 位有效数字' in results['factor']['issue']['message']
+        assert '28 位有效数字' in _unanswered_message(item)
+
+
+def test_the_quotient_comparison_is_exact_except_for_full_precision_quotients():
+    from decimal import Decimal
+    from fractions import Fraction
+
+    from foundry.financial_evidence import _matches_exact
+
+    def matches(exact, claimed):
+        server = Decimal(exact.numerator) / Decimal(exact.denominator)  # the server's 28-digit rendering
+        return _matches_exact(exact, Decimal(claimed), server)
+
+    third = Fraction(1, 3)
+    assert matches(third, '0.' + '3' * 28)
+    assert matches(third, '0.' + '3' * 27 + '4')  # a rounded last digit of a 28-digit quotient
+    assert matches(third, '0.' + '3' * 40)  # a higher precision
+    assert not matches(third, '0.' + '3' * 27)  # 27 digits: rounded below full precision
+    assert not matches(third, '0.' + '3' * 20 + '4' + '3' * 7)  # wrong in the 21st digit
+    assert not matches(Fraction(5, 8), '0.6250000000000000000000000001')
+    assert matches(Fraction(5, 8), '0.62500')
+    assert matches(Fraction(0), '0.00') and not matches(Fraction(0), '1E-30')
+    assert not matches(third, '1E+999999') and not matches(third, '3E-999999')
+    # Without an exact rational (a recipe touching an extreme size) the server's Decimal decides, as before.
+    assert _matches_exact(None, Decimal('1E-999997'), Decimal('1E-999997'))
+    assert not _matches_exact(None, Decimal('1000'), Decimal('1E-999997'))
+
+
+def test_a_quotient_that_terminates_is_still_compared_exactly(analysis, tmp_path):
+    """Opposite direction: 300 ÷ 480 is exactly 0.625, so a 28-digit value one unit off in its last digit
+    fails; so does a direct recipe off in its last digit. Only a quotient with no exact decimal is compared
+    to full precision."""
+    case = _float_estimate_case(analysis, tmp_path, factor_value='0.6250000000000000000000000001',
+                                estimate_value='112860.000', left=300, right=480)
+    results = {result['recipe_id']: result for result in evaluate_evidence_recipes(analysis, case.recipes)['results']}
+    assert results['factor']['status'] == 'mismatch'
+    assert results['estimate']['status'] == 'unreadable'
+
+    other = AnalysisStore(TaskStore(tmp_path / 'exact-var').create(title='除尽'))
+    exact = _float_estimate_case(other, tmp_path / 'exact', factor_value='0.625', estimate_value='112860.000',
+                                 left=300, right=480)
+    assert {result['status'] for result in evaluate_evidence_recipes(other, exact.recipes)['results']} == {'pass'}
+    assert _item(check_requirements(other, exact.spec))['status'] == 'estimated'
+
+
+def _sheet_appendix_draft(tmp_path, sheet, metric, *, body=None, value='41469.625'):
+    """One cited script value backed by a direct recipe on a sheet named `sheet` (round 7 repro)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    service = FinanceStore(TaskStore(tmp_path / 'var').create(title='appendix'))
+    analysis = service.analysis
+    book = _workbook(analysis, tmp_path, 'close', {sheet: {'B5': float(value)}})
+    requirement = save_requirements(analysis, spec(scope={}, bindings={'close': book['id']}, items=[
+        {'id': 'aug', 'metric': metric, 'organizations': ['集团合并'], 'periods': ['2026-08'],
+         'scenarios': ['actual_2026_08'], 'requires_drilldown': False}]))
+    rows = [{'metric_key': metric, 'organization': '集团合并', 'period': '2026-08', 'scenario': 'actual_2026_08',
+             'value': value}]
+    run = _script_run(analysis, {'close': book}, rows, suffix='appendix', requirements_id=requirement['id'],
+                      requirements_semantic_fingerprint=requirement['semantic_fingerprint'])
+    draft = service.save_explanation_draft({
+        'title': '8 月', 'body': body or f'8 月指标 {value}。', 'run_ids': [run['id']],
+        'claims': [_claim(run, row=0, column='value', value=value)],
+        'evidence_recipes': [_recipe(book, sheet, 'B5', run, 0, recipe_id='r1')]})
+    return service, draft
+
+
+@pytest.mark.parametrize('sheet', ['预算2026', '利润表 2026', '2026预算', '2026'])
+@pytest.mark.parametrize('metric', ['ratio', 'revenue'])
+def test_a_year_in_a_sheet_name_the_appendix_prints_is_not_an_uncited_number(tmp_path, sheet, metric):
+    """Round 7: the server's 来源复算依据 appendix writes `sheet!range`; a year in the sheet name (2026预算) was
+    read as a body number, flagged uncited_number in the generated appendix, which the writer cannot edit,
+    and the draft could never reach complete. The sheet!range references it writes name archived cells."""
+    service, draft = _sheet_appendix_draft(tmp_path / f'{metric}-{sheet}', sheet, metric)
+    check = draft['explanation_check']
+
+    assert f'{sheet}!B5' in draft['body'][draft['body'].index('## 来源复算依据'):]
+    assert [issue for issue in check['issues'] if issue['code'] == 'uncited_number'] == []
+    assert check['checks']['numbers']['status'] == 'pass'
+    assert draft['completion']['status'] == 'complete'
+    revalidated = service.validate_explanation({'draft_id': draft['id']})
+    assert [issue for issue in revalidated['issues'] if issue['code'] == 'uncited_number'] == []
+
+
+def test_the_same_sheet_year_typed_in_the_manager_body_is_still_checked(tmp_path):
+    """Opposite direction: only the server's own references are exempt; the writer's prose is checked."""
+    _service, draft = _sheet_appendix_draft(tmp_path, '预算2026', 'revenue', body='8 月收入 41469.625，见预算2026!B5。')
+    flagged = [issue for issue in draft['explanation_check']['issues'] if issue['code'] == 'uncited_number']
+
+    assert [(issue['text'], issue['origin']) for issue in flagged] == [('2026', 'manager_body')]
+    assert draft['completion']['status'] != 'complete'
+
+
+def test_the_huachen_estimate_with_years_in_its_sheet_names_still_reaches_the_manager(analysis, tmp_path, monkeypatch):
+    """The Huachen revenue_1_8 estimate case reached awaiting_manager with its own sheet names and
+    repair_available (4 appendix '2026' issues) once the budget sheets were named 2026预算 and 2026区域预算."""
+    import test_requirement_evidence_paths as module
+
+    rename = {'01·年度预算总表': '2026预算', '05·区域预算分解': '2026区域预算'}
+    workbook, recipe = module._workbook, module._recipe
+    monkeypatch.setattr(module, '_workbook', lambda analysis, tmp, name, sheets: workbook(
+        analysis, tmp, name, {rename.get(key, key): value for key, value in sheets.items()}))
+    monkeypatch.setattr(module, '_recipe', lambda dataset, sheet, *args, **kwargs: recipe(
+        dataset, rename.get(sheet, sheet), *args, **kwargs))
+    case = module._estimate_case(analysis, tmp_path)
+    for entry in case.spec['evidence_recipes']:
+        for side in ('left', 'right'):
+            if side in entry:
+                entry[side]['sheet'] = rename.get(entry[side]['sheet'], entry[side]['sheet'])
+    draft = FinanceStore(analysis.task).save_explanation_draft(
+        {'body': '收入说明见附表。', **{key: case.spec[key] for key in ('run_ids', 'claims', 'evidence_recipes')}})
+
+    assert '2026区域预算!C5 × （2026预算!B12:C12 ÷ 2026预算!N12）' in draft['body']
+    assert [issue for issue in draft['explanation_check']['issues'] if issue.get('origin') == 'generated_appendix'] == []
+    assert (draft['completion']['status'], draft['completion']['stop_reason']) == (
+        'awaiting_manager', 'estimate_requires_acceptance')
+
+
+CONTROL_SCOPE = {'ledger': 'L1', 'organization': 'O1', 'period': '2026-09', 'currency': 'CNY', 'unit': '万元'}
+GL_ROW = {**CONTROL_SCOPE, 'scenario': 'actual', 'management_account': 'revenue', 'amount': '120', 'source_row': 1}
+
+
+def _control_totals_request(service, requirement, runs=(), claims=()):
+    return {'requirements_id': requirement['id'], 'run_ids': [run['id'] for run in runs], 'claims': list(claims)}
+
+
+def _completion(service, request, content_hash):
+    quality = augment_quality(service.analysis, request, {'status': 'pass', 'issues': []})
+    return record_completion(service.analysis, {'id': content_hash[:1] * 32, 'content_hash': content_hash,
+                                                'run_ids': request['run_ids']}, quality)
+
+
+def test_a_workbook_bound_beside_a_table_the_engine_reads_leaves_the_engine_path_open(tmp_path):
+    """Round 7: a requirement bound to a GL table plus a budget workbook kept for recipes. One workbook
+    binding blocked every finance-engine path as bindings_without_engine_rows and completion stopped at
+    awaiting_manager, although run_metric on exactly these bindings reads the GL rows and answers."""
+    service, _context, bindings = _finance_service_from_rows(tmp_path, {'gl': [GL_ROW]},
+                                                             {'gl': {**CONTROL_SCOPE, 'scenario': 'actual'}}, title='mixed')
+    budget = _workbook(service.analysis, tmp_path, 'budget', {'预算': {'A1': '营业收入', 'B1': 100}})
+    context = service.save_context({'bindings': {**bindings, 'book': budget['id']},
+                                    'scopes': {'gl': {**CONTROL_SCOPE, 'scenario': 'actual'}}})
+    requirement = service.analysis_requirements_save({
+        'question': '控制数', 'context_id': context['id'], 'scope': CONTROL_SCOPE,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}]})
+    support = requirement['support']['items'][0]
+    request = _control_totals_request(service, requirement)
+    item = _item(check_requirements(service.analysis, request))
+
+    assert support['accepted_evidence'] == ['run_metric_result_set'] and 'blocked_evidence' not in support
+    assert [path['path'] for path in item['evidence_paths']['accepted']] == ['run_metric_result_set']
+    assert 'awaiting_manager' not in item
+    assert '可计入的依据' in _unanswered_message(item)
+    completion = _completion(service, request, 'mixed-before')
+    assert (completion['status'], completion['repair_allowed']) == ('repair_available', True)
+
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+    _verify_run_column(service, run, 'amount')
+    answered = check_requirements(service.analysis, _control_totals_request(
+        service, requirement, [run], _claims_for_columns(run, 'amount')))
+    assert run['bindings'] == requirement['bindings'] and run['result']['rows']
+    assert _item(answered)['status'] == 'answered'
+
+
+REGIONAL_TABLE = [{'区域': region, '全年预算': budget, '1-8月实际': actual}
+                  for region, budget, actual in (('华东', '180576', '109742.028'), ('华南', '120000', '80000'))]
+
+
+def test_bound_tables_the_finance_engine_reads_no_rows_from_are_handed_to_the_manager(tmp_path):
+    """Round 7 (Huachen): the manager rebound control_totals to the confirmed table snapshots of the regional
+    sheets (7 rows each, no amount column). Any snapshot with rows counted as engine-readable, so the
+    assistant saved a finance context and ran run_metric, which read 0 rows; the guidance kept offering
+    run_metric and completion kept spending repairs. Readability is now what the finance normaliser reads."""
+    pnl = [{'区域': row['区域'], '1-8月实际': row['1-8月实际']} for row in REGIONAL_TABLE]
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path, {'regional_budget': REGIONAL_TABLE, 'regional_pnl': pnl}, {}, title='regional')
+    requirement = service.analysis_requirements_save({
+        'question': '区域与集团合计勾稽', 'context_id': context['id'], 'scope': {'ledger': 'L1'},
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    request = _control_totals_request(service, requirement, [run])
+    item = _item(check_requirements(service.analysis, request))
+    message = _unanswered_message(item)
+
+    assert run['bindings'] == requirement['bindings'] and run['result']['rows'] == []
+    assert item['evidence_paths']['accepted'] == []
+    assert [(path['path'], path['blockers']) for path in item['evidence_paths']['blocked']] == [
+        ('run_metric_result_set', ['bindings_without_engine_rows'])]
+    assert item['awaiting_manager'] == ['bindings_without_engine_rows']
+    assert '没有金额列' in message and '助手不要重复计算' in message
+    assert '可计入的依据' not in message and 'finance_context_save' not in message
+    assert requirement['support']['items'][0]['accepted_evidence'] == []
+    completion = _completion(service, request, 'regional')
+    assert (completion['status'], completion['repair_allowed']) == ('awaiting_manager', False)
+    assert completion['manager_reasons'] == ['bindings_without_engine_rows']
+
+
+@pytest.mark.parametrize('rows, policies', [
+    # Wide finance measures the normaliser reads without an amount column.
+    ([{**CONTROL_SCOPE, 'scenario': 'actual', 'revenue': '120', 'cost': '80'}], {}),
+    # A column the finance context maps to amount.
+    ([{**CONTROL_SCOPE, 'scenario': 'actual', 'management_account': 'revenue', '本月数': '120'}],
+     {'t': {'field_map': {'amount': '本月数'}}}),
+])
+def test_bound_tables_the_engine_reads_through_their_context_keep_the_engine_path(tmp_path, rows, policies):
+    """Opposite direction: a table without an `amount` column that the finance engine still reads (wide
+    revenue/cost measures, or a column the requirement's finance context maps to amount) stays open."""
+    task = TaskStore(tmp_path / 'var').create(title='wide')
+    analysis = AnalysisStore(task)
+    path = tmp_path / 't.json'
+    path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='t')
+    service = FinanceStore(task)
+    context = service.save_context({'bindings': {'t': dataset['id']}, 'policies': policies})
+    requirement = service.analysis_requirements_save({
+        'question': '控制数', 'context_id': context['id'], 'scope': CONTROL_SCOPE,
+        'items': [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}]})
+    item = _item(check_requirements(analysis, _control_totals_request(service, requirement)))
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'}})
+
+    assert [path['path'] for path in item['evidence_paths']['accepted']] == ['run_metric_result_set']
+    assert 'awaiting_manager' not in item
+    assert run['result']['rows']
+
+
+def test_a_finance_run_whose_rows_miss_the_requirement_grain_says_why(tmp_path):
+    """Round 7 GL variant: bound to a GL balance table the engine reads (1 row) whose rows carry no
+    organization, period or scenario and an unmapped account. The run never matched the grain and the
+    same message repeated with no reason. The run and what its rows lack are now named."""
+    gl = [{'ledger': 'L1', 'currency': 'CNY', 'unit': '万元', '科目代码': '6001', 'amount': '3431356426'}]
+    service, context, _bindings = _finance_service_from_rows(tmp_path, {'gl': gl}, {}, title='gl')
+    requirement = service.analysis_requirements_save({
+        'question': '区域与集团合计勾稽', 'context_id': context['id'], 'scope': {'ledger': 'L1'},
+        'items': [{'id': 'control_totals', 'metric': 'control_totals', 'organizations': ['集团合并'],
+                   'periods': ['2026-08'], 'requires_drilldown': False}]})
+    run = service.run_metric({'context_id': context['id'], 'metric': {'kind': 'control_totals'},
+                              'requirements_id': requirement['id']})
+    _verify_run_column(service, run, 'amount')
+    request = _control_totals_request(service, requirement, [run], _claims_for_columns(run, 'amount'))
+    item = _item(check_requirements(service.analysis, request))
+    message = _unanswered_message(item)
+
+    assert len(run['result']['rows']) == 1
+    assert item['status'] == 'pending'
+    assert item['engine_runs'] == [{'run_id': run['id'], 'rows': 1, 'reason': 'rows_do_not_cover_requirement',
+                                    'blank_fields': ['organization', 'period'], 'unmapped_accounts': 1,
+                                    'missing_grains': [{'organization': '集团合并', 'period': '2026-08'}]}]
+    fixup = next(fixup for fixup in item['fixups'] if fixup['code'] == 'engine_run_does_not_cover_requirement')
+    assert fixup['runs'] == item['engine_runs']
+    assert run['id'] in message and '行上 organization、period 为空' in message and '__unmapped__' in message
+    assert 'awaiting_manager' not in item
+
+
+def test_a_draft_policy_9_completed_with_a_second_unbacked_value_is_checked_again(analysis, monthly):
+    """Policy 9 completed a draft that cited a script-only value beside a counted one for the same grain.
+    The rule changed, so a resend must not replay that verdict."""
+    from foundry.analysis import _hash
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION
+    from foundry.fsutil import write_json_atomic
+
+    fake = {**REVENUE_ROWS[1], 'value': '52000.0000'}
+    _run, request = _second_value_request(analysis, monthly, [*REVENUE_ROWS, fake], {
+        0: (monthly.budget, '01·年度预算总表', 'I12', {}),
+        1: (monthly.close, '04·合并利润表', 'B5', {'scale': '0.0001'})}, suffix='replay-9')
+    service = FinanceStore(analysis.task)
+    draft_request = {'title': '8月收入', 'body': '8 月营业收入实际 52000.0000 万元，预算 44163.6526 万元。',
+                     **{key: request[key] for key in ('run_ids', 'claims', 'evidence_recipes', 'requirements_id')}}
+    first = service.save_explanation_draft(draft_request)
+    assert first['check_policy_version'] == COMPLETION_POLICY_VERSION == 10
+    path = analysis._object_path('drafts', first['id'])
+    stored = {key: value for key, value in json.loads(path.read_text()).items() if key != '_integrity_hash'}
+    check = stored['explanation_check']
+    old = {**check, 'status': 'pass', 'issues': [], 'requirements': {
+        **check['requirements'], 'coverage': {'status': 'pass'}, 'original_requirements_completed': True,
+        'items': [{**item, 'status': 'answered'} for item in check['requirements']['items']]}}
+    record = {**stored, 'check_policy_version': 9, 'explanation_check': old, 'quality': old}
+    write_json_atomic(path, {**record, '_integrity_hash': _hash(record)})
+
+    again = service.save_explanation_draft(draft_request)
+
+    assert again.get('replayed') is not True
+    assert _item(again['explanation_check']['requirements'])['status'] == 'pending'
+    assert again['completion']['status'] != 'complete'
+
+
+def test_tool_descriptions_state_the_round_7_rules():
+    """The tools say what the checker now does: every cited value of a grain counts, a non-terminating
+    quotient keeps 28 significant digits, and only bindings no snapshot of which the engine reads block."""
+    from foundry.finance_mcp import _tools
+
+    tools = (ROOT / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8')
+    preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
+    draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
+
+    assert 'Every value the draft cites for a requirement grain must count' in draft
+    assert '同一个要求组合引用的每个数都要按上述依据计入' in tools and '同一要求组合引用的每个数都要计入' in preset
+    assert '28 significant digits' in draft and '28 位有效数字' in tools and '28位有效数字' in preset
+    assert 'A workbook bound beside a table the engine reads blocks nothing' in draft
+    assert '没有金额列的表' in tools and '没有金额列的表' in preset
+    assert 'engine_run_does_not_cover_requirement' in draft and 'engine_run_does_not_cover_requirement' in tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+    assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(
+        encoding='utf-8') == preset

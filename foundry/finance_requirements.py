@@ -112,6 +112,8 @@ GRAIN_LISTS = (('organization', 'organizations'), ('period', 'periods'), ('scena
 GRAIN_BASIS_KINDS = ('estimate', 'unavailable')
 # Evidence classes that answer an amount; an estimate only ever reaches `estimated`.
 SOURCE_EVIDENCE_BASES = frozenset({'engine_closed', 'source_value', 'source_calculation'})
+# Location statuses that count for a grain; a grain is only as good as every value the draft cites for it.
+COUNTED_STATUSES = frozenset({'answered', 'estimated'})
 # Blockers only the manager can clear; everything else stays a repairable gap. Which data a requirement is
 # bound to is the manager's call, so bindings the engine reads no rows from are hers to change.
 MANAGER_BLOCKERS = frozenset({'structure_pending_confirmation', 'bindings_without_engine_rows'})
@@ -1108,7 +1110,8 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
     kind = _result_set_kind(item)
     if not kind:
         return None
-    bases = []
+    bases, tried = [], []
+    scope = _row_scope(latest['scope'])
     for run in runs.values():
         if not _bindings_match(latest.get('bindings', {}), run.get('bindings', {})):
             continue
@@ -1117,15 +1120,22 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
             continue
         if kind == 'account_total' and not _account_total_metric_matches_item(metric, item):
             continue
-        if not _metric_filters_cover_requirement(metric, item, _row_scope(latest['scope'])):
+        if not _metric_filters_cover_requirement(metric, item, scope):
+            tried.append(_engine_run_gap(item, run, scope, 'metric_filters_differ'))
             continue
-        if _run_scope_is_narrower_than_requirement(run, item, _row_scope(latest['scope'])):
+        if _run_scope_is_narrower_than_requirement(run, item, scope):
+            tried.append(_engine_run_gap(item, run, scope, 'run_scope_narrower'))
             continue
-        rows = _result_set_required_rows(item, run, _row_scope(latest['scope']))
+        rows = _result_set_required_rows(item, run, scope)
         if rows and _result_set_comparison_complete(kind, item, latest, run, rows):
             bases.append((run, rows))
+        else:
+            tried.append(_engine_run_gap(item, run, scope, 'actual_budget_pairs_incomplete' if rows
+                                         else 'rows_do_not_cover_requirement'))
     if not bases:
-        return {'locations': [], 'status': 'pending'}
+        # Finance runs of this kind on exactly these bindings that still do not answer: say which and why, so
+        # the same guidance is not repeated with no reason (review round 7).
+        return {'locations': [], 'status': 'pending', **({'engine_runs': tried[-12:]} if tried else {})}
     max_rows = max(len(rows) for _, rows in bases)
     for run, rows in bases:
         if len(rows) != max_rows:
@@ -1152,6 +1162,27 @@ def _result_set_requirement_status(analysis, item, latest, runs, claimed, checks
             'status': 'answered',
         }
     return {'locations': [], 'status': 'pending'}
+
+
+UNMAPPED_ACCOUNT = '__unmapped__'
+
+
+def _engine_run_gap(item, run, scope, reason):
+    """Why a finance result-set run on the requirement's bindings does not answer the item."""
+    rows = [row for row in (run.get('result') or {}).get('rows') or [] if isinstance(row, dict)]
+    if not rows:
+        return {'run_id': run['id'], 'rows': 0, 'reason': 'engine_run_empty'}
+    keys = [key for key, field in GRAIN_LISTS if item.get(field)]
+    keys += [key for key in _comparison_scopes(scope)['actual'] if key in GRAIN_KEYS and key not in keys]
+    blank = [key for key in keys if all(row.get(key) in (None, '') for row in rows)]
+    unmapped = sum(row.get('management_account') == UNMAPPED_ACCOUNT for row in rows)
+    requested = _requested_grains(item) or {}
+    covered = {_row_grain(item, run, row) for row in rows if _scope_matches(run, row, scope)}
+    missing = [_grain_record(item, grain) for grain in requested if grain not in covered]
+    return {'run_id': run['id'], 'rows': len(rows), 'reason': reason,
+            **({'blank_fields': blank} if blank else {}),
+            **({'unmapped_accounts': unmapped} if unmapped else {}),
+            **({'missing_grains': missing[:12]} if missing else {})}
 
 
 def _result_set_kind(item):
@@ -1996,11 +2027,14 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 row = run['result']['rows'][location['row']]
                 key = _row_grain(item, run, row) if grain_locations is not None else (None, None, None)
                 grains.get(key, []).append(location)
-            grain_states = {grain: _grain_state(item, grain, members) for grain, members in grains.items()}
+            grain_states = {grain: _grain_state(item, grain, members, runs) for grain, members in grains.items()}
             if grain_locations is not None:
                 states = set(grain_states.values())
                 item_status = ('answered' if states == {'answered'}
                                else 'estimated' if states <= {'answered', 'estimated'} else 'pending')
+            elif grain_states[(None, None, None)] == 'uncounted' and item_status in COUNTED_STATUSES:
+                # A cited value no counted cell states (see _grain_state): the item is as unanswered as that cell.
+                item_status = _item_status([status for status in statuses if status not in COUNTED_STATUSES])
         failed_source = item['id'] in source_failures
         provenance = [_location_provenance(location, checks) for location in locations]
         if _profit_bridge_group_required(item):
@@ -2035,6 +2069,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
         paths = _evidence_paths(item, environment)
         if paths['accepted'] or paths['blocked']:
             item_record['evidence_paths'] = paths
+        if result_set is not None and result_set.get('engine_runs') and item_status != 'answered':
+            item_record['engine_runs'] = result_set['engine_runs']
         hierarchy = _hierarchy_dimensions(item)
         if hierarchy:
             item_record['hierarchy_dimensions'] = hierarchy
@@ -2117,7 +2153,11 @@ def _with_declared_basis(item, location, runs):
     return {**location, 'status': 'pending', 'evidence': {**location['evidence'], 'not_counted_reason': reason}}
 
 
-def _grain_state(item, grain, members):
+def _grain_state(item, grain, members, runs):
+    if any(location['status'] in COUNTED_STATUSES for location in members) and _unbacked_cells(members, runs):
+        # Every value the draft cites for a grain must count: a counted cell does not vouch for another number
+        # cited for the same grain (a script-only 52000 beside a recipe-backed 41469.6250).
+        return 'uncounted'
     if any(location['status'] == 'answered' for location in members):
         return 'answered'
     if any(location['status'] == 'estimated' for location in members):
@@ -2128,6 +2168,24 @@ def _grain_state(item, grain, members):
     if declared and declared['basis'] == 'estimate' and not declared.get('factor_reproducible', True):
         return 'estimate_factor_not_reproducible'
     return 'uncounted' if members else 'missing'
+
+
+def _unbacked_cells(members, runs):
+    """Cited cells of one grain that did not count and state a number no counted cell of the grain states.
+
+    A cell restating a counted number (an explain_variance row's amount_change beside its closed
+    contribution) adds nothing to prove; any other uncounted value is a number the draft delivers unproven.
+    With no counted cell, every uncounted cell is unbacked.
+    """
+    counted = [_cited_value(location, runs) for location in members if location['status'] in COUNTED_STATUSES]
+    return [location for location in members if location['status'] not in COUNTED_STATUSES
+            and not any(_same_number(_cited_value(location, runs), value) for value in counted)]
+
+
+def _cited_value(location, runs):
+    rows = ((runs.get(location['run_id']) or {}).get('result') or {}).get('rows') or []
+    row = rows[location['row']] if isinstance(location.get('row'), int) and location['row'] < len(rows) else {}
+    return row.get(location['column']) if isinstance(row, dict) else None
 
 
 MANAGER_GRAIN_STATES = {
@@ -2145,15 +2203,21 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
                         acceptances, result_set):
     """Why an unanswered item is unanswered, split by grain, and what can still answer it."""
     missing = [_grain_record(item, grain) for grain, state in grain_states.items() if state == 'missing']
-    uncounted = []
+    uncounted, unbacked = [], set()
     for grain, state in grain_states.items():
         if state != 'uncounted':
             continue
         members = [location for location in record['locations'] if _location_grain(item, location, runs) == grain]
+        counted = sum(location['status'] in COUNTED_STATUSES for location in members)
+        members = _unbacked_cells(members, runs)
+        unbacked.update((location['run_id'], location['row'], location['column']) for location in members)
         reasons = [location['evidence'].get('not_counted_reason') for location in members]
         uncounted.append({**_grain_record(item, grain),
                           'statuses': list(dict.fromkeys(location['status'] for location in members)),
-                          'reasons': list(dict.fromkeys(reason for reason in reasons if reason))})
+                          'reasons': list(dict.fromkeys(reason for reason in reasons if reason)),
+                          # Other cited values of this grain did count: the uncounted one is an extra value
+                          # the draft states, to back or to drop, not a grain the source lacks.
+                          **({'counted_cells': counted} if counted else {})})
     estimated = []
     for grain, state in grain_states.items():
         if state != 'estimated':
@@ -2191,7 +2255,8 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
                                 **_grain_basis_guidance(item, missing, paths)}]
         if uncounted:
             uncounted_keys = {grain for grain, state in grain_states.items() if state == 'uncounted'}
-            fixups = [*fixups, {**_uncounted_rows_fixup(item, record['locations'], uncounted, paths, route, runs, uncounted_keys),
+            fixups = [*fixups, {**_uncounted_rows_fixup(item, record['locations'], uncounted, paths, route, runs,
+                                                        uncounted_keys, unbacked),
                                 **_grain_basis_guidance(item, uncounted, paths)}]
     rebind = list(dict.fromkeys(location['run_id'] for location in record['locations']
                                 if location['evidence'].get('not_counted_reason') == 'run_bindings_differ'))
@@ -2220,6 +2285,15 @@ def _unanswered_details(item, record, fixups, latest, runs, claimed_cells, evide
         }]
     if result_set and paths['blocked'] and not paths['accepted']:
         fixups = [*fixups, _blocked_path_fixup(item, paths)]
+    if record.get('engine_runs') and any(path['path'] == 'run_metric_result_set' for path in paths['accepted']):
+        fixups = [*fixups, {
+            'code': 'engine_run_does_not_cover_requirement',
+            'requirement_item_id': item['id'],
+            # Rerunning unchanged repeats these rows: state the missing fields in the finance context's scopes
+            # (when the whole table shares them), map the accounts, or leave rebinding to the manager.
+            'runs': record['engine_runs'],
+            'reason': record['engine_runs'][-1]['reason'],
+        }]
     cited_for_source = [grain for grain in uncounted if 'estimate_cited_for_source_grain' in grain['reasons']]
     if cited_for_source:
         fixups = [*fixups, {
@@ -2302,8 +2376,8 @@ def _estimate_accepted(acceptances, item, grain, location):
 
 def _evidence_environment(analysis, latest, runs=None):
     """What the requirement's bound data allows right now: archived workbooks for recipes, and whether the
-    finance engine can run on it (every bound snapshot gives the engine rows, a saved finance context or
-    finance runs on exactly these bindings, and structures the manager has confirmed)."""
+    finance engine can run on it (at least one bound snapshot gives the engine rows, a saved finance context
+    or finance runs on exactly these bindings, and structures the manager has confirmed)."""
     bindings = latest.get('bindings') or {}
     dataset_ids = [value for value in bindings.values() if isinstance(value, str)]
     if runs is None:
@@ -2315,8 +2389,19 @@ def _evidence_environment(analysis, latest, runs=None):
     # or context makes an engine path available.
     engine_runs = any(run.get('engine') == 'finance' and _bindings_match(bindings, run.get('bindings') or {})
                       for run in runs.values())
-    workbooks, tables, rowless, accounts = [], [], [], set()
-    for dataset_id in dataset_ids:
+    store, contexts = None, []
+    try:
+        from foundry.finance_service import FinanceStore
+
+        store = FinanceStore(analysis.task)
+        contexts = [context for context in store._list('contexts')
+                    if _bindings_match(bindings, context.get('bindings') or {})]
+    except (FoundryError, OSError, ValueError, KeyError, TypeError):
+        store = None
+    workbooks, tables, rowless, readable, accounts = [], [], [], [], set()
+    for alias, dataset_id in bindings.items():
+        if not isinstance(dataset_id, str):
+            continue
         try:
             dataset = analysis.read_dataset(dataset_id)
         except (FoundryError, OSError, ValueError, KeyError, TypeError):
@@ -2327,39 +2412,81 @@ def _evidence_environment(analysis, latest, runs=None):
             workbooks.append(dataset_id)
         if isinstance(dataset.get('rows'), list) and dataset['rows']:
             tables.append(dataset_id)
+        # What the finance normaliser reads, not the raw row count: a workbook file, an empty table and a
+        # table with no amount column (a confirmed regional sheet) all give the engine no rows, so a context
+        # on them saves cleanly and every run on them is empty.
+        if _engine_reads_rows(dataset, _engine_readers(contexts, alias, dataset_id)):
+            readable.append(dataset_id)
         else:
-            # A workbook file (or an empty table) gives the finance engine no rows: a context on it saves
-            # cleanly and every run on it is empty. The table snapshots a structure confirmation files are
-            # other datasets, and runs on them never carry this requirement's bindings.
             rowless.append(dataset_id)
         # Management accounts the finance engine can total on its own (run_metric account_total).
         accounts.update(str(row['management_account']) for row in dataset.get('rows') or []
                         if isinstance(row, dict) and row.get('management_account') not in (None, ''))
     finance_context, pending = None, []
     try:
-        from foundry.finance_service import FinanceStore
         from foundry.structure_records import PENDING_CONFIRMATION
 
-        store = FinanceStore(analysis.task)
-        contexts = store._list('contexts')
-        finance_context = bool(latest.get('context_id')) or engine_runs or any(
-            _bindings_match(bindings, context.get('bindings') or {}) for context in contexts)
+        if store is None:
+            raise FoundryError('finance store unavailable')
+        finance_context = bool(latest.get('context_id')) or engine_runs or bool(contexts)
         pending = [dataset_id for dataset_id in dataset_ids
                    if store.dataset_structure_state(dataset_id) == PENDING_CONFIRMATION]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         finance_context = True if engine_runs else None
     return {'workbook_sources': workbooks, 'finance_context': finance_context, 'structure_pending': pending,
-            'rowless_bindings': rowless, 'accounts': sorted(accounts),
+            'rowless_bindings': rowless, 'engine_bindings': readable, 'accounts': sorted(accounts),
             # structured_aggregate reads exactly one snapshot, so it can meet only a single-binding requirement.
             'aggregate_sources': tables if len(dataset_ids) == 1 else []}
+
+
+def _engine_readers(contexts, alias, dataset_id):
+    """The (scope, policy) pairs the finance engine could read this snapshot with: the default reading and
+    that of every finance context on the requirement's bindings that binds it."""
+    readers = [({}, {})]
+    for context in contexts:
+        for name, bound in (context.get('bindings') or {}).items():
+            if bound == dataset_id and (name == alias or len(context.get('bindings') or {}) == 1):
+                scope = (context.get('scopes') or {}).get(name)
+                policy = (context.get('policies') or {}).get(name)
+                readers.append((scope if isinstance(scope, dict) else {}, policy if isinstance(policy, dict) else {}))
+    return readers
+
+
+ENGINE_READ_CHUNK = 500
+
+
+def _engine_reads_rows(dataset, readers):
+    """Whether normalize_finance_dataset (what run_metric and explain_variance read) yields any row."""
+    from foundry.finance_model import _field_map, normalize_finance_dataset
+
+    rows = dataset.get('rows')
+    if not isinstance(rows, list) or not rows:
+        return False
+    for scope, policy in readers:
+        # A table with no amount (or wide revenue/cost/expense) value anywhere is rowless without normalising it.
+        keys = {*_field_map(policy).get('amount', ()), 'revenue', 'cost', 'expense'}
+        if not any(isinstance(row, dict) and any(row.get(key) not in (None, '') for key in keys) for row in rows):
+            continue
+        # Rows are normalised independently, so the first chunk with a row answers without reading the rest.
+        for start in range(0, len(rows), ENGINE_READ_CHUNK):
+            try:
+                result = normalize_finance_dataset({**dataset, 'rows': rows[start:start + ENGINE_READ_CHUNK]},
+                                                   scope, None, policy)
+            except (FoundryError, ArithmeticError, ValueError, KeyError, TypeError):
+                break
+            if result.get('rows'):
+                return True
+    return False
 
 
 def _engine_blockers(environment):
     blockers = []
     if environment.get('structure_pending'):
         blockers.append('structure_pending_confirmation')
-    if environment.get('rowless_bindings'):
-        # A finance context on these bindings would not help: the engine still reads no rows from them.
+    if environment.get('rowless_bindings') and not environment.get('engine_bindings'):
+        # No bound snapshot gives the engine a row: a finance context on these bindings would not help. One
+        # rowless binding beside a table the engine reads (a GL table plus a budget workbook kept for
+        # recipes) blocks nothing, since a run on all the bindings reads that table.
         blockers.append('bindings_without_engine_rows')
     elif environment.get('finance_context') is False:
         blockers.append('no_finance_context')
@@ -2538,11 +2665,12 @@ def _missing_rows_fixup(item, missing_grains, required_fields, field_gaps, paths
     }
 
 
-def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncounted_keys):
+def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncounted_keys, unbacked):
     """Grains whose cited results matched the item but did not count, each with its statuses and reasons.
 
-    evidence_recipe_cells lists only the cells of those grains that did not count: an estimated cell, or a
-    cell of a grain another cell already answers, is not something to repair.
+    evidence_recipe_cells lists only the cells of those grains that did not count and state a number no
+    counted cell states: an estimated cell, a cell of a grain another cell answers, or a restatement of a
+    counted number is not something to repair.
     """
     recipe_cells = []
     if any(path['path'] == 'evidence_recipe' for path in paths['accepted']):
@@ -2550,7 +2678,8 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncoun
             reason = location['evidence'].get('not_counted_reason')
             if (location['status'] in {'answered', 'estimated'}
                     or reason in {'estimate_cited_for_source_grain', 'run_bindings_differ', 'run_scope_differs'}
-                    or _location_grain(item, location, runs) not in uncounted_keys):
+                    or _location_grain(item, location, runs) not in uncounted_keys
+                    or (location['run_id'], location['row'], location['column']) not in unbacked):
                 continue
             row = runs[location['run_id']]['result']['rows'][location['row']]
             recipe_cells.append({'run_id': location['run_id'], 'row': location['row'], 'column': location['column'],
@@ -2599,6 +2728,7 @@ def _needs_grain_basis_hint(item, grain):
     return (
         _closed_metric_key(item) is not None
         and _declared_basis(item, _grain_key(grain)) is None
+        and not grain.get('counted_cells')  # another cited value of the grain counts: the source states it
         and ('reasons' not in grain or bool(set(grain['reasons']) & ESTIMATING_REASONS))
     )
 
@@ -2753,7 +2883,8 @@ NOT_COUNTED_TEXT = {
                                          '收入、成本、费用、利润和量价拆分要引擎闭合或来源复算'),
     'recipe_failed': '复算规则未通过',
     'recipe_failed_precision': ('复算规则因运行值的精度损失（被舍入，或脚本用二进制浮点数计算）而未通过，'
-                                '需用精确小数计算并在运行结果中保存完整精度'),
+                                '需用精确小数计算并在运行结果中保存完整精度（能除尽的值保留全部位数，'
+                                '除不尽的比值及由它算出的估算至少保留 28 位有效数字，运算顺序不限）'),
     'recipe_coefficient_unbound': ('复算规则的 scale 不是 1 或单位换算，只证明了乘法'
                                    '（系数要写成一条 ratio 规则，由 factor_recipe_id 引用，且只对 grain_basis 声明为估算的组合计为估算）'),
     'ratio_recipe_cannot_prove_amount': 'ratio 规则不能证明金额',
@@ -2769,10 +2900,36 @@ NOT_COUNTED_TEXT = {
 BLOCKER_TEXT = {
     'structure_pending_confirmation': '工作簿结构待经理确认',
     'no_finance_context': '尚无覆盖这些资料的财务口径',
-    'bindings_without_engine_rows': ('本要求绑定的资料快照是工作簿文件或空表，财务引擎从中读不到数据行；'
-                                     '结构确认生成的表快照不是本要求绑定的资料，在其上的运行不计入'),
+    'bindings_without_engine_rows': ('本要求绑定的资料快照都读不出财务引擎的数据行（工作簿文件、空表，'
+                                     '或没有金额列、也没有收入成本费用列的表，如区域预算分解表）；'
+                                     '未绑定到本要求的表快照上的运行不计入，需经理改绑到引擎能读的明细表或改用其他依据'),
     'no_workbook_source': '绑定资料中没有可复算的归档工作簿',
 }
+
+
+ENGINE_RUN_TEXT = {
+    'engine_run_empty': '结果为 0 行（财务口径的 scope 滤掉了全部数据行，或绑定资料没有可读的金额）',
+    'rows_do_not_cover_requirement': '结果行没有覆盖要求的范围和组合',
+    'actual_budget_pairs_incomplete': '结果行没有按组合成对给出实际与预算',
+    'metric_filters_differ': 'run_metric 的 filters 与要求的组织、期间、情景或维度不一致',
+    'run_scope_narrower': '财务口径的 scope 比要求的范围窄',
+}
+
+
+def _engine_runs_text(runs):
+    parts = []
+    for run in runs[-3:]:
+        text = f'运行 {run["run_id"]} 读到 {run["rows"]} 行，{ENGINE_RUN_TEXT.get(run["reason"], run["reason"])}'
+        if run.get('blank_fields'):
+            text += f'，行上 {"、".join(run["blank_fields"])} 为空'
+        if run.get('unmapped_accounts'):
+            text += f'，{run["unmapped_accounts"]} 行的管理科目未映射（__unmapped__）'
+        if run.get('missing_grains'):
+            text += '，' + _grain_count(run['missing_grains'], '没有结果行')
+        parts.append(text)
+    return ('已在本要求的绑定上运行过 run_metric，结果不计入：' + '；'.join(parts) + '。原样重跑只会得到同样的行：'
+            '整张表属于同一组织、期间或情景时，可用 finance_context_save 在该绑定的 scopes 里写明后重跑；'
+            '未映射的科目要先有科目映射；绑定资料本身没有这些字段时，需经理改绑或改用其他依据。')
 
 
 def _grain_example(grain):
@@ -2840,6 +2997,10 @@ def _unanswered_message(item):
         statuses = dict.fromkeys(status for grain in uncounted for status in grain.get('statuses', []))
         why = '、'.join(NOT_COUNTED_TEXT.get(reason, reason) for reason in reasons) or '、'.join(statuses)
         message += _grain_count(uncounted, '已引用了结果但未计入') + f'，状态为 {"、".join(statuses)}：{why}。'
+        doubled = [grain for grain in uncounted if grain.get('counted_cells')]
+        if doubled:
+            message += (_grain_count(doubled, '同一组合另有已计入的引用') + '：文稿为一个组合引用的每个数都要计入，'
+                        '已计入的引用不能替另一个数作证；未计入的数按下述依据补上，或从正文和 claims 中删去。')
     estimated = item.get('estimated_grains') or []
     if estimated:
         message += _grain_count(estimated, '为估算') + '，按声明的估算方法由系数规则复算，始终标注“估算”。'
@@ -2885,6 +3046,8 @@ def _unanswered_message(item):
     elif paths['accepted'] and status != 'answered' and not estimated and not item.get('declared_grains'):
         # A result set has no per-grain detail; still name what answers it.
         message += '可计入的依据：' + '；或'.join(_path_text(path, 'value') for path in paths['accepted']) + '。'
+    if item.get('engine_runs') and any(path['path'] == 'run_metric_result_set' for path in paths['accepted']):
+        message += _engine_runs_text(item['engine_runs'])
     blocked = paths.get('blocked') or []
     if blocked and status != 'answered':
         texts = [f'{path.get("tool") or path["path"]}（{"、".join(BLOCKER_TEXT.get(b, b) for b in path["blockers"])}）'

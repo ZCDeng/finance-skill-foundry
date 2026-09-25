@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import math
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Any
 
 from openpyxl import load_workbook
@@ -38,7 +39,7 @@ COEFFICIENT_UNBOUND = "coefficient_unbound"
 def evaluate_evidence_recipes(analysis: Any, recipes: list[Any] | None) -> dict[str, Any]:
     clean = _clean_recipes(recipes)
     recipe_by_id = {recipe["id"]: recipe for recipe in clean}
-    factor_cache: dict[str, Decimal] = {}
+    factor_cache: dict[str, tuple[Decimal, Fraction | None]] = {}
     results = [
         {
             **_evaluate_recipe(analysis, recipe, recipe_by_id, factor_cache),
@@ -299,19 +300,22 @@ def _evaluate_recipe(
     analysis: Any,
     recipe: dict[str, Any],
     recipe_by_id: dict[str, dict[str, Any]] | None = None,
-    factor_cache: dict[str, Decimal] | None = None,
+    factor_cache: dict[str, tuple[Decimal, Fraction | None]] | None = None,
 ) -> dict[str, Any]:
     factor_value: Decimal | None = None
     try:
         if recipe.get("factor_recipe_id"):
             _assert_claim_business_key(analysis, recipe)
-        actual = _recipe_actual(analysis, recipe)
+        # `actual` is the server's Decimal rendering (shown, and read for hints); `exact` decides.
+        actual, exact = _recipe_actual(analysis, recipe)
         if recipe.get("factor_recipe_id"):
             if recipe_by_id is None or factor_cache is None:  # pragma: no cover - compatibility guard
                 raise FoundryError("factor recipe context is unavailable")
-            factor_value = _factor_value(analysis, recipe, recipe_by_id, factor_cache)
+            factor_value, factor_exact = _factor_value(analysis, recipe, recipe_by_id, factor_cache)
             actual = actual * factor_value
+            exact = _exact_product(exact, factor_exact)
         actual = actual * recipe["scale"]
+        exact = _exact_product(exact, _exact(recipe["scale"]))
         expected = _claim_expected(analysis, recipe["claim"])
     except FoundryError as exc:
         # A factor that failed only on the precision of its run value makes the dependent fail for the
@@ -324,7 +328,7 @@ def _evaluate_recipe(
             "issue": _issue(recipe, "evidence_recipe_unreadable", str(exc), actual=None, expected=None,
                             precision_hint=rounded),
         }
-    if actual != expected:
+    if not _matches_exact(exact, expected, actual):
         rounded = _rounding_hint(actual, expected)
         return {
             "recipe_id": recipe["id"],
@@ -352,31 +356,42 @@ def _evaluate_recipe(
     }
 
 
-def _recipe_actual(analysis: Any, recipe: dict[str, Any]) -> Decimal:
+def _recipe_actual(analysis: Any, recipe: dict[str, Any]) -> tuple[Decimal, Fraction | None]:
+    """The recipe's value as the server's Decimal (default context) and as an exact rational (see _exact)."""
     if recipe["kind"] == "direct":
-        return _single_value(analysis, recipe)
+        value = _single_value(analysis, recipe)
+        return value, _exact(value)
     if recipe["kind"] == "sum":
-        return _range_sum(analysis, recipe)
+        value = _range_sum(analysis, recipe)
+        return value, _exact(value)
     if recipe["kind"] == "diff":
-        return _source_value(analysis, recipe["left"]) - _source_value(analysis, recipe["right"])
+        left, right = _source_value(analysis, recipe["left"]), _source_value(analysis, recipe["right"])
+        exact_left, exact_right = _exact(left), _exact(right)
+        return left - right, (exact_left - exact_right if exact_left is not None and exact_right is not None else None)
     if recipe["kind"] == "ratio":
         return _ratio_value(analysis, recipe)
     raise FoundryError("unsupported evidence recipe kind")  # pragma: no cover - guarded by clean step
 
 
-def _ratio_value(analysis: Any, recipe: dict[str, Any]) -> Decimal:
+def _ratio_value(analysis: Any, recipe: dict[str, Any]) -> tuple[Decimal, Fraction | None]:
     denominator = _source_value(analysis, recipe["right"])
     if denominator == 0:
         raise FoundryError("ratio evidence recipe denominator is zero")
-    return _source_value(analysis, recipe["left"]) / denominator
+    numerator = _source_value(analysis, recipe["left"])
+    exact_numerator, exact_denominator = _exact(numerator), _exact(denominator)
+    exact = (exact_numerator / exact_denominator
+             if exact_numerator is not None and exact_denominator is not None else None)
+    return numerator / denominator, exact
 
 
 def _factor_value(
     analysis: Any,
     dependent: dict[str, Any],
     recipe_by_id: dict[str, dict[str, Any]],
-    factor_cache: dict[str, Decimal],
-) -> Decimal:
+    factor_cache: dict[str, tuple[Decimal, Fraction | None]],
+) -> tuple[Decimal, Fraction | None]:
+    """The factor's Decimal rendering and its exact quotient. The dependent is computed on the exact one, so
+    how the run rounded its own copy of the factor never decides the estimate."""
     factor_id = dependent["factor_recipe_id"]
     if factor_id in factor_cache:
         return factor_cache[factor_id]
@@ -384,14 +399,14 @@ def _factor_value(
     if factor is None or factor["kind"] != "ratio":  # pragma: no cover - guarded by clean step
         raise FoundryError("factor_recipe_id must reference a ratio evidence recipe")
     _assert_claim_business_key(analysis, factor)
-    actual = _ratio_value(analysis, factor)
+    actual, exact = _ratio_value(analysis, factor)
     expected = _claim_expected(analysis, factor["claim"])
-    if actual != expected:
+    if not _matches_exact(exact, expected, actual):
         error = FoundryError("系数规则未通过归档来源的精确复算")
         error.precision_hint = _rounding_hint(actual, expected)
         raise error
-    factor_cache[factor_id] = actual
-    return actual
+    factor_cache[factor_id] = (actual, exact)
+    return actual, exact
 
 
 def _factor_result_details(recipe: dict[str, Any], factor_value: Decimal | None) -> dict[str, str]:
@@ -477,12 +492,12 @@ def _issue(
             message += (
                 "运行引用值与独立计算值只差舍入（按引用值的小数位舍入，或脚本用二进制浮点数计算），"
                 "差异来自运行结果的精度损失；请用精确小数（如 Decimal）计算，并在运行结果中保存完整精度的数值"
-                "（展示时再舍入），精确比对不放宽。"
+                f"（展示时再舍入）。{PRECISION_RULE}"
             )
     elif precision_hint:
         message = message.rstrip("。") + "。" + (
             "所引用的系数规则只因运行值的精度损失（舍入或二进制浮点数）而未通过；请用精确小数计算系数和估算，"
-            "并在运行结果中保存完整精度的数值，精确比对不放宽。"
+            f"并在运行结果中保存完整精度的数值。{PRECISION_RULE}"
         )
     return {
         "code": code,
@@ -502,6 +517,57 @@ def _issue(
 
 UNIT_SCALE_EXPONENTS = {3, 4, 6, 8}  # 千元、万元、百万元、亿元
 FULL_PRECISION_REQUIRED = "full_precision_required"
+# A quotient that does not terminate (344487.0552 ÷ 527999.9999) has no exact decimal: every run value of it
+# is rounded, the server's own 28-digit Decimal included. Such a value matches when it keeps at least a
+# Decimal context's full precision (28 significant digits) and agrees with the exact quotient to 10^-25 of
+# its size, so neither a higher precision nor another order of exact-decimal operations decides the result.
+# Every value that terminates (each direct/sum/diff recipe, 300 ÷ 480 = 0.625) is still compared exactly.
+FULL_PRECISION_DIGITS = 28
+QUOTIENT_TOLERANCE = Fraction(1, 10**25)
+PRECISION_RULE = (
+    "能除尽的值须与独立计算值完全相等；除不尽的比值及由它算出的估算至少保留 28 位有效数字"
+    "（Python Decimal 的默认精度），更高精度或不同运算顺序都可以，精确比对不放宽。"
+)
+
+
+# Decimals with an exponent or a digit count beyond this are never expanded into an exact rational (1E-1000000
+# would be a million-digit integer); a recipe touching one is compared as Decimals, as before round 7.
+EXACT_SIZE_LIMIT = 400
+
+
+def _exact(value: Decimal) -> Fraction | None:
+    sign, digits, exponent = value.as_tuple()
+    if not value.is_finite() or abs(exponent) > EXACT_SIZE_LIMIT or len(digits) > EXACT_SIZE_LIMIT:
+        return None
+    return Fraction(value)
+
+
+def _exact_product(left: Fraction | None, right: Fraction | None) -> Fraction | None:
+    return left * right if left is not None and right is not None else None
+
+
+def _matches_exact(exact: Fraction | None, claimed: Decimal, actual: Decimal) -> bool:
+    """Whether the run value is the recipe's value: exactly, or for a quotient that does not terminate, to
+    full precision (see FULL_PRECISION_DIGITS). Without an exact rational (extreme sizes) the server's
+    Decimal `actual` is compared as it was."""
+    if exact is None:
+        return actual == claimed
+    value = _exact(claimed)
+    if value is None:
+        return False
+    if value == exact:
+        return True
+    if _terminates(exact) or len(claimed.as_tuple().digits) < FULL_PRECISION_DIGITS:
+        return False
+    return abs(value - exact) <= abs(exact) * QUOTIENT_TOLERANCE
+
+
+def _terminates(value: Fraction) -> bool:
+    denominator = value.denominator
+    for prime in (2, 5):
+        while denominator % prime == 0:
+            denominator //= prime
+    return denominator == 1
 
 
 def _rounding_hint(actual: Decimal | None, expected: Decimal | None) -> bool:
@@ -527,13 +593,14 @@ def _float_rounding(actual: Decimal, expected: Decimal) -> bool:
     """Whether the claimed value is what a script computing in binary floats would write (its repr).
 
     Such a value is not a decimal rounding of the exact one (repr(0.1 + 0.2) is 0.30000000000000004), so the
-    decimal check misses it. The claim must carry a double's worth of digits and sit within a few ulps.
+    decimal check misses it. The claim must carry a double's worth of digits (15 to 17: a repr never has
+    more) and sit within a few ulps; a 28- or 30-digit value is a Decimal result, never a float repr.
     """
     try:
         claimed = float(expected)
     except (OverflowError, ValueError):  # pragma: no cover - finite Decimal always converts
         return False
-    if not math.isfinite(claimed) or claimed == 0 or len(expected.as_tuple().digits) < 15:
+    if not math.isfinite(claimed) or claimed == 0 or not 15 <= len(expected.as_tuple().digits) <= 17:
         return False
     tolerance = Decimal(math.ulp(claimed)) * FLOAT_ROUNDING_ULPS
     return abs(actual - expected) <= tolerance

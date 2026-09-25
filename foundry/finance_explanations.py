@@ -441,6 +441,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     ignored_number_spans = [
         *_generated_appendix_heading_number_spans(body, prepared),
         *_generated_appendix_label_number_spans(body, generated_regions, prepared),
+        *_generated_appendix_reference_spans(body, generated_regions),
     ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
@@ -2179,9 +2180,10 @@ def _trusted_generated_appendix_regions(
     rebuilt_base = render_evidence_appendix(prepared).get("body", "")
     if not isinstance(rebuilt_base, str) or not rebuilt_base:
         return []
-    rebuilt_gap = _rebuilt_input_gap_appendix(analysis, spec, prepared, recipe_report)
-    if rebuilt_gap is None:
+    rebuilt_requirement = _rebuilt_input_gap_appendix(analysis, spec, prepared, recipe_report)
+    if rebuilt_requirement is None:
         return []
+    rebuilt_gap, references = rebuilt_requirement
     rebuilt = rebuilt_base + rebuilt_gap
     expected = evidence_appendix_metadata(rebuilt, base_body=rebuilt_base)
     if any(meta.get(key) != expected[key] for key in ("body_sha256", "base_body_sha256")):
@@ -2205,6 +2207,8 @@ def _trusted_generated_appendix_regions(
             "section": "generated_appendix",
             "start": start,
             "end": start + len(rendered),
+            # Item headings and sheet!range formulas the server wrote in 来源复算依据 (no values).
+            "references": references,
         }
     ]
 
@@ -2225,14 +2229,17 @@ def _canonical_report_markdown(markdown: str) -> str | None:
 
 def _rebuilt_input_gap_appendix(
     analysis, spec: dict, prepared: dict, recipe_report: dict | None = None
-) -> str | None:
+) -> tuple[str, list[str]] | None:
+    """The requirement part of the generated appendix (待补资料 and 来源复算依据) and the references the
+    来源复算依据 section writes; None when the requirement check itself fails."""
     requirements_id = spec.get("requirements_id")
     if not requirements_id:
-        return ""
+        return "", []
     try:
         requirements = analysis._get("requirements", requirements_id)
         from foundry.finance_requirement_support import (
             evidence_basis_appendix,
+            evidence_basis_references,
             input_gap_appendix,
             with_input_gaps,
         )
@@ -2257,11 +2264,11 @@ def _rebuilt_input_gap_appendix(
             _recipe_report=recipe_report,
         )
         checked = with_input_gaps(analysis, checked)
-        return input_gap_appendix(checked) + evidence_basis_appendix(checked)
+        return input_gap_appendix(checked) + evidence_basis_appendix(checked), evidence_basis_references(checked)
     except FoundryError:
         return None
     except (OSError, ValueError, KeyError, TypeError):
-        return ""
+        return "", []
 
 
 def _readability_suggestions(body: str, generated_regions: list[dict]) -> dict:
@@ -2514,6 +2521,27 @@ def _generated_appendix_label_number_spans(
                 start = line.start("member")
             if name is not None:
                 spans.extend(_period_segment_spans(name, region["start"] + start))
+    return spans
+
+
+def _generated_appendix_reference_spans(body: str, generated_regions: list[dict]) -> list[tuple[int, int]]:
+    """Where the trusted appendix writes a 来源复算依据 reference (an item heading or a sheet!range formula).
+
+    Those texts name archived cells and requirement keys, never values, but a sheet name can hold a year
+    (2026预算!B5) the number scan would read. Only occurrences inside a trusted region are exempt; the same
+    reference in the writer's prose is still checked.
+    """
+    spans = []
+    for region in generated_regions:
+        text = body[region["start"] : region["end"]]
+        for reference in region.get("references") or []:
+            if not reference:
+                continue
+            position = text.find(reference)
+            while position >= 0:
+                start = region["start"] + position
+                spans.append((start, start + len(reference)))
+                position = text.find(reference, position + len(reference))
     return spans
 
 

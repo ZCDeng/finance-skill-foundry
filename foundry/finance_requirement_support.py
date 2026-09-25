@@ -222,10 +222,32 @@ EVIDENCE_BASIS_LABELS = {
 def evidence_basis_appendix(requirements):
     """Recipe-backed cells grouped by server-derived evidence_basis; estimates show their formula.
 
-    Only item ids and sheet!range references are written, so the generated appendix adds no business
-    numbers that would need their own citation.
+    Only item ids, metric keys and sheet!range references are written, never a value. A sheet name can
+    still hold digits (2026预算!B5), so validation exempts exactly these references inside the trusted
+    appendix (see evidence_basis_references); the same text in the writer's prose is still checked.
     """
     lines = []
+    for heading, groups in _evidence_basis_groups(requirements):
+        lines.append(f"- {heading}")
+        for basis, label in EVIDENCE_BASIS_LABELS.items():
+            if basis in groups:
+                lines.append(f"  - {label}：" + "；".join(groups[basis]))
+    if not lines:
+        return ""
+    return "\n\n## 来源复算依据\n\n" + "\n".join(lines)
+
+
+def evidence_basis_references(requirements):
+    """The texts the 来源复算依据 appendix writes that name requirement items and archived cells (item
+    headings and sheet!range formulas); they state no business number."""
+    references = []
+    for heading, groups in _evidence_basis_groups(requirements):
+        references.append(heading)
+        references.extend(formula for formulas in groups.values() for formula in formulas)
+    return list(dict.fromkeys(references))
+
+
+def _evidence_basis_groups(requirements):
     for item in requirements.get("items", []):
         groups = {}
         for location in item.get("locations", []):
@@ -234,15 +256,9 @@ def evidence_basis_appendix(requirements):
             if basis not in EVIDENCE_BASIS_LABELS or location.get("status") not in {"answered", "estimated"}:
                 continue
             groups.setdefault(basis, []).append(_basis_formula(evidence))
-        if not groups:
-            continue
-        lines.append(f"- {item['id']}（{item.get('metric')}）")
-        for basis, label in EVIDENCE_BASIS_LABELS.items():
-            if basis in groups:
-                lines.append(f"  - {label}：" + "；".join(dict.fromkeys(groups[basis])))
-    if not lines:
-        return ""
-    return "\n\n## 来源复算依据\n\n" + "\n".join(lines)
+        if groups:
+            yield f"{item['id']}（{item.get('metric')}）", {
+                basis: list(dict.fromkeys(formulas)) for basis, formulas in groups.items()}
 
 
 def _basis_formula(evidence):
