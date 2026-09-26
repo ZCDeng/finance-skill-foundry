@@ -38,6 +38,8 @@ NOT_STATED = "—"
 # Why a declared estimate grain the check did not count has no recomputed formula (issue #33).
 NOT_REPRODUCIBLE = "系数无法由来源复算"
 NOT_RECOMPUTED = "尚未由来源复算"
+# Declared estimate grains listed without a cited value, per item; the rest are counted in one row.
+UNCITED_GRAIN_ROWS = 12
 # Private-use characters no renderer writes: _MARK stands where a label goes, _SLOT for a text node's text.
 _MARK = "\ue000"
 _SLOT = "\ue001"
@@ -82,8 +84,16 @@ def _declared_estimate_cells(
 ) -> list[dict[str, Any]]:
     """Grains the item declares an estimate (grain_basis basis estimate) that the check left unanswered and not
     estimated: declared with a factor no recipe can recompute (declared_grains), or declared reproducible and not
-    yet made `estimated` by a factor recipe (uncounted_grains, missing_grains)."""
-    from foundry.finance_requirements import GRAIN_LISTS, _declared_basis, _location_grain
+    yet made `estimated` by a factor recipe (uncounted_grains, missing_grains).
+
+    A grain's cells are its cited cells that state an estimate: not an answered cell, and not a cell restating a
+    number an answered cell of the grain states. A cell a factor recipe made `estimated` keeps its recipe (no
+    `declared`). Where the item lists no scenarios but a cell's row states one, the grain holds cells the
+    declaration cannot tell apart (an actual beside the estimate): the grain is declared with no cell. Grains
+    declared with no cell are listed up to UNCITED_GRAIN_ROWS per item, the rest counted in one entry (`more`)."""
+    from foundry.finance_requirements import (
+        GRAIN_LISTS, _cited_value, _declared_basis, _location_grain, _row_scenario, _same_number,
+    )
 
     if not isinstance(item.get("grain_basis"), list) or not isinstance(item.get("locations"), list):
         return []
@@ -99,23 +109,46 @@ def _declared_estimate_cells(
                 grains[grain] = (record, declared)
     if not grains:
         return []
-    members: dict[tuple[Any, ...], list[tuple[str, int, str]]] = {}
+    members: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for location in item["locations"]:
-        key = _cell_key(location)
-        if key is None or key in seen or location.get("status") == "answered" or key[0] not in runs:
+        if _cell_key(location) is None or location["run_id"] not in runs:
             continue
         try:
             grain = _location_grain(item, location, runs)
         except (AttributeError, IndexError, KeyError, TypeError):
             continue
-        if grain in grains and key not in members.setdefault(grain, []):
-            members[grain].append(key)
-    found = []
+        if grain in grains:
+            members.setdefault(grain, []).append(location)
+    def pinned(location: dict[str, Any]) -> bool:
+        # The scenario tells an estimate from the actual; a declaration over all scenarios cannot.
+        run = runs[location["run_id"]]
+        return bool(item.get("scenarios")) or _row_scenario(run, run["result"]["rows"][location["row"]]) in (None, "")
+
+    found: list[dict[str, Any]] = []
+    uncited = 0
     for grain, (record, declared) in grains.items():
-        for key in members.get(grain) or [None]:
-            if key is not None:
-                seen.add(key)
-            found.append({"item": item, "grain": record, "cell": key, "declared": declared})
+        cited = members.get(grain) or []
+        answered = [_cited_value(location, runs) for location in cited if location.get("status") == "answered"]
+        cells = [location for location in cited if location.get("status") != "answered"
+                 and not any(_same_number(_cited_value(location, runs), value) for value in answered)]
+        if not all(pinned(location) for location in cells):
+            cells = []
+        added = False
+        for location in cells:
+            key = _cell_key(location)
+            if key in seen:
+                continue
+            seen.add(key)
+            added = True
+            found.append({"item": item, "grain": record, "cell": key,
+                          **({} if location.get("status") == "estimated" else {"declared": declared})})
+        if added or cells:
+            continue
+        uncited += 1
+        if uncited <= UNCITED_GRAIN_ROWS:
+            found.append({"item": item, "grain": record, "cell": None, "declared": declared})
+    if uncited > UNCITED_GRAIN_ROWS:
+        found.append({"item": item, "grain": {}, "cell": None, "more": uncited - UNCITED_GRAIN_ROWS})
     return found
 
 
@@ -209,6 +242,10 @@ def _declaration_rows(
     rows = []
     for entry in cells:
         item, grain, key = entry["item"], entry["grain"], entry["cell"]
+        if entry.get("more"):
+            rows.append([_shown(item.get("label") or item.get("metric") or item.get("id")), *[NOT_STATED] * 4,
+                         f"另有 {entry['more']} 个声明为估算的组合未引用数值"])
+            continue
         declared = entry.get("declared")
         fact = (facts.get(key) or {}) if key is not None else {}
         # The value as its fact displays it (value and unit), as a {{fact:…}} template writes it.

@@ -407,6 +407,148 @@ def test_a_declared_estimate_grain_the_draft_answers_from_the_source_is_not_decl
     assert _result_labels(analysis, draft, mode) == []
 
 
+def _books(analysis, tmp_path):
+    budget = _workbook(analysis, tmp_path, 'budget', {'01·年度预算总表': {'B12': 100, 'C12': 200, 'N12': 480},
+                                                      '05·区域预算分解': {'C5': 188503.3}})
+    close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'D5': 109742.028, 'D11': 325644}})
+    return budget, close
+
+
+def _runs_case(analysis, tmp_path, item, runs_rows, recipes=lambda runs, budget, close: []):
+    """One requirement item on the fixture's workbooks, script runs of `runs_rows` (every value cited, each run's
+    value facts as {{fact:…}} tokens keyed (run index, row)); returns (service, runs, tokens, recipes, claims)."""
+    budget, close = _books(analysis, tmp_path)
+    requirement = save_requirements(analysis, spec(
+        question='1-8 月收入实际与同期预算', scope={'ledger': '预算工作簿与月结套表', 'currency': 'CNY', 'unit': '万元'},
+        bindings={'budget': budget['id'], 'close': close['id']}, items=[item]))
+    runs = []
+    for index, rows in enumerate(runs_rows):
+        names = list(dict.fromkeys(key for row in rows for key in row))
+        runs.append(_script_run(analysis, {'budget': budget, 'close': close}, rows, suffix=f'declared-{index}',
+                                requirements_id=requirement['id'],
+                                requirements_semantic_fingerprint=requirement['semantic_fingerprint'],
+                                result={'columns': [{'name': name, 'type': 'DECIMAL(38,10)' if name == 'value' else 'VARCHAR'}
+                                                    for name in names], 'rows': rows}))
+    service = FinanceStore(analysis.task)
+    facts = service.prepare_explanation({'run_ids': [run['id'] for run in runs]})['facts']
+    by_id = {run['id']: index for index, run in enumerate(runs)}
+    tokens = {(by_id[fact['run_id']], fact['row']): '{{fact:%s}}' % fact['id'] for fact in facts if fact['column'] == 'value'}
+    claims = [_claim(run, row=row, column='value', value=values['value'])
+              for run, rows in zip(runs, runs_rows) for row, values in enumerate(rows)]
+    return service, runs, tokens, recipes(runs, budget, close), claims
+
+
+def _save_runs(service, runs, body, recipes, claims):
+    saved = service.save_explanation_draft({'title': '区域收入', 'body': body, 'run_ids': [run['id'] for run in runs],
+                                            'evidence_recipes': recipes, 'claims': claims})
+    return service.analysis.get_draft(saved['id'])
+
+
+BUDGET_ROW = {'metric_key': 'revenue', 'period': '2026-01:2026-08', 'unit': '万元', 'currency': 'CNY'}
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_a_cell_restating_a_number_the_source_answers_is_not_declared(analysis, tmp_path, mode):
+    """Review of #33: the item lists no organizations and declares every budget_1_8 cell an estimate. The group's
+    300 is answered from the source; the draft cites it a second time from a summary run. That restatement is
+    the source number, not an estimate: only 华东's uncounted value is declared and labelled."""
+    rows = [{**BUDGET_ROW, 'organization': '集团合并', 'scenario': 'budget_1_8', 'value': '300'},
+            {**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE}]
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'periods': ['2026-01:2026-08'],
+            'scenarios': ['budget_1_8'], 'requires_drilldown': True,
+            'grain_basis': [{'scenarios': ['budget_1_8'], 'basis': 'estimate', 'method': METHOD}]}
+    service, runs, tokens, recipes, claims = _runs_case(
+        analysis, tmp_path, item, [rows, rows[:1]],
+        lambda runs, budget, close: [_recipe(budget, '01·年度预算总表', 'B12:C12', runs[0], 0, kind='sum',
+                                             recipe_id='group_budget')])
+    draft = _save_runs(service, runs, f'## 区域收入\n\n集团 1-8 月预算 {tokens[(1, 0)]}，华东 {tokens[(0, 1)]}。',
+                       recipes, claims)
+    assert [grain.get('counted_cells') for grain in _item(draft)['uncounted_grains']] == [1]
+
+    projection = _projection(analysis, draft, mode)
+
+    assert _rows(_declared(projection['document']['content'])[2]) == [
+        COLUMNS, ['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8', ESTIMATE + ' 万元', NOT_RECOMPUTED]]
+    assert f'集团 1-8 月预算 300 万元，华东 {ESTIMATE} 万元（估算）。' in projection['body']
+    assert _result_labels(analysis, draft, mode) == [('Result 1', 3, 7)]
+
+
+def test_a_recipe_estimate_in_an_uncounted_declared_grain_keeps_its_formula(analysis, tmp_path):
+    """Review of #33: the grain holds the factor-recipe estimate and a second, different value from an older
+    run, so the check leaves it uncounted. The recipe estimate shows its recipe, the other value the method."""
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'organizations': ['华东区域'],
+            'periods': ['2026-01:2026-08'], 'scenarios': ['budget_1_8'], 'requires_drilldown': True,
+            'grain_basis': [{'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'basis': 'estimate',
+                             'method': METHOD}]}
+    new = [{**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE},
+           {**BUDGET_ROW, 'organization': '集团合并', 'scenario': 'budget_phasing_ratio', 'value': '0.625', 'unit': '-'}]
+    old = [{**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': '117814.5729'}]
+    key = {'metric_key': 'revenue', 'period': '2026-01:2026-08'}
+
+    def recipes(runs, budget, close):
+        def cell(reference):
+            return {'dataset_id': budget['id'], 'source_hash': budget['source_hash'], 'sheet': '01·年度预算总表',
+                    'range': reference}
+        return [{'id': 'phasing', 'kind': 'ratio', 'business_key': key,
+                 'claim': {'run_id': runs[0]['id'], 'row': 1, 'column': 'value'},
+                 'left': cell('B12:C12'), 'right': cell('N12')},
+                {**_recipe(budget, '05·区域预算分解', 'C5', runs[0], 0, recipe_id='east'), 'factor_recipe_id': 'phasing',
+                 'business_key': key}]
+    service, runs, tokens, recipes_, claims = _runs_case(analysis, tmp_path, item, [new, old], recipes)
+    draft = _save_runs(service, runs, f'## 区域收入\n\n华东 {tokens[(0, 0)]}，旧稿 {tokens[(1, 0)]}。', recipes_, claims)
+    assert {(location['run_id'] == runs[0]['id'], location['status']) for location in _item(draft)['locations']
+            if location['row'] == 0} == {(True, 'estimated'), (False, 'not_applicable')}
+    assert _item(draft)['uncounted_grains'] and not _item(draft).get('estimated_grains')
+
+    rows = _rows(_declared(_projection(analysis, draft, 'management')['document']['content'])[2])
+
+    # Rows follow the check's location order (by run id).
+    assert rows[0] == COLUMNS and sorted(rows[1:]) == [
+        ['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8', ESTIMATE + ' 万元', FORMULA],
+        ['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8', '117814.5729 万元', NOT_RECOMPUTED]]
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_a_declaration_over_every_scenario_labels_no_cell(analysis, tmp_path, mode):
+    """Review of #33: the item lists no scenarios, so its declared grain holds 华东's actual beside its budget and
+    nothing tells them apart. The grain is declared; no cell, the actual least of all, is labelled."""
+    item = {'id': 'east', 'metric': 'revenue', 'label': '华东 1-8 月收入', 'organizations': ['华东区域'],
+            'periods': ['2026-01:2026-08'], 'requires_drilldown': True,
+            'grain_basis': [{'organizations': ['华东区域'], 'basis': 'estimate', 'method': METHOD,
+                             'factor_reproducible': False, 'reason': REASON}]}
+    rows = [{**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE},
+            {**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'actual_1_8', 'value': '109742.028'}]
+    service, runs, tokens, recipes, claims = _runs_case(analysis, tmp_path, item, [rows])
+    draft = _save_runs(service, runs, f'## 区域收入\n\n实际 {tokens[(0, 1)]}，预算 {tokens[(0, 0)]}。', recipes, claims)
+    assert [grain['state'] for grain in _item(draft)['declared_grains']] == ['estimate_factor_not_reproducible']
+
+    projection = _projection(analysis, draft, mode)
+
+    assert _rows(_declared(projection['document']['content'])[2]) == [
+        COLUMNS, ['华东 1-8 月收入', '华东区域', '2026-01:2026-08', '—', '—', NOT_REPRODUCIBLE]]
+    assert LABEL not in projection['body'].split(SENTENCE, 1)[1]
+    assert _result_labels(analysis, draft, mode) == []
+
+
+def test_declared_grains_without_a_cited_value_are_listed_up_to_a_fixed_number(analysis, tmp_path):
+    """Review of #33: every missing declared grain got its own row repeating the method, so a large grid grew the
+    projection past the app's 32 MiB buffer while main's was 2.7 KB. The draft states nothing for those grains."""
+    organizations = [f'区域{index:02d}' for index in range(30)]
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'organizations': organizations,
+            'periods': ['2026-01:2026-08'], 'scenarios': ['budget_1_8'], 'requires_drilldown': True,
+            'grain_basis': [{'scenarios': ['budget_1_8'], 'basis': 'estimate', 'method': METHOD * 20}]}
+    rows = [{**BUDGET_ROW, 'organization': '区域00', 'scenario': 'budget_1_8', 'value': ESTIMATE}]
+    service, runs, tokens, recipes, claims = _runs_case(analysis, tmp_path, item, [rows])
+    draft = _save_runs(service, runs, '## 区域收入\n\n见附表。', recipes, claims)
+    assert len(_item(draft)['missing_grains']) == 29
+
+    rows = _rows(_declared(_projection(analysis, draft, 'management')['document']['content'])[2])[1:]
+
+    assert [row[1] for row in rows[:13]] == organizations[:13]
+    assert rows[0][4] == ESTIMATE + ' 万元' and [row[4] for row in rows[1:13]] == ['—'] * 12
+    assert rows[13:] == [['1-8 月营业收入', '—', '—', '—', '—', '另有 17 个声明为估算的组合未引用数值']]
+
+
 # --- inline labels only where a {{fact:…}} template renders an estimate --------------------------------------
 
 
