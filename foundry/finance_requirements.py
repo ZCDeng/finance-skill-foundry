@@ -1793,11 +1793,13 @@ def _aggregate_measure(run, column):
 
 
 # Names that ask for money outright, beyond the P&L lines, the named amounts and the amount markers
-# (_names_an_amount): a balance. And names that ask for one row's extreme amount.
+# (_names_an_amount): a balance. Names that ask for one row's extreme, and names that ask for a count.
 BALANCE_STEMS = ('余额',)
 BALANCE_WORDS = frozenset({'balance', 'balances'})
-EXTREME_STEMS = ('最大', '最小', '最高', '最低')
-EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'largest', 'smallest', 'highest', 'lowest', 'peak'})
+EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '峰值', '上限', '下限')
+EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'largest', 'smallest', 'highest', 'lowest', 'peak',
+                           'top', 'most', 'least', 'greatest', 'biggest'})
+COUNT_HEAD_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'cnt', 'qty', 'quantity'})
 
 
 def _aggregate_statistic_of_money(item, member):
@@ -1805,7 +1807,8 @@ def _aggregate_statistic_of_money(item, member):
     money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28).
 
     A minimum or maximum still answers an item that asks for one (单笔最大应收金额), and a count still answers
-    a name that says no money (逾期笔数), as on main; only a sum states the amount itself.
+    a name that asks for a count (调价次数, 报价笔数, customer_count) or says no money (逾期笔数), as on main; only
+    a sum states the amount itself.
     """
     aggregation = member.get('aggregate_measure')
     if not member.get('aggregate_output') or aggregation in (None, 'sum'):
@@ -1813,6 +1816,12 @@ def _aggregate_statistic_of_money(item, member):
     text = str(item.get('metric') or '').strip()
     words = _label_words(text)
     if aggregation in {'min', 'max'} and (any(stem in text for stem in EXTREME_STEMS) or set(words) & EXTREME_WORDS):
+        return False
+    english_tail = bool(words) and not re.search(r'[\u4e00-\u9fff]\s*$', text)
+    if aggregation in {'count', 'count_distinct'} and (
+            text.endswith(('数', '数量')) or (english_tail and words[-1] in COUNT_HEAD_WORDS)
+            or words[:2] in (['number', 'of'], ['count', 'of'])):
+        # 调价次数, 应收金额笔数, 客户数量, large_amount_invoice_count, number_of_high_value_invoices: a count.
         return False
     lowered = text.lower()
     named = any(lowered == key or lowered in {str(alias).lower() for alias in aliases}

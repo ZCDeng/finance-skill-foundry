@@ -4165,10 +4165,17 @@ def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp
     ('应收账款余额', 'sum'), ('other_income', 'sum'),
     # A count the gate does not know by name stays answered by a count, as on main.
     ('逾期笔数', 'count'), ('发票张数', 'count_distinct'),
+    # A count whose name also mentions a price or value is still a count (review of #38).
+    ('调价次数', 'count'), ('报价笔数', 'count'), ('高价值客户数', 'count_distinct'),
+    ('high_value_customer_count', 'count'), ('price_change_number', 'count'),
+    ('应收金额笔数', 'count'), ('应收账款余额笔数', 'count'), ('应收金额大于0的客户数量', 'count_distinct'),
+    ('large_amount_invoice_count', 'count'), ('number_of_high_value_invoices', 'count'),
     # Known non-amounts keep their rule.
     ('客户数', 'count'), ('最长账龄天数', 'max'),
     # An item that asks for an extreme is answered by that extreme.
     ('单笔最大应收金额', 'max'), ('最小单笔金额', 'min'), ('max_invoice_amount', 'max'),
+    ('应收金额峰值', 'max'), ('单笔金额上限', 'max'), ('top_invoice_amount', 'max'), ('单日最多回款金额', 'max'),
+    ('单笔回款金额最少', 'min'), ('greatest_invoice_amount', 'max'),
 ])
 def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric, aggregation):
     result, _ = _measure_case(tmp_path, metric, aggregation)
