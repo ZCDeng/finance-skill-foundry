@@ -573,7 +573,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "explain_variance",
             "title": "Explain finance variance",
-            "description": "Compute a variance bridge within the granted task, session, snapshots, and finance context scope. For requirement evidence, actual_filters/baseline_filters may only restate the requirement's own organization, period, scenario or dimensions, account_signs may only be 1 or -1, and the two sides may not be the same scenario with the same filters; other bridges still close but do not answer a requirement.",
+            "description": "Compute a variance bridge within the granted task, session, snapshots, and finance context scope. For requirement evidence, actual_filters/baseline_filters may not pick individual source rows, documents or lines (source_row, doc_id, line_id) or contradict the requirement's own organization, period, scenario or dimensions, account_signs may only be 1 or -1, and the two sides may not be the same scenario with the same filters; other bridges still close but do not answer a requirement.",
             "inputSchema": {
                 "type": "object",
                 "required": ["context_id"],

@@ -2525,6 +2525,43 @@ def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path, filters
     assert result['coverage']['status'] == 'needs_attention'
 
 
+@pytest.mark.parametrize('scope', ['flat', 'two_sided'])
+@pytest.mark.parametrize('field, kept, other', [('posting_status', 'posted', 'unposted'),
+                                                ('line_type', 'period_activity', 'opening')])
+def test_a_filter_that_selects_the_periods_own_movement_still_answers(tmp_path, scope, field, kept, other):
+    """Review round 3 of #36: a journal with unposted vouchers, or a balance-style export with opening and ending
+    lines, needs a filter on a field the requirement never names to give the period's own revenue; main answers
+    it, and dropping the filter gives a wrong number. Only row identity (source_row, doc_id, line_id) narrows."""
+    base = {**BRIDGE_BASE, 'period': '2026-09'}
+    actual = [{**base, 'scenario': 'actual', 'management_account': account, field: kind, 'amount': amount,
+               'source_row': index}
+              for index, (account, kind, amount) in enumerate([
+                  ('revenue', kept, '1120'), ('revenue', other, '8000'), ('cost', kept, '450'), ('cost', other, '3000'),
+                  ('expense', kept, '110'), ('expense', other, '900')], start=1)]
+    budget = [{**base, 'scenario': 'budget', 'management_account': account, field: kept, 'amount': amount,
+               'source_row': index}
+              for index, (account, amount) in enumerate([('revenue', '1000'), ('cost', '420'), ('expense', '100')], start=1)]
+    service, context, _ = _finance_service_from_rows(
+        tmp_path, {'actual': actual, 'budget': budget},
+        {'actual': {**BRIDGE_BASE, 'scenario': 'actual'}, 'budget': {**BRIDGE_BASE, 'scenario': 'budget'}}, title='movement')
+    requirement = service.analysis_requirements_save({
+        'question': '9 月营业收入与利润差异', 'context_id': context['id'], 'scope': BRIDGE_SCOPES[scope],
+        'items': [{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False},
+                  {'id': 'profit', 'metric': 'profit', 'requires_drilldown': False}]})
+    run = service.explain_variance({'context_id': context['id'], 'kind': 'profit_bridge',
+                                    'actual_filters': {field: kept}, 'baseline_filters': {field: kept}})
+    rows = run['result']['rows']
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': 'contribution',
+               'value': row['contribution']} for index, row in enumerate(rows) if row['metric'] in ('revenue', 'profit')]
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': claims})
+
+    assert {row['metric']: row['contribution'] for row in rows if row['metric'] in ('revenue', 'profit')} == {
+        'revenue': '120', 'profit': '80'}
+    closed = [('engine_closed', None)]
+    assert _bridge_statuses(result) == {'revenue': ('answered', closed), 'profit': ('answered', closed)}
+
+
 def test_a_year_on_year_bridge_that_forgot_its_baseline_period_does_not_answer(tmp_path):
     """Review round 2: actual against actual with only the actual side narrowed to 2026-09 and the prior year's
     group assumed zero: the 2026-09 row compares the actual with itself (1120 vs 1120), while the 2025-09 row has

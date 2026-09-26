@@ -1632,18 +1632,23 @@ def _unit_sign(value):
 
 
 GRAIN_FIELD_LISTS = dict(GRAIN_LISTS)
+# Fields that pick individual source rows (finance_model's source_row and TRACE_FIELDS): a comparison filtered on them
+# is a bridge of those rows. A filter on any other field the requirement does not pin (posting_status, line_type,
+# account_code) is how some ledgers select the period's own movement, and stays as on main.
+ROW_IDENTITY_KEYS = frozenset({'source_row', 'doc_id', 'line_id'})
 
 
 def _comparison_filters_cover(item, run, scope, row=None):
     """Whether an explain_variance run compares the rows the requirement asks for (issue #26).
 
-    Each side's filters may only restate what the requirement pins: the item's own dimensions, organizations,
-    periods and scenarios, the scope's values for that side, and the side's own scenario. A filter on a field the requirement never
-    names (a source row, a product it does not ask for) makes the bridge a bridge of that subset; it still
-    closes, but it is not the requirement's amount. On the baseline side a field the requirement pins only for
-    the actual side (a flat scope's period) is the comparison's baseline, as the scope match reads it. A field
-    the cited `row` states is one the bridge groups by: its filter picks groups, and the row is the whole of its
-    own group, which the scope and grain match check.
+    A filter on a field the requirement pins (the item's own dimensions, organizations, periods and scenarios,
+    the scope's values for that side) must restate it; a scenario filter must include the side's own scenario.
+    A filter picking individual source rows, documents or lines (ROW_IDENTITY_KEYS) makes the bridge a bridge of
+    those rows: it still closes, but it is not the requirement's amount. On the baseline side a field the
+    requirement pins only for the actual side (a flat scope's period) is the comparison's baseline, as the scope
+    match reads it. A field the cited `row` states is one the bridge groups by: its filter picks groups, and the
+    row is the whole of its own group, which the scope and grain match check. Filters on other fields are left
+    as on main.
     """
     comparison = (run.get('result') or {}).get('comparison')
     if not isinstance(comparison, dict):
@@ -1664,8 +1669,10 @@ def _comparison_filters_cover(item, run, scope, row=None):
             except TypeError:
                 return False
             listed = item.get(GRAIN_FIELD_LISTS.get(key, '')) or []
-            if key == 'scenario' and comparison.get(f'{side}_scenario') in values:
-                continue  # the side's rows already have its own scenario; a filter naming it takes none away
+            if key == 'scenario':
+                if comparison.get(f'{side}_scenario') in values:
+                    continue  # the side's rows already have its own scenario; a filter naming it takes none away
+                return False
             if key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
                 required = dimensions[key]
             elif key in expected[side]:
@@ -1678,8 +1685,10 @@ def _comparison_filters_cover(item, run, scope, row=None):
                 continue
             elif key in expected['source']:
                 required = expected['source'][key]
-            else:
+            elif key in ROW_IDENTITY_KEYS:
                 return False
+            else:
+                continue
             required_values = required if isinstance(required, (list, tuple, set, frozenset)) else [required]
             try:
                 if values != set(required_values):
@@ -3326,9 +3335,10 @@ NOT_COUNTED_TEXT = {
     'run_scope_differs': '财务引擎运行的 finance_scope 里有绑定输入的口径与本要求的范围不一致，这个运行的结果不计入',
     'metric_filters_differ': ('run_metric 的 filters 只取了该科目的一部分行（如某张凭证、某个产品或来源行），不是该科目在要求范围内的合计；'
                               '去掉这些 filters 重跑，filters 只能写要求本身的组织、期间、情景或维度'),
-    'comparison_filters_differ': ('explain_variance 的 actual_filters 或 baseline_filters 只取了一部分行（如某个产品或来源行），'
-                                  '差异桥闭合的是这部分行，不是要求范围内的金额；去掉这些 filters 重跑，'
-                                  'filters 只能写要求本身的组织、期间、情景或维度'),
+    'comparison_filters_differ': ('explain_variance 的 actual_filters 或 baseline_filters 只取了一部分行（按来源行、凭证或分录挑选，'
+                                  '或与要求本身的组织、期间、情景或维度不一致），差异桥闭合的是这部分行，不是要求范围内的金额；'
+                                  '去掉这些 filters 重跑，filters 不能按 source_row、doc_id、line_id 挑行，'
+                                  '也不能与要求本身的组织、期间、情景或维度矛盾'),
     'account_signs_not_unit': ('explain_variance 的 account_signs 只能写 1 或 -1 说明科目的借贷符号；'
                                '其他倍数会把整条科目放大或缩小，缩放后的差异桥即使闭合也不计入；去掉 account_signs 或只写符号后重跑'),
     'comparison_same_side': ('explain_variance 的实际与基准是同一情景、同一过滤条件，只是把同一批行和自己比较，'
