@@ -4146,7 +4146,8 @@ def _measure_case(tmp_path, metric, aggregation):
 
 
 @pytest.mark.parametrize('aggregation', ['count', 'count_distinct', 'min', 'max'])
-@pytest.mark.parametrize('metric', ['应收账款余额', 'other_income', '其他收益', '应收金额', 'receivable_balance'])
+@pytest.mark.parametrize('metric', ['应收账款余额', 'other_income', '其他收益', '应收金额', 'receivable_balance',
+                                    '应收账款', '其他应收款', '应收余额（万元）', 'receivable_amount', 'closing_cash'])
 def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp_path, metric, aggregation):
     """Issue #28: a measure named after the item answered it whatever its aggregation: a row count (2) or the
     largest row (120.50) completed a 200.75 receivables-balance requirement."""
@@ -4176,6 +4177,10 @@ def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp
     ('单笔最大应收金额', 'max'), ('最小单笔金额', 'min'), ('max_invoice_amount', 'max'),
     ('应收金额峰值', 'max'), ('单笔金额上限', 'max'), ('top_invoice_amount', 'max'), ('单日最多回款金额', 'max'),
     ('单笔回款金额最少', 'min'), ('greatest_invoice_amount', 'max'),
+    # Names whose head is not money, in words no list names (review round 2 of #38).
+    ('应收金额笔数（笔）', 'count'), ('调价次数（次）', 'count'), ('发票数目', 'count'), ('回款频次', 'count_distinct'),
+    ('num_invoices', 'count'), ('total_number_of_invoices', 'count'), ('amount_count', 'count'),
+    ('应收金额高点', 'max'), ('invoice_amount_ceiling', 'max'), ('应收余额极大值', 'max'), ('第一大客户应收余额', 'max'),
 ])
 def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric, aggregation):
     result, _ = _measure_case(tmp_path, metric, aggregation)

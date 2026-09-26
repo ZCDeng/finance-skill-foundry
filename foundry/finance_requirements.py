@@ -1792,42 +1792,56 @@ def _aggregate_measure(run, column):
                  if isinstance(measure, dict) and measure.get('name') == column), None)
 
 
-# Names that ask for money outright, beyond the P&L lines, the named amounts and the amount markers
-# (_names_an_amount): a balance. Names that ask for one row's extreme, and names that ask for a count.
-BALANCE_STEMS = ('余额',)
-BALANCE_WORDS = frozenset({'balance', 'balances'})
-EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '峰值', '上限', '下限')
+# The head (last word, after any bracketed unit) of a name that asks for money: an amount, a balance, a P&L
+# line, an account, cash (issue #28). Names ending in anything else (笔数, 次数, 峰值, count, ceiling …) are left
+# as on main. And names that ask for one row's extreme, which a minimum or maximum answers.
+MONEY_HEAD_STEMS = ('额', '收入', '收益', '损益', '成本', '费用', '利润', '价值', '款', '价', '现金', '资金')
+MONEY_HEAD_WORDS = frozenset({
+    'amount', 'amounts', 'balance', 'balances', 'value', 'values', 'revenue', 'revenues', 'income', 'gains', 'cost',
+    'costs', 'expense', 'expenses', 'profit', 'profits', 'price', 'prices', 'cash', 'receivable', 'receivables',
+    'payable', 'payables',
+})
+EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '峰值', '上限', '下限', '极大', '极小',
+                 '第一大')
 EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'largest', 'smallest', 'highest', 'lowest', 'peak',
-                           'top', 'most', 'least', 'greatest', 'biggest'})
-COUNT_HEAD_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'cnt', 'qty', 'quantity'})
+                           'top', 'most', 'least', 'greatest', 'biggest', 'ceiling', 'floor'})
+
+
+def _money_head(metric):
+    """Whether a metric name ends by asking for money: 应收账款余额, 应收金额, 其他收益, other_income,
+    receivable_balance, 其他应收款. A named amount (METRIC_LABELS) counts whatever its spelling."""
+    text = str(metric or '').strip()
+    lowered = text.lower()
+    if any(lowered == key or lowered in {str(alias).lower() for alias in aliases}
+           for key, aliases in METRIC_LABELS.items() if key not in NON_AMOUNT_METRICS):
+        return True
+    while True:
+        match = re.search(r'\s*[（(][^（）()]*[)）]\s*$', text)
+        if not match:
+            break
+        text = text[:match.start()]
+    if re.search(r'[\u4e00-\u9fff]\s*$', text):
+        return text.rstrip().endswith(MONEY_HEAD_STEMS)
+    words = _label_words(text)
+    return bool(words) and words[-1] in MONEY_HEAD_WORDS
 
 
 def _aggregate_statistic_of_money(item, member):
-    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name asks for
-    money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28).
+    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name ends by
+    asking for money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that
+    amount (issue #28); only a sum states the amount itself.
 
-    A minimum or maximum still answers an item that asks for one (单笔最大应收金额), and a count still answers
-    a name that asks for a count (调价次数, 报价笔数, customer_count) or says no money (逾期笔数), as on main; only
-    a sum states the amount itself.
+    A name ending in anything else (调价次数, 应收金额笔数（笔）, 峰值, large_amount_invoice_count) is left as on
+    main, and a minimum or maximum still answers an item that asks for an extreme (单笔最大应收金额).
     """
     aggregation = member.get('aggregate_measure')
     if not member.get('aggregate_output') or aggregation in (None, 'sum'):
         return False
     text = str(item.get('metric') or '').strip()
-    words = _label_words(text)
-    if aggregation in {'min', 'max'} and (any(stem in text for stem in EXTREME_STEMS) or set(words) & EXTREME_WORDS):
+    if aggregation in {'min', 'max'} and (any(stem in text for stem in EXTREME_STEMS)
+                                           or set(_label_words(text)) & EXTREME_WORDS):
         return False
-    english_tail = bool(words) and not re.search(r'[\u4e00-\u9fff]\s*$', text)
-    if aggregation in {'count', 'count_distinct'} and (
-            text.endswith(('数', '数量')) or (english_tail and words[-1] in COUNT_HEAD_WORDS)
-            or words[:2] in (['number', 'of'], ['count', 'of'])):
-        # 调价次数, 应收金额笔数, 客户数量, large_amount_invoice_count, number_of_high_value_invoices: a count.
-        return False
-    lowered = text.lower()
-    named = any(lowered == key or lowered in {str(alias).lower() for alias in aliases}
-                for key, aliases in METRIC_LABELS.items() if key not in NON_AMOUNT_METRICS)
-    return bool(named or _pnl_class(text) or _names_an_amount(text, words)
-                or any(stem in text for stem in BALANCE_STEMS) or set(words) & BALANCE_WORDS)
+    return _money_head(text)
 
 
 def _server_output(member):
