@@ -1,7 +1,7 @@
 {
   "name": "finance-skill-foundry-app",
   "productName": "FA Foundry",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "description": "Desktop surface for the finance skill foundry: tasks, their inputs, and every version of what they produced",
   "main": "dist-electron/main.js",
@@ -17,6 +17,8 @@
     "harness:check": "node scripts/fetch-harness.mjs --check",
     "clean:electron": "rm -rf dist-electron dist-vite",
     "package": "npm run harness:check && npm run foundry:check && npm run formulator:check && npm run formulator:gate && npm run clean:electron && npm run build && electron-builder --mac --dir",
+    "package:signed": "npm run harness:check && npm run foundry:check && npm run formulator:check && npm run formulator:gate && npm run clean:electron && npm run build && electron-builder --mac --dir -c.mac.identity=\"$CSC_NAME\" -c.mac.hardenedRuntime=true -c.mac.gatekeeperAssess=false -c.mac.entitlements=signing/entitlements.mac.plist -c.mac.entitlementsInherit=signing/entitlements.mac.plist -c.mac.sign=signing/sign-macho-only.cjs",
+    "notarize": "sh scripts/notarize-app.sh",
     "dist": "npm run harness:check && npm run foundry:check && npm run formulator:check && npm run formulator:gate && npm run clean:electron && npm run build && electron-builder --mac",
     "foundry": "node scripts/build-foundry.mjs",
     "foundry:check": "node scripts/build-foundry.mjs --check",

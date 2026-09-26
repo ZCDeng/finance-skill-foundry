@@ -119,5 +119,10 @@ mac:
   category: public.app-category.finance
   target:
     - dir
-  # Unsigned. First open goes through right-click → Open.
+  # `npm run package` stays unsigned so any machine can build; first open goes through
+  # right-click → Open. The release build signs and notarizes instead:
+  #   CSC_NAME="<Name> (<TEAMID>)" npm run package:signed   # no "Developer ID Application:" prefix
+  #   NOTARY_PROFILE=<notarytool keychain profile> npm run notarize
+  # package:signed adds the hardened runtime, signing/entitlements.mac.plist and
+  # signing/sign-macho-only.cjs (signs Mach-O files only; see that file for why).
   identity: null
