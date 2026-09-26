@@ -5,7 +5,9 @@
 set -eu
 APP="${1:-release/mac-arm64/FA Foundry.app}"
 PROFILE="${NOTARY_PROFILE:?set NOTARY_PROFILE to a notarytool keychain profile}"
-WORK="$(mktemp -d)"
+# The upload zip is the size of the app (~0.5 GB); delete it and its directory however the run ends.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/fa-foundry-notarize.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 ZIP="$WORK/FA-Foundry-notarize.zip"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
