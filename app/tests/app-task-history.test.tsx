@@ -98,7 +98,7 @@ describe('task history response ownership', () => {
     const exportWorkbook = vi.fn<Bridge['exportWorkbook']>(() => exported.promise);
     const api = mount({ exportWorkbook });
     await openInitialHistory();
-    fireEvent.click(await screen.findByRole('button', { name: '出一份表格' }));
+    fireEvent.click(await screen.findByRole('button', { name: '导出 Excel' }));
     expect(exportWorkbook).toHaveBeenCalledWith(a.id, a.id);
     await openBHistory();
     const bHeading = screen.getByRole('heading', { name: b.title });
@@ -107,7 +107,7 @@ describe('task history response ownership', () => {
     await act(async () => exported.resolve(ok({ sha256: '3'.repeat(64), seq: 2, ext: '.xlsx' })));
     expect(api.deliverableOpen).toHaveBeenCalledWith(a.id, '3'.repeat(64), '.xlsx');
     expect(screen.getByRole('heading', { name: b.title })).toBe(bHeading);
-    expect(screen.getByRole('button', { name: '出一份表格' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '导出 Excel' })).toBeTruthy();
     // An obsolete refresh must be rejected before it clears B or starts an A read.
     expect(api.task).toHaveBeenCalledTimes(readsBeforeCompletion);
 

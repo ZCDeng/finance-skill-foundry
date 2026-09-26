@@ -85,28 +85,38 @@ export function Deliverables({
             <dd>{KIND_LABEL[open.row.kind]}</dd>
           </div>
           <div className="fnd-doc__pair">
-            <dt>成因</dt>
-            <dd>{open.row.cause}</dd>
+            <dt>期间</dt>
+            <dd>{open.task.period ?? '未设期间'}</dd>
           </div>
           <div className="fnd-doc__pair">
-            <dt>会话</dt>
-            <dd>{open.row.session_id ?? '无会话'}</dd>
+            <dt>成因</dt>
+            <dd>{open.row.cause}</dd>
           </div>
           <div className="fnd-doc__pair">
             <dt>时间</dt>
             <dd>{when(open.row.at)}</dd>
           </div>
-          <div className="fnd-doc__pair">
-            <dt>大小</dt>
-            <dd>{bytes(open.row.bytes)}</dd>
-          </div>
-          <div className="fnd-doc__pair">
-            <dt>摘要</dt>
-            <dd className="fnd-sha" title={open.row.sha256}>
-              {shortSha(open.row.sha256)}
-            </dd>
-          </div>
         </dl>
+        {/* Session, size and digest place a version for whoever audits the store; they fold. */}
+        <details className="analysis-details">
+          <summary>技术信息</summary>
+          <dl className="fnd-doc__meta">
+            <div className="fnd-doc__pair">
+              <dt>会话</dt>
+              <dd>{open.row.session_id ?? '无会话'}</dd>
+            </div>
+            <div className="fnd-doc__pair">
+              <dt>大小</dt>
+              <dd>{bytes(open.row.bytes)}</dd>
+            </div>
+            <div className="fnd-doc__pair">
+              <dt>摘要</dt>
+              <dd className="fnd-sha" title={open.row.sha256}>
+                {shortSha(open.row.sha256)}
+              </dd>
+            </div>
+          </dl>
+        </details>
         {/*
           * The export lives here because this is the screen named 交付物 and
           * this is where an operator looking for one arrives. It was only on
@@ -120,7 +130,7 @@ export function Deliverables({
               onClick={() => onExport(open.task, open.row.window_id)}
               disabled={busy === open.row.window_id}>
               <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
-              {busy === open.row.window_id ? ' 正在从锁库写…' : ' 把这个窗口出成表格'}
+              {busy === open.row.window_id ? ' 正在导出…' : ' 导出 Excel'}
             </Button>
           </div>
         )}
@@ -136,7 +146,7 @@ export function Deliverables({
         {isWorkbook(open.row) ? (
           <div className="fnd-stack" style={{ gap: 10 }}>
             <p className="fnd-muted">
-              这一版是表格。四页：本期（窗口、锁哈希、标签怎么读）、结论、底稿、外部引用。
+              这一版是 Excel 工作簿，共四页：本期、结论、底稿、外部引用。
             </p>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {onPreview ? (
@@ -156,7 +166,7 @@ export function Deliverables({
             </div>
           </div>
         ) : open.text === null ? (
-          <p className="fnd-muted">正在从锁库读出这一版…</p>
+          <p className="fnd-muted">正在读取这一版…</p>
         ) : (
           <Reader source={open.text} />
         )}
@@ -175,11 +185,9 @@ export function Deliverables({
           <tr>
             <th>时间</th>
             <th>任务</th>
+            <th>期间</th>
             <th>类型</th>
             <th>成因</th>
-            <th>会话</th>
-            <th className="fnd-num">大小</th>
-            <th>摘要</th>
           </tr>
         </thead>
         <tbody>
@@ -206,11 +214,9 @@ export function Deliverables({
                 </button>
               </td>
               <td>{task.title}</td>
+              <td>{task.period ?? '—'}</td>
               <td>{isWorkbook(row) ? '表格' : KIND_LABEL[row.kind]}</td>
               <td>{row.cause}</td>
-              <td className="fnd-muted">{row.session_id ?? '无会话'}</td>
-              <td className="fnd-num">{bytes(row.bytes)}</td>
-              <td className="fnd-sha">{shortSha(row.sha256)}</td>
             </tr>
           ))}
         </tbody>
