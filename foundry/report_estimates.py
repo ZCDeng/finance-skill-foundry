@@ -86,14 +86,14 @@ def _declared_estimate_cells(
     estimated: declared with a factor no recipe can recompute (declared_grains), or declared reproducible and not
     yet made `estimated` by a factor recipe (uncounted_grains, missing_grains).
 
-    A grain's cells are its cited cells that state an estimate: not an answered cell, and not a cell restating a
-    number an answered cell of the grain states. A cell a factor recipe made `estimated` keeps its recipe (no
-    `declared`). Where the item lists no scenarios, the grain holds cells the declaration cannot tell apart (an
-    actual beside the estimate): the grain is declared with no cell. Grains
-    declared with no cell are listed up to UNCITED_GRAIN_ROWS per item, the rest counted in one entry (`more`)."""
-    from foundry.finance_requirements import (
-        GRAIN_LISTS, _cited_value, _declared_basis, _location_grain, _same_number,
-    )
+    Cells are labelled only where the item lists organizations, periods and scenarios, so that one grain is one
+    organization, period and scenario: a coarser grain holds cells the declaration cannot tell apart (an actual
+    beside the estimate, the group's source budget beside a region's estimate, a full-year budget beside a 1-8
+    one), and is declared with no cell. A fully listed grain the draft answers from the source is not declared at
+    all: a second number cited for it (a rounded restatement) is not an estimate. Otherwise its cited cells are
+    declared; a cell a factor recipe made `estimated` keeps its recipe (no `declared`). Grains declared with no
+    cell are listed up to UNCITED_GRAIN_ROWS per item, the rest counted in one entry (`more`)."""
+    from foundry.finance_requirements import GRAIN_LISTS, _declared_basis, _location_grain
 
     if not isinstance(item.get("grain_basis"), list) or not isinstance(item.get("locations"), list):
         return []
@@ -122,15 +122,12 @@ def _declared_estimate_cells(
 
     found: list[dict[str, Any]] = []
     uncited = 0
+    listed = all(item.get(plural) for _key, plural in GRAIN_LISTS)
     for grain, (record, declared) in grains.items():
         cited = members.get(grain) or []
-        answered = [_cited_value(location, runs) for location in cited if location.get("status") == "answered"]
-        cells = [location for location in cited if location.get("status") != "answered"
-                 and not any(_same_number(_cited_value(location, runs), value) for value in answered)]
-        if not item.get("scenarios"):
-            # The scenario tells an estimate from the actual; a declaration over every scenario cannot, whichever
-            # column the rows name their scenario in.
-            cells = []
+        if listed and any(location.get("status") == "answered" for location in cited):
+            continue
+        cells = cited if listed else []
         added = False
         for location in cells:
             key = _cell_key(location)

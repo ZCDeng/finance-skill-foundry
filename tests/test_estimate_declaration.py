@@ -448,29 +448,50 @@ BUDGET_ROW = {'metric_key': 'revenue', 'period': '2026-01:2026-08', 'unit': '万
 
 
 @pytest.mark.parametrize('mode', MODES)
-def test_a_cell_restating_a_number_the_source_answers_is_not_declared(analysis, tmp_path, mode):
-    """Review of #33: the item lists no organizations and declares every budget_1_8 cell an estimate. The group's
-    300 is answered from the source; the draft cites it a second time from a summary run. That restatement is
-    the source number, not an estimate: only 华东's uncounted value is declared and labelled."""
+@pytest.mark.parametrize('restated', ['300', '300.12'])
+def test_a_grain_the_source_answers_is_not_declared_whatever_else_the_draft_cites_for_it(analysis, tmp_path, mode,
+                                                                                         restated):
+    """Review of #33 (rounds 1 and 2): the group's 1-8 budget 300 is answered from the source; the draft cites it a
+    second time from a summary run, exactly or rounded. That is the source number, not an estimate: the group's
+    grain is not declared, and only 华东's uncounted value is declared and labelled."""
     rows = [{**BUDGET_ROW, 'organization': '集团合并', 'scenario': 'budget_1_8', 'value': '300'},
             {**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE}]
-    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'periods': ['2026-01:2026-08'],
-            'scenarios': ['budget_1_8'], 'requires_drilldown': True,
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'organizations': ['集团合并', '华东区域'],
+            'periods': ['2026-01:2026-08'], 'scenarios': ['budget_1_8'], 'requires_drilldown': True,
             'grain_basis': [{'scenarios': ['budget_1_8'], 'basis': 'estimate', 'method': METHOD}]}
     service, runs, tokens, recipes, claims = _runs_case(
-        analysis, tmp_path, item, [rows, rows[:1]],
+        analysis, tmp_path, item, [rows, [{**rows[0], 'value': restated}]],
         lambda runs, budget, close: [_recipe(budget, '01·年度预算总表', 'B12:C12', runs[0], 0, kind='sum',
                                              recipe_id='group_budget')])
     draft = _save_runs(service, runs, f'## 区域收入\n\n集团 1-8 月预算 {tokens[(1, 0)]}，华东 {tokens[(0, 1)]}。',
                        recipes, claims)
-    assert [grain.get('counted_cells') for grain in _item(draft)['uncounted_grains']] == [1]
 
     projection = _projection(analysis, draft, mode)
 
     assert _rows(_declared(projection['document']['content'])[2]) == [
         COLUMNS, ['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8', ESTIMATE + ' 万元', NOT_RECOMPUTED]]
-    assert f'集团 1-8 月预算 300 万元，华东 {ESTIMATE} 万元（估算）。' in projection['body']
+    assert f'集团 1-8 月预算 {restated} 万元，华东 {ESTIMATE} 万元（估算）。' in projection['body']
     assert _result_labels(analysis, draft, mode) == [('Result 1', 3, 7)]
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_a_declaration_over_every_organization_labels_no_cell(analysis, tmp_path, mode):
+    """Review of #33 (round 2): the item lists no organizations and declares every budget_1_8 cell an estimate, so
+    its grain holds the group's source budget beside 华东's estimate. The grain is declared; no cell is labelled."""
+    rows = [{**BUDGET_ROW, 'organization': '集团合并', 'scenario': 'budget_1_8', 'value': '300.12'},
+            {**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE}]
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'periods': ['2026-01:2026-08'],
+            'scenarios': ['budget_1_8'], 'requires_drilldown': True,
+            'grain_basis': [{'scenarios': ['budget_1_8'], 'basis': 'estimate', 'method': METHOD}]}
+    service, runs, tokens, recipes, claims = _runs_case(analysis, tmp_path, item, [rows])
+    draft = _save_runs(service, runs, f'## 区域收入\n\n集团 {tokens[(0, 0)]}，华东 {tokens[(0, 1)]}。', recipes, claims)
+
+    projection = _projection(analysis, draft, mode)
+
+    assert _rows(_declared(projection['document']['content'])[2]) == [
+        COLUMNS, ['1-8 月营业收入', '—', '2026-01:2026-08', 'budget_1_8', '—', NOT_RECOMPUTED]]
+    assert LABEL not in projection['body'].split(SENTENCE, 1)[1]
+    assert _result_labels(analysis, draft, mode) == []
 
 
 def test_a_recipe_estimate_in_an_uncounted_declared_grain_keeps_its_formula(analysis, tmp_path):
