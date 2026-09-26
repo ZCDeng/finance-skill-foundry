@@ -1002,6 +1002,16 @@ ${canonicalAppendix} 已改写`;
     expect(setup.open).toBe(true);
   });
 
+  it('lists the files before the scope settings and the workbook tools on the materials tab', async () => {
+    mountBridge({ analysisState: async () => success(initial),
+      financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
+    render(<Analysis {...props} embedded section="materials" />);
+    const file = (await screen.findAllByText(source.name)).find((element) => element.closest('.analysis-source-list'))!;
+    const scope = await screen.findByRole('region', { name: '分析口径' });
+    expect(file.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scope.compareDocumentPosition(screen.getByText('更新 ERP 来源')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('puts the result above the finance settings once a result exists, and the settings first before any result', async () => {
     const financeCall = async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [{ ...run, engine: 'sql' }] }), financeCall });
