@@ -272,6 +272,34 @@ describe('RunPanel finance conclusion', () => {
     expect(within(conclusion).getByText('共 4 组，其余见下表。')).toBeTruthy();
   });
 
+  it('counts every compared group, including ones it could not conclude on', () => {
+    const rows = ['华东', '华南', '华北'].map((organization) => bridgeRow('profit', '5', { organization }));
+    rows.push(bridgeRow('profit', '', { organization: '西南', amount_change: null, contribution: null, comparison_status: 'incomplete' }));
+    render(<RunPanel {...props} runs={[varianceRun(rows)]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getAllByText(/与预算相比/)).toHaveLength(3);
+    expect(within(conclusion).getByText('共 4 组，其余见下表。')).toBeTruthy();
+  });
+
+  it('takes the unit from the side scopes when the row has none, and says nothing when the sides disagree', () => {
+    const scoped = (unit: string, baseline = unit) => ({ unit: undefined, actual_scope: { scenario: 'actual', unit }, baseline_scope: { scenario: 'budget', unit: baseline } });
+    const { unmount } = render(<RunPanel {...props} runs={[varianceRun([
+      bridgeRow('profit', '-312.00', { ...scoped('万元'), amount_change_display: '利润减少 312.00' }),
+    ])]} />);
+    expect(within(screen.getByRole('region', { name: '结论' })).getByText('与预算相比，利润减少 312.00 万元')).toBeTruthy();
+    unmount();
+    render(<RunPanel {...props} runs={[varianceRun([bridgeRow('profit', '-312.00', scoped('元', '万元'))])]} />);
+    expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
+  });
+
+  it('says nothing when empty dimension values fold two groups into one', () => {
+    render(<RunPanel {...props} runs={[varianceRun([
+      bridgeRow('profit', '30', { organization: '华东' }),
+      bridgeRow('profit', '-20', { organization: null }),
+    ])]} />);
+    expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
+  });
+
   it('writes no conclusion when there is no profit change to state', () => {
     render(<RunPanel {...props} runs={[varianceRun([bridgeRow('revenue', '50'), bridgeRow('profit', '', { amount_change: null, contribution: null, comparison_status: 'incomplete' })])]} />);
     expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
@@ -288,6 +316,7 @@ describe('RunPanel finance conclusion', () => {
     render(<RunPanel {...props} runs={[run]} onAdjustScope={onAdjustScope} />);
     fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
     expect(onAdjustScope).toHaveBeenCalledTimes(1);
+    expect(onAdjustScope).toHaveBeenCalledWith(run);
     cleanup();
     render(<RunPanel {...props} runs={[structuredRun()]} onAdjustScope={onAdjustScope} />);
     expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
