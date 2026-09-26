@@ -22,9 +22,10 @@ MAX_REPAIRS = 2
 # 12: review round 9 filters rows on dimensions named level/breakdown/group_by/hierarchy again (only drilldown is
 #     a hierarchy level), keeps the original requirement incomplete when a version dropped a legacy level, and
 #     compares a finance run converted with policies.target_unit in the unit the engine wrote.
-# 13: exports label estimates 估算 (issue #24); an estimate the text (body, limitations, title) states only
-#     unbound, or only as a number a counted cell also states, cannot be labelled and is an
-#     estimate_label_unplaced issue the assistant repairs.
+# 13: exports label estimates 估算 (issue #24) where the text (body, limitations, title) binds them. A number
+#     bound to no cell that equals an estimate as rounded, an estimate in a code block, or one written only as a
+#     number a counted cell also states cannot be labelled and is an estimate_label_unplaced issue the
+#     assistant repairs.
 COMPLETION_POLICY_VERSION = 13
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}

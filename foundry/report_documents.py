@@ -23,6 +23,7 @@ REPORT_SUFFIXES = {".docx": "docx", ".pdf": "pdf", ".html": "html", ".htm": "htm
 REPORT_TEMPLATE_VERSION = "annual-v1"
 MAX_DOCUMENT_NODES = 20_000
 MAX_DOCUMENT_TEXT = 1_000_000
+MAX_TABLE_ATTR_TEXT = 300
 MAX_IMAGE_DATA_URL = 2 * 1024 * 1024
 SOURCE_ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -236,7 +237,7 @@ def _validate_attrs(
     if node_type in {"table", "tableCell", "tableHeader"}:
         for key in ("caption", "period", "currency", "unit"):
             if key in attrs and attrs[key] is not None:
-                clean[key] = _text(attrs[key], f"report table {key}", maximum=300)
+                clean[key] = _text(attrs[key], f"report table {key}", maximum=MAX_TABLE_ATTR_TEXT)
         for key in ("colspan", "rowspan"):
             if key in attrs and attrs[key] is not None:
                 value = attrs[key]

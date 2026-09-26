@@ -1001,6 +1001,7 @@ class AnalysisStore:
         )
         explanation_check = augment_quality(self, {
             "body": body, "title": title, "limitations": limitations, "run_ids": list(runs), "claims": claims,
+            **({"document": document} if document is not None else {}),
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
             "evidence_recipes": evidence_recipes,
@@ -1378,8 +1379,8 @@ class AnalysisStore:
                     from foundry.report_projection import ESTIMATE_LABEL, estimate_cells
 
                     if projection.get("document"):
-                        # The projection's 估算 labels get the room it gave them beyond the text limit.
-                        headroom = len(ESTIMATE_LABEL) * projection.get("estimate_labels", 0)
+                        # The text the projection added for estimates gets the room it gave it beyond the text limit.
+                        headroom = projection.get("estimate_text_headroom", 0)
                         for sheet_name, rows in report_document_excel_rows(
                             projection["document"], projection, text_headroom=headroom
                         ).items():

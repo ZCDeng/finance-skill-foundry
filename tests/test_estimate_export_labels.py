@@ -1,10 +1,12 @@
 """Exports always label estimates 估算 (issue #24; phase 1 decision 2, spec item 13).
 
-A number is an estimate when it comes from a cited cell of a grain the server's requirement check for the
-draft found `estimated`; the assistant's text and any report a caller supplies decide nothing. Every export
-format is built from the report projection, so the projection writes （估算） beside those numbers in prose
-and tables; the xlsx run sheets mark the estimated cells themselves. Where an estimate cannot be found in
-the text, the draft gets a quality issue and the export says so instead of shipping it unlabelled.
+A cell is an estimate when it is a cited cell of a grain the server's requirement check for the draft found
+`estimated`; the assistant's text and any report a caller supplies decide nothing. Every export format is built
+from the report projection, so the projection writes （估算） beside the numbers bound to those cells in prose,
+tables and captions: written as the cell's claim value, its presentation or its {{fact:…}} template renders it,
+never by a value that is merely close, and never for 0. The xlsx run sheets mark the estimated cells themselves.
+Where the text writes an estimate the export cannot label (a rounded copy bound to nothing, a code block), the
+draft gets a quality issue and the export says so instead of shipping it unlabelled.
 """
 import hashlib
 import io
@@ -207,30 +209,34 @@ def test_limitations_that_cite_the_estimate_are_labelled_in_the_projection_and_t
     assert text.count('117,814.5625 万元（估算）按集团进度推算') == 2
 
 
+SAME = (188503.3, ESTIMATE, 117814.5625, ESTIMATE)  # 华东's counted actual equals its estimate
+
+
 def test_an_estimate_equal_to_a_counted_number_is_labelled_only_where_its_own_form_tells_them_apart(analysis, tmp_path):
-    """Huachen: 集团本部及共享中心 has a 0 full-year budget, so its 1-8 estimate is 0 beside a counted actual 0.
-    The estimate shown as 0.00 (its presentation) is labelled; the counted 0 never is."""
-    case = _case(analysis, tmp_path, east=(0, '0', 0, '0'))
-    table = '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 0 | 0.00 |'
-    draft = _save(case, '华东区域 1-8 月收入实际 0 万元，同期预算 0.00 万元。\n\n' + table)
+    """An estimate and a counted actual with the same value: the estimate shown as 117,814.56 (its presentation) is
+    labelled; 117,814.5625, which the counted actual also states, never is."""
+    case = _case(analysis, tmp_path, east=SAME)
+    table = '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 117,814.5625 | 117,814.56 |'
+    draft = _save(case, '华东区域 1-8 月收入实际 117,814.5625 万元，同期预算 117,814.56 万元。\n\n' + table)
     assert _item(draft)['status'] == 'estimated'
 
     body = build_report_projection(draft, mode='management')['body']
 
-    assert '实际 0 万元，同期预算 0.00 万元（估算）。' in body
-    assert '| 华东区域 | 0 | 0.00（估算） |' in body
+    assert '实际 117,814.5625 万元，同期预算 117,814.56 万元（估算）。' in body
+    assert '| 华东区域 | 117,814.5625 | 117,814.56（估算） |' in body
     assert [issue for issue in draft['quality']['issues'] if issue['code'] == 'estimate_label_unplaced'] == []
 
 
 def test_an_estimate_the_text_cannot_tell_from_a_counted_number_is_not_labelled_and_is_a_quality_issue(analysis, tmp_path):
-    case = _case(analysis, tmp_path, east=(0, '0', 0, '0'))
-    draft = _save(case, '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 0 | 0 |', presented=False)
+    case = _case(analysis, tmp_path, east=SAME)
+    table = '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 117,814.5625 | 117,814.5625 |'
+    draft = _save(case, table, presented=False)
 
     body = build_report_projection(draft, mode='management')['body']
     issues = [issue for issue in draft['quality']['issues'] if issue['code'] == 'estimate_label_unplaced']
 
-    assert '| 华东区域 | 0 | 0 |' in body
-    assert len(issues) == 1 and issues[0]['same_as_counted_numbers'] == ['0']
+    assert '| 华东区域 | 117,814.5625 | 117,814.5625 |' in body
+    assert len(issues) == 1 and issues[0]['same_as_counted_numbers'] == ['117,814.5625']
     assert '## 估算标注待核对' in body and issues[0]['message'] in body
     # The assistant can fix the text, so the draft is not handed to the manager as only an estimate.
     assert draft['completion']['status'] != 'awaiting_manager'
@@ -425,11 +431,11 @@ def test_wording_that_already_marks_the_estimate_gets_no_second_label(analysis, 
 
 
 def test_a_counted_number_stated_without_its_own_claim_is_not_labelled_as_the_estimate_it_equals(analysis, tmp_path):
-    """Huachen: 集团本部's counted actual 0 sits beside a 0 estimate. Written without its own claim, the actual
-    still is a counted cell of the run, so the text cannot mean the estimate by it."""
-    case = _case(analysis, tmp_path, east=(0, '0', 0, '0'))
+    """The counted actual equals the estimate. Written without its own claim, the actual still is a counted cell
+    of the run, so the text cannot mean the estimate by it."""
+    case = _case(analysis, tmp_path, east=SAME)
     claims = [claim for claim in case.claims if claim['row'] != 2]
-    table = '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 0 | 0.00 |'
+    table = '| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | 117,814.5625 | 117,814.56 |'
     saved = case.service.save_explanation_draft({'body': table, 'run_ids': [case.run['id']],
                                                  'evidence_recipes': case.recipes, 'claims': [*claims, case.presented]})
     draft = analysis.get_draft(saved['id'])
@@ -437,7 +443,7 @@ def test_a_counted_number_stated_without_its_own_claim_is_not_labelled_as_the_es
 
     body = build_report_projection(draft, mode='management')['body']
 
-    assert '| 华东区域 | 0 | 0.00（估算） |' in body
+    assert '| 华东区域 | 117,814.5625 | 117,814.56（估算） |' in body
     assert _unplaced(draft) == []
 
 
@@ -552,3 +558,204 @@ def test_labelling_a_paragraph_of_many_inline_nodes_costs_about_what_the_project
 
     assert '同期预算 117,814.56 万元（估算）。' in projection['body']
     assert labelled < 3 * plain + 0.2, (labelled, plain)
+
+
+# --- PR #29 review round 2: a number is labelled only where it is bound to the estimate ---------------------
+# A number is the estimate where it is written as the estimate's own claim, presentation or fact template renders
+# it. A number bound to nothing that equals an estimate rounded to the digits it shows is reported instead of
+# labelled. Zeros, counts, percentages and unrelated numbers are neither labelled nor reported.
+
+
+def test_a_fact_template_of_the_estimate_is_labelled(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    facts = case.service.prepare_explanation({'run_ids': [case.run['id']]})['facts']
+    estimate = next(fact for fact in facts if fact['row'] == 3 and fact['column'] == 'value')
+    actual = next(fact for fact in facts if fact['row'] == 2 and fact['column'] == 'value')
+    draft = _save(case, f'华东区域实际 {{{{fact:{actual["id"]}}}}}，同期预算 {{{{fact:{estimate["id"]}}}}}。', presented=False)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert f'同期预算 {estimate["display_value"]}（估算）。' in body
+    assert f'实际 {actual["display_value"]}，' in body
+    assert _unplaced(draft) == []
+
+
+def test_the_exact_value_padded_with_zeros_is_the_estimate_and_a_rounded_copy_is_reported(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    draft = _save(case, '华东区域同期预算 117,814.5625000 万元，实际 109,742.028 万元；预算约 117,814.6 万元。',
+                  presented=False)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '同期预算 117,814.5625000 万元（估算），实际 109,742.028 万元；预算约 117,814.6 万元。' in body
+    assert [issue['uncited_numbers'] for issue in _unplaced(draft)] == [['117,814.6']]
+
+
+def test_zeros_are_never_labelled_or_reported_even_beside_a_zero_estimate(analysis, tmp_path):
+    """Huachen: 集团本部及共享中心 has a 0 full-year budget, so its 1-8 estimate is 0. A 0 is never bound to an
+    estimate: no bare 0, 0 项, 0 个 or 0% becomes an estimate, and the 0 estimate itself stays as written."""
+    case = _case(analysis, tmp_path, east=(0, '0', 109742.028, '109742.028'))
+    body = ('华东区域 1-8 月收入实际 109,742.028 万元，同期预算 0.00 万元。\n\n'
+            '本期共 0 项调整事项，共 0 个区域超出全年预算，环比变动 0%，差异 0 万元。')
+    draft = _save(case, body)
+    assert _item(draft)['status'] == 'estimated'
+
+    for mode in ('management', 'audit'):
+        projection = build_report_projection(draft, mode=mode)['body']
+        assert LABEL not in _outside_code(projection)
+        assert '本期共 0 项调整事项，共 0 个区域超出全年预算，环比变动 0%，差异 0 万元。' in projection
+        assert '同期预算 0.00 万元。' in projection
+    assert _unplaced(draft) == []
+
+
+def test_a_count_or_a_percentage_equal_to_an_estimate_is_not_labelled(analysis, tmp_path):
+    case = _case(analysis, tmp_path, east=(9.6, '6', 109742.028, '109742.028'))
+    draft = _save(case, '华东区域 1-8 月收入实际 109,742.028 万元，同期预算 6 万元；共 6 个区域超预算，环比增长 6%。',
+                  presented=False, title='6 个区域 1-8 月收入', limitations=['其余 6 家子公司未纳入。'])
+    assert _item(draft)['status'] == 'estimated'
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '同期预算 6 万元（估算）；共 6 个区域超预算，环比增长 6%。' in body
+    assert '# 6 个区域 1-8 月收入\n' in body and '- 其余 6 家子公司未纳入。' in body
+    assert _outside_code(body).count(LABEL) == 1
+    assert _unplaced(draft) == []
+
+
+def test_numbers_unrelated_to_an_estimate_the_text_does_not_state_raise_nothing(analysis, tmp_path):
+    """The estimate is cited by claim but not written, so there is nothing to label. A count, a percentage, a
+    slash or any other number in the body, limitations or title is not the estimate: the draft waits for the
+    manager exactly as on main and the export gains no 估算标注待核对 section."""
+    case = _case(analysis, tmp_path)
+    base = '华东区域 1-8 月收入实际 109,742.028 万元，集团合并实际 325,644 万元，同期预算 300 万元，预算进度 0.625。'
+    reference = _save(case, base)
+    assert reference['completion']['status'] == 'awaiting_manager'
+    variants = [
+        {'limitations': ['共 2 个组织，华东同期预算为推算值。']},
+        {'limitations': ['差异超过 5% 的区域需经理复核，其余区域差异合计 1,234.5 万元。']},
+        {'title': '2 个组织 1-8 月收入'},
+        {'body': base + '（1/2 级）'},
+    ]
+    for extra in variants:
+        name = json.dumps(extra, ensure_ascii=False)
+        draft = _save(case, extra.pop('body', base), **extra)
+        assert _unplaced(draft) == [], name
+        assert draft['completion']['status'] == reference['completion']['status'], name
+        assert '估算标注待核对' not in build_report_projection(draft, mode='management')['body'], name
+
+
+def test_a_note_that_calls_the_value_approved_is_no_estimate_label(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    draft = _save(case, '华东区域 1-8 月收入实际 109,742.028 万元，同期预算 117,814.56 万元（批复数，已取代估算）。\n\n'
+                        '华东区域取代估算：117,814.56 万元。\n\n' + TABLE)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '同期预算 117,814.56 万元（估算）（批复数，已取代估算）。' in body
+    assert '取代估算：117,814.56 万元（估算）。' in body
+    assert _unlabelled_estimates(body) == []
+
+
+def test_估算_before_the_noun_of_the_estimate_is_its_label(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    lines = ['华东区域估算预算 117,814.56 万元。', '华东区域同期估算预算为 117,814.56 万元。']
+    draft = _save(case, '\n\n'.join(lines) + '\n\n' + TABLE)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    for line in lines:
+        assert line in body
+    assert LABEL + LABEL not in body and '万元（估算）' not in body
+
+
+def test_an_estimate_right_after_a_period_or_beside_a_minus_sign_is_labelled_or_reported(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    draft = _save(case, '华东区域实际 109,742.028 万元；华东区域1-8月117,814.56万元为同期预算。\n\n'
+                        '华东区域预算缺口 117,814.56-109,742.028 万元。')
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '华东区域1-8月117,814.56万元（估算）为同期预算。' in body
+    assert '预算缺口 117,814.56（估算）-109,742.028 万元。' in body
+    assert _unplaced(draft) == []
+
+    unbound = _save(case, '华东区域实际 109,742.028 万元；华东区域1-8月117,815万元为同期预算。', presented=False)
+    assert [issue['uncited_numbers'] for issue in _unplaced(unbound)] == [['117,815']]
+
+
+def test_the_label_keeps_a_non_money_unit_whole(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    lines = {
+        '甲：同期计划 117,814.56 万吨。': '甲：同期计划 117,814.56 万吨（估算）。',
+        '乙：同期计划 117,814.56 万人。': '乙：同期计划 117,814.56 万人（估算）。',
+        '丙：同期计划 117,814.56 万平方米。': '丙：同期计划 117,814.56 万平方米（估算）。',
+        '丁：同期计划 117,814.56 亿股。': '丁：同期计划 117,814.56 亿股（估算）。',
+        '戊：同期计划 117,814.56 万吨/年。': '戊：同期计划 117,814.56 万吨/年（估算）。',
+        '己：同期计划 117,814.56 吨。': '己：同期计划 117,814.56 吨（估算）。',
+    }
+    draft = _save(case, '\n\n'.join(lines) + '\n\n' + TABLE)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    for labelled in lines.values():
+        assert labelled in body
+
+
+def test_an_estimate_in_a_code_block_is_reported_and_one_in_a_table_caption_is_labelled(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    coded = _save(case, '华东区域 1-8 月收入实际 109,742.028 万元，同期预算 117,814.56 万元。\n\n'
+                        '```text\n华东区域  109,742.028    117,814.56\n```')
+    issues = _unplaced(coded)
+    assert len(issues) == 1 and issues[0]['in_code_numbers'] == ['117,814.56']
+    body = build_report_projection(coded, mode='management')['body']
+    assert '同期预算 117,814.56 万元（估算）。' in body
+    assert '华东区域  109,742.028    117,814.56\n```' in body and issues[0]['message'] in body
+
+    def with_caption(caption):
+        document = report_document_from_markdown_body(BODY)
+        table = next(node for node in document['content'] if node['type'] == 'table')
+        table['attrs'] = {**table.get('attrs', {}), 'caption': caption}
+        saved = case.service.save_explanation_draft({'document': document, 'run_ids': [case.run['id']],
+                                                     'evidence_recipes': case.recipes,
+                                                     'claims': [*case.claims, case.presented]})
+        draft = analysis.get_draft(saved['id'])
+        projection = build_report_projection(draft, mode='management')
+        return draft, next(node for node in projection['document']['content'] if node['type'] == 'table')['attrs']['caption']
+
+    captioned, caption = with_caption('华东区域 1-8 月同期预算 117,814.56 万元')
+    assert _unplaced(captioned) == []
+    assert caption == '华东区域 1-8 月同期预算 117,814.56 万元（估算）'
+    markdown = open(analysis.export_draft(captioned['id'], 'md')['path'], encoding='utf-8').read()
+    assert '表题：华东区域 1-8 月同期预算 117,814.56 万元（估算）' in markdown
+
+    # A caption with no room for the label under the 300-character caption limit stays as written and is reported.
+    full = '华东区域 1-8 月同期预算 117,814.56 万元'
+    full += '。' * (300 - len(full))
+    crowded, caption = with_caption(full)
+    assert caption == full
+    assert [issue['in_caption_numbers'] for issue in _unplaced(crowded)] == [['117,814.56']]
+
+
+def test_labelled_limitations_and_the_label_section_do_not_push_an_export_that_fits_past_the_text_limit(
+        analysis, tmp_path, monkeypatch):
+    """Main appends the limitations unlabelled and has no 估算标注待核对 section: an export that fits there fits here."""
+    import foundry.report_documents as documents
+
+    case = _case(analysis, tmp_path)
+    draft = _save(case, BODY + '\n\n华东区域同期预算约 117,815 万元。',
+                  limitations=['华东区域同期预算 117,814.56 万元，按集团进度推算。'] * 60)
+    assert len(_unplaced(draft)) == 1
+    stored = len(_document_text(report_document_from_markdown_body(draft['body'])))
+    with monkeypatch.context() as unlabelled:
+        # The export as main builds it: the same draft with no estimates to label.
+        read = analysis.get_draft
+        unlabelled.setattr(analysis, 'get_draft', lambda draft_id: {**read(draft_id), 'quality': {}})
+        plain = len(_document_text(analysis.report_projection(draft['id'], mode='management')['document']))
+    labelled = _document_text(analysis.report_projection(draft['id'], mode='management')['document'])
+    assert labelled.count(LABEL) >= 61 and '估算标注待核对' in labelled and len(labelled) > max(stored, plain)
+    monkeypatch.setattr(documents, 'MAX_DOCUMENT_TEXT', max(stored, plain))
+
+    markdown = open(analysis.export_draft(draft['id'], 'md', mode='management')['path'], encoding='utf-8').read()
+    assert markdown.count('117,814.56 万元（估算），按集团进度推算。') >= 60
+    book = load_workbook(analysis.export_draft(draft['id'], 'xlsx', mode='management')['path'])
+    assert '同期预算 117,814.56 万元（估算）。' in book['Report']['A3'].value

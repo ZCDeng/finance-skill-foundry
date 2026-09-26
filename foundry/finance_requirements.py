@@ -3292,7 +3292,7 @@ def _unanswered_message(item):
                         '已计入的引用不能替另一个数作证；未计入的数按下述依据补上，或从正文和 claims 中删去。')
     estimated = item.get('estimated_grains') or []
     if estimated:
-        message += _grain_count(estimated, '为估算') + '，按声明的估算方法由系数规则复算；导出时在正文和表格引用这些数的位置旁标注“（估算）”，正文里的这些数须由 claim 绑定到估算单元格，未绑定的数无法标注。'
+        message += _grain_count(estimated, '为估算') + '，按声明的估算方法由系数规则复算；导出时在正文和表格引用这些数的位置旁标注“（估算）”：正文须按绑定估算单元格的 claim 的值或 presentation 的位数原样写这些数（或用 {{fact:…}}），未绑定的约数无法标注。'
         beside = [grain for grain in estimated if grain.get('answered_cells')]
         if beside:
             message += (_grain_count(beside, '另引用了数值不同、已计入的数') + '：文稿为这些组合同时给出估算和另一个数，'
@@ -3394,7 +3394,7 @@ def _estimated_issues(item):
                              **{key: grain[key] for key in GRAIN_KEYS if key in grain}},
             'message': (f'“{item.get("label") or item.get("metric")}”'
                         + (f'的 {_grain_example(grain)}' if _grain_example(grain) else '')
-                        + f'为估算：{formula}。经理确认前不计为已回答；导出时在引用它的数值旁标注“（估算）”，正文里的这个数须由 claim 绑定到该单元格，未绑定的数无法标注。'),
+                        + f'为估算：{formula}。经理确认前不计为已回答；导出时在引用它的数值旁标注“（估算）”：正文须按绑定该单元格的 claim 的值或 presentation 的位数原样写这个数（或用 {{{{fact:…}}}}），未绑定的约数无法标注。'),
             'location': {'reference': _plain_location(evidence.get('recipe_location')),
                          **({'factor': factor.get('location')} if factor.get('location') else {})},
             'recipe_ids': evidence.get('recipe_ids', []),
@@ -3450,9 +3450,9 @@ def augment_quality(analysis, spec, quality, *, _recipe_report=None):
             source_fixups = [fixup for fixup in item.get('fixups', []) if fixup.get('code') in SOURCE_FIXUP_CODES]
             issues.append({'code': 'requested_source_missing', 'severity': 'warning', 'message': f'尚未完成“{item["label"]}”的指定来源核查。', 'requirement_item_id': item['id'],
                            **({'fixups': source_fixups} if source_fixups else {})})
-    # Exports write 估算 beside each estimate the text states; one the text may state unbound cannot be labelled.
+    # Exports write 估算 beside each estimate the text binds; a rounded copy bound to nothing cannot be labelled.
     from foundry.report_projection import estimate_label_issues
-    issues.extend(estimate_label_issues(spec, requirements, quality.get('issues', []), quality.get('facts')))
+    issues.extend(estimate_label_issues(spec, requirements, quality.get('facts')))
     return {**quality, 'issues': issues, 'status': 'needs_attention' if issues else quality['status'],
             'requirements': requirements,
             'checks': {'numbers': {'status': quality['status']}, 'coverage': requirements['coverage'], 'provenance': requirements['provenance']}}
