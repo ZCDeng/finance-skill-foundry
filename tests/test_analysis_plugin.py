@@ -222,6 +222,8 @@ process.stdout.write(JSON.stringify({
   hasTopExpected: Object.hasOwn(draftRecipe.properties, 'expected'),
   hasClaimExpected: Object.hasOwn(draftRecipe.properties.claim.properties, 'expected'),
   factorFields: [draftRecipe, saveRecipe, validateRecipe].map(recipe => Object.hasOwn(recipe.properties, 'factor_recipe_id')),
+  // Issue #28: the server keeps display-only anchors on every path, analysis-draft included.
+  anchorSchemas: [draftRecipe, saveRecipe, validateRecipe].map(recipe => JSON.stringify(recipe.properties.anchors || null)),
   // Review round 3: a unit scale (元 → 万元) may sit next to factor_recipe_id; the server refuses any other scale.
   factorAndScaleExcluded: [draftRecipe, saveRecipe, validateRecipe].some(recipe =>
     recipe.oneOf[0].not.anyOf.some(rule => JSON.stringify(rule.required) === JSON.stringify(['scale', 'factor_recipe_id']))),
@@ -251,6 +253,7 @@ process.stdout.write(JSON.stringify({
     assert result["hasTopExpected"] is False
     assert result["hasClaimExpected"] is False
     assert result["factorFields"] == [True, True, True]
+    assert result["anchorSchemas"][0] != 'null' and len(set(result["anchorSchemas"])) == 1
     assert result["factorAndScaleExcluded"] is False
     assert result["ratioFactorExcluded"] is True
     assert result["oneOfCount"] == 2

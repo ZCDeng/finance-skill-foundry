@@ -157,6 +157,7 @@ const evidenceRecipe = {
     right: evidenceSource,
     scale: string("可选自填 Decimal 缩放，默认 1；只核验乘法，不能证明系数来源"),
     factor_recipe_id: string("仅 direct/sum 估算可选：引用本批次已由归档数值范围独立复算通过的 ratio recipe；需同一 business_key.metric_key 与 period；同时写 scale 时只能是 1 或千/万/百万/亿单位换算，系数只写在被引用的 ratio 规则里"),
+    anchors: { type: "object", maxProperties: 4, additionalProperties: string("同一工作表的单个 A1 单元格"), description: "可选：来源区域旁的行标签、列表头单元格，如 {row_label:\"A12\", column_header:\"I3\"}；只供经理复核展示，不影响复算结果" },
     unit: string("展示单位"),
     claim: evidenceClaim,
     business_key: { type: "object", additionalProperties: true },
