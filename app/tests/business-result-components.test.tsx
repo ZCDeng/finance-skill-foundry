@@ -94,7 +94,7 @@ describe('business result components', () => {
     expect((screen.getByLabelText('币种') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('情景') as HTMLInputElement).value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存口径版本 blank-scope-。');
+    await screen.findByText('已保存分析口径，旧版本仍保留。');
   });
 
   it('resolves a legacy shared-period conflict explicitly while preserving item periods and bindings', async () => {
@@ -120,7 +120,7 @@ describe('business result components', () => {
     fireEvent.click(screen.getByRole('button', { name: '移除共享期间，保留逐项期间' }));
     expect((screen.getByLabelText('分析口径期间') as HTMLInputElement).value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存口径版本 resolved-req。');
+    await screen.findByText('已保存分析口径，旧版本仍保留。');
     expect(financeCall).toHaveBeenCalledTimes(2);
   });
 
@@ -144,7 +144,7 @@ describe('business result components', () => {
     expect(await screen.findByDisplayValue('万元')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('分析口径期间'), { target: { value: '2026-08' } });
     fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存口径版本 saved-scope-。');
+    await screen.findByText('已保存分析口径，旧版本仍保留。');
     fireEvent.change(screen.getByLabelText('分析口径币种'), { target: { value: 'CNY' } });
     fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
     await waitFor(() => expect(saved).toHaveLength(2));

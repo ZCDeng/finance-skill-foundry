@@ -418,7 +418,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
-              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `${when(row.created_at)} · ${shortSha(row.id)}` }))}
+              triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
+              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)} · ${shortSha(row.id)}` }))}
               onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
@@ -528,7 +529,7 @@ function DatasetPreview({ source, content }: { source: DatasetSnapshot; content:
   const rows = Array.isArray(content.rows) ? content.rows as Record<string, unknown>[] : [];
   const workbook = content.workbook as { sheets?: { name: string; rows: number; columns: number }[] } | undefined;
   return <article className="analysis-source-preview"><h3>{source.name}</h3>
-    <p className="analysis-note">资料版本：{source.id} · 原始摘要：{source.source_hash ?? source.sha256}</p>
+    <details className="analysis-details"><summary>资料标识</summary><p className="analysis-note">资料版本：{source.id} · 原始摘要：{source.source_hash ?? source.sha256}</p></details>
     {source.kind === 'workbook' && <>
       <p className="analysis-note">已保留完整工作簿及所有工作表。请与助手确定分析范围，封面和标题不会被当作数据表头。</p>
       {Array.isArray(workbook?.sheets) && <Table caption="工作表目录"
@@ -1758,13 +1759,13 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
 
 
 const denominatorOptions: SelectOption[] = [
-  { value: 'baseline_abs', label: '按基准金额', meta: 'baseline_abs' },
-  { value: 'actual_abs', label: '按实际金额', meta: 'actual_abs' },
-  { value: 'max_abs', label: '按较大金额', meta: 'max_abs' },
+  { value: 'baseline_abs', label: '按基准金额' },
+  { value: 'actual_abs', label: '按实际金额' },
+  { value: 'max_abs', label: '按较大金额' },
 ];
 const negativePolicyOptions: SelectOption[] = [
-  { value: 'absolute', label: '按绝对值比较', meta: 'absolute' },
-  { value: 'signed', label: '保留正负方向', meta: 'signed' },
+  { value: 'absolute', label: '按绝对值比较' },
+  { value: 'signed', label: '保留正负方向' },
 ];
 function validDenominator(value: unknown): MaterialityDenominator {
   return value === 'actual_abs' || value === 'max_abs' ? value : 'baseline_abs';

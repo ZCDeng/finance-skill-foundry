@@ -112,7 +112,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       setCurrent(record);
       setScope(editableScope(record.scope));
       setExtraScope(carriedScope(record.scope));
-      setMessage(`已保存口径版本 ${record.id.slice(0, 12)}。`);
+      setMessage('已保存分析口径，旧版本仍保留。');
       onSaved?.(record);
     } catch (reason) {
       if (saveRequest.current !== seq) return;
@@ -125,7 +125,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
   const conflicts = itemScopeKeys.filter(({ field, itemField }) => conflictingItemScope(current?.items, itemField, scope[field]));
   return <section className="analysis-scope-card" aria-label="分析口径">
     <div className="analysis-section-heading"><div><h3>分析口径</h3><p className="analysis-note">运行前确认期间、单位、情景和组织；保存会生成新版要求。</p></div>
-      <span className="analysis-note">{current ? `版本 ${current.id.slice(0, 12)}` : '未保存'} · 资料 {datasets.length} 份</span></div>
+      <span className="analysis-note" title={current?.id}>{current ? '已保存' : '未保存'} · 资料 {datasets.length} 份</span></div>
     {loading ? <p role="status" className="analysis-note">正在读取已保存口径…</p> : null}
     <div className="analysis-edit-grid">
       <label>期间<Input aria-label="分析口径期间" disabled={blocked} value={scope.period} onChange={(event) => setField('period', event.target.value)} placeholder="待确认，例如 2026-08 / 2026 YTD" /></label>

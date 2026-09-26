@@ -242,6 +242,10 @@ describe('RunPanel finance conclusion', () => {
       bridgeRow('profit', '-312.00', { amount_change_display: '利润减少 312.00 万元' }),
     ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
     render(<RunPanel {...props} runs={[run]} />);
+    // The run is named by its order, not by a hash prefix; the id stays on hover.
+    const header = screen.getByText(/第 1 次运行/);
+    expect(header.getAttribute('title')).toBe(run.id);
+    expect(header.textContent).not.toContain(run.id.slice(0, 12));
     const conclusion = screen.getByRole('region', { name: '结论' });
     expect(within(conclusion).getByText('与预算相比，利润减少 312.00 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入增加 50 万元 · 成本增加 208 万元 · 费用减少 10 万元')).toBeTruthy();

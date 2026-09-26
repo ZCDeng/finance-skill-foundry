@@ -31,6 +31,13 @@ const amountFieldLabels: Record<string, string> = {
   amount_change: '科目增减',
   profit_impact: '利润影响',
   contribution: '差异贡献',
+  // Wide P&L results name their columns by metric.
+  revenue: '收入',
+  cost: '成本',
+  expense: '费用',
+  profit: '利润',
+  gross_profit: '毛利',
+  operating_profit: '营业利润',
 };
 const ratioFieldLabels: Record<string, string> = {
   attainment: '达成率',

@@ -93,6 +93,19 @@ describe('business result presentation', () => {
     expect(formatBusinessValue('-0.006532', 'ratio_delta')).toBe('-0.65个百分点');
   });
 
+  it('labels a wide P&L result by its metrics in Chinese', () => {
+    const labels = displayColumns(run({
+      result: {
+        columns: ['organization', 'scenario', 'currency', 'unit', 'revenue', 'cost', 'expense', 'profit'].map((name) => ({ name, type: ['revenue', 'cost', 'expense', 'profit'].includes(name) ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [{ organization: '华东', scenario: 'actual', currency: 'CNY', unit: '元', revenue: '120', cost: '70', expense: '20', profit: '30' }],
+        row_count: 1,
+        truncated: false,
+      },
+    })).map((column) => column.label);
+    expect(labels).toEqual(expect.arrayContaining(['组织', '情景', '币种', '单位', '收入', '成本', '费用', '利润']));
+    expect(labels).not.toEqual(expect.arrayContaining(['revenue']));
+  });
+
   it('maps declared business fields to Chinese labels and preserves unknown columns', () => {
     const rows = displayRows(run({
       result: {

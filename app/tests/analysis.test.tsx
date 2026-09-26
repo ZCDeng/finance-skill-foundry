@@ -290,7 +290,9 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('返回后还要继续写的判断。');
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.92');
-    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('华东利润分析');
+    // The picker names the version; the question it answers is the result heading below it.
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 1 版（共 2 版）');
+    expect(screen.getByRole('heading', { name: '华东利润分析' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
     expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
@@ -497,7 +499,8 @@ describe('analysis workbench', () => {
     // A failed run shows no result table. The account-map editor is a table of
     // its own elsewhere on the page, so this looks where the result would be.
     expect(document.querySelector('.analysis-result table')).toBeNull();
-    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('新的成本口径');
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 2 版（共 2 版）');
+    expect(screen.getByRole('heading', { name: '新的成本口径' })).toBeTruthy();
   });
 
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {
@@ -1279,6 +1282,8 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(screen.getByLabelText('相对重要性阈值'), { target: { value: '0.1' } });
     chooseSearchable('相对分母', /按较大金额/);
     chooseSearchable('负数比较规则', /按绝对值比较/);
+    expect(screen.getByRole('button', { name: '相对分母' }).textContent).toBe('按较大金额');
+    expect(screen.getByRole('button', { name: '负数比较规则' }).textContent).toBe('按绝对值比较');
 
     expect(screen.getByText(/待重检/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
