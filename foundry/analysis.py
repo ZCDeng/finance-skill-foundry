@@ -1374,16 +1374,25 @@ class AnalysisStore:
                     ]:
                         _append_excel(sheet, row)
                     if projection.get("document"):
-                        for sheet_name, rows in report_document_excel_rows(projection["document"], projection).items():
+                        # The projection's estimate declaration and labels get the room it gave them.
+                        headroom = projection.get("estimate_headroom") or {}
+                        for sheet_name, rows in report_document_excel_rows(
+                            projection["document"], projection,
+                            text_headroom=headroom.get("text", 0), node_headroom=headroom.get("nodes", 0),
+                        ).items():
                             structured_sheet = workbook.create_sheet(sheet_name)
                             for row in rows:
                                 _append_excel(structured_sheet, row)
+                    from foundry.report_estimates import ESTIMATE_LABEL, estimated_cells
+
+                    # Cells of grains the server's requirement check stored on this draft found estimated.
+                    estimates = {entry["cell"] for entry in estimated_cells(draft)}
                     for number, run in enumerate(runs, start=1):
                         target = workbook.create_sheet("Result " + str(number))
                         result = run.get("result") or {"columns": [], "rows": []}
                         columns = [c["name"] for c in result["columns"]]
                         _append_excel(target, columns)
-                        for row in result["rows"]:
+                        for row_index, row in enumerate(result["rows"]):
                             row_start = target.max_row + 1
                             _append_excel(
                                 target,
@@ -1408,6 +1417,12 @@ class AnalysisStore:
                                     put_number(cell, value)
                                 else:
                                     cell.comment = Comment("超过 Excel 可安全保留的数值精度，按精确文本保存。", "Foundry")
+                            for column_index, column in enumerate(columns, start=1):
+                                cell = target.cell(row_start, column_index)
+                                if (run["id"], row_index, column) in estimates and cell.value not in (None, ""):
+                                    # The value stays what the run computed; its display carries the label.
+                                    shown = cell.number_format if cell.data_type == "n" else "@"
+                                    cell.number_format = f'{shown}"{ESTIMATE_LABEL}"'
                         evidence = workbook.create_sheet("Evidence " + str(number))
                         for key in [
                             "id",

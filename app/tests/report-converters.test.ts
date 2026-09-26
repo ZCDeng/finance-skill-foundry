@@ -158,6 +158,53 @@ describe('report document converters', () => {
     expect(headerXml).toContain('dddddddddddd');
   });
 
+  it('renders the projection 估算值声明 block first and keeps template 估算 labels in HTML, print HTML and DOCX', async () => {
+    // Shapes as foundry/report_estimates.py builds them: the declaration opens the projection document.
+    const declaredValue = '117814.5625 万元';
+    const formula = '05·区域预算分解!C5 × （01·年度预算总表!B12:C12 ÷ 01·年度预算总表!N12）';
+    const doc: ReportDocument = {
+      schema_version: 1,
+      template_version: 'annual-v1',
+      metadata: { company: '华宸物业', period: '2026-01:2026-08', currency: 'CNY', unit: '万元' },
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '估算值声明' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '以下数值为估算，经理确认前不作为批复预算。' }] },
+        { type: 'table', content: [
+          { type: 'tableRow', content: ['要求', '组织', '期间', '情景', '估算值', '估算公式'].map((text) => cell('tableHeader', text, { textAlign: 'left' })) },
+          { type: 'tableRow', content: [
+            ...['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8'].map((text) => cell('tableCell', text, { textAlign: 'left' })),
+            cell('tableCell', declaredValue, { textAlign: 'right' }),
+            cell('tableCell', formula, { textAlign: 'left' }),
+          ] },
+        ] },
+        { type: 'paragraph', content: [{ type: 'text', text: '华东区域同期预算 117814.5625 万元（估算），实际 109742.028 万元。' }] },
+        { type: 'table', content: [
+          { type: 'tableRow', content: ['区域', '实际', '预算'].map((text) => cell('tableHeader', text)) },
+          { type: 'tableRow', content: [cell('tableCell', '华东区域'), cell('tableCell', '109742.028 万元', { textAlign: 'right' }), cell('tableCell', '117814.5625 万元（估算）', { textAlign: 'right' })] },
+        ] },
+      ],
+    };
+
+    for (const contentMode of ['management', 'audit']) {
+      const options = { marker: '分析草稿·待复核', contentMode, projectionHash: 'e'.repeat(64) };
+      for (const html of [renderReportHtml(doc, '区域收入', options), renderReportHtml(doc, '区域收入', { print: true, ...options })]) {
+        const order = ['<h1>区域收入</h1>', '估算值声明</h2>', '以下数值为估算，经理确认前不作为批复预算。', formula, '华东区域同期预算'].map((text) => html.indexOf(text));
+        expect(order.every((position, index) => position >= 0 && (index === 0 || position > order[index - 1]))).toBe(true);
+        expect(html).toContain(`<td class="num"><p>${declaredValue}</p></td>`);
+        expect(html).toContain('同期预算 117814.5625 万元（估算），实际 109742.028 万元。');
+        expect(html).toContain('<td class="num"><p>117814.5625 万元（估算）</p></td>');
+        expect(html).not.toContain('109742.028 万元（估算）');
+      }
+
+      const documentXml = await (await JSZip.loadAsync(await exportDocx(doc, '区域收入', undefined, options))).file('word/document.xml')!.async('string');
+      const positions = ['估算值声明', '以下数值为估算，经理确认前不作为批复预算。', formula, '华东区域同期预算 117814.5625 万元（估算）'].map((text) => documentXml.indexOf(text));
+      expect(positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1]))).toBe(true);
+      expect(documentXml).toContain(declaredValue);
+      expect(documentXml).toContain('117814.5625 万元（估算）');
+      expect(documentXml).not.toContain('109742.028 万元（估算）');
+    }
+  });
+
   it('keeps the legacy receipt-first layout and TOC outside management mode', async () => {
     const doc = documentFromMarkdown('# 经营分析报告\n\n## 管理摘要\n\n正文。');
     const options = { marker: '分析草稿·待复核', contentMode: 'audit', projectionHash: 'd'.repeat(64), draftId: 'draft-1', contentHash: 'c'.repeat(64), publicationStatus: 'draft', reviewStatus: 'unreviewed', reproducibilityStatus: 'unverified', sources: ['report.md（md；ID source-1；SHA-256 aaaaaaaaaaaa）'] };
