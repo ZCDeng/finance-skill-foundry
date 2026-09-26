@@ -39,6 +39,9 @@ _MARK = "\ue000"
 _SLOT = "\ue001"
 _ESCAPED = set("\\`*[]()")
 _ESCAPABLE = re.compile(r"[\\`*\[\]()]")
+# The template's own label right after a token (after the prose's unit where it writes one), as the check's message
+# asks the body to write it: （估算） or (估算), markdown-escaped or not, after a space or the token's closing emphasis.
+_AUTHOR_LABEL = re.compile(r"[*_~`]*[ \t\u3000]*\\?[（(]估算")
 
 
 def estimated_cells(draft: dict[str, Any]) -> list[dict[str, Any]]:
@@ -63,10 +66,15 @@ def estimated_cells(draft: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def declare_estimates(
-    document: dict[str, Any], draft: dict[str, Any], cells: list[dict[str, Any]], labels: list[tuple[int, int]]
+    document: dict[str, Any],
+    draft: dict[str, Any],
+    cells: list[dict[str, Any]],
+    labels: list[tuple[int, int]],
+    runs: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """The projection document with （估算） at `labels` (text node index in document order, offset) and the
-    估算值声明 block right after the title; and the room beyond the text and node limits those additions take."""
+    估算值声明 block right after the title; and the room beyond the text and node limits those additions take.
+    `runs` (by id) give a declared cell's own row where its grain leaves a field out (see _declaration_rows)."""
     declared = {**document, "content": _copied(document["content"])}
     texts = _text_nodes(declared["content"])
     offsets: dict[int, list[int]] = {}
@@ -81,7 +89,7 @@ def declare_estimates(
             cursor = offset
             added += 1
         texts[index]["text"] = "".join(pieces) + text[cursor:]
-    nodes = _declaration_nodes(_declaration_rows(draft, cells))
+    nodes = _declaration_nodes(_declaration_rows(draft, cells, runs))
     content = declared["content"]
     # Right after the title: after the author's own metadata line when the document opens with it (the markdown
     # export prints that paragraph in place of the generated one), otherwise first.
@@ -100,7 +108,8 @@ def template_label_positions(
 ) -> list[tuple[int, int]]:
     """Where （估算） goes in `document`, the draft's own document as the projection reads it: (index of the text
     node in document order, offset in its text) right after each display of an estimated fact that the draft's
-    {{fact:…}} template rendered, after the unit where the prose writes the unit.
+    {{fact:…}} template rendered, after the unit where the prose writes the unit, unless the template writes the
+    label there itself.
 
     The positions come from the template's tokens, never from the numbers in the text. Nothing is placed unless
     rendering the stored template again gives exactly the stored body or document text.
@@ -137,7 +146,9 @@ def _cell_key(location: Any) -> tuple[str, int, str] | None:
     return run_id, row, column
 
 
-def _declaration_rows(draft: dict[str, Any], cells: list[dict[str, Any]]) -> list[list[str]]:
+def _declaration_rows(
+    draft: dict[str, Any], cells: list[dict[str, Any]], runs: dict[str, dict[str, Any]] | None = None
+) -> list[list[str]]:
     check = draft["explanation_check"]
     facts = {_cell_key(fact): fact for fact in check.get("facts") or [] if isinstance(fact, dict)}
     claims = {_cell_key(claim): claim for claim in draft.get("claims") or [] if isinstance(claim, dict)}
@@ -151,11 +162,28 @@ def _declaration_rows(draft: dict[str, Any], cells: list[dict[str, Any]]) -> lis
                         if _cell_key(location) == key and location.get("status") == "estimated"), "")
         rows.append([
             _shown(item.get("label") or item.get("metric") or item.get("id")),
-            *(_shown(grain.get(field)) for field in GRAIN_FIELDS),
+            *(_shown(part) for part in _cell_grain(grain, key, runs)),
             _shown(value),
             _shown(formula),
         ])
     return rows
+
+
+def _cell_grain(
+    grain: dict[str, Any], key: tuple[str, int, str], runs: dict[str, dict[str, Any]] | None
+) -> list[Any]:
+    """Organization, period and scenario of an estimated cell. The check's grain holds only the fields its item
+    lists; a field it leaves out is read off the cell's own run row the way the check reads a row's grain."""
+    values = [grain.get(field) for field in GRAIN_FIELDS]
+    run = (runs or {}).get(key[0])
+    rows = ((run.get("result") or {}).get("rows") or []) if isinstance(run, dict) else []
+    row = rows[key[1]] if 0 <= key[1] < len(rows) else None
+    if all(value not in (None, "") for value in values) or not isinstance(row, dict):
+        return values
+    from foundry.finance_requirements import _row_organization, _row_period, _row_scenario
+
+    read = (_row_organization, _row_period, _row_scenario)
+    return [value if value not in (None, "") else reader(run, row) for value, reader in zip(values, read)]
 
 
 def _formula(evidence: Any) -> str:
@@ -197,8 +225,9 @@ def _declaration_nodes(rows: list[list[str]]) -> list[dict[str, Any]]:
 
 def _render_marked(template: str, facts: list[dict[str, Any]], fact_ids: set[str]) -> tuple[str, str] | None:
     """The template rendered by render_fact_template's rule, and the same text with _MARK after each rendered fact
-    in `fact_ids` (after the prose's unit where the display leaves the unit to the prose). The caller compares the
-    first with the stored text, so a rendering that differs from the one saved places nothing."""
+    in `fact_ids` (after the prose's unit where the display leaves the unit to the prose) that the template does
+    not already label itself (_AUTHOR_LABEL). The caller compares the first with the stored text, so a rendering
+    that differs from the one saved places nothing."""
     from foundry.finance_explanations import FACT_TOKEN
 
     if _MARK in template or _SLOT in template:
@@ -235,7 +264,9 @@ def _render_marked(template: str, facts: list[dict[str, Any]], fact_ids: set[str
                 marked.append(follows.group(0))
                 plain.append(follows.group(0))
                 cursor = follows.end()
-            marked.append(_MARK)
+            # Where the template already labels this estimate itself, a second label would print （估算）（估算）.
+            if not _AUTHOR_LABEL.match(template, cursor):
+                marked.append(_MARK)
     plain.append(template[cursor:])
     marked.append(template[cursor:])
     if _MARK not in marked:

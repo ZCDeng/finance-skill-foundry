@@ -26,7 +26,14 @@ from foundry.report_estimates import declare_estimates, estimated_cells, templat
 REPORT_PROJECTION_MODES = {"management", "audit"}
 
 
-def build_report_projection(draft: dict[str, Any], mode: str = "management", resolved_datasets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_report_projection(
+    draft: dict[str, Any],
+    mode: str = "management",
+    resolved_datasets: list[dict[str, Any]] | None = None,
+    runs: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """`runs` (by id) are the draft's runs as the store read them; the estimate declaration reads an estimated
+    cell's own row there for a grain field its requirement item does not list."""
     if mode not in REPORT_PROJECTION_MODES:
         raise FoundryError("report projection mode must be management or audit")
     title = _text(draft.get("title") or "分析报告")
@@ -61,7 +68,7 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
     if estimates:
         # Added last, so every earlier step checks the limits on main's text; the declaration and the labels get
         # exactly the room they take (see validate_report_document).
-        document, headroom = declare_estimates(document, draft, estimates, labels)
+        document, headroom = declare_estimates(document, draft, estimates, labels, runs)
 
     body = report_document_markdown(
         document, title=title, text_headroom=headroom.get("text", 0), node_headroom=headroom.get("nodes", 0)

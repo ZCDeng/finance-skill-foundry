@@ -1236,11 +1236,13 @@ class AnalysisStore:
 
         draft = self.get_draft(draft_id)
         dataset_ids: set[str] = set()
+        runs: dict[str, dict] = {}
         for run_id in draft.get("run_ids", []) or []:
             try:
                 run = self.get_run(run_id)
             except FoundryError:
                 continue
+            runs[run_id] = run
             bindings = run.get("bindings", {})
             if isinstance(bindings, dict):
                 dataset_ids.update(value for value in bindings.values() if isinstance(value, str))
@@ -1254,6 +1256,7 @@ class AnalysisStore:
                     run = self.get_run(claim["run_id"])
                 except FoundryError:
                     continue
+                runs[claim["run_id"]] = run
                 bindings = run.get("bindings", {})
                 if isinstance(bindings, dict):
                     dataset_ids.update(value for value in bindings.values() if isinstance(value, str))
@@ -1271,7 +1274,7 @@ class AnalysisStore:
                 "kind": dataset.get("kind") or dataset.get("metadata", {}).get("mode") or "dataset",
                 "source_hash": dataset.get("source_hash"),
             })
-        return build_report_projection(draft, mode=mode, resolved_datasets=resolved)
+        return build_report_projection(draft, mode=mode, resolved_datasets=resolved, runs=runs)
 
     def report_projection(self, draft_id: str, mode: str = "management") -> dict:
         return self.projection_for_draft(draft_id, mode)

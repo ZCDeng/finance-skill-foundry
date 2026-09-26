@@ -69,22 +69,24 @@ def analysis(tmp_path):
     return AnalysisStore(TaskStore(tmp_path / 'var').create(title='估算声明'))
 
 
-def _case(analysis, tmp_path, *, declare=True, value_type='DECIMAL(38,10)'):
+def _case(analysis, tmp_path, *, declare=True, value_type='DECIMAL(38,10)', organizations=True):
     """Huachen revenue_1_8 in miniature (PR #29's fixture): 华东's 1-8 budget is a declared estimate, a direct
-    recipe on 05!C5 with the group 1-8 phasing ratio recipe as its factor; every other cell is counted."""
+    recipe on 05!C5 with the group 1-8 phasing ratio recipe as its factor; every other cell is counted.
+    Without `organizations` the item lists no organizations and declares every budget_1_8 cell an estimate
+    basis; the group's budget is still answered, so only 华东's cell is estimated."""
     budget = _workbook(analysis, tmp_path, 'budget', {
         '01·年度预算总表': {'B12': 100, 'C12': 200, 'N12': 480},
         '05·区域预算分解': {'C5': 188503.3},
     })
     close = _workbook(analysis, tmp_path, 'close', {'10·区域经营损益表': {'D5': 109742.028, 'D11': 325644}})
-    declared = [{'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'basis': 'estimate',
-                 'method': '区域全年收入预算 × 集团1-8月收入预算进度'}]
+    declared = [{**({'organizations': ['华东区域']} if organizations else {}), 'scenarios': ['budget_1_8'],
+                 'basis': 'estimate', 'method': '区域全年收入预算 × 集团1-8月收入预算进度'}]
     requirement = save_requirements(analysis, spec(
         question='1-8 月收入实际与同期预算',
         scope={'ledger': '预算工作簿与月结套表', 'currency': 'CNY', 'unit': '万元'},
         bindings={'budget': budget['id'], 'close': close['id']},
         items=[{'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入',
-                'organizations': ['集团合并', '华东区域'], 'periods': ['2026-01:2026-08'],
+                **({'organizations': ['集团合并', '华东区域']} if organizations else {}), 'periods': ['2026-01:2026-08'],
                 'scenarios': ['actual_1_8', 'budget_1_8'], 'requires_drilldown': True,
                 **({'grain_basis': declared} if declare else {})}],
     ))
@@ -276,6 +278,22 @@ def test_a_caller_supplied_quality_or_check_is_ignored(analysis, tmp_path):
     assert _rows(table) == [COLUMNS, EAST_ROW]
 
 
+@pytest.mark.parametrize('mode', MODES)
+def test_a_declared_cell_names_the_grain_its_own_row_states_where_the_item_lists_no_such_field(analysis, tmp_path, mode):
+    """An item without an organizations list keeps estimated grains without an organization. The declaration
+    reads the missing field off the estimated cell's own run row (华东区域), the row the check graded."""
+    case = _case(analysis, tmp_path, organizations=False)
+    draft = _save(case, BODY)
+    assert [(grain.get('organization'), grain['scenario']) for grain in _item(draft)['estimated_grains']] == [
+        (None, 'budget_1_8')]
+
+    projection = analysis.report_projection(draft['id'], mode)
+
+    assert _rows(projection['document']['content'][2]) == [COLUMNS, EAST_ROW]
+    markdown = open(analysis.export_draft(draft['id'], 'md', mode=mode)['path'], encoding='utf-8').read()
+    assert markdown.startswith(OPENING)
+
+
 # --- inline labels only where a {{fact:…}} template renders an estimate --------------------------------------
 
 
@@ -423,6 +441,66 @@ def test_a_template_the_stored_text_is_not_the_rendering_of_places_no_label(anal
     assert _labels(projection['document']['content']) == 0
     assert '华东区域实际 109742.028 万元。' in projection['body']
     assert _rows(projection['document']['content'][2]) == [COLUMNS, EAST_ROW]
+
+
+def test_a_template_that_writes_the_label_after_an_estimate_itself_is_not_labelled_again(analysis, tmp_path):
+    """The check's message asks the body to write 估算 beside an estimate it cites. Where the template itself
+    writes （估算） right after the token (after the prose's unit where it writes the unit; also as (估算), after a
+    space or after the token's closing emphasis), that is the label; the export adds none there. A token the
+    template leaves unlabelled in the same draft still gets one."""
+    case = _case(analysis, tmp_path)
+    estimate, actual = case.estimate, case.actual
+    shown = f'{ESTIMATE} 万元'
+    body = '\n\n'.join([
+        '## 区域收入',
+        f'华东区域同期预算 {estimate}（估算），按 {estimate} 万元（估算）列示；实际 {actual}。',
+        f'另记 {estimate} （估算），{estimate}(估算)，**{estimate}**（估算）。',
+        f'| 区域 | 1-8 月实际 | 1-8 月预算 |\n| --- | ---: | ---: |\n| 华东区域 | {actual} | {estimate}（估算） |',
+        f'未写标注的 {estimate} 由导出加注。',
+    ])
+    document = {
+        'schema_version': 1, 'template_version': 'annual-v1',
+        'metadata': {'ledger': '', 'organization': '', 'company': '', 'period': '', 'currency': '', 'unit': ''},
+        'content': [
+            {'type': 'paragraph', 'content': [
+                {'type': 'text', 'text': f'华东区域同期预算 {estimate}（估算），按 {estimate} 万元（估算）列示；'},
+                {'type': 'text', 'text': estimate, 'marks': [{'type': 'bold'}]},
+                {'type': 'text', 'text': f'（估算）；另记 {estimate}(估算)。未写标注的 {estimate} 由导出加注。'},
+            ]},
+            {'type': 'table', 'content': [{'type': 'tableRow', 'content': [
+                {'type': 'tableCell', 'content': [{'type': 'paragraph', 'content': [
+                    {'type': 'text', 'text': f'{estimate}（估算）'}]}]}]}]},
+        ],
+    }
+    expected = {
+        'body': [f'华东区域同期预算 {shown}（估算），按 {shown}（估算）列示；实际 109742.028 万元。',
+                 f'另记 {shown} （估算），{shown}(估算)，{shown}（估算）。',
+                 f'未写标注的 {shown}（估算） 由导出加注。'],
+        'document': [f'华东区域同期预算 {shown}（估算），按 {shown}（估算）列示；{shown}（估算）；另记 {shown}(估算)。'
+                     f'未写标注的 {shown}（估算） 由导出加注。'],
+    }
+    for name, draft in (('body', _save(case, body)), ('document', _save(case, document=document))):
+        for mode in MODES:
+            projection = build_report_projection(draft, mode=mode)
+            content = projection['document']['content']
+            paragraphs = [_text(node) for node in content[3:] if node['type'] == 'paragraph']
+            assert [text for text in expected[name] if text not in paragraphs] == []
+            table = next(node for node in content[3:] if node['type'] == 'table')
+            assert _rows(table)[-1][-1] == f'{shown}（估算）'
+            assert not any('估算）（估算' in node['text'] or '估算） （估算' in node['text'] or '估算）(估算' in node['text']
+                           for node in _texts(content))
+            # Only the one label the export placed takes room beyond the limits.
+            assert projection['estimate_headroom'] == {
+                'text': _text_length(_declared(content)) + len(LABEL), 'nodes': _node_count(_declared(content))}
+            markdown = open(analysis.export_draft(draft['id'], 'md', mode=mode)['path'], encoding='utf-8').read()
+            assert '（估算）（估算）' not in markdown and f'{shown}（估算）（估算）' not in markdown
+            book = load_workbook(analysis.export_draft(draft['id'], 'xlsx', mode=mode)['path'])
+            try:
+                texts = [str(cell) for sheet in ('Report', '分段正文', '财务表格')
+                         for row in book[sheet].iter_rows(values_only=True) for cell in row if cell is not None]
+                assert not any('（估算）（估算）' in text for text in texts)
+            finally:
+                book.close()
 
 
 # --- every format -------------------------------------------------------------------------------------------
