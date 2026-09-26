@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { type Binding, runFoundryJson } from '../foundry.js';
+import { type Binding, FOUNDRY_MAX_BUFFER, runFoundryJson, runFoundryJsonSized } from '../foundry.js';
 import type { ReportDocument, ReportFormat, ReportImportOptions, ReportImportResult, ReportProjection, ReportProjectionMode, ReportSource } from './model.js';
 import { ocrDocument } from './ocr.js';
 import { localReportResources } from './resources.js';
@@ -25,11 +25,16 @@ export function sourceId(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{32}$/.test(value)) throw new Error('无效的文稿来源。');
   return value;
 }
-function assertDocument(value: unknown): asserts value is ReportDocument {
+function assertDocument(value: unknown, room = 0): asserts value is ReportDocument {
   if (!value || typeof value !== 'object' || (value as ReportDocument).schema_version !== 1
-    || !Array.isArray((value as ReportDocument).content) || Buffer.byteLength(JSON.stringify(value)) > MAX_BYTES) {
+    || !Array.isArray((value as ReportDocument).content) || Buffer.byteLength(JSON.stringify(value)) > MAX_BYTES + room) {
     throw new Error('文稿结构无效或超过容量。');
   }
+}
+/** Bytes the server's estimate declaration and labels add to a projection, which the size limits do not count. */
+export function estimateRoom(projection: ReportProjection): number {
+  const bytes = projection.estimate_headroom?.bytes;
+  return typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes > 0 ? Math.min(bytes, MAX_BYTES) : 0;
 }
 function assertProjection(value: unknown): asserts value is ReportProjection {
   if (!value || typeof value !== 'object' || (value as ReportProjection).schema_version !== 1
@@ -40,7 +45,7 @@ function assertProjection(value: unknown): asserts value is ReportProjection {
     || typeof (value as ReportProjection).body !== 'string') {
     throw new Error('文稿导出投影无效。');
   }
-  assertDocument((value as ReportProjection).document);
+  assertDocument((value as ReportProjection).document, estimateRoom(value as ReportProjection));
 }
 function aborted(signal: AbortSignal) { if (signal.aborted) throw new Error('已取消文档转换。'); }
 
@@ -257,8 +262,12 @@ export class ReportHost {
     const format = reportFormat(rawFormat);
     const mode = reportMode(rawMode);
     return this.job(task, async (signal, commit) => {
-      const projection = await this.call<ReportProjection>(task, 'report-projection-read', ['--draft', id, '--mode', mode], signal);
+      // Read with room for the estimate declaration, then hold everything else to the usual 32 MiB (issue #32).
+      const { value: projection, bytes } = await runFoundryJsonSized<ReportProjection>(
+        { ...this.binding, task }, 'report-projection-read', ['--draft', id, '--mode', mode],
+        { signal, maxBuffer: 2 * FOUNDRY_MAX_BUFFER });
       assertProjection(projection);
+      if (bytes - estimateRoom(projection) > FOUNDRY_MAX_BUFFER) throw new Error('文稿导出投影超过容量，请拆分图片或章节。');
       const selected = await dialog.showSaveDialog({ title: '导出财务文稿', defaultPath: `${projection.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100)}-${projection.content_mode}.${format}`,
         filters: [{ name: format.toUpperCase(), extensions: [format] }] });
       if (selected.canceled || !selected.filePath) return { cancelled: true };

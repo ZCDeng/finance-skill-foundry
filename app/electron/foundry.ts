@@ -71,6 +71,8 @@ export interface FoundryEnv {
   bin?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** stdout limit in bytes; 32 MiB unless a caller checks a larger output itself (runFoundryJsonSized). */
+  maxBuffer?: number;
 }
 
 /** Run one call and hand back its stdout, or throw a refusal apart from a failure. */
@@ -86,7 +88,7 @@ export function runFoundry(
     execFile(
       bin,
       argv,
-      { timeout: env.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: 'utf8', signal: env.signal },
+      { timeout: env.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: env.maxBuffer ?? MAX_BUFFER, encoding: 'utf8', signal: env.signal },
       (error, stdout, stderr) => {
         if (!error) return resolve(stdout);
         // A refusal is a state the operator acts on ("this window is not
@@ -119,6 +121,24 @@ export async function runFoundryJson<T>(
   const stdout = await runFoundry(binding, command, rest, env);
   try {
     return JSON.parse(stdout) as T;
+  } catch {
+    throw new FoundryFailure(`foundry ${command} did not print JSON: ${stdout.slice(0, 400)}`, 0);
+  }
+}
+
+/** The usual stdout limit, for callers that read with a larger buffer and check the size themselves. */
+export const FOUNDRY_MAX_BUFFER = MAX_BUFFER;
+
+/** runFoundryJson, and how many bytes the command printed. */
+export async function runFoundryJsonSized<T>(
+  binding: Binding,
+  command: string,
+  rest: readonly string[] = [],
+  env: FoundryEnv = {},
+): Promise<{ value: T; bytes: number }> {
+  const stdout = await runFoundry(binding, command, rest, env);
+  try {
+    return { value: JSON.parse(stdout) as T, bytes: Buffer.byteLength(stdout) };
   } catch {
     throw new FoundryFailure(`foundry ${command} did not print JSON: ${stdout.slice(0, 400)}`, 0);
   }

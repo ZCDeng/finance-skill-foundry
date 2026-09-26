@@ -12,6 +12,7 @@ template again reproduces the stored text exactly.
 from __future__ import annotations
 
 import bisect
+import json
 import re
 from typing import Any
 
@@ -20,10 +21,10 @@ from foundry.finance_requirement_support import _basis_formula
 from foundry.report_documents import (
     NOTE_REF,
     _document_metadata_markdown,
-    _escape_markdown_literal,
-    _escape_markdown_text,
+    _flat_inline,
     _paragraph_plain_text,
     _parse_document_metadata_line,
+    _render_inline,
     report_document_markdown,
     report_nodes_from_markdown,
     validate_report_document,
@@ -44,7 +45,6 @@ UNCITED_GRAIN_ROWS = 12
 _MARK = "\ue000"
 _SLOT = "\ue001"
 _ESCAPED = set("\\`*[]()")
-_ESCAPABLE = re.compile(r"[\\`*\[\]()]")
 # The template's own label right after a token (after the prose's unit where it writes one), as the check's message
 # asks the body to write it: （估算） or (估算), markdown-escaped or not, after a space or the token's closing emphasis.
 _AUTHOR_LABEL = re.compile(r"[*_~`]*[ \t\u3000]*\\?[（(]估算")
@@ -189,11 +189,22 @@ def declare_estimates(
     metadata = _document_metadata_markdown(declared["metadata"], declare_missing=bool(declared.get("template_id")))
     first = 1 if metadata and content and _paragraph_plain_text(content[0]) == metadata else 0
     declared["content"] = [*content[:first], *nodes, *content[first:]]
-    headroom = {"text": _text_length(nodes) + len(ESTIMATE_LABEL) * added, "nodes": _node_count(nodes)}
+    headroom = {"text": _text_length(nodes) + len(ESTIMATE_LABEL) * added, "nodes": _node_count(nodes),
+                "bytes": _added_bytes(nodes, added)}
     return (
         validate_report_document(declared, text_headroom=headroom["text"], node_headroom=headroom["nodes"]),
         headroom,
     )
+
+
+def _added_bytes(nodes: list[dict[str, Any]], labels: int) -> int:
+    """An upper bound of the bytes the declaration and `labels` （估算） add to what an export carries: the
+    projection JSON the CLI prints (the nodes in `document`, their markdown in `body`) and a rendered file
+    (HTML, DOCX, PDF), none of which spends more per node than the node's own JSON. The 32 MiB limits on those
+    get this much room (issue #32), so an export that fits them on main still fits."""
+    nodes_bytes = len(json.dumps(nodes, ensure_ascii=False).encode("utf-8"))
+    label_bytes = len(ESTIMATE_LABEL.encode("utf-8")) * labels
+    return 2 * (nodes_bytes + label_bytes) + 64
 
 
 def template_label_positions(
@@ -245,6 +256,8 @@ def _declaration_rows(
     check = draft["explanation_check"]
     facts = {_cell_key(fact): fact for fact in check.get("facts") or [] if isinstance(fact, dict)}
     claims = {_cell_key(claim): claim for claim in draft.get("claims") or [] if isinstance(claim, dict)}
+    # Each item's estimated cells' formulas, read once per item (a scan per cell grew with cells × locations).
+    formulas: dict[int, dict[tuple[str, int, str], str]] = {}
     rows = []
     for entry in cells:
         item, grain, key = entry["item"], entry["grain"], entry["cell"]
@@ -254,15 +267,22 @@ def _declaration_rows(
             continue
         declared = entry.get("declared")
         fact = (facts.get(key) or {}) if key is not None else {}
-        # The value as its fact displays it (value and unit), as a {{fact:…}} template writes it.
-        value = fact.get("display_value") or ((claims.get(key) or {}).get("value") if key is not None else None)
+        # The value as its fact displays it (value and unit), as a {{fact:…}} template writes it; a text-typed
+        # column has no fact, so the cited value gets its row's unit.
+        value = fact.get("display_value") or (_with_row_unit((claims.get(key) or {}).get("value"), key, runs)
+                                              if key is not None else None)
         if declared:
             # No recipe recomputed this estimate: the requirement's declared method, and why.
             not_recomputed = NOT_RECOMPUTED if declared.get("factor_reproducible", True) else NOT_REPRODUCIBLE
             formula = f"{str(declared.get('method') or '').strip()}（{not_recomputed}）"
         else:
-            formula = next((_formula(location.get("evidence")) for location in item.get("locations") or []
-                            if _cell_key(location) == key and location.get("status") == "estimated"), "")
+            if id(item) not in formulas:
+                formulas[id(item)] = {}
+                for location in item.get("locations") or []:
+                    cell = _cell_key(location)
+                    if cell is not None and location.get("status") == "estimated":
+                        formulas[id(item)].setdefault(cell, _formula(location.get("evidence")))
+            formula = formulas[id(item)].get(key, "")
         rows.append([
             _shown(item.get("label") or item.get("metric") or item.get("id")),
             *(_shown(part) for part in (_cell_grain(grain, key, runs) if key is not None
@@ -271,6 +291,20 @@ def _declaration_rows(
             _shown(formula),
         ])
     return rows
+
+
+def _with_row_unit(value: Any, key: tuple[str, int, str], runs: dict[str, dict[str, Any]] | None) -> Any:
+    """A cited value that no fact displays (a text-typed run column), with the unit its run row states."""
+    if value in (None, ""):
+        return value
+    run = (runs or {}).get(key[0])
+    rows = ((run.get("result") or {}).get("rows") or []) if isinstance(run, dict) else []
+    row = rows[key[1]] if 0 <= key[1] < len(rows) else None
+    unit = str(row.get("unit") or "").strip() if isinstance(row, dict) else ""
+    text = str(value).strip()
+    if not unit or unit == "-" or text.endswith(unit):
+        return value
+    return f"{text} {unit}"
 
 
 def _cell_grain(
@@ -434,71 +468,120 @@ def _document_positions(document: dict[str, Any], plain: str, marked: str) -> li
     slices = _text_slices(document, rendered)
     if slices is None:
         return None
-    starts = [start for start, _end, _text, _literal in slices]
-    escaped: list[tuple[int, int]] = []
+    starts = [start for start, _end, _index, _offsets in slices]
+    positions: list[tuple[int, int]] = []
     offset = 0
     for piece in marked.split(_MARK)[:-1]:
         offset += len(piece)
         index = bisect.bisect_left(starts, offset) - 1
         if index < 0 or not slices[index][0] < offset <= slices[index][1]:
             return None
-        escaped.append((index, offset - slices[index][0]))
-    wanted: dict[int, set[int]] = {}
-    for index, position in escaped:
-        wanted.setdefault(index, set()).add(position)
-    raw = {index: _raw_offsets(slices[index][2], slices[index][3], positions) for index, positions in wanted.items()}
-    if any(position not in raw[index] for index, position in escaped):
-        return None
-    return [(index, raw[index][position]) for index, position in escaped]
+        raw = slices[index][3].get(offset - slices[index][0])
+        if raw is None:
+            return None
+        positions.append((slices[index][2], raw))
+    return positions
 
 
-def _text_slices(document: dict[str, Any], rendered: str) -> list[tuple[int, int, str, bool]] | None:
-    """(start, end) of each text node's text in `rendered`, the document's markdown, in document order, with the
-    text and whether it is escaped as a link. None where that markdown is not the slots filled with the texts."""
+def _text_slices(
+    document: dict[str, Any], rendered: str
+) -> list[tuple[int, int, int, dict[int, int]]] | None:
+    """Where each text node's text sits in `rendered`, the document's markdown, in document order: (start, end,
+    the node's index among the document's text nodes, and for each offset in that markdown that falls on a
+    character boundary of the text, the offset in the text).
+
+    The markdown is read off the document with every text node's text replaced by one slot character, and each
+    text is rewritten as the renderer rewrites it: escaped (_escape_markdown_text; a link's text whole), and in a
+    table cell stripped at the cell's edges with newlines and '|' escaped (_cell_text, _table_cell_markdown). A
+    first paragraph that is the document's own metadata line keeps its text, since the renderer then prints no
+    generated line. None where the markdown is not the slots filled with the rewritten texts."""
     skeleton = {**document, "content": _copied(document["content"])}
-    texts: list[tuple[str, bool]] = []
-    for node in _text_nodes(skeleton["content"]):
-        texts.append((node.get("text", ""), any(mark.get("type") == "link" for mark in node.get("marks", []))))
-        node["text"] = _SLOT
+    content = skeleton["content"]
+    metadata = _document_metadata_markdown(skeleton.get("metadata") or {},
+                                           declare_missing=bool(skeleton.get("template_id")))
+    kept = content[0] if metadata and content and _paragraph_plain_text(content[0]) == metadata else None
+    entries: list[tuple[int, dict[str, Any], dict[str, Any] | None]] = []
+    counter = [0]
+
+    def visit(node: dict[str, Any], cell: dict[str, Any] | None, keep: bool) -> None:
+        if node.get("type") == "text":
+            if not keep:
+                entries.append((counter[0], node, cell))
+            counter[0] += 1
+            return
+        inner = node if node.get("type") in ("tableCell", "tableHeader") else cell
+        for child in node.get("content") or []:
+            visit(child, inner, keep)
+
+    for node in content:
+        visit(node, None, node is kept)
+    texts = [(node.get("text", ""), any(mark.get("type") == "link" for mark in node.get("marks", [])))
+             for _index, node, _cell in entries]
     if any(_SLOT in text for text, _literal in texts):
         return None
+    for _index, node, _cell in entries:
+        node["text"] = _SLOT
+    # _cell_text strips the cell's whole inline markdown: a slot with only whitespace before (after) it in its
+    # cell loses its text's leading (trailing) whitespace.
+    edges: dict[int, tuple[bool, bool]] = {}
+    for _index, _node, cell in entries:
+        if cell is not None and id(cell) not in edges:
+            inline = _render_inline(_flat_inline(cell.get("content", [])))
+            edges[id(cell)] = (not inline.split(_SLOT, 1)[0].strip(), not inline.rsplit(_SLOT, 1)[-1].strip())
+    firsts: dict[int, int] = {}
+    lasts: dict[int, int] = {}
+    for position, (_index, _node, cell) in enumerate(entries):
+        if cell is not None:
+            firsts.setdefault(id(cell), position)
+            lasts[id(cell)] = position
     pieces = report_document_markdown(skeleton).split(_SLOT)
-    if len(pieces) != len(texts) + 1:
+    if len(pieces) != len(entries) + 1:
         return None
     slices = []
     parts = []
     position = 0
-    for piece, (text, literal) in zip(pieces, texts):
-        escaped = _escape_markdown_literal(text) if literal else _escape_markdown_text(text)
+    for number, (piece, (index, _node, cell), (text, literal)) in enumerate(zip(pieces, entries, texts)):
+        in_cell = cell is not None
+        escaped, offsets = _rewritten(
+            text, literal, in_cell=in_cell,
+            lstrip=in_cell and firsts[id(cell)] == number and edges[id(cell)][0],
+            rstrip=in_cell and lasts[id(cell)] == number and edges[id(cell)][1])
         position += len(piece)
-        slices.append((position, position + len(escaped), text, literal))
+        slices.append((position, position + len(escaped), index, offsets))
         position += len(escaped)
         parts.extend((piece, escaped))
     parts.append(pieces[-1])
     return slices if "".join(parts) == rendered else None
 
 
-def _raw_offsets(text: str, literal: bool, wanted: set[int]) -> dict[int, int]:
-    """For each wanted offset in the escaped markdown of `text` that falls on a character boundary of `text`, the
-    offset in `text` (see _escape_markdown_text: footnote references stay as written, a link's text is escaped
-    whole). An offset inside an escape is left out."""
-    if not _ESCAPABLE.search(text):
-        return {offset: offset for offset in wanted if offset <= len(text)}
+def _rewritten(text: str, literal: bool, *, in_cell: bool, lstrip: bool, rstrip: bool) -> tuple[str, dict[int, int]]:
+    """`text` as the markdown writes it, and for each offset in that markdown on a character boundary of `text`,
+    the offset in `text`: escaped character by character (footnote references stay as written, a link's text is
+    escaped whole), stripped at a cell's edges, then with a cell's newlines and '|' escaped."""
     notes = [] if literal else [(match.start(), match.end()) for match in NOTE_REF.finditer(text)]
-    found = {0: 0} if 0 in wanted else {}
-    position = 0
+    low, high = 0, len(text)
+    if lstrip:
+        while low < high and text[low].isspace():
+            low += 1
+    if rstrip:
+        while high > low and text[high - 1].isspace():
+            high -= 1
+    pieces = []
+    offsets = {0: low}
     note = 0
-    last = max(wanted)
-    for index, char in enumerate(text):
-        if position >= last:
-            break
+    written = 0
+    for index in range(low, high):
+        char = text[index]
         while note < len(notes) and notes[note][1] <= index:
             note += 1
         in_note = note < len(notes) and notes[note][0] <= index
-        position += 2 if char in _ESCAPED and not in_note else 1
-        if position in wanted:
-            found[position] = index + 1
-    return found
+        piece = "\\" + char if char in _ESCAPED and not in_note else char
+        if in_cell:
+            piece = piece.replace("\n", "<br>").replace("|", "\\|")
+        pieces.append(piece)
+        written += len(piece)
+        offsets[written] = index + 1
+    return "".join(pieces), offsets
 
 
 def _copied(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
