@@ -553,6 +553,46 @@ def test_a_declaration_over_every_scenario_labels_no_cell(analysis, tmp_path, mo
     assert _result_labels(analysis, draft, mode) == []
 
 
+@pytest.mark.parametrize('mode', MODES)
+def test_a_variance_cited_at_a_declared_grain_is_not_declared_as_its_estimate(analysis, tmp_path, mode):
+    """Review round 3 of #35: a wide row carries the budget and its variance; the variance is not the estimate."""
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'organizations': ['华东区域'],
+            'periods': ['2026-01:2026-08'], 'scenarios': ['actual_1_8', 'budget_1_8'], 'requires_drilldown': True,
+            'grain_basis': [{'organizations': ['华东区域'], 'scenarios': ['budget_1_8'], 'basis': 'estimate',
+                             'method': METHOD, 'factor_reproducible': False, 'reason': REASON}]}
+    rows = [{**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE,
+             'variance': '-8072.5345'}]
+    service, runs, tokens, recipes, claims = _runs_case(analysis, tmp_path, item, [rows])
+    claims.append(_claim(runs[0], row=0, column='variance', value='-8072.5345'))
+    draft = _save_runs(service, runs, f'## 区域收入\n\n预算 {tokens[(0, 0)]}。', recipes, claims)
+    assert {location['column'] for location in _item(draft)['locations']} == {'value', 'variance'}
+
+    projection = _projection(analysis, draft, mode)
+
+    assert _rows(_declared(projection['document']['content'])[2]) == [
+        COLUMNS, ['1-8 月营业收入', '华东区域', '2026-01:2026-08', 'budget_1_8', ESTIMATE + ' 万元', NOT_REPRODUCIBLE]]
+    assert _result_labels(analysis, draft, mode) == [('Result 1', 2, 7)]
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_a_coarse_grain_the_draft_answers_from_the_source_is_not_declared(analysis, tmp_path, mode):
+    """Review round 3 of #35: no scenarios listed; the draft cites only 华东's close-book actual (answered) and a
+    rounded restatement of it. No estimate is stated for the grain, so nothing is declared."""
+    item = {'id': 'revenue_1_8', 'metric': 'revenue', 'label': '1-8 月营业收入', 'organizations': ['华东区域'],
+            'periods': ['2026-01:2026-08'], 'requires_drilldown': True,
+            'grain_basis': [{'organizations': ['华东区域'], 'basis': 'estimate', 'method': METHOD}]}
+    actual = {**BUDGET_ROW, 'organization': '华东区域', 'value': '109742.028'}
+    service, runs, tokens, recipes, claims = _runs_case(
+        analysis, tmp_path, item, [[actual], [{**actual, 'value': '109742.03'}]],
+        lambda runs, budget, close: [_recipe(close, '10·区域经营损益表', 'D5', runs[0], 0, recipe_id='east')])
+    draft = _save_runs(service, runs, f'## 区域收入\n\n华东 {tokens[(0, 0)]}，约 {tokens[(1, 0)]}。', recipes, claims)
+    assert _item(draft)['uncounted_grains']
+
+    projection = _projection(analysis, draft, mode)
+
+    assert HEADING not in projection['body'] and LABEL not in projection['body']
+
+
 def test_declared_grains_without_a_cited_value_are_listed_up_to_a_fixed_number(analysis, tmp_path):
     """Review of #33: every missing declared grain got its own row repeating the method, so a large grid grew the
     projection past the app's 32 MiB buffer while main's was 2.7 KB. The draft states nothing for those grains."""
@@ -569,7 +609,7 @@ def test_declared_grains_without_a_cited_value_are_listed_up_to_a_fixed_number(a
 
     assert [row[1] for row in rows[:13]] == organizations[:13]
     assert rows[0][4] == ESTIMATE + ' 万元' and [row[4] for row in rows[1:13]] == ['—'] * 12
-    assert rows[13:] == [['1-8 月营业收入', '—', '—', '—', '—', '另有 17 个声明为估算的组合未引用数值']]
+    assert rows[13:] == [['1-8 月营业收入', '—', '—', '—', '—', '另有 17 个声明为估算的组合']]
 
 
 # --- inline labels only where a {{fact:…}} template renders an estimate --------------------------------------

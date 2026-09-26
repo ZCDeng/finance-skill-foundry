@@ -89,10 +89,11 @@ def _declared_estimate_cells(
     Cells are labelled only where the item lists organizations, periods and scenarios, so that one grain is one
     organization, period and scenario: a coarser grain holds cells the declaration cannot tell apart (an actual
     beside the estimate, the group's source budget beside a region's estimate, a full-year budget beside a 1-8
-    one), and is declared with no cell. A fully listed grain the draft answers from the source is not declared at
-    all: a second number cited for it (a rounded restatement) is not an estimate. Otherwise its cited cells are
-    declared; a cell a factor recipe made `estimated` keeps its recipe (no `declared`). Grains declared with no
-    cell are listed up to UNCITED_GRAIN_ROWS per item, the rest counted in one entry (`more`)."""
+    one), and is declared with no cell. A grain the draft answers from the source is not declared at all: a second
+    number cited for it (a rounded restatement) is not an estimate. Otherwise its cited cells that state its value
+    (not a variance, contribution or change) are declared; a cell a factor recipe made `estimated` keeps its
+    recipe (no `declared`). Grains declared with no cell are listed up to UNCITED_GRAIN_ROWS per item, the rest
+    counted in one entry (`more`)."""
     from foundry.finance_requirements import GRAIN_LISTS, _declared_basis, _location_grain
 
     if not isinstance(item.get("grain_basis"), list) or not isinstance(item.get("locations"), list):
@@ -125,9 +126,10 @@ def _declared_estimate_cells(
     listed = all(item.get(plural) for _key, plural in GRAIN_LISTS)
     for grain, (record, declared) in grains.items():
         cited = members.get(grain) or []
-        if listed and any(location.get("status") == "answered" for location in cited):
+        if any(location.get("status") == "answered" for location in cited):
             continue
-        cells = cited if listed else []
+        # A variance, contribution or change cited at the grain is not the grain's value (the estimate).
+        cells = [location for location in cited if _level_column(location.get("column"))] if listed else []
         added = False
         for location in cells:
             key = _cell_key(location)
@@ -145,6 +147,15 @@ def _declared_estimate_cells(
     if uncited > UNCITED_GRAIN_ROWS:
         found.append({"item": item, "grain": {}, "cell": None, "more": uncited - UNCITED_GRAIN_ROWS})
     return found
+
+
+# Amount columns that state a change between two values rather than a value (see _metric_matches).
+CHANGE_COLUMNS = frozenset({"contribution", "profit_impact", "amount_change", "variance", "difference"})
+CHANGE_SUFFIXES = ("_variance", "_difference", "_contribution", "_change", "_impact")
+
+
+def _level_column(column: Any) -> bool:
+    return isinstance(column, str) and column not in CHANGE_COLUMNS and not column.endswith(CHANGE_SUFFIXES)
 
 
 def declare_estimates(
@@ -239,7 +250,7 @@ def _declaration_rows(
         item, grain, key = entry["item"], entry["grain"], entry["cell"]
         if entry.get("more"):
             rows.append([_shown(item.get("label") or item.get("metric") or item.get("id")), *[NOT_STATED] * 4,
-                         f"另有 {entry['more']} 个声明为估算的组合未引用数值"])
+                         f"另有 {entry['more']} 个声明为估算的组合"])
             continue
         declared = entry.get("declared")
         fact = (facts.get(key) or {}) if key is not None else {}
