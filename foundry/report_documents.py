@@ -103,7 +103,15 @@ def validate_report_source(source: Any) -> dict[str, Any]:
     }
 
 
-def validate_report_document(document: Any, *, registered_source_ids: set[str] | None = None) -> dict[str, Any]:
+def validate_report_document(
+    document: Any,
+    *,
+    registered_source_ids: set[str] | None = None,
+    text_headroom: int = 0,
+    node_headroom: int = 0,
+) -> dict[str, Any]:
+    """`text_headroom`/`node_headroom` are room beyond the limits for exactly the text and nodes the server
+    itself adds to an export (a projection's estimate declaration and labels); an author's text never gets it."""
     if not isinstance(document, dict):
         raise FoundryError("report document must be an object")
     if document.get("schema_version") != 1:
@@ -126,7 +134,12 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
     content = document.get("content")
     if not isinstance(content, list):
         raise FoundryError("report document content must be an array")
-    budget = {"nodes": 0, "text": 0}
+    budget = {
+        "nodes": 0,
+        "text": 0,
+        "max_nodes": MAX_DOCUMENT_NODES + max(0, node_headroom),
+        "max_text": MAX_DOCUMENT_TEXT + max(0, text_headroom),
+    }
     clean_content: list[dict[str, Any]] = []
     for node in content:
         normalized = _validate_node(node, source_ids, registered_source_ids, budget, parent=None)
@@ -134,7 +147,7 @@ def validate_report_document(document: Any, *, registered_source_ids: set[str] |
             clean_content.extend(normalized.get("content", []))
         else:
             clean_content.append(normalized)
-    if budget["text"] > MAX_DOCUMENT_TEXT:
+    if budget["text"] > budget["max_text"]:
         raise FoundryError("report document text exceeds 1 MiB limit")
     result = {
         "schema_version": 1,
@@ -161,7 +174,7 @@ def _validate_node(
     if not isinstance(node, dict) or node.get("type") not in NODE_TYPES:
         raise FoundryError("report node type is not supported")
     budget["nodes"] += 1
-    if budget["nodes"] > MAX_DOCUMENT_NODES:
+    if budget["nodes"] > budget["max_nodes"]:
         raise FoundryError("report document has too many nodes")
     node_type = node["type"]
     attrs = _validate_attrs(node_type, node.get("attrs", {}), source_ids, registered_source_ids)
@@ -169,7 +182,7 @@ def _validate_node(
     if attrs:
         clean["attrs"] = attrs
     if node_type == "text":
-        text = _text(node.get("text", ""), "report text", maximum=MAX_DOCUMENT_TEXT)
+        text = _text(node.get("text", ""), "report text", maximum=budget["max_text"])
         budget["text"] += len(text)
         clean["text"] = text
         marks = []
@@ -320,8 +333,10 @@ def _paragraph_plain_text(node: dict[str, Any]) -> str:
     return _render_inline(_flat_inline(node.get("content", []))).strip()
 
 
-def report_document_markdown(document: dict[str, Any], *, title: str | None = None) -> str:
-    clean = validate_report_document(document)
+def report_document_markdown(
+    document: dict[str, Any], *, title: str | None = None, text_headroom: int = 0, node_headroom: int = 0
+) -> str:
+    clean = validate_report_document(document, text_headroom=text_headroom, node_headroom=node_headroom)
     blocks: list[str] = []
     if title:
         blocks.append("# " + title.strip())
@@ -737,8 +752,10 @@ def _node_source_columns(node: dict[str, Any]) -> list[Any]:
     return [attrs.get("source_id"), attrs.get("sheet"), attrs.get("range"), attrs.get("page")]
 
 
-def report_document_excel_rows(document: dict[str, Any], draft: dict[str, Any]) -> dict[str, list[list[Any]]]:
-    clean = validate_report_document(document)
+def report_document_excel_rows(
+    document: dict[str, Any], draft: dict[str, Any], *, text_headroom: int = 0, node_headroom: int = 0
+) -> dict[str, list[list[Any]]]:
+    clean = validate_report_document(document, text_headroom=text_headroom, node_headroom=node_headroom)
     overview = [["字段", "值"]]
     for label, value in (
         ("标题", draft.get("title", "")),

@@ -21,22 +21,37 @@ from foundry.report_documents import (
     report_nodes_from_markdown,
     validate_report_document,
 )
+from foundry.report_estimates import declare_estimates, estimated_cells, template_label_positions, text_node_count
 
 REPORT_PROJECTION_MODES = {"management", "audit"}
 
 
-def build_report_projection(draft: dict[str, Any], mode: str = "management", resolved_datasets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_report_projection(
+    draft: dict[str, Any],
+    mode: str = "management",
+    resolved_datasets: list[dict[str, Any]] | None = None,
+    runs: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """`runs` (by id) are the draft's runs as the store read them; the estimate declaration reads an estimated
+    cell's own row there for a grain field its requirement item does not list."""
     if mode not in REPORT_PROJECTION_MODES:
         raise FoundryError("report projection mode must be management or audit")
     title = _text(draft.get("title") or "分析报告")
     base = _draft_document(draft)
+    # Estimates are the cells the server's requirement check stored on this draft found estimated (issue #24).
+    estimates = estimated_cells(draft)
+    labels = template_label_positions(draft, base, estimates) if estimates else []
     document = _dedupe_leading_title(base, title)
+    # Text nodes of the dropped title heading come before the body's; label positions count from the body.
+    dropped = text_node_count(base["content"][: len(base["content"]) - len(document["content"])])
     limitations = [str(item).strip() for item in draft.get("limitations", []) if str(item).strip()]
     marker = _review_marker(draft)
 
     appendix = str(draft.get("evidence_appendix") or "")
     trusted_appendix = appendix if _trusted_appendix(draft, appendix) else ""
     document = _strip_generated_appendix_suffix(document, trusted_appendix)
+    body_texts = text_node_count(document["content"])
+    labels = [(index - dropped, offset) for index, offset in labels if 0 <= index - dropped < body_texts]
     if mode == "audit" and trusted_appendix:
         document = _append_markdown(document, "系统生成计算依据附录", trusted_appendix)
     elif mode == "audit" and appendix:
@@ -49,8 +64,15 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
     if limitations:
         document = _append_markdown(document, "局限与待确认事项", "\n".join(f"- {item}" for item in limitations))
     document = _append_markdown(document, "导出身份与来源", _identity_appendix(draft, mode, sources))
+    headroom: dict[str, int] = {}
+    if estimates:
+        # Added last, so every earlier step checks the limits on main's text; the declaration and the labels get
+        # exactly the room they take (see validate_report_document).
+        document, headroom = declare_estimates(document, draft, estimates, labels, runs)
 
-    body = report_document_markdown(document, title=title).strip()
+    body = report_document_markdown(
+        document, title=title, text_headroom=headroom.get("text", 0), node_headroom=headroom.get("nodes", 0)
+    ).strip()
     if marker:
         body = f"{marker}\n\n{body}" if body else marker
     body += "\n"
@@ -69,6 +91,8 @@ def build_report_projection(draft: dict[str, Any], mode: str = "management", res
         "document": document,
         "limitations": limitations,
         "sources": sources,
+        # Room beyond the text and node limits for what the server added for estimates; absent without estimates.
+        **({"estimate_headroom": headroom} if estimates else {}),
     }
     projection_hash = _hash(projection_base)
     return {
