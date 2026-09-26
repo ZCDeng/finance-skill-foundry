@@ -1664,8 +1664,8 @@ def _comparison_filters_cover(item, run, scope, row=None):
             except TypeError:
                 return False
             listed = item.get(GRAIN_FIELD_LISTS.get(key, '')) or []
-            if key == 'scenario' and values <= {comparison.get(f'{side}_scenario')}:
-                continue  # the side's own scenario, which already selects its rows
+            if key == 'scenario' and comparison.get(f'{side}_scenario') in values:
+                continue  # the side's rows already have its own scenario; a filter naming it takes none away
             if key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
                 required = dimensions[key]
             elif key in expected[side]:

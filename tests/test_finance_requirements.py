@@ -2549,6 +2549,8 @@ def test_a_year_on_year_bridge_that_forgot_its_baseline_period_does_not_answer(t
     ('flat', {'actual_filters': {'scenario': ['actual'], 'period': '2026-09'},
               'baseline_filters': {'scenario': 'budget', 'period': ['2026-09']}}, ('120', '80')),
     ('two_sided', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
+    ('flat', {'actual_filters': {'scenario': ['actual', 'budget']}, 'baseline_filters': {'scenario': ['actual', 'budget']}},
+     ('120', '80')),
     # Filters that list the requirement's value among others of a field the bridge groups by (organization is
     # always a grouping field): the cited row is that value's whole group (review round 2).
     ('flat', {'actual_filters': {'organization': ['O1', 'O2']}, 'baseline_filters': {'organization': ['O1', 'O2']}},
