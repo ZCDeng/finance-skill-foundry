@@ -14,6 +14,7 @@ from __future__ import annotations
 import bisect
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from foundry.errors import FoundryError
@@ -47,7 +48,7 @@ _SLOT = "\ue001"
 _ESCAPED = set("\\`*[]()")
 # The template's own label right after a token (after the prose's unit where it writes one), as the check's message
 # asks the body to write it: （估算） or (估算), markdown-escaped or not, after a space or the token's closing emphasis.
-_AUTHOR_LABEL = re.compile(r"[*_~`]*[ \t\u3000]*\\?[（(]估算")
+_AUTHOR_LABEL = re.compile(r"[*_~`]*(?:[ \t\u3000\n]|<br>)*\\?[（(]估算")
 
 
 def estimated_cells(
@@ -200,11 +201,14 @@ def declare_estimates(
 def _added_bytes(nodes: list[dict[str, Any]], labels: int) -> int:
     """An upper bound of the bytes the declaration and `labels` （估算） add to what an export carries: the
     projection JSON the CLI prints (the nodes in `document`, their markdown in `body`) and a rendered file
-    (HTML, DOCX, PDF), none of which spends more per node than the node's own JSON. The 32 MiB limits on those
-    get this much room (issue #32), so an export that fits them on main still fits."""
+    (HTML, DOCX, PDF), none of which spends more per node than the node's own JSON plus six bytes per text
+    byte for escapes. The 32 MiB limits on those get this much room (issue #32), so an export that fits them on
+    main still fits."""
     nodes_bytes = len(json.dumps(nodes, ensure_ascii=False).encode("utf-8"))
+    text_bytes = sum(len(node.get("text", "").encode("utf-8")) for node in _text_nodes(nodes))
     label_bytes = len(ESTIMATE_LABEL.encode("utf-8")) * labels
-    return 2 * (nodes_bytes + label_bytes) + 64
+    # Escapes may grow each character of the text: markdown (\*) printed as JSON (\\*), HTML entities (&amp;).
+    return 2 * (nodes_bytes + label_bytes) + 6 * (text_bytes + label_bytes) + 64
 
 
 def template_label_positions(
@@ -302,9 +306,17 @@ def _with_row_unit(value: Any, key: tuple[str, int, str], runs: dict[str, dict[s
     row = rows[key[1]] if 0 <= key[1] < len(rows) else None
     unit = str(row.get("unit") or "").strip() if isinstance(row, dict) else ""
     text = str(value).strip()
-    if not unit or unit == "-" or text.endswith(unit):
+    if not unit or unit == "-" or not _plain_number(text):
+        # Text that states its own magnitude or unit (11.78亿元, 117,815 万) is shown as written.
         return value
     return f"{text} {unit}"
+
+
+def _plain_number(text: str) -> bool:
+    try:
+        return Decimal(text).is_finite()
+    except (InvalidOperation, ValueError):
+        return False
 
 
 def _cell_grain(

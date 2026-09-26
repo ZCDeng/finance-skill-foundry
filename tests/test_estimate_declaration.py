@@ -994,6 +994,58 @@ def test_a_registered_export_over_the_limit_by_no_more_than_the_declaration_stil
         analysis.register_report_export(draft['id'], 'docx', fits)
 
 
+def test_a_text_value_that_states_its_own_magnitude_is_declared_as_written():
+    """Review of #39: only a plain number gets its row's unit; 11.78亿元 or 117,815 万 keep the text as written."""
+    from foundry.report_estimates import _with_row_unit
+
+    runs = {'r': {'result': {'rows': [{'unit': '万元'}, {'unit': '-'}, {}]}}}
+    assert _with_row_unit('117814.5625', ('r', 0, 'value'), runs) == '117814.5625 万元'
+    for text in ('11.78亿元', '117,815 万', '约11.8亿', '117814.5625万元', '12.5%'):
+        assert _with_row_unit(text, ('r', 0, 'value'), runs) == text
+    assert _with_row_unit('117814.5625', ('r', 1, 'value'), runs) == '117814.5625'
+    assert _with_row_unit('117814.5625', ('r', 2, 'value'), runs) == '117814.5625'
+
+
+def test_an_author_label_after_a_line_break_in_a_cell_is_not_doubled(analysis, tmp_path):
+    """Review of #39: a cell writes the estimate, a line break and its own （估算）; the export adds no second one."""
+    case = _case(analysis, tmp_path)
+
+    def cell(kind, text):
+        return {'type': kind, 'attrs': {'textAlign': 'left'},
+                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': text}]}]}
+
+    document = {'schema_version': 1, 'template_version': 'annual-v1', 'metadata': {'unit': '万元'}, 'content': [
+        {'type': 'table', 'content': [
+            {'type': 'tableRow', 'content': [cell('tableHeader', '区域'), cell('tableHeader', '预算')]},
+            {'type': 'tableRow', 'content': [cell('tableCell', '华东区域'), cell('tableCell', f'{case.estimate}\n（估算）')]}]},
+    ]}
+    draft = _save(case, document=document)
+
+    for mode in MODES:
+        content = build_report_projection(draft, mode=mode)['document']['content']
+        table = [node for node in content if node['type'] == 'table'][-1]
+        assert _rows(table)[1][1] == f'{ESTIMATE} 万元\n（估算）'
+
+
+def test_the_byte_headroom_covers_a_declaration_dense_in_escaped_characters(analysis, tmp_path):
+    """Review of #39: markdown escapes (\\*) printed as JSON and HTML entities grow the text; the room covers them."""
+    method = '*[&](|)<>' * 100
+    case = _case(analysis, tmp_path, grain_basis=[{'organizations': ['华东区域'], 'scenarios': ['budget_1_8'],
+                                                   'basis': 'estimate', 'method': method,
+                                                   'factor_reproducible': False, 'reason': REASON}])
+    draft = _save(case, BODY)
+    runs = {run_id: analysis.get_run(run_id) for run_id in draft['run_ids']}
+
+    def printed(projection):
+        return len((json.dumps(projection, ensure_ascii=False) + '\n').encode('utf-8'))
+
+    with_estimates = build_report_projection(draft, mode='management', runs=runs)
+    without = build_report_projection(_without_estimates(draft), mode='management', runs=runs)
+
+    assert method in json.dumps(with_estimates['document'], ensure_ascii=False)
+    assert printed(with_estimates) - printed(without) <= with_estimates['estimate_headroom']['bytes']
+
+
 # --- a draft without estimates is main's export ---------------------------------------------------------------
 
 RUN = '0' * 31 + '1'
