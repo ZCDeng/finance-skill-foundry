@@ -3291,7 +3291,8 @@ def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_nati
     assert 'account_total' not in _unanswered_message(item)
 
 
-@pytest.mark.parametrize('account, method', [('营业收入', 'yoy'), ('营业成本', 'actual_vs_budget'), ('Revenue', 'yoy')])
+@pytest.mark.parametrize('account, method', [('营业收入', 'yoy'), ('营业成本', 'actual_vs_budget'), ('Revenue', 'yoy'),
+                                             ('other_income', 'yoy')])
 def test_a_method_routed_pnl_alias_that_is_also_an_account_is_not_called_unrecognized(tmp_path, account, method):
     """Review of #37: with a method route the checker offers only the method run; the support record fell through
     to 'unrecognized' once the alias stopped being an account item. It names the method run instead."""
@@ -3307,7 +3308,11 @@ def test_a_method_routed_pnl_alias_that_is_also_an_account_is_not_called_unrecog
     support = requirement['support']['items'][0]
 
     assert support['status'] != 'unrecognized'
-    assert 'account_total' not in support.get('evidence', '') and 'method_run' in support['evidence']
+    if account == 'other_income':
+        # Not a P&L line: its account total still answers it (engine output), and the advice stays main's.
+        assert support['evidence'] == 'run_metric_result_set (single account_total)'
+    else:
+        assert 'account_total' not in support.get('evidence', '') and 'method_run' in support['evidence']
 
 
 @pytest.mark.parametrize('account', LEDGER_ACCOUNT_NAMES)
