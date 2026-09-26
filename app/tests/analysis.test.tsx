@@ -1547,6 +1547,28 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getAllByLabelText('四项独立核验状态')).toHaveLength(1);
   });
 
+  it('puts every pre-publication check after the text in one section, with the check state in the toolbar', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [],
+        checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const checks = await screen.findByRole('region', { name: '发布前检查' });
+    expect(await within(checks).findByRole('region', { name: '文稿质量检查' })).toBeTruthy();
+    const materiality = within(checks).getByText(/^重要性阈值/);
+    expect(materiality.textContent).toBe('重要性阈值 · 绝对 0');
+    expect(materiality.closest('details')?.open).toBe(false);
+    expect(within(checks).getByText(/^引用的计算与依据/)).toBeTruthy();
+    const document = screen.getByRole('region', { name: '财务文稿工作区' });
+    expect(document.compareDocumentPosition(checks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await within(document).findByText(/检查：通过/)).toBeTruthy();
+  });
+
   it('shows paragraph advice separately from passed financial checks and clears it after edits', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance' };
     const financeCall = vi.fn(async (_taskId: string, command: string) => {

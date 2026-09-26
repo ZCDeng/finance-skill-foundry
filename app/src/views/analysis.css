@@ -102,6 +102,8 @@
 
 .analysis-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .analysis-draft-fields { gap: 18px; }
+.analysis-prepublish { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; border-top: 1px solid var(--fnd-line); }
+.analysis-prepublish > .analysis-section-heading h3 { font-size: var(--fnd-size-reading); }
 .analysis-number { text-align: right !important; font-variant-numeric: tabular-nums; }
 .analysis-table th { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
