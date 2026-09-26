@@ -759,3 +759,232 @@ def test_labelled_limitations_and_the_label_section_do_not_push_an_export_that_f
     assert markdown.count('117,814.56 万元（估算），按集团进度推算。') >= 60
     book = load_workbook(analysis.export_draft(draft['id'], 'xlsx', mode='management')['path'])
     assert '同期预算 117,814.56 万元（估算）。' in book['Report']['A3'].value
+
+
+# --- PR #29 review round 3 ----------------------------------------------------------------------------------
+# The text's own 估算 counts wherever a reader takes it to mean this number: anywhere in its sentence, or in the
+# header of its table column or row, for a rounded copy, which is only reported; between it and its neighbouring
+# numbers for a bound estimate, which is labelled otherwise. The label goes after the whole unit.
+
+REFERENCE = '华东区域 1-8 月收入实际 109,742.028 万元，集团合并实际 325,644 万元，同期预算 300 万元，预算进度 0.625。'
+
+
+@pytest.mark.parametrize('extra', [
+    {'limitations': ['华东同期预算（估算）约 11.78 亿元，经理确认前不作批复预算。']},
+    {'limitations': ['华东同期预算约 11.78 亿元（估算，经理确认前不作批复预算）。']},
+    {'limitations': ['华东同期预算约 11.78 亿元，属于估算。']},
+    {'limitations': ['华东同期预算约 11.78 亿元（按集团 1-8 月预算进度估算）。']},
+    {'limitations': ['区域 1-8 月预算为估算数（华东区域约 11.78 亿元），经理确认前不作批复预算。']},
+    {'limitations': ['以下为估算：华东区域约 11.78 亿元，经理确认前不作批复预算。']},
+    {'limitations': ['批复前估算预算：华东区域约 11.78 亿元。']},
+    {'title': '华东同期预算（估算）约 11.78 亿元'},
+    {'body': REFERENCE + '\n\n| 区域 | 1-8 月预算（估算） |\n| --- | ---: |\n| 华东区域 | 117,815 |'},
+    {'body': REFERENCE + '\n\n| 项目 | 金额（万元） |\n| --- | ---: |\n| 华东同期预算（估算） | 117,815 |'},
+    {'body': REFERENCE + '\n\n## 区域同期预算（估算口径）\n\n华东区域约 117,815 万元。\n\n### 说明\n\n经理确认前不作批复预算。'},
+    {'body': REFERENCE + '\n\n以下区域预算均为估算：\n\n- 华东区域约 117,815 万元\n- 华南区域另行说明'},
+], ids=['bracket-before', 'note-after', 'shu-yu', 'method-note', 'lead-in-bracket', 'lead-in-colon',
+        'approval-before', 'title', 'column-header', 'row-header', 'section-heading', 'list-lead-in'])
+def test_a_rounded_estimate_the_text_already_calls_估算_raises_nothing(analysis, tmp_path, extra):
+    """The draft's completion is that of the same draft with a number that is no estimate in place of the rounded
+    copy (as on main, which raises nothing for either), and the export says nothing about an unlabelled
+    estimate. Without the table, that is waiting for the manager."""
+    case = _case(analysis, tmp_path)
+
+    def swap(value):
+        if isinstance(value, list):
+            return [swap(item) for item in value]
+        return value.replace('11.78', '11.99').replace('117,815', '117,999')
+
+    table = 'body' in extra
+    control = _save(case, swap(extra.get('body', REFERENCE)), presented=False,
+                    **{key: swap(value) for key, value in extra.items() if key != 'body'})
+    draft = _save(case, extra.pop('body', REFERENCE), presented=False, **extra)
+
+    assert _unplaced(draft) == [] and _unplaced(control) == []
+    assert draft['completion']['status'] == control['completion']['status']
+    if not table:
+        assert draft['completion']['status'] == 'awaiting_manager'
+    for mode in ('management', 'audit'):
+        body = build_report_projection(draft, mode=mode)['body']
+        assert '估算标注待核对' not in body
+        assert _outside_code(body).count('估算') == _outside_code(
+            build_report_projection({**draft, 'quality': {}}, mode=mode)['body']).count('估算')
+
+
+@pytest.mark.parametrize('limitation', [
+    '华东同期预算约 11.78 亿元（非估算）。',
+    '华东同期预算约 11.78 亿元，估算口径不适用。',
+    '华东同期预算约 11.78 亿元。华南区域预算为估算。',
+    '华东同期预算约 11.78 亿元，已取代估算。',
+])
+def test_a_rounded_estimate_whose_sentence_denies_or_lacks_估算_is_still_reported(analysis, tmp_path, limitation):
+    case = _case(analysis, tmp_path)
+    draft = _save(case, REFERENCE, presented=False, limitations=[limitation])
+
+    assert [issue['uncited_numbers'] for issue in _unplaced(draft)] == [['11.78']]
+
+
+def test_a_heading_or_lead_in_that_says_估算_covers_rounded_copies_only_within_its_reach(analysis, tmp_path):
+    """A section heading covers its section and a colon lead-in the block right after it: a rounded copy past them
+    is still reported, and a bound estimate inside them is still labelled."""
+    case = _case(analysis, tmp_path)
+    draft = _save(case, '\n\n'.join([
+        REFERENCE, '## 区域同期预算（估算口径）', '华东区域约 117,815 万元，同期预算 117,814.56 万元。',
+        '## 其他事项', '华东区域另有预算约 117,814.6 万元。', '以下区域预算均为估算：', '华南区域另行说明。',
+        '- 华东区域约 11.78 亿元',
+    ]))
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '华东区域约 117,815 万元，同期预算 117,814.56 万元（估算）。' in body
+    assert [issue['uncited_numbers'] for issue in _unplaced(draft)] == [['117,814.6', '11.78']]
+
+
+def test_wording_that_marks_a_bound_estimate_in_more_words_gets_no_second_label(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    lines = [
+        '甲：华东区域同期预算 117,814.56 万元（估算，经理确认前不作批复预算）。',
+        '乙：华东区域同期预算 117,814.56 万元（按集团 1-8 月预算进度估算）。',
+        '丙：华东区域同期预算 117,814.56 万元（估算数，下同）。',
+        '丁：华东区域同期预算 117,814.56 万元（经理确认前为估算）。',
+        '戊：华东区域同期预算 117,814.56 万元，仍为估算。',
+        '己：华东区域同期预算 117,814.56 万元，属于估算，待经理确认。',
+        '庚：华东区域同期预算 117,814.56 万元，此数为估算。',
+        '辛：华东区域同期预算（估算口径）117,814.56 万元。',
+        '壬：华东区域同期预算（估算）约 117,814.56 万元。',
+        '癸：华东区域同期预算 117,814.56 万元〔估算〕。',
+        '子：华东区域同期预算 117,814.56 万元[估算]。',
+        '丑：华东区域批复前估算预算 117,814.56 万元。',
+    ]
+    draft = _save(case, '\n\n'.join(lines) + '\n\n' + TABLE)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    for line in lines:
+        # Markdown escapes the square brackets, labelled or not.
+        assert line.replace('[估算]', '\\[估算\\]') in body
+    assert LABEL + LABEL not in body
+    assert '| 华东区域 | 109,742.028 | 117,814.5625（估算） |' in body
+    assert _unplaced(draft) == []
+
+
+def test_估算_said_about_another_number_in_the_sentence_does_not_stand_in_for_the_label(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    draft = _save(case, '\n\n'.join([
+        '华东区域同期预算 117,814.56 万元，高于估算值 110,000 万元。',
+        '华东区域实际 109,742.028 万元（低于估算），同期预算 117,814.56 万元。',
+        '华东区域估算实际 109,742.028 万元，同期预算 117,814.56 万元。',
+        '华东区域同期预算 117,814.56 万元，华南区域预算 77,854.07 万元（估算）。',
+    ]))
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    assert '同期预算 117,814.56 万元（估算），高于估算值 110,000 万元。' in body
+    assert '（低于估算），同期预算 117,814.56 万元（估算）。' in body
+    assert '估算实际 109,742.028 万元，同期预算 117,814.56 万元（估算）。' in body
+    assert '同期预算 117,814.56 万元（估算），华南区域预算 77,854.07 万元（估算）。' in body
+    assert '109,742.028 万元（估算）' not in body and '110,000 万元（估算）' not in body
+
+
+def test_the_label_goes_after_units_outside_the_round_2_list(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    lines = {
+        '甲：在管面积 117,814.56 万㎡。': '甲：在管面积 117,814.56 万㎡（估算）。',
+        '乙：物业费均价 117,814.56 元/㎡·月。': '乙：物业费均价 117,814.56 元/㎡·月（估算）。',
+        '丙：物业费均价 117,814.56 元/平方米·月。': '丙：物业费均价 117,814.56 元/平方米·月（估算）。',
+        '丁：物业费均价 117,814.56 元/平方米/月。': '丁：物业费均价 117,814.56 元/平方米/月（估算）。',
+        '戊：停车费 117,814.56 元/车位·月。': '戊：停车费 117,814.56 元/车位·月（估算）。',
+        '己：水费 117,814.56 元/立方米。': '己：水费 117,814.56 元/立方米（估算）。',
+        '庚：电费 117,814.56 元/千瓦时。': '庚：电费 117,814.56 元/千瓦时（估算）。',
+        '辛：同期预算 117,814.56 万元／年。': '辛：同期预算 117,814.56 万元／年（估算）。',
+        '壬：同期预算 117,814.56 万元/年为全年口径。': '壬：同期预算 117,814.56 万元/年（估算）为全年口径。',
+        '癸：同期预算 117,814.56 万元/年度预算 188,503.3 万元。': '癸：同期预算 117,814.56 万元（估算）/年度预算 188,503.3 万元。',
+        '子：同期预算 117,814.56  万元。': '子：同期预算 117,814.56  万元（估算）。',
+        '丑：同期预算 117,814.56 万 元。': '丑：同期预算 117,814.56 万 元（估算）。',
+        '寅：在管面积 117,814.56 m²。': '寅：在管面积 117,814.56 m²（估算）。',
+        '卯：同期预算 117,814.56 万美金。': '卯：同期预算 117,814.56 万美金（估算）。',
+        '辰：在管面积 117,814.56 平方米为同期计划。': '辰：在管面积 117,814.56 平方米（估算）为同期计划。',
+        '巳：在管面积 117,814.56 万平方米·月。': '巳：在管面积 117,814.56 万平方米·月（估算）。',
+    }
+    draft = _save(case, '\n\n'.join(lines) + '\n\n' + TABLE)
+
+    body = build_report_projection(draft, mode='management')['body']
+
+    for labelled in lines.values():
+        assert labelled in body
+    assert _outside_code(body).replace(LABEL, '') == _outside_code(
+        build_report_projection({**draft, 'quality': {}}, mode='management')['body'])
+
+
+def test_a_rounded_copy_in_a_non_money_unit_or_a_scaled_count_is_not_the_estimate(analysis, tmp_path):
+    """The estimate is money (万元): a number in 万㎡ or 人 with the same digits is not it, and a scaled count
+    (万家) is a count."""
+    case = _case(analysis, tmp_path)
+    draft = _save(case, REFERENCE, presented=False,
+                  limitations=['在管面积约 117,815 万㎡，服务约 117,815 人。', '覆盖 117,814.56 万家商户。'])
+
+    assert _unplaced(draft) == []
+    body = build_report_projection(draft, mode='management')['body']
+    assert '覆盖 117,814.56 万家商户。' in body and LABEL not in _outside_code(body)
+
+
+def test_the_estimate_messages_ask_the_text_to_write_估算_as_on_main(analysis, tmp_path):
+    """The export labels only a bound non-zero estimate; a 0 estimate, a percentage and a count are never labelled
+    (Huachen 集团本部及共享中心 0.00). The guidance still asks the text to write 估算 beside every estimate, word
+    for word as on main, so the stored check is no longer than main's either."""
+    case = _case(analysis, tmp_path)
+    draft = _save(case, BODY)
+    estimated = [issue for issue in draft['quality']['issues'] if issue['code'] == 'requirement_estimated']
+
+    assert estimated and all(issue['message'].endswith('经理确认前不计为已回答；审计附录会标注“估算”，正文引用时须在数值旁写明“估算”。')
+                             for issue in estimated)
+    assert not [issue for issue in draft['quality']['issues'] if '导出时' in issue.get('message', '')]
+
+
+def test_a_zero_estimate_the_text_calls_估算_as_the_messages_ask_exports_as_written(analysis, tmp_path):
+    case = _case(analysis, tmp_path, east=(0, '0', 109742.028, '109742.028'))
+    draft = _save(case, '华东区域 1-8 月收入实际 109,742.028 万元，同期预算 0.00 万元（估算）。')
+    assert _item(draft)['status'] == 'estimated'
+
+    for mode in ('management', 'audit'):
+        body = build_report_projection(draft, mode=mode)['body']
+        assert '同期预算 0.00 万元（估算）。' in body and LABEL + LABEL not in body
+    assert _unplaced(draft) == []
+
+
+def test_a_claim_value_with_a_huge_exponent_does_not_break_save_validate_or_export(analysis, tmp_path):
+    case = _case(analysis, tmp_path)
+    huge = {'basis': 'user_assumption', 'value': '1e9999999', 'statement': '极端假设'}
+    saved = case.service.save_explanation_draft({'body': BODY, 'run_ids': [case.run['id']],
+                                                 'evidence_recipes': case.recipes,
+                                                 'claims': [*case.claims, case.presented, huge]})
+    draft = analysis.get_draft(saved['id'])
+
+    for mode in ('management', 'audit'):
+        assert '同期预算 117,814.56 万元（估算）。' in build_report_projection(draft, mode=mode)['body']
+        for fmt in ('md', 'xlsx'):
+            assert analysis.export_draft(draft['id'], fmt, mode=mode)['path']
+    on_cell = {**case.presented, 'value': '1e9999999'}
+    for claims in ([*case.claims, case.presented, huge], [*case.claims, on_cell]):
+        result = case.service.validate_explanation({'draft_id': draft['id'], 'claims': claims})
+        assert 'requirement_estimated' in [issue['code'] for issue in result['issues']]
+
+
+def test_an_audit_export_with_label_issues_fits_where_the_same_draft_without_them_fits(analysis, tmp_path, monkeypatch):
+    """The audit export embeds the stored check as JSON. Main stores no estimate_label_unplaced issue, so the room
+    the projection gives covers those too: a draft whose rounded copy raises one exports in audit mode wherever a
+    draft of the same size that raises none does."""
+    import foundry.report_documents as documents
+
+    case = _case(analysis, tmp_path)
+    reported = _save(case, REFERENCE + '\n\n华东区域同期预算约 117,815 万元。', presented=False)
+    silent = _save(case, REFERENCE + '\n\n华东区域同期预算约 117,999 万元。', presented=False)
+    assert len(_unplaced(reported)) == 1 and _unplaced(silent) == []
+
+    limit = len(_document_text(analysis.report_projection(silent['id'], mode='audit')['document']))
+    monkeypatch.setattr(documents, 'MAX_DOCUMENT_TEXT', limit)
+
+    projection = analysis.report_projection(reported['id'], mode='audit')
+    assert '估算标注待核对' in projection['body']
+    for fmt in ('md', 'xlsx'):
+        assert analysis.export_draft(reported['id'], fmt, mode='audit')['path']

@@ -24,8 +24,8 @@ MAX_REPAIRS = 2
 #     compares a finance run converted with policies.target_unit in the unit the engine wrote.
 # 13: exports label estimates 估算 (issue #24) where the text (body, limitations, title) binds them. A number
 #     bound to no cell that equals an estimate as rounded, an estimate in a code block, or one written only as a
-#     number a counted cell also states cannot be labelled and is an estimate_label_unplaced issue the
-#     assistant repairs.
+#     number a counted cell also states cannot be labelled and, unless the text calls it 估算, is an
+#     estimate_label_unplaced issue the assistant repairs.
 COMPLETION_POLICY_VERSION = 13
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
