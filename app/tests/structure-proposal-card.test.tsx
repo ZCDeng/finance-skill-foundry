@@ -74,6 +74,19 @@ describe('structure confirmation card', () => {
     expect(spec.sheets[0].header_row).toBe(6);
   });
 
+  it('says it is working while the confirmed structure is applied', async () => {
+    let settle: (value: unknown) => void = () => {};
+    financeCall.mockReturnValueOnce(new Promise((resolve) => { settle = resolve; }));
+    const onSettled = vi.fn();
+    render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={proposal([ledger()])}
+      busy={false} onSettled={onSettled} />);
+    fireEvent.click(screen.getByRole('button', { name: /确认表结构/ }));
+    expect((await screen.findByRole('status')).textContent).toBe('正在按确认的结构整理数据…');
+    settle({ ok: true, value: {} });
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText('正在按确认的结构整理数据…')).toBeNull());
+  });
+
   it('will not confirm while a kept sheet has no debit or credit side', () => {
     const undecided = ledger({
       sheet: '余额表',

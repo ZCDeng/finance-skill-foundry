@@ -597,6 +597,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   const [policy, setPolicy] = useState<'snapshot_only' | 'business_key'>('snapshot_only');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {
     const api = bridge(); if (!api?.financeCall) return;
     const answer = unwrap(await api.financeCall(taskId, 'finance-source-list') as Answer<{ batches: FinanceSourceBatch[] }>);
@@ -604,6 +605,8 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   }, [taskId]);
   useEffect(() => { void load().catch(() => {}); }, [load]);
   async function refreshSource() {
+    if (refreshing) return;
+    setRefreshing(true);
     try {
       const api = bridge(); if (!api?.financeSourceRefresh) throw new Error('此版本暂不支持刷新财务来源文件。');
       setError(''); setMessage('');
@@ -620,6 +623,8 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
         : '文件内容与已发布快照一致，已保留原结果引用。');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setRefreshing(false);
     }
   }
   const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
@@ -628,7 +633,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
     <summary><span><span className="analysis-source-refresh-title">更新 ERP 来源</span>
       <span className="analysis-note">已有来源导出变化时，生成新的资料版本；旧运行仍引用旧快照。</span></span>
       <ChevronDown size={16} aria-hidden /></summary>
-    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+    <fieldset className="analysis-fieldset" disabled={busy || refreshing}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
       <TextField label="账簿" value={scope.ledger_id} onChange={(value) => setScope({ ...scope, ledger_id: value })} />
@@ -646,8 +651,9 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
       <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
         <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>
-    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !ready} onClick={() => void refreshSource()}>
-      <RefreshCw size={14} aria-hidden />选择文件并刷新</Button></div>
+    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
+      <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>
+      {refreshing && <span role="status" className="analysis-note"><WaitOrb state="working" />正在选择文件并刷新来源…</span>}</div>
     {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
@@ -678,6 +684,14 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
   const [readResult, setReadResult] = useState<Record<string, unknown> | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  // What the panel is doing, in words; every action below waits on the foundry.
+  const [running, setRunning] = useState('');
+  const locked = busy || Boolean(running);
+  const track = (label: string, work: () => Promise<void>) => {
+    if (running) return;
+    setRunning(label);
+    void work().finally(() => setRunning(''));
+  };
   const workbookRequest = useRef(0);
   const workbookPreviewMounted = useRef(false);
   const workbookDatasetMounted = useRef(false);
@@ -773,7 +787,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
   const conflictCells = cells.filter((cell) => cell.conflict === true && cell.cell);
   return <section className="analysis-workbook-panel" aria-label="Excel 协作">
     <div className="analysis-section-heading"><div><h3>Excel 协作</h3><p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p></div></div>
-    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+    <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="工作簿资料" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="搜索工作簿名或快照" />
       <TextField label="绑定编号" value={bindingId} onChange={setBindingId} placeholder="读取、预览或应用已有绑定" />
       <FieldShell label="区域类型"><select aria-label="区域类型" className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
@@ -795,19 +809,21 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
     </div></details></fieldset>
     <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
     <div className="analysis-actions">
-      <Button variant="outline" type="button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
-      <Button variant="outline" type="button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId || !contextId} onClick={() => void circleSelect()}>改成开票口径</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</Button>
-      <Button type="button" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</Button>
+      <Button variant="outline" type="button" disabled={locked || !datasetId} onClick={() => track('正在检查工作簿结构…', inspect)}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
+      <Button variant="outline" type="button" disabled={locked || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => track('正在保存绑定…', bind)}>保存绑定</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId || !contextId} onClick={() => track('正在按圈选生成开票口径修订…', circleSelect)}>改成开票口径</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在读取绑定区域…', read)}>读取区域</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在生成写回预览…', previewPatch)}>预览写回</Button>
+      <Button type="button" disabled={locked || !preview?.patch_id} onClick={() => track('正在生成工作簿…', applyPatch)}>生成工作簿</Button>
+      {running && <span role="status" className="analysis-note"><WaitOrb state="working" />{running}</span>}
     </div>
     {inspection && <details className="analysis-details" open><summary>工作簿结构</summary>
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
       {Array.isArray(inspection.unsupported_features) && inspection.unsupported_features.length > 0 && <p>需生成独立结果工作簿：{inspection.unsupported_features.map(textValue).join('、')}</p>}
     </details>}
     {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" />}
-    {cells.length > 0 && <Table columns={[{ name: 'cell', type: 'VARCHAR' }, { name: 'field', type: 'VARCHAR' }, { name: 'old_value', type: 'VARCHAR' }, { name: 'new_value', type: 'VARCHAR' }, { name: 'conflict', type: 'BOOLEAN' }]} rows={cells} caption="写回预览" />}
+    {cells.length > 0 && <Table columns={[{ name: '单元格', type: 'VARCHAR' }, { name: '字段', type: 'VARCHAR' }, { name: '原值', type: 'VARCHAR' }, { name: '新值', type: 'VARCHAR' }, { name: '冲突', type: 'VARCHAR' }]}
+      rows={cells.map((cell) => ({ 单元格: cell.cell, 字段: cell.field, 原值: cell.old_value, 新值: cell.new_value, 冲突: cell.conflict === true ? '是' : '否' }))} caption="写回预览" />}
     {conflictCells.length > 0 && <div className="analysis-workbook-conflicts" aria-label="写回冲突处理">
       <strong>冲突处理</strong>
       {conflictCells.map((cell) => {

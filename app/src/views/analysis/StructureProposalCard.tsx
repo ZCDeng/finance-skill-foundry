@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, FileSpreadsheet, RotateCcw, X } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
+import { WaitOrb } from '../../components/WaitOrb.js';
 import { Input } from '../../components/ui/input.js';
 
 /** One column of a sheet, as the engine read it. */
@@ -451,6 +452,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
           onClick={() => void confirm()}>
           <Check size={15} strokeWidth={1.5} aria-hidden />确认表结构
         </Button>
+        {working && <span role="status" className="analysis-note"><WaitOrb state="working" />正在按确认的结构整理数据…</span>}
         {blocking.length > 0 && (
           <span className="analysis-note">先为 {blocking.map((sheet) => sheet.sheet).join('、')} 选定借贷方向。</span>
         )}
@@ -504,6 +506,7 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
         表已经可以计算，追认只是把这条记录归到你名下。
       </p>
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
+      {working && <p role="status" className="analysis-note"><WaitOrb state="working" />正在保存你的决定…</p>}
       <div className="analysis-structure-actions">
         <Button type="button" disabled={locked} onClick={() => void settle('structure-acknowledge')}>
           <Check size={15} strokeWidth={1.5} aria-hidden />追认

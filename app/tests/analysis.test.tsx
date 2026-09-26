@@ -891,6 +891,27 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByRole('tab', { name: /资料/ }).getAttribute('aria-selected')).toBe('false');
   });
 
+  it('says the ERP source refresh is running and locks it until the file is in', async () => {
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeSourceRefresh = vi.fn(() => gate.promise);
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState: async () => success(initial), financeSourceRefresh, financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await openSourceRefreshDetails();
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    const refresh = screen.getByRole('button', { name: /选择文件并刷新/ });
+    fireEvent.click(refresh);
+    expect(await screen.findByText('正在选择文件并刷新来源…')).toBeTruthy();
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => gate.resolve(success({ cancelled: true })));
+    await screen.findByText('已取消刷新。');
+    expect(screen.queryByText('正在选择文件并刷新来源…')).toBeNull();
+    expect(financeSourceRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('does not let a delayed source refresh from the previous task replace the current draft', async () => {
     const other = { ...task, id: '8'.repeat(32), title: '西南经营分析' };
     const refreshGate = deferred<Answer<AnalysisState>>();
@@ -1963,11 +1984,39 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-read', { binding_id: 'bind-1', dataset_id: refreshedWorkbook.id });
     fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
     await screen.findByText('B2');
+    const previewTable = screen.getByRole('table', { name: '写回预览' });
+    expect(within(previewTable).getByRole('columnheader', { name: '原值' })).toBeTruthy();
+    expect(within(previewTable).queryByRole('columnheader', { name: 'old_value' })).toBeNull();
+    expect(within(previewTable).getByRole('cell', { name: '是' })).toBeTruthy();
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-preview', expect.objectContaining({ binding_id: 'bind-1', dataset_id: refreshedWorkbook.id }));
     expect((screen.getByLabelText(/B2 · 原值/) as HTMLSelectElement).value).toBe('keep');
     fireEvent.change(screen.getByLabelText(/B2 · 原值/), { target: { value: 'apply' } });
     fireEvent.click(screen.getByRole('button', { name: '生成工作簿' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-apply', { patch_id: 'patch-1', resolutions: { B2: 'apply' } }));
+  });
+
+  it('says what the Excel panel is doing and locks it until the foundry answers', async () => {
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-source-list') return success({ batches: [] });
+      if (command === 'workbook-inspect') return gate.promise;
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    const inspect = screen.getByRole('button', { name: /检查结构/ });
+    fireEvent.click(inspect);
+    const panel = screen.getByRole('region', { name: 'Excel 协作' });
+    expect((await within(panel).findByRole('status')).textContent).toBe('正在检查工作簿结构…');
+    expect((inspect as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(inspect);
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'workbook-inspect')).toHaveLength(1);
+    await act(async () => gate.resolve(success({ sheet_names: ['Sheet1'], tables: [], named_ranges: [], unsupported_features: [] })));
+    await within(panel).findByText(/工作表：Sheet1/);
+    expect(within(panel).queryByText('正在检查工作簿结构…')).toBeNull();
+    expect((inspect as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('ignores stale Excel writeback previews after the target snapshot changes', async () => {
