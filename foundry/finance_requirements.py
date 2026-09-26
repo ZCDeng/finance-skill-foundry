@@ -1586,12 +1586,39 @@ def _closure_not_counted_reason(analysis, run):
         if signs not in (None, {}) and (not isinstance(signs, dict) or not all(
                 _unit_sign(value) for key, value in signs.items() if str(key) in BRIDGE_SIGNED_LINES)):
             return 'account_signs_not_unit'
-    comparison = result.get('comparison') if isinstance(result.get('comparison'), dict) else {}
-    if (comparison.get('actual_scenario') is not None
-            and comparison.get('actual_scenario') == comparison.get('baseline_scenario')
-            and (comparison.get('actual_filters') or {}) == (comparison.get('baseline_filters') or {})):
+    if _same_side_comparison(result):
         return 'comparison_same_side'
     return None
+
+
+def _same_side_comparison(result):
+    """Both sides select the same rows: one scenario, and the sides' scopes as the engine read them off the rows
+    (ledger, organization, period, currency, unit) are the same on every bridge row, whatever filters restate
+    them. A year-on-year bridge differs in its period. Rows without side scopes (the price-quantity bridge)
+    compare the two sides' filters."""
+    comparison = result.get('comparison') if isinstance(result.get('comparison'), dict) else {}
+    scenario = comparison.get('actual_scenario')
+    if scenario is None or scenario != comparison.get('baseline_scenario'):
+        return False
+    rows = [row for row in result.get('rows') or [] if isinstance(row, dict)
+            and isinstance(row.get('actual_scope'), dict) and isinstance(row.get('baseline_scope'), dict)]
+    if rows:
+        return all(_without_filters(row['actual_scope']) == _without_filters(row['baseline_scope']) for row in rows)
+    return _filter_sets(comparison.get('actual_filters')) == _filter_sets(comparison.get('baseline_filters'))
+
+
+def _without_filters(scope):
+    return {key: value for key, value in scope.items() if key != 'filters'}
+
+
+def _filter_sets(filters):
+    if not isinstance(filters, dict):
+        return filters
+    try:
+        return {key: frozenset(value if isinstance(value, (list, tuple, set, frozenset)) else [value])
+                for key, value in filters.items()}
+    except TypeError:
+        return filters
 
 
 def _unit_sign(value):
@@ -1610,7 +1637,7 @@ def _comparison_filters_cover(item, run, scope):
     """Whether an explain_variance run compares the rows the requirement asks for (issue #26).
 
     Each side's filters may only restate what the requirement pins: the item's own dimensions, organizations,
-    periods and scenarios, and the scope's values for that side. A filter on a field the requirement never
+    periods and scenarios, the scope's values for that side, and the side's own scenario. A filter on a field the requirement never
     names (a source row, a product it does not ask for) makes the bridge a bridge of that subset; it still
     closes, but it is not the requirement's amount. On the baseline side a field the requirement pins only for
     the actual side (a flat scope's period) is the comparison's baseline, as the scope match reads it.
@@ -1632,6 +1659,8 @@ def _comparison_filters_cover(item, run, scope):
             except TypeError:
                 return False
             listed = item.get(GRAIN_FIELD_LISTS.get(key, '')) or []
+            if key == 'scenario' and values <= {comparison.get(f'{side}_scenario')}:
+                continue  # the side's own scenario, which already selects its rows
             if key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
                 required = dimensions[key]
             elif key in expected[side]:

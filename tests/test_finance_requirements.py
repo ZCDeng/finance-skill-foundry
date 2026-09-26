@@ -2506,10 +2506,18 @@ def test_a_bridge_over_part_of_the_rows_does_not_answer_the_whole_scope(tmp_path
     assert '差异桥闭合的是这部分行' in _unanswered_message(result['items'][0])
 
 
-def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path):
+@pytest.mark.parametrize('filters', [
+    {},
+    # Filters that restate the scope on one side, or write the same value as a list, select the same rows.
+    {'baseline_filters': {'organization': 'O1'}},
+    {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': ['2026-09']}},
+    {'actual_filters': {'ledger': 'L1'}},
+])
+def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path, filters):
     """Issue #26: with a flat scope (the Huachen style) nothing names the sides, and budget against budget
     closes at 0."""
-    result, contributions = _bridge_check(tmp_path, 'flat', {'actual_scenario': 'budget', 'baseline_scenario': 'budget'})
+    result, contributions = _bridge_check(tmp_path, 'flat', {'actual_scenario': 'budget', 'baseline_scenario': 'budget',
+                                                             **filters})
 
     assert contributions == {'revenue': '0', 'profit': '0'}
     reason = [('engine_output', 'comparison_same_side')]
@@ -2523,6 +2531,11 @@ def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path):
     ('two_sided', {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': '2026-09'}}, ('120', '80')),
     ('flat', {'actual_filters': {'organization': 'O1', 'period': '2026-09', 'ledger': 'L1'},
               'baseline_filters': {'organization': 'O1'}}, ('120', '80')),
+    # Each side's own scenario restated (tests/test_finance_evals.py calls explain_variance this way).
+    ('flat', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
+    ('flat', {'actual_filters': {'scenario': ['actual'], 'period': '2026-09'},
+              'baseline_filters': {'scenario': 'budget', 'period': ['2026-09']}}, ('120', '80')),
+    ('two_sided', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
     # Year on year: one scenario, two periods. A flat scope pins only the actual period, as on main.
     ('flat', {'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
               'baseline_filters': {'period': '2025-09'}}, ('70', '45')),
@@ -2531,7 +2544,8 @@ def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path):
       'baseline_filters': {'period': '2025-09'}}, ('70', '45')),
 ])
 def test_bridge_filters_that_restate_the_requirement_still_answer(tmp_path, scope, variance, expected):
-    result, contributions = _bridge_check(tmp_path, scope, variance, prior=True)
+    # The prior year's rows only for the year-on-year cases; elsewhere they would be a period with no budget.
+    result, contributions = _bridge_check(tmp_path, scope, variance, prior=expected == ('70', '45'))
 
     assert contributions == {'revenue': expected[0], 'profit': expected[1]}
     closed = [('engine_closed', None)]
@@ -2552,6 +2566,20 @@ def test_the_profit_bridge_intent_is_not_answered_by_a_bridge_over_part_of_the_r
     item = result['items'][0]
     assert item['status'] == 'pending' and result['coverage']['status'] == 'needs_attention'
     assert {location['evidence'].get('not_counted_reason') for location in item['locations']} == {'comparison_filters_differ'}
+
+
+def test_the_profit_bridge_intent_still_answers_a_bridge_whose_filters_restate_each_sides_scenario(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='scenario-restated-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context,
+                                  actual_filters={'organization': '华东', 'period': '2026-08', 'scenario': 'actual'},
+                                  baseline_filters={'organization': '华东', 'period': '2026-08', 'scenario': 'budget'})
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['items'][0]['status'] == 'answered' and result['coverage']['status'] == 'pass'
 
 
 def test_the_profit_bridge_intent_is_not_answered_by_a_bridge_with_scaled_lines(tmp_path):
