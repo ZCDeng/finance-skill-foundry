@@ -1057,7 +1057,7 @@ def _prepared_evidence(analysis, runs):
                 'aggregate_output': engine == 'structured_aggregate',
                 # Which aggregation the cited measure column is (sum, count, min …), for _aggregate_statistic_of_money.
                 **({'aggregate_measure': _aggregate_measure(run, member.get('column')),
-                    'aggregate_rows': _aggregate_row_count(run, member.get('row'))}
+                    'aggregate_rows': _aggregate_row_count(run, member.get('row'), member.get('column'))}
                    if engine == 'structured_aggregate' else {}),
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
@@ -1785,11 +1785,20 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
 
 
-def _aggregate_row_count(run, row):
-    """How many source rows the aggregate's output row `row` summarises, or None."""
-    rows = (run.get('result') or {}).get('rows') or []
+def _aggregate_row_count(run, row, column):
+    """How many source rows with a value for measure `column` the aggregate's output row `row` summarises (its
+    included detail rows), or its source rows where the run keeps no detail rows; None if unknown."""
+    result = run.get('result') or {}
+    rows = result.get('rows') or []
     output = rows[row] if isinstance(row, int) and not isinstance(row, bool) and 0 <= row < len(rows) else None
-    sources = output.get('source_rows') if isinstance(output, dict) else None
+    if not isinstance(output, dict):
+        return None
+    details = result.get('detail_rows')
+    if isinstance(details, list) and output.get('result_key') is not None:
+        return sum(1 for detail in details if isinstance(detail, dict)
+                   and detail.get('result_key') == output['result_key'] and detail.get('included', True)
+                   and (detail.get('measure_values') or {}).get(column) not in (None, ''))
+    sources = output.get('source_rows')
     return len(sources) if isinstance(sources, list) else None
 
 
@@ -1810,13 +1819,16 @@ MONEY_HEAD_WORDS = frozenset({
     'amount', 'amounts', 'balance', 'balances', 'revenue', 'revenues', 'income', 'gains', 'cost', 'costs', 'expense',
     'expenses', 'profit', 'profits', 'cash', 'receivable', 'receivables', 'payable', 'payables',
 })
-COUNT_UNIT_STEMS = ('数', '笔', '户', '个', '次', '张', '件', '家', '人', '份', '条', '项', '单')
-COUNT_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'nums', 'cnt', 'qty', 'quantity', 'quantities'})
-EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '最贵', '最便宜', '峰值', '高点', '低点',
-                 '顶峰', '谷底', '上限', '下限', '极大', '极小', '第一大')
+# Cues, anywhere in the metric or the item's label, that the item asks for a count or for one row's extreme. They
+# are read broadly: a cue only ever leaves an item as on main.
+COUNT_CUES = ('数', '笔', '次', '户', '个', '件', '张', '家', '条', '项', '量', '多少', '＃', '#')
+COUNT_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'nums', 'cnt', 'qty', 'quantity', 'quantities',
+                         'pcs', 'no', 'many', 'frequency', 'times', 'occurrences'})
+EXTREME_CUES = ('最', '峰', '谷', '极', '顶', '底', '高点', '低点', '高位', '低位', '上限', '下限', '第一', '单笔')
 EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'maximal', 'minimal', 'largest', 'smallest', 'highest',
                            'lowest', 'peak', 'top', 'most', 'least', 'greatest', 'biggest', 'cheapest', 'priciest',
-                           'ceiling', 'floor', 'upper', 'lower', 'record', 'extreme'})
+                           'ceiling', 'floor', 'upper', 'lower', 'record', 'extreme', 'trough', 'bottom', 'high', 'low',
+                           'first', 'single'})
 BRACKETED_TAIL = re.compile(r'\s*[（(【\[]([^（）()【】\[\]]*)[)）】\]]\s*$')
 
 
@@ -1848,24 +1860,22 @@ def _money_head(metric):
 
 
 def _asks_for_statistic(name, aggregation):
-    """Whether a name (or label) asks for a count (笔数, （笔）, （户数）, number_of_…, #) or, for min/max, an extreme."""
+    """Whether a name (or label) carries any cue that it asks for a count, or, for min/max, for an extreme."""
     text = str(name or '').strip()
     if not text:
         return False
     words = set(_label_words(text))
     if aggregation in {'min', 'max'}:
-        return any(stem in text for stem in EXTREME_STEMS) or bool(words & EXTREME_WORDS)
-    head, units = _name_parts(text)
-    return (head.rstrip().endswith(('数', '数量', '笔', '次')) or '#' in text or bool(words & COUNT_WORDS)
-            or any(unit.endswith(COUNT_UNIT_STEMS) for unit in units))
+        return any(cue in text for cue in EXTREME_CUES) or bool(words & EXTREME_WORDS)
+    return any(cue in text for cue in COUNT_CUES) or bool(words & COUNT_WORDS)
 
 
 def _aggregate_statistic_of_money(item, member):
     """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name asks for
     money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28);
-    only a sum states the amount itself. Where the item's name, a bracketed unit or its label asks for that
-    statistic (应收金额笔数, 逾期应收款（笔）, number_of_receivables, 单笔最大应收金额), or the minimum or maximum is
-    of one source row, it answers as on main.
+    only a sum states the amount itself. Where the metric or the item's label carries any cue for that statistic
+    (应收金额笔数, 逾期应收款（笔）, number_of_receivables, 单笔最大应收金额), or the minimum or maximum is of one
+    source row, it answers as on main.
     """
     aggregation = member.get('aggregate_measure')
     if not member.get('aggregate_output') or aggregation in (None, 'sum'):
@@ -1873,7 +1883,7 @@ def _aggregate_statistic_of_money(item, member):
     if any(_asks_for_statistic(item.get(field), aggregation) for field in ('metric', 'label')):
         return False
     if aggregation in {'min', 'max'} and member.get('aggregate_rows') == 1:
-        return False  # the minimum or maximum of one row is that row's amount
+        return False  # the minimum or maximum of one row's value is that row's amount
     return _money_head(item.get('metric'))
 
 

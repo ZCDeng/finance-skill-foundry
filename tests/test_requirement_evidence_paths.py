@@ -4118,15 +4118,15 @@ def test_the_precision_guidance_states_the_decimal_38_cap_a_run_stores():
 # --- a count, minimum or maximum is not the amount an item names (issue #28) --------------------------------------
 
 
-def _measure_case(tmp_path, metric, aggregation, label=None, group_by=()):
+def _measure_case(tmp_path, metric, aggregation, label=None, group_by=(), rows=None):
     """Two receivables of 120.50 and 80.25 万元 (total 200.75) and one structured_aggregate measure named after
     the item, of the given aggregation, every row verified."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     task = TaskStore(tmp_path / 'var').create(title='汇总度量')
     analysis = AnalysisStore(task)
     path = tmp_path / 'ar.json'
-    path.write_text(json.dumps([{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
-                                {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]),
+    path.write_text(json.dumps(rows or [{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+                                        {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]),
                     encoding='utf-8')
     dataset = analysis.add_dataset(path, name='actual')
     requirement = save_requirements(analysis, {'question': metric, 'bindings': {'actual': dataset['id']},
@@ -4189,6 +4189,9 @@ def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp
     ('number_of_receivables', 'count'), ('count_of_payables', 'count'), ('num_receivables', 'count'),
     ('最贵单价', 'max'), ('cheapest_price', 'min'), ('maximal_balance', 'max'), ('历史高点余额', 'max'),
     ('upper_bound_amount', 'max'),
+    # Cues anywhere in the name (review round 4 of #38).
+    ('no_of_receivables', 'count'), ('how_many_receivables', 'count'), ('应收账款（pcs）', 'count'),
+    ('应收余额低谷', 'min'), ('应收余额高峰', 'max'), ('receivable_balance_trough', 'min'), ('low_point_balance', 'min'),
     # Not money: a unit price, quota places, distinct values.
     ('单价', 'max'), ('unit_price', 'min'), ('招聘名额', 'count'), ('unique_values', 'count_distinct'),
 ])
@@ -4201,6 +4204,8 @@ def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric
 
 @pytest.mark.parametrize('metric, label, aggregation', [
     ('overdue_receivables', '逾期应收款笔数', 'count'),
+    ('overdue_receivables', '统计逾期应收款的笔数及占比', 'count'),
+    ('receivable_balance', '应收账款余额的历史高峰', 'max'),
     ('receivable_balance', '单笔最大应收余额（万元）', 'max'),
     ('应收账款', '应收账款笔数', 'count'),
 ])
@@ -4218,4 +4223,16 @@ def test_the_extreme_of_one_row_is_that_rows_amount(tmp_path, aggregation):
     result, value = _measure_case(tmp_path, '应收账款余额', aggregation, group_by=('customer',))
 
     assert value in {'120.50', '80.25', '120.5'}
+    assert _item(result)['status'] == 'answered'
+
+
+@pytest.mark.parametrize('aggregation', ['max', 'min'])
+def test_the_extreme_of_one_non_blank_row_is_that_rows_amount(tmp_path, aggregation):
+    """Review round 4 of #38: the group has two rows, one with no amount; its min or max is the other row's."""
+    rows = [{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+            {'customer': 'C1', 'amount': None, 'currency': 'CNY', 'unit': '万元'},
+            {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]
+    result, value = _measure_case(tmp_path, '应收账款余额', aggregation, group_by=('customer',), rows=rows)
+
+    assert value in {'120.50', '120.5'}
     assert _item(result)['status'] == 'answered'
