@@ -3237,6 +3237,79 @@ def test_an_account_total_filtered_only_to_the_items_own_scope_still_answers(tmp
     assert result['coverage']['status'] == 'pass'
 
 
+# --- account_total never answers the four P&L lines, whatever the item calls them (issue #27) -----------------
+
+PNL_LINE_NAMES = ['营业收入', 'Revenue', 'REVENUE', 'operating_revenue', '净利润', '营业利润', 'Profit', '营业成本',
+                  '期间费用', 'Expense']
+# Ledger account names: the engine's account_total is their answer (test_the_finance_engines_own_account_total_…).
+LEDGER_ACCOUNT_NAMES = ['管理费用', '销售费用', '主营业务成本', '主营业务收入', '其他收益', 'cash']
+
+
+def _all_rows_account_total(case, account):
+    run = case.service.run_metric({'context_id': case.context['id'],
+                                   'metric': {'kind': 'account_total', 'accounts': [account]}})
+    _verify_run_column(case.service, run, 'amount')
+    return run, _claims_for_columns(run, 'amount')
+
+
+@pytest.mark.parametrize('account', PNL_LINE_NAMES)
+def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_result_set_path(tmp_path, account):
+    """Issue #27: the result-set path took any metric outside METRIC_LABELS' keys as a ledger account, so an
+    item named 营业收入, Revenue or 净利润 with organizations/periods/scenarios was answered by run_metric
+    account_total rows (every row cited and drilled) and the draft completed, while `revenue` stayed pending."""
+    case = _pnl_account_case(tmp_path, account)
+    run, claims = _all_rows_account_total(case, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': claims})
+    item = _item(result)
+    draft = case.service.save_explanation_draft({'title': 't', 'body': f'8 月{account} {claims[0]["value"]} 元。',
+                                                 'run_ids': [run['id']], 'claims': claims})
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] == 'pending' and result['coverage']['status'] == 'needs_attention'
+    assert {location['evidence'].get('not_counted_reason') for location in item['locations']} == {
+        'engine_output_without_closure'}
+    assert not {'run_metric_result_set', 'run_metric_account_total'} & set(support['accepted_evidence'])
+    assert 'account_total' not in support.get('evidence', '')
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+@pytest.mark.parametrize('account', PNL_LINE_NAMES)
+def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_native_total_path(tmp_path, account):
+    """Issue #27, dimensions.period: the native-total branch answered 营业收入 by engine_output before its P&L
+    class was checked, and the support record offered run_metric_account_total for it."""
+    case = _ledger_account_case(tmp_path, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [case.run['id']], 'claims': case.claims})
+    item = _item(result)
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] != 'answered' and result['coverage']['status'] == 'needs_attention'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'engine_output_without_closure'
+    assert 'run_metric_account_total' not in support['accepted_evidence']
+    assert 'account_total' not in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('account', LEDGER_ACCOUNT_NAMES)
+def test_account_total_still_answers_a_ledger_account_on_both_paths(tmp_path, account):
+    """Opposite direction: a ledger account is named by the ledger, even when its name contains 成本, 费用 or
+    收入 (主营业务成本) or is another named amount's alias (其他收益); its own account_total answers it."""
+    native = _ledger_account_case(tmp_path / 'native', account)
+    result = check_requirements(native.service.analysis, {'requirements_id': native.requirement['id'],
+                                                          'run_ids': [native.run['id']], 'claims': native.claims})
+    assert _item(result)['status'] == 'answered'
+    assert _item(result)['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+    assert native.requirement['support']['items'][0]['accepted_evidence'][0] == 'run_metric_account_total'
+
+    case = _pnl_account_case(tmp_path / 'set', account)
+    run, claims = _all_rows_account_total(case, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': claims})
+    assert _item(result)['status'] == 'answered' and result['coverage']['status'] == 'pass'
+    assert case.requirement['support']['items'][0]['accepted_evidence'][0] == 'run_metric_result_set'
+
+
 def _estimate_beside_source(analysis, tmp_path, *, cite_estimate=True):
     """_estimate_case plus a sixth row that states 华东区域 budget_1_8 as 05!C5 (180576) by a direct recipe."""
     case = _estimate_case(analysis, tmp_path)

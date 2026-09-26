@@ -126,7 +126,9 @@ def assess_requirement_support(analysis, spec):
                              "reason": "snapshot_unverified"})
     reports = []
     source_columns = {column for source in sources for column in source["columns"]}
-    from foundry.finance_requirements import _closed_metric_key, _evidence_environment, _evidence_paths, _pnl_class
+    from foundry.finance_requirements import (
+        _closed_metric_key, _evidence_environment, _evidence_paths, _native_account_item, _pnl_class,
+    )
 
     try:
         environment = _evidence_environment(analysis, spec)
@@ -148,7 +150,7 @@ def assess_requirement_support(analysis, spec):
                     report.update(status="unrecognized", next_action=(
                         "未识别的指标按金额核验：可选择已支持指标，或用SQL/Python计算并声明明确的结果列，再按下述依据作答。"
                         + report["next_action"]))
-            elif metric in accounts:
+            elif metric in accounts and _native_account_item(item):
                 report["evidence"] = "run_metric_result_set (single account_total)"
             elif metric in source_columns:
                 report["evidence"] = "cited_result_row (explicit result column)"
