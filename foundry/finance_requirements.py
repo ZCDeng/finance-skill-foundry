@@ -1056,7 +1056,8 @@ def _prepared_evidence(analysis, runs):
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
                 'aggregate_output': engine == 'structured_aggregate',
                 # Which aggregation the cited measure column is (sum, count, min …), for _aggregate_statistic_of_money.
-                **({'aggregate_measure': _aggregate_measure(run, member.get('column'))}
+                **({'aggregate_measure': _aggregate_measure(run, member.get('column')),
+                    'aggregate_rows': _aggregate_row_count(run, member.get('row'))}
                    if engine == 'structured_aggregate' else {}),
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
@@ -1784,6 +1785,14 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
 
 
+def _aggregate_row_count(run, row):
+    """How many source rows the aggregate's output row `row` summarises, or None."""
+    rows = (run.get('result') or {}).get('rows') or []
+    output = rows[row] if isinstance(row, int) and not isinstance(row, bool) and 0 <= row < len(rows) else None
+    sources = output.get('source_rows') if isinstance(output, dict) else None
+    return len(sources) if isinstance(sources, list) else None
+
+
 def _aggregate_measure(run, column):
     """The aggregation of a structured_aggregate measure column, or None for any other column."""
     plan = run.get('aggregate_plan') if isinstance(run.get('aggregate_plan'), dict) else {}
@@ -1792,56 +1801,80 @@ def _aggregate_measure(run, column):
                  if isinstance(measure, dict) and measure.get('name') == column), None)
 
 
-# The head (last word, after any bracketed unit) of a name that asks for money: an amount, a balance, a P&L
-# line, an account, cash (issue #28). Names ending in anything else (笔数, 次数, 峰值, count, ceiling …) are left
-# as on main. And names that ask for one row's extreme, which a minimum or maximum answers.
-MONEY_HEAD_STEMS = ('额', '收入', '收益', '损益', '成本', '费用', '利润', '价值', '款', '价', '现金', '资金')
+# Issue #28: a structured_aggregate count, distinct count, minimum or maximum does not answer an item whose name
+# asks for money, unless its name, bracketed unit or label asks for that statistic. The default is main's: only a
+# name ending in an unambiguous money word is refused.
+MONEY_HEAD_STEMS = ('余额', '金额', '总额', '净额', '发生额', '账款', '应收款', '应付款', '预付款', '预收款', '收入',
+                    '收益', '损益', '成本', '费用', '利润', '现金', '资金')
 MONEY_HEAD_WORDS = frozenset({
-    'amount', 'amounts', 'balance', 'balances', 'value', 'values', 'revenue', 'revenues', 'income', 'gains', 'cost',
-    'costs', 'expense', 'expenses', 'profit', 'profits', 'price', 'prices', 'cash', 'receivable', 'receivables',
-    'payable', 'payables',
+    'amount', 'amounts', 'balance', 'balances', 'revenue', 'revenues', 'income', 'gains', 'cost', 'costs', 'expense',
+    'expenses', 'profit', 'profits', 'cash', 'receivable', 'receivables', 'payable', 'payables',
 })
-EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '峰值', '上限', '下限', '极大', '极小',
-                 '第一大')
-EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'largest', 'smallest', 'highest', 'lowest', 'peak',
-                           'top', 'most', 'least', 'greatest', 'biggest', 'ceiling', 'floor'})
+COUNT_UNIT_STEMS = ('数', '笔', '户', '个', '次', '张', '件', '家', '人', '份', '条', '项', '单')
+COUNT_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'nums', 'cnt', 'qty', 'quantity', 'quantities'})
+EXTREME_STEMS = ('最大', '最小', '最高', '最低', '最多', '最少', '最长', '最短', '最贵', '最便宜', '峰值', '高点', '低点',
+                 '顶峰', '谷底', '上限', '下限', '极大', '极小', '第一大')
+EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'maximal', 'minimal', 'largest', 'smallest', 'highest',
+                           'lowest', 'peak', 'top', 'most', 'least', 'greatest', 'biggest', 'cheapest', 'priciest',
+                           'ceiling', 'floor', 'upper', 'lower', 'record', 'extreme'})
+BRACKETED_TAIL = re.compile(r'\s*[（(【\[]([^（）()【】\[\]]*)[)）】\]]\s*$')
+
+
+def _name_parts(name):
+    """A name without its trailing bracketed units, and those units (应收账款余额（笔）→ 应收账款余额, ['笔'])."""
+    text = str(name or '').strip()
+    units = []
+    while True:
+        match = BRACKETED_TAIL.search(text)
+        if not match:
+            return text, units
+        units.append(match.group(1).strip())
+        text = text[:match.start()]
 
 
 def _money_head(metric):
-    """Whether a metric name ends by asking for money: 应收账款余额, 应收金额, 其他收益, other_income,
-    receivable_balance, 其他应收款. A named amount (METRIC_LABELS) counts whatever its spelling."""
+    """Whether a metric name asks for money: a named amount (METRIC_LABELS, other_income, 其他收益) or a name that
+    ends, before any bracketed unit, in an unambiguous money word (应收账款余额, 应收金额, receivable_balance)."""
     text = str(metric or '').strip()
     lowered = text.lower()
     if any(lowered == key or lowered in {str(alias).lower() for alias in aliases}
            for key, aliases in METRIC_LABELS.items() if key not in NON_AMOUNT_METRICS):
         return True
-    while True:
-        match = re.search(r'\s*[（(][^（）()]*[)）]\s*$', text)
-        if not match:
-            break
-        text = text[:match.start()]
-    if re.search(r'[\u4e00-\u9fff]\s*$', text):
-        return text.rstrip().endswith(MONEY_HEAD_STEMS)
-    words = _label_words(text)
+    head, _units = _name_parts(text)
+    if re.search(r'[\u4e00-\u9fff]\s*$', head):
+        return head.rstrip().endswith(MONEY_HEAD_STEMS)
+    words = _label_words(head)
     return bool(words) and words[-1] in MONEY_HEAD_WORDS
 
 
-def _aggregate_statistic_of_money(item, member):
-    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name ends by
-    asking for money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that
-    amount (issue #28); only a sum states the amount itself.
+def _asks_for_statistic(name, aggregation):
+    """Whether a name (or label) asks for a count (笔数, （笔）, （户数）, number_of_…, #) or, for min/max, an extreme."""
+    text = str(name or '').strip()
+    if not text:
+        return False
+    words = set(_label_words(text))
+    if aggregation in {'min', 'max'}:
+        return any(stem in text for stem in EXTREME_STEMS) or bool(words & EXTREME_WORDS)
+    head, units = _name_parts(text)
+    return (head.rstrip().endswith(('数', '数量', '笔', '次')) or '#' in text or bool(words & COUNT_WORDS)
+            or any(unit.endswith(COUNT_UNIT_STEMS) for unit in units))
 
-    A name ending in anything else (调价次数, 应收金额笔数（笔）, 峰值, large_amount_invoice_count) is left as on
-    main, and a minimum or maximum still answers an item that asks for an extreme (单笔最大应收金额).
+
+def _aggregate_statistic_of_money(item, member):
+    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name asks for
+    money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28);
+    only a sum states the amount itself. Where the item's name, a bracketed unit or its label asks for that
+    statistic (应收金额笔数, 逾期应收款（笔）, number_of_receivables, 单笔最大应收金额), or the minimum or maximum is
+    of one source row, it answers as on main.
     """
     aggregation = member.get('aggregate_measure')
     if not member.get('aggregate_output') or aggregation in (None, 'sum'):
         return False
-    text = str(item.get('metric') or '').strip()
-    if aggregation in {'min', 'max'} and (any(stem in text for stem in EXTREME_STEMS)
-                                           or set(_label_words(text)) & EXTREME_WORDS):
+    if any(_asks_for_statistic(item.get(field), aggregation) for field in ('metric', 'label')):
         return False
-    return _money_head(text)
+    if aggregation in {'min', 'max'} and member.get('aggregate_rows') == 1:
+        return False  # the minimum or maximum of one row is that row's amount
+    return _money_head(item.get('metric'))
 
 
 def _server_output(member):

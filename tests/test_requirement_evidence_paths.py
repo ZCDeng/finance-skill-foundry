@@ -4118,7 +4118,7 @@ def test_the_precision_guidance_states_the_decimal_38_cap_a_run_stores():
 # --- a count, minimum or maximum is not the amount an item names (issue #28) --------------------------------------
 
 
-def _measure_case(tmp_path, metric, aggregation):
+def _measure_case(tmp_path, metric, aggregation, label=None, group_by=()):
     """Two receivables of 120.50 and 80.25 万元 (total 200.75) and one structured_aggregate measure named after
     the item, of the given aggregation, every row verified."""
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -4130,11 +4130,12 @@ def _measure_case(tmp_path, metric, aggregation):
                     encoding='utf-8')
     dataset = analysis.add_dataset(path, name='actual')
     requirement = save_requirements(analysis, {'question': metric, 'bindings': {'actual': dataset['id']},
-                                               'items': [{'id': 'item', 'metric': metric, 'requires_drilldown': True}]})
+                                               'items': [{'id': 'item', 'metric': metric, 'requires_drilldown': True,
+                                                          **({'label': label} if label else {})}]})
     measure = {'name': metric, 'aggregation': aggregation, **({} if aggregation == 'count' else {'field': 'amount'})}
     definition = analysis.save_analysis({'question': metric, 'engine': 'structured_aggregate',
                                          'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
-                                             'dataset_alias': 'actual', 'group_by': [], 'measures': [measure],
+                                             'dataset_alias': 'actual', 'group_by': list(group_by), 'measures': [measure],
                                              'dedupe': {'policy': 'none'}}})
     run = analysis.run_analysis(definition['id'])
     service = FinanceStore(task)
@@ -4147,7 +4148,8 @@ def _measure_case(tmp_path, metric, aggregation):
 
 @pytest.mark.parametrize('aggregation', ['count', 'count_distinct', 'min', 'max'])
 @pytest.mark.parametrize('metric', ['应收账款余额', 'other_income', '其他收益', '应收金额', 'receivable_balance',
-                                    '应收账款', '其他应收款', '应收余额（万元）', 'receivable_amount', 'closing_cash'])
+                                    '应收账款', '其他应收款', '应收余额（万元）', '应收账款余额【万元】', 'receivable_amount',
+                                    'closing_cash'])
 def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp_path, metric, aggregation):
     """Issue #28: a measure named after the item answered it whatever its aggregation: a row count (2) or the
     largest row (120.50) completed a 200.75 receivables-balance requirement."""
@@ -4181,9 +4183,39 @@ def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp
     ('应收金额笔数（笔）', 'count'), ('调价次数（次）', 'count'), ('发票数目', 'count'), ('回款频次', 'count_distinct'),
     ('num_invoices', 'count'), ('total_number_of_invoices', 'count'), ('amount_count', 'count'),
     ('应收金额高点', 'max'), ('invoice_amount_ceiling', 'max'), ('应收余额极大值', 'max'), ('第一大客户应收余额', 'max'),
+    # The count or extreme asked for in a bracketed unit or an English prefix (review round 3 of #38).
+    ('逾期应收款（笔）', 'count'), ('应收账款余额（笔数）', 'count'), ('应收账款（户）', 'count_distinct'),
+    ('其他应收款（个）', 'count'), ('overdue_receivables (count)', 'count'), ('receivables (#)', 'count'),
+    ('number_of_receivables', 'count'), ('count_of_payables', 'count'), ('num_receivables', 'count'),
+    ('最贵单价', 'max'), ('cheapest_price', 'min'), ('maximal_balance', 'max'), ('历史高点余额', 'max'),
+    ('upper_bound_amount', 'max'),
+    # Not money: a unit price, quota places, distinct values.
+    ('单价', 'max'), ('unit_price', 'min'), ('招聘名额', 'count'), ('unique_values', 'count_distinct'),
 ])
 def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric, aggregation):
     result, _ = _measure_case(tmp_path, metric, aggregation)
 
     assert _item(result)['status'] == 'answered'
     assert result['coverage']['status'] == 'pass'
+
+
+@pytest.mark.parametrize('metric, label, aggregation', [
+    ('overdue_receivables', '逾期应收款笔数', 'count'),
+    ('receivable_balance', '单笔最大应收余额（万元）', 'max'),
+    ('应收账款', '应收账款笔数', 'count'),
+])
+def test_a_label_that_asks_for_the_statistic_still_answers(tmp_path, metric, label, aggregation):
+    """Review round 3 of #38: requirements keep a short metric key and say what they count in the label."""
+    result, _ = _measure_case(tmp_path, metric, aggregation, label=label)
+
+    assert _item(result)['status'] == 'answered'
+
+
+@pytest.mark.parametrize('aggregation', ['max', 'min'])
+def test_the_extreme_of_one_row_is_that_rows_amount(tmp_path, aggregation):
+    """A per-customer table (group_by customer) with one receivable per customer: its min or max is the customer's
+    balance, as on main."""
+    result, value = _measure_case(tmp_path, '应收账款余额', aggregation, group_by=('customer',))
+
+    assert value in {'120.50', '80.25', '120.5'}
+    assert _item(result)['status'] == 'answered'
