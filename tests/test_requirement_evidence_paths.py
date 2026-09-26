@@ -3801,9 +3801,10 @@ def test_tool_descriptions_state_the_round_8_rules():
     preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
     draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
 
-    assert 'not revenue/cost/expense/profit, which only (1) and (2) answer' in draft
-    assert '不是 revenue、cost、expense、profit 这类规范指标名；这四项只按①②作答' in tools
-    assert 'revenue、cost、expense、profit四项不走这条路' in preset
+    # Issue #27: their aliases in any case too.
+    assert 'not revenue/cost/expense/profit or their aliases such as 营业收入/净利润/营业成本/期间费用 in any case' in draft
+    assert '不是 revenue、cost、expense、profit 这类规范指标名或其别名，如营业收入、净利润、营业成本、期间费用' in tools
+    assert 'revenue、cost、expense、profit四项及其别名（营业收入、净利润、营业成本、期间费用等，大小写不论）不走这条路' in preset
     assert 'filters may only restate' in draft and 'filters 只能写要求本身的组织、期间、情景或维度' in tools
     assert 'keeps the grain estimated until the manager accepts it' in draft
     assert '该组合仍按估算计' in tools and '该组合仍按估算计' in preset
