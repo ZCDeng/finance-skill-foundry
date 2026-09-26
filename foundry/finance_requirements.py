@@ -706,10 +706,14 @@ def _scope_matches(run, row, scope):
     scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else (run.get('finance_scope') or {})
     if isinstance(scopes, dict):
         actual_scope = row.get('actual_scope') if isinstance(row.get('actual_scope'), dict) else scopes.get('actual')
+        # baseline/budget name the comparison's baseline side only beside an actual side; alone they are binding
+        # aliases like any other (Huachen binds {'budget': …, 'close': …}; issue #28).
+        paired = isinstance(scopes.get('actual'), dict)
         baseline_scope = (
             row.get('baseline_scope') if isinstance(row.get('baseline_scope'), dict)
-            else scopes.get('baseline') if isinstance(scopes.get('baseline'), dict)
-            else scopes.get('budget')
+            else scopes.get('baseline') if paired and isinstance(scopes.get('baseline'), dict)
+            else scopes.get('budget') if paired
+            else None
         )
         source_scope = (
             row.get('source_scope') if isinstance(row.get('source_scope'), dict)
@@ -1025,13 +1029,15 @@ def _prepared_evidence(analysis, runs):
     member_map = {}
     group_map = {}
     closure_reasons = {}
+    aggregate_counts = {}
     for group in prepared.get('evidence_groups', []):
         if not isinstance(group, dict):
             continue
         group_key = (group.get('run_id'), group.get('row'))
         if group_key[0] is not None and group_key[1] is not None:
             group_map[group_key] = group
-        engine = (runs.get(group.get('run_id')) or {}).get('engine')
+        run = runs.get(group.get('run_id')) or {}
+        engine = run.get('engine')
         closure_status = (group.get('closure') or {}).get('status')
         closure_reason = None
         if engine == 'finance' and closure_status == 'passed':
@@ -1044,6 +1050,16 @@ def _prepared_evidence(analysis, runs):
             fact_id = member.get('fact_id')
             if not fact_id:
                 continue
+            aggregate = {}
+            if engine == 'structured_aggregate':
+                # Which aggregation the cited measure column is (sum, count, min …), and for a min or max how many
+                # source rows with a value it spans (_aggregate_statistic_of_money); detail rows are read once.
+                aggregate['aggregate_measure'] = _aggregate_measure(run, member.get('column'))
+                if aggregate['aggregate_measure'] in {'min', 'max'}:
+                    if group.get('run_id') not in aggregate_counts:
+                        aggregate_counts[group.get('run_id')] = _aggregate_value_counts(run)
+                    aggregate['aggregate_rows'] = _aggregate_row_count(
+                        run, member.get('row'), member.get('column'), aggregate_counts[group.get('run_id')])
             member_map[(group.get('run_id'), member.get('row'), member.get('column'))] = {
                 'group_id': group.get('id'),
                 'group_type': group.get('group_type'),
@@ -1058,6 +1074,7 @@ def _prepared_evidence(analysis, runs):
                 # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
                 'aggregate_output': engine == 'structured_aggregate',
+                **aggregate,
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
@@ -1940,6 +1957,9 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         # The finance engine's own total of exactly this account (not a script's copy of it).
         return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
     if amount not in CLOSURE_OR_RECIPE_AMOUNTS and _server_output(member) and not estimate:
+        if _aggregate_statistic_of_money(item, member):
+            return 'not_applicable', {**metadata, 'evidence_basis': 'aggregate_output',
+                                      'not_counted_reason': 'aggregate_statistic_not_amount'}
         # Outside the four P&L lines the engine's own output of the amount (finance_scenario_run,
         # run_metric columns) or a server-side structured aggregate of the bound snapshot answers it;
         # only revenue/profit/cost/expense need closure or a recipe (decision 1).
@@ -1948,6 +1968,121 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
     return 'not_applicable', {**metadata, 'evidence_basis': _uncounted_basis(member),
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
+
+
+def _aggregate_value_counts(run):
+    """For each (result_key, measure) of a structured_aggregate run, how many included detail rows have a value
+    for the measure, read once per run; None where the run keeps no detail rows."""
+    details = (run.get('result') or {}).get('detail_rows')
+    if not isinstance(details, list):
+        return None
+    counts = {}
+    for detail in details:
+        if not isinstance(detail, dict) or not detail.get('included', True):
+            continue
+        for measure, value in (detail.get('measure_values') or {}).items():
+            if value not in (None, ''):
+                key = (detail.get('result_key'), measure)
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _aggregate_row_count(run, row, column, counts):
+    """How many source rows with a value for measure `column` the aggregate's output row `row` summarises (from
+    `counts`, _aggregate_value_counts of the run), or its source rows where the run keeps no detail rows."""
+    rows = (run.get('result') or {}).get('rows') or []
+    output = rows[row] if isinstance(row, int) and not isinstance(row, bool) and 0 <= row < len(rows) else None
+    if not isinstance(output, dict):
+        return None
+    if counts is not None and output.get('result_key') is not None:
+        return counts.get((output['result_key'], column), 0)
+    sources = output.get('source_rows')
+    return len(sources) if isinstance(sources, list) else None
+
+
+def _aggregate_measure(run, column):
+    """The aggregation of a structured_aggregate measure column, or None for any other column."""
+    plan = run.get('aggregate_plan') if isinstance(run.get('aggregate_plan'), dict) else {}
+    measures = plan.get('measures') if isinstance(plan.get('measures'), list) else []
+    return next((measure.get('aggregation') for measure in measures
+                 if isinstance(measure, dict) and measure.get('name') == column), None)
+
+
+# Issue #28: a structured_aggregate count, distinct count, minimum or maximum does not answer an item whose name
+# asks for money, unless its name, bracketed unit or label asks for that statistic. The default is main's: only a
+# name ending in an unambiguous money word is refused.
+MONEY_HEAD_STEMS = ('余额', '金额', '总额', '净额', '发生额', '账款', '应收款', '应付款', '预付款', '预收款', '收入',
+                    '收益', '损益', '成本', '费用', '利润', '现金', '资金')
+MONEY_HEAD_WORDS = frozenset({
+    'amount', 'amounts', 'balance', 'balances', 'revenue', 'revenues', 'income', 'gains', 'cost', 'costs', 'expense',
+    'expenses', 'profit', 'profits', 'cash', 'receivable', 'receivables', 'payable', 'payables',
+})
+# Cues, anywhere in the metric or the item's label, that the item asks for a count or for one row's extreme. They
+# are read broadly: a cue only ever leaves an item as on main.
+COUNT_CUES = ('数', '笔', '次', '户', '个', '件', '张', '家', '条', '项', '量', '多少', '＃', '#')
+COUNT_WORDS = frozenset({'count', 'counts', 'number', 'numbers', 'num', 'nums', 'cnt', 'qty', 'quantity', 'quantities',
+                         'pcs', 'no', 'many', 'frequency', 'times', 'occurrences'})
+EXTREME_CUES = ('最', '峰', '谷', '极', '顶', '底', '高点', '低点', '高位', '低位', '上限', '下限', '第一', '单笔')
+EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'maximal', 'minimal', 'largest', 'smallest', 'highest',
+                           'lowest', 'peak', 'top', 'most', 'least', 'greatest', 'biggest', 'cheapest', 'priciest',
+                           'ceiling', 'floor', 'upper', 'lower', 'record', 'extreme', 'trough', 'bottom', 'high', 'low',
+                           'first', 'single'})
+BRACKETED_TAIL = re.compile(r'\s*[（(【\[]([^（）()【】\[\]]*)[)）】\]]\s*$')
+
+
+def _name_parts(name):
+    """A name without its trailing bracketed units, and those units (应收账款余额（笔）→ 应收账款余额, ['笔'])."""
+    text = str(name or '').strip()
+    units = []
+    while True:
+        match = BRACKETED_TAIL.search(text)
+        if not match:
+            return text, units
+        units.append(match.group(1).strip())
+        text = text[:match.start()]
+
+
+def _money_head(metric):
+    """Whether a metric name asks for money: a named amount (METRIC_LABELS, other_income, 其他收益) or a name that
+    ends, before any bracketed unit, in an unambiguous money word (应收账款余额, 应收金额, receivable_balance)."""
+    text = str(metric or '').strip()
+    lowered = text.lower()
+    if any(lowered == key or lowered in {str(alias).lower() for alias in aliases}
+           for key, aliases in METRIC_LABELS.items() if key not in NON_AMOUNT_METRICS):
+        return True
+    head, _units = _name_parts(text)
+    if re.search(r'[\u4e00-\u9fff]\s*$', head):
+        return head.rstrip().endswith(MONEY_HEAD_STEMS)
+    words = _label_words(head)
+    return bool(words) and words[-1] in MONEY_HEAD_WORDS
+
+
+def _asks_for_statistic(name, aggregation):
+    """Whether a name (or label) carries any cue that it asks for a count, or, for min/max, for an extreme."""
+    text = str(name or '').strip()
+    if not text:
+        return False
+    words = set(_label_words(text))
+    if aggregation in {'min', 'max'}:
+        return any(cue in text for cue in EXTREME_CUES) or bool(words & EXTREME_WORDS)
+    return any(cue in text for cue in COUNT_CUES) or bool(words & COUNT_WORDS)
+
+
+def _aggregate_statistic_of_money(item, member):
+    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name asks for
+    money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28);
+    only a sum states the amount itself. Where the metric or the item's label carries any cue for that statistic
+    (应收金额笔数, 逾期应收款（笔）, number_of_receivables, 单笔最大应收金额), or the minimum or maximum is of one
+    source row, it answers as on main.
+    """
+    aggregation = member.get('aggregate_measure')
+    if not member.get('aggregate_output') or aggregation in (None, 'sum'):
+        return False
+    if any(_asks_for_statistic(item.get(field), aggregation) for field in ('metric', 'label')):
+        return False
+    if aggregation in {'min', 'max'} and member.get('aggregate_rows') == 1:
+        return False  # the minimum or maximum of one row's value is that row's amount
+    return _money_head(item.get('metric'))
 
 
 def _server_output(member):
@@ -2506,7 +2641,7 @@ def _out_of_scope_inputs(run, item, latest):
     are ambiguous rather than out of scope, so neither is reported here.
     """
     scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else {}
-    if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'baseline', 'budget', 'source')):
+    if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'source')):
         return []
     expected = _comparison_scopes(_item_scope(item, latest.get('scope') or {}))['actual']
     return [alias for alias, bound in scopes.items() if isinstance(bound, dict) and any(
@@ -3334,6 +3469,8 @@ NOT_COUNTED_TEXT = {
     'script_output_without_recipe': '只有脚本输出，没有通过的来源复算规则',
     'script_closure_not_counted': '闭合由脚本自行算出，只作展示，不计为引擎闭合',
     'engine_output_without_closure': '财务引擎的这项输出没有闭合规则，也没有通过的来源复算规则',
+    'aggregate_statistic_not_amount': ('服务端汇总（structured_aggregate）的这一列是计数、去重计数、最小值或最大值，不是该金额；'
+                                       '金额要用 sum 度量汇总，或按来源复算规则引用单元格；要求问的若是笔数或单笔最大值，在要求里写明'),
     'aggregate_output_without_closure': ('服务端汇总（structured_aggregate）的这项输出不是闭合结果，也没有通过的来源复算规则；'
                                          '收入、成本、费用、利润和量价拆分要引擎闭合或来源复算'),
     'recipe_failed': '复算规则未通过',

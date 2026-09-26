@@ -4211,3 +4211,158 @@ def test_the_precision_guidance_states_the_decimal_38_cap_a_run_stores():
         assert '更高精度' not in text and 'DECIMAL(38)' in text
     assert 'higher precision' not in draft and 'DECIMAL(38)' in draft
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+# --- a count, minimum or maximum is not the amount an item names (issue #28) --------------------------------------
+
+
+def _measure_case(tmp_path, metric, aggregation, label=None, group_by=(), rows=None):
+    """Two receivables of 120.50 and 80.25 万元 (total 200.75) and one structured_aggregate measure named after
+    the item, of the given aggregation, every row verified."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    task = TaskStore(tmp_path / 'var').create(title='汇总度量')
+    analysis = AnalysisStore(task)
+    path = tmp_path / 'ar.json'
+    path.write_text(json.dumps(rows or [{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+                                        {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]),
+                    encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='actual')
+    requirement = save_requirements(analysis, {'question': metric, 'bindings': {'actual': dataset['id']},
+                                               'items': [{'id': 'item', 'metric': metric, 'requires_drilldown': True,
+                                                          **({'label': label} if label else {})}]})
+    measure = {'name': metric, 'aggregation': aggregation, **({} if aggregation == 'count' else {'field': 'amount'})}
+    definition = analysis.save_analysis({'question': metric, 'engine': 'structured_aggregate',
+                                         'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
+                                             'dataset_alias': 'actual', 'group_by': list(group_by), 'measures': [measure],
+                                             'dedupe': {'policy': 'none'}}})
+    run = analysis.run_analysis(definition['id'])
+    service = FinanceStore(task)
+    service.drilldown_fact({'run_id': run['id'], 'row': 0, 'column': metric})
+    claim = {'basis': 'calculation', 'run_id': run['id'], 'row': 0, 'column': metric,
+             'value': run['result']['rows'][0][metric]}
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': [claim]})
+    return result, claim['value']
+
+
+@pytest.mark.parametrize('aggregation', ['count', 'count_distinct', 'min', 'max'])
+@pytest.mark.parametrize('metric', ['应收账款余额', 'other_income', '其他收益', '应收金额', 'receivable_balance',
+                                    '应收账款', '其他应收款', '应收余额（万元）', '应收账款余额【万元】', 'receivable_amount',
+                                    'closing_cash'])
+def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp_path, metric, aggregation):
+    """Issue #28: a measure named after the item answered it whatever its aggregation: a row count (2) or the
+    largest row (120.50) completed a 200.75 receivables-balance requirement."""
+    result, value = _measure_case(tmp_path, metric, aggregation)
+    item = _item(result)
+
+    assert value != '200.75'
+    assert item['status'] == 'not_applicable' and result['coverage']['status'] == 'needs_attention'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'aggregate_output'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'aggregate_statistic_not_amount'
+    assert '不是该金额' in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('metric, aggregation', [
+    # The total still answers the amount.
+    ('应收账款余额', 'sum'), ('other_income', 'sum'),
+    # A count the gate does not know by name stays answered by a count, as on main.
+    ('逾期笔数', 'count'), ('发票张数', 'count_distinct'),
+    # A count whose name also mentions a price or value is still a count (review of #38).
+    ('调价次数', 'count'), ('报价笔数', 'count'), ('高价值客户数', 'count_distinct'),
+    ('high_value_customer_count', 'count'), ('price_change_number', 'count'),
+    ('应收金额笔数', 'count'), ('应收账款余额笔数', 'count'), ('应收金额大于0的客户数量', 'count_distinct'),
+    ('large_amount_invoice_count', 'count'), ('number_of_high_value_invoices', 'count'),
+    # Known non-amounts keep their rule.
+    ('客户数', 'count'), ('最长账龄天数', 'max'),
+    # An item that asks for an extreme is answered by that extreme.
+    ('单笔最大应收金额', 'max'), ('最小单笔金额', 'min'), ('max_invoice_amount', 'max'),
+    ('应收金额峰值', 'max'), ('单笔金额上限', 'max'), ('top_invoice_amount', 'max'), ('单日最多回款金额', 'max'),
+    ('单笔回款金额最少', 'min'), ('greatest_invoice_amount', 'max'),
+    # Names whose head is not money, in words no list names (review round 2 of #38).
+    ('应收金额笔数（笔）', 'count'), ('调价次数（次）', 'count'), ('发票数目', 'count'), ('回款频次', 'count_distinct'),
+    ('num_invoices', 'count'), ('total_number_of_invoices', 'count'), ('amount_count', 'count'),
+    ('应收金额高点', 'max'), ('invoice_amount_ceiling', 'max'), ('应收余额极大值', 'max'), ('第一大客户应收余额', 'max'),
+    # The count or extreme asked for in a bracketed unit or an English prefix (review round 3 of #38).
+    ('逾期应收款（笔）', 'count'), ('应收账款余额（笔数）', 'count'), ('应收账款（户）', 'count_distinct'),
+    ('其他应收款（个）', 'count'), ('overdue_receivables (count)', 'count'), ('receivables (#)', 'count'),
+    ('number_of_receivables', 'count'), ('count_of_payables', 'count'), ('num_receivables', 'count'),
+    ('最贵单价', 'max'), ('cheapest_price', 'min'), ('maximal_balance', 'max'), ('历史高点余额', 'max'),
+    ('upper_bound_amount', 'max'),
+    # Cues anywhere in the name (review round 4 of #38).
+    ('no_of_receivables', 'count'), ('how_many_receivables', 'count'), ('应收账款（pcs）', 'count'),
+    ('应收余额低谷', 'min'), ('应收余额高峰', 'max'), ('receivable_balance_trough', 'min'), ('low_point_balance', 'min'),
+    # Not money: a unit price, quota places, distinct values.
+    ('单价', 'max'), ('unit_price', 'min'), ('招聘名额', 'count'), ('unique_values', 'count_distinct'),
+])
+def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric, aggregation):
+    result, _ = _measure_case(tmp_path, metric, aggregation)
+
+    assert _item(result)['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
+
+
+@pytest.mark.parametrize('metric, label, aggregation', [
+    ('overdue_receivables', '逾期应收款笔数', 'count'),
+    ('overdue_receivables', '统计逾期应收款的笔数及占比', 'count'),
+    ('receivable_balance', '应收账款余额的历史高峰', 'max'),
+    ('receivable_balance', '单笔最大应收余额（万元）', 'max'),
+    ('应收账款', '应收账款笔数', 'count'),
+])
+def test_a_label_that_asks_for_the_statistic_still_answers(tmp_path, metric, label, aggregation):
+    """Review round 3 of #38: requirements keep a short metric key and say what they count in the label."""
+    result, _ = _measure_case(tmp_path, metric, aggregation, label=label)
+
+    assert _item(result)['status'] == 'answered'
+
+
+@pytest.mark.parametrize('aggregation', ['max', 'min'])
+def test_the_extreme_of_one_row_is_that_rows_amount(tmp_path, aggregation):
+    """A per-customer table (group_by customer) with one receivable per customer: its min or max is the customer's
+    balance, as on main."""
+    result, value = _measure_case(tmp_path, '应收账款余额', aggregation, group_by=('customer',))
+
+    assert value in {'120.50', '80.25', '120.5'}
+    assert _item(result)['status'] == 'answered'
+
+
+@pytest.mark.parametrize('aggregation', ['max', 'min'])
+def test_the_extreme_of_one_non_blank_row_is_that_rows_amount(tmp_path, aggregation):
+    """Review round 4 of #38: the group has two rows, one with no amount; its min or max is the other row's."""
+    rows = [{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+            {'customer': 'C1', 'amount': None, 'currency': 'CNY', 'unit': '万元'},
+            {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]
+    result, value = _measure_case(tmp_path, '应收账款余额', aggregation, group_by=('customer',), rows=rows)
+
+    assert value in {'120.50', '120.5'}
+    assert _item(result)['status'] == 'answered'
+
+
+def test_detail_rows_are_counted_once_per_run(tmp_path, monkeypatch):
+    """Review round 5 of #38: counting each cited min/max cell's detail rows by scanning all of them made the check
+    quadratic on large grouped aggregates; they are counted once per run."""
+    import foundry.finance_requirements as requirements
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    task = TaskStore(tmp_path / 'var').create(title='汇总计数')
+    analysis = AnalysisStore(task)
+    path = tmp_path / 'ar.json'
+    path.write_text(json.dumps([{'customer': f'C{index}', 'amount': f'{100 + index}.50', 'currency': 'CNY', 'unit': '万元'}
+                                for index in range(30)]), encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='actual')
+    requirement = save_requirements(analysis, {'question': '应收账款余额', 'bindings': {'actual': dataset['id']},
+                                               'items': [{'id': 'item', 'metric': '应收账款余额', 'requires_drilldown': False}]})
+    definition = analysis.save_analysis({'question': '应收账款余额', 'engine': 'structured_aggregate',
+                                         'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
+                                             'dataset_alias': 'actual', 'group_by': ['customer'],
+                                             'measures': [{'name': '应收账款余额', 'aggregation': 'max', 'field': 'amount'}],
+                                             'dedupe': {'policy': 'none'}}})
+    run = analysis.run_analysis(definition['id'])
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': '应收账款余额',
+               'value': row['应收账款余额']} for index, row in enumerate(run['result']['rows'])]
+    calls = []
+    original = requirements._aggregate_value_counts
+    monkeypatch.setattr(requirements, '_aggregate_value_counts', lambda run: calls.append(1) or original(run))
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims})
+
+    assert len(claims) == 30 and len(calls) == 1
+    assert {location['status'] for location in _item(result)['locations']} == {'answered'}
