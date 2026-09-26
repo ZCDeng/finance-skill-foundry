@@ -223,3 +223,73 @@ describe('RunPanel structured aggregate results', () => {
     expect(screen.queryByText(/完整明细/)).toBeNull();
   });
 });
+
+function varianceRun(rows: Record<string, unknown>[], extra: Record<string, unknown> = {}): AnalysisRun {
+  const columns = ['organization', 'period', 'unit', 'metric', 'actual', 'baseline', 'amount_change', 'profit_impact', 'contribution', 'ratio', 'comparison_status']
+    .map((name) => ({ name, type: ['actual', 'baseline', 'amount_change', 'profit_impact', 'contribution', 'ratio'].includes(name) ? 'DECIMAL' : 'VARCHAR' }));
+  return { ...baseRun, engine: 'finance', result: { method: 'revenue_minus_cost_minus_expense', comparison: { actual_scenario: 'actual', baseline_scenario: 'budget' },
+    columns, rows, row_count: rows.length, truncated: false, ...extra } as AnalysisRun['result'] };
+}
+const bridgeRow = (metric: string, amountChange: string, extra: Record<string, unknown> = {}) => ({ organization: '华东', period: '2026-08', unit: '万元', metric,
+  actual: '1', baseline: '1', amount_change: amountChange, profit_impact: amountChange, contribution: amountChange, ratio: '0', comparison_status: 'complete', ...extra });
+
+describe('RunPanel finance conclusion', () => {
+  it('leads with the profit change the backend wrote, the three drivers, and the backend caveat', () => {
+    const run = varianceRun([
+      bridgeRow('revenue', '50', { amount_change_display: '收入增加 50 万元' }),
+      bridgeRow('cost', '208', { amount_change_display: '成本增加 208 万元' }),
+      bridgeRow('expense', '-10', { amount_change_display: '费用减少 10 万元' }),
+      bridgeRow('profit', '-312.00', { amount_change_display: '利润减少 312.00 万元' }),
+    ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
+    render(<RunPanel {...props} runs={[run]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('与预算相比，利润减少 312.00 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('收入增加 50 万元 · 成本增加 208 万元 · 费用减少 10 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('分量表示算术贡献。业务原因需经理判断或独立证据。')).toBeTruthy();
+    const table = screen.getByRole('region', { name: '预算差异桥' });
+    expect(conclusion.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('reads the sign of the amount string when the backend wrote no phrase, without rounding it', () => {
+    const run = varianceRun([
+      bridgeRow('revenue', '0.00'),
+      bridgeRow('profit', '-900719925474099.99', { comparison_status: 'assumed_zero' }),
+    ]);
+    render(<RunPanel {...props} runs={[run]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('与预算相比，利润减少 900719925474099.99 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('收入持平')).toBeTruthy();
+    expect(within(conclusion).getByText('部分科目缺少一侧数据，已按 0 计入。')).toBeTruthy();
+  });
+
+  it('names each compared group and caps the conclusion at three of them', () => {
+    const rows = ['华东', '华南', '华北', '西南'].map((organization, index) => bridgeRow('profit', index % 2 ? '-20' : '30', { organization }));
+    render(<RunPanel {...props} runs={[varianceRun(rows)]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('华东：与预算相比，利润增加 30 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('华南：与预算相比，利润减少 20 万元')).toBeTruthy();
+    expect(within(conclusion).queryByText(/西南/)).toBeNull();
+    expect(within(conclusion).getByText('共 4 组，其余见下表。')).toBeTruthy();
+  });
+
+  it('writes no conclusion when there is no profit change to state', () => {
+    render(<RunPanel {...props} runs={[varianceRun([bridgeRow('revenue', '50'), bridgeRow('profit', '', { amount_change: null, contribution: null, comparison_status: 'incomplete' })])]} />);
+    expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
+    render(<RunPanel {...props} runs={[structuredRun()]} />);
+    expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
+  });
+
+  it('offers 调整口径 on finance results only when the settings can be opened', () => {
+    const onAdjustScope = vi.fn();
+    const run = varianceRun([bridgeRow('profit', '5')]);
+    const { unmount } = render(<RunPanel {...props} runs={[run]} />);
+    expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+    unmount();
+    render(<RunPanel {...props} runs={[run]} onAdjustScope={onAdjustScope} />);
+    fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
+    expect(onAdjustScope).toHaveBeenCalledTimes(1);
+    cleanup();
+    render(<RunPanel {...props} runs={[structuredRun()]} onAdjustScope={onAdjustScope} />);
+    expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+  });
+});

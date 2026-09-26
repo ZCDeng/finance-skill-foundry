@@ -37,8 +37,30 @@ function statusText(key: typeof dimensions[number][0], status: string | undefine
   if (['needs_attention', 'mismatch', 'failed', 'error', 'issues', 'rejected'].includes(status ?? '')) return key === 'execution' ? '运行未成功' : '需要复核';
   return pending;
 }
-export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false }: {
+/** The four verification dimensions that are not done yet, in words; empty when all four passed. */
+export function dimensionGaps(values: EvidenceDimensions | undefined, stale = false): string[] {
+  if (stale) return ['改稿后待复核'];
+  return dimensions.flatMap(([key, label, success, pending]) => {
+    const text = statusText(key, values?.[key]?.status, success, pending);
+    if (text === success) return [];
+    return [text === '需要复核' ? `${label}需要复核` : text];
+  });
+}
+export function EvidenceDimensionList({ dimensions: values, stale = false }: { dimensions?: EvidenceDimensions; stale?: boolean }) {
+  return <>
+    <dl className="analysis-check-summary" aria-label="四项独立核验状态">
+      {dimensions.map(([key, label, success, pending]) => <div key={key}>
+        <dt>{label}</dt><dd>{stale ? '改稿后待复核' : statusText(key, values?.[key]?.status, success, pending)}</dd>
+        {values?.[key]?.message && <p className="analysis-note">{values[key]?.message}</p>}
+      </div>)}
+    </dl>
+    <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
+  </>;
+}
+export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false, showDimensions = true }: {
   taskId: string; dimensions?: EvidenceDimensions; issues: EvidenceIssue[]; stale?: boolean;
+  /** False when the caller already lists the dimensions in its own summary. */
+  showDimensions?: boolean;
 }) {
   const [selected, setSelected] = useState<SourceRange | null>(null);
   const groups = new Map<string, { title: string; message: string; issues: EvidenceIssue[]; sources: Map<string, SourceRange> }>();
@@ -55,13 +77,7 @@ export function EvidenceQuality({ taskId, dimensions: values, issues, stale = fa
     groups.set(key, group);
   }
   return <div className="analysis-evidence-quality">
-    <dl className="analysis-check-summary" aria-label="四项独立核验状态">
-      {dimensions.map(([key, label, success, pending]) => <div key={key}>
-        <dt>{label}</dt><dd>{stale ? '改稿后待复核' : statusText(key, values?.[key]?.status, success, pending)}</dd>
-        {values?.[key]?.message && <p className="analysis-note">{values[key]?.message}</p>}
-      </div>)}
-    </dl>
-    <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
+    {showDimensions && <EvidenceDimensionList dimensions={values} stale={stale} />}
     {[...groups].sort(([, a], [, b]) => priority(a.issues[0]) - priority(b.issues[0])).map(([key, group]) => <details className="analysis-details" key={key}>
       <summary>{group.title ? `${group.title}：` : ''}{group.issues[0].origin === 'claim_binding' ? '引用绑定 · ' : group.issues[0].origin === 'generated_appendix' ? '自动附表 · ' : ''}{group.issues[0].severity === 'error' ? '需修正 · ' : ''}{group.message} · {group.issues.length} 条原始问题</summary>
       <p className="analysis-note">{group.sources.size ? '先核对来源区域，再修正计算或引用并重检。' : '核对当前运行和引用；原始问题保留在下方，便于逐项处理。'}</p>

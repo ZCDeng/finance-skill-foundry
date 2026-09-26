@@ -9,11 +9,13 @@ import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { runPresentationRole, selectBusinessResult } from './businessResults.js';
 
-export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
+export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
+  /** Opens the finance scope settings, which sit below the result. */
+  onAdjustScope?(): void;
 }) {
   const [selected, setSelected] = useState(() => readCopy<string>(`${analysis.task_id}:run`) ?? '');
   const [evidence, setEvidence] = useState(false);
@@ -41,6 +43,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)} · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
       {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
+      {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
@@ -50,6 +53,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       <div className="analysis-actions">
         <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
         <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的运行 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
+        {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={onAdjustScope}>调整口径</Button>}
         {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
       {analysis.sql && <details className="analysis-details"><summary>保存这次分析方法</summary><form className="analysis-method-form" onSubmit={(event) => {
@@ -230,6 +234,8 @@ function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
 
 type FinanceVarianceResult = NonNullable<AnalysisRun['result']> & {
   method?: unknown;
+  /** The backend's own caveat on what the bridge does and does not show. */
+  interpretation?: unknown;
   comparison?: { actual_scenario?: unknown; baseline_scenario?: unknown } | Record<string, unknown>;
 };
 
@@ -318,6 +324,56 @@ function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
       <Table key={`${run.id}:raw`} columns={run.result!.columns} rows={run.result!.rows} caption="原始计算结果" />
     </details>
   </section>;
+}
+
+/**
+ * The conclusion a manager reads before the bridge table. Every figure is a
+ * string the backend computed; this only picks rows and reads the sign, so no
+ * amount passes through Number. Groups without a profit change say nothing.
+ */
+function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
+  const result = financeVarianceResult(run);
+  const dimensions = financeVarianceDimensionColumns(run).map((column) => column.name);
+  const copy = financeVarianceCopy(run);
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of result?.rows ?? []) {
+    const key = JSON.stringify(dimensions.map((name) => row[name] ?? null));
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const lines = [...groups.values()].map((rows) => {
+    const profit = rows.find((row) => row.metric === 'profit');
+    return {
+      label: dimensions.map((name) => textValue(rows[0][name])).join(' · '),
+      headline: profit ? changePhrase(profit, true) : null,
+      drivers: ['revenue', 'cost', 'expense'].map((metric) => rows.find((row) => row.metric === metric))
+        .flatMap((row) => row ? [changePhrase(row, false)] : []).filter((phrase): phrase is string => Boolean(phrase)),
+      assumedZero: rows.some((row) => row.comparison_status === 'assumed_zero'),
+    };
+  }).filter((line) => line.headline);
+  if (!lines.length) return null;
+  const interpretation = typeof result?.interpretation === 'string' ? result.interpretation : '';
+  return <section className="analysis-headline" aria-label="结论">
+    {lines.slice(0, 3).map((line, index) => <div key={index} className="analysis-headline-line">
+      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}与{copy.baselineLabel}相比，{line.headline}</p>
+      {line.drivers.length > 0 && <p className="analysis-note">{line.drivers.join(' · ')}</p>}
+      {line.assumedZero && <p className="analysis-note">部分科目缺少一侧数据，已按 0 计入。</p>}
+    </div>)}
+    {lines.length > 3 && <p className="analysis-note">共 {lines.length} 组，其余见下表。</p>}
+    {interpretation && <p className="analysis-note">{interpretation}</p>}
+  </section>;
+}
+
+/** The backend's own phrase when it wrote one, otherwise the same phrase from the sign of amount_change. */
+function changePhrase(row: Record<string, unknown>, profit: boolean): string | null {
+  if (typeof row.amount_change_display === 'string' && row.amount_change_display) return row.amount_change_display;
+  const value = row.amount_change ?? (profit ? row.contribution : undefined);
+  if (value == null || value === '') return null;
+  const text = String(value).trim();
+  const amount = text.replace(/^[-+]/, '');
+  if (!/^\d*\.?\d+$/.test(amount)) return null;
+  const word = /^0*\.?0*$/.test(amount) ? '持平' : text.startsWith('-') ? '减少' : '增加';
+  const unit = typeof row.unit === 'string' && row.unit ? ` ${row.unit}` : '';
+  return `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${word}${word === '持平' ? '' : ` ${amount}${unit}`}`;
 }
 
 function textValue(value: unknown): string {

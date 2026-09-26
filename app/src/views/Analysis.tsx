@@ -12,7 +12,7 @@ import { AnalysisScopeCard } from './analysis/AnalysisScopeCard.js';
 import { ClaimBindingRepair } from './analysis/ClaimBindingRepair.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { RevisionDiff } from './analysis/RevisionDiff.js';
-import { EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
+import { dimensionGaps, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
@@ -120,6 +120,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [dataset, setDataset] = useState<{ source: DatasetSnapshot; content: Record<string, unknown> } | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<string | null>(null);
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null);
+  const [scopeRequest, setScopeRequest] = useState(0);
   const currentTask = useRef(task?.id);
   currentTask.current = task?.id;
   const active = useRef(true);
@@ -302,6 +303,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       writeCopy(`${task?.id}:selection`, { ...readCopy<Selection>(`${task?.id}:selection`), draft: draft.id });
     }
   }, [draftKey, draft?.id]);
+  const financeWorkbench = task && view && view.datasets.length > 0
+    ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
+      openRequest={scopeRequest} onRefresh={() => refresh(task.id)} />
+    : null;
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
     drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
@@ -401,8 +406,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </details>
         </>}
         {view && tab === 'results' && <>
-          {view.datasets.length > 0 && <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
-            onRefresh={() => refresh(task.id)} />}
+          {!analysis && financeWorkbench}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
           {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
@@ -411,6 +415,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
+              onAdjustScope={financeWorkbench ? () => setScopeRequest((value) => value + 1) : undefined}
               onOpen={(run, path) => void perform(async (taskId) => {
                 const api = bridge(); if (!api?.analysisOpenOutput) throw new Error('此版本暂不支持打开分析文件。');
                 unwrap(await api.analysisOpenOutput(taskId, run.id, path));
@@ -464,6 +469,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               </div>}
 
           </>}
+          {analysis && financeWorkbench}
         </>}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}
@@ -961,10 +967,10 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     }
   }
   if (!contextId) return null;
-  return <aside className="analysis-details analysis-adjustment-panel" aria-label="考核调整">
-    <div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">确认后才会进入下一次管理损益。</span></div>
+  return <details className="analysis-details analysis-adjustment-panel" aria-label="考核调整">
+    <summary><div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">{pending.length ? `${pending.length} 条待确认 · ` : ''}确认后才会进入下一次管理损益。</span></div></summary>
     {pending.length ? <ul className="analysis-history-list">{pending.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
-      <span>{row.label || '调整'} · pending</span>
+      <span>{row.label || '调整'} · 待确认</span>
       <Button type="button" disabled={locked} onClick={() => void confirm(row.id)}>{pendingId === row.id ? '确认中…' : '确认纳入'}</Button>
     </li>)}</ul> : <p className="analysis-note">没有待确认的调整。</p>}
     {confirmed.length ? <div className="analysis-fieldset analysis-adjustment-rerun" aria-label="重算">
@@ -975,7 +981,7 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     </div> : null}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </aside>;
+  </details>;
 }
 
 
@@ -1026,8 +1032,8 @@ function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
   }
   const rows = opened?.series?.rows ?? [];
   const columns = rows[0] ? Object.keys(rows[0]) : [];
-  return <aside className="analysis-details analysis-chart-panel" aria-label="归档图">
-    <div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">绑定原 run，不重跑。</span></div>
+  return <details className="analysis-details analysis-chart-panel" aria-label="归档图">
+    <summary><div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">{charts.length ? `${charts.length} 张 · ` : ''}归档当前结果，不重新计算。</span></div></summary>
     <Button type="button" disabled={busy || pending || !latest} onClick={() => void archive()}>{pending ? '归档中…' : '归档当前结果图'}</Button>
     {charts.length ? <ul className="analysis-history-list">{charts.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
       <span>{row.label || row.id}</span>
@@ -1037,11 +1043,13 @@ function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
       <tbody>{rows.map((row, index) => <tr key={index}>{columns.map((name) => <td key={name}>{textValue(row[name])}</td>)}</tr>)}</tbody></table> : null}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-  </aside>;
+  </details>;
 }
 
-function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
-  taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean; onRefresh(): Promise<void>;
+function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = 0, onRefresh }: {
+  taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean;
+  /** Bumped by 调整口径 on the result; each change opens the settings and brings them into view. */
+  openRequest?: number; onRefresh(): Promise<void>;
 }) {
   const [finance, setFinance] = useState<FinanceContextState | null>(null);
   const [actual, setActual] = useState(datasets[0]?.id ?? '');
@@ -1069,8 +1077,24 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
   const [setupOpen, setSetupOpen] = useState(!hasSuccessfulResults);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  // What is running right now, in words. Finance runs can take seconds and the
+  // buttons alone going grey does not say anything is happening.
+  const [running, setRunning] = useState('');
+  const setup = useRef<HTMLDetailsElement>(null);
+  const seenRequest = useRef(openRequest);
   useEffect(() => { setActual((value) => value || datasets[0]?.id || ''); }, [datasets]);
   useEffect(() => { if (hasSuccessfulResults) setSetupOpen(false); }, [hasSuccessfulResults]);
+  useEffect(() => {
+    if (openRequest === seenRequest.current) return;
+    seenRequest.current = openRequest;
+    setSetupOpen(true);
+    setup.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }, [openRequest]);
+  async function track(label: string, work: () => Promise<void>) {
+    if (running) return;
+    setRunning(label);
+    try { await work(); } finally { setRunning(''); }
+  }
   useEffect(() => {
     let cancelled = false;
     const api = bridge();
@@ -1084,8 +1108,8 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     }).catch((failure) => { if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure)); });
     return () => { cancelled = true; };
   }, [taskId]);
-  async function saveContext(runAfter?: 'pnl' | 'bridge') {
-    try {
+  function saveContext(runAfter?: 'pnl' | 'bridge') {
+    return track(runAfter === 'pnl' ? '正在保存口径并运行管理口径损益…' : runAfter === 'bridge' ? '正在保存口径并运行预算差异桥…' : '正在保存口径…', async () => { try {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
       setError(''); setMessage('');
       const bindings = { actual, ...(budget ? { budget } : {}) };
@@ -1117,10 +1141,10 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       await onRefresh();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
-    }
+    } });
   }
-  async function saveMap() {
-    try {
+  function saveMap() {
+    return track('正在保存映射…', async () => { try {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持管理科目映射。');
       setError(''); setMessage('');
       const parsed = JSON.parse(mapRows);
@@ -1131,9 +1155,9 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       setMessage('已保存管理科目映射，可用于下一次口径保存。');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
-    }
+    } });
   }
-  const runExisting = async (kind: 'pnl' | 'bridge') => {
+  const runExisting = (kind: 'pnl' | 'bridge') => track(kind === 'pnl' ? '正在运行管理口径损益…' : '正在运行预算差异桥…', async () => {
     try {
       const api = bridge(); if (!api?.financeCall || !contextId) return;
       setError(''); setMessage('');
@@ -1151,15 +1175,15 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }
-  };
+  });
   const selectedContext = finance?.contexts.find((context) => context.id === contextId);
   const aliases = Object.keys(selectedContext?.bindings ?? {});
   useEffect(() => {
     setScenarioPrimary((value) => value || aliases[0] || 'actual');
   }, [aliases.join('|')]);
   useEffect(() => { setBaselineScenarioId(''); }, [contextId, scenarioKind]);
-  async function runScenario(child = false) {
-    try {
+  function runScenario(child = false) {
+    return track(child ? '正在运行延迟回款子情景…' : '正在运行基准情景…', async () => { try {
       const api = bridge(); if (!api?.financeCall || !contextId) throw new Error('请先保存或选择财务口径。');
       setError(''); setMessage('');
       const scenarioScope = selectedContext?.scopes?.[scenarioPrimary] ?? scope;
@@ -1194,13 +1218,16 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       await onRefresh();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
-    }
+    } });
   }
-  const disabled = busy || !actual;
-  return <><details className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
+  const locked = busy || Boolean(running);
+  const disabled = locked || !actual;
+  const moreScope = scopeFields.filter(([key]) => key !== 'period');
+  const moreScopeSummary = moreScope.map(([key, label]) => scope[key] ? `${label} ${scope[key]}` : '').filter(Boolean).join(' · ');
+  return <><details ref={setup} className="analysis-finance-setup" aria-label="财务分析设置" open={setupOpen}
     onToggle={(event) => setSetupOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary><div className="analysis-section-heading"><h3>财务业务口径</h3><span className="analysis-note">用已登记资料建立范围，结果仍保留 SQL 与脚本高级路径。</span></div></summary>
-    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+    <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
         setActual(value);
         if (budget === value) setBudget('');
@@ -1209,23 +1236,25 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         onChange={setBudget} placeholder="搜索预算资料" allowEmptyLabel="暂不选择" />
       {finance?.contexts.length ? <SearchableSelect label="已保存口径" value={contextId} options={contextOptions(finance)}
         onChange={setContextId} placeholder="搜索口径名称或范围" /> : null}
-      {scopeFields.map(([key, label]) => key === 'period'
-        ? <AccountingPeriodInput key={key} label={label} value={scope[key] ?? ''} onChange={(value) => setScope({ ...scope, [key]: value })} />
-        : <TextField key={key} label={label} value={scope[key] ?? ''} onChange={(value) => setScope({ ...scope, [key]: value })} />)}
+      <AccountingPeriodInput label="期间" value={scope.period ?? ''} onChange={(value) => setScope({ ...scope, period: value })} />
       {budget && <TextField label="预算情景名称" value={budgetScope.scenario ?? ''} onChange={(value) => setBudgetScope({ ...budgetScope, scenario: value })} />}
       {budget && <AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
         shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
         help="快捷项基于实际期间；留空时沿用实际期间，填写后预算桥按该期间保存 baseline 范围。" />}
-    </div></fieldset>
+    </div>
+    <details className="analysis-details"><summary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</summary>
+      <div className="analysis-edit-grid">{moreScope.map(([key, label]) =>
+        <TextField key={key} label={label} value={scope[key] ?? ''} onChange={(value) => setScope({ ...scope, [key]: value })} />)}</div>
+    </details></fieldset>
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={disabled} onClick={() => void saveContext()}>保存口径</Button>
       <Button type="button" disabled={disabled} onClick={() => void saveContext('pnl')}>保存并运行 P&L</Button>
       <Button variant="outline" type="button" disabled={disabled || !budget} onClick={() => void saveContext('bridge')}>运行预算桥</Button>
-      {contextId && <Button variant="outline" type="button" disabled={busy} onClick={() => void runExisting('pnl')}>用已保存口径重跑 P&L</Button>}
-      {contextId && <Button variant="outline" type="button" disabled={busy} onClick={() => void runExisting('bridge')}>用已保存口径运行预算桥</Button>}
+      {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('pnl')}>用已保存口径重跑 P&L</Button>}
+      {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('bridge')}>用已保存口径运行预算桥</Button>}
     </div>
     {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
-      <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+      <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
         <FieldShell label="情景类型"><select aria-label="情景类型" className="fnd-field" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
           <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></FieldShell>
         <TextField label="情景名称" value={scenarioLabel} onChange={setScenarioLabel} />
@@ -1249,8 +1278,8 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
         {scenarioKind === 'cash_13_weeks' && <DecimalInput label="回款延迟天数" value={delayDays} onChange={setDelayDays} unit="天" />}
       </div></fieldset>
       <div className="analysis-actions">
-        <Button variant="outline" type="button" disabled={busy || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</Button>
-        <Button variant="outline" type="button" disabled={busy || scenarioKind !== 'cash_13_weeks' || !baselineScenarioId} onClick={() => void runScenario(true)}>运行延迟回款子情景</Button>
+        <Button variant="outline" type="button" disabled={locked || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />运行基准情景</Button>
+        <Button variant="outline" type="button" disabled={locked || scenarioKind !== 'cash_13_weeks' || !baselineScenarioId} onClick={() => void runScenario(true)}>运行延迟回款子情景</Button>
       </div>
       {finance?.scenarios.filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).length ? <div className="analysis-history-list">{[...finance.scenarios].filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).reverse().slice(0, 6).map((scenario) => <button type="button" className="analysis-history-row" key={String(scenario.id)}
         aria-current={scenario.id === baselineScenarioId ? 'true' : undefined} onClick={() => setBaselineScenarioId(String(scenario.id ?? ''))}>
@@ -1265,13 +1294,15 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, onRefresh }: {
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} options={accountMapOptions(finance)} onChange={setAccountMapId}
           placeholder="搜索映射名称或编号" allowEmptyLabel="暂不使用" /></div>
-      <AccountMapEditor value={mapRows} disabled={busy} onChange={setMapRows} />
+      <AccountMapEditor value={mapRows} disabled={locked} onChange={setMapRows} />
       {accountMapId && <p className="analysis-note">当前口径保存时会使用映射 {shortSha(accountMapId)}。</p>}
-      <Button variant="outline" type="button" disabled={busy || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
+      <Button variant="outline" type="button" disabled={locked || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
-    {message && <p role="status" className="analysis-message">{message}</p>}
-    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   </details>
+  {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
+  {running ? <p role="status" className="analysis-message">{running}</p>
+    : message ? <p role="status" className="analysis-message">{message}</p> : null}
+  {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={busy} onRefresh={onRefresh} /> : null}
   {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={busy} onRefresh={onRefresh} /> : null}
   </>;
@@ -1907,27 +1938,42 @@ function locatorFailureText(failure: unknown): string {
   return LOCATOR_FAILURES[message] ?? message;
 }
 
+const qualityChecks = [['numbers', '数字与口径'], ['coverage', '问题覆盖'], ['provenance', '来源追溯']] as const;
+
 function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
   taskId: string; quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
   factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string; page?: number } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
 }) {
   const coverage = coverageSummary(quality?.coverage);
+  const stale = state === 'stale';
+  // One line of what is still open. The seven statuses stay separate records and
+  // stay listed below; this only names the ones a manager still has to act on.
+  const checkGaps = stale ? [] : qualityChecks.flatMap(([key, label]) => {
+    const result = quality?.checks?.[key]?.status;
+    return !quality?.checks || result === 'pass' ? [] : [`${label}${result === 'needs_attention' ? '仍有缺口' : '尚未核对'}`];
+  });
+  const gaps = [...checkGaps, ...dimensionGaps(quality?.status_dimensions, stale)];
+  const itemCount = (quality?.checks ? qualityChecks.length : 0) + 4;
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
-    {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
-      {([['numbers', '数字与口径'], ['coverage', '问题覆盖'], ['provenance', '来源追溯']] as const).map(([key, label]) => {
-        const result = quality.checks?.[key]?.status;
-        return <div key={key}><dt>{label}</dt><dd>{state === 'stale' ? '改稿后待复核' : result === 'pass' ? '已核对' : result === 'needs_attention' ? '仍有缺口' : '尚未核对'}</dd></div>;
-      })}
-    </dl>}
+    {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : `${itemCount} 项核对均已通过`}</p>}
+    <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>
+      {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
+        {qualityChecks.map(([key, label]) => {
+          const result = quality.checks?.[key]?.status;
+          return <div key={key}><dt>{label}</dt><dd>{stale ? '改稿后待复核' : result === 'pass' ? '已核对' : result === 'needs_attention' ? '仍有缺口' : '尚未核对'}</dd></div>;
+        })}
+      </dl>}
+      <EvidenceDimensionList dimensions={quality?.status_dimensions} stale={stale} />
+    </details>
     {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
     {quality?.readability?.issues.length && state !== 'stale' ? <section className="analysis-details" aria-label="正文阅读建议">
       <h4>正文阅读建议</h4>
       <p className="analysis-note">可用“整理段落”预览分段，再将比较数据、完整公式和来源附注分别组织。</p>
       <ul>{quality.readability.issues.map((issue, index) => <li key={`${issue.code}-${issue.position ?? index}`}>{issue.message}</li>)}</ul>
     </section> : null}
-    <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={state === 'stale'} />
+    <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={stale} showDimensions={false} />
     {!(quality?.issues?.length) && <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
