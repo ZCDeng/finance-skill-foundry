@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, periodOptions, rowBasisLabel, type DisplayColumn } from './businessResults.js';
+import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisKind, rowBasisLabel, type DisplayColumn } from './businessResults.js';
 import { Table } from './presentation.js';
 
-type Kpi = { title: string; period: string; unit: string; basis: string; actual: string; budget: string; difference: string; rate: string };
+type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; actual: string; budget: string; difference: string; rate: string };
 
 function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
   for (const name of names) {
@@ -32,18 +32,24 @@ function metricKey(row: Record<string, unknown>): string {
 function kpiPriority(row: Record<string, unknown>): number {
   const key = metricKey(row);
   if (key === 'revenue' || key === '收入' || key === '营业收入') return 0;
-  if (key === 'operating_profit' || key === '营业利润') return 1;
+  if (key === 'operating_profit' || key === '营业利润' || key === 'profit' || key === '利润') return 1;
   if (key.includes('经营利润') && (key.includes('剔除') || key.includes('excl'))) return 2;
   return 10;
 }
 
+/**
+ * Up to four cards, one per metric before any metric repeats: the first row of
+ * each metric (usually the group total) says more than four regions of revenue.
+ */
 function kpiRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
-  return rows
+  const ranked = rows
     .filter((row) => row.actual != null && row.actual !== '')
     .map((row, index) => ({ row, index, priority: kpiPriority(row) }))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)
-    .slice(0, 4)
-    .map((item) => item.row);
+    .sort((left, right) => left.priority - right.priority || left.index - right.index);
+  const seen = new Set<string>();
+  const first = ranked.filter((item) => !seen.has(metricKey(item.row)) && Boolean(seen.add(metricKey(item.row))));
+  const rest = ranked.filter((item) => !first.includes(item));
+  return [...first, ...rest].slice(0, 4).map((item) => item.row);
 }
 
 function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
@@ -52,6 +58,7 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     period: row.period == null || row.period === '' ? '未声明期间' : String(row.period),
     unit: row.unit == null || row.unit === '' ? '未声明单位' : String(row.unit),
     basis: rowBasisLabel(row),
+    estimated: rowBasisKind(row) === 'estimate',
     actual: valueFor(row, columns, ['actual']),
     budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
     difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
@@ -76,6 +83,12 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
     return output;
   }), [columns, filteredRows]);
   const kpis = useMemo(() => kpiRows(filteredRows).map((row) => kpiFor(row, columns)), [columns, filteredRows]);
+  const otherColumns = useMemo(() => longRowColumns(run), [run]);
+  const others = useMemo(() => otherLongRows(run).filter((row) => !period || String(row.period ?? '') === period).map((row) => {
+    const output: Record<string, string> = {};
+    for (const column of otherColumns) output[column.label] = formatBusinessCell(row[column.name], column, row);
+    return output;
+  }), [otherColumns, period, run]);
   return <section className="analysis-business-result" aria-label="业务结果">
     {periods.length > 1 ? <div className="analysis-period-tabs" role="tablist" aria-label="结果期间">
       {periods.map((item) => <Button key={item} variant={item === period ? 'default' : 'outline'} type="button" role="tab" aria-selected={item === period}
@@ -87,15 +100,17 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
         <strong aria-label={`${kpi.title}实际`}>{kpi.actual}</strong>
         <small>{kpi.period} · {kpi.unit} · 依据：{kpi.basis}</small>
         <dl aria-label={`${kpi.title}指标明细`}>
-          <div><dt>预算</dt><dd>{kpi.budget}</dd></div>
+          <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd>{kpi.budget}</dd></div>
           <div><dt>差异</dt><dd>{kpi.difference}</dd></div>
           <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
         </dl>
       </article>)}
     </div> : null}
     <div className="analysis-business-table">
-      <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
-        rows={rows} caption="业务结果" />
+      {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
+        rows={rows} caption="业务结果" /> : null}
+      {others.length > 0 && <Table key={`${run.id}:${period || 'all'}:others`} columns={otherColumns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
+        rows={others} caption="其他结果" />}
     </div>
     <div className="analysis-actions">
       {onSources ? <Button variant="outline" type="button" onClick={onSources}>查看来源与口径</Button> : null}

@@ -46,7 +46,8 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
-      {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
+      {run.stdout && <details className="analysis-details"><summary>脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</summary>
+        <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
           onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}

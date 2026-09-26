@@ -183,6 +183,8 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
     expect(screen.getByLabelText('脚本计算输出').textContent).toBe('利润 30');
+    expect(screen.getByLabelText('脚本计算输出').closest('details')?.open).toBe(false);
+    expect(screen.getByText('脚本输出 · 1 行')).toBeTruthy();
     expect(screen.getByText(/profit.csv/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '保存新版并重跑' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '调整或重跑此分析' }));
