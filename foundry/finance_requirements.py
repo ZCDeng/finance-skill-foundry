@@ -1024,6 +1024,7 @@ def _prepared_evidence(analysis, runs):
     prepared = prepare_explanation(analysis, list(runs.values())) if runs else {'evidence_groups': []}
     member_map = {}
     group_map = {}
+    closure_reasons = {}
     for group in prepared.get('evidence_groups', []):
         if not isinstance(group, dict):
             continue
@@ -1032,6 +1033,11 @@ def _prepared_evidence(analysis, runs):
             group_map[group_key] = group
         engine = (runs.get(group.get('run_id')) or {}).get('engine')
         closure_status = (group.get('closure') or {}).get('status')
+        closure_reason = None
+        if engine == 'finance' and closure_status == 'passed':
+            if group.get('run_id') not in closure_reasons:
+                closure_reasons[group.get('run_id')] = _closure_not_counted_reason(analysis, runs[group['run_id']])
+            closure_reason = closure_reasons[group.get('run_id')]
         for member in group.get('members', []):
             if not isinstance(member, dict):
                 continue
@@ -1045,7 +1051,9 @@ def _prepared_evidence(analysis, runs):
                 'closure_status': closure_status,
                 # Only the finance engine's own closure is evidence; a script that builds a
                 # bridge-shaped table which adds up (999/-1/-1/997) is shown, never counted.
-                'engine_closed': engine == 'finance' and closure_status == 'passed',
+                'engine_closed': engine == 'finance' and closure_status == 'passed' and not closure_reason,
+                # A finance closure over scaled lines or of a scenario with itself (_closure_not_counted_reason).
+                **({'closure_not_counted_reason': closure_reason} if closure_reason else {}),
                 'engine_output': engine == 'finance',
                 # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
@@ -1524,7 +1532,9 @@ def _profit_bridge_group_required(item):
     )
 
 
-def _run_finance_variance_method(analysis, run):
+def _variance_revision_spec(analysis, run):
+    """The finance_spec an explain_variance run ran with ({} if it holds none), or None when the run is not a
+    finance variance run whose revision matches it."""
     if run.get('engine') != 'finance':
         return None
     analysis_id = run.get('analysis_id')
@@ -1541,10 +1551,116 @@ def _run_finance_variance_method(analysis, run):
         or revision.get('bindings') != run.get('bindings')
     ):
         return None
+    spec = revision.get('finance_spec')
+    return spec if isinstance(spec, dict) else {}
+
+
+def _run_finance_variance_method(analysis, run):
+    if _variance_revision_spec(analysis, run) is None:
+        return None
     result = run.get('result', {})
     if not isinstance(result, dict):
         return None
     return _canonical_method_name(result.get('method'))
+
+
+# The lines a profit bridge reads with account_signs (finance_metrics._management_pnl multiplies each undirected
+# row of the line by its sign).
+BRIDGE_SIGNED_LINES = ('revenue', 'cost', 'expense')
+
+
+def _closure_not_counted_reason(analysis, run):
+    """Why the closure of this finance run proves nothing about the requirement's lines, or None.
+
+    account_signs state which way a ledger books a line (1 or -1); any other factor scales every undirected
+    row of the line, and the scaled bridge still closes (issue #25), the way a recipe scale that is not a unit
+    change proves only a multiplication (decision 1). A comparison of one scenario with itself on the same
+    filters compares the rows with themselves and closes at 0 (issue #26).
+    """
+    if run.get('engine') != 'finance' or not _comparison_run(run):
+        return None
+    result = run.get('result') if isinstance(run.get('result'), dict) else {}
+    spec = _variance_revision_spec(analysis, run)
+    if spec is not None and _canonical_method_name(result.get('method')) == 'revenue_minus_cost_minus_expense':
+        signs = spec.get('account_signs')
+        if signs not in (None, {}) and (not isinstance(signs, dict) or not all(
+                _unit_sign(value) for key, value in signs.items() if str(key) in BRIDGE_SIGNED_LINES)):
+            return 'account_signs_not_unit'
+    comparison = result.get('comparison') if isinstance(result.get('comparison'), dict) else {}
+    if (comparison.get('actual_scenario') is not None
+            and comparison.get('actual_scenario') == comparison.get('baseline_scenario')
+            and (comparison.get('actual_filters') or {}) == (comparison.get('baseline_filters') or {})):
+        return 'comparison_same_side'
+    return None
+
+
+def _unit_sign(value):
+    if isinstance(value, bool):
+        return False
+    try:
+        return abs(Decimal(str(value))) == 1
+    except (InvalidOperation, ValueError):
+        return False
+
+
+GRAIN_FIELD_LISTS = dict(GRAIN_LISTS)
+
+
+def _comparison_filters_cover(item, run, scope):
+    """Whether an explain_variance run compares the rows the requirement asks for (issue #26).
+
+    Each side's filters may only restate what the requirement pins: the item's own dimensions, organizations,
+    periods and scenarios, and the scope's values for that side. A filter on a field the requirement never
+    names (a source row, a product it does not ask for) makes the bridge a bridge of that subset; it still
+    closes, but it is not the requirement's amount. On the baseline side a field the requirement pins only for
+    the actual side (a flat scope's period) is the comparison's baseline, as the scope match reads it.
+    """
+    comparison = (run.get('result') or {}).get('comparison')
+    if not isinstance(comparison, dict):
+        return True
+    expected = _comparison_scopes(scope)
+    dimensions = item.get('dimensions') if isinstance(item.get('dimensions'), dict) else {}
+    for side in ('actual', 'baseline'):
+        filters = comparison.get(f'{side}_filters')
+        if filters in (None, {}):
+            continue
+        if not isinstance(filters, dict):
+            return False
+        for key, filtered in filters.items():
+            try:
+                values = set(filtered if isinstance(filtered, (list, tuple, set, frozenset)) else [filtered])
+            except TypeError:
+                return False
+            listed = item.get(GRAIN_FIELD_LISTS.get(key, '')) or []
+            if key in dimensions and key not in {'method', *INTENT_DIMENSION_KEYS}:
+                required = dimensions[key]
+            elif key in expected[side]:
+                required = expected[side][key]
+            elif listed and (side == 'actual' or key != 'period'):
+                if not values <= set(listed):
+                    return False
+                continue
+            elif side == 'baseline' and (listed or key in expected['actual'] or key in expected['source']):
+                continue
+            elif key in expected['source']:
+                required = expected['source'][key]
+            else:
+                return False
+            required_values = required if isinstance(required, (list, tuple, set, frozenset)) else [required]
+            try:
+                if values != set(required_values):
+                    return False
+            except TypeError:
+                return False
+    return True
+
+
+def _with_comparison_filters(item, run, scope, location):
+    """A cited cell of a comparison run whose filters take part of the rows: reported, never counted."""
+    if location['status'] not in COUNTED_STATUSES or not _comparison_run(run) or _comparison_filters_cover(item, run, scope):
+        return location
+    return {**location, 'status': 'pending',
+            'evidence': {**location['evidence'], 'evidence_basis': None, 'not_counted_reason': 'comparison_filters_differ'}}
 
 
 def _profit_bridge_candidate_locations(analysis, item, run, evidence, scope):
@@ -1794,6 +1910,8 @@ def _amount_not_counted_reason(member, recipe):
         return recipe['rejected_reason']
     if recipe and recipe.get('counted') and recipe.get('kind') == 'ratio':
         return 'ratio_recipe_cannot_prove_amount'
+    if member.get('closure_not_counted_reason'):
+        return member['closure_not_counted_reason']
     if member.get('engine_output'):
         return 'engine_output_without_closure'
     if member.get('aggregate_output'):
@@ -2174,7 +2292,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 processed_groups.add(('profit_bridge', run_id))
                 for location in profit_bridge_locations:
                     status, metadata = _cell_evidence_status(item, location, evidence)
-                    locations.append({**location, 'evidence': metadata, 'status': status})
+                    locations.append(_with_comparison_filters(item, run, _row_scope(latest['scope']),
+                                                              {**location, 'evidence': metadata, 'status': status}))
                 continue
             if (
                 _price_quantity_requirement_matches(item, run, row, group)
@@ -2186,7 +2305,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                 for member in _price_quantity_required_members(group):
                     location = {'run_id': run_id, 'row': index, 'column': member['column'], 'output_hash': run.get('output_hash')}
                     status, metadata = _cell_evidence_status(item, location, evidence)
-                    locations.append({**location, 'evidence': metadata, 'status': status})
+                    locations.append(_with_comparison_filters(item, run, _row_scope(latest['scope']),
+                                                              {**location, 'evidence': metadata, 'status': status}))
                 continue
             if _profit_bridge_group_required(item):
                 continue
@@ -2202,7 +2322,8 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
                     # Cited, about this account, but a total over part of it: reported, never counted.
                     status, metadata = 'pending', {**metadata, 'evidence_basis': None,
                                                    'not_counted_reason': 'metric_filters_differ'}
-                locations.append({**location, 'evidence': metadata, 'status': status})
+                locations.append(_with_comparison_filters(item, run, _row_scope(latest['scope']),
+                                                          {**location, 'evidence': metadata, 'status': status}))
             elif (account_total_candidate or generic_candidate) and _out_of_scope_inputs(run, item, latest):
                 # The run read inputs outside the requirement scope, which no row field repairs: report the
                 # cited cell as not counted (ruling (a)), never as "no cited row".
@@ -2949,7 +3070,8 @@ def _uncounted_rows_fixup(item, locations, uncounted, paths, route, runs, uncoun
             reason = location['evidence'].get('not_counted_reason')
             if (location['status'] in {'answered', 'estimated'}
                     or reason in {'estimate_cited_for_source_grain', 'run_bindings_differ', 'run_scope_differs',
-                                  'metric_filters_differ'}
+                                  'metric_filters_differ', 'comparison_filters_differ', 'account_signs_not_unit',
+                                  'comparison_same_side'}
                     or _location_grain(item, location, runs) not in uncounted_keys
                     or (location['run_id'], location['row'], location['column']) not in unbacked):
                 continue
@@ -3167,6 +3289,13 @@ NOT_COUNTED_TEXT = {
     'run_scope_differs': '财务引擎运行的 finance_scope 里有绑定输入的口径与本要求的范围不一致，这个运行的结果不计入',
     'metric_filters_differ': ('run_metric 的 filters 只取了该科目的一部分行（如某张凭证、某个产品或来源行），不是该科目在要求范围内的合计；'
                               '去掉这些 filters 重跑，filters 只能写要求本身的组织、期间、情景或维度'),
+    'comparison_filters_differ': ('explain_variance 的 actual_filters 或 baseline_filters 只取了一部分行（如某个产品或来源行），'
+                                  '差异桥闭合的是这部分行，不是要求范围内的金额；去掉这些 filters 重跑，'
+                                  'filters 只能写要求本身的组织、期间、情景或维度'),
+    'account_signs_not_unit': ('explain_variance 的 account_signs 只能写 1 或 -1 说明科目的借贷符号；'
+                               '其他倍数会把整条科目放大或缩小，缩放后的差异桥即使闭合也不计入；去掉 account_signs 或只写符号后重跑'),
+    'comparison_same_side': ('explain_variance 的实际与基准是同一情景、同一过滤条件，只是把同一批行和自己比较，'
+                             '闭合的 0 差异不计入；按要求的实际与基准情景重跑'),
     'evidence_incomplete': '证据缺项、口径或单位不一致，或复算不闭合',
     'method_not_applicable': '计算方法未定义该项',
     'no_evidence_record': '该数值没有对应的证据记录',
