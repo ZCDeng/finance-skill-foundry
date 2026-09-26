@@ -29,6 +29,7 @@ from foundry.report_documents import (
     report_document_markdown,
     validate_report_document,
 )
+from foundry.report_estimates import _added_bytes
 from foundry.report_projection import build_report_projection
 from foundry.task import TaskStore
 from test_finance_requirements import _claim, _recipe, _script_run, _workbook, spec
@@ -640,7 +641,8 @@ def test_a_fact_template_that_renders_an_estimate_gets_the_label_after_its_displ
     assert _unlabelled(content) == _reference(draft, mode)
     # Exactly the text and nodes the server added get room beyond the limits (see the limit tests).
     assert projection['estimate_headroom'] == {
-        'text': _text_length(_declared(content)) + len(LABEL) * 3, 'nodes': _node_count(_declared(content))}
+        'text': _text_length(_declared(content)) + len(LABEL) * 3, 'nodes': _node_count(_declared(content)),
+        'bytes': _added_bytes(_declared(content), 3)}
 
 
 def test_a_fact_template_in_a_structured_document_is_labelled_in_its_own_text_node(analysis, tmp_path):
@@ -688,6 +690,49 @@ def test_a_fact_template_in_a_structured_document_is_labelled_in_its_own_text_no
         # After the title and the document's metadata line, as the markdown export prints them.
         assert projection['body'].startswith('分析草稿·待复核\n\n# 区域收入\n\n账套：未声明；组织：未声明；企业：华宸物业；'
                                              '期间：2026-01:2026-08；币种：CNY；单位：万元\n\n## 估算值声明\n\n')
+
+
+METADATA_LINE = '账套：未声明；组织：未声明；企业：华宸物业；期间：2026-01:2026-08；币种：CNY；单位：万元'
+
+
+@pytest.mark.parametrize('variant', ['metadata_paragraph', 'cell_edge_space', 'cell_pipe', 'cell_newline'])
+def test_a_structured_document_is_labelled_whatever_its_markdown_rewrites(analysis, tmp_path, variant):
+    """Issue #32: every template label in a structured document was dropped when the document opened with its
+    own metadata line, or a table cell's text had edge whitespace, a '|' or a newline: the markdown rewrites
+    those (prints the metadata once, strips and escapes cells), so the slotted skeleton never matched."""
+    case = _case(analysis, tmp_path)
+    estimate = case.estimate
+    cell_text = {'metadata_paragraph': estimate, 'cell_edge_space': f' {estimate} ', 'cell_pipe': f'甲|乙 {estimate}',
+                 'cell_newline': f'第一行\n{estimate}'}[variant]
+
+    def cell(kind, text):
+        return {'type': kind, 'attrs': {'textAlign': 'left'},
+                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': text}]}]}
+
+    document = {
+        'schema_version': 1, 'template_version': 'annual-v1',
+        'metadata': {'company': '华宸物业', 'period': '2026-01:2026-08', 'currency': 'CNY', 'unit': '万元'},
+        'content': [
+            *([{'type': 'paragraph', 'content': [{'type': 'text', 'text': METADATA_LINE}]}]
+              if variant == 'metadata_paragraph' else []),
+            {'type': 'paragraph', 'content': [{'type': 'text', 'text': f'华东区域同期预算 {estimate}。'}]},
+            {'type': 'table', 'content': [
+                {'type': 'tableRow', 'content': [cell('tableHeader', '区域'), cell('tableHeader', '预算')]},
+                {'type': 'tableRow', 'content': [cell('tableCell', '华东区域'), cell('tableCell', cell_text)]}]},
+        ],
+    }
+    draft = _save(case, document=document)
+
+    for mode in MODES:
+        content = build_report_projection(draft, mode=mode)['document']['content']
+        texts = [_text(node) for node in content]
+        assert f'华东区域同期预算 {ESTIMATE} 万元（估算）。' in texts
+        table = [node for node in content if node['type'] == 'table'][-1]
+        assert _rows(table)[1][1] == cell_text.replace(estimate, f'{ESTIMATE} 万元（估算）')
+        # The document's own metadata line stays first, before the declaration (as on main's export).
+        first = 1 if variant == 'metadata_paragraph' else 0
+        assert _text(content[0]) == METADATA_LINE if first else True
+        assert _labels(content) == 2 and _unlabelled(content[first:]) == _reference(draft, mode)[first:]
 
 
 def test_the_label_lands_after_the_display_whatever_markdown_escapes_or_marks_precede_it(analysis, tmp_path):
@@ -803,13 +848,14 @@ def test_a_template_that_writes_the_label_after_an_estimate_itself_is_not_labell
             content = projection['document']['content']
             paragraphs = [_text(node) for node in content[3:] if node['type'] == 'paragraph']
             assert [text for text in expected[name] if text not in paragraphs] == []
-            table = next(node for node in content[3:] if node['type'] == 'table')
+            table = [node for node in content if node['type'] == 'table'][-1]
             assert _rows(table)[-1][-1] == f'{shown}（估算）'
             assert not any('估算）（估算' in node['text'] or '估算） （估算' in node['text'] or '估算）(估算' in node['text']
                            for node in _texts(content))
             # Only the one label the export placed takes room beyond the limits.
             assert projection['estimate_headroom'] == {
-                'text': _text_length(_declared(content)) + len(LABEL), 'nodes': _node_count(_declared(content))}
+                'text': _text_length(_declared(content)) + len(LABEL), 'nodes': _node_count(_declared(content)),
+                'bytes': _added_bytes(_declared(content), 1)}
             markdown = open(analysis.export_draft(draft['id'], 'md', mode=mode)['path'], encoding='utf-8').read()
             assert '（估算）（估算）' not in markdown and f'{shown}（估算）（估算）' not in markdown
             book = load_workbook(analysis.export_draft(draft['id'], 'xlsx', mode=mode)['path'])
@@ -867,6 +913,137 @@ def test_the_xlsx_result_sheet_marks_only_estimated_cells_through_their_number_f
             assert labelled == [('Result 1', cells[3].coordinate)]
         finally:
             book.close()
+
+
+def test_the_declaration_shows_a_text_typed_estimate_with_its_rows_unit(analysis, tmp_path):
+    """Issue #32: a VARCHAR value column has no fact, so the declaration printed the claim text with no unit."""
+    case = _case(analysis, tmp_path, value_type='VARCHAR')
+    draft = _save(case, BODY)
+    assert not case.estimate_fact
+
+    for mode in MODES:
+        table = _declared(_projection(analysis, draft, mode)['document']['content'])[2]
+        assert _rows(table) == [COLUMNS, EAST_ROW]
+
+
+def test_declaration_rows_read_each_items_locations_once(monkeypatch):
+    """Issue #32: every estimated cell rescanned its item's whole locations list, so a draft with N estimated cells
+    took N × 2N steps (1.9 s at N=4000 against 0.001 s on main)."""
+    import foundry.report_estimates as estimates
+
+    count = 2000
+    run = 'r' * 32
+    locations = [{'run_id': run, 'row': row, 'column': 'value', 'status': 'estimated',
+                  'evidence': {'evidence_basis': 'estimate'}} for row in range(count)]
+    locations += [{'run_id': run, 'row': count + row, 'column': 'value', 'status': 'answered', 'evidence': {}}
+                   for row in range(count)]
+    item = {'id': 'revenue_1_8', 'label': '1-8 月营业收入', 'locations': locations, 'estimated_grains': [
+        {'organization': '华东区域', 'locations': [{'run_id': run, 'row': row, 'column': 'value'} for row in range(count)]}]}
+    draft = {'explanation_check': {'requirements': {'items': [item]}, 'facts': []}, 'claims': []}
+    cells = estimates.estimated_cells(draft)
+    calls = []
+    original = estimates._cell_key
+    monkeypatch.setattr(estimates, '_cell_key', lambda location: calls.append(1) or original(location))
+
+    rows = estimates._declaration_rows(draft, cells)
+
+    assert len(rows) == count
+    assert len(calls) < 10 * count
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_the_byte_headroom_covers_what_the_declaration_adds_to_the_printed_projection(analysis, tmp_path, mode):
+    """Issue #32: the declaration added bytes to report-projection-read's output and to rendered files with no
+    allowance under their 32 MiB limits; estimate_headroom.bytes bounds what it adds."""
+    case = _case(analysis, tmp_path)
+    draft = _save(case, BODY + f'\n\n华东区域同期预算 {case.estimate}。')
+    runs = {run_id: analysis.get_run(run_id) for run_id in draft['run_ids']}
+
+    def printed(projection):
+        return len((json.dumps(projection, ensure_ascii=False) + '\n').encode('utf-8'))
+
+    with_estimates = build_report_projection(draft, mode=mode, runs=runs)
+    without = build_report_projection(_without_estimates(draft), mode=mode, runs=runs)
+
+    added = printed(with_estimates) - printed(without)
+    assert 0 < added <= with_estimates['estimate_headroom']['bytes']
+    document = len(json.dumps(with_estimates['document'], ensure_ascii=False).encode('utf-8'))
+    assert document - len(json.dumps(without['document'], ensure_ascii=False).encode('utf-8')) <= (
+        with_estimates['estimate_headroom']['bytes'])
+
+
+def test_a_registered_export_over_the_limit_by_no_more_than_the_declaration_still_registers(analysis, tmp_path):
+    from foundry.analysis import MAX_SOURCE_BYTES
+
+    case = _case(analysis, tmp_path)
+    draft = _save(case, BODY)
+    projection = analysis.projection_for_draft(draft['id'], 'management')
+    room = projection['estimate_headroom']['bytes']
+    fits, over = tmp_path / 'fits.html', tmp_path / 'over.html'
+    fits.write_bytes(b'x' * (MAX_SOURCE_BYTES + room))
+    over.write_bytes(b'x' * (MAX_SOURCE_BYTES + room + 1))
+
+    registered = analysis.register_report_export(draft['id'], 'html', fits, content_mode='management',
+                                                 projection_hash=projection['projection_hash'])
+    assert registered['projection_hash'] == projection['projection_hash']
+    with pytest.raises(FoundryError, match='32 MiB'):
+        analysis.register_report_export(draft['id'], 'pdf', over, content_mode='management',
+                                        projection_hash=projection['projection_hash'])
+    # Without the projection it was built from, the limit is main's.
+    with pytest.raises(FoundryError, match='32 MiB'):
+        analysis.register_report_export(draft['id'], 'docx', fits)
+
+
+def test_a_text_value_that_states_its_own_magnitude_is_declared_as_written():
+    """Review of #39: only a plain number gets its row's unit; 11.78亿元 or 117,815 万 keep the text as written."""
+    from foundry.report_estimates import _with_row_unit
+
+    runs = {'r': {'result': {'rows': [{'unit': '万元'}, {'unit': '-'}, {}]}}}
+    assert _with_row_unit('117814.5625', ('r', 0, 'value'), runs) == '117814.5625 万元'
+    for text in ('11.78亿元', '117,815 万', '约11.8亿', '117814.5625万元', '12.5%'):
+        assert _with_row_unit(text, ('r', 0, 'value'), runs) == text
+    assert _with_row_unit('117814.5625', ('r', 1, 'value'), runs) == '117814.5625'
+    assert _with_row_unit('117814.5625', ('r', 2, 'value'), runs) == '117814.5625'
+
+
+def test_an_author_label_after_a_line_break_in_a_cell_is_not_doubled(analysis, tmp_path):
+    """Review of #39: a cell writes the estimate, a line break and its own （估算）; the export adds no second one."""
+    case = _case(analysis, tmp_path)
+
+    def cell(kind, text):
+        return {'type': kind, 'attrs': {'textAlign': 'left'},
+                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': text}]}]}
+
+    document = {'schema_version': 1, 'template_version': 'annual-v1', 'metadata': {'unit': '万元'}, 'content': [
+        {'type': 'table', 'content': [
+            {'type': 'tableRow', 'content': [cell('tableHeader', '区域'), cell('tableHeader', '预算')]},
+            {'type': 'tableRow', 'content': [cell('tableCell', '华东区域'), cell('tableCell', f'{case.estimate}\n（估算）')]}]},
+    ]}
+    draft = _save(case, document=document)
+
+    for mode in MODES:
+        content = build_report_projection(draft, mode=mode)['document']['content']
+        table = [node for node in content if node['type'] == 'table'][-1]
+        assert _rows(table)[1][1] == f'{ESTIMATE} 万元\n（估算）'
+
+
+def test_the_byte_headroom_covers_a_declaration_dense_in_escaped_characters(analysis, tmp_path):
+    """Review of #39: markdown escapes (\\*) printed as JSON and HTML entities grow the text; the room covers them."""
+    method = '*[&](|)<>' * 100
+    case = _case(analysis, tmp_path, grain_basis=[{'organizations': ['华东区域'], 'scenarios': ['budget_1_8'],
+                                                   'basis': 'estimate', 'method': method,
+                                                   'factor_reproducible': False, 'reason': REASON}])
+    draft = _save(case, BODY)
+    runs = {run_id: analysis.get_run(run_id) for run_id in draft['run_ids']}
+
+    def printed(projection):
+        return len((json.dumps(projection, ensure_ascii=False) + '\n').encode('utf-8'))
+
+    with_estimates = build_report_projection(draft, mode='management', runs=runs)
+    without = build_report_projection(_without_estimates(draft), mode='management', runs=runs)
+
+    assert method in json.dumps(with_estimates['document'], ensure_ascii=False)
+    assert printed(with_estimates) - printed(without) <= with_estimates['estimate_headroom']['bytes']
 
 
 # --- a draft without estimates is main's export ---------------------------------------------------------------

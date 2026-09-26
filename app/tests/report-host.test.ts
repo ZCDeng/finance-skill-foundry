@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ call: vi.fn(), open: vi.fn(), save: vi.fn(), printOptions: undefined as any, lastWindow: undefined as any }));
+const mocks = vi.hoisted(() => ({ call: vi.fn(), open: vi.fn(), save: vi.fn(), printOptions: undefined as any, lastWindow: undefined as any, printed: undefined as number | undefined }));
 vi.mock('electron', () => ({
   app: { getAppPath: () => process.cwd() },
   BrowserWindow: class {
@@ -27,7 +27,15 @@ vi.mock('electron', () => ({
   },
   dialog: { showOpenDialog: mocks.open, showSaveDialog: mocks.save },
 }));
-vi.mock('../electron/foundry.js', () => ({ runFoundryJson: mocks.call }));
+vi.mock('../electron/foundry.js', () => ({
+  runFoundryJson: mocks.call,
+  // The projection read reports how many bytes it printed; tests may set mocks.printed to override.
+  runFoundryJsonSized: async (...args: unknown[]) => {
+    const value = await mocks.call(...args);
+    return { value, bytes: mocks.printed ?? Buffer.byteLength(JSON.stringify(value)) };
+  },
+  FOUNDRY_MAX_BUFFER: 32 * 1024 * 1024,
+}));
 vi.mock('node:worker_threads', () => ({
   Worker: class {
     private listeners = new Map<string, Function[]>();
@@ -49,7 +57,7 @@ import type { ReportImportResult, ReportProjection, ReportSource } from '../elec
 
 const task = 'a'.repeat(32), source = { id: 'b'.repeat(32), name: '报告.md', format: 'md', sha256: '' };
 let directory: string;
-beforeEach(async () => { vi.clearAllMocks(); directory = await mkdtemp(path.join(tmpdir(), 'report-host-test-')); });
+beforeEach(async () => { vi.clearAllMocks(); mocks.printed = undefined; directory = await mkdtemp(path.join(tmpdir(), 'report-host-test-')); });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
 function projection(document = createReportDocument()): ReportProjection {
@@ -138,6 +146,23 @@ describe('document boundary and task ownership', () => {
     expect(mocks.call.mock.calls.map((call) => call[1])).toEqual(['report-projection-read', 'analysis-export']);
     expect(mocks.call.mock.calls[0][2]).toEqual(['--draft', 'draft', '--mode', 'management']);
     expect(mocks.call.mock.calls[1][2]).toEqual(['--draft', 'draft', '--format', 'md', '--mode', 'management']);
+  });
+  it('reads a projection over 32 MiB only by as much as its estimate declaration adds (issue #32)', async () => {
+    const limit = 32 * 1024 * 1024, archive = path.join(directory, 'archive.md'), chosen = path.join(directory, 'chosen.md');
+    await writeFile(archive, '# 财务报告');
+    mocks.save.mockResolvedValue({ canceled: false, filePath: chosen });
+    const declared = { ...projection(), estimate_headroom: { text: 100, nodes: 20, bytes: 4000 } };
+    mocks.call.mockImplementation(async (_binding, command) => command === 'report-projection-read'
+      ? declared : { path: archive, sha256: 'receipt', projection_hash: 'd'.repeat(64), content_mode: 'management' });
+    const host = new ReportHost({ varRoot: '/store' });
+    mocks.printed = limit + 4000;
+    expect(await host.export(task, 'draft', 'md')).toMatchObject({ path: chosen });
+    mocks.printed = limit + 4001;
+    await expect(host.export(task, 'draft', 'md')).rejects.toThrow('超过容量');
+    // Without estimates the limit is main's 32 MiB.
+    mocks.call.mockImplementation(async () => projection());
+    mocks.printed = limit + 1;
+    await expect(host.export(task, 'draft', 'md')).rejects.toThrow('超过容量');
   });
   it('cancelled save creates no export record and releases the task job', async () => {
     mocks.call.mockResolvedValue(projection());

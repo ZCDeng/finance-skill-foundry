@@ -44,4 +44,6 @@ export interface ReportProjection {
   document: ReportDocument;
   limitations?: string[];
   sources?: string[];
+  /** Room beyond the limits for the estimate declaration and labels the server added (absent without estimates). */
+  estimate_headroom?: { text: number; nodes: number; bytes?: number };
 }

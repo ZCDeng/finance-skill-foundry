@@ -1174,7 +1174,14 @@ class AnalysisStore:
         if not source.is_file() or source.is_symlink():
             raise FoundryError("report export source must be a regular file")
         data = source.read_bytes()
-        if len(data) > MAX_SOURCE_BYTES:
+        limit = MAX_SOURCE_BYTES
+        if len(data) > limit and projection_hash is not None:
+            # The estimate declaration and labels bring their own room (issue #32): a file that fits the limit
+            # without them still registers.
+            projection = self.projection_for_draft(draft_id, content_mode)
+            if projection["projection_hash"] == projection_hash:
+                limit += int((projection.get("estimate_headroom") or {}).get("bytes") or 0)
+        if len(data) > limit:
             raise FoundryError("report export exceeds 32 MiB limit")
         digest = _hash_bytes(data)
         filename = (
