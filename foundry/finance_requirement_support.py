@@ -126,7 +126,9 @@ def assess_requirement_support(analysis, spec):
                              "reason": "snapshot_unverified"})
     reports = []
     source_columns = {column for source in sources for column in source["columns"]}
-    from foundry.finance_requirements import _closed_metric_key, _evidence_environment, _evidence_paths, _pnl_class
+    from foundry.finance_requirements import (
+        CLOSED_EVIDENCE_METRICS, _closed_metric_key, _evidence_environment, _evidence_paths, _named_metric, _pnl_class,
+    )
 
     try:
         environment = _evidence_environment(analysis, spec)
@@ -148,8 +150,12 @@ def assess_requirement_support(analysis, spec):
                     report.update(status="unrecognized", next_action=(
                         "未识别的指标按金额核验：可选择已支持指标，或用SQL/Python计算并声明明确的结果列，再按下述依据作答。"
                         + report["next_action"]))
-            elif metric in accounts:
+            elif metric in accounts and _named_metric(item.get("metric")) not in CLOSED_EVIDENCE_METRICS:
                 report["evidence"] = "run_metric_result_set (single account_total)"
+            elif paths and (paths["accepted"] or paths["blocked"]) and _pnl_class(item.get("metric")) is not None:
+                # A P&L line named by its alias (营业收入) that is also a ledger account: not an account item, and
+                # not unrecognized either; the paths the checker offers it (a method run) are its evidence.
+                report["evidence"] = _paths_evidence(paths)
             elif metric in source_columns:
                 report["evidence"] = "cited_result_row (explicit result column)"
             else:
