@@ -203,6 +203,7 @@
 .analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 12px; display: grid; gap: 4px; background: var(--fnd-surface); min-width: 0; }
 .analysis-kpi-card span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .analysis-kpi-card strong { font-size: 20px; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-kpi-card .analysis-kpi-source { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 1.5; }
 .analysis-headline { display: grid; gap: 10px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); }
 .analysis-headline-line { display: grid; gap: 2px; }
 .analysis-headline-text { margin: 0; font-size: 18px; line-height: 1.5; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

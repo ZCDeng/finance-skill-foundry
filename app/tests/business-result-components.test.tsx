@@ -494,7 +494,11 @@ describe('business result components', () => {
     expect(within(table).getByRole('columnheader', { name: '数值' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '收缴率实际' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '90.20%' })).toBeTruthy();
-    expect(within(table).queryByRole('cell', { name: 'receivable_balance' })).toBeNull();
+    // The label leads; the key stays last, because a unique label need not name its metric.
+    const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
+    expect(headers[0]).toBe('指标');
+    expect(headers).toContain('指标键');
+    expect(within(table).getByRole('cell', { name: 'receivable_balance' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: '其他结果' })).toBeNull();
   });
 
@@ -591,8 +595,85 @@ describe('business result components', () => {
       const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
       expect(within(table).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
       expect(within(table).queryByRole('columnheader', { name: '情景' })).toBeNull();
-      expect(within(table).getAllByRole('columnheader').slice(0, 2).map((header) => header.textContent)).toEqual(['指标', '指标说明']);
+      const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
+      expect(headers[0]).toBe('指标');
+      expect(headers).toContain('指标键');
       expect(within(table).getByRole('cell', { name: '62.00%' })).toBeTruthy();
+    });
+
+    it.each([
+      ['推算', { metric_label: '营业收入 1-8 月预算（按集团进度率推算）' }],
+      ['预估', { metric_label: '1-8 月预估预算' }],
+      ['English estimated', { note: 'budget (estimated from group progress)' }],
+    ])('labels a budget worded as %s an estimate', (_, budget) => {
+      render(<BusinessResultView run={longRun(pair(budget), ['metric_label', 'note'])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('预算（估算）')).toBeTruthy();
+      expect(within(card).getByText(/依据：估算/)).toBeTruthy();
+    });
+
+    it.each([
+      ['非估算 in the label', { metric_label: '1-8 月批复预算（非估算）' }, ['metric_label']],
+      ['不含估算 in the note', { note: '批复预算，不含估算调整' }, ['note']],
+      ['估算方法 无', { 估算方法: '无' }, ['估算方法']],
+    ])('keeps an approved budget as 预算 when %s', (_, budget, extra) => {
+      render(<BusinessResultView run={longRun(pair(budget), extra)} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText(/依据：计算/)).toBeTruthy();
+    });
+
+    it('puts the run\'s assumptions and each side\'s own label beside the numbers', () => {
+      const current = longRun(pair({ metric_label: '营业利润 1-8 月预算' }, { metric_label: '营业利润 1-8 月实际（剔除其他收益类）' }), ['metric_label']);
+      render(<BusinessResultView run={{ ...current, assumptions: ['区域层级的 1-8 月预算为推算值，不是批复预算。'] }} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('营业利润 1-8 月实际（剔除其他收益类）')).toBeTruthy();
+      expect(within(card).getByText('预算：营业利润 1-8 月预算')).toBeTruthy();
+      expect(screen.getByLabelText('本次计算的假设').textContent).toBe('本次计算的假设：区域层级的 1-8 月预算为推算值，不是批复预算。');
+      expect(within(screen.getByRole('table', { name: '业务结果' })).getByRole('cell', { name: /营业利润 1-8 月实际（剔除其他收益类）/ })).toBeTruthy();
+    });
+
+    it('marks an unpaired estimate whose label does not say so', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({}),
+        { metric_key: 'profit', organization: '华东区域', period: '2026-01:2026-08', scenario: 'estimated_budget_ytd', value: '12', unit: '万元', metric_label: '营业利润预算' },
+      ], ['metric_label'])} />);
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '营业利润预算（估算）' })).toBeTruthy();
+    });
+
+    it.each([
+      ['a bare year suffix', [
+        { metric_key: 'revenue', organization: '集团', period: '2026', scenario: 'actual_2026', value: '325644', unit: '万元' },
+        { metric_key: 'revenue', organization: '集团', period: '2026', scenario: 'budget_2026', value: '528000', unit: '万元' }]],
+      ['a year-to-date actual beside a monthly budget', [
+        { metric_key: 'revenue', organization: '集团', period: '2026-08', scenario: 'actual_ytd', value: '325644', unit: '万元' },
+        { metric_key: 'revenue', organization: '集团', period: '2026-08', scenario: 'budget_month', value: '44163', unit: '万元' }]],
+    ])('makes no card from %s', (_, rows) => {
+      render(<BusinessResultView run={longRun(rows)} />);
+      expect(screen.queryByRole('article')).toBeNull();
+    });
+
+    it('does not read a favorable-signed variance as actual minus budget', () => {
+      const expense = (scenario: string, value: string, metric_key = 'expense') => ({ metric_key, organization: '集团', period: '2026-08', scenario, value, unit: '万元' });
+      render(<BusinessResultView run={longRun([expense('actual_ytd', '120'), expense('budget_ytd', '100'), expense('variance_favorable', '-20'), expense('variance_favorable', '-20', 'expense_variance')])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).queryByText('-20.00')).toBeNull();
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getAllByRole('cell', { name: '-20.00' })).toHaveLength(2);
+    });
+
+    it('follows a Chinese 期间 column for the other results and the period tabs', () => {
+      const current: AnalysisRun = { ...run([]), result: {
+        columns: ['metric_key', 'organization', '期间', 'scenario', 'value', 'unit', 'metric_label'].map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [
+          { metric_key: 'revenue', organization: '集团', 期间: '2026-08', scenario: 'actual_2026_08', value: '90', unit: '万元', metric_label: '8 月收入实际' },
+          { metric_key: 'revenue', organization: '集团', 期间: '2026-08', scenario: 'budget_2026_08', value: '100', unit: '万元', metric_label: '8 月收入预算' },
+          { metric_key: 'revenue_budget_fy', organization: '集团', 期间: '2026', scenario: 'budget_bud_fy', value: '1200', unit: '万元', metric_label: '全年收入预算' },
+        ], row_count: 3, truncated: false } };
+      render(<BusinessResultView run={current} />);
+      expect(screen.getByRole('tab', { name: '2026' })).toBeTruthy();
+      expect(screen.queryByRole('table', { name: '其他结果' })).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: '2026' }));
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '全年收入预算' })).toBeTruthy();
     });
 
     it('reads a 达成率 given in % as a percentage, not a fraction', () => {

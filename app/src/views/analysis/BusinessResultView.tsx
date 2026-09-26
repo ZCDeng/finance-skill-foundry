@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, type DisplayColumn } from './businessResults.js';
-import { Table } from './presentation.js';
+import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
+import { assumptionSummary, Table } from './presentation.js';
 
-type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actual: string; budget: string; difference: string; rate: string };
+type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string };
 
 function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
   for (const name of names) {
@@ -61,6 +61,9 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     // Only when the budget shown is itself the estimate; an approved budget beside an estimate stays 预算.
     estimated: row.same_period_budget_estimated === true,
     estimatedBudget: valueFor(row, columns, ['estimated_same_period_budget'], ''),
+    // The source's own words for each side: they carry the 口径 and how a budget was made.
+    actualLabel: typeof row.actual_label === 'string' ? row.actual_label : '',
+    budgetLabel: typeof row.budget_label === 'string' ? row.budget_label : '',
     actual: valueFor(row, columns, ['actual']),
     budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
     difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
@@ -76,7 +79,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
   }, [run.id, periods]);
   const columns = useMemo(() => displayColumns(run), [run]);
   const sourceRows = useMemo(() => businessRows(run), [run]);
-  const filteredRows = useMemo(() => (period ? sourceRows.filter((row) => String(row.period ?? '') === period) : sourceRows), [period, sourceRows]);
+  const filteredRows = useMemo(() => (period ? sourceRows.filter((row) => String(rowPeriod(row) ?? '') === period) : sourceRows), [period, sourceRows]);
   const rows = useMemo(() => filteredRows.map((row) => {
     const output: Record<string, string> = {};
     for (const column of columns) {
@@ -88,7 +91,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
   const otherRows = useMemo(() => otherLongRows(run), [run]);
   const otherColumns = useMemo(() => longRowColumns(run, otherRows), [run, otherRows]);
   // A row without a period belongs to every period tab rather than to none.
-  const others = useMemo(() => otherRows.filter((row) => !period || row.period == null || row.period === '' || String(row.period) === period).map((row) => {
+  const others = useMemo(() => otherRows.filter((row) => { const value = rowPeriod(row); return !period || value == null || value === '' || String(value) === period; }).map((row) => {
     const output: Record<string, string> = {};
     for (const column of otherColumns) output[column.label] = formatBusinessCell(row[column.name], column, row);
     return output;
@@ -102,6 +105,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
       {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
         <span>{kpi.title}</span>
         <strong aria-label={`${kpi.title}实际`}>{kpi.actual}</strong>
+        {kpi.actualLabel ? <small className="analysis-kpi-source">{kpi.actualLabel}</small> : null}
         <small>{kpi.period} · {kpi.unit} · 依据：{kpi.basis}</small>
         <dl aria-label={`${kpi.title}指标明细`}>
           <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd>{kpi.budget}</dd></div>
@@ -109,8 +113,11 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
           <div><dt>差异</dt><dd>{kpi.difference}</dd></div>
           <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
         </dl>
+        {kpi.budgetLabel ? <small className="analysis-kpi-source">预算：{kpi.budgetLabel}</small> : null}
       </article>)}
     </div> : null}
+    {/* The run's own caveats stand next to the numbers they qualify, whatever words they use. */}
+    {kpis.length > 0 && Boolean(run.assumptions?.length) && <p className="analysis-note" aria-label="本次计算的假设">本次计算的假设：{assumptionSummary(run.assumptions)}</p>}
     <div className="analysis-business-table">
       {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
         rows={rows} caption="业务结果" /> : null}
