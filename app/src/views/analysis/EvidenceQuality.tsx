@@ -46,7 +46,11 @@ export function dimensionGaps(values: EvidenceDimensions | undefined, stale = fa
     return [text === '需要复核' ? `${label}需要复核` : text];
   });
 }
-export function EvidenceDimensionList({ dimensions: values, stale = false }: { dimensions?: EvidenceDimensions; stale?: boolean }) {
+/** Each of the four verification dimensions in words, one per record. */
+export function dimensionStates(values: EvidenceDimensions | undefined): string[] {
+  return dimensions.map(([key, , success, pending]) => statusText(key, values?.[key]?.status, success, pending));
+}
+export function EvidenceDimensionList({ dimensions: values, stale = false, caveat = true }: { dimensions?: EvidenceDimensions; stale?: boolean; caveat?: boolean }) {
   return <>
     <dl className="analysis-check-summary" aria-label="四项独立核验状态">
       {dimensions.map(([key, label, success, pending]) => <div key={key}>
@@ -54,7 +58,7 @@ export function EvidenceDimensionList({ dimensions: values, stale = false }: { d
         {values?.[key]?.message && <p className="analysis-note">{values[key]?.message}</p>}
       </div>)}
     </dl>
-    <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
+    {caveat && <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>}
   </>;
 }
 export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false, showDimensions = true }: {

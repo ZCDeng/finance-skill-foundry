@@ -13,7 +13,7 @@ import { ClaimBindingRepair } from './analysis/ClaimBindingRepair.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { RevisionDiff } from './analysis/RevisionDiff.js';
 import { WaitOrb } from '../components/WaitOrb.js';
-import { dimensionGaps, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
+import { dimensionGaps, dimensionStates, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../electron/reports/format.js';
@@ -123,8 +123,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
-  // it started keeps going. Keyed by task so another task never shows it.
-  const [financeRunning, setFinanceRunning] = useState<{ taskId: string; label: string } | null>(null);
+  // it started keeps going. One entry per task, so a run in another task neither
+  // shows here nor unlocks this one.
+  const [financeRunning, setFinanceRunning] = useState<Record<string, string>>({});
   const currentTask = useRef(task?.id);
   currentTask.current = task?.id;
   const active = useRef(true);
@@ -309,9 +310,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   }, [draftKey, draft?.id]);
   const financeWorkbench = task && view && view.datasets.length > 0
     ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
-      openRequest={scopeRequest} running={financeRunning?.taskId === task.id ? financeRunning.label : ''}
-      onRunning={(label, active) => setFinanceRunning((current) => active ? { taskId: task.id, label }
-        : current?.taskId === task.id && current.label === label ? null : current)}
+      openRequest={scopeRequest} running={financeRunning[task.id] ?? ''}
+      onRunning={(label, active) => setFinanceRunning((current) => {
+        if (active) return { ...current, [task.id]: label };
+        if (current[task.id] !== label) return current;
+        const { [task.id]: _finished, ...rest } = current;
+        return rest;
+      })}
       onRefresh={() => refresh(task.id)} />
     : null;
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
@@ -1122,18 +1127,43 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count:
   useEffect(() => {
     if (openRequest.count === seenRequest.current) return;
     seenRequest.current = openRequest.count;
-    const context = finance?.contexts.find((item) => item.id === openRequest.contextId);
-    if (context) loadContext(context);
     setSetupOpen(true);
     setup.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
     setup.current?.querySelector('summary')?.focus({ preventScroll: true });
+    void openScopeOf(openRequest.contextId);
   }, [openRequest.count]);
+  /**
+   * Loads the scope a result used into the form. The list read at mount may not
+   * have it yet (still loading, or saved by the assistant since), so read it
+   * again; if it is still not there, say so rather than show another scope as if
+   * it were this result's.
+   */
+  async function openScopeOf(wanted?: string) {
+    setError('');
+    if (!wanted) { setMessage('这条结果没有记录财务口径，设置区显示的是当前选中的口径。'); return; }
+    let context = finance?.contexts.find((item) => item.id === wanted);
+    if (!context) {
+      try {
+        const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
+        const value = unwrap(await api.financeCall(taskId, 'list-finance-context') as Answer<FinanceContextState>);
+        setFinance(value);
+        context = value.contexts.find((item) => item.id === wanted);
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : String(failure));
+        return;
+      }
+    }
+    if (context) { loadContext(context); setMessage(''); }
+    else setMessage('没有找到这条结果用的财务口径，设置区显示的是当前选中的口径。');
+  }
   /** Puts a saved scope back into the form, so the settings show what that result used. */
   function loadContext(context: FinanceContext) {
     const text = (value: unknown) => typeof value === 'string' ? value : '';
     const actualScope = (context.scopes?.actual ?? {}) as Record<string, unknown>;
     const budgetScope = context.scopes?.budget as Record<string, unknown> | undefined;
     setContextId(context.id);
+    // The account map is part of the scope: dropping it would rerun on another mapping.
+    setAccountMapId(context.account_map_id ?? '');
     if (text(context.bindings?.actual)) setActual(text(context.bindings.actual));
     setBudget(text(context.bindings?.budget));
     setScope((current) => ({ ...current, ...Object.fromEntries(scopeFields.map(([key]) => [key, text(actualScope[key])])) }));
@@ -2006,6 +2036,11 @@ function locatorFailureText(failure: unknown): string {
 }
 
 const qualityChecks = [['numbers', '数字与口径'], ['coverage', '问题覆盖'], ['provenance', '来源追溯']] as const;
+function checkStateText(result: string | undefined): string {
+  if (result === 'pass') return '已核对';
+  if (result === 'pass_with_accepted_estimates') return '已核对（含已接受的估算）';
+  return result === 'needs_attention' ? '仍有缺口' : '尚未核对';
+}
 
 function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
   taskId: string; quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
@@ -2017,22 +2052,26 @@ function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, 
   // stay listed below; this only names the ones a manager still has to act on.
   const checkGaps = stale ? [] : qualityChecks.flatMap(([key, label]) => {
     const result = quality?.checks?.[key]?.status;
-    return !quality?.checks || result === 'pass' ? [] : [`${label}${result === 'needs_attention' ? '仍有缺口' : '尚未核对'}`];
+    return !quality?.checks || result === 'pass' || result === 'pass_with_accepted_estimates' ? [] : [`${label}${checkStateText(result)}`];
   });
   const gaps = [...checkGaps, ...dimensionGaps(quality?.status_dimensions, stale)];
+  const accepted = qualityChecks.filter(([key]) => quality?.checks?.[key]?.status === 'pass_with_accepted_estimates').map(([, label]) => label);
   const itemCount = (quality?.checks ? qualityChecks.length : 0) + 4;
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
-    {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : `${itemCount} 项核对均已通过`}</p>}
+    {/* Never one merged "all passed": with nothing open, the four verification states are named one by one. */}
+    {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : dimensionStates(quality?.status_dimensions).join(' · ')}</p>}
+    {quality && accepted.length > 0 && <p className="analysis-note">{accepted.join('、')}已核对，其中含经理已接受的估算。</p>}
+    <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
     <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>
       {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
         {qualityChecks.map(([key, label]) => {
           const result = quality.checks?.[key]?.status;
-          return <div key={key}><dt>{label}</dt><dd>{stale ? '改稿后待复核' : result === 'pass' ? '已核对' : result === 'needs_attention' ? '仍有缺口' : '尚未核对'}</dd></div>;
+          return <div key={key}><dt>{label}</dt><dd>{stale ? '改稿后待复核' : checkStateText(result)}</dd></div>;
         })}
       </dl>}
-      <EvidenceDimensionList dimensions={quality?.status_dimensions} stale={stale} />
+      <EvidenceDimensionList dimensions={quality?.status_dimensions} stale={stale} caveat={false} />
     </details>
     {quality?.requirements?.scope_changed && <p role="status">本次分析范围已更新，这份文稿仍使用旧范围。</p>}
     {quality?.readability?.issues.length && state !== 'stale' ? <section className="analysis-details" aria-label="正文阅读建议">
