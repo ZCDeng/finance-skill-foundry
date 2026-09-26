@@ -1079,7 +1079,8 @@ ${canonicalAppendix} 已改写`;
 
   it('keeps the account map and reads a scope saved after mount when 调整口径 opens a result\'s scope', async () => {
     const scope = (period: string) => ({ ledger: '总账', organization: '华东', period, currency: 'CNY', unit: '元', scenario: 'actual' });
-    const mapped = { ...object, id: '5'.repeat(32), name: '七月经营口径', bindings: { actual: source.id }, scopes: { actual: scope('2026-07') }, account_map_id: '9'.repeat(32) };
+    const mapped = { ...object, id: '5'.repeat(32), name: '七月经营口径', bindings: { actual: source.id }, scopes: { actual: scope('2026-07') }, account_map_id: '9'.repeat(32),
+      policies: { actual: { field_map: { amount: '本期金额' }, target_unit: '万元' } } };
     const latest = { ...object, id: '6'.repeat(32), name: '八月经营口径', bindings: { actual: source.id }, scopes: { actual: scope('2026-08') } };
     let lists = 0;
     const financeCall = vi.fn(async (_taskId: string, command: string) => {
@@ -1098,7 +1099,9 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07'));
     expect(screen.getByText(`当前口径保存时会使用映射 ${'9'.repeat(12)}。`)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({ account_map_id: mapped.id.replace(/5/g, '9') })));
+    await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({
+      account_map_id: '9'.repeat(32), policies: { actual: { field_map: { amount: '本期金额' }, target_unit: '万元' } },
+    })));
   });
 
   it('says so when a result\'s scope cannot be found, instead of showing another as if it were that one', async () => {

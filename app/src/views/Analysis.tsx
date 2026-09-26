@@ -1134,8 +1134,11 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count:
     if (context) { loadContext(context); setMessage(''); }
     else setMessage('没有找到这条结果用的财务口径，设置区显示的是当前选中的口径。');
   }
+  // The saved scope the form was last refilled from, for what the form cannot show.
+  const loaded = useRef<FinanceContext | null>(null);
   /** Puts a saved scope back into the form, so the settings show what that result used. */
   function loadContext(context: FinanceContext) {
+    loaded.current = context;
     const text = (value: unknown) => typeof value === 'string' ? value : '';
     const actualScope = (context.scopes?.actual ?? {}) as Record<string, unknown>;
     const budgetScope = context.scopes?.budget as Record<string, unknown> | undefined;
@@ -1174,9 +1177,15 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count:
       setError(''); setMessage('');
       const bindings = { actual, ...(budget ? { budget } : {}) };
       const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope, ...(comparePeriod ? { period: comparePeriod } : {}) } } : {}) };
+      // A form refilled from a saved scope keeps what it does not show: each alias's
+      // policies (field map, target unit) while that alias still binds the same dataset.
+      const base = loaded.current?.id === contextId ? loaded.current : null;
+      const policies = Object.fromEntries(Object.entries(base?.policies ?? {})
+        .filter(([alias]) => (bindings as Record<string, string>)[alias] === base?.bindings?.[alias]));
       const context = unwrap(await api.financeCall(taskId, 'finance-context-save', {
         name: `${scope.period || '本期'}${scope.organization ? ` ${scope.organization}` : ''}经营口径`,
         bindings, scopes, ...(accountMapId ? { account_map_id: accountMapId } : {}),
+        ...(Object.keys(policies).length ? { policies } : {}),
       }) as Answer<FinanceContext>);
       setContextId(context.id);
       setFinance((value) => value ? {
