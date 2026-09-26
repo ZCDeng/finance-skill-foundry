@@ -12,6 +12,7 @@ import { AnalysisScopeCard } from './analysis/AnalysisScopeCard.js';
 import { ClaimBindingRepair } from './analysis/ClaimBindingRepair.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { RevisionDiff } from './analysis/RevisionDiff.js';
+import { WaitOrb } from '../components/WaitOrb.js';
 import { dimensionGaps, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './analysis/EvidenceQuality.js';
 import { ParameterField } from './analysis/ParameterField.js';
 import { PdfComparison, ReportEditor, type ReportDraftDocument } from './analysis/ReportEditor.js';
@@ -983,7 +984,7 @@ function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
       <p className="analysis-note">重算</p>
       {confirmed.map((row) => <label key={row.id}><input type="checkbox" checked={selected[row.id] !== false}
         onChange={(event) => setSelected((value) => ({ ...value, [row.id]: event.target.checked }))} />{row.label || row.id}</label>)}
-      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? '重算中…' : '重算'}</Button>
+      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? <><WaitOrb state="solving" />重算中…</> : '重算'}</Button>
     </div> : null}
   </details>
     {/* Outside the fold: a failed list must not read as "nothing to confirm". */}
@@ -1329,7 +1330,7 @@ function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count:
     </details>
   </details>
   {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
-  {running ? <p role="status" className="analysis-message">{running}</p>
+  {running ? <p role="status" className="analysis-message"><WaitOrb state="solving" />{running}</p>
     : message ? <p role="status" className="analysis-message">{message}</p> : null}
   {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
@@ -1984,7 +1985,7 @@ function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, 
   const gaps = [...checkGaps, ...dimensionGaps(quality?.status_dimensions, stale)];
   const itemCount = (quality?.checks ? qualityChecks.length : 0) + 4;
   return <section className="analysis-quality" aria-label="文稿质量检查">
-    <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
+    <div className="analysis-section-heading"><div><h4>文稿质量检查</h4><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
     {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : `${itemCount} 项核对均已通过`}</p>}
     <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>

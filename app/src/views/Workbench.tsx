@@ -1,12 +1,12 @@
 import {
   GraduationCap,
-  Loader,
   MessagesSquare,
   PlayCircle,
   TriangleAlert,
 } from 'lucide-react';
 
 import { APP_NAME } from '../components/Shell.js';
+import { WaitOrb } from '../components/WaitOrb.js';
 import type { HarnessStatus, TaskDetail, TaskRow } from '../bridge.js';
 
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
@@ -202,7 +202,7 @@ export function WiringTrouble({ status }: { status: HarnessStatus | null }) {
 export function Booting() {
   return (
     <div className="fnd-booting">
-      <Loader size={20} strokeWidth={1.25} className="fnd-spin" aria-hidden />
+      <WaitOrb state="connecting" delay={0} />
       <p className="fnd-muted">{APP_NAME} 正在启动</p>
     </div>
   );

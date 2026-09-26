@@ -76,6 +76,8 @@ scope: 分析结果、文稿、成果库三个界面
 
 仓库里测过的查询在 1.1 到 1.3 秒之间，用的是合成资料（`docs/finance/r2-performance-optimized-evidence.json`）。华宸真实工作簿的财务运行时长没测过，加 beam 之前先打点。
 
+2026-09-27 用户同意安装。装的是 `thinking-orbs` 0.3.2，MIT 协议，无运行时依赖，锁定版本，和 `lucide-react` 一样放在 devDependencies，由 Vite 打进界面包。上表五处都已接入，统一走 `WaitOrb`。等待满 2 秒才出现，冷启动页不等。画布对读屏隐藏，状态由旁边的中文文字承担。减少动态效果时停在一帧，深浅色跟随 `data-theme`。原来的旋转图标和 `fnd-spin` 样式已删。Border beam 没装。
+
 ## 5. P0 实施记录（2026-09-27）
 
 分支 `codex/results-conclusion-first`。
