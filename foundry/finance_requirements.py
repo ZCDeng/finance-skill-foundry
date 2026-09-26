@@ -1600,7 +1600,8 @@ def _same_side_comparison(result):
     scenario = comparison.get('actual_scenario')
     if scenario is None or scenario != comparison.get('baseline_scenario'):
         return False
-    rows = [row for row in result.get('rows') or [] if isinstance(row, dict)
+    # A group the engine assumed zero on one side (missing_groups_as_zero) carries only its declared scope.
+    rows = [row for row in result.get('rows') or [] if isinstance(row, dict) and row.get('comparison_status') == 'complete'
             and isinstance(row.get('actual_scope'), dict) and isinstance(row.get('baseline_scope'), dict)]
     if rows:
         return all(_without_filters(row['actual_scope']) == _without_filters(row['baseline_scope']) for row in rows)
@@ -1633,14 +1634,16 @@ def _unit_sign(value):
 GRAIN_FIELD_LISTS = dict(GRAIN_LISTS)
 
 
-def _comparison_filters_cover(item, run, scope):
+def _comparison_filters_cover(item, run, scope, row=None):
     """Whether an explain_variance run compares the rows the requirement asks for (issue #26).
 
     Each side's filters may only restate what the requirement pins: the item's own dimensions, organizations,
     periods and scenarios, the scope's values for that side, and the side's own scenario. A filter on a field the requirement never
     names (a source row, a product it does not ask for) makes the bridge a bridge of that subset; it still
     closes, but it is not the requirement's amount. On the baseline side a field the requirement pins only for
-    the actual side (a flat scope's period) is the comparison's baseline, as the scope match reads it.
+    the actual side (a flat scope's period) is the comparison's baseline, as the scope match reads it. A field
+    the cited `row` states is one the bridge groups by: its filter picks groups, and the row is the whole of its
+    own group, which the scope and grain match check.
     """
     comparison = (run.get('result') or {}).get('comparison')
     if not isinstance(comparison, dict):
@@ -1654,6 +1657,8 @@ def _comparison_filters_cover(item, run, scope):
         if not isinstance(filters, dict):
             return False
         for key, filtered in filters.items():
+            if isinstance(row, dict) and row.get(key) not in (None, ''):
+                continue
             try:
                 values = set(filtered if isinstance(filtered, (list, tuple, set, frozenset)) else [filtered])
             except TypeError:
@@ -1686,7 +1691,10 @@ def _comparison_filters_cover(item, run, scope):
 
 def _with_comparison_filters(item, run, scope, location):
     """A cited cell of a comparison run whose filters take part of the rows: reported, never counted."""
-    if location['status'] not in COUNTED_STATUSES or not _comparison_run(run) or _comparison_filters_cover(item, run, scope):
+    rows = (run.get('result') or {}).get('rows') or []
+    row = rows[location['row']] if isinstance(location.get('row'), int) and 0 <= location['row'] < len(rows) else None
+    if (location['status'] not in COUNTED_STATUSES or not _comparison_run(run)
+            or _comparison_filters_cover(item, run, scope, row)):
         return location
     return {**location, 'status': 'pending',
             'evidence': {**location['evidence'], 'evidence_basis': None, 'not_counted_reason': 'comparison_filters_differ'}}

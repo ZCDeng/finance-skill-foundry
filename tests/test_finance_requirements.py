@@ -2525,6 +2525,19 @@ def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path, filters
     assert result['coverage']['status'] == 'needs_attention'
 
 
+def test_a_year_on_year_bridge_that_forgot_its_baseline_period_does_not_answer(tmp_path):
+    """Review round 2: actual against actual with only the actual side narrowed to 2026-09 and the prior year's
+    group assumed zero: the 2026-09 row compares the actual with itself (1120 vs 1120), while the 2025-09 row has
+    no actual side at all."""
+    result, contributions = _bridge_check(tmp_path, 'flat', {
+        'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
+        'missing_groups_as_zero': True}, prior=True)
+
+    assert contributions['revenue'] == '0'
+    reason = [('engine_output', 'comparison_same_side')]
+    assert _bridge_statuses(result) == {'revenue': ('not_applicable', reason), 'profit': ('not_applicable', reason)}
+
+
 @pytest.mark.parametrize('scope, variance, expected', [
     # Filters that restate the requirement's own period.
     ('flat', {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': '2026-09'}}, ('120', '80')),
@@ -2536,6 +2549,12 @@ def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path, filters
     ('flat', {'actual_filters': {'scenario': ['actual'], 'period': '2026-09'},
               'baseline_filters': {'scenario': 'budget', 'period': ['2026-09']}}, ('120', '80')),
     ('two_sided', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
+    # Filters that list the requirement's value among others of a field the bridge groups by (organization is
+    # always a grouping field): the cited row is that value's whole group (review round 2).
+    ('flat', {'actual_filters': {'organization': ['O1', 'O2']}, 'baseline_filters': {'organization': ['O1', 'O2']}},
+     ('120', '80')),
+    ('two_sided', {'actual_filters': {'organization': ['O1', 'O2'], 'scenario': 'actual'},
+                   'baseline_filters': {'organization': ['O1', 'O2'], 'scenario': 'budget'}}, ('120', '80')),
     # Year on year: one scenario, two periods. A flat scope pins only the actual period, as on main.
     ('flat', {'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
               'baseline_filters': {'period': '2025-09'}}, ('70', '45')),
