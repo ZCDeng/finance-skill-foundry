@@ -2,8 +2,9 @@
 {{fact:…}} template rendered an estimate.
 
 Which cells are estimates is decided only by the server's requirement check that save_draft stored on the draft
-(`explanation_check.requirements`): the cited cells of its `estimated_grains`. Nothing in the text decides it, and
-the text is never scanned for numbers. The declaration is built from the check's structured data; an inline
+(`explanation_check.requirements`): the cited cells of its `estimated_grains`, and the grains its items declare
+estimates in `grain_basis` that the check left uncounted (issue #33). Nothing in the text decides it, and the text
+is never scanned for numbers. The declaration is built from the check's structured data; an inline
 （估算） goes only where the draft's own {{fact:…}} template rendered an estimated fact, and only when rendering that
 template again reproduces the stored text exactly.
 """
@@ -34,6 +35,11 @@ DECLARATION_SENTENCE = "以下数值为估算，经理确认前不作为批复�
 DECLARATION_COLUMNS = ("要求", "组织", "期间", "情景", "估算值", "估算公式")
 GRAIN_FIELDS = ("organization", "period", "scenario")
 NOT_STATED = "—"
+# Why a declared estimate grain the check did not count has no recomputed formula (issue #33).
+NOT_REPRODUCIBLE = "系数无法由来源复算"
+NOT_RECOMPUTED = "尚未由来源复算"
+# Declared estimate grains listed without a cited value, per item; the rest are counted in one row.
+UNCITED_GRAIN_ROWS = 12
 # Private-use characters no renderer writes: _MARK stands where a label goes, _SLOT for a text node's text.
 _MARK = "\ue000"
 _SLOT = "\ue001"
@@ -44,25 +50,112 @@ _ESCAPABLE = re.compile(r"[\\`*\[\]()]")
 _AUTHOR_LABEL = re.compile(r"[*_~`]*[ \t\u3000]*\\?[（(]估算")
 
 
-def estimated_cells(draft: dict[str, Any]) -> list[dict[str, Any]]:
-    """Cited cells of the grains the draft's stored requirement check found `estimated`, in the check's order:
-    one entry per requirement item and cell, with the item and the grain it belongs to."""
+def estimated_cells(
+    draft: dict[str, Any], runs: dict[str, dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """What the draft's stored requirement check says is an estimate, in the check's order, one entry per
+    requirement item and cell, with the item and the grain it belongs to:
+    - the cited cells of the grains the check found `estimated`;
+    - then, per item, each grain its `grain_basis` declares an estimate that the check left uncounted (declared
+      non-reproducible, uncounted or missing; never an answered grain), with `declared` (the declaration): its
+      cited cells that did not answer, or one entry with `cell` None where the draft cites none. Which grain a
+      cited cell belongs to is read off the cell's run row in `runs` (by id), as the check read it."""
     check = draft.get("explanation_check")
     requirements = check.get("requirements") if isinstance(check, dict) else None
     items = requirements.get("items") if isinstance(requirements, dict) else None
     cells: list[dict[str, Any]] = []
     for item in items if isinstance(items, list) else []:
-        if not isinstance(item, dict) or not isinstance(item.get("estimated_grains"), list):
+        if not isinstance(item, dict):
             continue
         seen: set[tuple[str, int, str]] = set()
-        for grain in item["estimated_grains"]:
+        for grain in item.get("estimated_grains") if isinstance(item.get("estimated_grains"), list) else []:
             locations = grain.get("locations") if isinstance(grain, dict) else None
             for location in locations if isinstance(locations, list) else []:
                 key = _cell_key(location)
                 if key is not None and key not in seen:
                     seen.add(key)
                     cells.append({"item": item, "grain": grain, "cell": key})
+        cells.extend(_declared_estimate_cells(item, seen, runs or {}))
     return cells
+
+
+def _declared_estimate_cells(
+    item: dict[str, Any], seen: set[tuple[str, int, str]], runs: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Grains the item declares an estimate (grain_basis basis estimate) that the check left unanswered and not
+    estimated: declared with a factor no recipe can recompute (declared_grains), or declared reproducible and not
+    yet made `estimated` by a factor recipe (uncounted_grains, missing_grains).
+
+    Cells are labelled only where the item lists organizations, periods and scenarios, so that one grain is one
+    organization, period and scenario: a coarser grain holds cells the declaration cannot tell apart (an actual
+    beside the estimate, the group's source budget beside a region's estimate, a full-year budget beside a 1-8
+    one), and is declared with no cell. A grain the draft answers from the source is not declared at all: a second
+    number cited for it (a rounded restatement) is not an estimate. Otherwise its cited cells that state its value
+    (not a variance, contribution or change) are declared; a cell a factor recipe made `estimated` keeps its
+    recipe (no `declared`). Grains declared with no cell are listed up to UNCITED_GRAIN_ROWS per item, the rest
+    counted in one entry (`more`)."""
+    from foundry.finance_requirements import GRAIN_LISTS, _declared_basis, _location_grain
+
+    if not isinstance(item.get("grain_basis"), list) or not isinstance(item.get("locations"), list):
+        return []
+    grains: dict[tuple[Any, ...], tuple[dict[str, Any], dict[str, Any]]] = {}
+    for field in ("declared_grains", "uncounted_grains", "missing_grains"):
+        for record in item.get(field) if isinstance(item.get(field), list) else []:
+            if not isinstance(record, dict) or (field == "declared_grains"
+                                                and record.get("state") != "estimate_factor_not_reproducible"):
+                continue
+            grain = tuple(record.get(key) if item.get(plural) else None for key, plural in GRAIN_LISTS)
+            declared = _declared_basis(item, grain)
+            if declared and declared.get("basis") == "estimate" and grain not in grains:
+                grains[grain] = (record, declared)
+    if not grains:
+        return []
+    members: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for location in item["locations"]:
+        if _cell_key(location) is None or location["run_id"] not in runs:
+            continue
+        try:
+            grain = _location_grain(item, location, runs)
+        except (AttributeError, IndexError, KeyError, TypeError):
+            continue
+        if grain in grains:
+            members.setdefault(grain, []).append(location)
+
+    found: list[dict[str, Any]] = []
+    uncited = 0
+    listed = all(item.get(plural) for _key, plural in GRAIN_LISTS)
+    for grain, (record, declared) in grains.items():
+        cited = members.get(grain) or []
+        if any(location.get("status") == "answered" for location in cited):
+            continue
+        # A variance, contribution or change cited at the grain is not the grain's value (the estimate).
+        cells = [location for location in cited if _level_column(location.get("column"))] if listed else []
+        added = False
+        for location in cells:
+            key = _cell_key(location)
+            if key in seen:
+                continue
+            seen.add(key)
+            added = True
+            found.append({"item": item, "grain": record, "cell": key,
+                          **({} if location.get("status") == "estimated" else {"declared": declared})})
+        if added or cells:
+            continue
+        uncited += 1
+        if uncited <= UNCITED_GRAIN_ROWS:
+            found.append({"item": item, "grain": record, "cell": None, "declared": declared})
+    if uncited > UNCITED_GRAIN_ROWS:
+        found.append({"item": item, "grain": {}, "cell": None, "more": uncited - UNCITED_GRAIN_ROWS})
+    return found
+
+
+# Amount columns that state a change between two values rather than a value (see _metric_matches).
+CHANGE_COLUMNS = frozenset({"contribution", "profit_impact", "amount_change", "variance", "difference"})
+CHANGE_SUFFIXES = ("_variance", "_difference", "_contribution", "_change", "_impact")
+
+
+def _level_column(column: Any) -> bool:
+    return isinstance(column, str) and column not in CHANGE_COLUMNS and not column.endswith(CHANGE_SUFFIXES)
 
 
 def declare_estimates(
@@ -122,7 +215,7 @@ def template_label_positions(
     facts = [fact for fact in facts if isinstance(fact, dict) and isinstance(fact.get("id"), str)
              and isinstance(fact.get("display_value"), str)]
     estimated = {entry["cell"] for entry in cells}
-    fact_ids = {fact["id"] for fact in facts if _cell_key(fact) in estimated}
+    fact_ids = {fact["id"] for fact in facts if _cell_key(fact) is not None and _cell_key(fact) in estimated}
     rendered = _render_marked(template, facts, fact_ids) if fact_ids else None
     if rendered is None:
         return []
@@ -155,14 +248,25 @@ def _declaration_rows(
     rows = []
     for entry in cells:
         item, grain, key = entry["item"], entry["grain"], entry["cell"]
-        fact = facts.get(key) or {}
+        if entry.get("more"):
+            rows.append([_shown(item.get("label") or item.get("metric") or item.get("id")), *[NOT_STATED] * 4,
+                         f"另有 {entry['more']} 个声明为估算的组合"])
+            continue
+        declared = entry.get("declared")
+        fact = (facts.get(key) or {}) if key is not None else {}
         # The value as its fact displays it (value and unit), as a {{fact:…}} template writes it.
-        value = fact.get("display_value") or (claims.get(key) or {}).get("value")
-        formula = next((_formula(location.get("evidence")) for location in item.get("locations") or []
-                        if _cell_key(location) == key and location.get("status") == "estimated"), "")
+        value = fact.get("display_value") or ((claims.get(key) or {}).get("value") if key is not None else None)
+        if declared:
+            # No recipe recomputed this estimate: the requirement's declared method, and why.
+            not_recomputed = NOT_RECOMPUTED if declared.get("factor_reproducible", True) else NOT_REPRODUCIBLE
+            formula = f"{str(declared.get('method') or '').strip()}（{not_recomputed}）"
+        else:
+            formula = next((_formula(location.get("evidence")) for location in item.get("locations") or []
+                            if _cell_key(location) == key and location.get("status") == "estimated"), "")
         rows.append([
             _shown(item.get("label") or item.get("metric") or item.get("id")),
-            *(_shown(part) for part in _cell_grain(grain, key, runs)),
+            *(_shown(part) for part in (_cell_grain(grain, key, runs) if key is not None
+                                        else [grain.get(field) for field in GRAIN_FIELDS])),
             _shown(value),
             _shown(formula),
         ])

@@ -1388,8 +1388,9 @@ class AnalysisStore:
                                 _append_excel(structured_sheet, row)
                     from foundry.report_estimates import ESTIMATE_LABEL, estimated_cells
 
-                    # Cells of grains the server's requirement check stored on this draft found estimated.
-                    estimates = {entry["cell"] for entry in estimated_cells(draft)}
+                    # Cells the server's requirement check stored on this draft found estimated or declared.
+                    estimates = {entry["cell"] for entry in estimated_cells(draft, {run["id"]: run for run in runs})
+                                 if entry["cell"] is not None}
                     for number, run in enumerate(runs, start=1):
                         target = workbook.create_sheet("Result " + str(number))
                         result = run.get("result") or {"columns": [], "rows": []}

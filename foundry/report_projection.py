@@ -38,8 +38,9 @@ def build_report_projection(
         raise FoundryError("report projection mode must be management or audit")
     title = _text(draft.get("title") or "分析报告")
     base = _draft_document(draft)
-    # Estimates are the cells the server's requirement check stored on this draft found estimated (issue #24).
-    estimates = estimated_cells(draft)
+    # Estimates are what the server's requirement check stored on this draft found estimated or its items declare
+    # estimates (issues #24, #33).
+    estimates = estimated_cells(draft, runs)
     labels = template_label_positions(draft, base, estimates) if estimates else []
     document = _dedupe_leading_title(base, title)
     # Text nodes of the dropped title heading come before the body's; label positions count from the body.
