@@ -4334,3 +4334,35 @@ def test_the_extreme_of_one_non_blank_row_is_that_rows_amount(tmp_path, aggregat
 
     assert value in {'120.50', '120.5'}
     assert _item(result)['status'] == 'answered'
+
+
+def test_detail_rows_are_counted_once_per_run(tmp_path, monkeypatch):
+    """Review round 5 of #38: counting each cited min/max cell's detail rows by scanning all of them made the check
+    quadratic on large grouped aggregates; they are counted once per run."""
+    import foundry.finance_requirements as requirements
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    task = TaskStore(tmp_path / 'var').create(title='汇总计数')
+    analysis = AnalysisStore(task)
+    path = tmp_path / 'ar.json'
+    path.write_text(json.dumps([{'customer': f'C{index}', 'amount': f'{100 + index}.50', 'currency': 'CNY', 'unit': '万元'}
+                                for index in range(30)]), encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='actual')
+    requirement = save_requirements(analysis, {'question': '应收账款余额', 'bindings': {'actual': dataset['id']},
+                                               'items': [{'id': 'item', 'metric': '应收账款余额', 'requires_drilldown': False}]})
+    definition = analysis.save_analysis({'question': '应收账款余额', 'engine': 'structured_aggregate',
+                                         'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
+                                             'dataset_alias': 'actual', 'group_by': ['customer'],
+                                             'measures': [{'name': '应收账款余额', 'aggregation': 'max', 'field': 'amount'}],
+                                             'dedupe': {'policy': 'none'}}})
+    run = analysis.run_analysis(definition['id'])
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': '应收账款余额',
+               'value': row['应收账款余额']} for index, row in enumerate(run['result']['rows'])]
+    calls = []
+    original = requirements._aggregate_value_counts
+    monkeypatch.setattr(requirements, '_aggregate_value_counts', lambda run: calls.append(1) or original(run))
+
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims})
+
+    assert len(claims) == 30 and len(calls) == 1
+    assert {location['status'] for location in _item(result)['locations']} == {'answered'}

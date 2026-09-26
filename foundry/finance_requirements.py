@@ -1029,6 +1029,7 @@ def _prepared_evidence(analysis, runs):
     member_map = {}
     group_map = {}
     closure_reasons = {}
+    aggregate_counts = {}
     for group in prepared.get('evidence_groups', []):
         if not isinstance(group, dict):
             continue
@@ -1049,6 +1050,16 @@ def _prepared_evidence(analysis, runs):
             fact_id = member.get('fact_id')
             if not fact_id:
                 continue
+            aggregate = {}
+            if engine == 'structured_aggregate':
+                # Which aggregation the cited measure column is (sum, count, min …), and for a min or max how many
+                # source rows with a value it spans (_aggregate_statistic_of_money); detail rows are read once.
+                aggregate['aggregate_measure'] = _aggregate_measure(run, member.get('column'))
+                if aggregate['aggregate_measure'] in {'min', 'max'}:
+                    if group.get('run_id') not in aggregate_counts:
+                        aggregate_counts[group.get('run_id')] = _aggregate_value_counts(run)
+                    aggregate['aggregate_rows'] = _aggregate_row_count(
+                        run, member.get('row'), member.get('column'), aggregate_counts[group.get('run_id')])
             member_map[(group.get('run_id'), member.get('row'), member.get('column'))] = {
                 'group_id': group.get('id'),
                 'group_type': group.get('group_type'),
@@ -1063,10 +1074,7 @@ def _prepared_evidence(analysis, runs):
                 # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
                 'aggregate_output': engine == 'structured_aggregate',
-                # Which aggregation the cited measure column is (sum, count, min …), for _aggregate_statistic_of_money.
-                **({'aggregate_measure': _aggregate_measure(run, member.get('column')),
-                    'aggregate_rows': _aggregate_row_count(run, member.get('row'), member.get('column'))}
-                   if engine == 'structured_aggregate' else {}),
+                **aggregate,
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
@@ -1962,19 +1970,32 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
 
 
-def _aggregate_row_count(run, row, column):
-    """How many source rows with a value for measure `column` the aggregate's output row `row` summarises (its
-    included detail rows), or its source rows where the run keeps no detail rows; None if unknown."""
-    result = run.get('result') or {}
-    rows = result.get('rows') or []
+def _aggregate_value_counts(run):
+    """For each (result_key, measure) of a structured_aggregate run, how many included detail rows have a value
+    for the measure, read once per run; None where the run keeps no detail rows."""
+    details = (run.get('result') or {}).get('detail_rows')
+    if not isinstance(details, list):
+        return None
+    counts = {}
+    for detail in details:
+        if not isinstance(detail, dict) or not detail.get('included', True):
+            continue
+        for measure, value in (detail.get('measure_values') or {}).items():
+            if value not in (None, ''):
+                key = (detail.get('result_key'), measure)
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _aggregate_row_count(run, row, column, counts):
+    """How many source rows with a value for measure `column` the aggregate's output row `row` summarises (from
+    `counts`, _aggregate_value_counts of the run), or its source rows where the run keeps no detail rows."""
+    rows = (run.get('result') or {}).get('rows') or []
     output = rows[row] if isinstance(row, int) and not isinstance(row, bool) and 0 <= row < len(rows) else None
     if not isinstance(output, dict):
         return None
-    details = result.get('detail_rows')
-    if isinstance(details, list) and output.get('result_key') is not None:
-        return sum(1 for detail in details if isinstance(detail, dict)
-                   and detail.get('result_key') == output['result_key'] and detail.get('included', True)
-                   and (detail.get('measure_values') or {}).get(column) not in (None, ''))
+    if counts is not None and output.get('result_key') is not None:
+        return counts.get((output['result_key'], column), 0)
     sources = output.get('source_rows')
     return len(sources) if isinstance(sources, list) else None
 
