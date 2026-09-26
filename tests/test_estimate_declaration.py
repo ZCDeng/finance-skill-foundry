@@ -509,15 +509,17 @@ def test_a_recipe_estimate_in_an_uncounted_declared_grain_keeps_its_formula(anal
 
 
 @pytest.mark.parametrize('mode', MODES)
-def test_a_declaration_over_every_scenario_labels_no_cell(analysis, tmp_path, mode):
+@pytest.mark.parametrize('scenario_column', ['scenario', '情景'])
+def test_a_declaration_over_every_scenario_labels_no_cell(analysis, tmp_path, mode, scenario_column):
     """Review of #33: the item lists no scenarios, so its declared grain holds 华东's actual beside its budget and
-    nothing tells them apart. The grain is declared; no cell, the actual least of all, is labelled."""
+    nothing tells them apart, whichever column the rows name the scenario in (round 2: 情景). The grain is
+    declared; no cell, the actual least of all, is labelled."""
     item = {'id': 'east', 'metric': 'revenue', 'label': '华东 1-8 月收入', 'organizations': ['华东区域'],
             'periods': ['2026-01:2026-08'], 'requires_drilldown': True,
             'grain_basis': [{'organizations': ['华东区域'], 'basis': 'estimate', 'method': METHOD,
                              'factor_reproducible': False, 'reason': REASON}]}
-    rows = [{**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'budget_1_8', 'value': ESTIMATE},
-            {**BUDGET_ROW, 'organization': '华东区域', 'scenario': 'actual_1_8', 'value': '109742.028'}]
+    rows = [{**BUDGET_ROW, 'organization': '华东区域', scenario_column: 'budget_1_8', 'value': ESTIMATE},
+            {**BUDGET_ROW, 'organization': '华东区域', scenario_column: 'actual_1_8', 'value': '109742.028'}]
     service, runs, tokens, recipes, claims = _runs_case(analysis, tmp_path, item, [rows])
     draft = _save_runs(service, runs, f'## 区域收入\n\n实际 {tokens[(0, 1)]}，预算 {tokens[(0, 0)]}。', recipes, claims)
     assert [grain['state'] for grain in _item(draft)['declared_grains']] == ['estimate_factor_not_reproducible']

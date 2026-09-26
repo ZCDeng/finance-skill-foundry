@@ -88,11 +88,11 @@ def _declared_estimate_cells(
 
     A grain's cells are its cited cells that state an estimate: not an answered cell, and not a cell restating a
     number an answered cell of the grain states. A cell a factor recipe made `estimated` keeps its recipe (no
-    `declared`). Where the item lists no scenarios but a cell's row states one, the grain holds cells the
-    declaration cannot tell apart (an actual beside the estimate): the grain is declared with no cell. Grains
+    `declared`). Where the item lists no scenarios, the grain holds cells the declaration cannot tell apart (an
+    actual beside the estimate): the grain is declared with no cell. Grains
     declared with no cell are listed up to UNCITED_GRAIN_ROWS per item, the rest counted in one entry (`more`)."""
     from foundry.finance_requirements import (
-        GRAIN_LISTS, _cited_value, _declared_basis, _location_grain, _row_scenario, _same_number,
+        GRAIN_LISTS, _cited_value, _declared_basis, _location_grain, _same_number,
     )
 
     if not isinstance(item.get("grain_basis"), list) or not isinstance(item.get("locations"), list):
@@ -119,10 +119,6 @@ def _declared_estimate_cells(
             continue
         if grain in grains:
             members.setdefault(grain, []).append(location)
-    def pinned(location: dict[str, Any]) -> bool:
-        # The scenario tells an estimate from the actual; a declaration over all scenarios cannot.
-        run = runs[location["run_id"]]
-        return bool(item.get("scenarios")) or _row_scenario(run, run["result"]["rows"][location["row"]]) in (None, "")
 
     found: list[dict[str, Any]] = []
     uncited = 0
@@ -131,7 +127,9 @@ def _declared_estimate_cells(
         answered = [_cited_value(location, runs) for location in cited if location.get("status") == "answered"]
         cells = [location for location in cited if location.get("status") != "answered"
                  and not any(_same_number(_cited_value(location, runs), value) for value in answered)]
-        if not all(pinned(location) for location in cells):
+        if not item.get("scenarios"):
+            # The scenario tells an estimate from the actual; a declaration over every scenario cannot, whichever
+            # column the rows name their scenario in.
             cells = []
         added = False
         for location in cells:
