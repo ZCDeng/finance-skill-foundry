@@ -1219,11 +1219,14 @@ def _account_total_requirement_matches(analysis, item, run, row, column):
 def _native_account_item(item):
     """An item whose metric names a ledger account, which the engine's own account_total answers.
 
-    revenue/profit/cost/expense and the other named metrics (METRIC_LABELS) are not: decision 1 answers the
-    four P&L lines only by closure or a source recipe, and the guidance never offers account_total for them
-    (_ledger_account_item, _result_set_kind use the same test).
+    The named metrics (METRIC_LABELS keys) are not, and neither is any name _pnl_class reads as one of the four
+    P&L lines by its key or alias in any case (营业收入, Revenue, 净利润, 期间费用; issue #27): decision 1 answers
+    those lines only by closure or a source recipe, and the guidance never offers account_total for them
+    (_ledger_account_item, _result_set_kind, _account_amount_claim_requires_native_total use this test). A
+    ledger account named like a line (主营业务成本, 管理费用) is the ledger's own name and stays an account.
     """
-    return _canonical_metric_name(item.get('metric')) not in METRIC_LABELS
+    metric = item.get('metric')
+    return _canonical_metric_name(metric) not in METRIC_LABELS and _named_metric(metric) not in CLOSED_EVIDENCE_METRICS
 
 
 def _account_total_filters_cover(analysis, item, run, scope):
@@ -1236,7 +1239,7 @@ def _account_total_filters_cover(analysis, item, run, scope):
 def _account_amount_claim_requires_native_total(item, row, column):
     return (
         column == 'amount'
-        and _canonical_metric_name(item.get('metric')) not in METRIC_LABELS
+        and _native_account_item(item)
         and row.get('management_account') == item.get('metric')
     )
 
@@ -1373,7 +1376,7 @@ def _result_set_kind(item):
     metric = _canonical_metric_name(item.get('metric'))
     if metric in RESULT_SET_METRICS:
         return metric
-    if (item.get('periods') or item.get('organizations')) and metric not in RESULT_SET_METRICS and metric not in METRIC_LABELS:
+    if (item.get('periods') or item.get('organizations')) and metric not in RESULT_SET_METRICS and _native_account_item(item):
         return 'account_total'
     return None
 
@@ -1840,6 +1843,20 @@ def _names_an_amount(text, words):
         stem in text for stem in AMOUNT_MARKER_STEMS)
 
 
+def _named_metric(metric):
+    """The METRIC_LABELS key a metric name is, by its key or one of its aliases in any case (营业收入 → revenue,
+    Revenue → revenue, 其他收益 → other_income), else None."""
+    canonical = _canonical_metric_name(metric)
+    if canonical in METRIC_LABELS:
+        return canonical
+    lowered = str(metric or '').strip().lower()
+    for key in sorted(CLOSED_EVIDENCE_METRICS):
+        if lowered == key or lowered in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
+            return key
+    return next((key for key, aliases in METRIC_LABELS.items() if key not in CLOSED_EVIDENCE_METRICS
+                 and (lowered == key or lowered in {str(alias).lower() for alias in aliases})), None)
+
+
 def _pnl_class(metric):
     """revenue/profit/cost/expense when the name is recognisably one of those lines, price_quantity for a
     price-quantity bridge, else None."""
@@ -1849,12 +1866,10 @@ def _pnl_class(metric):
     text = str(metric or '').strip()
     if canonical == 'price_quantity' or _price_volume_name(text):
         return 'price_quantity'
-    lowered = text.lower()
-    for key in sorted(CLOSED_EVIDENCE_METRICS):
-        if lowered in {str(alias).lower() for alias in METRIC_LABELS.get(key, ())}:
-            return key
-    if any(lowered in {str(alias).lower() for alias in aliases} or lowered == key
-           for key, aliases in METRIC_LABELS.items() if key not in CLOSED_EVIDENCE_METRICS):
+    named = _named_metric(metric)
+    if named in CLOSED_EVIDENCE_METRICS:
+        return named
+    if named:
         return None  # other_income and its aliases are amounts of their own class
     for key, stems in AMOUNT_LABEL_STEMS:
         if any(stem in text for stem in stems):
@@ -3001,7 +3016,7 @@ def _ledger_account_item(item, environment):
     metric = item.get('metric')
     return (
         isinstance(metric, str)
-        and _canonical_metric_name(metric) not in METRIC_LABELS
+        and _native_account_item(item)
         and _canonical_metric_name(metric) not in RESULT_SET_METRICS
         and metric in (environment.get('accounts') or ())
     )
