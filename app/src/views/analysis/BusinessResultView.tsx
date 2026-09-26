@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisKind, rowBasisLabel, type DisplayColumn } from './businessResults.js';
+import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, type DisplayColumn } from './businessResults.js';
 import { Table } from './presentation.js';
 
-type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; actual: string; budget: string; difference: string; rate: string };
+type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actual: string; budget: string; difference: string; rate: string };
 
 function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
   for (const name of names) {
@@ -58,7 +58,9 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     period: row.period == null || row.period === '' ? '未声明期间' : String(row.period),
     unit: row.unit == null || row.unit === '' ? '未声明单位' : String(row.unit),
     basis: rowBasisLabel(row),
-    estimated: rowBasisKind(row) === 'estimate',
+    // Only when the budget shown is itself the estimate; an approved budget beside an estimate stays 预算.
+    estimated: row.same_period_budget_estimated === true,
+    estimatedBudget: valueFor(row, columns, ['estimated_same_period_budget'], ''),
     actual: valueFor(row, columns, ['actual']),
     budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
     difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
@@ -83,12 +85,14 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
     return output;
   }), [columns, filteredRows]);
   const kpis = useMemo(() => kpiRows(filteredRows).map((row) => kpiFor(row, columns)), [columns, filteredRows]);
-  const otherColumns = useMemo(() => longRowColumns(run), [run]);
-  const others = useMemo(() => otherLongRows(run).filter((row) => !period || String(row.period ?? '') === period).map((row) => {
+  const otherRows = useMemo(() => otherLongRows(run), [run]);
+  const otherColumns = useMemo(() => longRowColumns(run, otherRows), [run, otherRows]);
+  // A row without a period belongs to every period tab rather than to none.
+  const others = useMemo(() => otherRows.filter((row) => !period || row.period == null || row.period === '' || String(row.period) === period).map((row) => {
     const output: Record<string, string> = {};
     for (const column of otherColumns) output[column.label] = formatBusinessCell(row[column.name], column, row);
     return output;
-  }), [otherColumns, period, run]);
+  }), [otherColumns, otherRows, period]);
   return <section className="analysis-business-result" aria-label="业务结果">
     {periods.length > 1 ? <div className="analysis-period-tabs" role="tablist" aria-label="结果期间">
       {periods.map((item) => <Button key={item} variant={item === period ? 'default' : 'outline'} type="button" role="tab" aria-selected={item === period}
@@ -101,6 +105,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
         <small>{kpi.period} · {kpi.unit} · 依据：{kpi.basis}</small>
         <dl aria-label={`${kpi.title}指标明细`}>
           <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd>{kpi.budget}</dd></div>
+          {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd>{kpi.estimatedBudget}</dd></div> : null}
           <div><dt>差异</dt><dd>{kpi.difference}</dd></div>
           <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
         </dl>

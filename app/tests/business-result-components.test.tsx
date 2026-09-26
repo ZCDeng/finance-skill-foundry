@@ -498,6 +498,114 @@ describe('business result components', () => {
     expect(screen.queryByRole('region', { name: '其他结果' })).toBeNull();
   });
 
+  describe('long-form estimates and edge cases', () => {
+    const longRun = (rows: Record<string, unknown>[], extra: string[] = []): AnalysisRun => ({
+      ...run([]),
+      result: {
+        columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit', ...extra].map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })),
+        rows, row_count: rows.length, truncated: false,
+      },
+    });
+    const pair = (budget: Record<string, unknown>, actual: Record<string, unknown> = {}) => [
+      { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '90', unit: '万元', ...actual },
+      { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '100', unit: '万元', ...budget },
+    ];
+
+    it.each([
+      ['a filled 估算方法 without the word', { 估算方法: '区域年度预算×集团分期比例' }, ['估算方法']],
+      ['an estimate basis', { basis: 'user_assumption' }, ['basis']],
+      ['估算 only in the source', { source: '按集团进度估算' }, ['source']],
+    ])('labels a budget estimated by %s', (_, budget, extra) => {
+      render(<BusinessResultView run={longRun(pair(budget), extra)} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('预算（估算）')).toBeTruthy();
+      expect(within(card).getByText(/依据：估算/)).toBeTruthy();
+    });
+
+    const withEstimate = (note?: string) => [
+      { metric_key: 'revenue', organization: '集团合并', period: '2026-08', scenario: 'actual_ytd', value: '90', unit: '万元' },
+      { metric_key: 'revenue', organization: '集团合并', period: '2026-08', scenario: 'budget_ytd', value: '100', unit: '万元', ...(note ? { note } : {}) },
+      { metric_key: 'revenue', organization: '集团合并', period: '2026-08', scenario: 'estimated_budget_ytd', value: '110', unit: '万元' },
+    ];
+
+    it('keeps an approved budget as 预算 and shows the estimated one beside it', () => {
+      render(<BusinessResultView run={longRun(withEstimate(), ['note'])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText('110.00').previousSibling?.textContent).toBe('预算（估算）');
+    });
+
+    it('still pairs when an approved budget only mentions an estimate in its note, flagging it rather than dropping the table', () => {
+      render(<BusinessResultView run={longRun(withEstimate('另列估算预算供参考'), ['note'])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算（估算）');
+      expect(within(card).getByText('110.00')).toBeTruthy();
+    });
+
+    it('does not call an approved budget an estimate when only the actual declares one', () => {
+      render(<BusinessResultView run={longRun(pair({}, { note: '实际含估算调整' }), ['note'])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText(/依据：估算/)).toBeTruthy();
+    });
+
+    it('leaves only an ambiguous group unpaired, keeping the other cards', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({}),
+        { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'variance_1_8', value: '-10', unit: '万元' },
+        { metric_key: 'revenue_variance', organization: '华东区域', period: '2026-01:2026-08', scenario: 'variance_1_8', value: '-10.5', unit: '万元' },
+        { metric_key: 'profit', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '9', unit: '万元' },
+        { metric_key: 'profit', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '10', unit: '万元' },
+      ])} />);
+      const cards = screen.getAllByRole('article');
+      expect(cards).toHaveLength(1);
+      expect(within(cards[0]).getByText('利润 · 华东区域')).toBeTruthy();
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '-10.50' })).toBeTruthy();
+    });
+
+    it('keeps the key and scenario when one label covers two rows, and shows rows without a period on every tab', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({}),
+        { metric_key: 'revenue_prior', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_py_1_8', value: '80', unit: '万元', metric_label: '营业收入' },
+        { metric_key: 'revenue_prior', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_ly_1_8', value: '85', unit: '万元', metric_label: '营业收入' },
+        { metric_key: 'ratio', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_bud_fy', value: '0.48', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
+        { metric_key: 'revenue_completion_ratio', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_bud_fy', value: '0.62', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
+        { metric_key: 'receivable_balance', organization: '华东区域', period: null, scenario: 'actual', value: '41400', unit: '万元', metric_label: '应收账款期末余额' },
+        { metric_key: 'revenue', organization: '华东区域', period: '2026-08', scenario: 'actual_2026_08', value: '12', unit: '万元' },
+        { metric_key: 'revenue', organization: '华东区域', period: '2026-08', scenario: 'budget_2026_08', value: '13', unit: '万元' },
+      ], ['metric_label'])} />);
+      const others = screen.getByRole('table', { name: '其他结果' });
+      expect(within(others).getByRole('columnheader', { name: '情景' })).toBeTruthy();
+      expect(within(others).getByRole('cell', { name: 'actual_py_1_8' })).toBeTruthy();
+      expect(within(others).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
+      expect(within(others).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
+    });
+
+    it('lets two ratios sharing a label keep their keys but drop the scenario when the keys tell them apart', () => {
+      render(<BusinessResultView run={longRun([
+        { metric_key: 'ratio', organization: '集团合并', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '0.48', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
+        { metric_key: 'revenue_completion_ratio', organization: '集团合并', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '0.62', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
+      ], ['metric_label'])} />);
+      const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
+      expect(within(table).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
+      expect(within(table).queryByRole('columnheader', { name: '情景' })).toBeNull();
+      expect(within(table).getAllByRole('columnheader').slice(0, 2).map((header) => header.textContent)).toEqual(['指标', '指标说明']);
+      expect(within(table).getByRole('cell', { name: '62.00%' })).toBeTruthy();
+    });
+
+    it('reads a 达成率 given in % as a percentage, not a fraction', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({}).map((row) => ({ ...row, scenario: row.scenario === 'actual_1_8' ? 'actual_ytd' : 'budget_ytd' })),
+        { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'achievement_ratio', value: '90', unit: '%' },
+      ])} />);
+      const card = screen.getByRole('article');
+      expect(within(card).getByText('90.00%')).toBeTruthy();
+      expect(within(card).queryByText('9,000.00%')).toBeNull();
+    });
+  });
+
   it('treats an empty backend no-comparable comparison as authoritative instead of falling back locally', () => {
     const previous = run([{ metric_key: 'revenue', actual: '325644' }]);
     const current = run([{ metric_key: 'revenue', actual: '344487.0552' }]);
