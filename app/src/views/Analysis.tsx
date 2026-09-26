@@ -924,9 +924,13 @@ function StructurePanel({ taskId, datasets, busy, onRefresh }: {
   return (
     <div className="analysis-structure-panel">
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
+      {/* A to-do line per file; the confirmation form is long and opens on demand. */}
       {waiting.map((proposal) => (
-        <StructureProposalCard key={proposal.id} taskId={taskId} datasetName={named(proposal.dataset_id)}
-          proposal={proposal} busy={busy} onSettled={settle} />
+        <details key={proposal.id} className="analysis-details analysis-structure-todo">
+          <summary>待确认表结构 · {named(proposal.dataset_id)}{proposal.structure_state === 'no_table' ? ' · 没有识别出数据表' : ` · ${proposal.sheets.length} 张工作表`}</summary>
+          <StructureProposalCard taskId={taskId} datasetName={named(proposal.dataset_id)}
+            proposal={proposal} busy={busy} onSettled={settle} />
+        </details>
       ))}
       {pending.map((confirmation) => (
         <StructurePendingStrip key={confirmation.id} taskId={taskId} datasetName={named(confirmation.dataset_id)}

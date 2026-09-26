@@ -1002,6 +1002,28 @@ ${canonicalAppendix} 已改写`;
     expect(setup.open).toBe(true);
   });
 
+  it('shows a pending table structure as a folded to-do line that opens to the confirmation form', async () => {
+    const column = (letter: string, display: string, role: string, pair: string | null = null) => ({ letter, header: display, display, role, pair, direction: null });
+    const sheet = { sheet: '02·GL科目余额表', decision: 'table', reason: null, header_row: 4, title_rows: [1, 2],
+      columns: [column('A', '科目代码', 'account_code'), column('C', '类别', 'category'), column('G', '本期发生额借方', 'debit', 'amount_1'), column('H', '本期发生额贷方', 'credit', 'amount_1')],
+      amount_pairs: [{ id: 'amount_1', label: '本期发生额', debit: 'G', credit: 'H', primary: true, direction: { kind: 'by_category', column: 'C' } }],
+      excluded_rows: [], fill_down_columns: [], scope_hints: { period: '2026-08', currency: '', unit: '元' },
+      preview: [{ row: 4, is_header: true, cells: [{ letter: 'A', text: '科目代码' }] }], confidence: 0.9, blocked_reason: null };
+    mountBridge({ analysisState: async () => success(initial), financeCall: async (_taskId: string, command: string) => {
+      if (command === 'structure-proposal-list') return success({ proposals: [{ id: 'p1', dataset_id: source.id, revision: 1, structure_state: 'pending_confirmation', sheets: [sheet], template_matches: [] }] });
+      if (command === 'structure-confirmation-list') return success({ confirmations: [] });
+      if (command === 'finance-source-list') return success({ batches: [] });
+      return success({});
+    } });
+    render(<Analysis {...props} embedded section="materials" />);
+    const todo = await screen.findByText(`待确认表结构 · ${source.name} · 1 张工作表`);
+    const details = todo.closest('details')!;
+    expect(details.open).toBe(false);
+    expect(within(details).getByRole('button', { name: /确认表结构/ })).toBeTruthy();
+    fireEvent.click(todo);
+    expect(details.open).toBe(true);
+  });
+
   it('lists the files before the scope settings and the workbook tools on the materials tab', async () => {
     mountBridge({ analysisState: async () => success(initial),
       financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
