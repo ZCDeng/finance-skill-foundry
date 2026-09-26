@@ -286,16 +286,38 @@ function financeVarianceDimensionColumns(run: AnalysisRun): { name: string; type
   return run.result?.columns.filter((column) => !financeVarianceReservedColumns.has(column.name) && distinctFinanceValues(rows, column.name).length > 1) ?? [];
 }
 
+/** One side of a comparison in words. An estimate says 估算; a label it cannot name stays as written. */
+function scenarioWords(label: string, side: 'actual' | 'baseline'): string {
+  if (/^actual$/i.test(label) || label === '实际') return '实际';
+  const estimate = /estimat|估算|推算|预估/i.test(label);
+  if (/budget|预算/i.test(label)) return estimate ? '预算（估算）' : '预算';
+  if (/forecast|预测|rolling|滚动/i.test(label)) return '预测';
+  if (label === 'baseline') return '对照';
+  return side === 'actual' ? label : `对照（${label}）`;
+}
+
 function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel: string; actualLabel: string } {
-  const comparison = financeVarianceResult(run)?.comparison;
+  const comparison = financeVarianceResult(run)?.comparison as Record<string, unknown> | undefined;
   const actual = textValue(comparison?.actual_scenario ?? 'actual');
   const baseline = textValue(comparison?.baseline_scenario ?? 'baseline');
-  const baselineIsBudget = /budget|预算/i.test(baseline);
-  const actualIsDefault = /^actual$/i.test(actual) || actual === '实际';
+  const period = (filters: unknown) => {
+    const value = filters && typeof filters === 'object' ? (filters as Record<string, unknown>).period : undefined;
+    return typeof value === 'string' ? value : '';
+  };
+  const actualPeriod = period(comparison?.actual_filters);
+  const baselinePeriod = period(comparison?.baseline_filters);
+  // Periods are named only when the two sides differ; the same words on both sides get their codes.
+  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${value}）` : words;
+  const actualLabel = withPeriod(scenarioWords(actual, 'actual'), actualPeriod);
+  let baselineLabel = withPeriod(scenarioWords(baseline, 'baseline'), baselinePeriod);
+  // Same words on both sides (the same scenario under other filters) must still read as two sides.
+  if (actualLabel === baselineLabel) baselineLabel = `对照（${baselineLabel}）`;
+  const budget = /budget|预算/i.test(baseline);
+  const estimate = /estimat|估算|推算|预估/i.test(baseline);
   return {
-    caption: baselineIsBudget ? '预算差异桥' : actualIsDefault ? '损益差异桥' : '对照损益差异桥',
-    actualLabel: actualIsDefault ? '实际' : actual,
-    baselineLabel: baselineIsBudget ? '预算' : baseline === 'baseline' ? '对照' : `对照（${baseline}）`,
+    caption: budget ? (estimate ? '估算预算差异桥' : '预算差异桥') : /^actual$/i.test(actual) || actual === '实际' ? '损益差异桥' : '对照损益差异桥',
+    actualLabel,
+    baselineLabel,
   };
 }
 
@@ -358,9 +380,9 @@ function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
   const interpretation = typeof result?.interpretation === 'string' ? result.interpretation : '';
   return <section className="analysis-headline" aria-label="结论">
     {shown.map((line, index) => <div key={index} className="analysis-headline-line">
-      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}与{copy.baselineLabel}相比，{line.headline}</p>
+      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}{copy.actualLabel}与{copy.baselineLabel}相比，{line.headline}</p>
       {line.drivers.length > 0 && <p className="analysis-note">{line.drivers.join(' · ')}</p>}
-      {line.assumedZero && <p className="analysis-note">部分科目缺少一侧数据，已按 0 计入。</p>}
+      {line.assumedZero && <p className="analysis-note">这一组有一侧没有数据，已按 0 计入，差异等于另一侧的全额。</p>}
     </div>)}
     {groups.size > shown.length && <p className="analysis-note">共 {groups.size} 组，其余见下表。</p>}
     {interpretation && <p className="analysis-note">{interpretation}</p>}

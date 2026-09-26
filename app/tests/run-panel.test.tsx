@@ -243,7 +243,7 @@ describe('RunPanel finance conclusion', () => {
     ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
     render(<RunPanel {...props} runs={[run]} />);
     const conclusion = screen.getByRole('region', { name: '结论' });
-    expect(within(conclusion).getByText('与预算相比，利润减少 312.00 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('实际与预算相比，利润减少 312.00 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入增加 50 万元 · 成本增加 208 万元 · 费用减少 10 万元')).toBeTruthy();
     expect(within(conclusion).getByText('分量表示算术贡献。业务原因需经理判断或独立证据。')).toBeTruthy();
     const table = screen.getByRole('region', { name: '预算差异桥' });
@@ -257,17 +257,17 @@ describe('RunPanel finance conclusion', () => {
     ]);
     render(<RunPanel {...props} runs={[run]} />);
     const conclusion = screen.getByRole('region', { name: '结论' });
-    expect(within(conclusion).getByText('与预算相比，利润减少 900719925474099.99 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('实际与预算相比，利润减少 900719925474099.99 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入持平')).toBeTruthy();
-    expect(within(conclusion).getByText('部分科目缺少一侧数据，已按 0 计入。')).toBeTruthy();
+    expect(within(conclusion).getByText('这一组有一侧没有数据，已按 0 计入，差异等于另一侧的全额。')).toBeTruthy();
   });
 
   it('names each compared group and caps the conclusion at three of them', () => {
     const rows = ['华东', '华南', '华北', '西南'].map((organization, index) => bridgeRow('profit', index % 2 ? '-20' : '30', { organization }));
     render(<RunPanel {...props} runs={[varianceRun(rows)]} />);
     const conclusion = screen.getByRole('region', { name: '结论' });
-    expect(within(conclusion).getByText('华东：与预算相比，利润增加 30 万元')).toBeTruthy();
-    expect(within(conclusion).getByText('华南：与预算相比，利润减少 20 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('华东：实际与预算相比，利润增加 30 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('华南：实际与预算相比，利润减少 20 万元')).toBeTruthy();
     expect(within(conclusion).queryByText(/西南/)).toBeNull();
     expect(within(conclusion).getByText('共 4 组，其余见下表。')).toBeTruthy();
   });
@@ -277,7 +277,7 @@ describe('RunPanel finance conclusion', () => {
     rows.push(bridgeRow('profit', '', { organization: '西南', amount_change: null, contribution: null, comparison_status: 'incomplete' }));
     render(<RunPanel {...props} runs={[varianceRun(rows)]} />);
     const conclusion = screen.getByRole('region', { name: '结论' });
-    expect(within(conclusion).getAllByText(/与预算相比/)).toHaveLength(3);
+    expect(within(conclusion).getAllByText(/实际与预算相比/)).toHaveLength(3);
     expect(within(conclusion).getByText('共 4 组，其余见下表。')).toBeTruthy();
   });
 
@@ -286,7 +286,7 @@ describe('RunPanel finance conclusion', () => {
     const { unmount } = render(<RunPanel {...props} runs={[varianceRun([
       bridgeRow('profit', '-312.00', { ...scoped('万元'), amount_change_display: '利润减少 312.00' }),
     ])]} />);
-    expect(within(screen.getByRole('region', { name: '结论' })).getByText('与预算相比，利润减少 312.00 万元')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: '结论' })).getByText('实际与预算相比，利润减少 312.00 万元')).toBeTruthy();
     unmount();
     render(<RunPanel {...props} runs={[varianceRun([bridgeRow('profit', '-312.00', scoped('元', '万元'))])]} />);
     expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
@@ -298,6 +298,17 @@ describe('RunPanel finance conclusion', () => {
       bridgeRow('profit', '-20', { organization: null }),
     ])]} />);
     expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
+  });
+
+  it.each([
+    [{ actual_scenario: 'forecast', baseline_scenario: 'budget' }, '预测与预算相比，利润减少 5 万元', '预算差异桥'],
+    [{ actual_scenario: 'actual', baseline_scenario: 'budget', actual_filters: { period: '2026-08' }, baseline_filters: { period: '2026-07' } }, '实际（2026-08）与预算（2026-07）相比，利润减少 5 万元', '预算差异桥'],
+    [{ actual_scenario: 'actual', baseline_scenario: 'actual' }, '实际与对照（实际）相比，利润减少 5 万元', '损益差异桥'],
+    [{ actual_scenario: 'actual', baseline_scenario: 'estimated_budget' }, '实际与预算（估算）相比，利润减少 5 万元', '估算预算差异桥'],
+  ])('names both sides of the comparison: %j', (comparison, sentence, caption) => {
+    render(<RunPanel {...props} runs={[varianceRun([bridgeRow('profit', '-5')], { comparison })]} />);
+    expect(within(screen.getByRole('region', { name: '结论' })).getByText(sentence)).toBeTruthy();
+    expect(screen.getByRole('region', { name: caption })).toBeTruthy();
   });
 
   it('writes no conclusion when there is no profit change to state', () => {
