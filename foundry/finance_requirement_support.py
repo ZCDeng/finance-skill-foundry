@@ -152,6 +152,10 @@ def assess_requirement_support(analysis, spec):
                         + report["next_action"]))
             elif metric in accounts and _native_account_item(item):
                 report["evidence"] = "run_metric_result_set (single account_total)"
+            elif paths and (paths["accepted"] or paths["blocked"]) and _pnl_class(item.get("metric")) is not None:
+                # A P&L line named by its alias (营业收入) that is also a ledger account: not an account item, and
+                # not unrecognized either; the paths the checker offers it (a method run) are its evidence.
+                report["evidence"] = _paths_evidence(paths)
             elif metric in source_columns:
                 report["evidence"] = "cited_result_row (explicit result column)"
             else:

@@ -3291,6 +3291,25 @@ def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_nati
     assert 'account_total' not in _unanswered_message(item)
 
 
+@pytest.mark.parametrize('account, method', [('营业收入', 'yoy'), ('营业成本', 'actual_vs_budget'), ('Revenue', 'yoy')])
+def test_a_method_routed_pnl_alias_that_is_also_an_account_is_not_called_unrecognized(tmp_path, account, method):
+    """Review of #37: with a method route the checker offers only the method run; the support record fell through
+    to 'unrecognized' once the alias stopped being an account item. It names the method run instead."""
+    rows = [{'ledger': 'L', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+             'scenario': 'actual', 'management_account': account, 'amount': '110', 'source_row': '1',
+             'doc_id': 'D1', 'line_id': '1'}]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope}, title='method')
+    requirement = save_requirements(service.analysis, {
+        'question': f'8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'line', 'metric': account, 'dimensions': {'period': '2026-08', 'method': method},
+                   'requires_drilldown': False}]})
+    support = requirement['support']['items'][0]
+
+    assert support['status'] != 'unrecognized'
+    assert 'account_total' not in support.get('evidence', '') and 'method_run' in support['evidence']
+
+
 @pytest.mark.parametrize('account', LEDGER_ACCOUNT_NAMES)
 def test_account_total_still_answers_a_ledger_account_on_both_paths(tmp_path, account):
     """Opposite direction: a ledger account is named by the ledger, even when its name contains 成本, 费用 or
