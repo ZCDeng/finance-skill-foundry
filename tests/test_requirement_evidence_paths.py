@@ -3237,6 +3237,103 @@ def test_an_account_total_filtered_only_to_the_items_own_scope_still_answers(tmp
     assert result['coverage']['status'] == 'pass'
 
 
+# --- account_total never answers the four P&L lines, whatever the item calls them (issue #27) -----------------
+
+PNL_LINE_NAMES = ['营业收入', 'Revenue', 'REVENUE', 'operating_revenue', '净利润', '营业利润', 'Profit', '营业成本',
+                  '期间费用', 'Expense']
+# Ledger account names: the engine's account_total is their answer (test_the_finance_engines_own_account_total_…).
+LEDGER_ACCOUNT_NAMES = ['管理费用', '销售费用', '主营业务成本', '主营业务收入', '其他收益', 'cash']
+
+
+def _all_rows_account_total(case, account):
+    run = case.service.run_metric({'context_id': case.context['id'],
+                                   'metric': {'kind': 'account_total', 'accounts': [account]}})
+    _verify_run_column(case.service, run, 'amount')
+    return run, _claims_for_columns(run, 'amount')
+
+
+@pytest.mark.parametrize('account', PNL_LINE_NAMES)
+def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_result_set_path(tmp_path, account):
+    """Issue #27: the result-set path took any metric outside METRIC_LABELS' keys as a ledger account, so an
+    item named 营业收入, Revenue or 净利润 with organizations/periods/scenarios was answered by run_metric
+    account_total rows (every row cited and drilled) and the draft completed, while `revenue` stayed pending."""
+    case = _pnl_account_case(tmp_path, account)
+    run, claims = _all_rows_account_total(case, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': claims})
+    item = _item(result)
+    draft = case.service.save_explanation_draft({'title': 't', 'body': f'8 月{account} {claims[0]["value"]} 元。',
+                                                 'run_ids': [run['id']], 'claims': claims})
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] == 'pending' and result['coverage']['status'] == 'needs_attention'
+    assert {location['evidence'].get('not_counted_reason') for location in item['locations']} == {
+        'engine_output_without_closure'}
+    assert not {'run_metric_result_set', 'run_metric_account_total'} & set(support['accepted_evidence'])
+    assert 'account_total' not in support.get('evidence', '')
+    assert draft['completion']['status'] != 'complete'
+    assert draft['completion']['original_requirements_completed'] is False
+
+
+@pytest.mark.parametrize('account', PNL_LINE_NAMES)
+def test_account_total_does_not_answer_a_pnl_line_named_by_its_alias_on_the_native_total_path(tmp_path, account):
+    """Issue #27, dimensions.period: the native-total branch answered 营业收入 by engine_output before its P&L
+    class was checked, and the support record offered run_metric_account_total for it."""
+    case = _ledger_account_case(tmp_path, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [case.run['id']], 'claims': case.claims})
+    item = _item(result)
+    support = case.requirement['support']['items'][0]
+
+    assert item['status'] != 'answered' and result['coverage']['status'] == 'needs_attention'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'engine_output_without_closure'
+    assert 'run_metric_account_total' not in support['accepted_evidence']
+    assert 'account_total' not in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('account, method', [('营业收入', 'yoy'), ('营业成本', 'actual_vs_budget'), ('Revenue', 'yoy'),
+                                             ('other_income', 'yoy')])
+def test_a_method_routed_pnl_alias_that_is_also_an_account_is_not_called_unrecognized(tmp_path, account, method):
+    """Review of #37: with a method route the checker offers only the method run; the support record fell through
+    to 'unrecognized' once the alias stopped being an account item. It names the method run instead."""
+    rows = [{'ledger': 'L', 'organization': '总部', 'period': '2026-08', 'currency': 'CNY', 'unit': '元',
+             'scenario': 'actual', 'management_account': account, 'amount': '110', 'source_row': '1',
+             'doc_id': 'D1', 'line_id': '1'}]
+    scope = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元', 'scenario': 'actual'}
+    service, context, bindings = _finance_service_from_rows(tmp_path, {'actual': rows}, {'actual': scope}, title='method')
+    requirement = save_requirements(service.analysis, {
+        'question': f'8 月{account}', 'context_id': context['id'], 'bindings': bindings, 'scope': {'actual': scope},
+        'items': [{'id': 'line', 'metric': account, 'dimensions': {'period': '2026-08', 'method': method},
+                   'requires_drilldown': False}]})
+    support = requirement['support']['items'][0]
+
+    assert support['status'] != 'unrecognized'
+    if account == 'other_income':
+        # Not a P&L line: its account total still answers it (engine output), and the advice stays main's.
+        assert support['evidence'] == 'run_metric_result_set (single account_total)'
+    else:
+        assert 'account_total' not in support.get('evidence', '') and 'method_run' in support['evidence']
+
+
+@pytest.mark.parametrize('account', LEDGER_ACCOUNT_NAMES)
+def test_account_total_still_answers_a_ledger_account_on_both_paths(tmp_path, account):
+    """Opposite direction: a ledger account is named by the ledger, even when its name contains 成本, 费用 or
+    收入 (主营业务成本) or is another named amount's alias (其他收益); its own account_total answers it."""
+    native = _ledger_account_case(tmp_path / 'native', account)
+    result = check_requirements(native.service.analysis, {'requirements_id': native.requirement['id'],
+                                                          'run_ids': [native.run['id']], 'claims': native.claims})
+    assert _item(result)['status'] == 'answered'
+    assert _item(result)['locations'][0]['evidence']['evidence_basis'] == 'engine_output'
+    assert native.requirement['support']['items'][0]['accepted_evidence'][0] == 'run_metric_account_total'
+
+    case = _pnl_account_case(tmp_path / 'set', account)
+    run, claims = _all_rows_account_total(case, account)
+    result = check_requirements(case.service.analysis, {'requirements_id': case.requirement['id'],
+                                                        'run_ids': [run['id']], 'claims': claims})
+    assert _item(result)['status'] == 'answered' and result['coverage']['status'] == 'pass'
+    assert case.requirement['support']['items'][0]['accepted_evidence'][0] == 'run_metric_result_set'
+
+
 def _estimate_beside_source(analysis, tmp_path, *, cite_estimate=True):
     """_estimate_case plus a sixth row that states 华东区域 budget_1_8 as 05!C5 (180576) by a direct recipe."""
     case = _estimate_case(analysis, tmp_path)
@@ -3704,9 +3801,10 @@ def test_tool_descriptions_state_the_round_8_rules():
     preset = (ROOT / 'dsh-plugin' / 'presets' / 'analysis' / 'agent.cordis.yml').read_text(encoding='utf-8')
     draft = next(tool for tool in _tools() if tool['name'] == 'save_explanation_draft')['description']
 
-    assert 'not revenue/cost/expense/profit, which only (1) and (2) answer' in draft
-    assert '不是 revenue、cost、expense、profit 这类规范指标名；这四项只按①②作答' in tools
-    assert 'revenue、cost、expense、profit四项不走这条路' in preset
+    # Issue #27: their aliases in any case too.
+    assert 'not revenue/cost/expense/profit or their aliases such as 营业收入/净利润/营业成本/期间费用 in any case' in draft
+    assert '不是 revenue、cost、expense、profit 这类规范指标名或其别名，如营业收入、净利润、营业成本、期间费用' in tools
+    assert 'revenue、cost、expense、profit四项及其别名（营业收入、净利润、营业成本、期间费用等，大小写不论）不走这条路' in preset
     assert 'filters may only restate' in draft and 'filters 只能写要求本身的组织、期间、情景或维度' in tools
     assert 'keeps the grain estimated until the manager accepts it' in draft
     assert '该组合仍按估算计' in tools and '该组合仍按估算计' in preset

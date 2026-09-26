@@ -1,5 +1,6 @@
 """Task coverage cannot be hidden by narrowing a draft's run list."""
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -2398,6 +2399,262 @@ def test_method_conflict_fixup_does_not_relax_matching(analysis):
     conflict = next(fixup for fixup in result['items'][0]['fixups'] if fixup['code'] == 'method_conflict')
     assert conflict['expected_method'] == 'free_sql'
     assert conflict['actual_method'] == 'revenue_minus_cost_minus_expense'
+
+
+# --- explain_variance closures count only on the inputs the requirement asks for (issues #25, #26) ---------------
+
+BRIDGE_BASE = {'ledger': 'L1', 'organization': 'O1', 'currency': 'CNY', 'unit': '万元'}
+BRIDGE_SCOPES = {
+    'flat': {**BRIDGE_BASE, 'period': '2026-09'},
+    'two_sided': {'actual': {**BRIDGE_BASE, 'period': '2026-09', 'scenario': 'actual'},
+                  'budget': {**BRIDGE_BASE, 'period': '2026-09', 'scenario': 'budget'}},
+}
+# revenue 1120 vs 1000, cost 450 vs 420, expense 110 vs 100: revenue +120, profit +80.
+BRIDGE_ACTUAL = [('2026-09', 'A', 'revenue', '120'), ('2026-09', 'B', 'revenue', '1000'), ('2026-09', 'A', 'cost', '50'),
+                 ('2026-09', 'B', 'cost', '400'), ('2026-09', 'A', 'expense', '10'), ('2026-09', 'B', 'expense', '100')]
+BRIDGE_BUDGET = [('2026-09', 'A', 'revenue', '100'), ('2026-09', 'B', 'revenue', '900'), ('2026-09', 'A', 'cost', '40'),
+                 ('2026-09', 'B', 'cost', '380'), ('2026-09', 'A', 'expense', '10'), ('2026-09', 'B', 'expense', '90')]
+# The prior year: revenue 1050, profit 515, so year on year revenue +70, profit +45.
+BRIDGE_PRIOR = [('2025-09', 'A', 'revenue', '100'), ('2025-09', 'B', 'revenue', '950'), ('2025-09', 'A', 'cost', '45'),
+                ('2025-09', 'B', 'cost', '385'), ('2025-09', 'A', 'expense', '5'), ('2025-09', 'B', 'expense', '100')]
+
+
+def _bridge_check(tmp_path, scope, variance, *, credit_revenue=False, prior=False, items=None):
+    """A profit bridge on actual/budget ledgers, its revenue and profit contributions cited for revenue and
+    profit items; returns (check result, the run's revenue and profit contributions)."""
+    def rows(scenario, amounts):
+        return [{**BRIDGE_BASE, 'period': period, 'scenario': scenario, 'management_account': account,
+                 'amount': ('-' + amount) if credit_revenue and account == 'revenue' else amount,
+                 'product': product, 'source_row': index}
+                for index, (period, product, account, amount) in enumerate(amounts, start=1)]
+    service, context, _ = _finance_service_from_rows(
+        tmp_path, {'actual': rows('actual', BRIDGE_ACTUAL + (BRIDGE_PRIOR if prior else [])),
+                   'budget': rows('budget', BRIDGE_BUDGET)},
+        {'actual': {**BRIDGE_BASE, 'scenario': 'actual'}, 'budget': {**BRIDGE_BASE, 'scenario': 'budget'}},
+        title='bridge-inputs')
+    requirement = service.analysis_requirements_save({
+        'question': '9 月营业收入与利润差异', 'context_id': context['id'], 'scope': BRIDGE_SCOPES[scope] if isinstance(scope, str) else scope,
+        'items': items or [{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False},
+                           {'id': 'profit', 'metric': 'profit', 'requires_drilldown': False}]})
+    run = service.explain_variance({'context_id': context['id'], 'kind': 'profit_bridge', **variance})
+    rows_ = run['result']['rows']
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': 'contribution',
+               'value': row['contribution']}
+              for index, row in enumerate(rows_) if row['metric'] in ('revenue', 'profit')]
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': claims})
+    return result, {row['metric']: row['contribution'] for row in rows_ if row['metric'] in ('revenue', 'profit')}
+
+
+def _bridge_statuses(result):
+    return {item['id']: (item['status'], [(location['evidence'].get('evidence_basis'),
+                                            location['evidence'].get('not_counted_reason'))
+                                           for location in item['locations']])
+            for item in result['items']}
+
+
+@pytest.mark.parametrize('scope', ['flat', 'two_sided'])
+@pytest.mark.parametrize('scale', ['0.6524', '1000', '0', '2'])
+def test_a_bridge_whose_account_signs_scale_a_line_does_not_answer_revenue_or_profit(tmp_path, scope, scale):
+    """Issue #25: account_signs multiply every undirected row of the line; any factor other than a sign scales
+    it, and the scaled bridge still closes. A recipe with that scale is coefficient_unbound (decision 1); an
+    engine closure on scaled lines does not count either."""
+    result, contributions = _bridge_check(tmp_path, scope, {'account_signs': {'revenue': scale}})
+
+    assert contributions['revenue'] != '120'
+    reason = [('engine_output', 'account_signs_not_unit')]
+    assert _bridge_statuses(result) == {'revenue': ('not_applicable', reason), 'profit': ('not_applicable', reason)}
+    assert result['coverage']['status'] == 'needs_attention'
+    from foundry.finance_requirements import _unanswered_message
+    assert 'account_signs 只能写 1 或 -1' in _unanswered_message(result['items'][0])
+
+
+@pytest.mark.parametrize('variance, credit_revenue', [
+    ({}, False),
+    ({'account_signs': {'revenue': '1'}}, False),
+    ({'account_signs': {'revenue': '1.00', 'cost': '-1', 'expense': '-1'}}, False),
+    # A ledger that books revenue as negative credits states its sign with -1, and the bridge is right.
+    ({'account_signs': {'revenue': '-1'}}, True),
+])
+@pytest.mark.parametrize('scope', ['flat', 'two_sided'])
+def test_account_signs_that_only_state_a_lines_sign_still_answer(tmp_path, scope, variance, credit_revenue):
+    result, contributions = _bridge_check(tmp_path, scope, variance, credit_revenue=credit_revenue)
+
+    assert {line: Decimal(value) for line, value in contributions.items()} == {'revenue': 120, 'profit': 80}
+    closed = [('engine_closed', None)]
+    assert _bridge_statuses(result) == {'revenue': ('answered', closed), 'profit': ('answered', closed)}
+    assert result['coverage']['status'] == 'pass'
+
+
+@pytest.mark.parametrize('scope', ['flat', 'two_sided'])
+@pytest.mark.parametrize('filters', [
+    {'actual_filters': {'source_row': [1, 3, 5]}, 'baseline_filters': {'source_row': [1, 3, 5]}},
+    {'actual_filters': {'source_row': [2, 4, 6]}, 'baseline_filters': {'source_row': [2, 4, 6]}},
+    # Only the actual side is narrowed (product A's revenue row left out); the period restates the scope.
+    {'actual_filters': {'period': '2026-09', 'source_row': [2, 3, 4, 5, 6]}, 'baseline_filters': {'period': '2026-09'}},
+])
+def test_a_bridge_over_part_of_the_rows_does_not_answer_the_whole_scope(tmp_path, scope, filters):
+    """Issue #26: filters on a field the requirement never names (source rows, one product's rows) make the
+    bridge a bridge of that subset. It closes, but it is not the requirement's revenue or profit."""
+    result, contributions = _bridge_check(tmp_path, scope, filters)
+
+    assert contributions['revenue'] not in (None, '120')
+    reason = [(None, 'comparison_filters_differ')]
+    assert _bridge_statuses(result) == {'revenue': ('pending', reason), 'profit': ('pending', reason)}
+    assert result['coverage']['status'] == 'needs_attention'
+    from foundry.finance_requirements import _unanswered_message
+    assert '差异桥闭合的是这部分行' in _unanswered_message(result['items'][0])
+
+
+@pytest.mark.parametrize('filters', [
+    {},
+    # Filters that restate the scope on one side, or write the same value as a list, select the same rows.
+    {'baseline_filters': {'organization': 'O1'}},
+    {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': ['2026-09']}},
+    {'actual_filters': {'ledger': 'L1'}},
+])
+def test_a_bridge_of_a_scenario_against_itself_does_not_answer(tmp_path, filters):
+    """Issue #26: with a flat scope (the Huachen style) nothing names the sides, and budget against budget
+    closes at 0."""
+    result, contributions = _bridge_check(tmp_path, 'flat', {'actual_scenario': 'budget', 'baseline_scenario': 'budget',
+                                                             **filters})
+
+    assert contributions == {'revenue': '0', 'profit': '0'}
+    reason = [('engine_output', 'comparison_same_side')]
+    assert _bridge_statuses(result) == {'revenue': ('not_applicable', reason), 'profit': ('not_applicable', reason)}
+    assert result['coverage']['status'] == 'needs_attention'
+
+
+@pytest.mark.parametrize('scope', ['flat', 'two_sided'])
+@pytest.mark.parametrize('field, kept, other', [('posting_status', 'posted', 'unposted'),
+                                                ('line_type', 'period_activity', 'opening')])
+def test_a_filter_that_selects_the_periods_own_movement_still_answers(tmp_path, scope, field, kept, other):
+    """Review round 3 of #36: a journal with unposted vouchers, or a balance-style export with opening and ending
+    lines, needs a filter on a field the requirement never names to give the period's own revenue; main answers
+    it, and dropping the filter gives a wrong number. Only row identity (source_row, doc_id, line_id) narrows."""
+    base = {**BRIDGE_BASE, 'period': '2026-09'}
+    actual = [{**base, 'scenario': 'actual', 'management_account': account, field: kind, 'amount': amount,
+               'source_row': index}
+              for index, (account, kind, amount) in enumerate([
+                  ('revenue', kept, '1120'), ('revenue', other, '8000'), ('cost', kept, '450'), ('cost', other, '3000'),
+                  ('expense', kept, '110'), ('expense', other, '900')], start=1)]
+    budget = [{**base, 'scenario': 'budget', 'management_account': account, field: kept, 'amount': amount,
+               'source_row': index}
+              for index, (account, amount) in enumerate([('revenue', '1000'), ('cost', '420'), ('expense', '100')], start=1)]
+    service, context, _ = _finance_service_from_rows(
+        tmp_path, {'actual': actual, 'budget': budget},
+        {'actual': {**BRIDGE_BASE, 'scenario': 'actual'}, 'budget': {**BRIDGE_BASE, 'scenario': 'budget'}}, title='movement')
+    requirement = service.analysis_requirements_save({
+        'question': '9 月营业收入与利润差异', 'context_id': context['id'], 'scope': BRIDGE_SCOPES[scope],
+        'items': [{'id': 'revenue', 'metric': 'revenue', 'requires_drilldown': False},
+                  {'id': 'profit', 'metric': 'profit', 'requires_drilldown': False}]})
+    run = service.explain_variance({'context_id': context['id'], 'kind': 'profit_bridge',
+                                    'actual_filters': {field: kept}, 'baseline_filters': {field: kept}})
+    rows = run['result']['rows']
+    claims = [{'basis': 'calculation', 'run_id': run['id'], 'row': index, 'column': 'contribution',
+               'value': row['contribution']} for index, row in enumerate(rows) if row['metric'] in ('revenue', 'profit')]
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': claims})
+
+    assert {row['metric']: row['contribution'] for row in rows if row['metric'] in ('revenue', 'profit')} == {
+        'revenue': '120', 'profit': '80'}
+    closed = [('engine_closed', None)]
+    assert _bridge_statuses(result) == {'revenue': ('answered', closed), 'profit': ('answered', closed)}
+
+
+def test_a_year_on_year_bridge_that_forgot_its_baseline_period_does_not_answer(tmp_path):
+    """Review round 2: actual against actual with only the actual side narrowed to 2026-09 and the prior year's
+    group assumed zero: the 2026-09 row compares the actual with itself (1120 vs 1120), while the 2025-09 row has
+    no actual side at all."""
+    result, contributions = _bridge_check(tmp_path, 'flat', {
+        'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
+        'missing_groups_as_zero': True}, prior=True)
+
+    assert contributions['revenue'] == '0'
+    reason = [('engine_output', 'comparison_same_side')]
+    assert _bridge_statuses(result) == {'revenue': ('not_applicable', reason), 'profit': ('not_applicable', reason)}
+
+
+@pytest.mark.parametrize('scope, variance, expected', [
+    # Filters that restate the requirement's own period.
+    ('flat', {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': '2026-09'}}, ('120', '80')),
+    ('two_sided', {'actual_filters': {'period': '2026-09'}, 'baseline_filters': {'period': '2026-09'}}, ('120', '80')),
+    ('flat', {'actual_filters': {'organization': 'O1', 'period': '2026-09', 'ledger': 'L1'},
+              'baseline_filters': {'organization': 'O1'}}, ('120', '80')),
+    # Each side's own scenario restated (tests/test_finance_evals.py calls explain_variance this way).
+    ('flat', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
+    ('flat', {'actual_filters': {'scenario': ['actual'], 'period': '2026-09'},
+              'baseline_filters': {'scenario': 'budget', 'period': ['2026-09']}}, ('120', '80')),
+    ('two_sided', {'actual_filters': {'scenario': 'actual'}, 'baseline_filters': {'scenario': 'budget'}}, ('120', '80')),
+    ('flat', {'actual_filters': {'scenario': ['actual', 'budget']}, 'baseline_filters': {'scenario': ['actual', 'budget']}},
+     ('120', '80')),
+    # Filters that list the requirement's value among others of a field the bridge groups by (organization is
+    # always a grouping field): the cited row is that value's whole group (review round 2).
+    ('flat', {'actual_filters': {'organization': ['O1', 'O2']}, 'baseline_filters': {'organization': ['O1', 'O2']}},
+     ('120', '80')),
+    ('two_sided', {'actual_filters': {'organization': ['O1', 'O2'], 'scenario': 'actual'},
+                   'baseline_filters': {'organization': ['O1', 'O2'], 'scenario': 'budget'}}, ('120', '80')),
+    # Year on year: one scenario, two periods. A flat scope pins only the actual period, as on main.
+    ('flat', {'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
+              'baseline_filters': {'period': '2025-09'}}, ('70', '45')),
+    ({**BRIDGE_BASE, 'period': '2026-09', 'baseline_period': '2025-09'},
+     {'actual_scenario': 'actual', 'baseline_scenario': 'actual', 'actual_filters': {'period': '2026-09'},
+      'baseline_filters': {'period': '2025-09'}}, ('70', '45')),
+])
+def test_bridge_filters_that_restate_the_requirement_still_answer(tmp_path, scope, variance, expected):
+    # The prior year's rows only for the year-on-year cases; elsewhere they would be a period with no budget.
+    result, contributions = _bridge_check(tmp_path, scope, variance, prior=expected == ('70', '45'))
+
+    assert contributions == {'revenue': expected[0], 'profit': expected[1]}
+    closed = [('engine_closed', None)]
+    assert _bridge_statuses(result) == {'revenue': ('answered', closed), 'profit': ('answered', closed)}
+
+
+def test_the_profit_bridge_intent_is_not_answered_by_a_bridge_over_part_of_the_rows(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='partial-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context,
+                                  actual_filters={'organization': '华东', 'period': '2026-08', 'source_row': [1]},
+                                  baseline_filters={'organization': '华东', 'period': '2026-08', 'source_row': [4]})
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': _claims_for_columns(run, 'contribution')})
+
+    item = result['items'][0]
+    assert item['status'] == 'pending' and result['coverage']['status'] == 'needs_attention'
+    assert {location['evidence'].get('not_counted_reason') for location in item['locations']} == {'comparison_filters_differ'}
+
+
+def test_the_profit_bridge_intent_still_answers_a_bridge_whose_filters_restate_each_sides_scenario(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='scenario-restated-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context,
+                                  actual_filters={'organization': '华东', 'period': '2026-08', 'scenario': 'actual'},
+                                  baseline_filters={'organization': '华东', 'period': '2026-08', 'scenario': 'budget'})
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['items'][0]['status'] == 'answered' and result['coverage']['status'] == 'pass'
+
+
+def test_the_profit_bridge_intent_is_not_answered_by_a_bridge_with_scaled_lines(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, title='scaled-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = service.explain_variance({
+        'context_id': context['id'], 'method': 'revenue_minus_cost_minus_expense', 'actual_scenario': 'actual',
+        'baseline_scenario': 'budget', 'actual_filters': {'organization': '华东', 'period': '2026-08'},
+        'baseline_filters': {'organization': '华东', 'period': '2026-08'}, 'account_signs': {'cost': '-0.5'}})
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                   'claims': _claims_for_columns(run, 'contribution')})
+
+    item = result['items'][0]
+    assert item['status'] != 'answered' and result['coverage']['status'] == 'needs_attention'
+    assert {location['evidence'].get('not_counted_reason') for location in item['locations']} == {'account_signs_not_unit'}
 
 
 # --- a binding alias named budget or baseline is a binding, not the comparison's baseline side (issue #28) --------
