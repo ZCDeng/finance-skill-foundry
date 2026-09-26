@@ -706,10 +706,14 @@ def _scope_matches(run, row, scope):
     scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else (run.get('finance_scope') or {})
     if isinstance(scopes, dict):
         actual_scope = row.get('actual_scope') if isinstance(row.get('actual_scope'), dict) else scopes.get('actual')
+        # baseline/budget name the comparison's baseline side only beside an actual side; alone they are binding
+        # aliases like any other (Huachen binds {'budget': …, 'close': …}; issue #28).
+        paired = isinstance(scopes.get('actual'), dict)
         baseline_scope = (
             row.get('baseline_scope') if isinstance(row.get('baseline_scope'), dict)
-            else scopes.get('baseline') if isinstance(scopes.get('baseline'), dict)
-            else scopes.get('budget')
+            else scopes.get('baseline') if paired and isinstance(scopes.get('baseline'), dict)
+            else scopes.get('budget') if paired
+            else None
         )
         source_scope = (
             row.get('source_scope') if isinstance(row.get('source_scope'), dict)
@@ -1030,7 +1034,8 @@ def _prepared_evidence(analysis, runs):
         group_key = (group.get('run_id'), group.get('row'))
         if group_key[0] is not None and group_key[1] is not None:
             group_map[group_key] = group
-        engine = (runs.get(group.get('run_id')) or {}).get('engine')
+        run = runs.get(group.get('run_id')) or {}
+        engine = run.get('engine')
         closure_status = (group.get('closure') or {}).get('status')
         for member in group.get('members', []):
             if not isinstance(member, dict):
@@ -1050,6 +1055,9 @@ def _prepared_evidence(analysis, runs):
                 # A server-side declarative aggregate of a bound snapshot (no user code): not a script, and
                 # drilldown_fact verifies its rows. It answers amounts outside the four P&L lines.
                 'aggregate_output': engine == 'structured_aggregate',
+                # Which aggregation the cited measure column is (sum, count, min …), for _aggregate_statistic_of_money.
+                **({'aggregate_measure': _aggregate_measure(run, member.get('column'))}
+                   if engine == 'structured_aggregate' else {}),
                 'member_state': member.get('state'),
                 'fact_id': fact_id,
             }
@@ -1763,6 +1771,9 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         # The finance engine's own total of exactly this account (not a script's copy of it).
         return 'answered', {**metadata, 'evidence_basis': 'engine_output'}
     if amount not in CLOSURE_OR_RECIPE_AMOUNTS and _server_output(member) and not estimate:
+        if _aggregate_statistic_of_money(item, member):
+            return 'not_applicable', {**metadata, 'evidence_basis': 'aggregate_output',
+                                      'not_counted_reason': 'aggregate_statistic_not_amount'}
         # Outside the four P&L lines the engine's own output of the amount (finance_scenario_run,
         # run_metric columns) or a server-side structured aggregate of the bound snapshot answers it;
         # only revenue/profit/cost/expense need closure or a recipe (decision 1).
@@ -1771,6 +1782,43 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'estimated', {**metadata, 'evidence_basis': 'estimate'}
     return 'not_applicable', {**metadata, 'evidence_basis': _uncounted_basis(member),
                               'not_counted_reason': _amount_not_counted_reason(member, recipe)}
+
+
+def _aggregate_measure(run, column):
+    """The aggregation of a structured_aggregate measure column, or None for any other column."""
+    plan = run.get('aggregate_plan') if isinstance(run.get('aggregate_plan'), dict) else {}
+    measures = plan.get('measures') if isinstance(plan.get('measures'), list) else []
+    return next((measure.get('aggregation') for measure in measures
+                 if isinstance(measure, dict) and measure.get('name') == column), None)
+
+
+# Names that ask for money outright, beyond the P&L lines, the named amounts and the amount markers
+# (_names_an_amount): a balance. And names that ask for one row's extreme amount.
+BALANCE_STEMS = ('余额',)
+BALANCE_WORDS = frozenset({'balance', 'balances'})
+EXTREME_STEMS = ('最大', '最小', '最高', '最低')
+EXTREME_WORDS = frozenset({'max', 'min', 'maximum', 'minimum', 'largest', 'smallest', 'highest', 'lowest', 'peak'})
+
+
+def _aggregate_statistic_of_money(item, member):
+    """A structured_aggregate count, distinct count, minimum or maximum cited for an item whose name asks for
+    money (应收账款余额, other_income, 应收金额 …) is a statistic of the snapshot's rows, not that amount (issue #28).
+
+    A minimum or maximum still answers an item that asks for one (单笔最大应收金额), and a count still answers
+    a name that says no money (逾期笔数), as on main; only a sum states the amount itself.
+    """
+    aggregation = member.get('aggregate_measure')
+    if not member.get('aggregate_output') or aggregation in (None, 'sum'):
+        return False
+    text = str(item.get('metric') or '').strip()
+    words = _label_words(text)
+    if aggregation in {'min', 'max'} and (any(stem in text for stem in EXTREME_STEMS) or set(words) & EXTREME_WORDS):
+        return False
+    lowered = text.lower()
+    named = any(lowered == key or lowered in {str(alias).lower() for alias in aliases}
+                for key, aliases in METRIC_LABELS.items() if key not in NON_AMOUNT_METRICS)
+    return bool(named or _pnl_class(text) or _names_an_amount(text, words)
+                or any(stem in text for stem in BALANCE_STEMS) or set(words) & BALANCE_WORDS)
 
 
 def _server_output(member):
@@ -2324,7 +2372,7 @@ def _out_of_scope_inputs(run, item, latest):
     are ambiguous rather than out of scope, so neither is reported here.
     """
     scopes = _finance_scopes(run) if isinstance(run.get('finance_scope'), dict) else {}
-    if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'baseline', 'budget', 'source')):
+    if _comparison_run(run) or any(isinstance(scopes.get(side), dict) for side in ('actual', 'source')):
         return []
     expected = _comparison_scopes(_item_scope(item, latest.get('scope') or {}))['actual']
     return [alias for alias, bound in scopes.items() if isinstance(bound, dict) and any(
@@ -3151,6 +3199,8 @@ NOT_COUNTED_TEXT = {
     'script_output_without_recipe': '只有脚本输出，没有通过的来源复算规则',
     'script_closure_not_counted': '闭合由脚本自行算出，只作展示，不计为引擎闭合',
     'engine_output_without_closure': '财务引擎的这项输出没有闭合规则，也没有通过的来源复算规则',
+    'aggregate_statistic_not_amount': ('服务端汇总（structured_aggregate）的这一列是计数、去重计数、最小值或最大值，不是该金额；'
+                                       '金额要用 sum 度量汇总，或按来源复算规则引用单元格；要求问的若是笔数或单笔最大值，在要求里写明'),
     'aggregate_output_without_closure': ('服务端汇总（structured_aggregate）的这项输出不是闭合结果，也没有通过的来源复算规则；'
                                          '收入、成本、费用、利润和量价拆分要引擎闭合或来源复算'),
     'recipe_failed': '复算规则未通过',

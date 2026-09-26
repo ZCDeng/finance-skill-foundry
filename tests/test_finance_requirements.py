@@ -2398,3 +2398,50 @@ def test_method_conflict_fixup_does_not_relax_matching(analysis):
     conflict = next(fixup for fixup in result['items'][0]['fixups'] if fixup['code'] == 'method_conflict')
     assert conflict['expected_method'] == 'free_sql'
     assert conflict['actual_method'] == 'revenue_minus_cost_minus_expense'
+
+
+# --- a binding alias named budget or baseline is a binding, not the comparison's baseline side (issue #28) --------
+
+ALIAS_BASE = {'ledger': 'L', 'organization': '总部', 'currency': 'CNY', 'unit': '元'}
+
+
+def _aliased_ledger_check(tmp_path, alias, kind, *, budget_organization='总部'):
+    """Huachen binds {'budget': …, 'close': …}; run_metric's finance_scope is keyed by those aliases."""
+    def rows(scenario, amount, organization):
+        return [{**ALIAS_BASE, 'organization': organization, 'period': '2026-08', 'scenario': scenario,
+                 'management_account': '管理费用', 'amount': amount, 'source_row': '1', 'doc_id': 'D1', 'line_id': '1'}]
+    service, context, bindings = _finance_service_from_rows(
+        tmp_path, {alias: rows('budget', '90', budget_organization), 'close': rows('actual', '110', '总部')},
+        {alias: {**ALIAS_BASE, 'organization': budget_organization, 'scenario': 'budget'},
+         'close': {**ALIAS_BASE, 'scenario': 'actual'}}, title='alias-' + alias)
+    items = ([{'id': 'fee', 'metric': '管理费用', 'organizations': ['总部'], 'periods': ['2026-08'],
+               'scenarios': ['actual', 'budget'], 'requires_drilldown': False}] if kind == 'account_total'
+             else [{'id': 'controls', 'metric': 'control_totals', 'requires_drilldown': False}])
+    requirement = save_requirements(service.analysis, {
+        'question': '8 月管理费用实际与预算', 'context_id': context['id'], 'bindings': bindings,
+        'scope': {**ALIAS_BASE, 'period': '2026-08'}, 'items': items})
+    metric = {'kind': 'account_total', 'accounts': ['管理费用']} if kind == 'account_total' else {'kind': 'control_totals'}
+    run = service.run_metric({'context_id': context['id'], 'metric': metric})
+    _verify_run_column(service, run, 'amount')
+    return check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']],
+                                                 'claims': _claims_for_columns(run, 'amount')})
+
+
+@pytest.mark.parametrize('kind', ['account_total', 'control_totals'])
+@pytest.mark.parametrize('alias', ['budget', 'baseline', 'bud'])
+def test_a_binding_alias_named_budget_is_read_as_a_binding(tmp_path, alias, kind):
+    """The alias budget (Huachen's own) was read as the comparison's baseline side with no actual side, so no
+    run_metric row on those bindings was ever in scope, whatever the scopes said; the alias bud matched."""
+    result = _aliased_ledger_check(tmp_path, alias, kind)
+
+    assert result['items'][0]['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
+
+
+@pytest.mark.parametrize('kind', ['account_total', 'control_totals'])
+@pytest.mark.parametrize('alias', ['budget', 'bud'])
+def test_a_binding_named_budget_outside_the_requirement_scope_still_does_not_answer(tmp_path, alias, kind):
+    result = _aliased_ledger_check(tmp_path, alias, kind, budget_organization='分部')
+
+    assert result['items'][0]['status'] != 'answered'
+    assert result['coverage']['status'] == 'needs_attention'

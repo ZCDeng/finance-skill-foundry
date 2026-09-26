@@ -4113,3 +4113,65 @@ def test_the_precision_guidance_states_the_decimal_38_cap_a_run_stores():
         assert '更高精度' not in text and 'DECIMAL(38)' in text
     assert 'higher precision' not in draft and 'DECIMAL(38)' in draft
     assert (ROOT / 'foundry' / 'resources' / 'dsh-plugin' / 'finance-tools.js').read_text(encoding='utf-8') == tools
+
+
+# --- a count, minimum or maximum is not the amount an item names (issue #28) --------------------------------------
+
+
+def _measure_case(tmp_path, metric, aggregation):
+    """Two receivables of 120.50 and 80.25 万元 (total 200.75) and one structured_aggregate measure named after
+    the item, of the given aggregation, every row verified."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    task = TaskStore(tmp_path / 'var').create(title='汇总度量')
+    analysis = AnalysisStore(task)
+    path = tmp_path / 'ar.json'
+    path.write_text(json.dumps([{'customer': 'C1', 'amount': '120.50', 'currency': 'CNY', 'unit': '万元'},
+                                {'customer': 'C2', 'amount': '80.25', 'currency': 'CNY', 'unit': '万元'}]),
+                    encoding='utf-8')
+    dataset = analysis.add_dataset(path, name='actual')
+    requirement = save_requirements(analysis, {'question': metric, 'bindings': {'actual': dataset['id']},
+                                               'items': [{'id': 'item', 'metric': metric, 'requires_drilldown': True}]})
+    measure = {'name': metric, 'aggregation': aggregation, **({} if aggregation == 'count' else {'field': 'amount'})}
+    definition = analysis.save_analysis({'question': metric, 'engine': 'structured_aggregate',
+                                         'bindings': {'actual': dataset['id']}, 'aggregate_plan': {
+                                             'dataset_alias': 'actual', 'group_by': [], 'measures': [measure],
+                                             'dedupe': {'policy': 'none'}}})
+    run = analysis.run_analysis(definition['id'])
+    service = FinanceStore(task)
+    service.drilldown_fact({'run_id': run['id'], 'row': 0, 'column': metric})
+    claim = {'basis': 'calculation', 'run_id': run['id'], 'row': 0, 'column': metric,
+             'value': run['result']['rows'][0][metric]}
+    result = check_requirements(analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': [claim]})
+    return result, claim['value']
+
+
+@pytest.mark.parametrize('aggregation', ['count', 'count_distinct', 'min', 'max'])
+@pytest.mark.parametrize('metric', ['应收账款余额', 'other_income', '其他收益', '应收金额', 'receivable_balance'])
+def test_a_count_minimum_or_maximum_does_not_answer_an_amount_the_item_names(tmp_path, metric, aggregation):
+    """Issue #28: a measure named after the item answered it whatever its aggregation: a row count (2) or the
+    largest row (120.50) completed a 200.75 receivables-balance requirement."""
+    result, value = _measure_case(tmp_path, metric, aggregation)
+    item = _item(result)
+
+    assert value != '200.75'
+    assert item['status'] == 'not_applicable' and result['coverage']['status'] == 'needs_attention'
+    assert item['locations'][0]['evidence']['evidence_basis'] == 'aggregate_output'
+    assert item['locations'][0]['evidence']['not_counted_reason'] == 'aggregate_statistic_not_amount'
+    assert '不是该金额' in _unanswered_message(item)
+
+
+@pytest.mark.parametrize('metric, aggregation', [
+    # The total still answers the amount.
+    ('应收账款余额', 'sum'), ('other_income', 'sum'),
+    # A count the gate does not know by name stays answered by a count, as on main.
+    ('逾期笔数', 'count'), ('发票张数', 'count_distinct'),
+    # Known non-amounts keep their rule.
+    ('客户数', 'count'), ('最长账龄天数', 'max'),
+    # An item that asks for an extreme is answered by that extreme.
+    ('单笔最大应收金额', 'max'), ('最小单笔金额', 'min'), ('max_invoice_amount', 'max'),
+])
+def test_a_measure_that_is_what_the_item_asks_for_still_answers(tmp_path, metric, aggregation):
+    result, _ = _measure_case(tmp_path, metric, aggregation)
+
+    assert _item(result)['status'] == 'answered'
+    assert result['coverage']['status'] == 'pass'
