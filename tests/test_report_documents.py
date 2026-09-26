@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import hashlib
+import signal
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -11,7 +12,12 @@ from foundry.analysis import AnalysisStore
 from foundry.cli import main
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
-from foundry.report_documents import report_document_from_markdown_body, report_document_markdown, validate_report_document
+from foundry.report_documents import (
+    report_document_from_markdown_body,
+    report_document_markdown,
+    report_nodes_from_markdown,
+    validate_report_document,
+)
 from foundry.report_projection import build_report_projection
 from foundry.task import TaskStore
 
@@ -203,6 +209,53 @@ def test_markdown_body_list_items_preserve_inline_bold_when_projected_back() -> 
     assert r"\*\*收入端\*\*" not in rendered
     assert "2. **利润端**：利润端在 8 月明显失速，**没有随收入缺口收敛。**" in rendered
 
+
+
+@pytest.fixture
+def parse_deadline():
+    """A regression in the bare-marker loop spins forever; fail in 5 s instead of hanging the suite."""
+    def _timeout(signum, frame):
+        raise TimeoutError("markdown parsing did not return")
+
+    previous = signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(5)
+    yield
+    signal.alarm(0)
+    signal.signal(signal.SIGALRM, previous)
+
+
+def _paragraph(text: str) -> dict:
+    return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("# \n\nx", [_paragraph("# "), _paragraph("x")]),
+        ("x\n\n- ", [_paragraph("x"), _paragraph("- ")]),
+        ("x\n\n1. ", [_paragraph("x"), _paragraph("1. ")]),
+        ("x\n\n* ", [_paragraph("x"), _paragraph("* ")]),
+        ("###\t\n\nx", [_paragraph("###\t"), _paragraph("x")]),
+    ],
+)
+def test_a_line_that_is_only_a_block_marker_is_kept_as_paragraph_text(parse_deadline, body, expected) -> None:
+    """On main these looped forever: the block regexes need text after the marker, and the paragraph
+    fallback broke on the same line without consuming it."""
+    assert report_document_from_markdown_body(body)["content"] == expected
+
+
+@pytest.mark.parametrize("marker", ["#", "# ", "###### ", "-", "- ", "* ", "+ ", "1. ", "2) "])
+def test_a_bare_block_marker_anywhere_in_the_body_returns(parse_deadline, marker) -> None:
+    nodes = report_nodes_from_markdown(f"正文第一段\n\n{marker}\n\n正文第二段")
+
+    texts = [part.get("text", "") for node in nodes for part in node.get("content", []) if isinstance(part, dict)]
+    assert "正文第一段" in texts and "正文第二段" in texts
+
+
+def test_headings_and_lists_right_after_a_paragraph_still_split_it(parse_deadline) -> None:
+    nodes = report_nodes_from_markdown("第一段\n# 标题\n- 条目")
+
+    assert [node["type"] for node in nodes] == ["paragraph", "heading", "bulletList"]
 
 
 def test_existing_list_item_ast_literal_markdown_chars_are_not_reinterpreted() -> None:

@@ -668,9 +668,11 @@ def report_nodes_from_markdown(markdown: str) -> list[dict[str, Any]]:
             continue
         paragraph: list[str] = []
         while index < len(lines) and lines[index].strip():
-            if re.match(r"^(#{1,6})\s+", lines[index]) or _is_table_start(lines, index) or re.match(r"^\[\^([^\]]+)\]:", lines[index]):
+            # The first line is always consumed: a bare "# " or "- " matched no block above, and breaking on it
+            # without advancing would loop forever.
+            if paragraph and (re.match(r"^(#{1,6})\s+", lines[index]) or _is_table_start(lines, index) or re.match(r"^\[\^([^\]]+)\]:", lines[index])):
                 break
-            if re.match(r"^(\s*)([-*+]|\d+[.)])\s+", lines[index]) or lines[index].startswith("```") or re.fullmatch(r"---+", lines[index].strip()):
+            if paragraph and (re.match(r"^(\s*)([-*+]|\d+[.)])\s+", lines[index]) or lines[index].startswith("```") or re.fullmatch(r"---+", lines[index].strip())):
                 break
             paragraph.append(lines[index])
             index += 1
