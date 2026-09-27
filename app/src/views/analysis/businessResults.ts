@@ -1,4 +1,4 @@
-import type { AnalysisDraft, AnalysisRevision, AnalysisRun, RowDeclaration, RowDeclarations } from '../../bridge.js';
+import type { AnalysisDraft, AnalysisRevision, AnalysisRun, PairMeasure, RowDeclaration, RowDeclarations } from '../../bridge.js';
 
 export type RunPresentationRole = 'business' | 'activity' | 'failure';
 
@@ -15,39 +15,9 @@ export type RowBasisKind = 'source' | 'direct' | 'calculation' | 'estimate' | 'j
 
 export type DisplayColumn = { name: string; type?: string; label: string; semantics: FieldSemantics };
 type CanonicalMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
-/** The measures a declared pair names its member rows by (result_semantics.LONG_SCENARIO_MEASURES). */
-export type PairMeasure = CanonicalMeasure;
-/** The backend's sentence for one fully declared pair: its own words, never verified, never a draft's fact. */
-export type ScriptConclusion = {
-  text: string;
-  basis: string;
-  verified: false;
-  /** The figures the sentence states, as Decimal strings; ratio_percent only when it states a 达成率. */
-  values: Partial<Record<'actual' | 'budget' | 'variance' | 'ratio_percent', string>>;
-  variance_from: 'row' | 'computed';
-};
-/** One comparison the backend paired from the declared rows; members are row indexes in the declaration. */
-export type DeclaredPair = {
-  metric: string;
-  organization: unknown;
-  period: unknown;
-  period_key: string;
-  span: 'ytd' | 'month' | null;
-  unit: string | null;
-  members: Partial<Record<PairMeasure, number>>;
-  /** Whether the vocabulary names the pair's metric; a pair known only from its scenarios is inferred and gets no sentence. */
-  declared: boolean;
-  estimate: { estimated: boolean; measures: PairMeasure[] };
-  conclusion: ScriptConclusion | null;
-};
-/**
- * A declaration as the workbench reads it (result_semantics.declared_runs): with its pairs, and the task's current
- * requirements version and its verified fingerprint when the task has requirements.
- */
-export type PairedDeclarations = RowDeclarations & {
-  pairs?: DeclaredPair[];
-  current_requirements?: { id: string; fingerprint: string | null };
-};
+export type { DeclaredPair, PairMeasure, ScriptConclusion } from '../../bridge.js';
+/** A declaration as the workbench reads it (result_semantics.declared_runs), with its pairs and current requirements. */
+export type PairedDeclarations = RowDeclarations;
 type ParsedWideColumn = { name: string; metric?: string; measure: CanonicalMeasure; period: string; order: number };
 
 const explicitBusinessRoles = new Set(['business', 'business_result', 'calculation', 'analysis_result']);

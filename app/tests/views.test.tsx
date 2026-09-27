@@ -12,7 +12,7 @@ import { Deliverables } from '../src/views/Deliverables.js';
 import { Tasks } from '../src/views/Tasks.js';
 import { TaskDetail } from '../src/views/TaskDetail.js';
 import { Analysis } from '../src/views/Analysis.js';
-import { type Answer, type AnalysisDraft, type AnalysisState, type Bridge, type DeliverableRow, type TaskRow, isWorkbook } from '../src/bridge.js';
+import { type Answer, type AnalysisDraft, type AnalysisState, type Bridge, type DeliverableRow, type GalleryRow, type TaskRow, isWorkbook } from '../src/bridge.js';
 
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Partial<Bridge> }).foundry; vi.clearAllMocks(); });
 
@@ -103,6 +103,8 @@ describe('the task list', () => {
 });
 
 /** The gallery's own props, for the cases that only look at the list. */
+/** An old-flow 成果库 row as reads.ts composes it. */
+const oldRow = (row: DeliverableRow): GalleryRow => ({ type: 'deliverable', key: `deliverable:${TASK.id}:${row.seq}`, at: row.at, task: TASK, row });
 const GALLERY = {
   open: null,
   onOpen: () => {},
@@ -116,7 +118,7 @@ describe('the deliverable gallery', () => {
   it('shows the cause, which is the column that earns the screen', () => {
     // A file name says a document changed. `query-locked:followup-1` says which
     // question changed it.
-    render(<Deliverables rows={[{ task: TASK, row: ROW }]} {...GALLERY} />);
+    render(<Deliverables rows={[oldRow(ROW)]} {...GALLERY} />);
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
     expect(screen.getByText('底稿')).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: '期间' })).toBeTruthy();
@@ -313,7 +315,7 @@ describe('the shell', () => {
         strip={<DataBar task={null} detail={null} running={null} busy={false} onLaunch={() => {}} onStop={() => {}} />}
       >
         <Deliverables
-          rows={[{ task: TASK, row: ROW }]}
+          rows={[oldRow(ROW)]}
           open={{ task: TASK, row: ROW, text: null }}
           onOpen={() => {}}
           onOpenWorkbook={() => {}}
@@ -673,7 +675,7 @@ describe('reading a deliverable', () => {
     const opened: string[] = [];
     render(
       <Deliverables
-        rows={[{ task: TASK, row: ROW }]}
+        rows={[oldRow(ROW)]}
         open={null}
         onOpen={(task, row) => opened.push(`${task.id}:${row.sha256}`)}
         onOpenWorkbook={() => {}}
@@ -691,7 +693,7 @@ describe('reading a deliverable', () => {
     // cannot place, and placing it is why every version is kept.
     render(
       <Deliverables
-        rows={[{ task: TASK, row: ROW }]}
+        rows={[oldRow(ROW)]}
         open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -708,7 +710,7 @@ describe('reading a deliverable', () => {
   it('shows the header while the store is still being read', () => {
     render(
       <Deliverables
-        rows={[{ task: TASK, row: ROW }]}
+        rows={[oldRow(ROW)]}
         open={{ task: TASK, row: ROW, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -760,7 +762,7 @@ describe('a workbook version', () => {
   };
 
   it('is listed as a spreadsheet rather than as a document', () => {
-    render(<Deliverables rows={[{ task: TASK, row: BOOK }]} {...GALLERY} />);
+    render(<Deliverables rows={[oldRow(BOOK)]} {...GALLERY} />);
     expect(screen.getByText('表格')).toBeTruthy();
   });
 
@@ -771,7 +773,7 @@ describe('a workbook version', () => {
     const opened: number[] = [];
     render(
       <Deliverables
-        rows={[{ task: TASK, row: BOOK }]}
+        rows={[oldRow(BOOK)]}
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => opened.push(1)}
@@ -790,7 +792,7 @@ describe('a workbook version', () => {
   it('still names the version above it', () => {
     render(
       <Deliverables
-        rows={[{ task: TASK, row: BOOK }]}
+        rows={[oldRow(BOOK)]}
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -879,7 +881,7 @@ describe('finding the export at all', () => {
     const asked: string[] = [];
     render(
       <Deliverables
-        rows={[{ task: TASK, row: ROW }]}
+        rows={[oldRow(ROW)]}
         open={{ task: TASK, row: ROW, text: '# 本期结论稿' }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -896,7 +898,7 @@ describe('finding the export at all', () => {
     const book: DeliverableRow = { ...ROW, kind: 'export', ext: '.xlsx' };
     render(
       <Deliverables
-        rows={[{ task: TASK, row: book }]}
+        rows={[oldRow(book)]}
         open={{ task: TASK, row: book, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -992,7 +994,7 @@ describe('looking at a workbook without leaving the window', () => {
     const asked: string[] = [];
     render(
       <Deliverables
-        rows={[{ task: TASK, row: BOOK }]}
+        rows={[oldRow(BOOK)]}
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -1011,7 +1013,7 @@ describe('looking at a workbook without leaving the window', () => {
     // An import is a headless Univer coming up; seconds, not milliseconds.
     render(
       <Deliverables
-        rows={[{ task: TASK, row: BOOK }]}
+        rows={[oldRow(BOOK)]}
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}
@@ -1028,7 +1030,7 @@ describe('looking at a workbook without leaving the window', () => {
   it('does not offer a look a build with no viewer cannot give', () => {
     render(
       <Deliverables
-        rows={[{ task: TASK, row: BOOK }]}
+        rows={[oldRow(BOOK)]}
         open={{ task: TASK, row: BOOK, text: null }}
         onOpen={() => {}}
         onOpenWorkbook={() => {}}

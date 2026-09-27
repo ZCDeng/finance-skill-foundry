@@ -112,7 +112,7 @@ export interface AnalysisExportRow {
  * row only so a `{ task, row }` built by hand still reads as one.
  */
 export type GalleryRow =
-  | { type?: 'deliverable'; key?: string; at?: string; task: TaskRow; row: DeliverableRow }
+  | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }
   | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
   | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
 
@@ -434,6 +434,35 @@ export interface RowDeclarations {
   rows: RowDeclaration[];
   /** Rows that break the result-row contract; the run still succeeded. Absent on declarations stored before them. */
   warnings?: ResultContractWarning[];
+  /** The comparisons the rows pair into, each with the backend's sentence when fully declared. Absent before rules 3.x. */
+  pairs?: DeclaredPair[];
+  /** Set only when read: the task's current requirements version and its verified fingerprint. */
+  current_requirements?: { id: string; fingerprint: string | null };
+}
+/** The measures a declared pair names its member rows by (result_semantics.LONG_SCENARIO_MEASURES). */
+export type PairMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
+/** The backend's sentence for one fully declared pair: its own words, never verified, never a draft's fact. */
+export interface ScriptConclusion {
+  text: string;
+  basis: string;
+  verified: false;
+  /** The figures the sentence states, as Decimal strings; ratio_percent only when it states a 达成率. */
+  values: Partial<Record<'actual' | 'budget' | 'variance' | 'ratio_percent', string>>;
+  variance_from: 'row' | 'computed';
+}
+/** One comparison the backend paired from the declared rows; members are row indexes in the declaration. */
+export interface DeclaredPair {
+  metric: string;
+  organization: unknown;
+  period: unknown;
+  period_key: string;
+  span: 'ytd' | 'month' | null;
+  unit: string | null;
+  members: Partial<Record<PairMeasure, number>>;
+  /** Whether the vocabulary names the pair's metric; a pair known only from its scenarios is inferred and gets no sentence. */
+  declared: boolean;
+  estimate: { estimated: boolean; measures: PairMeasure[] };
+  conclusion: ScriptConclusion | null;
 }
 /** One kind of result-row contract break, in the backend's diagnostic shape with a Chinese message. */
 export interface ResultContractWarning {
