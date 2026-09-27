@@ -303,6 +303,47 @@ export interface AnalysisRun extends AnalysisObject {
     excluded_detail_rows?: Record<string, unknown>[];
     provenance?: { mode?: string; status?: string; plan_hash?: string; data_hash?: string; source_hash?: string } & Record<string, unknown>;
   };
+  /** Script runs saved with declarations only; a run without one is paired by inference. */
+  row_declarations?: RowDeclarations;
+}
+/** Why a row is an estimate: its grain declared in requirements, its own basis columns, or its wording. */
+export type RowEstimateSource =
+  | { source: 'declared'; requirements_id: string; item_id: string }
+  | { source: 'row'; field: string }
+  | { source: 'text'; field: string };
+export interface RowDeclaration {
+  /** Zero-based index in the full result file (it may lie past the stored result preview). */
+  row: number;
+  /** The row's own fields the requirement matcher reads (metric_key, metric, organization, period, scenario …). */
+  fields: Record<string, unknown>;
+  role: 'actual' | 'budget' | 'variance' | 'ratio' | null;
+  /** The base metric a role compares (revenue for revenue_variance); the row's own metric without a role. */
+  metric: unknown;
+  organization: unknown;
+  period: unknown;
+  /** `${period}|${scenario period suffix}`: rows of one comparison share it; null without a role. */
+  period_key: string | null;
+  /** ytd or month when the scenario names that period class. */
+  span: 'ytd' | 'month' | null;
+  unit: string | null;
+  unit_kind: 'amount' | 'decimal' | 'percent' | 'unmarked' | null;
+  /** The row's value as written (a Decimal string), for rows with a role. */
+  value: unknown;
+  scope_label: string | null;
+  estimate: boolean;
+  estimate_sources: RowEstimateSource[];
+}
+export interface RowDeclarations {
+  rules_version: string;
+  /** The requirements version the run is pinned to, and that record's own fingerprint. */
+  requirements_id: string | null;
+  requirements_fingerprint: string | null;
+  /** Set only when read: the latest requirements whose estimates were merged in. */
+  latest_requirements_id?: string;
+  complete: boolean;
+  incomplete_reason: 'result_file_unavailable' | 'requirements_unavailable' | 'too_many_rows' | null;
+  row_count: number;
+  rows: RowDeclaration[];
 }
 export interface AnalysisDraft extends AnalysisObject {
   document?: import('../electron/reports/model').ReportDocument;

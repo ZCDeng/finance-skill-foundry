@@ -350,6 +350,8 @@ class AnalysisStore:
         )
 
     def state(self) -> dict:
+        from foundry.result_semantics import declared_runs
+
         root = self._inside(self.root / "datasets")
         datasets = (
             [record for path in root.glob("*/meta.json")
@@ -357,6 +359,7 @@ class AnalysisStore:
             if root.exists()
             else []
         )
+        requirements = self._list("requirements")
         return {
             "schema_version": 1,
             "task_id": self.task.id,
@@ -364,9 +367,13 @@ class AnalysisStore:
                 datasets, key=lambda r: (r.get("seq", 0), r["created_at"], r["id"])
             ),
             "analyses": self._list("revisions"),
-            "runs": self._list("runs"),
+            # Row declarations are read as the workbench shows them: recomputed when stored under older
+            # rules, and with the latest requirements' estimates added. Stored records are never rewritten.
+            "runs": declared_runs(
+                self, self._list("runs"), requirements[-1] if requirements else None
+            ),
             "drafts": self._list("drafts"),
-            "requirements": self._list("requirements"),
+            "requirements": requirements,
             "evidence_checks": self._list("evidence_checks"),
             "completions": self._list("completions"),
             "methods": self._methods(),
@@ -1782,10 +1789,20 @@ class AnalysisStore:
             **requirements_snapshot,
             "requirements_id": requirements_id or requirements_snapshot.get("requirements_id"),
         }
+        # Declared from the full parsed table (the stored result keeps only a preview) and kept beside the
+        # result, never in it: output_hash covers the result, so the same output keeps the same hash.
+        declaration = {}
+        if succeeded and result_file:
+            from foundry.result_semantics import declare_script_result
+
+            declaration["row_declarations"] = declare_script_result(
+                self, parsed["schema"], parsed["rows"], requirements_snapshot["requirements_id"]
+            )
         record = _new(
             self.task,
             analysis_id=revision["id"],
             **requirements_snapshot,
+            **declaration,
             result_role=result_role,
             scope=scope,
             session_id=session_id,
