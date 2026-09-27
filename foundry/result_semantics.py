@@ -17,10 +17,16 @@ assistant often declares grain_basis after the run it describes.
 
 The declaration also carries the rows that break the result-row contract (R5) as warnings in the diagnostic shape.
 A warning never fails the run and never changes how a row is declared.
+
+It pairs its rows as the result area pairs them (businessResults.ts longScenarioPairing). A pair whose every member is
+declared, in a complete declaration, gets one Chinese sentence built from the rows' own Decimal values (R6, KTD7).
+The sentence's basis is 脚本结果: it is never verified and never one of a draft's quotable facts, which are read
+from the run's result alone.
 """
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_UP, Decimal, Inexact, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +42,8 @@ from foundry.finance_requirements import (
 
 # The declaration rules are versioned by part; a stored declaration older than any part is recomputed on read.
 # Vocabulary 2: the vocabulary also decides the contract warnings.
-VOCABULARY_VERSION = 2
+# Vocabulary 3: the vocabulary also pairs rows and words the conclusion sentences; an estimated budget has a span.
+VOCABULARY_VERSION = 3
 UNIT_TABLE_VERSION = 1
 ESTIMATE_WORDS_VERSION = 1
 # A declaration covers at most this many rows; a longer result is declared up to here and marked incomplete.
@@ -106,6 +113,13 @@ MATCH_FIELDS = ('metric_key', 'metric', 'line', 'contribution_line', 'management
                 'organization', 'period', 'scenario')
 ROLES = {'actual': 'actual', 'budget': 'budget', 'estimated_budget': 'budget', 'variance': 'variance',
          'rate': 'ratio', 'rate_pct': 'ratio'}
+# How a conclusion sentence names each figure it says is an estimate.
+MEASURE_WORDS = {'actual': '实际', 'budget': '预算', 'estimated_budget': '预算', 'variance': '差异',
+                 'rate': '达成率', 'rate_pct': '达成率'}
+CONCLUSION_BASIS = '脚本结果'
+# Working precision for the one subtraction and the ×100 a sentence may need; a result it cannot hold exactly is
+# not said at all.
+CONCLUSION_PRECISION = 100
 
 
 def rules_version() -> str:
@@ -163,7 +177,8 @@ def _scenario_measure(row: dict) -> dict | None:
     span = 'ytd' if scenario.endswith('_ytd') else 'month' if scenario.endswith('_month') else None
     for measure, names in LONG_SCENARIO_MEASURES.items():
         if scenario in names:
-            return {'measure': measure, 'suffix': '', 'span': span if measure in {'actual', 'budget'} else None}
+            return {'measure': measure, 'suffix': '',
+                    'span': span if measure in {'actual', 'budget', 'estimated_budget'} else None}
     match = SCENARIO_WITH_PERIOD.fullmatch(scenario)
     return {'measure': match.group(1), 'suffix': match.group(2), 'span': None} if match else None
 
@@ -351,6 +366,153 @@ def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, 
     return warnings
 
 
+def pair_rows(rows: list[dict], entries: list[dict], long_format: bool, metrics: frozenset) -> list[dict]:
+    """The comparisons the declared rows fill, bucketed as businessResults.ts longScenarioPairing buckets them.
+
+    A bucket holds the rows of one metric, organization and period key, each member named by its measure and given as
+    its row index. Two rows for one measure, or a year-to-date figure beside a monthly one, leave that bucket unpaired;
+    an amount unit or currency that differs inside any bucket leaves the whole table unpaired. An unmarked ratio takes
+    no part (KTD9). A bucket pairs when its actual and one more figure have a value. The pair is declared when the
+    vocabulary names its metric; one the backend knows only from its scenario is inferred and gets no sentence.
+    """
+    if not long_format:
+        return []
+    buckets: dict[tuple, dict] = {}
+    for row, entry in zip(rows, entries):
+        if entry['role'] is None or entry['unit_kind'] == 'unmarked':
+            continue
+        measure = _comparison(json_value(row))['measure']
+        key = (_text(entry['metric']), _text(entry['organization']), entry['period_key'])
+        bucket = buckets.setdefault(key, {'entries': [], 'units': set(), 'currencies': set(), 'spans': set()})
+        bucket['entries'].append((measure, entry))
+        if entry['span']:
+            bucket['spans'].add(entry['span'])
+        if ROLES[measure] != 'ratio':
+            currency = _text(_first(row, ('currency', '币种'))).strip()
+            bucket['units'].update([entry['unit']] if entry['unit'] else [])
+            bucket['currencies'].update([currency] if currency else [])
+    if any(len(bucket['units']) > 1 or len(bucket['currencies']) > 1 for bucket in buckets.values()):
+        return []
+    pairs = []
+    for (metric, _, period_key), bucket in buckets.items():
+        measures = [measure for measure, _ in bucket['entries']]
+        if len(set(measures)) < len(measures) or len(bucket['spans']) > 1:
+            continue
+        values = {measure: entry['value'] for measure, entry in bucket['entries']}
+        if values.get('actual') is None or all(
+                value is None for measure, value in values.items() if measure != 'actual'):
+            continue
+        first = bucket['entries'][0][1]
+        pairs.append({
+            'metric': metric,
+            'organization': first['organization'],
+            'period': first['period'],
+            'period_key': period_key,
+            'span': next(iter(bucket['spans']), None),
+            'unit': next(iter(bucket['units']), None),
+            'members': {measure: entry['row'] for measure, entry in bucket['entries']},
+            'declared': metric in metrics,
+        })
+    return pairs
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(value.strip() if isinstance(value, str) else str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return number if number.is_finite() else None
+
+
+def _plain(value: Decimal) -> str:
+    return format(value, 'f')
+
+
+def _shown(value: Decimal) -> str:
+    """A figure as the cards show it: two places, half away from zero, thousands grouped (decimalToFixed)."""
+    with localcontext() as context:
+        context.prec = CONCLUSION_PRECISION
+        return format(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), ',f')
+
+
+def _period_phrase(pair: dict) -> str:
+    """The period a sentence opens with: the scenario's own suffix (1_8 is 1-8 月), else the row's period."""
+    period, _, suffix = _text(pair['period_key']).rpartition('|')
+    months = re.fullmatch(r'(\d{1,2})_(\d{1,2})', suffix)
+    if months:
+        first, last = int(months.group(1)), int(months.group(2))
+        return f'{first} 月' if first == last else f'{first}-{last} 月'
+    month = re.fullmatch(r'(\d{4})_(\d{2})', suffix)
+    if month:
+        return f'{month.group(1)} 年 {int(month.group(2))} 月'
+    if not period:
+        return ''
+    return f"{period} {'累计' if pair['span'] == 'ytd' else '单月' if pair['span'] == 'month' else ''}"
+
+
+def _pair_estimate(pair: dict, entries: dict[int, dict]) -> dict:
+    measures = [measure for measure, index in pair['members'].items() if (entries.get(index) or {}).get('estimate')]
+    return {'estimated': bool(measures), 'measures': measures}
+
+
+def _conclusion(pair: dict, entries: dict[int, dict], complete: bool) -> dict | None:
+    """One sentence for a pair whose every member is declared, in a complete declaration (KTD7).
+
+    It says the variance the variance row states, or actual minus budget in Decimal without one; the 达成率 the ratio
+    row states, by its declared unit; and which of the figures it uses are estimates. An approved and an estimated
+    budget in one pair leave open which one the variance is against, so such a pair says nothing.
+    """
+    members = {measure: entries.get(index) for measure, index in pair['members'].items()}
+    if not complete or not pair['declared'] or any(
+            entry is None or entry['role'] != ROLES[measure] or entry['unit_kind'] == 'unmarked'
+            for measure, entry in members.items()):
+        return None
+    if 'actual' not in members or ('budget' in members) == ('estimated_budget' in members):
+        return None
+    used = ['actual', 'budget' if 'budget' in members else 'estimated_budget']
+    actual, budget = _decimal(members[used[0]]['value']), _decimal(members[used[1]]['value'])
+    rate = next((measure for measure in ('rate', 'rate_pct') if measure in members), None)
+    stated = {measure: _decimal(members[measure]['value']) for measure in ('variance', rate) if measure in members}
+    if actual is None or budget is None or None in stated.values():
+        return None
+    try:
+        with localcontext() as context:
+            context.prec, context.traps[Inexact] = CONCLUSION_PRECISION, True
+            variance = stated['variance'] if 'variance' in stated else actual - budget
+            percent = None if rate is None else (
+                stated[rate].scaleb(2) if members[rate]['unit_kind'] == 'decimal' else stated[rate])
+    except Inexact:
+        return None
+    used += [measure for measure in ('variance', rate) if measure in stated]
+    unit = f" {pair['unit']}" if pair['unit'] else ''
+    organization = _text(pair['organization'])
+    change = '与预算持平' if variance == 0 else (
+        f"比预算{'少' if variance < 0 else '多'} {_shown(variance.copy_abs())}{unit}")
+    text = (f"{_period_phrase(pair)}{organization}{RESULT_METRIC_LABELS.get(pair['metric'], pair['metric'])}{change}"
+            f"{'' if percent is None else f'（达成 {_shown(percent)}%）'}"
+            f"，实际 {_shown(actual)}{unit}，预算 {_shown(budget)}{unit}")
+    estimated = list(dict.fromkeys(MEASURE_WORDS[measure] for measure in used if members[measure]['estimate']))
+    if estimated:
+        text += f"；{organization}{'、'.join(estimated)}为估算"
+    return {
+        'text': text,
+        'basis': CONCLUSION_BASIS,
+        'verified': False,
+        'values': {'actual': _plain(actual), 'budget': _plain(budget), 'variance': _plain(variance),
+                   **({} if percent is None else {'ratio_percent': _plain(percent)})},
+        'variance_from': 'row' if 'variance' in stated else 'computed',
+    }
+
+
+def conclude_pairs(pairs: list[dict], entries: list[dict], complete: bool) -> list[dict]:
+    """Each pair with its estimates and its sentence, read from the declared rows as they now stand."""
+    by_row = {entry['row']: entry for entry in entries}
+    return [{**pair, 'estimate': _pair_estimate(pair, by_row), 'conclusion': _conclusion(pair, by_row, complete)}
+            for pair in pairs]
+
+
 def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, fingerprint: str | None,
                  complete: bool = True, incomplete_reason: str | None = None) -> dict:
     """A declaration of `rows`, which must be the full result table unless `complete` says otherwise."""
@@ -359,6 +521,7 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
     if len(rows) > MAX_DECLARED_ROWS and complete:
         complete, incomplete_reason = False, 'too_many_rows'
     entries = [_declare_row(index, row, long_format, requirements) for index, row in enumerate(declared)]
+    pairs = pair_rows(declared, entries, long_format, vocabulary(requirements)['metrics'])
     return {
         'rules_version': rules_version(),
         'requirements_id': (requirements or {}).get('id'),
@@ -367,6 +530,7 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
         'incomplete_reason': None if complete else incomplete_reason,
         'row_count': len(rows),
         'rows': entries,
+        'pairs': conclude_pairs(pairs, entries, complete),
         'warnings': contract_warnings(declared, entries, long_format, requirements,
                                       names_known=incomplete_reason != 'requirements_unavailable'),
     }
@@ -428,7 +592,10 @@ def redeclare(analysis, run: dict) -> dict:
 
 
 def merge_latest(declaration: dict, latest: dict | None) -> dict:
-    """Add the estimates the task's latest requirements declare; nothing the declaration holds is removed."""
+    """Add the estimates the task's latest requirements declare; nothing the declaration holds is removed.
+
+    The pairs are kept; their estimates and sentences are read again from the merged rows.
+    """
     if not latest or latest.get('id') == declaration.get('requirements_id') or not _has_estimate_grains(latest):
         return declaration
     rows = []
@@ -437,7 +604,8 @@ def merge_latest(declaration: dict, latest: dict | None) -> dict:
                  if source not in entry.get('estimate_sources', [])]
         rows.append({**entry, 'estimate': True, 'estimate_sources': [*entry.get('estimate_sources', []), *added]}
                     if added else entry)
-    return {**declaration, 'rows': rows, 'latest_requirements_id': latest['id']}
+    pairs = conclude_pairs(declaration.get('pairs') or [], rows, declaration.get('complete') is True)
+    return {**declaration, 'rows': rows, 'pairs': pairs, 'latest_requirements_id': latest['id']}
 
 
 def declared_run(analysis, run: dict, latest: dict | None) -> dict:

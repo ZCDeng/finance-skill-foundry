@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import shutil
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -558,3 +559,231 @@ def test_a_compared_metric_outside_the_vocabulary_warns_only_without_a_label():
     assert set(warnings_by_code(declare([detail], columns=CONFORMING_COLUMNS))) == {'unit_unmarked'}
     listed = {'id': 'a' * 32, 'items': [{'id': 'adj', 'metric': 'op_adj'}]}
     assert declare([unnamed], listed, columns=CONFORMING_COLUMNS)['warnings'] == []
+
+
+# Pairs and conclusion sentences (R6, KTD7): the declaration pairs its rows as the result area does, and says in one
+# Chinese sentence what a fully declared pair shows, built from the rows' own Decimal values. The sentence is a script
+# result, never verified, and never one of a draft's quotable facts.
+GROUP_PROFIT_ROWS = [
+    {**BASE, 'metric_key': 'profit', 'organization': '集团合并', 'scenario': 'actual_1_8', 'value': '21086.0000',
+     'unit': '万元', 'metric_label': '营业利润 1-8 月实际（报告口径）'},
+    {**BASE, 'metric_key': 'profit', 'organization': '集团合并', 'scenario': 'budget_1_8', 'value': '27192.3769',
+     'unit': '万元', 'metric_label': '营业利润 1-8 月预算'},
+    {**BASE, 'metric_key': 'profit_variance', 'organization': '集团合并', 'scenario': 'variance_1_8',
+     'value': '-6106.3769', 'unit': '万元', 'metric_label': '营业利润差异'},
+    {**BASE, 'metric_key': 'profit_achievement_ratio', 'organization': '集团合并', 'scenario': 'budget_1_8',
+     'value': '0.775438', 'unit': '比率', 'metric_label': '营业利润达成率'},
+]
+PAIRED_ROWS = [*HUACHEN_ROWS, *GROUP_PROFIT_ROWS]
+PAIRED_COLUMNS = list(dict.fromkeys(key for row in PAIRED_ROWS for key in row))
+YTD = '2026-01:2026-08|1_8'
+
+
+def pair_of(declaration, metric, organization, period_key=YTD):
+    found = [pair for pair in declaration['pairs']
+             if (pair['metric'], pair['organization'], pair['period_key']) == (metric, organization, period_key)]
+    assert len(found) == 1, declaration['pairs']
+    return found[0]
+
+
+def sentence(declaration, metric, organization, period_key=YTD):
+    conclusion = pair_of(declaration, metric, organization, period_key)['conclusion']
+    return conclusion and conclusion['text']
+
+
+def test_huachen_group_revenue_and_profit_pairs_conclude_from_their_own_rows():
+    declaration = declare(PAIRED_ROWS, columns=PAIRED_COLUMNS)
+
+    assert [(pair['metric'], pair['organization'], pair['period_key'], pair['members']) for pair in declaration['pairs']] == [
+        ('revenue', '集团合并', YTD, {'actual': 0, 'budget': 1, 'variance': 2, 'rate': 3}),
+        ('revenue', '华东区域', YTD, {'actual': 5, 'budget': 6, 'variance': 7}),
+        ('profit', '华南区域', YTD, {'actual': 8, 'budget': 9}),
+        ('revenue', '集团合并', '2026-08|2026_08', {'actual': 10, 'budget': 11}),
+        ('profit', '集团合并', YTD, {'actual': 12, 'budget': 13, 'variance': 14, 'rate': 15}),
+    ]
+    revenue = pair_of(declaration, 'revenue', '集团合并')['conclusion']
+    assert revenue['text'] == ('1-8 月集团合并收入比预算少 18,843.06 万元（达成 94.53%），'
+                               '实际 325,644.00 万元，预算 344,487.06 万元')
+    # The variance is the row's own, as written; the percentage is the 比率 row ×100 in Decimal.
+    assert revenue['values'] == {'actual': '325644.0000', 'budget': '344487.0552', 'variance': '-18843.0552',
+                                 'ratio_percent': '94.5301'}
+    assert revenue['variance_from'] == 'row'
+    assert (revenue['basis'], revenue['verified']) == ('脚本结果', False)
+    assert sentence(declaration, 'profit', '集团合并') == (
+        '1-8 月集团合并利润比预算少 6,106.38 万元（达成 77.54%），实际 21,086.00 万元，预算 27,192.38 万元')
+    for pair in declaration['pairs']:
+        values = pair['conclusion']['values']
+        members = {measure: PAIRED_ROWS[index]['value'] for measure, index in pair['members'].items()}
+        assert (values['actual'], values['budget']) == (members['actual'], members['budget'])
+        if 'variance' in members:
+            assert values['variance'] == members['variance']
+        else:
+            assert Decimal(values['variance']) == Decimal(members['actual']) - Decimal(members['budget'])
+
+
+def test_without_a_variance_row_the_backend_subtracts_in_decimal():
+    declaration = declare(PAIRED_ROWS, columns=PAIRED_COLUMNS)
+    south = pair_of(declaration, 'profit', '华南区域')['conclusion']
+    assert south['text'] == '1-8 月华南区域利润比预算少 811.22 万元，实际 5,210.11 万元，预算 6,021.33 万元'
+    assert (south['values']['variance'], south['variance_from']) == ('-811.2200', 'computed')
+    assert sentence(declaration, 'revenue', '集团合并', '2026-08|2026_08') == (
+        '2026 年 8 月集团合并收入比预算少 2,694.03 万元，实际 41,469.63 万元，预算 44,163.65 万元')
+
+    # Values a float would blur: 0.3 − 0.1 and a 达成率 with eighteen places.
+    rows = [{**HUACHEN_ROWS[0], 'value': '0.3'}, {**HUACHEN_ROWS[1], 'value': '0.1'},
+            {**HUACHEN_ROWS[3], 'value': '0.945301122594983360'}]
+    exact = declare(rows)['pairs'][0]['conclusion']
+    # The sentence shows figures as the cards do (two places, half away from zero); values keep them exact.
+    assert exact['text'] == '1-8 月集团合并收入比预算多 0.20 万元（达成 94.53%），实际 0.30 万元，预算 0.10 万元'
+    assert (exact['values']['variance'], exact['values']['ratio_percent']) == ('0.2', '94.5301122594983360')
+    # A 达成率 in % is already a percentage.
+    percent = declare([*rows[:2], {**HUACHEN_ROWS[3], 'value': '94.53', 'unit': '%'}])['pairs'][0]['conclusion']
+    assert '（达成 94.53%）' in percent['text']
+    # A scenario without a period suffix is read by the row's own period and its ytd or month class.
+    ytd = [{**HUACHEN_ROWS[0], 'scenario': 'actual_ytd'}, {**HUACHEN_ROWS[1], 'scenario': 'budget_ytd'}]
+    assert declare(ytd)['pairs'][0]['conclusion']['text'].startswith('2026-01:2026-08 累计集团合并收入比预算少 18,843.06 万元')
+
+
+def test_a_regional_budget_estimate_is_said_in_the_sentence():
+    declaration = declare(PAIRED_ROWS, columns=PAIRED_COLUMNS)
+    east = pair_of(declaration, 'revenue', '华东区域')
+    assert east['estimate'] == {'estimated': True, 'measures': ['budget']}
+    assert east['conclusion']['text'] == ('1-8 月华东区域收入比预算少 8,072.54 万元，实际 109,742.03 万元，'
+                                          '预算 117,814.57 万元；华东区域预算为估算')
+    assert pair_of(declaration, 'revenue', '集团合并')['estimate'] == {'estimated': False, 'measures': []}
+    assert '估算' not in sentence(declaration, 'revenue', '集团合并')
+
+    # Declared only in the pinned requirements' grain_basis, the label saying nothing.
+    requirements = {'id': 'a' * 32, 'items': [estimate_grains('profit_1_8', 'profit', ['华南区域'])]}
+    assert sentence(declare(PAIRED_ROWS, requirements, columns=PAIRED_COLUMNS), 'profit', '华南区域').endswith(
+        '；华南区域预算为估算')
+
+
+def test_grain_basis_saved_after_the_run_puts_the_estimate_in_the_sentence_at_read_time():
+    pinned = {'id': 'a' * 32, 'items': plain_items()}
+    declaration = declare(PAIRED_ROWS, pinned, columns=PAIRED_COLUMNS)
+    assert '估算' not in sentence(declaration, 'profit', '华南区域')
+
+    latest = {'id': 'b' * 32, 'items': with_estimate(plain_items(), 'profit_1_8', ['华南区域'])}
+    merged = result_semantics.merge_latest(declaration, latest)
+    south = pair_of(merged, 'profit', '华南区域')
+    assert south['estimate'] == {'estimated': True, 'measures': ['budget']}
+    assert south['conclusion']['text'].endswith('；华南区域预算为估算')
+    # The other pairs keep their sentences as they were.
+    assert sentence(merged, 'revenue', '集团合并') == sentence(declaration, 'revenue', '集团合并')
+
+
+def test_no_sentence_for_an_incomplete_declaration_or_an_undeclared_member():
+    incomplete = declare_rows(PAIRED_COLUMNS, PAIRED_ROWS, None, fingerprint=None, complete=False,
+                              incomplete_reason='result_file_unavailable')
+    # Still paired for display, but nothing is concluded from part of the result.
+    assert len(incomplete['pairs']) == 5
+    assert all(pair['conclusion'] is None for pair in incomplete['pairs'])
+
+    # A metric the vocabulary does not declare: the backend inferred its comparison from the scenario alone.
+    inferred = [{**row, 'metric_key': 'op_adj', 'metric_label': None} for row in HUACHEN_ROWS[:2]]
+    declaration = declare([*HUACHEN_ROWS[:4], *inferred])
+    assert sentence(declaration, 'revenue', '集团合并') is not None
+    adjusted = pair_of(declaration, 'op_adj', '集团合并')
+    assert (adjusted['members'], adjusted['declared'], adjusted['conclusion']) == ({'actual': 4, 'budget': 5}, False, None)
+    # A metric the pinned requirements list is declared.
+    listed = {'id': 'a' * 32, 'items': [{'id': 'adj', 'metric': 'op_adj'}]}
+    assert sentence(declare(inferred, listed), 'op_adj', '集团合并') == (
+        '1-8 月集团合并op_adj比预算少 18,843.06 万元，实际 325,644.00 万元，预算 344,487.06 万元')
+
+
+def test_an_unmarked_ratio_gives_no_percentage_and_an_unmarked_required_member_no_sentence():
+    unmarked_ratio = [*HUACHEN_ROWS[:3], {**HUACHEN_ROWS[3], 'unit': '-'}]
+    declaration = declare(unmarked_ratio)
+    pair = pair_of(declaration, 'revenue', '集团合并')
+    # The unmarked 达成率 takes no part in the pair (KTD9); it is shown as it is.
+    assert pair['members'] == {'actual': 0, 'budget': 1, 'variance': 2}
+    assert pair['conclusion']['text'] == '1-8 月集团合并收入比预算少 18,843.06 万元，实际 325,644.00 万元，预算 344,487.06 万元'
+    assert 'ratio_percent' not in pair['conclusion']['values']
+
+    # A budget without a unit it could be read in: the pair shows actual and variance, and concludes nothing.
+    unmarked_budget = [HUACHEN_ROWS[0], {**HUACHEN_ROWS[1], 'unit': '-'}, *HUACHEN_ROWS[2:4]]
+    pair = pair_of(declare(unmarked_budget), 'revenue', '集团合并')
+    assert pair['members'] == {'actual': 0, 'variance': 2, 'rate': 3}
+    assert pair['conclusion'] is None
+
+
+def test_pairs_follow_the_result_areas_skip_rules():
+    group = HUACHEN_ROWS[:4]
+    # Two actuals for one comparison: that bucket is left unpaired, the others still pair.
+    twice = declare([*group, {**HUACHEN_ROWS[0], 'value': '1.0000'}, *HUACHEN_ROWS[5:8]])
+    assert [(pair['organization'], pair['members']) for pair in twice['pairs']] == [
+        ('华东区域', {'actual': 5, 'budget': 6, 'variance': 7})]
+    # A year-to-date actual beside a monthly budget is not one comparison; an estimated monthly budget neither.
+    base = {**HUACHEN_ROWS[0], 'metric_label': None}
+    for budget in ('budget_month', 'estimated_budget_month'):
+        spans = declare([{**base, 'scenario': 'actual_ytd'}, {**base, 'scenario': budget, 'value': '1.0000'}])
+        assert spans['pairs'] == []
+    # variance_favorable is signed by its effect on profit: it is never a pair's variance.
+    favorable = declare([*HUACHEN_ROWS[:2], {**base, 'scenario': 'variance_favorable', 'value': '18843.0552'}])
+    assert favorable['pairs'][0]['members'] == {'actual': 0, 'budget': 1}
+    # An actual alone pairs with nothing.
+    assert declare([HUACHEN_ROWS[0]])['pairs'] == []
+    # Two amount units inside one comparison leave the whole table unpaired, as the result area does.
+    assert declare([*group, *HUACHEN_ROWS[5:8], {**HUACHEN_ROWS[1], 'unit': '元', 'scenario': 'budget_1_8',
+                                                   'organization': '华南区域'},
+                    {**HUACHEN_ROWS[0], 'organization': '华南区域'}])['pairs'] == []
+    # An approved and an estimated budget both pair, as the result area shows both; which one the variance is
+    # against is open, so nothing is concluded.
+    plain = [{**base, 'scenario': scenario, 'value': value} for scenario, value in (
+        ('actual', '325644.0000'), ('budget', '344487.0552'), ('variance', '-18843.0552'),
+        ('estimated_budget', '340000.0000'))]
+    pair = declare(plain)['pairs'][0]
+    assert pair['members'] == {'actual': 0, 'budget': 1, 'variance': 2, 'estimated_budget': 3}
+    assert pair['conclusion'] is None
+    # A long-form table is required.
+    assert declare_rows(['organization', 'value'], group, None, fingerprint=None)['pairs'] == []
+
+
+def test_the_run_record_stores_pairs_beside_an_unchanged_result(analysis):
+    run = run_rows(analysis, HUACHEN_ROWS)
+    assert run['output_hash'] == PRE_CHANGE_OUTPUT_HASH
+    assert result_sha256(run) == PRE_CHANGE_RESULT_SHA256
+    assert 'pairs' not in run['result']
+    assert sentence(run['row_declarations'], 'revenue', '集团合并').startswith('1-8 月集团合并收入比预算少 18,843.06 万元')
+
+
+def test_a_declaration_stored_before_pairs_is_read_with_them(analysis):
+    from foundry.analysis import _hash
+
+    run = run_rows(analysis, HUACHEN_ROWS)
+    path = run_file(analysis, run)
+    record = json.loads(path.read_text(encoding='utf-8'))
+    record.pop('_integrity_hash')
+    del record['row_declarations']['pairs']
+    record['row_declarations']['rules_version'] = '2.1.1'
+    record['_integrity_hash'] = _hash(record)
+    path.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+
+    declaration = state_run(analysis, run)['row_declarations']
+    assert declaration['rules_version'] == result_semantics.rules_version()
+    assert sentence(declaration, 'revenue', '华东区域').endswith('；华东区域预算为估算')
+
+
+# The draft and report paths that turn runs into quotable facts. None of them may read the declaration.
+FACT_PATHS = ['finance_explanations.py', 'finance_locators.py', 'report_documents.py', 'report_estimates.py',
+              'report_projection.py', 'report_templates.py']
+
+
+def test_the_conclusion_never_enters_a_drafts_quotable_facts(analysis):
+    from foundry.finance_explanations import prepare_explanation
+
+    run = run_rows(analysis, PAIRED_ROWS)
+    texts = [pair['conclusion']['text'] for pair in run['row_declarations']['pairs'] if pair['conclusion']]
+    assert len(texts) == 5
+    payload = prepare_explanation(analysis, [run])
+    assert payload['facts']
+    dumped = json.dumps(payload, ensure_ascii=False)
+    assert not any(text in dumped for text in texts)
+    assert '脚本结果' not in dumped
+    # The facts are exactly those of the same run without its declaration.
+    undeclared = {key: value for key, value in run.items() if key != 'row_declarations'}
+    assert payload['facts'] == prepare_explanation(analysis, [undeclared])['facts']
+    foundry = Path(result_semantics.__file__).parent
+    for name in FACT_PATHS:
+        assert 'row_declarations' not in (foundry / name).read_text(encoding='utf-8'), name

@@ -785,3 +785,103 @@ describe('business result components', () => {
     expect(screen.getByText('区域收入假设仍待经理确认。')).toBeTruthy();
   });
 });
+
+// The backend's conclusion sentences (R6, KTD7): shown above the KPI cards as they were written, with their 脚本结果
+// basis. The frontend does no arithmetic; a run without declared conclusions renders as it did before them.
+describe('script conclusion sentences', () => {
+  const ytd = '2026-01:2026-08';
+  const huachenRow = (metric_key: string, scenario: string, organization: string, value: string, unit: string, metric_label: string, period = ytd) =>
+    ({ metric_key, organization, period, scenario, value, currency: 'CNY', unit, metric_label, source: '预算工作簿 09·预算执行分析' });
+  const huachen: AnalysisRun = {
+    ...run([]),
+    id: '84b65b7dda9b48ee8e1d65e285e22d7a',
+    result: {
+      columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'currency', 'unit', 'metric_label', 'source']
+        .map((name) => ({ name, type: name === 'value' ? 'DECIMAL(38,10)' : 'VARCHAR' })),
+      rows: [
+        huachenRow('revenue', 'actual_1_8', '集团合并', '325644.0000', '万元', '营业收入 1-8 月实际'),
+        huachenRow('revenue', 'budget_1_8', '集团合并', '344487.0552', '万元', '营业收入 1-8 月预算'),
+        huachenRow('revenue_variance', 'variance_1_8', '集团合并', '-18843.0552', '万元', '营业收入差异'),
+        huachenRow('revenue_achievement_ratio', 'budget_1_8', '集团合并', '0.945301', '比率', '营业收入达成率'),
+        huachenRow('profit', 'actual_1_8', '集团合并', '21086.0000', '万元', '营业利润 1-8 月实际（报告口径）'),
+        huachenRow('profit', 'budget_1_8', '集团合并', '27192.3769', '万元', '营业利润 1-8 月预算'),
+        huachenRow('revenue', 'actual_1_8', '华东区域', '109742.0280', '万元', '营业收入 1-8 月实际'),
+        huachenRow('revenue', 'budget_1_8', '华东区域', '117814.5729', '万元', '营业收入 1-8 月预算（估算：集团进度率×区域全年预算）'),
+        huachenRow('revenue_variance', 'variance_1_8', '华东区域', '-8072.5449', '万元', '营业收入差异'),
+        huachenRow('profit', 'actual_1_8', '华东区域', '12451.5443', '万元', '营业利润 1-8 月实际'),
+        huachenRow('profit', 'budget_1_8', '华东区域', '13936.4958', '万元', '营业利润 1-8 月预算（估算）'),
+        huachenRow('revenue', 'actual_2026_08', '集团合并', '41469.6250', '万元', '8 月营业收入实际', '2026-08'),
+        huachenRow('revenue', 'budget_2026_08', '集团合并', '44163.6526', '万元', '8 月营业收入预算', '2026-08'),
+      ],
+      row_count: 13,
+      truncated: false,
+    },
+  };
+  const sentences = {
+    groupRevenue: '1-8 月集团合并收入比预算少 18,843.06 万元（达成 94.53%），实际 325,644.00 万元，预算 344,487.06 万元',
+    groupProfit: '1-8 月集团合并利润比预算少 6106.3769 万元，实际 21086.0000 万元，预算 27192.3769 万元',
+    eastRevenue: '1-8 月华东区域收入比预算少 8072.5449 万元，实际 109742.0280 万元，预算 117814.5729 万元；华东区域预算为估算',
+    eastProfit: '1-8 月华东区域利润比预算少 1484.9515 万元，实际 12451.5443 万元，预算 13936.4958 万元；华东区域预算为估算',
+    august: '2026 年 8 月集团合并收入比预算少 2694.0276 万元，实际 41469.6250 万元，预算 44163.6526 万元',
+  };
+  const pair = (metric: string, organization: string, period: string, members: Record<string, number>, text: string | null) => ({
+    metric, organization, period, period_key: `${period}|${period === ytd ? '1_8' : '2026_08'}`, span: null, unit: '万元', members, declared: true,
+    estimate: { estimated: text?.includes('估算') ?? false, measures: text?.includes('估算') ? ['budget'] : [] },
+    conclusion: text ? { text, basis: '脚本结果', verified: false, values: {}, variance_from: 'row' } : null,
+  });
+  const pairs = (concluded: boolean) => [
+    pair('revenue', '集团合并', ytd, { actual: 0, budget: 1, variance: 2, rate: 3 }, concluded ? sentences.groupRevenue : null),
+    pair('profit', '集团合并', ytd, { actual: 4, budget: 5 }, concluded ? sentences.groupProfit : null),
+    pair('revenue', '华东区域', ytd, { actual: 6, budget: 7, variance: 8 }, concluded ? sentences.eastRevenue : null),
+    pair('profit', '华东区域', ytd, { actual: 9, budget: 10 }, concluded ? sentences.eastProfit : null),
+    pair('revenue', '集团合并', '2026-08', { actual: 11, budget: 12 }, concluded ? sentences.august : null),
+  ];
+  const declared = (concluded: boolean): AnalysisRun => ({
+    ...huachen,
+    row_declarations: {
+      rules_version: '3.1.1', requirements_id: null, requirements_fingerprint: null, complete: concluded, incomplete_reason: concluded ? null : 'result_file_unavailable',
+      row_count: 13, rows: [], warnings: [], pairs: pairs(concluded),
+    } as NonNullable<AnalysisRun['row_declarations']>,
+  });
+
+  it('shows the backend sentences above the KPI cards with their 脚本结果 basis, three first and the rest folded', () => {
+    render(<BusinessResultView run={declared(true)} />);
+
+    const conclusions = screen.getByRole('region', { name: '脚本结论' });
+    const cards = screen.getByLabelText('关键指标');
+    expect(conclusions.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Each sentence is the backend's text, character for character.
+    for (const text of [sentences.groupRevenue, sentences.groupProfit, sentences.eastRevenue]) {
+      expect(within(conclusions).getByText(text).closest('details')).toBeNull();
+    }
+    const rest = within(conclusions).getByText('其余 1 句结论').closest('details')!;
+    expect(within(rest).getByText(sentences.eastProfit)).toBeTruthy();
+    expect(within(conclusions).getAllByText('依据：脚本结果')).toHaveLength(4);
+    expect(conclusions.textContent).not.toMatch(/已核验|核验通过/);
+    // The regional budget's estimate is said in the sentence itself.
+    expect(within(conclusions).getByText(sentences.eastRevenue).textContent).toContain('华东区域预算为估算');
+    // A sentence belongs to its period tab, as the cards do.
+    expect(within(conclusions).queryByText(sentences.august)).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+    const august = screen.getByRole('region', { name: '脚本结论' });
+    expect(within(august).getByText(sentences.august)).toBeTruthy();
+    expect(within(august).queryByText(sentences.groupRevenue)).toBeNull();
+    expect(within(august).queryByText(/其余/)).toBeNull();
+  });
+
+  it('renders a run without declared conclusions exactly as before', () => {
+    const before = render(<BusinessResultView run={huachen} />).container.innerHTML;
+    expect(screen.queryByRole('region', { name: '脚本结论' })).toBeNull();
+    expect(screen.queryByText(/脚本结果/)).toBeNull();
+    cleanup();
+
+    // An incomplete declaration pairs its rows but concludes nothing: nothing is added.
+    expect(render(<BusinessResultView run={declared(false)} />).container.innerHTML).toBe(before);
+    cleanup();
+
+    // With conclusions, the sentences are the only addition.
+    const { container } = render(<BusinessResultView run={declared(true)} />);
+    container.querySelector('[aria-label="脚本结论"]')!.remove();
+    expect(container.innerHTML).toBe(before);
+  });
+});
