@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -119,13 +119,20 @@ describe('the deliverable gallery', () => {
     render(<Deliverables rows={[{ task: TASK, row: ROW }]} {...GALLERY} />);
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
     expect(screen.getByText('底稿')).toBeTruthy();
-    expect(screen.getByText('8.2 KB')).toBeTruthy();
-    expect(screen.getByText('cccccccccccc')).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: '期间' })).toBeTruthy();
+    // Size, digest and session place a version for an audit, not for choosing one.
+    expect(screen.queryByText('8.2 KB')).toBeNull();
+    expect(screen.queryByText('cccccccccccc')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: '会话' })).toBeNull();
   });
 
-  it('names a version with no conversation behind it', () => {
-    render(<Deliverables rows={[{ task: TASK, row: { ...ROW, session_id: null } }]} {...GALLERY} />);
-    expect(screen.getByText('无会话')).toBeTruthy();
+  it('keeps session, size and digest under the opened version\'s technical details, naming a missing session', () => {
+    render(<Deliverables rows={[]} {...GALLERY} open={{ task: TASK, row: { ...ROW, session_id: null }, text: '正文' }} />);
+    const technical = screen.getByText('技术信息').closest('details')!;
+    expect(technical.open).toBe(false);
+    expect(within(technical).getByText('无会话')).toBeTruthy();
+    expect(within(technical).getByText('8.2 KB')).toBeTruthy();
+    expect(within(technical).getByText('cccccccccccc')).toBeTruthy();
   });
 });
 
@@ -648,7 +655,7 @@ describe('reading a deliverable', () => {
         onBack={() => {}}
       />,
     );
-    expect(screen.getByText(/正在从锁库读出/)).toBeTruthy();
+    expect(screen.getByText(/正在读取这一版/)).toBeTruthy();
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
   });
 });
@@ -713,7 +720,7 @@ describe('a workbook version', () => {
     );
     // Not the loading line: nothing is being read, and saying so would be a lie
     // that never resolves.
-    expect(screen.queryByText(/正在从锁库读出/)).toBeNull();
+    expect(screen.queryByText(/正在读取这一版/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /在表格软件里打开/ }));
     expect(opened).toEqual([1]);
   });
@@ -767,7 +774,7 @@ describe('the task screen', () => {
   it('offers to write the window as a workbook, and says which window', () => {
     const asked: string[] = [];
     render(<TaskDetail detail={DETAIL} {...PROPS} onExport={(id) => asked.push(id)} />);
-    fireEvent.click(screen.getByRole('button', { name: /出一份表格/ }));
+    fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
     expect(asked).toEqual([WINDOW.window_id]);
   });
 
@@ -775,7 +782,7 @@ describe('the task screen', () => {
     // Writing a real close is not instant, and a button that looked idle would
     // be clicked again.
     render(<TaskDetail detail={DETAIL} {...PROPS} busy={WINDOW.window_id} />);
-    const button = screen.getByRole('button', { name: /正在从锁库写/ });
+    const button = screen.getByRole('button', { name: /正在导出/ });
     expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -819,7 +826,7 @@ describe('finding the export at all', () => {
         onBack={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /出成表格/ }));
+    fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
     expect(asked).toEqual([`${TASK.id}:${ROW.window_id}`]);
   });
 
@@ -836,7 +843,7 @@ describe('finding the export at all', () => {
         onBack={() => {}}
       />,
     );
-    expect(screen.queryByRole('button', { name: /出成表格/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /导出 Excel/ })).toBeNull();
     expect(screen.getByRole('button', { name: /在表格软件里打开/ })).toBeTruthy();
   });
 
@@ -868,7 +875,7 @@ describe('finding the export at all', () => {
         reading={null}
       />,
     );
-    const action = screen.getByRole('button', { name: /出一份表格/ });
+    const action = screen.getByRole('button', { name: /导出 Excel/ });
     const archive = screen.getByRole('heading', { name: /输入归档/ });
     expect(archive).toBeTruthy();
     // DOCUMENT_POSITION_FOLLOWING === 4: the archive comes after the button.

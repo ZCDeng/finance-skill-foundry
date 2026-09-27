@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun } from '../../bridge.js';
-import { businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessValue, rowBasisLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
+import { businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessValue, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 
 const analysis: AnalysisRevision = {
   id: 'analysis-1',
@@ -91,6 +91,19 @@ describe('business result presentation', () => {
     expect(formatBusinessValue('-18843.0552', 'amount')).toBe('-18,843.06');
     expect(formatBusinessValue('0.945301', 'ratio')).toBe('94.53%');
     expect(formatBusinessValue('-0.006532', 'ratio_delta')).toBe('-0.65个百分点');
+  });
+
+  it('labels a wide P&L result by its metrics in Chinese', () => {
+    const labels = displayColumns(run({
+      result: {
+        columns: ['organization', 'scenario', 'currency', 'unit', 'revenue', 'cost', 'expense', 'profit'].map((name) => ({ name, type: ['revenue', 'cost', 'expense', 'profit'].includes(name) ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [{ organization: '华东', scenario: 'actual', currency: 'CNY', unit: '元', revenue: '120', cost: '70', expense: '20', profit: '30' }],
+        row_count: 1,
+        truncated: false,
+      },
+    })).map((column) => column.label);
+    expect(labels).toEqual(expect.arrayContaining(['组织', '情景', '币种', '单位', '收入', '成本', '费用', '利润']));
+    expect(labels).not.toEqual(expect.arrayContaining(['revenue']));
   });
 
   it('maps declared business fields to Chinese labels and preserves unknown columns', () => {
@@ -342,13 +355,16 @@ describe('business result presentation', () => {
 
     expect(businessRows(current).slice(0, 2)).toEqual([
       expect.objectContaining({ metric: '毛利', region: '集团合并', period: '2026-01:2026-08', actual: '58789.5000', same_period_budget: '64441.3769', variance: '-5651.8769', unit: '万元', basis: '计算' }),
-      expect.objectContaining({ metric: '期间费用', region: '集团合并', period: '2026-01:2026-08', actual: '29946.0000', same_period_budget: '31642.0000', variance: '1696.0000', unit: '万元', basis: '计算' }),
+      // variance_favorable is budget minus actual (1696 under budget); as 差异 beside actual-minus-budget rows it
+      // would read as an overspend, so it stays unpaired and the card shows no 差异 for this row.
+      expect.objectContaining({ metric: '期间费用', region: '集团合并', period: '2026-01:2026-08', actual: '29946.0000', same_period_budget: '31642.0000', variance: undefined, unit: '万元', basis: '计算' }),
     ]);
+    expect(otherLongRows(current).map((row) => row.scenario)).toContain('variance_favorable');
     expect(displayRows(current).slice(0, 2).map((row) => row['指标'])).toEqual(['毛利', '期间费用']);
     expect(displayColumns(current).map((column) => column.label)).toEqual(['指标', '区域', '期间', '实际', '同期预算', '差异', '达成率', '单位', '依据', '来源']);
     expect(displayRows(current)).toEqual([
       expect.objectContaining({ 指标: '毛利', 区域: '集团合并', 实际: '58,789.50', 同期预算: '64,441.38', 差异: '-5,651.88', 单位: '万元', 依据: '计算' }),
-      expect.objectContaining({ 指标: '期间费用', 区域: '集团合并', 实际: '29,946.00', 同期预算: '31,642.00', 差异: '1,696.00', 单位: '万元', 依据: '计算' }),
+      expect.objectContaining({ 指标: '期间费用', 区域: '集团合并', 实际: '29,946.00', 同期预算: '31,642.00', 差异: '—', 单位: '万元', 依据: '计算' }),
     ]);
   });
 

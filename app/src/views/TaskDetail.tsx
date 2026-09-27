@@ -159,7 +159,7 @@ export function TaskDetail({
                       onClick={() => onExport(row.window_id)}
                       disabled={busy === row.window_id}>
                       <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
-                      {busy === row.window_id ? ' 正在从锁库写…' : ' 出一份表格'}
+                      {busy === row.window_id ? ' 正在导出…' : ' 导出 Excel'}
                     </Button>
                   </div>
                   <h3 style={{ marginTop: 14 }}>

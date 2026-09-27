@@ -233,6 +233,23 @@ function varianceRun(rows: Record<string, unknown>[], extra: Record<string, unkn
 const bridgeRow = (metric: string, amountChange: string, extra: Record<string, unknown> = {}) => ({ organization: '华东', period: '2026-08', unit: '万元', metric,
   actual: '1', baseline: '1', amount_change: amountChange, profit_impact: amountChange, contribution: amountChange, ratio: '0', comparison_status: 'complete', ...extra });
 
+describe('RunPanel version without a run', () => {
+  it('says the task has other results and opens the newest instead of reading as empty', () => {
+    const other: AnalysisRevision = { ...analysis, id: 'f'.repeat(32), question: '另一版分析' };
+    const onPick = vi.fn();
+    render(<RunPanel {...props} analyses={[analysis, other]} runs={[structuredRun({ analysis_id: other.id })]} onPick={onPick} />);
+    expect(screen.getByText('此版本尚未运行。本任务另有 1 个业务结果。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '查看最新结果' }));
+    expect(onPick).toHaveBeenCalledWith(other.id);
+  });
+
+  it('keeps the old hint when the task has no result yet', () => {
+    render(<RunPanel {...props} runs={[]} />);
+    expect(screen.getByText('此版本尚未运行。检查口径后即可计算。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '查看最新结果' })).toBeNull();
+  });
+});
+
 describe('RunPanel finance conclusion', () => {
   it('leads with the profit change the backend wrote, the three drivers, and the backend caveat', () => {
     const run = varianceRun([
@@ -242,6 +259,10 @@ describe('RunPanel finance conclusion', () => {
       bridgeRow('profit', '-312.00', { amount_change_display: '利润减少 312.00 万元' }),
     ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
     render(<RunPanel {...props} runs={[run]} />);
+    // The run is named by its order, not by a hash prefix; the id stays on hover.
+    const header = screen.getByText(/第 1 次运行/);
+    expect(header.getAttribute('title')).toBe(run.id);
+    expect(header.textContent).not.toContain(run.id.slice(0, 12));
     const conclusion = screen.getByRole('region', { name: '结论' });
     expect(within(conclusion).getByText('实际与预算相比，利润减少 312.00 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入增加 50 万元 · 成本增加 208 万元 · 费用减少 10 万元')).toBeTruthy();

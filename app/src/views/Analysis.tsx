@@ -395,12 +395,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
-          {bridge()?.financeCall && view.datasets.length > 0 && <AnalysisScopeCard taskId={task.id} question={task.title} datasets={view.datasets}
-            disabled={busy} onSaved={() => void refresh(task.id)} />}
-          <WorkbookOverview taskId={task.id} datasets={view.datasets} />
-          <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
+          {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
-          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
+          <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
@@ -413,6 +410,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
+          {bridge()?.financeCall && view.datasets.length > 0 && <AnalysisScopeCard taskId={task.id} question={task.title} datasets={view.datasets}
+            disabled={busy} onSaved={() => void refresh(task.id)} />}
+          <WorkbookOverview taskId={task.id} datasets={view.datasets} />
+          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <details className="analysis-details"><summary>写回 Excel</summary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
           </details>
@@ -423,7 +424,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
-              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `${when(row.created_at)} · ${shortSha(row.id)}` }))}
+              triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
+              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)} · ${shortSha(row.id)}` }))}
               onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
@@ -533,7 +535,7 @@ function DatasetPreview({ source, content }: { source: DatasetSnapshot; content:
   const rows = Array.isArray(content.rows) ? content.rows as Record<string, unknown>[] : [];
   const workbook = content.workbook as { sheets?: { name: string; rows: number; columns: number }[] } | undefined;
   return <article className="analysis-source-preview"><h3>{source.name}</h3>
-    <p className="analysis-note">资料版本：{source.id} · 原始摘要：{source.source_hash ?? source.sha256}</p>
+    <details className="analysis-details"><summary>资料标识</summary><p className="analysis-note">资料版本：{source.id} · 原始摘要：{source.source_hash ?? source.sha256}</p></details>
     {source.kind === 'workbook' && <>
       <p className="analysis-note">已保留完整工作簿及所有工作表。请与助手确定分析范围，封面和标题不会被当作数据表头。</p>
       {Array.isArray(workbook?.sheets) && <Table caption="工作表目录"
@@ -602,6 +604,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   const [policy, setPolicy] = useState<'snapshot_only' | 'business_key'>('snapshot_only');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {
     const api = bridge(); if (!api?.financeCall) return;
     const answer = unwrap(await api.financeCall(taskId, 'finance-source-list') as Answer<{ batches: FinanceSourceBatch[] }>);
@@ -609,6 +612,8 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
   }, [taskId]);
   useEffect(() => { void load().catch(() => {}); }, [load]);
   async function refreshSource() {
+    if (refreshing) return;
+    setRefreshing(true);
     try {
       const api = bridge(); if (!api?.financeSourceRefresh) throw new Error('此版本暂不支持刷新财务来源文件。');
       setError(''); setMessage('');
@@ -625,6 +630,8 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
         : '文件内容与已发布快照一致，已保留原结果引用。');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setRefreshing(false);
     }
   }
   const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
@@ -633,7 +640,7 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
     <summary><span><span className="analysis-source-refresh-title">更新 ERP 来源</span>
       <span className="analysis-note">已有来源导出变化时，生成新的资料版本；旧运行仍引用旧快照。</span></span>
       <ChevronDown size={16} aria-hidden /></summary>
-    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+    <fieldset className="analysis-fieldset" disabled={busy || refreshing}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
       <TextField label="账簿" value={scope.ledger_id} onChange={(value) => setScope({ ...scope, ledger_id: value })} />
@@ -651,8 +658,9 @@ function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy:
       <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
         <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>
-    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !ready} onClick={() => void refreshSource()}>
-      <RefreshCw size={14} aria-hidden />选择文件并刷新</Button></div>
+    <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
+      <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>
+      {refreshing && <span role="status" className="analysis-note"><WaitOrb state="working" />正在选择文件并刷新来源…</span>}</div>
     {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
@@ -683,6 +691,14 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
   const [readResult, setReadResult] = useState<Record<string, unknown> | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  // What the panel is doing, in words; every action below waits on the foundry.
+  const [running, setRunning] = useState('');
+  const locked = busy || Boolean(running);
+  const track = (label: string, work: () => Promise<void>) => {
+    if (running) return;
+    setRunning(label);
+    void work().finally(() => setRunning(''));
+  };
   const workbookRequest = useRef(0);
   const workbookPreviewMounted = useRef(false);
   const workbookDatasetMounted = useRef(false);
@@ -778,7 +794,7 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
   const conflictCells = cells.filter((cell) => cell.conflict === true && cell.cell);
   return <section className="analysis-workbook-panel" aria-label="Excel 协作">
     <div className="analysis-section-heading"><div><h3>Excel 协作</h3><p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p></div></div>
-    <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
+    <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="工作簿资料" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="搜索工作簿名或快照" />
       <TextField label="绑定编号" value={bindingId} onChange={setBindingId} placeholder="读取、预览或应用已有绑定" />
       <FieldShell label="区域类型"><select aria-label="区域类型" className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
@@ -800,19 +816,21 @@ function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { taskId: st
     </div></details></fieldset>
     <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
     <div className="analysis-actions">
-      <Button variant="outline" type="button" disabled={busy || !datasetId} onClick={() => void inspect()}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
-      <Button variant="outline" type="button" disabled={busy || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => void bind()}>保存绑定</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId || !contextId} onClick={() => void circleSelect()}>改成开票口径</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void read()}>读取区域</Button>
-      <Button variant="outline" type="button" disabled={busy || !bindingId} onClick={() => void previewPatch()}>预览写回</Button>
-      <Button type="button" disabled={busy || !preview?.patch_id} onClick={() => void applyPatch()}>生成工作簿</Button>
+      <Button variant="outline" type="button" disabled={locked || !datasetId} onClick={() => track('正在检查工作簿结构…', inspect)}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
+      <Button variant="outline" type="button" disabled={locked || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => track('正在保存绑定…', bind)}>保存绑定</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId || !contextId} onClick={() => track('正在按圈选生成开票口径修订…', circleSelect)}>改成开票口径</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在读取绑定区域…', read)}>读取区域</Button>
+      <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在生成写回预览…', previewPatch)}>预览写回</Button>
+      <Button type="button" disabled={locked || !preview?.patch_id} onClick={() => track('正在生成工作簿…', applyPatch)}>生成工作簿</Button>
+      {running && <span role="status" className="analysis-note"><WaitOrb state="working" />{running}</span>}
     </div>
     {inspection && <details className="analysis-details" open><summary>工作簿结构</summary>
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
       {Array.isArray(inspection.unsupported_features) && inspection.unsupported_features.length > 0 && <p>需生成独立结果工作簿：{inspection.unsupported_features.map(textValue).join('、')}</p>}
     </details>}
     {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" />}
-    {cells.length > 0 && <Table columns={[{ name: 'cell', type: 'VARCHAR' }, { name: 'field', type: 'VARCHAR' }, { name: 'old_value', type: 'VARCHAR' }, { name: 'new_value', type: 'VARCHAR' }, { name: 'conflict', type: 'BOOLEAN' }]} rows={cells} caption="写回预览" />}
+    {cells.length > 0 && <Table columns={[{ name: '单元格', type: 'VARCHAR' }, { name: '字段', type: 'VARCHAR' }, { name: '原值', type: 'VARCHAR' }, { name: '新值', type: 'VARCHAR' }, { name: '冲突', type: 'VARCHAR' }]}
+      rows={cells.map((cell) => ({ 单元格: cell.cell, 字段: cell.field, 原值: cell.old_value, 新值: cell.new_value, 冲突: cell.conflict === true ? '是' : '否' }))} caption="写回预览" />}
     {conflictCells.length > 0 && <div className="analysis-workbook-conflicts" aria-label="写回冲突处理">
       <strong>冲突处理</strong>
       {conflictCells.map((cell) => {
@@ -911,9 +929,13 @@ function StructurePanel({ taskId, datasets, busy, onRefresh }: {
   return (
     <div className="analysis-structure-panel">
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
+      {/* A to-do line per file; the confirmation form is long and opens on demand. */}
       {waiting.map((proposal) => (
-        <StructureProposalCard key={proposal.id} taskId={taskId} datasetName={named(proposal.dataset_id)}
-          proposal={proposal} busy={busy} onSettled={settle} />
+        <details key={proposal.id} className="analysis-details analysis-structure-todo">
+          <summary>待确认表结构 · {named(proposal.dataset_id)}{proposal.structure_state === 'no_table' ? ' · 没有识别出数据表' : ` · ${proposal.sheets.length} 张工作表`}</summary>
+          <StructureProposalCard taskId={taskId} datasetName={named(proposal.dataset_id)}
+            proposal={proposal} busy={busy} onSettled={settle} />
+        </details>
       ))}
       {pending.map((confirmation) => (
         <StructurePendingStrip key={confirmation.id} taskId={taskId} datasetName={named(confirmation.dataset_id)}
@@ -1751,7 +1773,7 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
     </div>
     <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} draftId={draft?.id} contextId={contextId} title={title} body={body} appendix={reading.appendix}
       toolbarLabel={draft ? '文稿' : '写下判断与建议'}
-      status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status}` : undefined}
+      status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status} · 检查：${qualityShortLabel(qualityState)}` : undefined}
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
@@ -1761,10 +1783,13 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
     {draft && parentDraft && draftRuns[0] && <RevisionDiff current={draftRuns[0]} previous={previousRun} comparison={comparison}
       currentRevision={drafts.findIndex((item) => item.id === draft.id) + 1} previousRevision={drafts.findIndex((item) => item.id === parentDraft.id) + 1}
       evidence={{ affected_claims: affectedClaims, unresolved_issues: quality?.issues ?? [] }} />}
+    {/* Everything that decides whether this version can go out, after the text it checks. */}
+    <section className="analysis-prepublish" aria-label="发布前检查">
+    <div className="analysis-section-heading"><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
+    {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
     {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
       {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
@@ -1772,6 +1797,7 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
       {draft.claims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</details>}
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
+    </section>
     <div className="analysis-actions">{changed && <Button type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</Button>}
       <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</Button></div>
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
@@ -1781,13 +1807,13 @@ function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit
 
 
 const denominatorOptions: SelectOption[] = [
-  { value: 'baseline_abs', label: '按基准金额', meta: 'baseline_abs' },
-  { value: 'actual_abs', label: '按实际金额', meta: 'actual_abs' },
-  { value: 'max_abs', label: '按较大金额', meta: 'max_abs' },
+  { value: 'baseline_abs', label: '按基准金额' },
+  { value: 'actual_abs', label: '按实际金额' },
+  { value: 'max_abs', label: '按较大金额' },
 ];
 const negativePolicyOptions: SelectOption[] = [
-  { value: 'absolute', label: '按绝对值比较', meta: 'absolute' },
-  { value: 'signed', label: '保留正负方向', meta: 'signed' },
+  { value: 'absolute', label: '按绝对值比较' },
+  { value: 'signed', label: '保留正负方向' },
 ];
 function validDenominator(value: unknown): MaterialityDenominator {
   return value === 'actual_abs' || value === 'max_abs' ? value : 'baseline_abs';
@@ -1837,7 +1863,13 @@ function materialityScopeSummary(runs: AnalysisRun[]): string {
 function MaterialityFields({ value, scopeText, error, disabled, onChange }: { value: MaterialityEdit; scopeText: string; error?: string; disabled?: boolean; onChange(value: MaterialityEdit): void }) {
 
   const set = (patch: Partial<MaterialityEdit>) => onChange({ ...value, ...patch });
-  return <details className="analysis-details" open><summary>重要性阈值</summary>
+  // Folded by default with the values in its summary; an error opens it, and
+  // clearing the error never closes it under the manager's cursor.
+  const [open, setOpen] = useState(Boolean(error));
+  useEffect(() => { if (error) setOpen(true); }, [error]);
+  const summary = [value.absolute && `绝对 ${value.absolute}`, value.relative && `相对 ${value.relative}`].filter(Boolean).join(' · ');
+  return <details className="analysis-details" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <summary>重要性阈值{summary ? ` · ${summary}` : ' · 未设置'}</summary>
     <p className="analysis-note">用于准备可引用事实和重检覆盖范围。相对阈值填 0.1 表示 10%。</p>
     <div className="analysis-edit-grid">
       <DecimalInput label="重要性绝对金额" value={value.absolute} onChange={(absolute) => set({ absolute })} placeholder="0"
@@ -1973,6 +2005,11 @@ function externalReferencePayload(source: string, retrievedAt: string): Record<s
   const payload: Record<string, string> = { title: source, retrieved_at: retrievedAt };
   if (/^https?:\/\//i.test(source)) payload.url = source;
   return payload;
+}
+
+/** The check state in the document toolbar, one word beside 草稿 · 未阅; the panel below says it in full. */
+function qualityShortLabel(state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'): string {
+  return ({ idle: '未检查', checking: '进行中', passed: '通过', issues: '待复核', stale: '改稿后未重检', unavailable: '不可用' } as Record<typeof state, string>)[state];
 }
 
 function qualityLabel(state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'): string {

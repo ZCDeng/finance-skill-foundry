@@ -39,14 +39,15 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   return <div className="analysis-result-area" data-evidence-open={evidence || undefined}>
     {latest && run && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
       最近一次运行失败，当前保留已成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看失败记录</Button></p>}
-    {!run ? <p className="analysis-note">此版本尚未运行。检查口径后即可计算。</p> : <article className="analysis-result">
-      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)} · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
+    {!run ? <NotRunYet runs={runs} onPick={(next) => pick(next)} /> : <article className="analysis-result">
+      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次运行 · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
       {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
-      {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
+      {run.stdout && <details className="analysis-details"><summary>脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</summary>
+        <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
           onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}
@@ -104,6 +105,18 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   </div>;
 }
 
+
+/**
+ * A version with no run yet. The tab counts every result in the task, so say
+ * the others exist and offer the newest, rather than read as "nothing here".
+ */
+function NotRunYet({ runs, onPick }: { runs: AnalysisRun[]; onPick(run: AnalysisRun): void }) {
+  const business = runs.filter((row) => runPresentationRole(row) === 'business');
+  const newest = business.at(-1);
+  return <div className="analysis-actions"><p className="analysis-note">此版本尚未运行。{business.length
+    ? `本任务另有 ${business.length} 个业务结果。` : '检查口径后即可计算。'}</p>
+    {newest && <Button variant="outline" type="button" onClick={() => onPick(newest)}>查看最新结果</Button>}</div>;
+}
 
 function RunResultTable({ run }: { run: AnalysisRun }) {
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;

@@ -183,6 +183,8 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
     expect(screen.getByLabelText('脚本计算输出').textContent).toBe('利润 30');
+    expect(screen.getByLabelText('脚本计算输出').closest('details')?.open).toBe(false);
+    expect(screen.getByText('脚本输出 · 1 行')).toBeTruthy();
     expect(screen.getByText(/profit.csv/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '保存新版并重跑' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '调整或重跑此分析' }));
@@ -288,7 +290,9 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('返回后还要继续写的判断。');
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.92');
-    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('华东利润分析');
+    // The picker names the version; the question it answers is the result heading below it.
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 1 版（共 2 版）');
+    expect(screen.getByRole('heading', { name: '华东利润分析' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
     expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
@@ -495,7 +499,8 @@ describe('analysis workbench', () => {
     // A failed run shows no result table. The account-map editor is a table of
     // its own elsewhere on the page, so this looks where the result would be.
     expect(document.querySelector('.analysis-result table')).toBeNull();
-    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('新的成本口径');
+    expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 2 版（共 2 版）');
+    expect(screen.getByRole('heading', { name: '新的成本口径' })).toBeTruthy();
   });
 
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {
@@ -889,6 +894,27 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByRole('tab', { name: /资料/ }).getAttribute('aria-selected')).toBe('false');
   });
 
+  it('says the ERP source refresh is running and locks it until the file is in', async () => {
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeSourceRefresh = vi.fn(() => gate.promise);
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState: async () => success(initial), financeSourceRefresh, financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await openSourceRefreshDetails();
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    const refresh = screen.getByRole('button', { name: /选择文件并刷新/ });
+    fireEvent.click(refresh);
+    expect(await screen.findByText('正在选择文件并刷新来源…')).toBeTruthy();
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => gate.resolve(success({ cancelled: true })));
+    await screen.findByText('已取消刷新。');
+    expect(screen.queryByText('正在选择文件并刷新来源…')).toBeNull();
+    expect(financeSourceRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('does not let a delayed source refresh from the previous task replace the current draft', async () => {
     const other = { ...task, id: '8'.repeat(32), title: '西南经营分析' };
     const refreshGate = deferred<Answer<AnalysisState>>();
@@ -974,6 +1000,38 @@ ${canonicalAppendix} 已改写`;
     expect(setup.open).toBe(false);
     fireEvent.click(screen.getByText('财务业务口径'));
     expect(setup.open).toBe(true);
+  });
+
+  it('shows a pending table structure as a folded to-do line that opens to the confirmation form', async () => {
+    const column = (letter: string, display: string, role: string, pair: string | null = null) => ({ letter, header: display, display, role, pair, direction: null });
+    const sheet = { sheet: '02·GL科目余额表', decision: 'table', reason: null, header_row: 4, title_rows: [1, 2],
+      columns: [column('A', '科目代码', 'account_code'), column('C', '类别', 'category'), column('G', '本期发生额借方', 'debit', 'amount_1'), column('H', '本期发生额贷方', 'credit', 'amount_1')],
+      amount_pairs: [{ id: 'amount_1', label: '本期发生额', debit: 'G', credit: 'H', primary: true, direction: { kind: 'by_category', column: 'C' } }],
+      excluded_rows: [], fill_down_columns: [], scope_hints: { period: '2026-08', currency: '', unit: '元' },
+      preview: [{ row: 4, is_header: true, cells: [{ letter: 'A', text: '科目代码' }] }], confidence: 0.9, blocked_reason: null };
+    mountBridge({ analysisState: async () => success(initial), financeCall: async (_taskId: string, command: string) => {
+      if (command === 'structure-proposal-list') return success({ proposals: [{ id: 'p1', dataset_id: source.id, revision: 1, structure_state: 'pending_confirmation', sheets: [sheet], template_matches: [] }] });
+      if (command === 'structure-confirmation-list') return success({ confirmations: [] });
+      if (command === 'finance-source-list') return success({ batches: [] });
+      return success({});
+    } });
+    render(<Analysis {...props} embedded section="materials" />);
+    const todo = await screen.findByText(`待确认表结构 · ${source.name} · 1 张工作表`);
+    const details = todo.closest('details')!;
+    expect(details.open).toBe(false);
+    expect(within(details).getByRole('button', { name: /确认表结构/ })).toBeTruthy();
+    fireEvent.click(todo);
+    expect(details.open).toBe(true);
+  });
+
+  it('lists the files before the scope settings and the workbook tools on the materials tab', async () => {
+    mountBridge({ analysisState: async () => success(initial),
+      financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
+    render(<Analysis {...props} embedded section="materials" />);
+    const file = (await screen.findAllByText(source.name)).find((element) => element.closest('.analysis-source-list'))!;
+    const scope = await screen.findByRole('region', { name: '分析口径' });
+    expect(file.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scope.compareDocumentPosition(screen.getByText('更新 ERP 来源')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('puts the result above the finance settings once a result exists, and the settings first before any result', async () => {
@@ -1324,6 +1382,8 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(screen.getByLabelText('相对重要性阈值'), { target: { value: '0.1' } });
     chooseSearchable('相对分母', /按较大金额/);
     chooseSearchable('负数比较规则', /按绝对值比较/);
+    expect(screen.getByRole('button', { name: '相对分母' }).textContent).toBe('按较大金额');
+    expect(screen.getByRole('button', { name: '负数比较规则' }).textContent).toBe('按绝对值比较');
 
     expect(screen.getByText(/待重检/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '重检当前正文' }));
@@ -1606,6 +1666,28 @@ ${canonicalAppendix} 已改写`;
     expect(caveat.closest('details')).toBeNull();
     expect(screen.getByText('问题覆盖已核对，其中含经理已接受的估算。')).toBeTruthy();
     expect(within(screen.getByLabelText('分项核对状态')).getByText('已核对（含已接受的估算）')).toBeTruthy();
+  });
+
+  it('puts every pre-publication check after the text in one section, with the check state in the toolbar', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
+      if (command === 'prepare-explanation') return success({ facts: [] });
+      if (command === 'validate-explanation') return success({ status: 'pass', issues: [],
+        checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } } });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const checks = await screen.findByRole('region', { name: '发布前检查' });
+    expect(await within(checks).findByRole('region', { name: '文稿质量检查' })).toBeTruthy();
+    const materiality = within(checks).getByText(/^重要性阈值/);
+    expect(materiality.textContent).toBe('重要性阈值 · 绝对 0');
+    expect(materiality.closest('details')?.open).toBe(false);
+    expect(within(checks).getByText(/^引用的计算与依据/)).toBeTruthy();
+    const document = screen.getByRole('region', { name: '财务文稿工作区' });
+    expect(document.compareDocumentPosition(checks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await within(document).findByText(/检查：通过/)).toBeTruthy();
   });
 
   it('shows paragraph advice separately from passed financial checks and clears it after edits', async () => {
@@ -2050,11 +2132,39 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-read', { binding_id: 'bind-1', dataset_id: refreshedWorkbook.id });
     fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
     await screen.findByText('B2');
+    const previewTable = screen.getByRole('table', { name: '写回预览' });
+    expect(within(previewTable).getByRole('columnheader', { name: '原值' })).toBeTruthy();
+    expect(within(previewTable).queryByRole('columnheader', { name: 'old_value' })).toBeNull();
+    expect(within(previewTable).getByRole('cell', { name: '是' })).toBeTruthy();
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-preview', expect.objectContaining({ binding_id: 'bind-1', dataset_id: refreshedWorkbook.id }));
     expect((screen.getByLabelText(/B2 · 原值/) as HTMLSelectElement).value).toBe('keep');
     fireEvent.change(screen.getByLabelText(/B2 · 原值/), { target: { value: 'apply' } });
     fireEvent.click(screen.getByRole('button', { name: '生成工作簿' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-apply', { patch_id: 'patch-1', resolutions: { B2: 'apply' } }));
+  });
+
+  it('says what the Excel panel is doing and locks it until the foundry answers', async () => {
+    const workbook = { ...source, id: '7'.repeat(32), source_name: 'plan.xlsx', name: '预算工作簿', metadata: { source_file: 'source.xlsx' } };
+    const gate = deferred<Answer<Record<string, unknown>>>();
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'finance-source-list') return success({ batches: [] });
+      if (command === 'workbook-inspect') return gate.promise;
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook] }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('Excel 协作');
+    const inspect = screen.getByRole('button', { name: /检查结构/ });
+    fireEvent.click(inspect);
+    const panel = screen.getByRole('region', { name: 'Excel 协作' });
+    expect((await within(panel).findByRole('status')).textContent).toBe('正在检查工作簿结构…');
+    expect((inspect as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(inspect);
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'workbook-inspect')).toHaveLength(1);
+    await act(async () => gate.resolve(success({ sheet_names: ['Sheet1'], tables: [], named_ranges: [], unsupported_features: [] })));
+    await within(panel).findByText(/工作表：Sheet1/);
+    expect(within(panel).queryByText('正在检查工作簿结构…')).toBeNull();
+    expect((inspect as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('ignores stale Excel writeback previews after the target snapshot changes', async () => {

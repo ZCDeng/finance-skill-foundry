@@ -31,6 +31,13 @@ const amountFieldLabels: Record<string, string> = {
   amount_change: '科目增减',
   profit_impact: '利润影响',
   contribution: '差异贡献',
+  // Wide P&L results name their columns by metric.
+  revenue: '收入',
+  cost: '成本',
+  expense: '费用',
+  profit: '利润',
+  gross_profit: '毛利',
+  operating_profit: '营业利润',
 };
 const ratioFieldLabels: Record<string, string> = {
   attainment: '达成率',
@@ -73,6 +80,10 @@ const textFieldLabels: Record<string, string> = {
   organization: '组织',
   organization_id: '组织',
   scenario: '情景',
+  value: '数值',
+  metric_label: '指标说明',
+  currency: '币种',
+  unit: '单位',
   source: '来源',
   source_note: '来源说明',
   '来源': '来源',
@@ -241,7 +252,10 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
 }
 
 export function formatBusinessCell(value: unknown, column: DisplayColumn, row: Record<string, unknown>): string {
-  void row;
+  // A row shown as it is keeps its estimate visible even when its label does not say so.
+  if (column.name === 'metric_label' && typeof value === 'string' && value && declaresEstimate(row) && !mentionsEstimate(value)) return `${value}（估算）`;
+  // A long-form value column mixes amounts and ratios; the row's own unit says which.
+  if (column.name === 'value' && fractionUnits.has(String(unitColumn(row) ?? '').trim().toLowerCase())) return formatBusinessValue(value, 'ratio');
   return formatBusinessValue(value, column.semantics);
 }
 
@@ -261,7 +275,7 @@ function rowMetric(row: Record<string, unknown>): unknown {
   return row.metric ?? row.metric_key ?? row.business_key ?? row.result_key ?? row.item ?? row.name ?? row['指标'];
 }
 
-function rowPeriod(row: Record<string, unknown>): unknown {
+export function rowPeriod(row: Record<string, unknown>): unknown {
   return row.period ?? row['期间'];
 }
 
@@ -327,16 +341,56 @@ function canonicalBasis(row: Record<string, unknown>): string {
   return row['估算方法'] ? basisLabels.estimate : explicit;
 }
 
-function longScenarioMeasure(row: Record<string, unknown>): CanonicalMeasure | null {
+// A scenario that names its own period: actual_1_8 (months 1–8), budget_2026_08.
+// Anything else after the word (actual_py_1_8, budget_bud_fy, variance_bud_le)
+// is a different comparison and is left unpaired. A bare year (actual_2026) is
+// left unpaired too: it cannot tell year-to-date from the full year.
+const scenarioWithPeriod = /^(actual|budget|variance)_(\d{1,2}_\d{1,2}|\d{4}_\d{2})$/;
+// Units that mark a row as a ratio rather than an amount. 比率 and ratio hold a
+// fraction (0.945 = 94.5%); the others hold a percent or percentage-point number.
+const fractionUnits = new Set(['比率', 'ratio']);
+const ratioUnits = new Set([...fractionUnits, '%', 'pct', '百分比']);
+
+function longScenarioMeasure(row: Record<string, unknown>): { measure: CanonicalMeasure; suffix: string; span?: string } | null {
   const scenario = String(row.scenario ?? row['情景'] ?? '').trim().toLowerCase();
   if (!scenario) return null;
-  if (['actual', 'actual_ytd', 'actual_month', 'actual_period'].includes(scenario)) return 'actual';
-  if (['budget', 'budget_ytd', 'budget_month', 'same_period_budget', 'baseline'].includes(scenario)) return 'budget';
-  if (['estimated_budget', 'estimated_budget_ytd', 'estimated_budget_month'].includes(scenario)) return 'estimated_budget';
-  if (['variance', 'variance_favorable', 'budget_variance', 'difference', 'amount_change', 'profit_impact', 'contribution'].includes(scenario)) return 'variance';
-  if (['achievement_ratio', 'attainment_rate', 'attainment_ratio', 'completion_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio'].includes(scenario)) return 'rate';
-  if (['achievement_pct', 'attainment_pct', 'completion_pct'].includes(scenario)) return 'rate_pct';
-  return null;
+  // A ytd or month ending is a period class: a year-to-date actual never pairs with a monthly budget.
+  const span = scenario.endsWith('_ytd') ? 'ytd' : scenario.endsWith('_month') ? 'month' : '';
+  if (['actual', 'actual_ytd', 'actual_month', 'actual_period'].includes(scenario)) return { measure: 'actual', suffix: '', span };
+  if (['budget', 'budget_ytd', 'budget_month', 'same_period_budget', 'baseline'].includes(scenario)) return { measure: 'budget', suffix: '', span };
+  if (['estimated_budget', 'estimated_budget_ytd', 'estimated_budget_month'].includes(scenario)) return { measure: 'estimated_budget', suffix: '', span };
+  // variance_favorable is signed by effect on profit, not actual minus budget; it stays unpaired.
+  if (['variance', 'budget_variance', 'difference', 'amount_change', 'profit_impact', 'contribution'].includes(scenario)) return { measure: 'variance', suffix: '' };
+  if (['achievement_ratio', 'attainment_rate', 'attainment_ratio', 'completion_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio'].includes(scenario)) return { measure: 'rate', suffix: '' };
+  if (['achievement_pct', 'attainment_pct', 'completion_pct'].includes(scenario)) return { measure: 'rate_pct', suffix: '' };
+  const match = scenarioWithPeriod.exec(scenario);
+  return match ? { measure: match[1] as CanonicalMeasure, suffix: match[2] } : null;
+}
+
+/**
+ * Which comparison a long-form row fills, and for which metric. A variance or
+ * 达成率 may be its own metric named for its base (revenue_variance with a
+ * variance scenario; revenue_achievement_ratio in 比率, whose scenario word is
+ * unreliable, so only its period suffix counts). Both signals must agree.
+ */
+function longScenarioEntry(row: Record<string, unknown>): { measure: CanonicalMeasure; suffix: string; span?: string; metric: string } | null {
+  const scenario = longScenarioMeasure(row);
+  if (!scenario) return null;
+  const metric = String(rowMetric(row) ?? '');
+  const unit = String(unitColumn(row) ?? '').trim().toLowerCase();
+  const ratioUnit = ratioUnits.has(unit);
+  const percentUnit = ratioUnit && !fractionUnits.has(unit);
+  const rate = /^(.+)_(?:achievement|attainment)_ratio$/.exec(metric);
+  if (rate && ratioUnit) return { measure: percentUnit ? 'rate_pct' : 'rate', suffix: scenario.suffix, metric: rate[1] };
+  // A 达成率 given in % or pct is already a percentage; as a fraction it would read 100 times too large.
+  if (scenario.measure === 'rate' && percentUnit) return { ...scenario, measure: 'rate_pct', metric };
+  if (isRatioMeasure(scenario.measure)) return { ...scenario, metric };
+  // An amount comparison in a ratio unit would sit beside amounts as if it were one.
+  if (ratioUnit) return null;
+  const variance = /^(.+)_variance$/.exec(metric);
+  if (variance && scenario.measure === 'variance') return { ...scenario, metric: variance[1] };
+  // Other metrics named for a base (revenue_budget_bud_fy, profit_actual_py) are their own figures.
+  return { ...scenario, metric };
 }
 
 function scenarioDetailLabel(measure: CanonicalMeasure): string {
@@ -364,11 +418,13 @@ function amountCurrency(row: Record<string, unknown>): string {
   return String(currencyColumn(row) ?? '').trim();
 }
 
-function longScenarioBaseKey(row: Record<string, unknown>): string {
-  return [rowMetric(row), rowPeriod(row), regionColumn(row)].map((value) => String(value ?? '')).join('|');
+function longScenarioBaseKey(row: Record<string, unknown>, metric: string, suffix: string): string {
+  return [metric, rowPeriod(row), regionColumn(row), suffix].map((value) => String(value ?? '')).join('|');
 }
 
 type LongScenarioGroup = {
+  /** Whether the figure shown as 同期预算 is itself an estimate. */
+  budgetEstimated?: boolean;
   order: number;
   metric: string;
   region?: unknown;
@@ -376,21 +432,61 @@ type LongScenarioGroup = {
   unit?: unknown;
   basis: string;
   values: Partial<Record<CanonicalMeasure, unknown>>;
+  /** Each figure's own Chinese label, as the source wrote it. */
+  labels: Partial<Record<CanonicalMeasure, string>>;
   sources: string[];
 };
 
-function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | null {
-  const names = new Set(run.result?.columns.map((column) => column.name.toLowerCase()) ?? []);
-  if (!names.has('scenario') || !names.has('value')) return null;
-  if (!names.has('metric_key') && !names.has('metric') && !names.has('指标')) return null;
+/**
+ * Whether a row declares itself an estimate, by any of the signals this file
+ * already honours: an estimate basis, a filled 估算方法, or 估算 in its label,
+ * note or source. Errs toward saying so.
+ */
+function declaresEstimate(row: Record<string, unknown>): boolean {
+  if (rowBasisKind(row) === 'estimate') return true;
+  const method = String(row['估算方法'] ?? '').trim();
+  if (method && !noMethod.has(method.toLowerCase())) return true;
+  if (typeof row.scenario === 'string' && /estimat/i.test(row.scenario)) return true;
+  return [row.metric_label, row.note, row['说明'], row.source, row.source_note, row['来源'], row['口径与来源']]
+    .some((value) => typeof value === 'string' && mentionsEstimate(value));
+}
 
-  const buckets = new Map<string, { rows: { order: number; row: Record<string, unknown>; measure: CanonicalMeasure }[]; units: Set<string>; currencies: Set<string> }>();
+const noMethod = new Set(['无', '否', '-', '—', 'n/a', 'na', '不适用', 'none', 'null']);
+// The words an estimate goes by in these files, and the negations that cancel one
+// (非估算, 不含估算调整). An unknown wording errs toward 估算.
+const estimateWords = /估算|推算|预估|估计|测算|estimat/gi;
+const negations = ['非', '不含', '不是', '并非', '无', '未'];
+export function mentionsEstimate(text: string): boolean {
+  for (const match of text.matchAll(estimateWords)) {
+    const before = text.slice(Math.max(0, match.index - 2), match.index);
+    if (!negations.some((word) => before.endsWith(word))) return true;
+  }
+  return false;
+}
+
+/** Whether a long-form row is an estimate by its own declaration, for tables that show it as it is. */
+export function isEstimateRow(row: Record<string, unknown>): boolean {
+  return declaresEstimate(row);
+}
+
+function isLongFormat(run: AnalysisRun): boolean {
+  const names = new Set(run.result?.columns.map((column) => column.name.toLowerCase()) ?? []);
+  return names.has('scenario') && names.has('value') && (names.has('metric_key') || names.has('metric') || names.has('指标'));
+}
+
+/** The comparison rows a long-form table pairs into, and which source rows they used. */
+function longScenarioPairing(run: AnalysisRun): { business: Record<string, unknown>[]; used: Set<number> } | null {
+  if (!isLongFormat(run)) return null;
+
+  const buckets = new Map<string, { metric: string; rows: { order: number; row: Record<string, unknown>; measure: CanonicalMeasure }[]; units: Set<string>; currencies: Set<string>; spans: Set<string> }>();
   for (const [order, row] of (run.result?.rows ?? []).entries()) {
-    const measure = longScenarioMeasure(row);
-    if (!measure) continue;
-    const key = longScenarioBaseKey(row);
-    const bucket = buckets.get(key) ?? { rows: [], units: new Set<string>(), currencies: new Set<string>() };
+    const entry = longScenarioEntry(row);
+    if (!entry) continue;
+    const { measure } = entry;
+    const key = longScenarioBaseKey(row, entry.metric, entry.suffix);
+    const bucket = buckets.get(key) ?? { metric: entry.metric, rows: [], units: new Set<string>(), currencies: new Set<string>(), spans: new Set<string>() };
     bucket.rows.push({ order, row, measure });
+    if (entry.span) bucket.spans.add(entry.span);
     if (!isRatioMeasure(measure)) {
       const unit = amountUnit(row);
       const currency = amountCurrency(row);
@@ -400,36 +496,51 @@ function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | nul
     buckets.set(key, bucket);
   }
 
-  const output: LongScenarioGroup[] = [];
+  const output: (LongScenarioGroup & { used: number[] })[] = [];
   for (const bucket of buckets.values()) {
     if (bucket.units.size > 1 || bucket.currencies.size > 1) return null;
-    const group: LongScenarioGroup = {
+    // A year-to-date figure beside a monthly one (actual_ytd, budget_month): not one comparison.
+    if (bucket.spans.size > 1) continue;
+    const group: LongScenarioGroup & { used: number[] } = {
+      used: bucket.rows.map((item) => item.order),
       order: Math.min(...bucket.rows.map((item) => item.order)),
-      metric: preferredMetricLabel(rowMetric(bucket.rows[0].row)),
+      metric: preferredMetricLabel(bucket.metric),
       region: regionColumn(bucket.rows[0].row),
       period: rowPeriod(bucket.rows[0].row),
       unit: [...bucket.units][0] || undefined,
       basis: basisLabels.calculation,
       values: {},
+      labels: {},
       sources: [],
     };
     const seen = new Set<CanonicalMeasure>();
+    const estimated = new Set<CanonicalMeasure>();
+    let duplicate = false;
     for (const { row, measure } of bucket.rows.sort((left, right) => left.order - right.order)) {
-      if (seen.has(measure)) return null;
+      // Two rows for one comparison: this group cannot be read, but the others can.
+      if (seen.has(measure)) { duplicate = true; break; }
       seen.add(measure);
       group.values[measure] = row.value ?? row['值'];
-      if (measure === 'estimated_budget') group.basis = basisLabels.estimate;
+      if (typeof row.metric_label === 'string' && row.metric_label.trim()) group.labels[measure] = row.metric_label.trim();
+      // Every figure in a group with an estimate is read against it, so the group's
+      // basis says 估算; which budget is itself the estimate is kept per figure.
+      if (measure === 'estimated_budget' || declaresEstimate(row)) {
+        group.basis = basisLabels.estimate;
+        estimated.add(measure);
+      }
+      // The row's own label goes with its source: it carries the 口径 (报告口径, 剔除其他收益类)
+      // and how a figure was made (推算, 估算) that the paired columns cannot show.
       const source = sourceColumn(row);
       const note = row.note ?? row['说明'];
-      if (source != null && source !== '') {
-        const detail = [source, note].filter((value) => value != null && value !== '').join('；');
-        group.sources.push(`${scenarioDetailLabel(measure)}：${detail}`);
-      }
+      const detail = [row.metric_label, source, note].filter((value) => value != null && value !== '').join('；');
+      if (detail) group.sources.push(`${scenarioDetailLabel(measure)}：${detail}`);
     }
+    if (duplicate) continue;
+    group.budgetEstimated = group.values.budget != null ? estimated.has('budget') : group.values.estimated_budget != null;
     output.push(group);
   }
 
-  const business = output
+  const paired = output
     .sort((left, right) => left.order - right.order)
     .filter((group) => group.values.actual != null && (
       group.values.budget != null
@@ -437,13 +548,17 @@ function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | nul
       || group.values.variance != null
       || group.values.rate != null
       || group.values.rate_pct != null
-    ))
+    ));
+  const business = paired
     .map((group) => ({
       metric: group.metric,
       ...(group.region != null && group.region !== '' ? { region: group.region } : {}),
       period: group.period,
       actual: group.values.actual,
       same_period_budget: group.values.budget ?? group.values.estimated_budget,
+      same_period_budget_estimated: group.budgetEstimated === true,
+      ...(group.labels.actual ? { actual_label: group.labels.actual } : {}),
+      ...(group.labels.budget ?? group.labels.estimated_budget ? { budget_label: group.labels.budget ?? group.labels.estimated_budget } : {}),
       ...(group.values.budget != null && group.values.estimated_budget != null ? { estimated_same_period_budget: group.values.estimated_budget } : {}),
       variance: group.values.variance,
       attainment_rate: group.values.rate,
@@ -452,7 +567,57 @@ function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | nul
       basis: group.basis,
       source: Array.from(new Set(group.sources)).join('；'),
     }));
-  return business.length ? business : null;
+  return { business, used: new Set(paired.flatMap((group) => group.used)) };
+}
+
+function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | null {
+  const pairing = longScenarioPairing(run);
+  return pairing?.business.length ? pairing.business : null;
+}
+
+/**
+ * The long-form rows that did not pair into a comparison: receivables, full-year
+ * budgets, ratios of their own. They stay on screen in their own table rather
+ * than only in the raw fields. Empty when the table did not pair at all, since
+ * the main table then shows every row.
+ */
+export function otherLongRows(run: AnalysisRun): Record<string, unknown>[] {
+  const pairing = longScenarioPairing(run);
+  if (!pairing?.business.length) return [];
+  return (run.result?.rows ?? []).filter((_, index) => !pairing.used.has(index));
+}
+
+/**
+ * Columns for long-form rows shown as they are. The Chinese label stands in for
+ * the key and the scenario code only when every row has one and it tells the
+ * rows apart; otherwise (this year and last year under one label, or a row
+ * with no label) the key and scenario stay beside it.
+ */
+export function longRowColumns(run: AnalysisRun, rows: Record<string, unknown>[] = run.result?.rows ?? []): DisplayColumn[] {
+  const columns = (run.result?.columns ?? []).filter((column) => !hiddenFields.has(column.name));
+  const names = new Set(columns.map((column) => column.name.toLowerCase()));
+  const distinct = (parts: (row: Record<string, unknown>) => unknown[]) => new Set(rows.map((row) => JSON.stringify(parts(row)))).size === rows.length;
+  const labelled = names.has('metric_label') && rows.every((row) => typeof row.metric_label === 'string' && row.metric_label.trim() !== '');
+  // The label replaces the key when it alone tells rows apart; the scenario goes
+  // too once the label and key together do (two ratios sharing one label keep
+  // their keys; this year and last year under one key keep their scenarios).
+  // A unique label need not name its metric (全年年初批复预算), so the key always stays,
+  // last, as 指标键; the label leads. The scenario goes once label and key tell rows apart.
+  const hideScenario = labelled && distinct((row) => [row.metric_label, rowMetric(row), regionColumn(row), rowPeriod(row)]);
+  const labelIndex = columns.findIndex((column) => column.name.toLowerCase() === 'metric_label');
+  const keyIndex = columns.findIndex((column) => ['metric_key', 'metric'].includes(column.name.toLowerCase()));
+  if (labelled && labelIndex >= 0) {
+    const [label] = columns.splice(labelIndex, 1);
+    columns.unshift(label);
+    if (keyIndex >= 0) columns.push(...columns.splice(columns.findIndex((column) => ['metric_key', 'metric'].includes(column.name.toLowerCase())), 1));
+  }
+  return uniqueColumns(columns.flatMap((column): DisplayColumn[] => {
+    const key = column.name.toLowerCase();
+    if (hideScenario && key === 'scenario') return [];
+    if (labelled && (key === 'metric_key' || key === 'metric')) return [{ name: column.name, type: 'VARCHAR', label: '指标键', semantics: 'text' }];
+    if (key === 'metric_label' && labelled) return [{ name: column.name, type: 'VARCHAR', label: '指标', semantics: 'text' }];
+    return [{ name: column.name, type: column.type, label: businessColumnLabel(column.name), semantics: key === 'value' ? 'amount' : columnSemantics(column.name, column.type) }];
+  }));
 }
 
 function hasLongScenarioBusinessShape(run: AnalysisRun): boolean {
@@ -492,6 +657,7 @@ export function businessRows(run: AnalysisRun): Record<string, unknown>[] {
         period: group.period,
         actual: group.values.actual,
         same_period_budget: group.values.budget ?? group.values.estimated_budget,
+        same_period_budget_estimated: !('budget' in group.values) && 'estimated_budget' in group.values,
         ...('budget' in group.values && 'estimated_budget' in group.values ? { estimated_same_period_budget: group.values.estimated_budget } : {}),
         variance: group.values.variance,
         attainment_rate: group.values.rate,
@@ -547,7 +713,7 @@ export function displayColumns(run: AnalysisRun): DisplayColumn[] {
       { name: 'source', type: 'VARCHAR', label: '来源', semantics: 'text' },
     ];
   }
-  const base = (run.result?.columns ?? [])
+  const base = isLongFormat(run) ? longRowColumns(run) : (run.result?.columns ?? [])
     .filter((column) => !hiddenFields.has(column.name))
     .map((column) => ({ name: column.name, type: column.type, label: businessColumnLabel(column.name), semantics: columnSemantics(column.name, column.type) }));
   if (hasRowBasis(run)) base.push({ name: '__basis', type: 'VARCHAR', label: '依据', semantics: 'text' });
@@ -582,7 +748,7 @@ export function displayRows(run: AnalysisRun): Record<string, string>[] {
 }
 
 export function periodOptions(run: AnalysisRun): string[] {
-  return Array.from(new Set(businessRows(run).map((row) => row.period).filter((value) => value != null && value !== '').map(String)));
+  return Array.from(new Set([...businessRows(run), ...otherLongRows(run)].map(rowPeriod).filter((value) => value != null && value !== '').map(String)));
 }
 
 function rowIdentity(row: Record<string, unknown>): string {
