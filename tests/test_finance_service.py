@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from foundry.analysis import AnalysisStore
+from foundry.analysis import AnalysisStore, _hash
 from foundry.errors import FoundryError
-from foundry.finance_service import FinanceStore
+from foundry.finance_service import FINANCE_CALCULATION_VERSION, FinanceStore
 from foundry.task import TaskStore
 
 
@@ -193,6 +193,253 @@ def test_finance_rerun_output_mismatch_is_non_reproducible(finance, monkeypatch)
     assert first["execution_status"] == "succeeded"
     assert second["execution_status"] == "succeeded"
     assert second["reproducibility_status"] == "non_reproducible"
+
+
+def _finance_with_accounts(tmp_path, amounts_by_scenario):
+    """A two-sided P&L context whose sides may book different accounts."""
+    task = TaskStore(tmp_path / "var").create(title="缺项")
+    store = AnalysisStore(task)
+    bindings = {}
+    for scenario, amounts in amounts_by_scenario.items():
+        path = tmp_path / f"{scenario}.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {"account_code": code, "management_account": account, "amount": amount}
+                    for code, (account, amount) in enumerate(amounts.items(), start=1)
+                ]
+            )
+        )
+        bindings[scenario] = store.add_dataset(path, name=scenario)["id"]
+    service = FinanceStore(task)
+    context = service.save_context(
+        {
+            "bindings": bindings,
+            "scopes": {
+                alias: {
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "period": "2026-09",
+                    "currency": "CNY",
+                    "unit": "万元",
+                    "scenario": alias,
+                }
+                for alias in bindings
+            },
+        }
+    )
+    return service, context
+
+
+def _recorded_before_calculation_version(service, run):
+    """Rewrite a fresh run as the calculation before partial status recorded it.
+
+    That calculation wrote no calculation_version, marked a one-sided account
+    complete and named no missing account; everything else is unchanged.
+    """
+    store = service.analysis
+    path = store._object_path("runs", run["id"])
+    record = {
+        key: value
+        for key, value in store._read(path).items()
+        if key not in {"seq", "_integrity_hash", "calculation_version"}
+    }
+    result = record["result"]
+    for row in result["rows"]:
+        if row.get("comparison_status") == "partial":
+            row["comparison_status"] = "complete"
+    result["diagnostics"] = [
+        item
+        for item in result.get("diagnostics", [])
+        if item.get("code") != "comparison_account_missing"
+    ]
+    record["output_hash"] = _hash(result)
+    path.unlink()
+    return store._write(path, record)
+
+
+def test_finance_run_records_its_calculation_version_outside_the_result(finance):
+    service, context = finance
+    run = service.explain_variance({"context_id": context["id"]})
+    assert run["calculation_version"] == FINANCE_CALCULATION_VERSION == 2
+    assert "calculation_version" not in run["result"]
+    assert run["environment"]["runner"] == "finance-v1"
+
+
+def test_complete_variance_rerun_after_upgrade_keeps_output_and_stays_reproducible(finance):
+    service, context = finance
+    old = _recorded_before_calculation_version(
+        service, service.explain_variance({"context_id": context["id"]})
+    )
+    assert "calculation_version" not in old
+
+    rerun = service.analysis.run_analysis(old["analysis_id"])
+
+    assert rerun["fingerprint"] == old["fingerprint"]
+    assert rerun["output_hash"] == old["output_hash"]
+    assert rerun["reproducibility_status"] == "reproducible"
+    assert rerun["calculation_version"] == FINANCE_CALCULATION_VERSION
+
+
+def test_one_sided_account_rerun_after_upgrade_is_unverified_then_reproducible(tmp_path):
+    service, context = _finance_with_accounts(
+        tmp_path,
+        {"actual": {"revenue": 120, "cost": 70}, "budget": {"revenue": 100}},
+    )
+    old = _recorded_before_calculation_version(
+        service, service.explain_variance({"context_id": context["id"]})
+    )
+    assert {row["comparison_status"] for row in old["result"]["rows"]} == {"complete"}
+
+    first = service.analysis.run_analysis(old["analysis_id"])
+
+    status = {row["metric"]: row["comparison_status"] for row in first["result"]["rows"]}
+    assert status["cost"] == status["profit"] == "partial"
+    assert first["output_hash"] != old["output_hash"]
+    # Only an earlier calculation disagrees: that is not evidence the same
+    # calculation gave two answers, so the rerun is unverified, never non_reproducible.
+    assert first["reproducibility_status"] == "unverified"
+
+    second = service.analysis.run_analysis(old["analysis_id"])
+    assert second["output_hash"] == first["output_hash"]
+    assert second["reproducibility_status"] == "reproducible"
+    # The earlier run still reads as it was recorded.
+    kept = service.analysis.get_run(old["id"])
+    assert kept["output_hash"] == old["output_hash"]
+    assert {row["comparison_status"] for row in kept["result"]["rows"]} == {"complete"}
+
+
+def test_earlier_calculation_with_same_output_counts_as_reproducible(finance, monkeypatch):
+    service, context = finance
+    values = iter(["1", "1", "2"])
+
+    def metric(_normalized, _spec):
+        return {
+            "columns": [{"name": "value", "type": "decimal"}],
+            "rows": [{"value": next(values)}],
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr("foundry.finance_service.evaluate_metric", metric)
+    spec = {"context_id": context["id"], "metric": {"kind": "management_pnl"}}
+    old = _recorded_before_calculation_version(service, service.run_metric(spec))
+
+    same = service.run_metric(spec)
+    assert same["reproducibility_status"] == "reproducible"
+    # Once the current calculation has a run of its own, the rule is the strict one again.
+    changed = service.run_metric(spec)
+    assert old["fingerprint"] == same["fingerprint"] == changed["fingerprint"]
+    assert changed["reproducibility_status"] == "non_reproducible"
+
+
+def _price_quantity_service(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="量价桥")
+    service = FinanceStore(task)
+    bindings = {}
+    for scenario, quantity, price in (("actual", "12", "11"), ("budget", "10", "10")):
+        path = tmp_path / f"{scenario}.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "ledger": "L1",
+                        "organization": "O1",
+                        "period": "2026-09",
+                        "currency": "CNY",
+                        "unit": "元",
+                        "scenario": scenario,
+                        "quantity": quantity,
+                        "price": price,
+                        "product": "A",
+                    }
+                ]
+            )
+        )
+        bindings[scenario] = service.analysis.add_dataset(path, name=scenario)["id"]
+    context = service.save_context(
+        {
+            "bindings": bindings,
+            "scopes": {
+                alias: {
+                    "ledger": "L1",
+                    "organization": "O1",
+                    "currency": "CNY",
+                    "unit": "元",
+                    "scenario": alias,
+                }
+                for alias in bindings
+            },
+        }
+    )
+    return service, context
+
+
+def _cash_scenario_service(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="现金预测")
+    service = FinanceStore(task)
+    scope = {"ledger": "L1", "organization": "O1", "currency": "CNY", "unit": "万元"}
+    bindings = {}
+    for alias, rows in {
+        "receipts": [{"id": "R1", "date": "2026-09-25", "amount": "100"}],
+        "payments": [{"id": "P1", "date": "2026-09-28", "amount": "60"}],
+    }.items():
+        path = tmp_path / f"{alias}.json"
+        path.write_text(json.dumps(rows))
+        bindings[alias] = service.analysis.add_dataset(path, name=alias)["id"]
+    context = service.save_context(
+        {"bindings": bindings, "scopes": {alias: scope for alias in bindings}}
+    )
+    scenario = service.save_scenario(
+        {
+            "context_id": context["id"],
+            "kind": "cash_13_weeks",
+            "inputs": {
+                "opening_cash": "50",
+                "start_date": "2026-09-24",
+                "actual_cutoff": "2026-09-23",
+                "scope": scope,
+            },
+            "label": "基准",
+        }
+    )
+    return service, scenario
+
+
+@pytest.mark.parametrize("kind", ["pnl", "scenario", "price_quantity"])
+def test_other_finance_reruns_after_upgrade_stay_reproducible(tmp_path, kind):
+    if kind == "pnl":
+        service, context = _finance_with_accounts(
+            tmp_path,
+            {
+                "actual": {"revenue": 120, "cost": 70, "expense": 20},
+                "budget": {"revenue": 100, "cost": 60, "expense": 15},
+            },
+        )
+        run = service.run_metric({"context_id": context["id"]})
+    elif kind == "scenario":
+        service, scenario = _cash_scenario_service(tmp_path)
+        run = service.run_scenario({"scenario_id": scenario["id"]})
+    else:
+        service, context = _price_quantity_service(tmp_path)
+        run = service.explain_variance(
+            {
+                "context_id": context["id"],
+                "kind": "price_quantity",
+                "dimensions": ["product"],
+                "actual_filters": {"period": "2026-09"},
+                "baseline_filters": {"period": "2026-09"},
+            }
+        )
+    assert run["execution_status"] == "succeeded"
+    assert run["result"]["rows"]
+    old = _recorded_before_calculation_version(service, run)
+    assert old["output_hash"] == run["output_hash"]
+
+    rerun = service.analysis.run_analysis(old["analysis_id"])
+
+    assert rerun["output_hash"] == old["output_hash"]
+    assert rerun["reproducibility_status"] == "reproducible"
+    assert rerun["calculation_version"] == FINANCE_CALCULATION_VERSION
 
 
 def test_price_quantity_run_uses_account_alias_and_explicit_period_filters(tmp_path):

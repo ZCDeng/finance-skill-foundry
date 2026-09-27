@@ -332,6 +332,46 @@ describe('RunPanel finance conclusion', () => {
     expect(screen.getByRole('region', { name: caption })).toBeTruthy();
   });
 
+  it('marks a line one side never booked as 缺项 and leaves it and the profit out of the conclusion', () => {
+    const run = varianceRun([
+      bridgeRow('revenue', '20', { amount_change_display: '收入增加 20 万元' }),
+      bridgeRow('cost', '70', { amount_change_display: '成本增加 70 万元', comparison_status: 'partial' }),
+      bridgeRow('expense', '5', { amount_change_display: '费用增加 5 万元' }),
+      bridgeRow('profit', '-55', { amount_change_display: '利润减少 55 万元', comparison_status: 'partial' }),
+    ]);
+    render(<RunPanel {...props} runs={[run]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('成本是缺项，只在一侧有来源行，利润差异不完整，见下表。')).toBeTruthy();
+    expect(within(conclusion).queryByText(/利润减少/)).toBeNull();
+    expect(within(conclusion).queryByText(/成本增加/)).toBeNull();
+    expect(within(conclusion).getByText('收入增加 20 万元 · 费用增加 5 万元')).toBeTruthy();
+    const table = screen.getByRole('region', { name: '预算差异桥' });
+    expect(within(table).getByRole('cell', { name: '成本（缺项）' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '利润（缺项）' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '收入' })).toBeTruthy();
+  });
+
+  it('names the group of a 缺项 line and still concludes on complete groups', () => {
+    render(<RunPanel {...props} runs={[varianceRun([
+      bridgeRow('profit', '30', { organization: '华东' }),
+      bridgeRow('expense', '8', { organization: '华南', comparison_status: 'partial' }),
+      bridgeRow('profit', '-8', { organization: '华南', comparison_status: 'partial' }),
+    ])]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('华东：实际与预算相比，利润增加 30 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('华南：费用是缺项，只在一侧有来源行，利润差异不完整，见下表。')).toBeTruthy();
+  });
+
+  it('reads an old run without a partial status as it was recorded', () => {
+    const rows = [bridgeRow('cost', '70'), bridgeRow('profit', '-55')].map(({ comparison_status: _recorded, ...row }) => row);
+    const run = varianceRun(rows);
+    run.result!.columns = run.result!.columns.filter((column) => column.name !== 'comparison_status');
+    render(<RunPanel {...props} runs={[run]} />);
+    expect(within(screen.getByRole('region', { name: '结论' })).getByText('实际与预算相比，利润减少 55 万元')).toBeTruthy();
+    expect(screen.queryByText(/缺项/)).toBeNull();
+    expect(within(screen.getByRole('region', { name: '预算差异桥' })).getByRole('cell', { name: '成本' })).toBeTruthy();
+  });
+
   it('writes no conclusion when there is no profit change to state', () => {
     render(<RunPanel {...props} runs={[varianceRun([bridgeRow('revenue', '50'), bridgeRow('profit', '', { amount_change: null, contribution: null, comparison_status: 'incomplete' })])]} />);
     expect(screen.queryByRole('region', { name: '结论' })).toBeNull();

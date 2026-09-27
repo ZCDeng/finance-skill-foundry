@@ -43,7 +43,10 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
     """Preaggregate facts independently before comparing budget/actual groups.
 
     Period comparisons require explicit side filters. Missing groups remain
-    incomplete unless the manager selects missing_groups_as_zero.
+    incomplete unless the manager selects missing_groups_as_zero. Inside a
+    group both sides have, an account with source rows on one side only is
+    partial (缺项), and so is the profit line built on it; the count-as-zero
+    choice covers whole groups, not these.
     """
     spec = _require_spec(spec, "variance spec")
     actual_label = spec.get("actual_scenario", "actual")
@@ -129,6 +132,33 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     "message": "比较口径缺少实际或基准组；未自动把缺失资料视为零。",
                 }
             )
+        # Which side has source rows for each account. Both sides empty is a
+        # line neither books (0 against 0), which is a complete comparison.
+        one_sided = (
+            {}
+            if missing
+            else {
+                account: "actual" if not a["evidence"].get(account) else "baseline"
+                for account in ("revenue", "cost", "expense")
+                if bool(a["evidence"].get(account)) != bool(b["evidence"].get(account))
+            }
+        )
+        for account, missing_side in one_sided.items():
+            side_word = "实际" if missing_side == "actual" else "基准"
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": "comparison_account_missing",
+                    "group": context,
+                    "metric": account,
+                    "missing_side": missing_side,
+                    "suggested_actions": [
+                        f"检查{side_word}资料是否漏了这个科目，或科目映射是否一致",
+                        "补齐后重跑；补齐前这一行和利润行都不算完整比较",
+                    ],
+                    "message": f"{_ACCOUNT_LABELS[account]}在{side_word}一侧没有来源行，这一行和利润行标为缺项。",
+                }
+            )
         zero = {
             "revenue": Decimal(0),
             "cost": Decimal(0),
@@ -191,6 +221,8 @@ def explain_variance(normalized: dict, spec: dict) -> dict:
                     if missing and calculable
                     else "incomplete"
                     if missing
+                    else "partial"
+                    if account in one_sided or (account == "profit" and one_sided)
                     else "complete",
                     "basis": "calculation",
                     "semantics": {
@@ -274,15 +306,17 @@ def _display_profit_impact(value, unit):
     return f"利润影响 {text} {unit}" if unit else f"利润影响 {text}"
 
 
+_ACCOUNT_LABELS = {"revenue": "收入", "cost": "成本", "expense": "费用", "profit": "利润"}
+
+
 def _display_amount_change(account, value, unit):
     if value is None:
         return None
-    labels = {"revenue": "收入", "cost": "成本", "expense": "费用", "profit": "利润"}
     word = "增加" if value > 0 else "减少" if value < 0 else "持平"
     amount = abs(value)
     text = _text(amount)
     suffix = f" {unit}" if unit else ""
-    return f"{labels.get(account, account)}{word} {text}{suffix}"
+    return f"{_ACCOUNT_LABELS.get(account, account)}{word} {text}{suffix}"
 
 
 def _declared_amount(row: dict, field: str) -> Decimal | None:

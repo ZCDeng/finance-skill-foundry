@@ -36,6 +36,15 @@ from foundry.finance_model import (
 )
 from foundry.finance_variance import explain_variance, price_quantity_bridge
 
+FINANCE_CALCULATION_VERSION = 2
+"""What the finance engine computes, recorded on each run beside (not in) its result.
+
+2 marks an account with source rows on one side only as partial (缺项). Runs
+from before carry no version and read as 1. The fingerprint's "finance-v1"
+runner string stays, so a rerun still finds those runs; it compares strictly
+only with runs of its own version (see _reproducibility_status).
+"""
+
 COLLECTIONS = {
     "contexts",
     "account_maps",
@@ -529,13 +538,7 @@ class FinanceStore:
                 "truncated": False,
             }
             output_hash = _hash(result)
-            reproducibility_status = "unverified"
-            if previous:
-                reproducibility_status = (
-                    "reproducible"
-                    if all(r["output_hash"] == output_hash for r in previous)
-                    else "non_reproducible"
-                )
+            reproducibility_status = _reproducibility_status(previous, output_hash)
             execution_status = "succeeded"
             error_fields = {}
         except Exception as exc:
@@ -562,6 +565,7 @@ class FinanceStore:
             source_hashes={alias: d["source_hash"] for alias, d in datasets.items()},
             code_hash=code_hash,
             fingerprint=fingerprint,
+            calculation_version=FINANCE_CALCULATION_VERSION,
             environment={"runner": "finance-v1", "decimal_precision": 80},
             parameters=[],
             parameter_metadata=[],
@@ -1906,6 +1910,35 @@ class FinanceStore:
         req_spec["context_id"] = child["id"]
         return {"requirements": self.analysis_requirements_save(req_spec), "context": child}
 
+
+
+def _reproducibility_status(previous, output_hash):
+    """Compare a rerun with earlier succeeded runs of the same fingerprint.
+
+    Runs of the current calculation version decide first: all equal is
+    reproducible, any difference non_reproducible. With none of those, runs
+    of another version (no version recorded reads as 1) can confirm an equal
+    output, but a different one only shows the calculation changed, so it is
+    unverified rather than non_reproducible.
+    """
+    same = [
+        r
+        for r in previous
+        if r.get("calculation_version", 1) == FINANCE_CALCULATION_VERSION
+    ]
+    if same:
+        return (
+            "reproducible"
+            if all(r["output_hash"] == output_hash for r in same)
+            else "non_reproducible"
+        )
+    if previous:
+        return (
+            "reproducible"
+            if all(r["output_hash"] == output_hash for r in previous)
+            else "unverified"
+        )
+    return "unverified"
 
 
 def _replayable_draft(drafts, attempt=None):

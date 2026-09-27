@@ -51,6 +51,66 @@ def test_profit_bridge_closes_and_links_sources():
     assert rows["cost"]["semantics"]["profit_impact_direction"] == "decrease"
     assert rows["cost"]["favorability"] == "unfavorable"
     assert len(rows["profit"]["source_rows"]) == 6
+    assert {row["comparison_status"] for row in out["rows"]} == {"complete"}
+    assert not [
+        d for d in out["diagnostics"] if d["code"] == "comparison_account_missing"
+    ]
+
+
+@pytest.mark.parametrize("missing_groups_as_zero", [False, True])
+def test_account_with_rows_on_one_side_only_is_partial(missing_groups_as_zero):
+    sample = facts()
+    # Actual books revenue and cost; the budget has revenue only. Neither side
+    # books expense, which leaves that line complete at 0 against 0.
+    sample["rows"] = [
+        row
+        for row in sample["rows"]
+        if row["management_account"] != "expense"
+        and not (row["scenario"] == "budget" and row["management_account"] == "cost")
+    ]
+    out = explain_variance(
+        sample, {"missing_groups_as_zero": missing_groups_as_zero}
+    )
+    status = {row["metric"]: row["comparison_status"] for row in out["rows"]}
+    # The manager's count-as-zero choice covers a whole missing group, not an
+    # account one side never booked inside a group both sides have.
+    assert status == {
+        "revenue": "complete",
+        "cost": "partial",
+        "expense": "complete",
+        "profit": "partial",
+    }
+    missing = [
+        d for d in out["diagnostics"] if d["code"] == "comparison_account_missing"
+    ]
+    assert [(d["metric"], d["missing_side"], d["severity"]) for d in missing] == [
+        ("cost", "baseline", "warning")
+    ]
+    assert missing[0]["group"]["organization"] == "O1"
+    assert "缺项" in missing[0]["message"]
+
+
+def test_account_missing_on_the_actual_side_is_partial_too():
+    sample = facts()
+    sample["rows"] = [
+        row
+        for row in sample["rows"]
+        if not (row["scenario"] == "actual" and row["management_account"] == "expense")
+    ]
+    out = explain_variance(sample, {})
+    status = {row["metric"]: row["comparison_status"] for row in out["rows"]}
+    assert status == {
+        "revenue": "complete",
+        "cost": "complete",
+        "expense": "partial",
+        "profit": "partial",
+    }
+    missing = [
+        d for d in out["diagnostics"] if d["code"] == "comparison_account_missing"
+    ]
+    assert [(d["metric"], d["missing_side"]) for d in missing] == [
+        ("expense", "actual")
+    ]
 
 
 def test_zero_negative_and_missing_budget_policies():
