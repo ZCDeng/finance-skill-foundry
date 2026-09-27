@@ -283,7 +283,14 @@ const financeScopeLabels: Record<string, string> = {
   ledger: '账簿', ledger_id: '账簿', organization: '组织', organization_id: '组织', period: '期间', currency: '币种', unit: '单位', scenario: '情景',
 };
 
-const sourceColumnLabels: Record<string, string> = { ratio_status: '差异率说明', favorability: '有利或不利', comparison_status: '比较状态' };
+const sourceColumnLabels: Record<string, string> = {
+  ratio_status: '差异率说明', favorability: '有利或不利', comparison_status: '比较状态',
+  management_account: '管理科目', amount: '金额', signed_amount: '带符号金额', numerator: '分子', denominator: '分母',
+  display_value: '显示值', row_count: '行数', bucket: '账龄段', customer: '客户', open_amount: '未清金额', invoice_id: '发票号',
+  as_of: '截至日期', week: '周', week_start: '周起始日', week_end: '周结束日', opening_cash: '期初现金', receipts: '收款',
+  payments: '付款', closing_cash: '期末现金', quantity_contribution: '数量影响', price_contribution: '价格影响',
+  interaction: '交互影响', total_variance: '总差异', residual: '残差',
+};
 
 /**
  * A result column in the words the tables above use, for choosing which column's sources to open. The option's
@@ -292,7 +299,9 @@ const sourceColumnLabels: Record<string, string> = { ratio_status: '差异率说
 function sourceColumnOptions(run: AnalysisRun, names: string[]): { name: string; label: string }[] {
   const copy = isFinanceVarianceRun(run) ? financeVarianceCopy(run) : null;
   const varianceLabels: Record<string, string> = copy ? { metric: '科目', actual: copy.actualLabel, baseline: copy.baselineLabel } : {};
-  const labels = names.map((name) => varianceLabels[name] ?? financeScopeLabels[name] ?? sourceColumnLabels[name] ?? businessColumnLabel(name));
+  const label = (name: string): string => varianceLabels[name] ?? financeScopeLabels[name] ?? sourceColumnLabels[name] ?? businessColumnLabel(name);
+  // The engine's exact companions (ratio_exact beside ratio) read as their base column, exactly.
+  const labels = names.map((name) => name.endsWith('_exact') && label(name) === name ? `${label(name.slice(0, -'_exact'.length))}（精确值）` : label(name));
   return names.map((name, index) => ({
     name, label: labels.indexOf(labels[index]) !== labels.lastIndexOf(labels[index]) && labels[index] !== name ? `${labels[index]}（${name}）` : labels[index],
   }));

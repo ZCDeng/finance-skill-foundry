@@ -76,6 +76,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
       <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
       <FieldShell label="刷新模式"><select aria-label="刷新模式" className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value as SourceRefreshMode })}>
         <option value="full_period">整期</option><option value="incremental">增量</option></select></FieldShell>
+      <p className="analysis-note">按业务键识别时生效：整期把文件视为整个期间，文件里没有的行在新快照中记为已删除；增量只更新文件里出现的行。旧结果仍按原快照保留。</p>
       <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
         <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>

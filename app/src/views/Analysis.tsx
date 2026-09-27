@@ -486,7 +486,7 @@ function definitionCopy(analysis: AnalysisRevision): { note: string; detailSumma
   }
   if (analysis.engine === 'finance') {
     const operation = analysis.operation ? FINANCE_OPERATION[analysis.operation] : undefined;
-    return { note: `这项分析由财务引擎按已保存的业务口径计算${operation ? `（${operation}）` : ''}，没有脚本；结果中的每一行都可以查看来源行。`,
+    return { note: `这项分析由财务引擎按已保存的业务口径计算${operation ? `（${operation}）` : ''}，没有脚本。有来源的结果行可以在「结果行来源」里打开来源行。`,
       detailSummary: '高级：查看计算口径', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
   }
   return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };

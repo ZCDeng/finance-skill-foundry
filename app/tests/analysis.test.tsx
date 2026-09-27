@@ -931,6 +931,8 @@ ${canonicalAppendix} 已改写`;
     expect(mode.tagName).toBe('SELECT');
     expect(Array.from(mode.options).map((option) => [option.value, option.textContent])).toEqual([['full_period', '整期'], ['incremental', '增量']]);
     expect(mode.value).toBe('full_period');
+    // What each mode does to lines missing from the file is said before the click.
+    expect(within(sourceRefreshField('刷新模式').closest('details') as HTMLElement).getByText(/整期.*记为已删除.*增量/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
     await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledTimes(1));
     expect((financeSourceRefresh.mock.calls[0][1].scope as Record<string, string>).mode).toBe('full_period');
@@ -2389,6 +2391,9 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [financeAnalysis], runs: [financeRun] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText(/财务引擎/);
+    // Scenario results and accounts with no lines carry no source rows, so the note never promises every row.
+    expect(screen.queryByText(/每一行都可以查看来源行/)).toBeNull();
+    expect(screen.getByText(/有来源的结果行/)).toBeTruthy();
     expect(screen.queryByText(/这项分析使用脚本计算/)).toBeNull();
     expect(screen.queryByText('高级：查看计算脚本')).toBeNull();
     expect(screen.getByText('高级：查看计算口径')).toBeTruthy();
@@ -2398,6 +2403,24 @@ ${canonicalAppendix} 已改写`;
     expect(options.map((option) => option.value)).toEqual(['ledger', 'organization', 'metric', 'actual', 'baseline', 'amount_change', 'contribution', 'ratio', 'ratio_status']);
     expect(options.map((option) => option.textContent).filter((text) => /^[a-z_]+$/.test(text ?? ''))).toEqual([]);
     expect(options.map((option) => option.textContent)).toEqual(expect.arrayContaining(['账簿', '组织', '科目增减', '差异贡献', '差异率']));
+  });
+
+  it('names a finance metric run\'s source columns in Chinese too', async () => {
+    const metricRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: '4'.repeat(32), result: {
+      columns: ['management_account', 'amount', 'signed_amount', 'numerator', 'denominator', 'ratio_exact', 'display_value', 'row_count']
+        .map((name) => ({ name, type: 'VARCHAR' })),
+      rows: [{ management_account: '营业收入', amount: '120.00', signed_amount: '120.00', numerator: '120.00', denominator: '100.00', ratio_exact: '1.2',
+        display_value: '120%', row_count: 3, source_rows: [{ dataset_id: source.id, row_index: 1 }] }],
+      row_count: 1, truncated: false } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drilldown'] })
+      : success({}));
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [metricRun] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    const column = await screen.findByLabelText('来源列（可选）') as HTMLSelectElement;
+    const options = Array.from(column.options).slice(1);
+    expect(options.map((option) => option.value)).toEqual(['management_account', 'amount', 'signed_amount', 'numerator', 'denominator', 'ratio_exact', 'display_value', 'row_count']);
+    expect(options.map((option) => option.textContent).filter((text) => /[A-Za-z_]/.test(text ?? ''))).toEqual([]);
   });
 
   it('passes structured aggregate excluded-detail section through the Analysis drilldown IPC wiring', async () => {

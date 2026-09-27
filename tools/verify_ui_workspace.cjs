@@ -10,15 +10,17 @@ const assert = require('node:assert/strict');
 (async () => {
   // UI_CHECKS picks the phases: first-screen (R12) and workspace (the flow below it); both by default. A run that
   // leaves one out records status 'partial' and names it in skippedPhases; only a run of both can record 'passed'.
+  const root = path.resolve(__dirname, '..');
+  const output = path.resolve(process.env.UI_EVIDENCE_DIR || path.join(root, 'build/ui-workspace-review'));
+  fs.mkdirSync(output, { recursive: true });
+  // No earlier verdict survives this run: until this run writes its own, there is no verification.json at all.
+  fs.rmSync(path.join(output, 'verification.json'), { force: true });
   const allPhases = ['first-screen', 'workspace'];
   const phases = (process.env.UI_CHECKS || allPhases.join(',')).split(',').map(phase => phase.trim()).filter(Boolean);
   const unknownPhases = phases.filter(phase => !allPhases.includes(phase));
   if (unknownPhases.length || !phases.length) throw new Error(`UI_CHECKS must name ${allPhases.join(' and/or ')}; got ${JSON.stringify(process.env.UI_CHECKS)}`);
   const skippedPhases = allPhases.filter(phase => !phases.includes(phase));
-  const root = path.resolve(__dirname, '..');
   const qa = fs.mkdtempSync('/tmp/finance-ui-workspace-');
-  const output = path.resolve(process.env.UI_EVIDENCE_DIR || path.join(root, 'build/ui-workspace-review'));
-  fs.mkdirSync(output, { recursive: true });
   const bundle = path.resolve(process.env.UI_APP_BUNDLE || path.join(root, 'app/release/mac-arm64/FA Foundry.app'));
   const bin = path.join(bundle, 'Contents/Resources/foundry/foundry');
   const cli = (command, args = [], task) => { const raw = execFileSync(bin, ['--var', qa + '/var', ...(task ? ['--task', task] : []), command, ...args], { encoding: 'utf8' }).trim(); return command === 'task-new' ? { id: raw } : JSON.parse(raw); };
@@ -298,8 +300,9 @@ const assert = require('node:assert/strict');
     console.log(JSON.stringify(writeEvidence({ task: task.id, exportedDraft: state.drafts.at(-1),
       exportedRuns: state.drafts.at(-1).run_ids.map(id => state.runs.find(row => row.id === id)), exported: exported[0] })));
   } catch (error) {
-    console.error('DOM:', await (await app.firstWindow()).locator('body').innerText());
     writeEvidence({ status: 'failed', error: String(error) });
+    try { console.error('DOM:', await (await app.firstWindow()).locator('body').innerText()); }
+    catch (dump) { console.error('DOM unavailable:', String(dump)); }
     console.error(JSON.stringify({ qa, output, checks, measures, firstScreen: firstScreenMeasures, error: String(error) })); throw error;
   } finally { await app.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
