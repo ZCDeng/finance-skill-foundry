@@ -52,7 +52,7 @@ function openDraftEditor() {
 }
 function openAnalysisEditor() {
   fireEvent.click(screen.getByRole('tab', { name: /分析结果/ }));
-  const definition = screen.queryByText(/^口径与计算定义/);
+  const definition = screen.queryByText(/^计算定义/);
   if (definition?.closest('details')) (definition.closest('details') as HTMLDetailsElement).open = true;
   const adjust = screen.queryByText('调整参数、假设与资料');
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
@@ -242,9 +242,10 @@ describe('analysis workbench', () => {
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '尚未保存的经营判断。' } });
     openAnalysisEditor();
     fireEvent.change(screen.getByLabelText('参数 · 第 1 项'), { target: { value: '0.93' } });
-    chooseSearchable('分析版本', /888888888888/);
+    // Versions are told apart by their order, not by an identifier prefix.
+    chooseSearchable('分析版本', /第 1 版/);
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.70');
-    chooseSearchable('分析版本', /dddddddddddd/);
+    chooseSearchable('分析版本', /第 2 版/);
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.93');
     openDraftEditor();
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('尚未保存的经营判断。');
@@ -417,7 +418,7 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
     fireEvent.change(screen.getByLabelText('参数 · 第 1 项'), { target: { value: '0.93' } });
-    fireEvent.click(screen.getByRole('button', { name: '与助手调整口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '与助手调整计算方式' }));
     await waitFor(() => expect(analysisSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ parameters: ['0.93'], parent_id: analysis.id })));
     expect(props.onChat).toHaveBeenCalledWith(expect.stringContaining(next.id), undefined, expect.objectContaining({ targetTaskId: task.id }));
     expect(analysisSave.mock.invocationCallOrder[0]).toBeLessThan(props.onChat.mock.invocationCallOrder[0]);
@@ -492,7 +493,7 @@ describe('analysis workbench', () => {
     const resultArea = screen.getByText('900719925474099.99').closest('.analysis-result') as HTMLElement;
     expect(within(resultArea).getAllByRole('table')).toHaveLength(1);
     expect(screen.getByText('900719925474099.99').classList.contains('analysis-number')).toBe(true);
-    const definition = screen.getByText(/^口径与计算定义/).closest('details');
+    const definition = screen.getByText(/^计算定义/).closest('details');
     expect(definition?.open).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '查看未完成的计算' }));
     expect((await screen.findByRole('alert')).textContent).toBe('缺少成本列');
@@ -526,7 +527,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, runs: [earlier, run] }) });
     render(<Analysis {...props} embedded section="results" />); await screen.findByText('900719925474099.99');
     fireEvent.click(screen.getByRole('button', { name: '比较版本' }));
-    fireEvent.change(screen.getByLabelText('对照运行'), { target: { value: earlier.id } });
+    fireEvent.change(screen.getByLabelText('对照结果'), { target: { value: earlier.id } });
     const comparison = screen.getByRole('region', { name: '版本比较' });
     expect(within(comparison).getByText('900719925474099.99')).toBeTruthy();
     expect(within(comparison).getByText('900719925474000.09')).toBeTruthy();
@@ -827,7 +828,7 @@ ${canonicalAppendix} 已改写`;
     expect(within(evidence).queryByText(/999.00|其他费用|美元/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '关闭计算依据' }));
     fireEvent.click(screen.getByRole('button', { name: '比较版本' }));
-    fireEvent.change(screen.getByLabelText('对照运行'), { target: { value: run.id } });
+    fireEvent.change(screen.getByLabelText('对照结果'), { target: { value: run.id } });
     const comparison = screen.getByRole('region', { name: '版本比较' });
     expect(within(comparison).getByText('参数：总部费用分摊：30.00000000000001 万元')).toBeTruthy();
     expect(within(comparison).getByText('参数：历史分摊费用：20.00 元')).toBeTruthy();
@@ -1150,7 +1151,7 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'list-finance-context'));
     const setup = screen.getByLabelText('财务分析设置') as HTMLDetailsElement;
     expect(setup.open).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
     await waitFor(() => expect(setup.open).toBe(true));
     expect(document.activeElement).toBe(setup.querySelector('summary'));
     expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07');
@@ -1181,7 +1182,7 @@ ${canonicalAppendix} 已改写`;
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('计算设置');
     await waitFor(() => expect(lists).toBe(1));
-    fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
     await waitFor(() => expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07'));
     // The map is named, not shown as its identifier.
     expect(screen.getByText('计算损益表时使用管理科目映射：已保存的映射。')).toBeTruthy();
@@ -1202,7 +1203,7 @@ ${canonicalAppendix} 已改写`;
       } });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('计算设置');
-    fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
     expect(await screen.findByText('没有找到这条结果用的范围，下面显示的是当前选中的范围。')).toBeTruthy();
   });
 
@@ -2398,7 +2399,7 @@ ${canonicalAppendix} 已改写`;
     expect(screen.getByText(/有来源的结果行/)).toBeTruthy();
     expect(screen.queryByText(/这项分析使用脚本计算/)).toBeNull();
     expect(screen.queryByText('高级：查看计算脚本')).toBeNull();
-    expect(screen.getByText('高级：查看计算口径')).toBeTruthy();
+    expect(screen.getByText('高级：查看计算定义')).toBeTruthy();
     const column = screen.getByLabelText('来源列（可选）') as HTMLSelectElement;
     const options = Array.from(column.options).slice(1);
     // The choice reads in the words of the tables above it; the value sent is still the column's own name.

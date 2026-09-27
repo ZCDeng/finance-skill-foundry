@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
-import { bridge, shortSha, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
+import { bridge, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { Table, textValue } from './presentation.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
@@ -149,13 +149,13 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       <FieldShell label="用途"><select aria-label="用途" className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
         <option value="input">读取输入</option><option value="output">写回输出</option></select></FieldShell>
       <SearchableSelect label="校验运行（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
-        placeholder="搜索运行时间或编号" allowEmptyLabel="经理直接写入" />
+        placeholder="搜索计算时间" allowEmptyLabel="经理直接写入" />
     </div>
     <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
       <label>字段数组<Textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
       <label>写入数组<Textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
     </div></details></fieldset>
-    <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
+    <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标资料。</p>
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={locked || !datasetId} onClick={() => track('正在检查工作簿结构…', inspect)}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
       <Button variant="outline" type="button" disabled={locked || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => track('正在保存绑定…', bind)}>保存绑定</Button>

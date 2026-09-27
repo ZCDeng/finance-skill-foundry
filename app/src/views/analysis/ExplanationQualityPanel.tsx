@@ -1,4 +1,5 @@
-import { shortSha, type FinanceDrilldown } from '../../bridge.js';
+import type { FinanceDrilldown } from '../../bridge.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 import { STATUS, Table, textValue } from './presentation.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { dimensionGaps, dimensionStates, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './EvidenceQuality.js';
@@ -85,7 +86,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
-        <p className="analysis-note">运行 {shortSha(fact.run_id)} · 第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
+        <p className="analysis-note">计算结果第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
         <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}
         {locatorNotice[fact.id] ? <p className="analysis-note" role="status">{locatorNotice[fact.id]}</p> : null}
@@ -101,7 +102,8 @@ function FactDrilldown({ detail }: { detail: FinanceDrilldown }) {
   return <div className="analysis-drilldown-result"><p className="analysis-note">来源：{detail.message} · {detail.total} 行{detail.has_more ? ' · 仍有更多' : ''}</p>
     {columns.length > 0 && <Table columns={columns} rows={detail.rows.map((row) => row.data)} caption="事实来源行" />}
     {detail.rows.map((row, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(row.source)}</summary>
-      <p>来源摘要：{row.source_hash}</p><p>凭证明细：{row.voucher_detail_available ? '可用' : '不可用'}</p>
-      <pre className="analysis-source-text">{JSON.stringify(row.data, null, 2)}</pre></details>)}
+      <p>凭证明细：{row.voucher_detail_available ? '可用' : '不可用'}</p>
+      <pre className="analysis-source-text">{JSON.stringify(row.data, null, 2)}</pre>
+      <TechnicalInfo rows={[['来源摘要', row.source_hash]]} /></details>)}
   </div>;
 }

@@ -52,9 +52,9 @@ export function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, 
   const metadataFor = (key: string) => analysis.parameter_metadata?.find((metadata) => metadata.key.toLowerCase()
     === (Array.isArray(parameters) ? String(Number(key) + 1) : key.toLowerCase()));
   return <div className="analysis-definition">
-    {calculationChanged && <p className="analysis-message" role="status">计算口径已修改，当前结果尚未更新。保存新版并重跑后查看新结果。</p>}
+    {calculationChanged && <p className="analysis-message" role="status">计算方式已修改，当前结果尚未更新。保存新版并重跑后查看新结果。</p>}
     {!calculationChanged && changed && <p className="analysis-note" role="status">假设说明已修改；说明文字本身不会改变计算。可以保存并交给助手继续调整。</p>}
-    <details className="analysis-details analysis-definition-fold"><summary>口径与计算定义{changed ? ' · 有未提交修改' : ''}</summary>
+    <details className="analysis-details analysis-definition-fold"><summary>计算定义{changed ? ' · 有未提交修改' : ''}</summary>
     <div className="analysis-logic">{analysis.metrics?.length > 0 && <p>指标：{analysis.metrics.map(metricLabel).join('；')}</p>}
       {analysis.grain?.length > 0 && <p>计算粒度：{analysis.grain.map(textValue).join('；')}</p>}
       {analysis.relationships?.length > 0 && <p>资料关联：{analysis.relationships.map(textValue).join('；')}</p>}</div>
@@ -77,8 +77,8 @@ export function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, 
       {Array.isArray(parameters) && <Button variant="outline" type="button" onClick={() => setParameters([...parameters, ''])}>添加计算参数</Button>}
       </fieldset>
       <p className="analysis-note">修改后保存并重跑会创建新版本，之前的结果仍可查看。</p>
-      <p className="analysis-note">参数会传入计算，假设说明用于记录依据；改变计算口径可请助手更新表达式。</p>
-      <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整口径</Button>
+      <p className="analysis-note">参数会传入计算，假设说明用于记录依据；改变计算方式可请助手更新表达式。</p>
+      <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整计算方式</Button>
     </section>
     <details className="analysis-details"><summary>高级：查看或编辑计算 SQL</summary>
       <Textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => setSql(event.target.value)} /></details>

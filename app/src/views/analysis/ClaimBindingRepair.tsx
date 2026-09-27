@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AnalysisRun } from '../../bridge.js';
+import { when, type AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { SearchableSelect } from '../../components/FinancialControls.js';
 
@@ -13,7 +13,7 @@ export function ClaimBindingRepair({ claims, runs, disabled, onChange }: {
       typeof value === 'number' || typeof value === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value)
     ).map(([column, value]) => ({ id: JSON.stringify([run.id, index, column]), run_id: run.id, row: index, column,
       value: String(value), label: `${String(row.metric ?? row.label ?? row.name ?? `第 ${index + 1} 行`)} · ${column} = ${String(value)}`,
-      meta: `运行 ${run.id.slice(0, 8)} · 第 ${index + 1} 行` }))));
+      meta: `${when(run.created_at)} 的计算 · 第 ${index + 1} 行` }))));
   const calculated = claims.flatMap((value, index) => value && typeof value === 'object'
     && (value as Record<string, unknown>).basis === 'calculation' ? [{ claim: value as Record<string, unknown>, index }] : []);
   if (!calculated.length) return null;

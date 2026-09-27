@@ -1,7 +1,7 @@
-import { shortSha, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState } from '../../bridge.js';
+import { when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import type { SelectOption } from '../../components/FinancialControls.js';
-import { friendlyError } from './glossary.js';
+import { friendlyError, scenarioLabel } from './glossary.js';
 
 export { errorText, friendlyError } from './glossary.js';
 
@@ -30,28 +30,26 @@ export const datasetSize = (source: DatasetSnapshot): string => source.kind === 
 export const datasetOptions = (datasets: DatasetSnapshot[]): SelectOption[] => datasets.map((source) => ({
   value: source.id,
   label: source.name,
-  meta: [source.source_name ?? source.kind, datasetSize(source), shortSha(source.id)].filter(Boolean).join(' · '),
+  meta: [source.source_name ?? source.kind, datasetSize(source), when(source.created_at)].filter(Boolean).join(' · '),
 }));
-export const runOptions = (runs: AnalysisRun[]): SelectOption[] => runs.filter((row) => row.execution_status === 'succeeded').map((row) => ({
-  value: row.id,
-  label: when(row.created_at),
-  meta: shortSha(row.id),
-}));
+// Two calculations at the same minute are told apart by their order, not by an identifier.
+export const runOptions = (runs: AnalysisRun[]): SelectOption[] => {
+  const succeeded = runs.filter((row) => row.execution_status === 'succeeded');
+  return succeeded.map((row, index) => ({ value: row.id, label: when(row.created_at), meta: `第 ${index + 1} 次计算` }));
+};
 export const contextOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.contexts.map((context) => ({
   value: context.id,
   label: context.name,
-  meta: Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias} ${scopeSummary(item)}`).join('；') || shortSha(context.id),
+  meta: Object.entries(context.scopes ?? {}).map(([alias, item]) => `${scenarioLabel(alias)} ${scopeSummary(item)}`).join('；') || '未记录范围',
 })) ?? [];
 export const accountMapOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.account_maps.map((item) => ({
   value: String(item.id ?? ''),
   label: textValue(item.name ?? '管理科目映射'),
-  meta: shortSha(String(item.id ?? '')),
 })).filter((item) => item.value) ?? [];
-export const aliasOptions = (aliases: string[], context?: FinanceContext): SelectOption[] => aliases.map((alias) => ({
-  value: alias,
-  label: alias,
-  meta: shortSha(context?.bindings[alias] ?? ''),
-}));
+export const aliasOptions = (aliases: string[], context?: FinanceContext, datasets: DatasetSnapshot[] = []): SelectOption[] => aliases.map((alias) => {
+  const bound = context?.bindings[alias];
+  return { value: alias, label: scenarioLabel(alias), meta: bound ? datasets.find((source) => source.id === bound)?.name ?? '已绑定资料' : '' };
+});
 
 export function scopeSummary(scope: Record<string, unknown> = {}): string {
   return scopeFields.map(([key, label]) => scope[key] ? `${label} ${textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';

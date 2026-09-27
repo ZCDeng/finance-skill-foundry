@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
-import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
+import { when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
-import { RUN_ROLE_LABELS } from './glossary.js';
+import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -57,7 +58,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       <div className="analysis-actions">
         <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
         <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的计算 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
-        {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整口径</Button>}
+        {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整范围</Button>}
         {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
       {analysis.sql && <details className="analysis-details"><summary>保存这次分析方法</summary><form className="analysis-method-form" onSubmit={(event) => {
@@ -75,37 +76,53 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
         const datasetId = (run.bindings ?? analysis.bindings)[id] ?? id;
         const source = datasets.find((row) => row.id === datasetId);
         const mismatch = source?.data_hash != null && source.data_hash !== hash;
-        return <div key={id}><strong>{source?.name ?? '资料快照'}</strong><p className="analysis-note">{source?.source_name ?? datasetId}</p>
+        return <div key={id}><strong>{source?.name ?? '资料快照'}</strong>{source?.source_name && <p className="analysis-note">{source.source_name}</p>}
           {source && <Button variant="outline" type="button" disabled={busy || mismatch} onClick={() => { if (!mismatch) onSource(source); }}>查看 {source.name}</Button>}
           {mismatch && <p className="analysis-note">资料内容与这次计算用的版本不一致，暂不可预览。</p>}
-          <details className="analysis-details"><summary>资料标识与摘要</summary><p>{datasetId}</p><p>{hash}</p></details></div>;
+          <TechnicalInfo rows={[['资料编号', datasetId], ['资料摘要', hash]]} /></div>;
       })}</div>
       <p>参数：{parameterSummary(run.parameters ?? analysis.parameters, run.parameter_metadata ?? analysis.parameter_metadata)}</p>
       {assumptions.length > 0 && <p>假设说明：{assumptionSummary(assumptions)}</p>}
-      {run.finance_scope && <details className="analysis-details"><summary>财务范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
-        <p key={alias}>{alias}：{textValue(scope)}</p>)}</details>}
-      <details className="analysis-details"><summary>运行标识与结果摘要</summary><p>{run.id}</p>{run.output_hash && <p>{run.output_hash}</p>}</details>
+      {run.finance_scope && <details className="analysis-details"><summary>计算范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+        <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
+      <TechnicalInfo rows={[['计算编号', run.id], ['结果摘要', run.output_hash]]} />
     </aside></div>}
     {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
       <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
-      <label className="analysis-select-label">对照运行<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
+      <label className="analysis-select-label">对照结果<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
         <option value="">选择一次已保存的计算</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
-          <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · {when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
+          <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</option>)}</select></label>
       {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} />
       <p className="analysis-note">完整原始结果仍按各次计算自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
         const definition = analyses.find((item) => item.id === row.analysis_id);
-        return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · {shortSha(row.id)}</h4><RunStatus run={row} />
+        return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</h4><RunStatus run={row} />
           <p>参数：{parameterSummary(row.parameters ?? definition?.parameters, row.parameter_metadata ?? definition?.parameter_metadata)}</p>
           <p>假设说明：{assumptionSummary(row.assumptions ?? definition?.assumptions)}</p>
           {row.result?.columns.length ? <Table columns={row.result.columns} rows={row.result.rows} caption={index === 0 ? '当前版本数据' : '对照版本数据'} />
             : <p className="analysis-note">{row.error ?? '这次计算没有表格结果。'}</p>}</div>;
       })}</div></>}
     </section>}
-    <details className="analysis-details analysis-history"><summary>运行历史 · 业务 {selection.businessRuns.length} · 活动 {selection.activityRuns.length} · 失败 {selection.failedRuns.length}</summary>
-      <div className="analysis-history-list">{[...runs].reverse().map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === run?.id ? 'true' : undefined} onClick={() => pick(row)}>
-        <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{runRoleLabel(row)}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>{shortSha(row.id)}</span></button>)}</div>
+    <details className="analysis-details analysis-history"><summary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</summary>
+      <HistoryRows rows={[...runs].reverse().filter((row) => runPresentationRole(row) !== 'activity')} runs={runs} analyses={analyses} current={run} onPick={pick} />
+      {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><summary>中间步骤 · {selection.activityRuns.length}</summary>
+        <p className="analysis-note">助手在得到结果前做的探查和重试。它们不是结论，文稿也不会引用它们。</p>
+        <HistoryRows rows={[...selection.activityRuns].reverse()} runs={runs} analyses={analyses} current={run} onPick={pick} />
+      </details>}
     </details>
   </div>;
+}
+
+function HistoryRows({ rows, runs, analyses, current, onPick }: {
+  rows: AnalysisRun[]; runs: AnalysisRun[]; analyses: AnalysisRevision[]; current: AnalysisRun | undefined; onPick(run: AnalysisRun): void;
+}) {
+  return <div className="analysis-history-list">{rows.map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === current?.id ? 'true' : undefined} onClick={() => onPick(row)}>
+    <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{runRoleLabel(row)}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>第 {revisionLabel(row, runs)} 次计算</span></button>)}</div>;
+}
+
+/** A scope in the words the settings use, one field per phrase. */
+function scopeText(scope: unknown): string {
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return textValue(scope);
+  return Object.entries(scope as Record<string, unknown>).map(([key, item]) => `${financeScopeLabels[key] ?? key} ${key === 'scenario' ? scenarioLabel(textValue(item)) : textValue(item)}`).join(' · ') || '—';
 }
 
 
@@ -226,7 +243,7 @@ function structuredDiagnosticText(value: unknown): string {
     if (method.includes('sum')) return `${metricText}有 ${countText} 条来源金额缺失，汇总未完成。`;
     const methodText = method.includes('count_distinct') ? '去重计数'
       : method.includes('min') ? '最小值' : method.includes('max') ? '最大值' : textValue(item.aggregation ?? '聚合');
-    return `${metricText}有 ${countText} 条来源金额缺失，${methodText}结果已排除这些缺失来源，请复核口径。`;
+    return `${metricText}有 ${countText} 条来源金额缺失，${methodText}结果已排除这些缺失来源，请复核结果。`;
   }
   const message = typeof item.message === 'string' ? item.message : '';
   return message || `结构化汇总诊断：${textValue(value)}`;
@@ -330,7 +347,7 @@ function financeVarianceScope(run: AnalysisRun): string {
     const label = financeScopeLabels[name] ?? name;
     return `${label} ${values[0]}`;
   });
-  return parts.join(' · ') || '按当前财务口径汇总';
+  return parts.join(' · ') || '按当前范围汇总';
 }
 
 function financeVarianceDimensionColumns(run: AnalysisRun): { name: string; type?: string }[] {
@@ -546,8 +563,8 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
     {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}
     {run.engine === 'finance' && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details"><summary>诊断 · {run.result.diagnostics.length} 项</summary>
       {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
-    {run.finance_scope && <details className="analysis-details"><summary>运行范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
-      <p key={alias}>{alias}：{textValue(scope)}</p>)}</details>}
+    {run.finance_scope && <details className="analysis-details"><summary>计算范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+      <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
     {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">
       <div className="analysis-edit-grid"><label>结果行来源<select className="fnd-field" value={target} onChange={(event) => setTarget(event.target.value)}>
         <option value="">选择一行查看来源</option>{sourceRows.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
@@ -557,8 +574,9 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
       {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
       {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>
         {drilldown.rows.map((item, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(item.source)}</summary>
-          <p>来源摘要：{item.source_hash}</p><p>凭证明细：{item.voucher_detail_available ? '可用' : '不可用'}</p>
-          <pre className="analysis-source-text">{JSON.stringify(item.data, null, 2)}</pre></details>)}</div>}
+          <p>凭证明细：{item.voucher_detail_available ? '可用' : '不可用'}</p>
+          <pre className="analysis-source-text">{JSON.stringify(item.data, null, 2)}</pre>
+          <TechnicalInfo rows={[['来源摘要', item.source_hash]]} /></details>)}</div>}
     </div>}
   </section>;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, timeWait, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
+import { bridge, timeWait, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
@@ -42,10 +42,8 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
         }));
         if (result.cancelled) { note('cancelled'); setMessage('已取消刷新。'); return; }
         await onRefresh(); await load();
-        const usable = typeof result.effective_dataset_id === 'string' ? result.effective_dataset_id : result.dataset_id;
-        const datasetId = typeof usable === 'string' ? shortSha(usable) : '';
         setMessage(typeof result.dataset_id === 'string'
-          ? `已发布新来源快照 ${datasetId}。历史结果仍按原快照保留。`
+          ? '已发布新来源快照，资料列表里是最新一版。历史结果仍按原快照保留。'
           : '文件内容与已发布快照一致，已保留原结果引用。');
       });
     } catch (failure) {
@@ -86,7 +84,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
     {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
-        <time>{when(batch.created_at)}</time><span>{batch.dataset_id ? `新快照 ${shortSha(batch.dataset_id)}` : batch.effective_dataset_id ? `沿用 ${shortSha(batch.effective_dataset_id)}` : batch.prior_snapshot_id ? `沿用 ${shortSha(batch.prior_snapshot_id)}` : shortSha(batch.id)}</span>
+        <time>{when(batch.created_at)}</time><span>{batch.dataset_id ? '生成了新快照' : batch.effective_dataset_id || batch.prior_snapshot_id ? '内容未变，沿用原快照' : '已记录'}</span>
       </div>)}</div></details>}
     {message && <p role="status" className="analysis-message">{message}</p>}
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}

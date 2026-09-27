@@ -145,8 +145,8 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
           )}
 
           <p className="analysis-note">
-            文件身份策略：{report.file_identity_policy === 'business_key' ? '按业务键比对' : '按快照整份替换'}
-            {report.erp_connected ? '' : ' · 未接外部账套，数字全部来自这些文件'}
+            {report.erp_connected ? '' : '未接外部账套，数字全部来自这些文件。'}
+            文件更新时{report.file_identity_policy === 'business_key' ? '按业务键逐行比对' : '整份替换'}。
           </p>
         </>
       )}

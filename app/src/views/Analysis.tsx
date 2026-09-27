@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
+import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
 import { STATUS, textValue } from './analysis/presentation.js';
@@ -385,8 +385,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
-              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)} · ${shortSha(row.id)}` }))}
-              onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
+              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)}` }))}
+              onChange={setSelectedAnalysis} placeholder="搜索问题或时间" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
               onAdjustScope={financeWorkbench ? (run) => setScopeRequest((value) => ({ count: value.count + 1, contextId: run.finance_context_id ?? undefined })) : undefined}
@@ -424,7 +424,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                   analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
                   await refresh(taskId); if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(id);
                 }
-                await handoff(`请调整分析「${analysis.question}」的口径或假设。先读取分析版本 ${id}，保留之前结果。`, undefined, { targetTaskId: taskId });
+                await handoff(`请调整分析「${analysis.question}」的范围或假设。先读取分析版本 ${id}，保留之前结果。`, undefined, { targetTaskId: taskId });
               })} onSave={(spec) => void perform((taskId) => timeWait('analysis.run', async (note) => {
                 const api = bridge(); if (!api?.analysisSave || !api.analysisRun) throw new Error('此版本暂不支持保存并运行分析。');
                 const next = unwrap(await api.analysisSave(taskId, spec));
@@ -450,8 +450,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               triggerText={draft ? `修订 ${view.drafts.findIndex((row) => row.id === draft.id) + 1}${draft.id === view.drafts.at(-1)?.id ? ' · 最新' : ''}` : '选择文稿'}
               options={[...view.drafts].reverse().map((row) => ({
                 value: row.id ?? '', label: `修订 ${view.drafts.findIndex((item) => item.id === row.id) + 1} · ${row.title}`,
-                meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
-              }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /> : undefined}
+                meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)}${row.id ? '' : ' · 未保存'}`,
+              }))} onChange={setSelectedDraft} placeholder="搜索标题或状态" /> : undefined}
             onChat={(spec) => void perform(async (taskId) => {
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               await handoff(undefined, id, spec ? { targetTaskId: taskId } : undefined);
@@ -489,8 +489,8 @@ function definitionCopy(analysis: AnalysisRevision): { note: string; detailSumma
   }
   if (analysis.engine === 'finance') {
     const operation = analysis.operation ? FINANCE_OPERATION[analysis.operation] : undefined;
-    return { note: `这项分析由财务引擎按已保存的业务口径计算${operation ? `（${operation}）` : ''}，没有脚本。有来源的结果行可以在「结果行来源」里打开来源行。`,
-      detailSummary: '高级：查看计算口径', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
+    return { note: `这项分析由财务引擎按已保存的范围计算${operation ? `（${operation}）` : ''}，没有脚本。有来源的结果行可以在「结果行来源」里打开来源行。`,
+      detailSummary: '高级：查看计算定义', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
   }
   return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };
 }

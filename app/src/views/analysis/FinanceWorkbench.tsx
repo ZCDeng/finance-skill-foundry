@@ -335,9 +335,9 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
           <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></FieldShell>
         <TextField label="情景名称" value={scenarioLabel} onChange={setScenarioLabel} />
         <SearchableSelect label={scenarioKind === 'receivables_aging' ? '应收/发票资料' : '回款资料'} value={scenarioPrimary}
-          options={aliasOptions(aliases, selectedContext)} onChange={setScenarioPrimary} placeholder="选择资料" />
+          options={aliasOptions(aliases, selectedContext, datasets)} onChange={setScenarioPrimary} placeholder="选择资料" />
         <SearchableSelect label={scenarioKind === 'receivables_aging' ? '核销记录（可选）' : '付款资料（可选）'} value={scenarioSecondary}
-          options={aliasOptions(aliases.filter((alias) => alias !== scenarioPrimary), selectedContext)}
+          options={aliasOptions(aliases.filter((alias) => alias !== scenarioPrimary), selectedContext, datasets)}
           onChange={setScenarioSecondary} placeholder="选择资料" allowEmptyLabel="暂不选择" />
         {scenarioKind === 'receivables_aging' ? <>
           <DateInput label="账龄日期" value={scenarioAsOf} onChange={setScenarioAsOf} />

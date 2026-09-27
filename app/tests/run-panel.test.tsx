@@ -85,8 +85,8 @@ describe('RunPanel structured aggregate results', () => {
       ],
     } })]} />);
     expect(await screen.findByText('指标“收入”有 3 条来源金额缺失，汇总未完成。')).toBeTruthy();
-    expect(screen.getByText('指标“最早订单”有 1 条来源金额缺失，最小值结果已排除这些缺失来源，请复核口径。')).toBeTruthy();
-    expect(screen.getByText('指标“客户数”有 2 条来源金额缺失，去重计数结果已排除这些缺失来源，请复核口径。')).toBeTruthy();
+    expect(screen.getByText('指标“最早订单”有 1 条来源金额缺失，最小值结果已排除这些缺失来源，请复核结果。')).toBeTruthy();
+    expect(screen.getByText('指标“客户数”有 2 条来源金额缺失，去重计数结果已排除这些缺失来源，请复核结果。')).toBeTruthy();
     const raw = screen.getByText('原始诊断细节 · 3 项').closest('details') as HTMLDetailsElement;
     expect(raw.open).toBe(false);
     fireEvent.click(screen.getByText('原始诊断细节 · 3 项'));
@@ -259,10 +259,11 @@ describe('RunPanel finance conclusion', () => {
       bridgeRow('profit', '-312.00', { amount_change_display: '利润减少 312.00 万元' }),
     ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
     render(<RunPanel {...props} runs={[run]} />);
-    // The run is named by its order, not by a hash prefix; the id stays on hover.
-    const header = screen.getByText(/第 1 次计算/);
-    expect(header.getAttribute('title')).toBe(run.id);
+    // The run is named by its order, not by a hash prefix; the id stays on hover and in the history rows.
+    const header = screen.getByTitle(run.id);
+    expect(header.textContent).toContain('第 1 次计算');
     expect(header.textContent).not.toContain(run.id.slice(0, 12));
+    expect(document.body.textContent).not.toContain(run.id.slice(0, 12));
     const conclusion = screen.getByRole('region', { name: '结论' });
     expect(within(conclusion).getByText('实际与预算相比，利润减少 312.00 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入增加 50 万元 · 成本增加 208 万元 · 费用减少 10 万元')).toBeTruthy();
@@ -383,15 +384,51 @@ describe('RunPanel finance conclusion', () => {
     const onAdjustScope = vi.fn();
     const run = varianceRun([bridgeRow('profit', '5')]);
     const { unmount } = render(<RunPanel {...props} runs={[run]} />);
-    expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '调整范围' })).toBeNull();
     unmount();
     render(<RunPanel {...props} runs={[run]} onAdjustScope={onAdjustScope} />);
-    fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
     expect(onAdjustScope).toHaveBeenCalledTimes(1);
     expect(onAdjustScope).toHaveBeenCalledWith(run);
     cleanup();
     render(<RunPanel {...props} runs={[structuredRun()]} onAdjustScope={onAdjustScope} />);
-    expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '调整范围' })).toBeNull();
+  });
+
+  it('lists results and failures in the history, keeps intermediate steps under their own fold, and names no identifiers', () => {
+    const result = structuredRun();
+    const probe: AnalysisRun = { ...baseRun, id: 'f'.repeat(32), created_at: '2026-09-07T00:05:00Z', engine: 'python',
+      result: { columns: [{ name: 'note', type: 'VARCHAR' }], rows: [{ note: '探查' }], row_count: 1, truncated: false } };
+    const failed: AnalysisRun = { ...baseRun, id: '1'.repeat(32), created_at: '2026-09-07T00:10:00Z', execution_status: 'failed', error: '缺少列' };
+    render(<RunPanel {...props} runs={[result, probe, failed]} />);
+    const history = screen.getByText(/^计算历史/).closest('details')!;
+    expect(history.querySelector('summary')!.textContent).toBe('计算历史 · 结果 1 · 未完成 1');
+    const rows = within(history).getAllByRole('button').filter((button) => button.classList.contains('analysis-history-row'));
+    // Two rows outside the fold (the result and the failure), one inside 中间步骤.
+    const steps = screen.getByText('中间步骤 · 1').closest('details')!;
+    expect(rows.filter((row) => !steps.contains(row))).toHaveLength(2);
+    expect(within(steps).getAllByRole('button')).toHaveLength(1);
+    for (const id of [result.id, probe.id, failed.id]) expect(history.textContent).not.toContain(id.slice(0, 12));
+  });
+
+  it('folds dataset and run identifiers under 技术信息 in the evidence panel', () => {
+    const run = structuredRun({ input_hashes: { ledger: 'd'.repeat(64) }, bindings: { ledger: dataset.id }, output_hash: '9'.repeat(64) });
+    render(<RunPanel {...props} runs={[run]} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
+    const evidence = screen.getByRole('dialog', { name: '本次计算依据' });
+    expect(within(evidence).getByText('本月台账')).toBeTruthy();
+    const folds = within(evidence).getAllByText('技术信息').map((summary) => summary.closest('details') as HTMLDetailsElement);
+    expect(folds).toHaveLength(2);
+    expect(folds.every((fold) => !fold.open)).toBe(true);
+    expect(within(folds[0]).getByText('资料编号').nextElementSibling?.textContent).toBe(dataset.id);
+    expect(within(folds[1]).getByText('计算编号').nextElementSibling?.textContent).toBe(run.id);
+    expect(within(folds[1]).getByText('结果摘要').nextElementSibling?.textContent).toBe('9'.repeat(64));
+    // Nothing outside the folds shows an identifier or digest.
+    const outside = evidence.cloneNode(true) as HTMLElement;
+    outside.querySelectorAll('.analysis-technical').forEach((fold) => fold.remove());
+    expect(outside.textContent).not.toContain(dataset.id);
+    expect(outside.textContent).not.toContain(run.id);
+    expect(outside.textContent).not.toContain('d'.repeat(64));
   });
 });
 
