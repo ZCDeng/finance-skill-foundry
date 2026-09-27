@@ -156,7 +156,7 @@
   },
   "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   "row_declarations": {
-    "rules_version": "3.1.1",
+    "rules_version": "4.1.1",
     "requirements_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     "requirements_fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "complete": true,

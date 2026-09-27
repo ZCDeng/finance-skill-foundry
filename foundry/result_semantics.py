@@ -19,7 +19,8 @@ The declaration also carries the rows that break the result-row contract (R5) as
 A warning never fails the run and never changes how a row is declared.
 
 It pairs its rows as the result area pairs them (businessResults.ts longScenarioPairing). A pair whose every member is
-declared, in a complete declaration, gets one Chinese sentence built from the rows' own Decimal values (R6, KTD7).
+declared, in a complete declaration, gets one Chinese sentence built from the rows' own Decimal values (R6, KTD7),
+unless its variance row states other than actual minus budget: then it says nothing and the declaration warns.
 The sentence's basis is 脚本结果: it is never verified and never one of a draft's quotable facts, which are read
 from the run's result alone.
 """
@@ -43,7 +44,8 @@ from foundry.finance_requirements import (
 # The declaration rules are versioned by part; a stored declaration older than any part is recomputed on read.
 # Vocabulary 2: the vocabulary also decides the contract warnings.
 # Vocabulary 3: the vocabulary also pairs rows and words the conclusion sentences; an estimated budget has a span.
-VOCABULARY_VERSION = 3
+# Vocabulary 4: a variance row that is not actual minus budget silences its pair's sentence and warns.
+VOCABULARY_VERSION = 4
 UNIT_TABLE_VERSION = 1
 ESTIMATE_WORDS_VERSION = 1
 # A declaration covers at most this many rows; a longer result is declared up to here and marked incomplete.
@@ -318,22 +320,28 @@ def _contract_message(code: str, count: int, names: list[str]) -> str:
     if code == 'metric_undeclared':
         return (f'指标名 {_names(names)} 不在约定指标里，这些行也没有写 metric_label（共 {count} 行），'
                 '结果区只能显示原名。请改用约定指标名，或在 metric_label 列写口径标签。')
+    if code == 'variance_mismatch':
+        return (f'{_names(names)} 的差异行不等于实际减预算（共 {count} 行），这些比较不写结论句，'
+                '以免结论与所引实际、预算的方向相反。差异行应写实际减预算，不写按利润影响取正负的数；'
+                '请核对实际、预算与差异是否取自同一口径，改好后重跑。')
     return (f'{count} 行的文字写了估算用语，但依据列 basis 没有写 estimate。这些行仍按估算显示；'
             '请在这些行的 basis 列写 estimate，估算就不只靠文字识别。')
 
 
 def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, requirements: dict | None, *,
-                      names_known: bool = True) -> list[dict]:
+                      names_known: bool = True, pairs: list[dict] = ()) -> list[dict]:
     """Where declared rows break the result-row contract, one warning per kind in the diagnostic shape.
 
     Scenario and metric names are checked in a long-form table only, and only when the pinned requirements could be
     read: a name they list is part of the vocabulary. A metric outside it warns only on a row that fills a
-    comparison and has no metric_label to be shown by.
+    comparison and has no metric_label to be shown by. A pair whose variance row is not its actual minus its budget
+    warns on that row, whether or not the pair would get a sentence: the rows disagree either way.
     """
     names = vocabulary(requirements)
     scenarios = {name.lower() for name in names['scenarios']}
     hits: dict[str, list[tuple[int, str | None]]] = {
-        'unit_unmarked': [], 'scenario_undeclared': [], 'metric_undeclared': [], 'estimate_basis_missing': []}
+        'unit_unmarked': [], 'scenario_undeclared': [], 'metric_undeclared': [], 'estimate_basis_missing': [],
+        'variance_mismatch': []}
     for row, entry in zip(rows, entries):
         index = entry['row']
         if entry['unit_kind'] == 'unmarked':
@@ -350,6 +358,9 @@ def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, 
         if any(source['source'] == 'text' for source in sources) and not any(
                 source['source'] == 'row' and source['field'] in BASIS_FIELDS for source in sources):
             hits['estimate_basis_missing'].append((index, None))
+    by_row = {entry['row']: entry for entry in entries}
+    hits['variance_mismatch'] = sorted((pair['members']['variance'], _subject(pair))
+                                       for pair in pairs if _variance_mismatch(pair, by_row))
     warnings = []
     for code, found in hits.items():
         if not found:
@@ -452,6 +463,41 @@ def _period_phrase(pair: dict) -> str:
     return f"{period} {'累计' if pair['span'] == 'ytd' else '单月' if pair['span'] == 'month' else ''}"
 
 
+def _subject(pair: dict) -> str:
+    """What a pair's sentence is about: its period, organization and metric (1-8 月集团合并收入)."""
+    metric = RESULT_METRIC_LABELS.get(pair['metric'], pair['metric'])
+    return f"{_period_phrase(pair)}{_text(pair['organization'])}{metric}"
+
+
+def _variance_mismatch(pair: dict, entries: dict[int, dict]) -> bool:
+    """Whether the pair's variance row states other than its actual minus its one budget, in Decimal.
+
+    Without a variance row, beside both an approved and an estimated budget, or with a figure that is not a number
+    or a difference that cannot be held exactly, there is nothing to hold the row against.
+    """
+    members = {measure: entries.get(index) or {} for measure, index in pair['members'].items()}
+    if 'variance' not in members or 'actual' not in members or ('budget' in members) == ('estimated_budget' in members):
+        return False
+    budget = members['budget' if 'budget' in members else 'estimated_budget']
+    actual, budget, stated = (_decimal(entry.get('value'))
+                              for entry in (members['actual'], budget, members['variance']))
+    if None in (actual, budget, stated):
+        return False
+    try:
+        with localcontext() as context:
+            context.prec, context.traps[Inexact] = CONCLUSION_PRECISION, True
+            difference = actual - budget
+    except Inexact:
+        return False
+    places = stated.as_tuple().exponent
+    if isinstance(places, int) and places > difference.as_tuple().exponent:
+        # A variance written to fewer places agrees when the exact difference rounds to it.
+        with localcontext() as context:
+            context.prec = CONCLUSION_PRECISION
+            difference = difference.quantize(Decimal(1).scaleb(places), rounding=ROUND_HALF_UP)
+    return stated != difference
+
+
 def _pair_estimate(pair: dict, entries: dict[int, dict]) -> dict:
     measures = [measure for measure, index in pair['members'].items() if (entries.get(index) or {}).get('estimate')]
     return {'estimated': bool(measures), 'measures': measures}
@@ -462,7 +508,8 @@ def _conclusion(pair: dict, entries: dict[int, dict], complete: bool) -> dict | 
 
     It says the variance the variance row states, or actual minus budget in Decimal without one; the 达成率 the ratio
     row states, by its declared unit; and which of the figures it uses are estimates. An approved and an estimated
-    budget in one pair leave open which one the variance is against, so such a pair says nothing.
+    budget in one pair leave open which one the variance is against, so such a pair says nothing; nor does one whose
+    variance row is not actual minus budget, since the sentence would contradict the figures it quotes.
     """
     members = {measure: entries.get(index) for measure, index in pair['members'].items()}
     if not complete or not pair['declared'] or any(
@@ -475,7 +522,7 @@ def _conclusion(pair: dict, entries: dict[int, dict], complete: bool) -> dict | 
     actual, budget = _decimal(members[used[0]]['value']), _decimal(members[used[1]]['value'])
     rate = next((measure for measure in ('rate', 'rate_pct') if measure in members), None)
     stated = {measure: _decimal(members[measure]['value']) for measure in ('variance', rate) if measure in members}
-    if actual is None or budget is None or None in stated.values():
+    if actual is None or budget is None or None in stated.values() or _variance_mismatch(pair, entries):
         return None
     try:
         with localcontext() as context:
@@ -490,7 +537,7 @@ def _conclusion(pair: dict, entries: dict[int, dict], complete: bool) -> dict | 
     organization = _text(pair['organization'])
     change = '与预算持平' if variance == 0 else (
         f"比预算{'少' if variance < 0 else '多'} {_shown(variance.copy_abs())}{unit}")
-    text = (f"{_period_phrase(pair)}{organization}{RESULT_METRIC_LABELS.get(pair['metric'], pair['metric'])}{change}"
+    text = (f"{_subject(pair)}{change}"
             f"{'' if percent is None else f'（达成 {_shown(percent)}%）'}"
             f"，实际 {_shown(actual)}{unit}，预算 {_shown(budget)}{unit}")
     estimated = list(dict.fromkeys(MEASURE_WORDS[measure] for measure in used if members[measure]['estimate']))
@@ -532,7 +579,7 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
         'rows': entries,
         'pairs': conclude_pairs(pairs, entries, complete),
         'warnings': contract_warnings(declared, entries, long_format, requirements,
-                                      names_known=incomplete_reason != 'requirements_unavailable'),
+                                      names_known=incomplete_reason != 'requirements_unavailable', pairs=pairs),
     }
 
 
@@ -600,17 +647,31 @@ def redeclare(analysis, run: dict, requirements_cache: dict[str, dict | None] | 
     return {**declaration, 'requirements_id': requirements_id}
 
 
-def merge_latest(declaration: dict, latest: dict | None) -> dict:
+def _latest_memo(latest: dict | None) -> dict:
+    """What merge_latest reads from one latest requirements record, kept across the runs of one state read: whether
+    it declares any estimate grain, and the sources it gives each distinct set of row fields."""
+    return {'estimate_grains': _has_estimate_grains(latest), 'sources': {}}
+
+
+def merge_latest(declaration: dict, latest: dict | None, memo: dict | None = None) -> dict:
     """Add the estimates the task's latest requirements declare; nothing the declaration holds is removed.
 
-    The pairs are kept; their estimates and sentences are read again from the merged rows.
+    The pairs are kept; their estimates and sentences are read again from the merged rows. `memo` (_latest_memo of
+    the same `latest`) lets runs read together match rows with the same fields against it once.
     """
-    if not latest or latest.get('id') == declaration.get('requirements_id') or not _has_estimate_grains(latest):
+    if not latest or latest.get('id') == declaration.get('requirements_id'):
+        return declaration
+    memo = _latest_memo(latest) if memo is None else memo
+    if not memo['estimate_grains']:
         return declaration
     rows = []
     for entry in declaration.get('rows') or []:
-        added = [source for source in _declared_sources(latest, entry.get('fields') or {})
-                 if source not in entry.get('estimate_sources', [])]
+        fields = entry.get('fields') or {}
+        # repr tells 1 from 1.0, True and '1', which equal tuple keys would not.
+        key = repr(sorted(fields.items()))
+        if key not in memo['sources']:
+            memo['sources'][key] = _declared_sources(latest, fields)
+        added = [dict(source) for source in memo['sources'][key] if source not in entry.get('estimate_sources', [])]
         rows.append({**entry, 'estimate': True, 'estimate_sources': [*entry.get('estimate_sources', []), *added]}
                     if added else entry)
     pairs = conclude_pairs(declaration.get('pairs') or [], rows, declaration.get('complete') is True)
@@ -618,7 +679,7 @@ def merge_latest(declaration: dict, latest: dict | None) -> dict:
 
 
 def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: str | None = None,
-                 requirements_cache: dict[str, dict | None] | None = None) -> dict:
+                 requirements_cache: dict[str, dict | None] | None = None, latest_memo: dict | None = None) -> dict:
     """The run as the workbench reads it: a stale declaration recomputed, the latest estimates merged in.
 
     It also names the task's current requirements version and that record's verified fingerprint, so the result
@@ -630,7 +691,7 @@ def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: s
         return run
     if is_stale(declaration.get('rules_version')):
         declaration = redeclare(analysis, run, requirements_cache)
-    declaration = merge_latest(declaration, latest)
+    declaration = merge_latest(declaration, latest, latest_memo)
     if latest:
         declaration = {**declaration, 'current_requirements': {'id': latest['id'], 'fingerprint': latest_fingerprint}}
     return run if declaration is run['row_declarations'] else {**run, 'row_declarations': declaration}
@@ -642,4 +703,5 @@ def declared_runs(analysis, runs: list[dict], latest: dict | None) -> list[dict]
     fingerprint = (verified_requirement_fingerprint(analysis, latest)
                    if latest and any(isinstance(run.get('row_declarations'), dict) for run in runs) else None)
     requirements_cache: dict[str, dict | None] = {}
-    return [declared_run(analysis, run, latest, fingerprint, requirements_cache) for run in runs]
+    memo = _latest_memo(latest)
+    return [declared_run(analysis, run, latest, fingerprint, requirements_cache, memo) for run in runs]

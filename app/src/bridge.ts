@@ -464,12 +464,12 @@ export interface DeclaredPair {
 /** One kind of result-row contract break, in the backend's diagnostic shape with a Chinese message. */
 export interface ResultContractWarning {
   severity: 'warning';
-  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing';
+  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing' | 'variance_mismatch';
   message: string;
   /** Zero-based rows of the full result file, at most 20; row_count counts every row it concerns. */
   rows: number[];
   row_count: number;
-  /** The scenario or metric names it concerns, for the name checks. */
+  /** The scenario or metric names it concerns, or the comparisons a variance_mismatch names. */
   names?: string[];
 }
 export interface AnalysisDraft extends AnalysisObject {

@@ -740,6 +740,109 @@ def test_an_unmarked_ratio_gives_no_percentage_and_an_unmarked_required_member_n
     assert pair['conclusion'] is None
 
 
+# A month of expense: actual 120 against budget 100 is 20 over budget, whatever a variance row beside them says.
+EXPENSE = {'metric_key': 'expense', 'organization': '集团', 'period': '2026-08', 'unit': '万元'}
+EXPENSE_PAIR = [{**EXPENSE, 'scenario': 'actual', 'value': '120'}, {**EXPENSE, 'scenario': 'budget', 'value': '100'}]
+EXPENSE_COLUMNS = [*EXPENSE, 'scenario', 'value']
+EXPENSE_SENTENCE = '2026-08 集团费用比预算多 20.00 万元，实际 120.00 万元，预算 100.00 万元'
+
+
+def expense_with(scenario, value):
+    return [*EXPENSE_PAIR, {**EXPENSE, 'scenario': scenario, 'value': value}]
+
+
+@pytest.mark.parametrize(('scenario', 'value'), [('profit_impact', '-20'), ('variance', '5')])
+def test_a_variance_row_that_is_not_actual_minus_budget_gets_no_sentence_and_warns(scenario, value):
+    rows = expense_with(scenario, value)
+    declaration = declare(rows, columns=EXPENSE_COLUMNS)
+
+    pair = pair_of(declaration, 'expense', '集团', '2026-08|')
+    assert (pair['members'], pair['declared'], pair['conclusion']) == (
+        {'actual': 0, 'budget': 1, 'variance': 2}, True, None)
+    assert [warning['code'] for warning in declaration['warnings']] == ['variance_mismatch']
+    warning = declaration['warnings'][0]
+    assert (warning['severity'], warning['rows'], warning['row_count'], warning['names']) == (
+        'warning', [2], 1, ['2026-08 集团费用'])
+    assert '2026-08 集团费用' in warning['message'] and '实际减预算' in warning['message']
+    assert_chinese(warning['message'])
+    # The rows disagree whether or not a sentence would be said: an incomplete declaration warns as well.
+    incomplete = declare_rows(EXPENSE_COLUMNS, rows, None, fingerprint=None, complete=False,
+                              incomplete_reason='result_file_unavailable')
+    assert [warning['code'] for warning in incomplete['warnings']] == ['variance_mismatch']
+
+
+@pytest.mark.parametrize(('scenario', 'value'), [('profit_impact', '20'), ('variance', '20.00')])
+def test_a_variance_row_equal_to_actual_minus_budget_keeps_its_sentence(scenario, value):
+    declaration = declare(expense_with(scenario, value), columns=EXPENSE_COLUMNS)
+
+    conclusion = pair_of(declaration, 'expense', '集团', '2026-08|')['conclusion']
+    assert conclusion['text'] == EXPENSE_SENTENCE
+    # Equal in Decimal is enough; the variance stays the row's own, as written.
+    assert (conclusion['values']['variance'], conclusion['variance_from']) == (value, 'row')
+    assert declaration['warnings'] == []
+
+
+@pytest.mark.parametrize(('value', 'agrees'), [('20.00', True), ('20.0', True), ('20.01', False), ('-20.00', False)])
+def test_a_variance_row_written_to_fewer_places_agrees_when_the_difference_rounds_to_it(value, agrees):
+    rows = [{**EXPENSE, 'scenario': 'actual', 'value': '120.004'}, {**EXPENSE, 'scenario': 'budget', 'value': '100'},
+            {**EXPENSE, 'scenario': 'variance', 'value': value}]
+    declaration = declare(rows, columns=EXPENSE_COLUMNS)
+
+    conclusion = pair_of(declaration, 'expense', '集团', '2026-08|')['conclusion']
+    assert (conclusion is not None) is agrees
+    assert [warning['code'] for warning in declaration['warnings']] == ([] if agrees else ['variance_mismatch'])
+
+
+def test_a_pair_without_a_variance_row_is_concluded_as_before():
+    declaration = declare(EXPENSE_PAIR, columns=EXPENSE_COLUMNS)
+
+    conclusion = pair_of(declaration, 'expense', '集团', '2026-08|')['conclusion']
+    assert conclusion['text'] == EXPENSE_SENTENCE
+    assert (conclusion['values']['variance'], conclusion['variance_from']) == ('20', 'computed')
+    assert declaration['warnings'] == []
+
+
+def merged_without_memo(declaration, latest):
+    """merge_latest as it read before the memo: every row matched against the latest requirements on its own."""
+    rows = []
+    for entry in declaration['rows']:
+        added = [source for source in result_semantics._declared_sources(latest, entry['fields'])
+                 if source not in entry['estimate_sources']]
+        rows.append({**entry, 'estimate': True, 'estimate_sources': [*entry['estimate_sources'], *added]}
+                    if added else entry)
+    pairs = result_semantics.conclude_pairs(declaration['pairs'], rows, declaration['complete'] is True)
+    return {**declaration, 'rows': rows, 'pairs': pairs, 'latest_requirements_id': latest['id']}
+
+
+def test_runs_read_together_match_each_distinct_row_once_against_the_latest_requirements(monkeypatch):
+    pinned = {'id': 'a' * 32, 'items': plain_items()}
+    latest = {'id': 'b' * 32, 'items': with_estimate(plain_items(), 'profit_1_8', ['华南区域'])}
+    declarations = [declare(PAIRED_ROWS, pinned, columns=PAIRED_COLUMNS), declare(HUACHEN_ROWS, pinned),
+                    declare(PAIRED_ROWS[8:10], pinned, columns=PAIRED_COLUMNS)]
+    expected = [merged_without_memo(declaration, latest) for declaration in declarations]
+    # Not vacuous: the latest requirements do mark 华南区域's budget an estimate in every run that has it.
+    assert all(by_row(merged)[index]['estimate'] for merged, index in zip(expected, (9, 9, 1)))
+    assert not by_row(declarations[0])[9]['estimate']
+
+    import foundry.finance_requirement_semantics as semantics
+    monkeypatch.setattr(semantics, 'verified_requirement_fingerprint', lambda analysis, record: 'f' * 64)
+    matched = []
+    declared_sources = result_semantics._declared_sources
+    monkeypatch.setattr(result_semantics, '_declared_sources',
+                        lambda requirements, fields: matched.append(fields) or declared_sources(requirements, fields))
+    runs = [{'id': str(index), 'row_declarations': declaration} for index, declaration in enumerate(declarations)]
+
+    read = result_semantics.declared_runs(None, runs, latest)
+
+    current = {'id': latest['id'], 'fingerprint': 'f' * 64}
+    assert [run['row_declarations'] for run in read] == [{**merged, 'current_requirements': current}
+                                                          for merged in expected]
+    distinct = {json.dumps(entry['fields'], sort_keys=True) for declaration in declarations
+                for entry in declaration['rows']}
+    assert sum(len(declaration['rows']) for declaration in declarations) > len(distinct)
+    assert len(matched) == len(distinct)
+
+
 def test_pairs_follow_the_result_areas_skip_rules():
     group = HUACHEN_ROWS[:4]
     # Two actuals for one comparison: that bucket is left unpaired, the others still pair.

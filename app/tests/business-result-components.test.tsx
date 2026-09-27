@@ -967,6 +967,47 @@ describe('result rows by declaration, inference and unit', () => {
     expect(within(card).getByText('营业收入 1-8 月实际')).toBeTruthy();
     expect(within(card).queryByText(/推断/)).toBeNull();
   });
+
+  // One declared comparison with an approved budget row beside an estimated one. The backend pairs it even when the
+  // approved row has no value, so the budget shown is picked by value, as the inference does for older runs.
+  const withEstimatedBudget = (budget: string | null) => {
+    const measures = ['actual', 'budget', 'estimated_budget'] as const;
+    const scenarios = ['actual_1_8', 'budget_1_8', 'estimated_budget_1_8'];
+    const labels = ['营业收入 1-8 月实际', '营业收入 1-8 月预算', '营业收入 1-8 月估算预算'];
+    const values = ['1000.0000', budget, '800.0000'];
+    const rows = scenarios.map((scenario, index) => ({ ...row('revenue', '西部区域', scenario, '', '万元', labels[index]), value: values[index] }));
+    const entries = measures.map((measure, index) => ({ ...declaration.rows[4], row: index, fields: {}, role: measure === 'estimated_budget' ? 'budget' : measure,
+      organization: '西部区域', value: values[index], scope_label: labels[index], estimate: measure === 'estimated_budget', estimate_sources: [] }));
+    const pair = { ...declaration.pairs![1], organization: '西部区域', members: { actual: 0, budget: 1, estimated_budget: 2 },
+      estimate: { estimated: true, measures: ['estimated_budget'] }, conclusion: null };
+    return declaredRun({ row_count: 3, warnings: [], rows: entries, pairs: [pair] } as Partial<Declarations>, rows);
+  };
+  const businessTable = () => {
+    const table = screen.getByRole('table', { name: '业务结果' });
+    const headers = within(table).getAllByRole('columnheader').map((cell) => cell.textContent);
+    const cells = within(table).getAllByRole('cell').map((cell) => cell.textContent);
+    return { headers, row: Object.fromEntries(headers.map((header, index) => [header, cells[index]])) };
+  };
+
+  it.each([['null', null], ['empty', '']])('reads the estimate as 预算（估算） when the declared approved budget beside it is %s', (_, budget) => {
+    render(<BusinessResultView run={withEstimatedBudget(budget)} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getAllByText('800.00').map((node) => node.previousSibling?.textContent)).toEqual(['预算（估算）']);
+    expect(within(card).queryByText('预算')).toBeNull();
+    // The table's one budget column holds the estimate its row reads against, 依据 估算, as an estimate-only comparison
+    // always has; no 同期预算（估算） column beside it makes that figure read as an approved budget.
+    const { headers, row: shown } = businessTable();
+    expect(headers).not.toContain('同期预算（估算）');
+    expect(shown).toMatchObject({ 实际: '1,000.00', 同期预算: '800.00', 依据: '估算' });
+  });
+
+  it('keeps a declared approved budget as 预算 and shows the estimated one beside it', () => {
+    render(<BusinessResultView run={withEstimatedBudget('900.0000')} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getByText('900.00').previousSibling?.textContent).toBe('预算');
+    expect(within(card).getByText('800.00').previousSibling?.textContent).toBe('预算（估算）');
+    expect(businessTable().row).toMatchObject({ 同期预算: '900.00', '同期预算（估算）': '800.00' });
+  });
 });
 
 // The backend's conclusion sentences (R6, KTD7): shown above the KPI cards as they were written, with their 脚本结果

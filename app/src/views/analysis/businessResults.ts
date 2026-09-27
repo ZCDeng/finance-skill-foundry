@@ -559,6 +559,8 @@ function declaredPairing(run: AnalysisRun, declarations: RowDeclarations): LongP
     const value = (measure: PairMeasure): unknown => entry(measure)?.value ?? undefined;
     const label = (measure: PairMeasure): string | undefined => entry(measure)?.scope_label ?? undefined;
     if (!nonEmpty(value('actual'))) return [];
+    // The budget shown is picked by value: an approved row with none leaves the estimate beside it as the budget.
+    const approved = nonEmpty(value('budget'));
     const estimated = new Set<PairMeasure>([...(pair.estimate?.measures ?? []),
       ...members.filter(([measure, index]) => measure === 'estimated_budget' || entries.get(index)?.estimate).map(([measure]) => measure)]);
     const rate = (['rate', 'rate_pct'] as const).find((measure) => entry(measure));
@@ -577,12 +579,12 @@ function declaredPairing(run: AnalysisRun, declarations: RowDeclarations): LongP
         ...(nonEmpty(pair.organization) ? { region: pair.organization } : {}),
         period: pair.period,
         actual: value('actual'),
-        same_period_budget: value('budget') ?? value('estimated_budget'),
+        same_period_budget: approved ? value('budget') : value('estimated_budget'),
         // Only when the budget shown is itself the estimate; an approved budget beside an estimate stays 预算.
-        same_period_budget_estimated: entry('budget') ? estimated.has('budget') : Boolean(entry('estimated_budget')),
+        same_period_budget_estimated: approved ? estimated.has('budget') : nonEmpty(value('estimated_budget')),
         ...(label('actual') ? { actual_label: label('actual') } : {}),
         ...(label('budget') ?? label('estimated_budget') ? { budget_label: label('budget') ?? label('estimated_budget') } : {}),
-        ...(entry('budget') && entry('estimated_budget') ? { estimated_same_period_budget: value('estimated_budget') } : {}),
+        ...(approved && nonEmpty(value('estimated_budget')) ? { estimated_same_period_budget: value('estimated_budget') } : {}),
         variance: value('variance'),
         attainment_rate: rate && rateField === 'attainment_rate' ? value(rate) : undefined,
         ...(rate && rateField === 'attainment_pct' ? { attainment_pct: value(rate) } : {}),
