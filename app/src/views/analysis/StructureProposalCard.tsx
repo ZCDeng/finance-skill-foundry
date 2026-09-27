@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, FileSpreadsheet, RotateCcw, X } from 'lucide-react';
-import { bridge, type Answer } from '../../bridge.js';
+import { bridge } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { Input } from '../../components/ui/input.js';
+import { scenarioLabel } from './glossary.js';
+import { errorText, unwrap } from './shared.js';
 
 /** One column of a sheet, as the engine read it. */
 export interface ProposedColumn {
@@ -153,6 +155,12 @@ function applyBlock(sheet: ProposedSheet, blockId: string): ProposedSheet {
   };
 }
 
+function blockLabel(block: ProposedTableBlock, index: number): string {
+  const area = `${block.start_column}${block.start_row}:${block.end_column}${block.end_row}`;
+  const header = block.header_row ? `表头第 ${block.header_row} 行` : '表头未定';
+  return `区域 ${index + 1} · ${area} · ${header}`;
+}
+
 function markRepairable(sheet: ProposedSheet): ProposedSheet {
   return { ...sheet, blocked_reason: null, reason: null };
 }
@@ -201,12 +209,12 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
     const api = bridge(); if (!api?.financeCall) return;
     setWorking(true); setError('');
     try {
-      unwrapAnswer(await api.financeCall(taskId, 'structure-proposal-confirm', {
+      unwrap(await api.financeCall(taskId, 'structure-proposal-confirm', {
         dataset_id: proposal.dataset_id, revision: proposal.revision, sheets: selected,
       }));
       await onSettled();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking(false);
     }
@@ -265,9 +273,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
               <select id={`block-${sheet.sheet}`} disabled={locked}
                 value={sheet.selected_block_id ?? ''}
                 onChange={(event) => edit(sheet.sheet, (current) => applyBlock(current, event.target.value))}>
-                {sheet.table_blocks.map((block) => (
+                {sheet.table_blocks.map((block, index) => (
                   <option key={block.id} value={block.id}>
-                    {block.id} · {block.start_column}{block.start_row}:{block.end_column}{block.end_row}
+                    {blockLabel(block, index)}
                   </option>
                 ))}
               </select>
@@ -414,7 +422,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
             标题读到：期间 {sheet.scope_hints.period || '未声明'} · 单位 {sheet.scope_hints.unit || '未声明'} · 币种 {sheet.scope_hints.currency || '未声明'}
             {sheet.scope_hints.granularity ? ` · 粒度 ${sheet.scope_hints.granularity}` : ''}
             {sheet.scope_hints.as_of_date ? ` · 基准日 ${sheet.scope_hints.as_of_date}` : ''}
-            {sheet.scope_hints.scenario ? ` · 口径 ${sheet.scope_hints.scenario}` : ''}
+            {sheet.scope_hints.scenario ? ` · 情景 ${scenarioLabel(sheet.scope_hints.scenario)}` : ''}
             {sheet.scope_hints.forecast ? ` · 预测 ${sheet.scope_hints.forecast}` : ''}
           </p>
           {undecided(sheet) && (
@@ -486,10 +494,10 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
     const api = bridge(); if (!api?.financeCall) return;
     setWorking(command); setError('');
     try {
-      unwrapAnswer(await api.financeCall(taskId, command, { id: confirmation.id }));
+      unwrap(await api.financeCall(taskId, command, { id: confirmation.id }));
       await onSettled();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking('');
     }
@@ -520,9 +528,4 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
       </div>
     </section>
   );
-}
-
-function unwrapAnswer<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value;
 }

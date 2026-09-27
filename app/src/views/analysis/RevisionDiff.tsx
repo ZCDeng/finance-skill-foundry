@@ -1,5 +1,5 @@
 import type { AnalysisRun } from '../../bridge.js';
-import { businessColumnLabel, columnSemantics, compareBusinessRuns, formatBusinessValue } from './businessResults.js';
+import { businessColumnLabel, columnSemantics, compareBusinessRuns, formatBusinessValue, type RevisionValueComparison } from './businessResults.js';
 
 type BackendRevisionIssue = {
   code?: string;
@@ -25,18 +25,21 @@ type RevisionEvidence = {
   unresolved_issues?: { code?: string; severity?: string; message?: string }[];
 };
 
-export function RevisionDiff({ current, previous, currentRevision, previousRevision, comparison, evidence }: {
+export function RevisionDiff({ current, previous, currentRevision, previousRevision, comparison, evidence, tablesBelow = false }: {
   current: AnalysisRun;
   previous?: AnalysisRun;
   currentRevision?: number | string;
   previousRevision?: number | string;
   comparison?: BackendRevisionComparison;
   evidence?: RevisionEvidence;
+  /** The two runs' own result tables follow this diff, so an unaligned comparison can send the reader there. */
+  tablesBelow?: boolean;
 }) {
   const hasBackendComparison = Boolean(comparison);
   const backendIssues = comparison?.issues ?? [];
-  const changes = hasBackendComparison ? [] : compareBusinessRuns(current, previous);
-  if (!previous && !hasBackendComparison) return <p className="analysis-note">暂无可比较的上一版业务结果。</p>;
+  const local = hasBackendComparison ? undefined : compareBusinessRuns(current, previous);
+  const changes = local?.changes ?? [];
+  if (!previous && !hasBackendComparison) return <p className="analysis-note">暂无可比较的上一版结果。</p>;
   return <section className="analysis-revision-diff" aria-label="修订差异">
     <div className="analysis-section-heading">
       <div><h4>修订差异</h4><p className="analysis-note">基于稳定业务身份比较，不按行号推断。</p></div>
@@ -48,7 +51,7 @@ export function RevisionDiff({ current, previous, currentRevision, previousRevis
         {changes.map((change, index) => <article key={`${change.identity}:${change.field}:${index}`} className="analysis-history-row analysis-history-row--static">
           <span>{change.label}</span><span>{change.field}</span><span>{change.before} → {change.after}</span>
         </article>)}
-      </div> : <p className="analysis-note">可比较指标没有发现数值变化。</p>}
+      </div> : <p className="analysis-note">{noChangeNote(local!, tablesBelow)}</p>}
     {evidence?.affected_claims?.length ? <details className="analysis-details"><summary>受影响结论 · {evidence.affected_claims.length} 项</summary>
       {evidence.affected_claims.map((claim, index) => <p key={claim.id ?? index}>{claim.label ?? claim.id ?? `结论 ${index + 1}`}：{claim.message ?? '需要按当前修订复核。'}</p>)}
     </details> : null}
@@ -56,6 +59,13 @@ export function RevisionDiff({ current, previous, currentRevision, previousRevis
       {evidence.unresolved_issues.map((issue, index) => <p key={`${issue.code ?? 'issue'}:${index}`}>{issue.message ?? issue.code ?? '仍需复核'}</p>)}
     </details> : null}
   </section>;
+}
+
+// "Nothing changed" holds only when every row of both results was lined up by business identity.
+function noChangeNote({ comparedRows, resultRows }: RevisionValueComparison, tablesBelow: boolean): string {
+  if (comparedRows > 0 && comparedRows >= resultRows) return '可比较指标没有发现数值变化。';
+  const unaligned = comparedRows === 0 ? '两次结果没有可对齐的指标' : '两次结果有部分行没有可对齐的指标';
+  return `${unaligned}，${tablesBelow ? '请直接对照下方两张结果表。' : '无法据此判断数值是否变化。'}`;
 }
 
 function BackendComparisonBody({ comparison, issues }: { comparison: BackendRevisionComparison; issues: BackendRevisionIssue[] }) {
@@ -68,15 +78,15 @@ function BackendComparisonBody({ comparison, issues }: { comparison: BackendRevi
     </div>;
   }
   if (status === 'no_comparable_runs') {
-    return <p className="analysis-note">后端没有找到可比较运行；未回退到本地行序或字段猜测。</p>;
+    return <p className="analysis-note">没有找到可以比较的上一次计算；系统不会按行序或字段名猜测对应关系。</p>;
   }
   if (status === 'no_parent') {
-    return <p className="analysis-note">后端没有找到上一版修订，无法生成修订差异。</p>;
+    return <p className="analysis-note">没有找到上一版修订，无法生成修订差异。</p>;
   }
   if (status === 'ambiguous' || status === 'revision_comparison_ambiguous') {
-    return <p className="analysis-note">后端判定可比较范围存在歧义；未回退到本地行序或字段猜测。</p>;
+    return <p className="analysis-note">两次计算的可比范围有歧义，无法自动对应；系统不会按行序或字段名猜测。</p>;
   }
-  return <p className="analysis-note">后端比较完成：{comparedCountText(comparison)}未发现需要处理的修订差异。</p>;
+  return <p className="analysis-note">比较完成：{comparedCountText(comparison)}未发现需要处理的修订差异。</p>;
 }
 
 function comparisonSummary(comparison?: BackendRevisionComparison): string {
@@ -98,7 +108,7 @@ function statusLabel(status: string): string {
     needs_attention: '需要处理',
     pass: '已比较',
     no_parent: '无上版',
-    no_comparable_runs: '无可比运行',
+    no_comparable_runs: '无可比计算',
     ambiguous: '比较歧义',
     revision_comparison_ambiguous: '比较歧义',
   } as Record<string, string>)[status] ?? status;

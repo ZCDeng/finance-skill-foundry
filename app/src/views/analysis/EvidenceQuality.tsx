@@ -11,7 +11,7 @@ export interface EvidenceIssue {
 }
 type SourceRange = { dataset_id: string; source_hash?: string; sheet: string; range: string };
 const dimensions = [
-  ['execution', '运行', '运行成功', '尚未运行'],
+  ['execution', '计算', '计算成功', '尚未计算'],
   ['numeric_citation', '数字引用', '引用值一致', '尚未检查引用'],
   ['source_validation', '源数据核验', '源数据核验通过', '尚未独立核验'],
   ['professional_review', '专业复核', '已专业复核', '待专业复核'],
@@ -19,7 +19,7 @@ const dimensions = [
 const messages: Record<string, string> = {
   uncited_number: '正文数字尚未关联计算依据', missing_required_fact: '关键事实尚未引用',
   missing_dataset_citation: '资料来源尚未关联', unknown_fact: '引用已不属于当前计算结果',
-  claim_value_mismatch: '引用值与运行结果不一致', revision_numeric_regression: '新修订改变了既有业务数值',
+  claim_value_mismatch: '引用值与计算结果不一致', revision_numeric_regression: '新修订改变了既有业务数值',
   requirement_estimated: '估算：来源区域 × 系数区域推算，非源表直接数；经理确认前不计为已回答',
   // The server message also tells the assistant which requirements_id a revision must name.
   requirements_changed: '分析范围已更新，请按当前要求复核文稿。',
@@ -34,7 +34,7 @@ function sources(value: unknown): SourceRange[] {
 }
 function statusText(key: typeof dimensions[number][0], status: string | undefined, success: string, pending: string): string {
   if (['pass', 'passed', 'succeeded', 'verified', 'reviewed', 'approved'].includes(status ?? '')) return success;
-  if (['needs_attention', 'mismatch', 'failed', 'error', 'issues', 'rejected'].includes(status ?? '')) return key === 'execution' ? '运行未成功' : '需要复核';
+  if (['needs_attention', 'mismatch', 'failed', 'error', 'issues', 'rejected'].includes(status ?? '')) return key === 'execution' ? '计算未成功' : '需要复核';
   return pending;
 }
 /** The four verification dimensions that are not done yet, in words; empty when all four passed. */
@@ -58,7 +58,7 @@ export function EvidenceDimensionList({ dimensions: values, stale = false, cavea
         {values?.[key]?.message && <p className="analysis-note">{values[key]?.message}</p>}
       </div>)}
     </dl>
-    {caveat && <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>}
+    {caveat && <p className="analysis-note">计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>}
   </>;
 }
 export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false, showDimensions = true }: {
@@ -84,7 +84,7 @@ export function EvidenceQuality({ taskId, dimensions: values, issues, stale = fa
     {showDimensions && <EvidenceDimensionList dimensions={values} stale={stale} />}
     {[...groups].sort(([, a], [, b]) => priority(a.issues[0]) - priority(b.issues[0])).map(([key, group]) => <details className="analysis-details" key={key}>
       <summary>{group.title ? `${group.title}：` : ''}{group.issues[0].origin === 'claim_binding' ? '引用绑定 · ' : group.issues[0].origin === 'generated_appendix' ? '自动附表 · ' : ''}{group.issues[0].severity === 'error' ? '需修正 · ' : ''}{group.message} · {group.issues.length} 条原始问题</summary>
-      <p className="analysis-note">{group.sources.size ? '先核对来源区域，再修正计算或引用并重检。' : '核对当前运行和引用；原始问题保留在下方，便于逐项处理。'}</p>
+      <p className="analysis-note">{group.sources.size ? '先核对来源区域，再修正计算或引用并重检。' : '核对当前计算和引用；原始问题保留在下方，便于逐项处理。'}</p>
       {group.issues[0].old_value != null && group.issues[0].new_value != null && <p>原值 {String(group.issues[0].old_value)} → 新值 {String(group.issues[0].new_value)}</p>}
       {[...group.sources].map(([sourceKey, source]) => <Button variant="outline" key={sourceKey} type="button" onClick={() => setSelected(source)}>
         查看源区域 {source.sheet}!{source.range}

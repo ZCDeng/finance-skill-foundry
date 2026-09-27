@@ -11,10 +11,10 @@ import {
   type TaskRow,
   bytes,
   isWorkbook,
-  shortSha,
   when,
 } from '../bridge.js';
 import { draftStateText } from './analysis/presentation.js';
+import { TechnicalInfo } from './analysis/TechnicalInfo.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -136,25 +136,11 @@ export function Deliverables({
           </div>
         </dl>
         {/* Session, size and digest place a version for whoever audits the store; they fold. */}
-        <details className="analysis-details">
-          <summary>技术信息</summary>
-          <dl className="fnd-doc__meta">
-            <div className="fnd-doc__pair">
-              <dt>会话</dt>
-              <dd>{open.row.session_id ?? '无会话'}</dd>
-            </div>
-            <div className="fnd-doc__pair">
-              <dt>大小</dt>
-              <dd>{bytes(open.row.bytes)}</dd>
-            </div>
-            <div className="fnd-doc__pair">
-              <dt>摘要</dt>
-              <dd className="fnd-sha" title={open.row.sha256}>
-                {shortSha(open.row.sha256)}
-              </dd>
-            </div>
-          </dl>
-        </details>
+        <TechnicalInfo rows={[
+          ['会话', open.row.session_id ?? '无会话'],
+          ['大小', bytes(open.row.bytes)],
+          ['摘要', open.row.sha256],
+        ]} />
         {/*
           * The export lives here because this is the screen named 交付物 and
           * this is where an operator looking for one arrives. It was only on
@@ -299,7 +285,7 @@ export function Deliverables({
                     type="button"
                     className="fnd-linkish"
                     onClick={() => onOpen(task, row)}
-                    aria-label={`打开 ${task.title} 的${KIND_LABEL[row.kind]} ${shortSha(row.sha256)}`}
+                    aria-label={`打开 ${task.title} 的${KIND_LABEL[row.kind]} 第 ${row.seq} 版`}
                   >
                     {isWorkbook(row) ? (
                       <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />

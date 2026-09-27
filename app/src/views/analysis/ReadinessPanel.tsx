@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { CircleCheck, CircleSlash, ClipboardList, RefreshCw } from 'lucide-react';
 import { bridge, type Answer, type ReadinessDataset, type ReadinessReport } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
+import { scenarioLabel } from './glossary.js';
+import { errorText } from './shared.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 
 const CAPABILITY_LABELS: Record<string, string> = {
   management_pnl: '管理损益',
@@ -11,7 +14,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   cash_13_weeks: '十三周现金',
 };
 const REASON_LABELS: Record<string, string> = {
-  missing_scope: '口径没声明齐',
+  missing_scope: '范围没声明齐',
   identity_failed: '表头没声明期间和币种',
   mapping_incomplete: '管理科目没映射全',
   pending_structure: '表结构等经理确认',
@@ -21,7 +24,8 @@ const FIELD_LABELS: Record<string, string> = {
   period: '期间',
   currency: '币种',
   unit: '单位',
-  ledger: '账套',
+  scenario: '情景',
+  ledger: '账簿',
   organization: '组织',
   management_account: '管理科目',
   table_structure: '表结构',
@@ -34,13 +38,19 @@ const fields = (names: string[]) => names.map((name) => label(FIELD_LABELS, name
 /** What the file declares, written the way she would say it. */
 function scopeLine(row: ReadinessDataset): string {
   const scope = row.scope ?? ({} as ReadinessDataset['scope']);
+  const scenario = (scope as ReadinessDataset['scope'] & { scenario?: string }).scenario;
   const parts = [
     scope.period && `期间 ${scope.period}`,
     scope.unit && `单位 ${scope.unit}`,
     scope.currency && `币种 ${scope.currency}`,
     scope.organization && `组织 ${scope.organization}`,
+    scenario && `情景 ${scenarioLabel(scenario)}`,
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : '标题里没读到口径';
+  return parts.length ? parts.join(' · ') : '标题里没读到范围';
+}
+
+function datasetLabel(row: ReadinessDataset, index: number): string {
+  return row.name || `资料 ${index + 1}`;
 }
 
 /**
@@ -66,7 +76,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
       if (!answer.ok) throw new Error(answer.message);
       setReport(answer.value ?? null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking(false);
     }
@@ -80,8 +90,10 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
   const ready = report?.can_run ?? [];
   const blocked = report?.blocked ?? [];
   const perFile = report?.datasets ?? [];
-  const named = (id?: string) =>
-    perFile.find((row) => row.dataset_id === id)?.name || '这份资料';
+  const named = (id?: string) => {
+    const index = perFile.findIndex((row) => row.dataset_id === id);
+    return index >= 0 ? datasetLabel(perFile[index], index) : '这份资料';
+  };
 
   return (
     <section className="fnd-card analysis-readiness-card">
@@ -121,15 +133,18 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
           {perFile.length > 0 && (
             <table className="analysis-readiness-table">
               <caption className="analysis-note">
-                每份文件各自声明的口径。空着的格子表示标题和数据里都没有这一项。
+                每份文件各自声明的范围。空着的格子表示标题和数据里都没有这一项。
               </caption>
               <thead>
-                <tr><th scope="col">资料</th><th scope="col">读到的口径</th><th scope="col">还缺</th><th scope="col">能算</th></tr>
+                <tr><th scope="col">资料</th><th scope="col">读到的范围</th><th scope="col">还缺</th><th scope="col">能算</th></tr>
               </thead>
               <tbody>
-                {perFile.map((row) => (
+                {perFile.map((row, index) => (
                   <tr key={row.dataset_id}>
-                    <th scope="row">{row.name || String(row.dataset_id ?? '').slice(0, 8)}</th>
+                    <th scope="row">
+                      {datasetLabel(row, index)}
+                      <TechnicalInfo rows={[['资料编号', row.dataset_id]]} />
+                    </th>
                     <td>{scopeLine(row)}</td>
                     <td>{row.missing_fields?.length ? fields(row.missing_fields) : '—'}</td>
                     <td>
@@ -144,8 +159,8 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
           )}
 
           <p className="analysis-note">
-            文件身份策略：{report.file_identity_policy === 'business_key' ? '按业务键比对' : '按快照整份替换'}
-            {report.erp_connected ? '' : ' · 未接外部账套，数字全部来自这些文件'}
+            {report.erp_connected ? '' : '未接外部账套，数字全部来自这些文件。'}
+            文件更新时{report.file_identity_policy === 'business_key' ? '按业务键逐行比对' : '整份替换'}。
           </p>
         </>
       )}

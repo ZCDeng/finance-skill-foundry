@@ -260,7 +260,7 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     fireEvent.click(screen.getByRole('button', { name: '插入空白提纲' }));
     const next = handlers.onDocument.mock.calls.at(-1)?.[0] as ReportDocument;
     expect(next.content.filter((node) => node.type === 'heading').map((node) => node.content?.[0]?.text)).toEqual([
-      '报告信息', '管理摘要', '经营与预算分析', '现金流与周转', '风险及行动', '财务表格', '口径与证据附注',
+      '报告信息', '管理摘要', '经营与预算分析', '现金流与周转', '风险及行动', '财务表格', '范围与证据附注',
     ]);
     expect(documentToMarkdown(next)).not.toContain('自动');
   });
@@ -502,7 +502,7 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     fireEvent.click(screen.getByText('费用'));
     fireEvent.click(screen.getByRole('button', { name: '改成开票口径' }));
-    expect(await screen.findByText('请先给表加上标题再圈选改口径。')).toBeTruthy();
+    expect(await screen.findByText('请先给表加上标题再圈选调整。')).toBeTruthy();
     expect(financeCall).not.toHaveBeenCalled();
   });
 

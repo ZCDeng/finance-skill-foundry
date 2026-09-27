@@ -134,7 +134,7 @@ describe('the deliverable gallery', () => {
     expect(technical.open).toBe(false);
     expect(within(technical).getByText('无会话')).toBeTruthy();
     expect(within(technical).getByText('8.2 KB')).toBeTruthy();
-    expect(within(technical).getByText('cccccccccccc')).toBeTruthy();
+    expect(within(technical).getByText('c'.repeat(64))).toBeTruthy();
   });
 });
 
@@ -703,7 +703,9 @@ describe('reading a deliverable', () => {
       />,
     );
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
-    expect(screen.getByText('cccccccccccc')).toBeTruthy();
+    const technical = screen.getByText('技术信息').closest('details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(within(technical).getByText('c'.repeat(64))).toBeTruthy();
     expect(screen.getByText('本期结论稿')).toBeTruthy();
   });
 
@@ -802,7 +804,9 @@ describe('a workbook version', () => {
       />,
     );
     expect(screen.getByText('export:xlsx')).toBeTruthy();
-    expect(screen.getByText('dddddddddddd')).toBeTruthy();
+    const technical = screen.getByText('技术信息').closest('details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(within(technical).getByText('d'.repeat(64))).toBeTruthy();
   });
 
   it('reads a row with no ext as the markdown it is', () => {
@@ -1070,7 +1074,7 @@ describe('looking at a workbook without leaving the window', () => {
       />,
     );
     // One look per workbook; the markdown row beside it gets none.
-    const looks = screen.getAllByRole('button', { name: /^预览 / });
+    const looks = screen.getAllByRole('button', { name: /^预览第 / });
     expect(looks).toHaveLength(1);
     fireEvent.click(looks[0]);
     expect(asked).toEqual([`${BOOK.sha256}.xlsx`]);
@@ -1082,19 +1086,28 @@ describe('looking at a workbook without leaving the window', () => {
     // operator accepted a server that lives only while the strip does.
     const { PreviewBar } = await import('../src/views/Preview.js');
     let closed = 0;
+    const technicalOpen = vi.fn();
     render(
       <PreviewBar
         preview={{ task: TASK.id, sha256: BOOK.sha256, origin: 'http://127.0.0.1:9081' }}
         task={TASK}
+        onTechnicalOpenChange={technicalOpen}
         onClose={() => {
           closed += 1;
         }}
       />,
     );
     expect(screen.getByText('2026-08 月度经营分析')).toBeTruthy();
-    expect(screen.getByText('dddddddddddd')).toBeTruthy();
-    expect(screen.getByText(/http:\/\/127\.0\.0\.1:9081/)).toBeTruthy();
     expect(screen.getByText(/不落盘/)).toBeTruthy();
+    const technical = screen.getByText('技术信息').closest('details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    fireEvent.click(screen.getByText('技术信息'));
+    technical.open = true;
+    fireEvent(technical, new Event('toggle'));
+    expect(technicalOpen).toHaveBeenLastCalledWith(true);
+    expect(within(technical).getByText(TASK.id)).toBeTruthy();
+    expect(within(technical).getByText(BOOK.sha256)).toBeTruthy();
+    expect(within(technical).getByText('http://127.0.0.1:9081')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /关闭预览/ }));
     expect(closed).toBe(1);
   });

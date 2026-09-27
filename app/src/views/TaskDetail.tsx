@@ -16,9 +16,9 @@ import {
   type WindowRow,
   bytes,
   isWorkbook,
-  shortSha,
   when,
 } from '../bridge.js';
+import { TechnicalInfo } from './analysis/TechnicalInfo.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -48,9 +48,9 @@ function Inputs({ window: row }: { window: WindowRow }) {
         <thead>
           <tr>
             <th>表</th>
-            <th>归档副本</th>
             <th className="fnd-num">大小</th>
             <th>导入时的来源</th>
+            <th>技术信息</th>
           </tr>
         </thead>
         <tbody>
@@ -60,7 +60,6 @@ function Inputs({ window: row }: { window: WindowRow }) {
                 {input.role}
                 {input.derived_from ? <span className="fnd-muted">{` 由 ${input.derived_from} 推出`}</span> : null}
               </td>
-              <td className="fnd-sha">{input.archived}</td>
               <td className="fnd-num">{bytes(input.bytes)}</td>
               {/*
                 * The operator's own path, kept for recognition only. Nothing
@@ -69,6 +68,7 @@ function Inputs({ window: row }: { window: WindowRow }) {
                 * and the window still answers for itself.
                 */}
               <td className="fnd-muted">{input.origin_path ?? ''}</td>
+              <td><TechnicalInfo rows={[['归档副本', input.archived]]} /></td>
             </tr>
           ))}
         </tbody>
@@ -140,11 +140,12 @@ export function TaskDetail({
                   <span className="fnd-title">{REASON_LABEL[row.reason]}</span>
                   <span className="fnd-muted">{row.state}</span>
                   <span className="fnd-muted">{when(row.at)}</span>
-                  <span className="fnd-sha">{shortSha(row.window_id)}</span>
+                  <span className="fnd-muted">第 {detail.windows.findIndex((item) => item.window_id === row.window_id) + 1} 个窗口</span>
                 </span>
               </button>
               {openWindow === row.window_id ? (
                 <div className="fnd-panel" style={{ marginTop: 10 }}>
+                  <TechnicalInfo rows={[['窗口编号', row.window_id]]} />
                   {/*
                     * First inside the panel, and that placement is the fix for
                     * a measured problem rather than a preference. It used to
@@ -180,10 +181,10 @@ export function TaskDetail({
                           <th>#</th>
                           <th>类型</th>
                           <th>成因</th>
-                          <th>会话</th>
                           <th>时间</th>
                           <th className="fnd-num">大小</th>
-                          <th>摘要</th>
+                          <th>打开</th>
+                          <th>技术信息</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -192,7 +193,6 @@ export function TaskDetail({
                             <td className="fnd-num">{version.seq}</td>
                             <td>{isWorkbook(version) ? '表格' : KIND_LABEL[version.kind]}</td>
                             <td>{version.cause}</td>
-                            <td className="fnd-muted">{version.session_id ?? '无会话'}</td>
                             <td>{when(version.at)}</td>
                             <td className="fnd-num">{bytes(version.bytes)}</td>
                             <td>
@@ -209,11 +209,11 @@ export function TaskDetail({
                                 // which version, and say where it opens.
                                 aria-label={
                                   isWorkbook(version)
-                                    ? `在表格软件里打开 ${shortSha(version.sha256)}`
-                                    : `打开 ${shortSha(version.sha256)}`
+                                    ? `在表格软件里打开第 ${version.seq} 版交付物`
+                                    : `打开第 ${version.seq} 版交付物`
                                 }
                               >
-                                {shortSha(version.sha256)}
+                                {isWorkbook(version) ? '在表格软件里打开' : '打开'}
                               </button>
                               {/*
                                 * The look, beside the handoff. A workbook row
@@ -226,13 +226,18 @@ export function TaskDetail({
                                   className="fnd-head__tab"
                                   onClick={() => onPreview(version.sha256, version.ext ?? '.xlsx')}
                                   disabled={previewing === version.sha256}
-                                  aria-label={`预览 ${shortSha(version.sha256)}`}
+                                  aria-label={`预览第 ${version.seq} 版交付物`}
                                 >
                                   <Eye size={12} strokeWidth={1.5} aria-hidden />
                                   {previewing === version.sha256 ? ' 装进预览…' : ' 预览'}
                                 </button>
                               ) : null}
                             </td>
+                            <td><TechnicalInfo rows={[
+                              ['会话', version.session_id ?? '无会话'],
+                              ['摘要', version.sha256],
+                              ['窗口编号', version.window_id],
+                            ]} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -263,9 +268,9 @@ export function TaskDetail({
               <div key={session.session_id} className="fnd-panel">
                 <span className="fnd-row">
                   <span className="fnd-title">{ROLE_LABEL[session.role]}</span>
-                  <span className="fnd-sha">{session.session_id}</span>
                   <span className="fnd-muted">{when(session.opened_at)}</span>
                 </span>
+                <TechnicalInfo rows={[['会话编号', session.session_id]]} />
                 {/*
                   * The leader's own wording, when the operator wrote it down. It
                   * is deliberately not the `text` a model passed to

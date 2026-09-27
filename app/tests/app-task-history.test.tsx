@@ -116,16 +116,67 @@ describe('task history response ownership', () => {
     expect(screen.getByText('bbbbbb · locked')).toBeTruthy();
   });
 
+
+
+  it('ignores a workbook preview that returns after selecting another task', async () => {
+    const latePreview = deferred<Answer<{ task: string; sha256: string; origin: string }>>();
+    const workbookDetail = (row: TaskRow): TaskDetail => ({
+      ...detail(row),
+      deliverables: detail(row).deliverables.map((item) => ({ ...item, ext: '.xlsx' })),
+    });
+    const taskRead = vi.fn<Bridge['task']>((id) => Promise.resolve(ok(workbookDetail(id === a.id ? a : b))));
+    const previewOpen = vi.fn<NonNullable<Bridge['previewOpen']>>((id) => id === a.id
+      ? latePreview.promise
+      : Promise.resolve(ok({ task: b.id, sha256: '2'.repeat(64), origin: 'http://127.0.0.1:9002' })));
+    const previewClose = vi.fn<NonNullable<Bridge['previewClose']>>(async () => ok({ stopped: true }));
+    const api = mount({ task: taskRead, previewOpen, previewClose });
+    await openInitialHistory();
+    fireEvent.click(await screen.findByRole('button', { name: '预览第 1 版交付物' }));
+    await waitFor(() => expect(previewOpen).toHaveBeenCalledWith(a.id, '1'.repeat(64), '.xlsx'));
+
+    await openBHistory();
+    await act(async () => latePreview.resolve(ok({ task: a.id, sha256: '1'.repeat(64), origin: 'http://127.0.0.1:9001' })));
+
+    expect(screen.queryByText('表格预览')).toBeNull();
+    expect(screen.getByRole('heading', { name: b.title })).toBeTruthy();
+    expect(previewClose).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.paneVisible!).mock.calls.map(([value]) => value)).not.toContain('preview');
+  });
+
+  it('can open a later preview after an earlier preview request rejects', async () => {
+    const workbookDetail = (row: TaskRow): TaskDetail => ({
+      ...detail(row),
+      deliverables: detail(row).deliverables.map((item) => ({ ...item, ext: '.xlsx' })),
+    });
+    const taskRead = vi.fn<Bridge['task']>((id) => Promise.resolve(ok(workbookDetail(id === a.id ? a : b))));
+    const previewOpen = vi.fn<NonNullable<Bridge['previewOpen']>>((id) => id === a.id
+      ? Promise.reject(new Error('preview gateway failed'))
+      : Promise.resolve(ok({ task: b.id, sha256: '2'.repeat(64), origin: 'http://127.0.0.1:9002' })));
+    const api = mount({ task: taskRead, previewOpen });
+    await openInitialHistory();
+    fireEvent.click(await screen.findByRole('button', { name: '预览第 1 版交付物' }));
+    expect(await screen.findAllByText('preview gateway failed')).not.toHaveLength(0);
+
+    await openBHistory();
+    fireEvent.click(await screen.findByRole('button', { name: '预览第 1 版交付物' }));
+
+    expect(await screen.findByText('表格预览')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '西南回款' })).toBeTruthy();
+    expect(screen.queryAllByText('preview gateway failed')).toHaveLength(0);
+    expect(previewOpen).toHaveBeenCalledWith(b.id, '2'.repeat(64), '.xlsx');
+    expect(vi.mocked(api.paneVisible!).mock.calls.map(([value]) => value)).toContain('preview');
+  });
+
   it('keeps B document visible when the document read started on A arrives late', async () => {
     const textA = deferred<Answer<string>>();
     const deliverableText = vi.fn<Bridge['deliverableText']>((id) => id === a.id
       ? textA.promise : Promise.resolve(ok('西南回款的结论正文')));
     mount({ deliverableText });
     await openInitialHistory();
-    fireEvent.click(await screen.findByRole('button', { name: `打开 ${'1'.repeat(12)}` }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开第 1 版交付物' }));
     expect(deliverableText).toHaveBeenCalledWith(a.id, '1'.repeat(64));
     await openBHistory();
-    fireEvent.click(screen.getByRole('button', { name: `打开 ${'2'.repeat(12)}` }));
+    fireEvent.click(screen.getByRole('button', { name: '打开第 1 版交付物' }));
     expect(await screen.findByText('西南回款的结论正文')).toBeTruthy();
 
     await act(async () => textA.resolve(ok('华东利润的迟到正文')));

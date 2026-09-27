@@ -532,7 +532,7 @@ describe('business result presentation', () => {
         truncated: false,
       },
     });
-    expect(compareBusinessRuns(current, previous)).toEqual([{
+    expect(compareBusinessRuns(current, previous).changes).toEqual([{
       identity: 'other_gains',
       label: '其他收益',
       field: '同期预算',

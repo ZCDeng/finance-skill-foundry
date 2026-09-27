@@ -38,7 +38,10 @@ const assert = require('node:assert/strict');
   const task = cli('task-new', ['--title', '华东八月经营分析', '--period', '2026-08']);
   const file = qa + '/华东经营数据.csv';
   fs.writeFileSync(file, '区域,收入,成本,费用\n华东,1280.00,820.00,190.00\n华南,960.00,650.00,160.00\n华北,830.00,590.00,155.00\n');
-  const dataset = cli('dataset-add', ['--path', file, '--name', '八月经营数据', '--meta', JSON.stringify({ period: '2026-08', unit: '万元', currency: 'CNY' })], task.id);
+  const dataset = cli('dataset-add', ['--path', file, '--name', '八月经营数据', '--meta', JSON.stringify({
+    period: '2026-08', organization: '华东', unit: '万元', currency: 'CNY', scenario: 'actual', ledger: '经营总账',
+    scope_hints: { period: '2026-08', organization: '华东', unit: '万元', currency: 'CNY', scenario: 'actual', ledger: '经营总账', granularity: '区域' },
+  })], task.id);
   const spec = { question: '总部费用分摊后的区域经营利润', bindings: { actual: dataset.id },
     sql: 'SELECT 区域, 收入, 成本, 费用, 收入-成本-费用-CAST($overhead AS DECIMAL(38,2)) AS 经营利润 FROM actual',
     parameters: { overhead: '20.00' }, parameter_metadata: [{ key: 'overhead', label: '总部费用分摊', type: 'decimal', unit: '万元', role: 'business', constraints: { min: '0', max: '100' } }],
@@ -109,11 +112,36 @@ const assert = require('node:assert/strict');
       if (await expandTasks.isVisible()) await expandTasks.click();
       await page.locator('.workspace-task').filter({ hasText: title }).click();
     };
+    const fieldValue = async (label, rootLocator = page) => {
+      const control = rootLocator.getByLabel(label, { exact: true });
+      const tag = await control.evaluate(node => node.tagName.toLowerCase());
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return control.inputValue();
+      return control.locator('span').first().innerText();
+    };
+    const scopeDisplay = (label, value) => ({ 单位: { 万元: '万元 · 管理报表常用' }, 币种: { 人民币: '人民币 · CNY' }, 情景: { 实际: '实际 · 账面发生数' } })[label]?.[value] ?? value;
+    const assertScopeFields = async (prefix, expected) => {
+      for (const [label, value] of Object.entries(expected)) assert.equal(await fieldValue(`${prefix}${label}`), scopeDisplay(label, value), `${prefix}${label} shows ${value}`);
+    };
+    const assertPlainScopeFields = async (expected, rootLocator = page) => {
+      for (const [label, value] of Object.entries(expected)) assert.equal(await fieldValue(label, rootLocator), scopeDisplay(label, value), `${label} shows ${value}`);
+    };
+    const chooseOption = async (label, option, rootLocator = page) => {
+      await rootLocator.getByLabel(label, { exact: true }).click();
+      const escaped = option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      await page.getByRole('option', { name: new RegExp(`^${escaped}(\\s|$)`) }).click();
+    };
+    const reloadWorkspace = async () => {
+      await page.reload();
+      await page.waitForLoadState('domcontentloaded');
+      await page.locator('.workspace-header').waitFor();
+      await page.waitForFunction(async () => { const result = await window.foundry.harnessStatus(); return result.ok && result.value.wiring.state === 'ready'; }, undefined, { timeout: 45000 });
+      await page.waitForFunction(() => !document.querySelector('.workspace-connection'));
+    };
     // R12 first screen: each seeded result, opened at 1280 × 800, shows its answer without scrolling, above the
     // finance settings, and its visible text holds no ids, scenario codes or raw column names.
     const measureFirstScreen = (forbidden) => page.evaluate((forbidden) => {
       const pane = document.querySelector('#analysis-panel-results'), scroller = document.querySelector('.workspace-results');
-      const box = node => { if (!node) return null; const rect = node.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
+      const box = node => { if (!node?.checkVisibility()) return null; const rect = node.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
       // Text a reader sees: rendered, outside closed <details> (their summary stays), not a closed select's other options.
       const folded = text => { for (let child = text, node = text.parentElement; node; child = node, node = node.parentElement) {
         if (node.tagName === 'DETAILS' && !node.open && child.nodeName !== 'SUMMARY') return true; if (node === pane) return false; } return false; };
@@ -129,7 +157,7 @@ const assert = require('node:assert/strict');
       const hits = seen.flatMap(({ text, where }) => patterns.flatMap(([kind, pattern]) => [...text.matchAll(pattern)].map(match => ({ kind, match: match[0], text: text.trim().slice(0, 80), where }))));
       const frame = scroller.getBoundingClientRect();
       return { viewport: [innerWidth, innerHeight], visibleTop: Math.max(0, frame.top), visibleBottom: Math.min(innerHeight, frame.bottom), scrollTop: scroller.scrollTop, pageScrollTop: document.scrollingElement.scrollTop,
-        conclusion: box(pane.querySelector('.analysis-result .analysis-headline')), card: box(pane.querySelector('.analysis-result .analysis-kpi-card')), settings: box(pane.querySelector('[aria-label="财务分析设置"]')),
+        conclusion: box(pane.querySelector('.analysis-result .analysis-headline')), card: box(pane.querySelector('.analysis-result .analysis-kpi-card')), settings: box(pane.querySelector('[role="dialog"][aria-label="设置与高级"]')),
         cardNotes: [...pane.querySelectorAll('.analysis-kpi-card')].map(card => ({ notes: card.querySelector('.analysis-kpi-notes')?.textContent ?? '', inferred: card.textContent.includes('推断') })), hits };
     }, forbidden);
     if (phases.includes('first-screen')) for (const [kind, seeded] of Object.entries(firstScreen)) {
@@ -160,10 +188,82 @@ const assert = require('node:assert/strict');
         if (kind === 'declared') assert.ok(seen.cardNotes.every(card => !card.inferred), name + ' no card says 推断');
       }
       checks.push(`first screen at 1280 × 800, light and dark: ${seeded.title} shows its ${kind === 'finance' ? 'conclusion bar' : 'key figures'} unscrolled, above any settings, with no technical names${kind === 'legacy' ? ', cards marked 推断' : kind === 'declared' ? ', no card marked 推断' : ''}`);
+      if (kind === 'finance') {
+        const raw = page.locator('.analysis-finance-variance > details.analysis-technical');
+        assert.equal(await raw.count(), 1, 'variance has one raw technical information block');
+        assert.equal(await raw.getAttribute('open'), null, 'raw information starts closed');
+        assert.equal(await raw.getByRole('table', { name: '原始计算结果' }).isVisible(), false, 'raw table is hidden');
+        await raw.locator('summary').click();
+        assert.equal(await raw.locator('details').count(), 0, 'raw results and diagnostics have no nested disclosure');
+        await raw.getByRole('table', { name: '原始计算结果' }).waitFor();
+        const savedRun = cli('analysis-state', [], seeded.task).runs.find(row => row.id === seeded.run);
+        const exactActual = savedRun.result.rows[0].actual;
+        assert.equal(typeof exactActual, 'string', 'finance amount remains a Decimal string');
+        assert.ok((await raw.innerText()).includes(exactActual), 'raw table retains the exact saved decimal');
+        await capture('variance-technical-1280', 1280, 800);
+        await raw.locator('summary').click();
+        checks.push('variance raw results and diagnostics share one default-closed TechnicalInfo; expansion keeps exact Decimal values');
+        await page.getByRole('button', { name: '调整范围', exact: true }).click();
+        const financeSettings = page.getByRole('dialog', { name: '设置与高级', exact: true });
+        await financeSettings.waitFor();
+        assert.equal(await page.getByRole('dialog', { name: '设置与高级', exact: true }).count(), 1, 'one settings drawer');
+        await assertPlainScopeFields({ 期间: '2026-08', 组织: '华东公司', 单位: '万元' }, financeSettings);
+        await financeSettings.getByRole('region', { name: '计算定义', exact: true }).waitFor();
+        await capture('finance-settings-light-1280', 1280, 800);
+        await capture('finance-settings-dark-1080', 1080, 800, true);
+        await financeSettings.getByLabel('组织', { exact: true }).fill('未保存组织');
+        await page.keyboard.press('Escape');
+        assert.equal(await financeSettings.isVisible(), false, 'Escape closes settings');
+        assert.equal(await page.getByRole('button', { name: '调整范围', exact: true }).evaluate(node => node === document.activeElement), true, 'Escape returns focus to 调整范围');
+        await page.getByRole('button', { name: '打开设置与高级', exact: true }).click();
+        await financeSettings.waitFor();
+        assert.equal(await fieldValue('组织', financeSettings), '未保存组织', 'closing and reopening preserves unfinished scope edits');
+        await page.keyboard.press('Escape');
+        checks.push('调整范围 opens one drawer with the selected calculation scope and definition; Escape restores trigger focus and reopening keeps unsaved edits');
+      }
     }
     if (!phases.includes('workspace')) { console.log(JSON.stringify(writeEvidence({}))); return; }
     await openTask('华东八月经营分析');
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
+    await page.getByRole('tab', { name: /资料/ }).click();
+    await page.getByRole('region', { name: '分析范围' }).waitFor();
+    await page.getByRole('region', { name: '分析范围' }).scrollIntoViewIfNeeded();
+    await capture('scope-candidates-1280', 1280, 800);
+    for (const [label, value] of Object.entries({ 期间: '2026-08', 组织: '华东', 单位: '万元', 币种: 'CNY', 情景: 'actual' })) {
+      const adopt = page.getByRole('button', { name: `采用资料里的${label} ${value}`, exact: true });
+      if (label === '情景') assert.equal(await adopt.innerText(), '实际', 'scenario suggestion shows its business label');
+      await adopt.click();
+    }
+    await chooseOption('分析范围单位', '万元');
+    await chooseOption('分析范围币种', '人民币');
+    await chooseOption('分析范围情景', '实际');
+    await assertScopeFields('分析范围', { 期间: '2026-08', 组织: '华东', 单位: '万元', 币种: '人民币', 情景: '实际' });
+    await page.getByRole('region', { name: '分析范围' }).getByText('更多范围').click();
+    await page.getByRole('button', { name: '采用资料里的账簿 经营总账', exact: true }).click();
+    await page.getByRole('button', { name: '采用资料里的粒度 区域', exact: true }).click();
+    await assertScopeFields('分析范围', { 账簿: '经营总账', 粒度: '区域' });
+    await page.getByRole('button', { name: '保存范围', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '已保存分析范围，旧版本仍保留。' }).waitFor({ timeout: 20000 });
+    const savedRequirements = cli('analysis-requirements-list', ['--spec', '{}'], task.id).current;
+    assert.deepEqual(savedRequirements.scope, { period: '2026-08', organization: '华东', unit: '万元', currency: 'CNY', scenario: 'actual', ledger: '经营总账', granularity: '区域' });
+    await capture('scope-confirmed-1280', 1280, 800);
+    await page.getByRole('tab', { name: /分析结果/ }).click();
+    await page.getByRole('button', { name: '打开设置与高级', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: '设置与高级', exact: true });
+    await settings.waitFor();
+    await assertPlainScopeFields({ 期间: '2026-08', 组织: '华东', 单位: '万元' }, settings);
+    await settings.getByText('更多范围').click();
+    await assertPlainScopeFields({ 币种: '人民币', 情景: '实际', 账簿: '经营总账' }, settings);
+    await reloadWorkspace();
+    await openTask('华东八月经营分析');
+    await page.getByRole('tab', { name: /资料/ }).click();
+    await page.getByRole('region', { name: '分析范围' }).waitFor();
+    await assertScopeFields('分析范围', { 期间: '2026-08', 组织: '华东', 单位: '万元', 币种: '人民币', 情景: '实际' });
+    await page.getByRole('region', { name: '分析范围' }).getByText('更多范围').click();
+    await assertScopeFields('分析范围', { 账簿: '经营总账', 粒度: '区域' });
+    await page.getByRole('tab', { name: /分析结果/ }).click();
+    await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
+    checks.push('真实合成资料 metadata/scope_hints 一键采用为分析范围；保存写入 requirements，结果页设置与高级同步，重载后持久化');
     await capture('results-1440', 1440, 900);
     await capture('results-1280', 1280, 800);
     // The whole 业务结果 table sits inside the visible part of the results pane, unscrolled.
@@ -197,14 +297,46 @@ const assert = require('node:assert/strict');
     checks.push('ERP refresh starts collapsed; hovered and focused ledger field keeps its neutral border under one 1px inset --fnd-focus outline, light and dark');
     await page.getByText('更新 ERP 来源', { exact: true }).click();
     await page.getByRole('tab', { name: /分析结果/ }).click();
-    await page.getByText('口径与计算定义', { exact: true }).click();
-    await page.getByLabel('总部费用分摊（万元）', { exact: true }).fill('30.00');
+    await page.getByRole('button', { name: '打开设置与高级', exact: true }).click();
+    await settings.waitFor();
+    await settings.getByLabel('总部费用分摊（万元）', { exact: true }).fill('30.00');
+    await capture('calculation-settings-1280', 1280, 800);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '打开设置与高级', exact: true }).click();
+    assert.equal(await settings.getByLabel('总部费用分摊（万元）', { exact: true }).inputValue(), '30.00', 'parameter edits survive closing the drawer');
     await page.getByRole('button', { name: '保存新版并重跑', exact: true }).click();
     await page.getByRole('table', { name: '业务结果' }).getByRole('cell', { name: '240.00', exact: true }).waitFor({ timeout: 20000 });
+    await settings.waitFor({ state: 'hidden' });
+    assert.equal(await settings.isVisible(), false, 'successful SQL calculation closes settings and shows its result');
+    const rerunState = cli('analysis-state', [], task.id);
+    const latestRun = rerunState.runs.at(-1);
+    assert.ok(latestRun?.id && latestRun?.output_hash, 'rerun state includes exact run id and output hash for technical verification');
+    const history = page.locator('details.analysis-history');
+    const historySummary = await history.locator('summary').first().innerText();
+    assert.equal(rerunState.runs.length, 2, 'the task keeps both saved calculations');
+    assert.equal(historySummary, '计算历史 · 结果 1', 'history is scoped to the selected analysis version');
+    assert.equal(historySummary.includes('活动'), false, 'history summary uses manager-facing labels');
+    if (await history.getAttribute('open') === null) await history.locator('summary').first().click();
+    assert.equal(await history.locator('.analysis-history-row').filter({ hasText: '中间步骤' }).count(), 0, 'business calculation history does not list middle steps as results');
+    assert.equal(await history.locator('.analysis-history-steps').count(), 0, 'no synthetic middle steps were mocked into the fixture');
     await page.locator('.workspace-results').evaluate(node => { node.scrollTop = 0; });
     checks.push('named decimal parameter saves a new version and changes actual result 250 → 240');
     await page.getByRole('button', { name: '查看本次计算依据' }).click();
     await capture('evidence-1280', 1280, 800);
+    const evidence = page.getByRole('dialog', { name: '本次计算依据' });
+    const technical = evidence.locator('details.analysis-technical');
+    assert.ok(await technical.count() >= 2, 'evidence exposes source and run technical info blocks');
+    assert.equal(await technical.evaluateAll(nodes => nodes.every(node => !node.hasAttribute('open'))), true, 'technical info is collapsed by default');
+    const foldedEvidenceText = await evidence.innerText();
+    assert.equal(foldedEvidenceText.includes(dataset.id), false, 'folded evidence hides exact dataset id');
+    assert.equal(foldedEvidenceText.includes(latestRun.id), false, 'folded evidence hides exact run id');
+    for (let index = 0, count = await technical.count(); index < count; index += 1) await technical.nth(index).locator('summary').click();
+    const expandedEvidenceText = await evidence.innerText();
+    assert.ok(expandedEvidenceText.includes(dataset.id), 'expanded technical info shows the exact dataset id');
+    assert.ok(expandedEvidenceText.includes(latestRun.id), 'expanded technical info shows the exact run id');
+    assert.ok(expandedEvidenceText.includes(latestRun.output_hash), 'expanded technical info shows the exact output hash');
+    await capture('technical-expanded-1280', 1280, 800);
+    checks.push('计算历史 uses 结果/未完成 wording; 技术信息 is default-collapsed, then reveals exact dataset/run/hash identifiers on demand');
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('button', { name: '查看本次计算依据' }).evaluate(node => node === document.activeElement), true);
     await page.getByRole('button', { name: '查看本次计算依据' }).click();
@@ -212,18 +344,37 @@ const assert = require('node:assert/strict');
     // The snapshot opens in the 依据资料 preview on the results tab, naming the dataset version the run bound.
     const preview = page.getByRole('region', { name: '依据资料预览' });
     await preview.getByRole('heading', { name: '八月经营数据', exact: true }).waitFor();
-    assert.ok((await preview.locator('details').first().textContent()).includes(`资料版本：${dataset.id}`), 'preview names the bound snapshot');
+    assert.ok((await preview.locator('.analysis-technical').textContent()).includes(dataset.id), 'preview names the bound snapshot');
     checks.push('run alias opens the exact source snapshot in the 依据资料 preview');
     await page.getByRole('tab', { name: /分析结果/ }).click();
     const closeEvidence = page.getByRole('button', { name: '关闭计算依据' });
     if (await closeEvidence.isVisible()) await closeEvidence.click();
     await page.getByRole('button', { name: '比较版本', exact: true }).click();
-    const comparison = page.getByLabel('对照运行');
+    const comparison = page.getByLabel('对照结果');
     await comparison.selectOption({ index: 1 });
     await page.getByRole('table', { name: '对照版本数据' }).waitFor();
     await page.getByRole('table', { name: '对照版本数据' }).scrollIntoViewIfNeeded();
     await capture('comparison-1440', 1440, 900);
     checks.push('saved runs compare and evidence closes with Escape returning focus');
+    await page.getByText('保存这次分析方法', { exact: true }).click();
+    await page.getByLabel('方法名称', { exact: true }).fill('区域利润分摊方法');
+    await page.getByRole('button', { name: '保存为方法', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '已保存方法，可在方法库中复用。' }).waitFor();
+    const expandForMethods = page.getByRole('button', { name: '展开任务列表' });
+    if (await expandForMethods.isVisible()) await expandForMethods.click();
+    await page.locator('.workspace-library').click();
+    const savedMethod = page.locator('.analysis-method').filter({ hasText: '区域利润分摊方法' });
+    await savedMethod.waitFor();
+    const methodAdvanced = savedMethod.locator('details');
+    assert.equal(await methodAdvanced.getAttribute('open'), null, 'method definitions are initially hidden');
+    assert.equal(await methodAdvanced.locator('pre').isVisible(), false);
+    assert.equal(await savedMethod.getByLabel('总部费用分摊（万元）', { exact: true }).inputValue(), '', 'saved business values are not silently reused');
+    await capture('method-library-1280', 1280, 800);
+    await methodAdvanced.locator('summary').click();
+    assert.ok((await methodAdvanced.innerText()).includes('SELECT'), 'the saved SQL stays accessible');
+    await capture('method-library-advanced-dark-1080', 1080, 800, true);
+    await page.getByRole('tab', { name: /分析结果/ }).click();
+    checks.push('method library separates business parameters from the collapsed calculation definition and does not reuse saved amounts');
     // 文稿 (DraftEditor + ReportEditor): a saved draft opens in 阅读 mode inside the 文稿工作区, its toolbar saying
     // 文稿 · 草稿 · 未阅, the Markdown rendered as a document at the 16px/28px reading size with 18px after each paragraph.
     await page.getByRole('tab', { name: /文稿/ }).click();
@@ -247,6 +398,16 @@ const assert = require('node:assert/strict');
     await capture('draft-1440', 1440, 900);
     await capture('draft-dark-1280', 1280, 800, true);
     checks.push('saved draft opens in 阅读 with its revision state, rendered Markdown and 16px/28px reading type');
+    const references = page.locator('details').filter({ has: page.locator('summary').filter({ hasText: /^引用的计算与依据 · 1 次计算$/ }) }).last();
+    await references.locator(':scope > summary').click();
+    assert.ok((await references.innerText()).includes('引用计算 1'), 'draft references use readable ordinals');
+    assert.equal((await references.innerText()).includes(run.id), false, 'the saved run id is hidden');
+    const referenceTechnical = references.locator('details.analysis-technical');
+    await referenceTechnical.locator('summary').click();
+    assert.ok((await referenceTechnical.innerText()).includes(run.id), 'technical information shows the exact draft reference');
+    await capture('draft-references-1280', 1280, 800);
+    await references.locator(':scope > summary').click();
+    checks.push('draft references use ordinals with exact cited run ids under TechnicalInfo');
     // 编辑: the manager rewrites the body through the Markdown source field; the visual editor follows it and the
     // draft is marked changed (未阅, not rechecked) with the note that export saves it first.
     await modes.getByRole('tab', { name: '编辑', exact: true }).click();

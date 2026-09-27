@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
+import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
 import { STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
 import { runPresentationRole } from './analysis/businessResults.js';
-import { AnalysisScopeCard } from './analysis/AnalysisScopeCard.js';
+import { ScopePanel } from './analysis/ScopePanel.js';
+import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -22,7 +23,7 @@ import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './anal
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
-import { datasetSize, structureLabel, unwrap } from './analysis/shared.js';
+import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
 type Selection = { analysis?: string; draft?: string };
@@ -64,6 +65,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     setSelectedDraft(draftRequest.draftId);
   }, [draftRequest, task?.id]);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
+  const [scopeRefresh, setScopeRefresh] = useState(0);
+  // One scope per task, edited from the 资料 page and the finance settings alike.
+  const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
   // it started keeps going. One entry per task, so a run in another task neither
   // shows here nor unlocks this one.
@@ -91,7 +95,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   }, [onSectionChange]);
   useEffect(() => { if (section) setTab(section === 'materials' ? 'datasets' : section); }, [section]);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
-  const refresh = useCallback(async (taskId: string) => {
+  const refresh = useCallback(async (taskId: string, options?: { scope?: boolean }) => {
     // A completed operation may belong to a task the manager has left. It must
     // not invalidate an in-flight read for the newly selected task.
     if (currentTask.current !== taskId) return;
@@ -99,7 +103,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     const api = bridge();
     if (!api?.analysisState) throw new Error('此版本未连接分析服务。资料与成果尚未读取。');
     const value = unwrap(await api.analysisState(taskId));
-    if (active.current && currentTask.current === taskId && request === readVersion.current) setState(value);
+    if (active.current && currentTask.current === taskId && request === readVersion.current) {
+      setState(value);
+      if (options?.scope) setScopeRefresh((version) => version + 1);
+    }
   }, []);
   useEffect(() => {
     const selection = readCopy<Selection>(`${task?.id}:selection`);
@@ -117,7 +124,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     const taskId = task.id;
     setLoading(true);
     void refresh(taskId).catch((failure: unknown) => {
-      if (active.current && currentTask.current === taskId) setError(String(failure instanceof Error ? failure.message : failure));
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
     }).finally(() => { if (active.current && currentTask.current === taskId) setLoading(false); });
   }, [task?.id, refresh]);
   useEffect(() => {
@@ -128,8 +135,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     if (!visible || previous.visible || previous.taskId !== task?.id || !task) return;
     const taskId = task.id;
     setLoading(true);
-    void refresh(taskId).catch((failure: unknown) => {
-      if (active.current && currentTask.current === taskId) setError(failure instanceof Error ? failure.message : String(failure));
+    void refresh(taskId, { scope: true }).catch((failure: unknown) => {
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
     }).finally(() => { if (active.current && currentTask.current === taskId) setLoading(false); });
   }, [visible, task?.id, refresh]);
   useEffect(() => {
@@ -139,7 +146,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       if (!operation.current && document.visibilityState !== 'hidden') {
-        try { await refresh(taskId); }
+        try { await refresh(taskId, { scope: true }); }
         catch { /* Keep the last readable results. Explicit refresh reports actionable failures. */ }
       }
       if (!cancelled) timer = setTimeout(() => void poll(), 5000);
@@ -148,13 +155,14 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     return () => { cancelled = true; clearTimeout(timer); };
   }, [visible, task?.id, refresh]);
 
-  async function perform(work: (taskId: string) => Promise<void>) {
+  async function perform(work: (taskId: string) => Promise<void>, options?: { rethrow?: boolean }) {
     if (!task || operation.current) return;
     const taskId = task.id;
     operation.current = true; setBusy(true); setError(''); setNotice('');
     try { await work(taskId); }
     catch (failure) {
-      if (active.current && currentTask.current === taskId) setError(failure instanceof Error ? failure.message : String(failure));
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
+      if (options?.rethrow) throw failure;
     } finally { operation.current = false; if (active.current) setBusy(false); }
   }
   // Timed from the click, but main takes off the minutes the file dialog stood open.
@@ -172,7 +180,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   /** Runs a saved analysis and reads the page back even if the run fails; the wait ends after the read-back. */
   async function runSaved(taskId: string, id: string, note: (outcome: 'ok', run: unknown) => void) {
     const api = bridge(); if (!api?.analysisRun) throw new Error('此版本暂不支持计算。');
-    try { note('ok', unwrap(await api.analysisRun(taskId, id))); } finally { await refresh(taskId); }
+    try {
+      const run = unwrap(await api.analysisRun(taskId, id));
+      if (run.execution_status === 'succeeded' || run.execution_status === 'success') note('ok', run);
+      else throw new Error(textValue(run.error ?? '计算失败'));
+    } finally { await refresh(taskId); }
   }
   useEffect(() => {
     if (busy || operation.current || !pendingStart.current?.taskId) return;
@@ -200,7 +212,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         submit: !pending.withFiles, requestId: pending.requestId, targetTaskId: pending.taskId,
       });
     } catch (failure) {
-      if (currentTask.current === pending.taskId) setError(failure instanceof Error ? failure.message : String(failure));
+      if (currentTask.current === pending.taskId) setError(errorText(failure));
     } finally { operation.current = false; if (active.current) setBusy(false); }
   }
   async function create(withFiles = false) {
@@ -218,7 +230,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       }
       if (pendingStart.current?.taskId) submission.current.taskId = pendingStart.current.taskId;
     }
-    catch (failure) { pendingStart.current = null; setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { pendingStart.current = null; setError(errorText(failure)); }
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   async function chat(prompt?: string, draftId?: string) {
@@ -229,7 +241,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       await handoff(prompt, draftId, retry && retry.taskId === task?.id && retry.question === prompt
         ? { submit: retry.submit, requestId: retry.requestId, targetTaskId: retry.taskId } : undefined);
     }
-    catch (failure) { if (active.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { if (active.current) setError(errorText(failure)); }
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   const view = state?.task_id === task?.id ? state : null;
@@ -259,8 +271,32 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       writeCopy(`${task?.id}:selection`, { ...readCopy<Selection>(`${task?.id}:selection`), draft: draft.id });
     }
   }, [draftKey, draft?.id]);
+  const analysisDefinition = (onSaved?: () => void) => analysis ? (analysis.sql ? <AnalysisEditor key={`${task?.id}:${analysis.id}`} analysis={analysis} datasets={view?.datasets ?? []} busy={busy}
+    edit={analysisEdits.current.get(analysisKey) ?? readCopy<AnalysisEdit>(analysisKey)} onEdit={rememberAnalysis}
+    onChat={(spec) => void perform(async (taskId) => {
+      let id = analysis.id;
+      if (spec) {
+        const api = bridge(); if (!api?.analysisSave) throw new Error('此版本暂不支持保存分析。');
+        const next = unwrap(await api.analysisSave(taskId, spec)); id = next.id;
+        analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
+        await refresh(taskId); if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(id);
+      }
+      await handoff(`请调整分析「${analysis.question}」的范围或假设。先读取分析版本 ${id}，保留之前结果。`, undefined, { targetTaskId: taskId });
+    })} onSave={(spec) => perform((taskId) => timeWait('analysis.run', async (note) => {
+      const api = bridge(); if (!api?.analysisSave || !api.analysisRun) throw new Error('此版本暂不支持保存并运行分析。');
+      const next = unwrap(await api.analysisSave(taskId, spec));
+      analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
+      if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(next.id);
+      // Save and run are distinct records; refresh the saved definition even if execution fails.
+      await runSaved(taskId, next.id, note);
+    }), { rethrow: true })} onSaved={onSaved} onRun={() => perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)), { rethrow: true })} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
+      <p className="analysis-note">{definitionCopy(analysis).note}</p>
+      {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
+      <details className="analysis-details"><summary>{definitionCopy(analysis).detailSummary}</summary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
+      <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
+    </div>) : null;
   const financeWorkbench = task && view && view.datasets.length > 0
-    ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
+    ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} scope={analysisScope}
       openRequest={scopeRequest} running={financeRunning[task.id] ?? ''} outcome={financeOutcome[task.id]}
       onRunning={(label, active) => setFinanceRunning((current) => {
         if (active) return { ...current, [task.id]: label };
@@ -274,7 +310,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         const { [task.id]: _cleared, ...rest } = current;
         return rest;
       })}
-      onRefresh={() => refresh(task.id)} />
+      onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
     drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
@@ -303,7 +339,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   return <div className="analysis-workspace">
     {!embedded && <header className="analysis-header">
       <div><h2>{task?.title ?? '从一个问题开始'}</h2>
-        <p className="analysis-note">{task ? '补充资料、调整口径，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
+        <p className="analysis-note">{task ? '补充资料、确认范围，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
       {tasks.length > 0 && <div className="analysis-task-controls"><SearchableSelect label="切换任务" ariaLabel="切换分析任务"
         value={task?.id ?? ''} disabled={busy} options={tasks.map((row) => ({ value: row.id, label: row.title, meta: when(row.created_at) }))}
         onChange={onPick} placeholder="搜索任务" />{task && <Button variant="outline" type="button" disabled={busy} onClick={() => onPick('')}>新建分析任务</Button>}</div>}
@@ -341,7 +377,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
             }}>{title}<span>{counts[id]}</span></TabsTrigger>
         ))}
-      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => void perform(refresh)}>
+      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => void perform((taskId) => refresh(taskId, { scope: true }))}>
         <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
@@ -349,7 +385,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'datasets' && <>
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3>{view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>}
-          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
+          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
@@ -367,7 +403,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          {bridge()?.financeCall && view.datasets.length > 0 && <AnalysisScopeCard taskId={task.id} question={task.title} datasets={view.datasets}
+          {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
@@ -378,12 +414,12 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
-          {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
+          {!analysis ? <Empty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
-              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)} · ${shortSha(row.id)}` }))}
-              onChange={setSelectedAnalysis} placeholder="搜索问题、时间或版本号" /></div>
+              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)}` }))}
+              onChange={setSelectedAnalysis} placeholder="搜索问题或时间" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
               onAdjustScope={financeWorkbench ? (run) => setScopeRequest((value) => ({ count: value.count + 1, contextId: run.finance_context_id ?? undefined })) : undefined}
@@ -411,44 +447,22 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             {dataset && <section aria-label="依据资料预览"><div className="analysis-section-heading"><h3>依据资料</h3>
               <Button variant="outline" type="button" onClick={() => setDataset(null)}>关闭资料预览</Button></div>
               <DatasetPreview source={dataset.source} content={dataset.content} /></section>}
-            {analysis.sql ? <AnalysisEditor key={`${task.id}:${analysis.id}`} analysis={analysis} datasets={view.datasets} busy={busy}
-              edit={analysisEdits.current.get(analysisKey) ?? readCopy<AnalysisEdit>(analysisKey)} onEdit={rememberAnalysis}
-              onChat={(spec) => void perform(async (taskId) => {
-                let id = analysis.id;
-                if (spec) {
-                  const api = bridge(); if (!api?.analysisSave) throw new Error('此版本暂不支持保存分析。');
-                  const next = unwrap(await api.analysisSave(taskId, spec)); id = next.id;
-                  analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
-                  await refresh(taskId); if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(id);
-                }
-                await handoff(`请调整分析「${analysis.question}」的口径或假设。先读取分析版本 ${id}，保留之前结果。`, undefined, { targetTaskId: taskId });
-              })} onSave={(spec) => void perform((taskId) => timeWait('analysis.run', async (note) => {
-                const api = bridge(); if (!api?.analysisSave || !api.analysisRun) throw new Error('此版本暂不支持保存并运行分析。');
-                const next = unwrap(await api.analysisSave(taskId, spec));
-                analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
-                if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(next.id);
-                // Save and run are distinct records; refresh the saved definition even if execution fails.
-                await runSaved(taskId, next.id, note);
-              }))} onRun={() => void perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)))} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
-                <p className="analysis-note">{definitionCopy(analysis).note}</p>
-                {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
-                <details className="analysis-details"><summary>{definitionCopy(analysis).detailSummary}</summary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
-                <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
-              </div>}
+            {!financeWorkbench && analysis ? <AnalysisSettingsFallback>{(close) => analysisDefinition(close)}</AnalysisSettingsFallback> : null}
 
           </>}
           {analysis && financeWorkbench}
         </>}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}
+            analysisScope={analysisScope}
             onAppliedDraft={(next) => void perform(async (taskId) => { await refresh(taskId); if (next.id) setSelectedDraft(next.id); })}
             onLocatorPreview={onLocatorPreview}
             versionPicker={view.drafts.length > 0 ? <SearchableSelect label="文稿版本" compact value={draft?.id ?? ''}
               triggerText={draft ? `修订 ${view.drafts.findIndex((row) => row.id === draft.id) + 1}${draft.id === view.drafts.at(-1)?.id ? ' · 最新' : ''}` : '选择文稿'}
               options={[...view.drafts].reverse().map((row) => ({
                 value: row.id ?? '', label: `修订 ${view.drafts.findIndex((item) => item.id === row.id) + 1} · ${row.title}`,
-                meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)} · ${row.id ? shortSha(row.id) : '未保存'}`,
-              }))} onChange={setSelectedDraft} placeholder="搜索标题、状态或版本号" /> : undefined}
+                meta: `${STATUS[row.publication_status] ?? row.publication_status} · ${when(row.created_at)}${row.id ? '' : ' · 未保存'}`,
+              }))} onChange={setSelectedDraft} placeholder="搜索标题或状态" /> : undefined}
             onChat={(spec) => void perform(async (taskId) => {
               const id = spec ? (await saveDraft(taskId, spec)).id : draft?.id;
               await handoff(undefined, id, spec ? { targetTaskId: taskId } : undefined);
@@ -469,10 +483,52 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');
             const next = unwrap(await api.analysisMethodApply(taskId, methodId, bindings, parameters)); await refresh(taskId);
-            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整口径后运行。'); }
+            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
           })} />}
       </section>
     </>}
+  </div>;
+}
+
+
+function AnalysisSettingsFallback({ children }: { children(close: () => void): ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const restoreFocusTo = useRef<HTMLElement | null>(null);
+  const focusAfterOpen = useRef(false);
+  function close() { setOpen(false); }
+  function toggle() {
+    if (open) { close(); return; }
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    restoreFocusTo.current = activeElement && activeElement !== document.body ? activeElement : trigger.current;
+    focusAfterOpen.current = true;
+    setOpen(true);
+  }
+  useEffect(() => {
+    if (!open || !focusAfterOpen.current) return;
+    focusAfterOpen.current = false;
+    dialog.current?.focus({ preventScroll: true });
+  }, [open]);
+  useEffect(() => {
+    if (open) return;
+    const previous = restoreFocusTo.current;
+    restoreFocusTo.current = null;
+    if (!previous) return;
+    const target = previous.isConnected ? previous : trigger.current;
+    target?.focus({ preventScroll: true });
+  }, [open]);
+  return <div className="analysis-finance-setup">
+    {!open ? <button ref={trigger} type="button" className="analysis-finance-setup-trigger" aria-expanded={open} aria-controls="analysis-finance-settings"
+      aria-label="打开设置与高级" onClick={toggle}>
+      <div className="analysis-section-heading"><h3>设置与高级</h3><span className="analysis-note">调整计算定义和高级参数。</span></div>
+    </button> : null}
+    {open ? <div id="analysis-finance-settings" ref={dialog} className="analysis-finance-setup-dialog" role="dialog" aria-modal="false" aria-label="设置与高级" tabIndex={-1}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
+      <div className="analysis-finance-setup-head analysis-section-heading"><div><h3>设置与高级</h3><p className="analysis-note">调整计算定义和高级参数。</p></div>
+        <Button variant="outline" type="button" aria-label="关闭设置与高级" onClick={close}>关闭</Button></div>
+      <div className="analysis-finance-setup-scroll">{children(close)}</div>
+    </div> : null}
   </div>;
 }
 
@@ -486,8 +542,8 @@ function definitionCopy(analysis: AnalysisRevision): { note: string; detailSumma
   }
   if (analysis.engine === 'finance') {
     const operation = analysis.operation ? FINANCE_OPERATION[analysis.operation] : undefined;
-    return { note: `这项分析由财务引擎按已保存的业务口径计算${operation ? `（${operation}）` : ''}，没有脚本。有来源的结果行可以在「结果行来源」里打开来源行。`,
-      detailSummary: '高级：查看计算口径', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
+    return { note: `这项分析由财务引擎按已保存的范围计算${operation ? `（${operation}）` : ''}，没有脚本。有来源的结果行可以在「结果行来源」里打开来源行。`,
+      detailSummary: '高级：计算定义', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
   }
   return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };
 }

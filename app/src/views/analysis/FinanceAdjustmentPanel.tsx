@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { bridge, type Answer } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { Button } from '../../components/ui/button.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 type FinanceAdjustment = {
   id: string;
@@ -38,7 +38,7 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
       return nextSelected;
     });
   }, [taskId, contextId]);
-  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  useEffect(() => { void load().catch((failure) => setError(errorText(failure))); }, [load]);
   const current = rows.filter((row) => !row.superseded_by);
   const confirmed = current.filter((row) => row.include_in_management_pnl);
   const pending = current.filter((row) => !row.include_in_management_pnl && !confirmed.some((item) => item.parent_id === row.id));
@@ -52,7 +52,7 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
       await load();
       await onRefresh();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setPendingId('');
     }
@@ -66,7 +66,7 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
       setMessage(ids.length ? '已按勾选调整重算考核利润。' : '已无调整重跑账面利润。');
       await onRefresh();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setRerunning(false);
     }

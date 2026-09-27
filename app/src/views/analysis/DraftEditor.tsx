@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MessageSquare } from 'lucide-react';
-import { bridge, type Answer, type AnalysisDraft, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
+import { bridge, when, type Answer, type AnalysisDraft, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 import { RunStatus, draftStateText, textValue } from './presentation.js';
 import { ClaimBindingRepair } from './ClaimBindingRepair.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { ReportEditor, type ReportDraftDocument } from './ReportEditor.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../../electron/reports/format.js';
 import { RequirementsPanel } from './RequirementsPanel.js';
+import type { AnalysisScope } from './scope.js';
 import { Button } from '../../components/ui/button.js';
 import { CompletionRecoveriesPanel, type FinanceCompletionRecovery } from './CompletionRecoveriesPanel.js';
 import { ExplanationQualityPanel, type ExplanationFact, type ExplanationQuality } from './ExplanationQualityPanel.js';
 import { FinanceBackgroundPanel, type FinanceBackground } from './FinanceBackgroundPanel.js';
 import { MaterialityFields, materialityScopeSummary, materialityToEdit, materialityToSpec, sameMateriality, type MaterialityEdit } from './MaterialityFields.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 export type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 type ReportMode = 'read' | 'edit' | 'print';
@@ -34,8 +36,9 @@ function readableDraftParts(body: string, appendix?: string): { body: string; ap
   return { body: trimmedBody.slice(0, trimmedBody.length - matchedAppendix.length).trimEnd(), appendix: variants[0] };
 }
 
-export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
+export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analysisScope, edit, onEdit, onSave, onExport, onChat, onDiscussRequirements, versionPicker, onLocatorPreview, onAppliedDraft }: {
   taskId: string; draft?: AnalysisDraft; drafts: AnalysisDraft[]; busy: boolean; runs: AnalysisRun[]; datasets: DatasetSnapshot[]; onSave(spec: Record<string, unknown>): void;
+  analysisScope?: AnalysisScope;
   edit?: DraftEdit; onEdit(edit: DraftEdit): void;
   onExport(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx', spec?: Record<string, unknown>, mode?: 'management' | 'audit'): void | Promise<void>; onChat(spec?: Record<string, unknown>): void;
   onDiscussRequirements(request: Record<string, unknown>): void;
@@ -129,7 +132,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
     } catch (failure) {
       if (request === recoveryRequest.current) {
         setRecoveries([]);
-        setRecoveryError(failure instanceof Error ? failure.message : String(failure));
+        setRecoveryError(errorText(failure));
       }
     }
   }, [taskId]);
@@ -172,7 +175,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
         setQuality(value);
         setQualityState(qualityStateFromResult(value));
       } else setQualityState('unavailable');
-    }).catch((failure) => { if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); } });
+    }).catch((failure) => { if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(errorText(failure)); } });
     void loadBackgrounds(bgRequest, defaultScope);
     return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
   }, [draft?.id, taskId]);
@@ -204,7 +207,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
     } catch (failure) {
-      if (request === qualityRequest.current) { setQuality(null); setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); }
+      if (request === qualityRequest.current) { setQuality(null); setQualityState('unavailable'); setToolError(errorText(failure)); }
     }
   }
   async function openFact(fact: ExplanationFact) {
@@ -214,7 +217,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       setToolError('');
       const result = unwrap(await api.financeCall(taskId, 'drilldown-fact', { run_id: fact.run_id, row: fact.row, ...(fact.column ? { column: fact.column } : {}), offset: 0, limit: 100 }) as Answer<FinanceDrilldown>);
       if (request === factRequest.current) setFactDetails((value) => ({ ...value, [fact.id]: result }));
-    } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === factRequest.current) setToolError(errorText(failure)); }
   }
   async function openLocator(fact: ExplanationFact) {
     const api = bridge();
@@ -297,7 +300,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       if (request !== backgroundRequest.current) return;
       setBackgroundMessage('已保存财务背景。'); setBackground({ ...background, label: '', text: '', paragraph: '', source: '', retrieved_at: '' });
       setBackgrounds((value) => [saved, ...value.filter((item) => item.id !== saved.id)]);
-    } catch (failure) { if (request === backgroundRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === backgroundRequest.current) setToolError(errorText(failure)); }
   }
   function markQualityStale() {
     qualityRequest.current += 1;
@@ -338,7 +341,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
     {bridge()?.financeCall && <details className="analysis-details analysis-requirements" open={requirementsOpen}
       onToggle={(event) => setRequirementsOpen((event.currentTarget as HTMLDetailsElement).open)}>
       <summary>本次分析要求</summary>
-      <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined}
+      <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined} analysisScope={analysisScope}
         onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
         onDiscuss={onDiscussRequirements} />
     </details>}
@@ -362,11 +365,20 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {draft && <details className="analysis-details"><summary>引用的计算与依据 · {draft.run_ids.length} 次运行</summary>
-      {draft.run_ids.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
-      {draft.run_ids.map((id) => { const run = runs.find((item) => item.id === id); return <div key={id}>
-        <p>{id}</p>{run ? <RunStatus run={run} /> : <p>此运行记录暂不可读取。</p>}</div>; })}
-      {draft.claims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</details>}
+    {(draft || recovery) && <details className="analysis-details"><summary>引用的计算与依据 · {effectiveRunIds.length} 次计算</summary>
+      {effectiveRunIds.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
+      {effectiveRunIds.map((id, index) => { const run = runs.find((item) => item.id === id); return <div key={id}>
+        <p>引用计算 {index + 1}{run ? ` · ${when(run.created_at)}` : ''}</p>
+        {run ? <RunStatus run={run} /> : <p>此计算记录暂不可读取。</p>}</div>; })}
+      <TechnicalInfo rows={[
+        ['文稿编号', recovery ? undefined : draft?.id],
+        ['恢复操作编号', recovery?.operation_id],
+        ...effectiveRunIds.map((id, index): [string, unknown] => [`引用计算 ${index + 1} 编号`, id]),
+      ]}>
+        {effectiveClaims.length > 0 && <><h4>原始引用记录 · {effectiveClaims.length} 条</h4>
+          {effectiveClaims.map((claim, index) => <p key={index}>{textValue(claim)}</p>)}</>}
+      </TechnicalInfo>
+    </details>}
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
     </section>
@@ -468,6 +480,6 @@ const LOCATOR_FAILURES: Record<string, string> = {
 };
 
 function locatorFailureText(failure: unknown): string {
-  const message = failure instanceof Error ? failure.message : String(failure);
+  const message = errorText(failure);
   return LOCATOR_FAILURES[message] ?? message;
 }

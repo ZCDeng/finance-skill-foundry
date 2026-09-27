@@ -153,8 +153,9 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
         rows={others} caption="其他结果" />}
     </div>
     <div className="analysis-actions">
-      {onSources ? <Button variant="outline" type="button" onClick={onSources}>查看来源与口径</Button> : null}
-      <details className="analysis-details"><summary>原始字段 · {run.result?.columns.length ?? 0} 列</summary>
+      {onSources ? <Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button> : null}
+      <details className="analysis-details"><summary>技术信息</summary>
+        <p className="analysis-note">原始字段 · {run.result?.columns.length ?? 0} 列</p>
         <Table key={`${run.id}:raw-business`} columns={run.result?.columns ?? []} rows={run.result?.rows ?? []} caption="原始计算结果" />
       </details>
     </div>

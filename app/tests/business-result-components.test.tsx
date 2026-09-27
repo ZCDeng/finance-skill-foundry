@@ -1,14 +1,26 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnalysisScopeCard } from '../src/views/analysis/AnalysisScopeCard.js';
+import { ScopePanel } from '../src/views/analysis/ScopePanel.js';
+import { useAnalysisScope } from '../src/views/analysis/scope.js';
 import { BusinessResultView } from '../src/views/analysis/BusinessResultView.js';
 import { RevisionDiff } from '../src/views/analysis/RevisionDiff.js';
-import type { AnalysisRun, Bridge } from '../src/bridge.js';
+import type { AnalysisRun, Bridge, DatasetSnapshot } from '../src/bridge.js';
 import huachenDeclared from './fixtures/huachen-row-declarations.json';
 
 const taskId = 't'.repeat(32);
-const dataset = { id: 'd'.repeat(32), name: '预算套表' };
+const dataset = { id: 'd'.repeat(32), name: '预算套表', kind: 'table', source_hash: 'h'.repeat(64), source_name: 'budget.xlsx', metadata: {} } as unknown as DatasetSnapshot;
+
+/** The 资料 page's scope card: the task's one scope, held by the hook and edited in the panel. */
+function ScopeCard({ task = taskId, question, datasets, onSaved }: { task?: string; question: string; datasets: DatasetSnapshot[]; onSaved?(): void }) {
+  const scope = useAnalysisScope(task, question, datasets);
+  return <ScopePanel scope={scope} datasetCount={datasets.length} onSaved={onSaved} />;
+}
+
+const choose = async (label: string, option: RegExp) => {
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  fireEvent.mouseDown(await screen.findByRole('option', { name: option }));
+};
 
 function run(rows: Record<string, unknown>[]): AnalysisRun {
   return {
@@ -54,15 +66,18 @@ describe('business result components', () => {
       question: '已保存的问题',
       scope: { period: '2026 YTD', unit: '万元', scenario: '待经理确认', custom_scope: '保留' },
       bindings: { budget_workbook: 'budget-dataset' },
+      context_id: 'ctx-existing',
       items: [{ id: 'req_9', metric: 'revenue', label: '收入', dimensions: { region: '集团' }, requires_drilldown: true }],
     };
     const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
       if (command === 'analysis-requirements-list') return ok({ current });
+      if (command === 'finance-readiness') return ok({});
       expect(command).toBe('analysis-requirements-save');
       expect(spec).toMatchObject({
         question: '已保存的问题',
         parent_id: current.id,
         bindings: current.bindings,
+        context_id: 'ctx-existing',
         items: current.items,
         scope: { period: '2026-08', unit: '万元', scenario: '待经理确认', organization: '集团', custom_scope: '保留' },
       });
@@ -72,30 +87,61 @@ describe('business result components', () => {
     });
     const onSaved = vi.fn();
     (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
-    render(<AnalysisScopeCard taskId={taskId} question="新的输入框问题" datasets={[dataset]} onSaved={onSaved} />);
+    render(<ScopeCard question="新的输入框问题" datasets={[dataset]} onSaved={onSaved} />);
     expect(await screen.findByDisplayValue('2026 YTD')).toBeTruthy();
-    expect(screen.getByDisplayValue('待经理确认')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-08' } });
-    fireEvent.change(screen.getByLabelText('组织'), { target: { value: '集团' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'next-scope-version' })));
+    // A saved value none of the fixed choices list is still shown, marked as the saved value.
+    expect(screen.getByRole('button', { name: '分析范围情景' }).textContent).toContain('待经理确认');
+    fireEvent.change(screen.getByLabelText('分析范围期间'), { target: { value: '2026-08' } });
+    fireEvent.change(screen.getByLabelText('分析范围组织'), { target: { value: '集团' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(screen.getByText('已保存分析范围，旧版本仍保留。')).toBeTruthy();
   });
 
   it('does not infer default period, unit, currency, scenario, bindings or profit requirements for a new task', async () => {
     const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
       if (command === 'analysis-requirements-list') return ok({ current: null });
+      if (command === 'finance-readiness') return ok({});
       expect(spec).toMatchObject({ question: '本次想问的问题', scope: {}, bindings: {}, items: [] });
       return ok({ id: 'blank-scope-version', question: '本次想问的问题', scope: {}, bindings: {}, items: [] });
     });
     (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
-    render(<AnalysisScopeCard taskId={taskId} question="本次想问的问题" datasets={[dataset]} />);
+    render(<ScopeCard question="本次想问的问题" datasets={[dataset]} />);
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-list', {}));
-    expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('');
-    expect((screen.getByLabelText('单位') as HTMLInputElement).value).toBe('');
-    expect((screen.getByLabelText('币种') as HTMLInputElement).value).toBe('');
-    expect((screen.getByLabelText('情景') as HTMLInputElement).value).toBe('');
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存分析口径，旧版本仍保留。');
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('');
+    for (const field of ['分析范围单位', '分析范围币种', '分析范围情景']) {
+      expect(screen.getByRole('button', { name: field }).textContent).toContain('待确认');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
+    await screen.findByText('已保存分析范围，旧版本仍保留。');
+    const saves = financeCall.mock.calls.filter(([, command]) => command === 'analysis-requirements-save');
+    expect(saves).toHaveLength(1);
+    expect(saves[0][2]?.scope).toEqual({});
+  });
+
+  it('offers the values the files declare as one click each', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'analysis-requirements-list') return ok({ current: null });
+      if (command === 'finance-readiness') return ok({ proposed_scope: { period: '2026-08', organization: '华东', scenario: 'actual', currency: 'CNY' }, datasets: [] });
+      return ok({});
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    const declared = { ...dataset, metadata: { scope_hints: { unit: '万元', period: '2026-08' } } } as DatasetSnapshot;
+    render(<ScopeCard question="八月经营情况" datasets={[declared]} />);
+    fireEvent.click(await screen.findByRole('button', { name: '采用资料里的组织 华东' }));
+    expect((screen.getByLabelText('分析范围组织') as HTMLInputElement).value).toBe('华东');
+    fireEvent.click(screen.getByRole('button', { name: '采用资料里的期间 2026-08' }));
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('2026-08');
+    expect(screen.getByRole('button', { name: '采用资料里的单位 万元' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '采用资料里的币种 CNY' }).textContent).toContain('CNY');
+    expect(screen.getByRole('button', { name: '采用资料里的情景 actual' }).textContent).toContain('实际');
+    fireEvent.click(screen.getByRole('button', { name: '分析范围情景' }));
+    expect(await screen.findByRole('option', { name: /^实际/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /^actual/ })).toBeNull();
+    // A value already taken is no longer offered.
+    expect(screen.queryByRole('button', { name: '采用资料里的期间 2026-08' })).toBeNull();
+    await choose('分析范围单位', /^万元/);
+    expect(screen.getByRole('button', { name: '分析范围单位' }).textContent).toContain('万元');
   });
 
   it('resolves a legacy shared-period conflict explicitly while preserving item periods and bindings', async () => {
@@ -107,22 +153,23 @@ describe('business result components', () => {
     };
     const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
       if (command === 'analysis-requirements-list') return ok({ current });
+      if (command === 'finance-readiness') return ok({});
       expect(command).toBe('analysis-requirements-save');
       expect(spec).toMatchObject({ parent_id: current.id, items, bindings: current.bindings, scope: { unit: '元', currency: 'CNY' } });
       expect(spec?.scope).not.toHaveProperty('period');
       return ok({ ...current, id: 'resolved-requirements', scope: spec?.scope });
     });
     (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
-    render(<AnalysisScopeCard taskId={taskId} question="新问题" datasets={[dataset]} />);
+    render(<ScopeCard question="新问题" datasets={[dataset]} />);
     expect(await screen.findByDisplayValue('2026-01:2026-08')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('分析口径单位'), { target: { value: '元' } });
-    expect(screen.getByRole('button', { name: '保存口径' }).hasAttribute('disabled')).toBe(true);
+    await choose('分析范围单位', /^元/);
+    expect(screen.getByRole('button', { name: '保存范围' }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('alert').textContent).toContain('逐项期间');
-    fireEvent.click(screen.getByRole('button', { name: '移除共享期间，保留逐项期间' }));
-    expect((screen.getByLabelText('分析口径期间') as HTMLInputElement).value).toBe('');
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存分析口径，旧版本仍保留。');
-    expect(financeCall).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '清空共同期间，保留逐项期间' }));
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
+    await screen.findByText('已保存分析范围，旧版本仍保留。');
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'analysis-requirements-save')).toHaveLength(1);
   });
 
   it('sends the scope the server saved on the next save, not a legacy level the server dropped', async () => {
@@ -136,26 +183,85 @@ describe('business result components', () => {
     const saved: Record<string, unknown>[] = [];
     const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => {
       if (command === 'analysis-requirements-list') return ok({ current });
+      if (command === 'finance-readiness') return ok({});
       saved.push(spec ?? {});
       const scope = Object.fromEntries(Object.entries((spec?.scope ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'drilldown'));
       return ok({ ...current, id: `saved-scope-${saved.length}`, scope, authoring_warnings: [{ code: 'hierarchy_scope_dropped' }] });
     });
     (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
-    render(<AnalysisScopeCard taskId={taskId} question="解释利润" datasets={[dataset]} />);
-    expect(await screen.findByDisplayValue('万元')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('分析口径期间'), { target: { value: '2026-08' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
-    await screen.findByText('已保存分析口径，旧版本仍保留。');
-    fireEvent.change(screen.getByLabelText('分析口径币种'), { target: { value: 'CNY' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
+    render(<ScopeCard question="解释利润" datasets={[dataset]} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '分析范围单位' }).textContent).toContain('万元'));
+    fireEvent.change(screen.getByLabelText('分析范围期间'), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
+    await screen.findByText('已保存分析范围，旧版本仍保留。');
+    await choose('分析范围币种', /^人民币/);
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
     await waitFor(() => expect(saved).toHaveLength(2));
 
     expect(saved[0]).toMatchObject({ parent_id: 'legacy-scope', scope: { ledger: 'L1', unit: '万元', period: '2026-08', drilldown: '城市公司' } });
     expect(saved[1]).toMatchObject({ parent_id: 'saved-scope-1', items, scope: { ledger: 'L1', unit: '万元', period: '2026-08', currency: 'CNY' } });
     expect(saved[1].scope).not.toHaveProperty('drilldown');
     // The fields show what was stored.
-    expect((screen.getByLabelText('分析口径期间') as HTMLInputElement).value).toBe('2026-08');
-    expect((screen.getByLabelText('分析口径币种') as HTMLInputElement).value).toBe('CNY');
+    expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('2026-08');
+    expect(screen.getByRole('button', { name: '分析范围币种' }).textContent).toContain('人民币');
+  });
+
+  it('ignores a delayed save response from a previous task after switching tasks', async () => {
+    let finishOldSave!: (value: ReturnType<typeof ok<Record<string, unknown>>>) => void;
+    const otherTask = 'u'.repeat(32);
+    const otherCurrent = {
+      id: 'other-scope',
+      question: '西南分析',
+      scope: { period: '2026-09', organization: '西南', unit: '万元' },
+      bindings: {},
+      items: [],
+    };
+    const financeCall = vi.fn(async (task: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'analysis-requirements-list') {
+        return ok({ current: task === otherTask ? otherCurrent : { id: 'old-scope', question: '华东分析', scope: { period: '2026-08' }, bindings: {}, items: [] } });
+      }
+      if (command === 'finance-readiness') return ok({});
+      if (command === 'analysis-requirements-save' && task === taskId) {
+        return new Promise<ReturnType<typeof ok<Record<string, unknown>>>>((resolve) => { finishOldSave = resolve; });
+      }
+      return ok({ id: 'unexpected', question: spec?.question, scope: spec?.scope, bindings: {}, items: [] });
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    const view = render(<ScopeCard task={taskId} question="华东分析" datasets={[dataset]} />);
+    expect(await screen.findByDisplayValue('2026-08')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('分析范围期间'), { target: { value: '2026-10' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
+    view.rerender(<ScopeCard task={otherTask} question="西南分析" datasets={[dataset]} />);
+    expect(await screen.findByDisplayValue('2026-09')).toBeTruthy();
+
+    finishOldSave(ok({ id: 'old-scope-saved', question: '华东分析', scope: { period: '2026-10', organization: '华东' }, bindings: {}, items: [] }));
+
+    await waitFor(() => expect((screen.getByLabelText('分析范围期间') as HTMLInputElement).value).toBe('2026-09'));
+    expect((screen.getByLabelText('分析范围组织') as HTMLInputElement).value).toBe('西南');
+  });
+
+
+  it('does not send duplicate saves while a scope save is already in flight', async () => {
+    let finishSave!: (value: ReturnType<typeof ok<Record<string, unknown>>>) => void;
+    const current = { id: 'scope-double-save', question: '双击保存', scope: { period: '2026-08' }, bindings: {}, items: [] };
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'analysis-requirements-list') return ok({ current });
+      if (command === 'finance-readiness') return ok({});
+      if (command === 'analysis-requirements-save') {
+        return new Promise<ReturnType<typeof ok<Record<string, unknown>>>>((resolve) => { finishSave = resolve; });
+      }
+      return ok({});
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    render(<ScopeCard question="双击保存" datasets={[dataset]} />);
+    expect(await screen.findByDisplayValue('2026-08')).toBeTruthy();
+
+    const save = screen.getByRole('button', { name: '保存范围' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(financeCall.mock.calls.filter(([, command]) => command === 'analysis-requirements-save')).toHaveLength(1);
+    finishSave(ok({ ...current, id: 'scope-double-save-next', scope: { period: '2026-08' } }));
+    await screen.findByText('已保存分析范围，旧版本仍保留。');
   });
 
   it('toggles periods while preserving exact amount, ratio, percentage-point and source detail text', () => {
@@ -173,7 +279,7 @@ describe('business result components', () => {
     const updated = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
     expect(within(updated).getByRole('cell', { name: '325,644.00' })).toBeTruthy();
     expect(within(updated).getByRole('cell', { name: '94.53%' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '查看来源与口径' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看来源与范围' }));
     expect(onSources).toHaveBeenCalledOnce();
   });
 
@@ -195,7 +301,7 @@ describe('business result components', () => {
 
     const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
     expect(within(table).getByRole('cell', { name: '77.00' })).toBeTruthy();
-    expect(within(table).queryByText('没有符合当前口径的行。')).toBeNull();
+    expect(within(table).queryByText('没有符合当前范围的行。')).toBeNull();
   });
 
   it('shows KPI actual, budget, difference, rate, period, unit and explicit row basis', () => {
@@ -694,8 +800,8 @@ describe('business result components', () => {
     const current = run([{ metric_key: 'revenue', actual: '344487.0552' }]);
     render(<RevisionDiff current={current} previous={previous} currentRevision={4} previousRevision={3}
       comparison={{ summary: { status: 'no_comparable_runs', issue_count: 0, compared_business_keys: 0 }, issues: [] }} />);
-    expect(screen.getByText(/无可比运行/)).toBeTruthy();
-    expect(screen.getByText('后端没有找到可比较运行；未回退到本地行序或字段猜测。')).toBeTruthy();
+    expect(screen.getByText(/无可比计算/)).toBeTruthy();
+    expect(screen.getByText('没有找到可以比较的上一次计算；系统不会按行序或字段名猜测对应关系。')).toBeTruthy();
     expect(screen.queryByText(/344,487.06/)).toBeNull();
   });
 
@@ -785,6 +891,48 @@ describe('business result components', () => {
     expect(screen.getByText(/收入达成率结论：引用了已变化的收入实际数。/)).toBeTruthy();
     fireEvent.click(screen.getByText('未解决问题 · 1 项'));
     expect(screen.getByText('区域收入假设仍待经理确认。')).toBeTruthy();
+  });
+});
+
+// Without a backend comparison the local diff can only line rows up by business identity. It may say nothing
+// changed only when every row of both results was lined up; otherwise it sends the reader to the raw tables.
+describe('local revision diff coverage', () => {
+  const noChange = '可比较指标没有发现数值变化。';
+  const sqlRun = (profits: string[]): AnalysisRun => ({ ...run([]), result: {
+    columns: [{ name: '区域', type: 'VARCHAR' }, { name: '经营利润', type: 'DECIMAL(38,2)' }],
+    rows: ['华东', '华南', '华北'].map((region, index) => ({ 区域: region, 经营利润: profits[index] })),
+    row_count: 3, truncated: false,
+  } });
+
+  it('keeps the no-change sentence when every row was lined up and none changed', () => {
+    const previous = run([{ metric_key: 'revenue', actual: '325644' }, { metric_key: 'cost', actual: '120000' }]);
+    const current = run([{ metric_key: 'revenue', actual: '325644' }, { metric_key: 'cost', actual: '120000' }]);
+    render(<RevisionDiff current={current} previous={previous} tablesBelow />);
+    expect(screen.getByText(noChange)).toBeTruthy();
+    expect(screen.queryByText(/没有可对齐的指标/)).toBeNull();
+  });
+
+  it('says no metric could be lined up, not that nothing changed, when rows carry no business identity', () => {
+    render(<RevisionDiff current={sqlRun(['240', '120', '55'])} previous={sqlRun(['250', '130', '65'])} tablesBelow />);
+    expect(screen.getByText('两次结果没有可对齐的指标，请直接对照下方两张结果表。')).toBeTruthy();
+    expect(screen.queryByText(noChange)).toBeNull();
+  });
+
+  it('lists the changed values when lined-up rows changed', () => {
+    const previous = run([{ metric_key: 'revenue', actual: '325644' }]);
+    const current = run([{ metric_key: 'revenue', actual: '344487.0552' }]);
+    render(<RevisionDiff current={current} previous={previous} tablesBelow />);
+    expect(screen.getByText('325,644.00 → 344,487.06')).toBeTruthy();
+    expect(screen.queryByText(noChange)).toBeNull();
+    expect(screen.queryByText(/没有可对齐的指标/)).toBeNull();
+  });
+
+  it('does not claim no change when only part of the rows lined up, and points nowhere without tables below', () => {
+    const previous = run([{ metric_key: 'revenue', actual: '325644' }, { actual: '10' }]);
+    const current = run([{ metric_key: 'revenue', actual: '325644' }, { actual: '20' }]);
+    render(<RevisionDiff current={current} previous={previous} />);
+    expect(screen.getByText('两次结果有部分行没有可对齐的指标，无法据此判断数值是否变化。')).toBeTruthy();
+    expect(screen.queryByText(noChange)).toBeNull();
   });
 });
 

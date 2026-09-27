@@ -105,6 +105,11 @@ describe('the 成果库 list', () => {
     const onExport = vi.fn();
     render(<Deliverables rows={ROWS} {...LIST} open={{ task: A, row: brief, text: '# 本期结论稿' }} onOpen={() => {}} onExport={onExport} />);
     expect(screen.getByText('本期结论稿')).toBeTruthy();
+    const technical = screen.getByText('技术信息').closest('details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(screen.queryByText('111111111111')).toBeNull();
+    fireEvent.click(screen.getByText('技术信息'));
+    expect(within(technical).getByText(brief.sha256)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
     expect(onExport).toHaveBeenCalledWith(A, brief.window_id);
   });

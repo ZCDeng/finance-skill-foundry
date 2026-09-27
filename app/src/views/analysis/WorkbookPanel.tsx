@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
-import { bridge, shortSha, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
+import { bridge, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { Table, textValue } from './presentation.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
-import { datasetOptions, runOptions, unwrap } from './shared.js';
+import { datasetOptions, runOptions, unwrap, errorText } from './shared.js';
 
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
@@ -67,7 +67,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       setInspection(result); setMessage('已读取工作簿结构。');
     } catch (failure) {
       if (request === workbookRequest.current) {
-        const text = failure instanceof Error ? failure.message : String(failure);
+        const text = errorText(failure);
         setInspectionError(text);
         setError(text);
       }
@@ -84,15 +84,15 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       const result = await call('workbook-bind', { dataset_id: datasetId, source: sourceSpec(), fields: parsed, role, writable: role === 'output', header: true });
       if (request !== workbookRequest.current) return;
       setBindingId(String(result.id ?? '')); setPreview(null); setResolutions({}); setMessage('已保存 Excel 区域绑定。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function circleSelect() {
     try {
       setError(''); setMessage('');
-      if (!contextId) throw new Error('请先保存财务口径。');
+      if (!contextId) throw new Error('请先保存财务范围。');
       await call('analysis-circle-select', { kind: 'workbook', binding_id: bindingId, range: range || sourceName || 'A:A', instruction: '改成开票口径', context_id: contextId });
       setMessage('已按圈选生成开票口径修订。');
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { setError(errorText(failure)); }
   }
   async function read() {
     const request = ++workbookRequest.current;
@@ -101,7 +101,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       const result = await call('workbook-read', { binding_id: bindingId, dataset_id: datasetId });
       if (request !== workbookRequest.current) return;
       setReadResult(result); setMessage('已读取绑定区域。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function previewPatch() {
     const request = ++workbookRequest.current;
@@ -117,7 +117,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
         .filter((cell) => cell.conflict === true && cell.cell)
         .map((cell) => [String(cell.cell), 'keep'])));
       setPreview(result); setMessage('已生成写回预览。冲突单元格需要选择保留或应用后再生成文件。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function applyPatch() {
     try {
@@ -125,7 +125,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       if (!preview?.patch_id) throw new Error('请先生成写回预览。');
       const result = await call('workbook-apply', { patch_id: preview.patch_id, resolutions });
       setMessage(`已生成协作工作簿：${textValue(result.artifact_path ?? result.path ?? result.id)}`);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { setError(errorText(failure)); }
   }
   const sheetNames = Array.isArray(inspection?.sheet_names) ? inspection.sheet_names.map(String) : [];
   const tables = Array.isArray(inspection?.tables) ? inspection.tables.map(String) : [];
@@ -148,14 +148,14 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
         : <TextField label={sourceKind === 'table' ? '表格名称' : '命名区域'} value={sourceName} onChange={setSourceName} />}
       <FieldShell label="用途"><select aria-label="用途" className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
         <option value="input">读取输入</option><option value="output">写回输出</option></select></FieldShell>
-      <SearchableSelect label="校验运行（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
-        placeholder="搜索运行时间或编号" allowEmptyLabel="经理直接写入" />
+      <SearchableSelect label="校验计算（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
+        placeholder="搜索计算时间" allowEmptyLabel="经理直接写入" />
     </div>
     <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
       <label>字段数组<Textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
       <label>写入数组<Textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
     </div></details></fieldset>
-    <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标快照 {shortSha(datasetId)}。</p>
+    <p className="analysis-note">绑定基准由绑定记录保存；读取和写回预览使用当前选择的目标资料。</p>
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={locked || !datasetId} onClick={() => track('正在检查工作簿结构…', inspect)}><FileSpreadsheet size={14} aria-hidden />检查结构</Button>
       <Button variant="outline" type="button" disabled={locked || !datasetId || (sourceKind === 'range' ? !sheet || !range : !sourceName)} onClick={() => track('正在保存绑定…', bind)}>保存绑定</Button>

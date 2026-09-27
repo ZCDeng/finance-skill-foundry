@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, MessageSquare, Plus, Save, Trash2 } from 'lucide-react';
 import { bridge, type Answer, type FinanceContextState } from '../../bridge.js';
 import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
+import { CURRENCY_OPTIONS, RESULT_SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
+import type { AnalysisScope } from './scope.js';
+import { errorText, scopeSummary, unwrap } from './shared.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -74,6 +78,7 @@ export type RequirementsPanelProps = {
   taskId?: string;
   contextId?: string;
   draftRequirementsId?: string;
+  analysisScope?: AnalysisScope;
   onChanged?(requirements: AnalysisRequirementsRecord): void;
   onDiscuss?(draft: {
     question: string;
@@ -86,32 +91,20 @@ export type RequirementsPanelProps = {
 
 const blankScope: RequirementScope = {};
 const metricOptions = [
-  { value: 'profit', label: '利润', meta: 'profit / management_profit' },
-  { value: 'revenue', label: '收入', meta: 'revenue' },
-  { value: 'cost', label: '成本', meta: 'cost' },
-  { value: 'expense', label: '费用', meta: 'expense' },
-  { value: 'open_amount', label: '应收余额', meta: '账龄 open_amount' },
-  { value: 'closing_cash', label: '期末现金', meta: '13周现金 closing_cash' },
-  { value: 'ratio', label: '比率', meta: 'ratio' },
-  { value: 'control_totals', label: '控制合计', meta: 'control_totals' },
-  { value: 'account_total', label: '科目合计', meta: 'account_total' },
-  { value: 'total_variance', label: '总额差异', meta: 'total_variance' },
-  { value: 'price_quantity', label: '量价分解', meta: 'price_quantity' },
+  { value: 'profit', label: '利润', meta: '营业利润或管理口径利润' },
+  { value: 'revenue', label: '收入' },
+  { value: 'cost', label: '成本' },
+  { value: 'expense', label: '费用' },
+  { value: 'open_amount', label: '应收余额', meta: '账龄分析' },
+  { value: 'closing_cash', label: '期末现金', meta: '13 周现金预测' },
+  { value: 'ratio', label: '比率' },
+  { value: 'control_totals', label: '控制合计' },
+  { value: 'account_total', label: '科目合计' },
+  { value: 'total_variance', label: '总额差异' },
+  { value: 'price_quantity', label: '量价分解' },
 ];
-const currencyOptions = [
-  { value: 'CNY', label: 'CNY', meta: '人民币' },
-  { value: 'USD', label: 'USD', meta: '美元' },
-  { value: 'EUR', label: 'EUR', meta: '欧元' },
-];
-const unitOptions = [
-  { value: '万元', label: '万元', meta: '管理报表常用' },
-  { value: '元', label: '元', meta: '明细账常用' },
-];
-
-function unwrap<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value;
-}
+const currencyOptions = CURRENCY_OPTIONS;
+const unitOptions = UNIT_OPTIONS;
 
 function normalizeScope(value: unknown): RequirementScope & Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...blankScope };
@@ -316,7 +309,11 @@ function metricOptionsForItem(item: RequirementItem): SelectOption[] {
   return [{ value: item.metric, label: item.label || item.metric, meta: '已保存自定义指标' }, ...metricOptions];
 }
 
-export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onChanged, onDiscuss }: RequirementsPanelProps) {
+function requirementTitle(item: RequirementItem): string {
+  return item.label.trim() || itemLabel(item.metric);
+}
+
+export function RequirementsPanel({ taskId, contextId, draftRequirementsId, analysisScope, onChanged, onDiscuss }: RequirementsPanelProps) {
   const [records, setRecords] = useState<AnalysisRequirementsRecord[]>([]);
   const [current, setCurrent] = useState<AnalysisRequirementsRecord | null>(null);
   const [question, setQuestion] = useState('');
@@ -331,11 +328,28 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   const [error, setError] = useState('');
   const [invalidItemDimensions, setInvalidItemDimensions] = useState<Set<string>>(() => new Set());
   const requestSeq = useRef(0);
+  const saveInFlight = useRef(false);
   const api = bridge();
+  const sharedApplyRecord = useRef<AnalysisScope['applyRecord'] | undefined>(undefined);
+  sharedApplyRecord.current = analysisScope?.applyRecord;
+  const sharedRecord = useRef(analysisScope?.current);
+  sharedRecord.current = analysisScope?.current;
+
+  const applyRecord = useCallback((record: AnalysisRequirementsRecord) => {
+    setCurrent(record);
+    setQuestion(record.question);
+    setScope(normalizeScope(record.scope));
+    setBindings(record.bindings);
+    setItems(record.items);
+    setInvalidItemDimensions(new Set());
+  }, []);
 
   useEffect(() => {
     const seq = requestSeq.current + 1;
     requestSeq.current = seq;
+    saveInFlight.current = false;
+    setSaving(false);
+    const sharedIdAtRead = sharedRecord.current?.id;
     setMessage('');
     setError('');
     setRemoved([]);
@@ -364,15 +378,22 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       const nextRecords = (payload.requirements ?? []).map(normalizeRecord).filter((row): row is AnalysisRequirementsRecord => Boolean(row));
       const nextCurrent = normalizeRecord(payload.current ?? nextRecords.at(-1));
       setRecords(nextRecords);
-      setCurrent(nextCurrent);
-      setQuestion(nextCurrent?.question ?? '');
-      setScope(nextCurrent ? normalizeScope(nextCurrent.scope) : contextSeed.scope);
-      setBindings(nextCurrent?.bindings ?? contextSeed.bindings);
-      setItems(nextCurrent?.items ?? []);
-      setInvalidItemDimensions(new Set());
+      if (sharedRecord.current?.id !== sharedIdAtRead && nextCurrent?.id !== sharedRecord.current?.id) return;
+      if (nextCurrent) {
+        applyRecord(nextCurrent);
+        sharedApplyRecord.current?.(nextCurrent);
+      }
+      else {
+        setCurrent(null);
+        setQuestion('');
+        setScope(contextSeed.scope);
+        setBindings(contextSeed.bindings);
+        setItems([]);
+        setInvalidItemDimensions(new Set());
+      }
     })().catch((reason: unknown) => {
       if (requestSeq.current !== seq) return;
-      setError(reason instanceof Error ? reason.message : '读取分析要求失败。');
+      setError(errorText(reason));
       setRecords([]);
       setCurrent(null);
       setQuestion('');
@@ -383,7 +404,19 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     }).finally(() => {
       if (requestSeq.current === seq) setLoading(false);
     });
-  }, [api, contextId, taskId]);
+    return () => { requestSeq.current += 1; };
+  }, [api, applyRecord, contextId, taskId]);
+
+  useEffect(() => {
+    const record = normalizeRecord(analysisScope?.current);
+    if (!record || record.id === current?.id) return;
+    setRecords((previous) => [...previous.filter((item) => item.id !== record.id), record]);
+    setRemoved([]);
+    setChangeReason('');
+    setMessage('');
+    setError('');
+    applyRecord(record);
+  }, [analysisScope?.current?.id, applyRecord, current?.id]);
 
   const removedExisting = useMemo(() => {
     const existing = new Set(current?.items.map((item) => item.id) ?? []);
@@ -439,7 +472,9 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
   };
 
   const save = async () => {
-    if (!taskId || !api?.financeCall) return;
+    if (!taskId || !api?.financeCall || loading || saveInFlight.current) return;
+    const seq = requestSeq.current;
+    saveInFlight.current = true;
     setSaving(true);
     setError('');
     setMessage('');
@@ -449,7 +484,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
         question: question.trim(),
         ...(Object.keys(nextScope).length ? { scope: nextScope } : {}),
         bindings,
-        ...(contextId ? { context_id: contextId } : {}),
+        ...((contextId ?? current?.context_id) ? { context_id: contextId ?? current?.context_id } : {}),
         ...(current?.id ? { parent_id: current.id } : {}),
         ...(changeReason.trim() ? { change_reason: changeReason.trim() } : {}),
         items: items.map((item) => ({
@@ -465,22 +500,19 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
         })),
       };
       const saved = normalizeRecord(unwrap(await api.financeCall(taskId, 'analysis-requirements-save', spec) as Answer<AnalysisRequirementsRecord>));
+      if (requestSeq.current !== seq) return;
       if (!saved) throw new Error('保存分析要求后没有返回版本。');
-      setCurrent(saved);
+      applyRecord(saved);
       setRecords((previous) => [...previous.filter((record) => record.id !== saved.id), saved]);
-      setQuestion(saved.question);
-      setScope(saved.scope);
-      setBindings(saved.bindings);
-      setItems(saved.items);
-      setInvalidItemDimensions(new Set());
       setRemoved([]);
       setChangeReason('');
       setMessage(`已保存要求版本 ${shortId(saved.id)}。保存不会自动计算或批准文稿。`);
+      sharedApplyRecord.current?.(saved);
       onChanged?.(saved);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存分析要求失败。');
+      if (requestSeq.current === seq) setError(errorText(reason));
     } finally {
-      setSaving(false);
+      if (requestSeq.current === seq) { saveInFlight.current = false; setSaving(false); }
     }
   };
 
@@ -520,20 +552,23 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     <fieldset className="analysis-fieldset" disabled={loading || saving || !api?.financeCall}>
       <label>用户问题<Textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
-      <div className="analysis-edit-grid">
-        <TextField label="账套" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="ledger 或账套名称" />
-        <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)}
-          help="只填单个共同组织；多组织请清空这里，并在必答指标中逐一添加。" placeholder="单个组织名称" />
-        {hasSavedCustomPeriod
-          ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
-            help="只填各指标共同的单个期间；累计加单月等多期间要求请清空这里，并在指标中逐一添加。" placeholder="YYYY-MM 或范围说明" />
-          : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
-            help="只填各指标共同的单个期间；多期间要求请清空这里，并在指标中逐一添加。" />}
-        <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
-          options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
-        <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
-          options={optionsWithSavedValue(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
-      </div>
+      <details className="analysis-details"><summary>范围 · {scopeSummary(scope)}</summary>
+        <p className="analysis-note">与资料页的「分析范围」是同一份记录；这里改动后保存，资料页会显示新版本。</p>
+        <div className="analysis-edit-grid">
+          {hasSavedCustomPeriod
+            ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+              help="只填各指标共同的单个期间；累计加单月等多期间要求请清空这里，并在指标中逐一添加。" placeholder="YYYY-MM 或范围说明" />
+            : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+              help="只填各指标共同的单个期间；多期间要求请清空这里，并在指标中逐一添加。" />}
+          <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)}
+            help="只填单个共同组织；多组织请清空这里，并在必答指标中逐一添加。" placeholder="单个组织名称" />
+          <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
+            options={optionsWithSavedValue(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
+          <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
+            options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
+          <TextField label="账簿" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="例如：经营总账" />
+        </div>
+      </details>
       <div className="analysis-section-heading"><h4>必答指标</h4><Button variant="outline" type="button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</Button></div>
       {items.length ? <div className="analysis-history-list">
         {items.map((item, index) => <RequirementItemEditor key={item.id} item={item} index={index} support={supportByItem.get(item.id)} supportStale={isSupportStale(item)} onChange={(patch) => setItem(item.id, patch)}
@@ -542,7 +577,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       {removedExisting.length ? <TextField label="删除要求的变更原因" value={changeReason} onChange={setChangeReason}
         error={changeReason.trim() ? undefined : '删要求必须写明变更原因。'} placeholder="例如：经理改为只核对范围，不再要求费用下钻。" /> : null}
       <details className="analysis-details"><summary>高级：绑定与历史版本</summary>
-        <p className="analysis-note">绑定随当前口径保存。上下文口径存在时，后端会校验并补齐授权绑定。</p>
+        <p className="analysis-note">Excel 区域随当前范围一起保存；有已保存的财务范围时，系统会自动核对并补齐。</p>
         <pre className="analysis-source-text">{JSON.stringify({ context_id: contextId ?? current?.context_id ?? null, bindings, versions: records.map((record) => record.id) }, null, 2)}</pre>
       </details>
     </fieldset>
@@ -639,17 +674,18 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     </FieldShell>
     <FieldShell label="须逐一覆盖的结果情景">
       <div className="analysis-actions">
-        <TextField label={`添加结果情景 ${index + 1}`} value={nextScenario} onChange={setNextScenario} placeholder="例如：actual_ytd、budget_ytd、achievement_ratio" />
+        <SearchableSelect label={`添加结果情景 ${index + 1}`} value={nextScenario} onChange={setNextScenario} placeholder="选择情景"
+          options={RESULT_SCENARIO_OPTIONS.filter((option) => !scenarios.includes(option.value))} />
         <Button variant="outline" type="button" onClick={addScenario} disabled={!nextScenario.trim() || scenarios.includes(nextScenario.trim())}>添加情景</Button>
       </div>
       {scenarios.length ? <div className="analysis-actions" aria-label={`已选结果情景 ${index + 1}`}>
-        {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" onClick={() => removeScenario(scenario)}>{scenario} ×</Button>)}
-      </div> : <p className="analysis-note">只在承诺多个结果情景时填写；每个组织、期间和情景都须有对应结果。情景键须与运行结果中的 scenario 一致。</p>}
+        {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" title={scenario} onClick={() => removeScenario(scenario)}>{scenarioLabel(scenario)} ×</Button>)}
+      </div> : <p className="analysis-note">只在同一指标要同时给出多个结果情景（如累计实际、累计预算、达成率）时填写；每个组织、期间和情景都须有对应结果。</p>}
     </FieldShell>
-    <div>
+    <details className="analysis-details"><summary>高级：精确结果键</summary>
       <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
-      <p className="analysis-note">与运行结果中的 metric_key 完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
-    </div>
+      <p className="analysis-note">与计算结果中的指标键完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
+    </details>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;
@@ -659,8 +695,9 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
       }} /></label>
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
     {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
-    <div className="analysis-actions"><span className="analysis-note">稳定 ID：{item.id}</span>
+    <div className="analysis-actions"><span className="analysis-note">要求 {index + 1} · {requirementTitle(item)}</span>
       <Button variant="destructive" type="button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</Button></div>
+    <TechnicalInfo rows={[['要求编号', item.id], ['指标键', item.metric]]} />
   </article>;
 }
 
@@ -669,7 +706,7 @@ function RequirementSupportHint({ support, stale }: { support: RequirementSuppor
     return <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />条件已修改，保存后重新检查资料匹配。</p>;
   }
   if (support.status === 'requires_execution') {
-    return <p className="analysis-note">{support.next_action || `已识别为 ${support.canonical_metric || '可分析指标'}，保存后可运行分析。`}</p>;
+    return <p className="analysis-note">{support.next_action || `已识别为 ${support.canonical_metric || '可分析指标'}，保存后即可计算。`}</p>;
   }
   const missing = support.missing_inputs?.length ? `缺少资料：${support.missing_inputs.map(formatMissingInput).join('、')}。` : '';
   const action = support.next_action || ({

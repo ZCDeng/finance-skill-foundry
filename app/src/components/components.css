@@ -274,6 +274,7 @@
  */
 .fnd-taskbar {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 12px;
   height: 44px;
@@ -283,6 +284,32 @@
   font-size: var(--fnd-size-small);
   white-space: nowrap;
   overflow-x: auto;
+}
+
+.fnd-taskbar__technical {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.fnd-taskbar__technical .analysis-technical {
+  margin: 0;
+  padding: 0;
+}
+
+.fnd-taskbar__technical .analysis-technical[open] .analysis-technical-list {
+  position: fixed;
+  z-index: 20;
+  top: calc(var(--fnd-header-height) + 44px + 8px);
+  right: 24px;
+  max-width: min(640px, calc(100vw - 48px));
+  max-height: min(420px, calc(100vh - var(--fnd-header-height) - 44px - 24px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-menu);
+  background: var(--fnd-surface);
+  box-shadow: var(--fnd-shadow-menu);
+  white-space: normal;
 }
 
 .fnd-taskbar__name {

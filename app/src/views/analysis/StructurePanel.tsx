@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { bridge, type Answer, type DatasetSnapshot } from '../../bridge.js';
 import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from './StructureProposalCard.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 /**
  * Every file in this task that is waiting on the manager: one waiting for her to
@@ -23,7 +23,7 @@ export function StructurePanel({ taskId, datasets, busy, onRefresh }: {
     const superseded = new Set(rows.map((row) => row.parent_id).filter(Boolean) as string[]);
     setPending(rows.filter((row) => row.state === 'pending_acknowledgement' && !superseded.has(row.id)));
   }, [taskId]);
-  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load, datasets]);
+  useEffect(() => { void load().catch((failure) => setError(errorText(failure))); }, [load, datasets]);
 
   const named = (id: string) => datasets.find((item) => item.id === id)?.name ?? id;
   const settle = async () => { await load(); await onRefresh(); };

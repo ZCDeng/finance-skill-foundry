@@ -941,17 +941,26 @@ export type RevisionValueChange = {
   after: string;
 };
 
-export function compareBusinessRuns(current: AnalysisRun, previous?: AnalysisRun): RevisionValueChange[] {
-  if (!previous?.result || !current.result) return [];
+/** comparedRows counts current rows lined up with a previous row by identity; resultRows is the larger result's row count. */
+export type RevisionValueComparison = {
+  changes: RevisionValueChange[];
+  comparedRows: number;
+  resultRows: number;
+};
+
+export function compareBusinessRuns(current: AnalysisRun, previous?: AnalysisRun): RevisionValueComparison {
+  if (!previous?.result || !current.result) return { changes: [], comparedRows: 0, resultRows: 0 };
   const previousByIdentity = new Map(previous.result.rows.map((row) => [rowIdentity(row), row]));
   const fieldTypes = new Map([...previous.result.columns, ...current.result.columns].map((column) => [column.name, column.type]));
   const fields = new Set([...current.result.columns, ...previous.result.columns]
     .map((column) => column.name)
     .filter((name) => columnSemantics(name, fieldTypes.get(name)) !== 'text'));
   const changes: RevisionValueChange[] = [];
+  let comparedRows = 0;
   for (const row of current.result.rows) {
     const identity = rowIdentity(row);
     if (!identity || !previousByIdentity.has(identity)) continue;
+    comparedRows += 1;
     const before = previousByIdentity.get(identity)!;
     for (const field of fields) {
       const semantics = columnSemantics(field, fieldTypes.get(field));
@@ -962,5 +971,6 @@ export function compareBusinessRuns(current: AnalysisRun, previous?: AnalysisRun
       }
     }
   }
-  return changes;
+  const resultRows = Math.max(current.result.rows.length, previous.result.rows.length, current.result.row_count ?? 0, previous.result.row_count ?? 0);
+  return { changes, comparedRows, resultRows };
 }

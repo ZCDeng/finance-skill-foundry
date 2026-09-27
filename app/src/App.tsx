@@ -78,6 +78,7 @@ export function App() {
   /** The workbook on screen in the Univer viewer, and the digest being put up. */
   const [preview, setPreview] = useState<PreviewSpec | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [previewTechnicalOpen, setPreviewTechnicalOpen] = useState(false);
   const [locatorPreview, setLocatorPreview] = useState(false);
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -93,6 +94,15 @@ export function App() {
   }, [current]);
   const openRef = useRef(open);
   openRef.current = open;
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const openedRef = useRef(opened);
+  openedRef.current = opened;
+  const locatorPreviewRef = useRef(locatorPreview);
+  locatorPreviewRef.current = locatorPreview;
+  const previewRequest = useRef(0);
+  const pendingPreview = useRef<{ request: number; taskId: string; sha: string } | null>(null);
+  const previewOperation = useRef<Promise<void>>(Promise.resolve());
   const detailSequence = useRef(0);
   const openSequence = useRef(0);
   const readerSequence = useRef(0);
@@ -107,6 +117,20 @@ export function App() {
     setNativeRect((held) => JSON.stringify(held) === JSON.stringify(next) ? held : next);
   }, []);
 
+  const ownsPreviewTarget = useCallback((taskId: string, sha: string) => {
+    if (screenRef.current === 'tasks') return openRef.current === taskId;
+    if (screenRef.current === 'deliverables') {
+      const currentOpen = openedRef.current;
+      return currentOpen?.task.id === taskId && currentOpen.row.sha256 === sha;
+    }
+    return false;
+  }, []);
+  const ownsPreview = useCallback((candidate: PreviewSpec | null) => {
+    if (!candidate) return false;
+    if (locatorPreviewRef.current) return screenRef.current === 'analysis';
+    return ownsPreviewTarget(candidate.task, candidate.sha256);
+  }, [ownsPreviewTarget]);
+
   /** Every answer lands here, so one refusal path serves every screen. */
   const take = useCallback(<T,>(answer: Answer<T>, use: (value: T) => void) => {
     if (answer.ok) {
@@ -116,6 +140,10 @@ export function App() {
       setProblem(answer.message);
     }
   }, []);
+
+  const previewErrorMessage = useCallback((error: unknown) => (
+    error instanceof Error ? error.message : '表格预览暂未就绪，请重试。'
+  ), []);
 
   /*
    * The list, for the strip as much as for 任务.
@@ -242,6 +270,10 @@ export function App() {
     let live = true;
     const revision = ++layoutRevision.current;
     const show = async () => {
+      if (previewTechnicalOpen && ownsPreview(preview)) {
+        await api?.paneVisible?.('');
+        return;
+      }
       if (inWorkspace && locatorPreview && preview) {
         await api?.paneVisible?.('preview');
         return;
@@ -260,13 +292,13 @@ export function App() {
           return;
         }
         const shown = !problem && screen === 'formulator' && formulator ? 'formulator'
-          : !problem && (screen === 'deliverables' || screen === 'tasks') && preview ? 'preview' : '';
+          : !problem && (screen === 'deliverables' || screen === 'tasks') && ownsPreview(preview) ? 'preview' : '';
         await api?.paneVisible?.(shown);
       }
     };
     void show().catch((error: unknown) => { if (live) setConversationProblem(error instanceof Error ? error.message : '对话布局暂未就绪，请重试。'); });
     return () => { live = false; };
-  }, [api, inWorkspace, nativeRect, ready, guide, conversationProblem, opening, session, current, screen, problem, formulator, preview, locatorPreview]);
+  }, [api, inWorkspace, nativeRect, ready, guide, conversationProblem, opening, session, current, screen, problem, formulator, preview, previewTechnicalOpen, locatorPreview, ownsPreview]);
 
   /**
    * Take the preview down, gateway and all.
@@ -276,13 +308,30 @@ export function App() {
    * server has stopped.
    */
   const closePreview = useCallback(() => {
+    const request = ++previewRequest.current;
+    pendingPreview.current = null;
+    setPreviewing(null);
+    setPreviewTechnicalOpen(false);
     if (!api?.previewClose) {
       setPreview(null);
       setLocatorPreview(false);
       return;
     }
-    void api.previewClose().then((a) => take(a, () => { setPreview(null); setLocatorPreview(false); }));
-  }, [api, take]);
+    previewOperation.current = previewOperation.current
+      .catch(() => undefined)
+      .then(async () => {
+        const answer = await api.previewClose!();
+        take(answer, () => {
+          if (previewRequest.current !== request) return;
+          setPreview(null);
+          setLocatorPreview(false);
+        });
+      })
+      .catch((error: unknown) => {
+        if (previewRequest.current === request) setProblem(previewErrorMessage(error));
+      });
+    void previewOperation.current;
+  }, [api, previewErrorMessage, take]);
 
   /**
    * Put one archived workbook up in the viewer.
@@ -295,13 +344,37 @@ export function App() {
   const openPreview = useCallback(
     (taskId: string, sha: string, ext: string) => {
       if (!api?.previewOpen) return;
+      const request = ++previewRequest.current;
+      pendingPreview.current = { request, taskId, sha };
       setPreviewing(sha);
-      void api
-        .previewOpen(taskId, sha, ext)
-        .then((a) => take(a, setPreview))
-        .finally(() => setPreviewing(null));
+      setPreviewTechnicalOpen(false);
+      previewOperation.current = previewOperation.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (previewRequest.current !== request || !ownsPreviewTarget(taskId, sha)) return;
+          const answer = await api.previewOpen!(taskId, sha, ext);
+          if (pendingPreview.current?.request === request) pendingPreview.current = null;
+          if (previewRequest.current !== request || !ownsPreviewTarget(taskId, sha)) {
+            if (api.previewClose) await api.previewClose();
+            return;
+          }
+          take(answer, (next) => {
+            if (previewRequest.current !== request || !ownsPreviewTarget(taskId, sha)) return;
+            setPreviewTechnicalOpen(false);
+            setLocatorPreview(false);
+            setPreview(next);
+          });
+        })
+        .catch((error: unknown) => {
+          if (previewRequest.current === request) setProblem(previewErrorMessage(error));
+        })
+        .finally(() => {
+          if (pendingPreview.current?.request === request) pendingPreview.current = null;
+          if (previewRequest.current === request) setPreviewing(null);
+        });
+      void previewOperation.current;
     },
-    [api, take],
+    [api, ownsPreviewTarget, previewErrorMessage, take],
   );
 
   /*
@@ -314,13 +387,15 @@ export function App() {
    * up behind a page that no longer mentions it.
    */
   useEffect(() => {
+    const pending = pendingPreview.current;
+    if (pending && !ownsPreviewTarget(pending.taskId, pending.sha)) {
+      previewRequest.current += 1;
+      pendingPreview.current = null;
+      setPreviewing(null);
+    }
     if (!preview) return;
-    const still =
-      (locatorPreview && screen === 'analysis') ||
-      (screen === 'deliverables' && opened?.row.sha256 === preview.sha256) ||
-      (screen === 'tasks' && open === preview.task);
-    if (!still) closePreview();
-  }, [preview, screen, opened, open, closePreview]);
+    if (!ownsPreview(preview)) closePreview();
+  }, [preview, screen, opened, open, ownsPreview, ownsPreviewTarget, closePreview]);
 
   const launchFormulator = useCallback(() => {
     if (!api?.formulatorLaunch) return;
@@ -609,6 +684,7 @@ export function App() {
           <PreviewBar
             preview={preview}
             task={tasks.find((row) => row.id === preview.task) ?? null}
+            onTechnicalOpenChange={setPreviewTechnicalOpen}
             onClose={closePreview}
           />
         ) : undefined

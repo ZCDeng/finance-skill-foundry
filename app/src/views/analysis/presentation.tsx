@@ -3,7 +3,7 @@ import type { AnalysisParameterMetadata, AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 
 export const STATUS: Record<string, string> = {
-  pending: '未运行', running: '运行中', succeeded: '运行成功', success: '运行成功', failed: '运行失败',
+  pending: '未计算', running: '计算中', succeeded: '计算成功', success: '计算成功', failed: '计算失败',
   verified: '可复算', reproducible: '可复算', unverified: '未验证复算', non_reproducible: '不可复算',
   unreviewed: '未阅', reviewed: '已阅', accepted: '经理认可', draft: '草稿', archived: '已归档',
 };
@@ -51,7 +51,7 @@ export function Table({ columns, rows, caption }: {
       <tbody>{visible.map((row, index) => <tr key={index}>{columns.map((column) =>
         <td className={numeric(column.type) ? 'analysis-number' : undefined} key={column.name}>{textValue(row[column.name])}</td>)}</tr>)}</tbody>
     </table>
-    {rows.length === 0 && <p className="analysis-note">没有符合当前口径的行。</p>}
+    {rows.length === 0 && <p className="analysis-note">没有符合当前范围的行。</p>}
     {pages > 1 && <div className="analysis-actions"><Button variant="outline" type="button" disabled={current === 0}
       onClick={() => setPage(current - 1)}>上一页</Button><span className="analysis-note">第 {current + 1} / {pages} 页 · 共 {rows.length} 行</span>
       <Button variant="outline" type="button" disabled={current === pages - 1} onClick={() => setPage(current + 1)}>下一页</Button></div>}

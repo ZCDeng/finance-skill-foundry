@@ -48,7 +48,7 @@ describe('readiness panel', () => {
 
     // The capability the batch can run, and the one it cannot, with the file.
     expect(screen.getAllByText('合计校验').length).toBeGreaterThan(0);
-    expect(screen.getByText(/02·GL科目余额表口径没声明齐：缺币种/)).toBeTruthy();
+    expect(screen.getByText(/02·GL科目余额表范围没声明齐：缺币种/)).toBeTruthy();
 
     // Each file's own scope, including the unit that only the title declared.
     const budget = screen.getByRole('row', { name: /年度预算台账/ });

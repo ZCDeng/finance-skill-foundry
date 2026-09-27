@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge } from '../src/bridge.js';
 import { RequirementsPanel, type AnalysisRequirementsRecord } from '../src/views/analysis/RequirementsPanel.js';
+import { emptyScope, type AnalysisScope } from '../src/views/analysis/scope.js';
 
 const taskId = 'a'.repeat(32);
 const otherTaskId = 'b'.repeat(32);
@@ -21,6 +22,23 @@ const current: AnalysisRequirementsRecord = {
 };
 
 const ok = <T,>(value: T): Answer<T> => ({ ok: true, value });
+
+function analysisScope(record: AnalysisRequirementsRecord): AnalysisScope {
+  return {
+    current: record,
+    scope: { ...emptyScope(), ...Object.fromEntries(Object.entries(record.scope).map(([key, value]) => [key, String(value ?? '')])) },
+    candidates: {},
+    conflicts: [],
+    loading: false,
+    saving: false,
+    message: '',
+    error: '',
+    setField: vi.fn(),
+    setFields: vi.fn(),
+    save: vi.fn(),
+    applyRecord: vi.fn(),
+  };
+}
 
 function mountBridge(overrides: Partial<Bridge> = {}) {
   const api = {
@@ -73,6 +91,43 @@ describe('requirements panel', () => {
     expect(api.financeCall).not.toHaveBeenCalledWith(taskId, 'run-metric', expect.anything());
     expect(onChanged).toHaveBeenCalledWith(expect.objectContaining(saved));
     expect(await screen.findByText(/保存不会自动计算或批准文稿/)).toBeTruthy();
+  });
+
+  it('saves the latest shared scope after another panel refreshes it', async () => {
+    const refreshed: AnalysisRequirementsRecord = {
+      ...current,
+      id: 'r-current-refreshed',
+      scope: { ...current.scope, period: '2026-11', organization: '华南' },
+    };
+    const applyRecord = vi.fn();
+    const api = mountBridge({
+      financeCall: vi.fn<NonNullable<Bridge['financeCall']>>(async (_task, command, spec) => command === 'analysis-requirements-save'
+        ? ok({ ...refreshed, id: 'r-current-saved', parent_id: refreshed.id, scope: spec?.scope } as Record<string, unknown>)
+        : ok({ requirements: [current], current })),
+    });
+    const firstScope = analysisScope(current);
+    const nextScope = { ...analysisScope(refreshed), applyRecord };
+    const { rerender } = render(<RequirementsPanel taskId={taskId} analysisScope={firstScope} />);
+    expect(await screen.findByDisplayValue('2026-10')).toBeTruthy();
+
+    rerender(<RequirementsPanel taskId={taskId} analysisScope={nextScope} />);
+
+    expect(await screen.findByDisplayValue('2026-11')).toBeTruthy();
+    expect((screen.getByLabelText('组织') as HTMLInputElement).value).toBe('华南');
+    fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
+    await waitFor(() => expect(api.financeCall).toHaveBeenCalledWith(taskId, 'analysis-requirements-save', expect.objectContaining({
+      parent_id: refreshed.id,
+      scope: expect.objectContaining({ period: '2026-11', organization: '华南' }),
+    })));
+    expect(applyRecord).toHaveBeenCalledWith(expect.objectContaining({ id: 'r-current-saved' }));
+  });
+
+
+  it('shares the loaded requirements record with the task scope hook after a guarded read', async () => {
+    const shared = { ...analysisScope(current), current: null, applyRecord: vi.fn() } as AnalysisScope;
+    mountBridge();
+    render(<RequirementsPanel taskId={taskId} analysisScope={shared} />);
+    await waitFor(() => expect(shared.applyRecord).toHaveBeenCalledWith(expect.objectContaining({ id: current.id, context_id: contextId })));
   });
 
   it('requires a change reason before removing an existing obligation', async () => {
@@ -176,8 +231,8 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/JPY/)).toBeTruthy();
-    expect(screen.getByText(/千元/)).toBeTruthy();
+    expect((await screen.findAllByText(/JPY/)).length).toBeTruthy();
+    expect(screen.getAllByText(/千元/).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '分析日本子公司费用' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
@@ -208,7 +263,7 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    expect((await screen.findAllByText(/CNY/)).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '解释费用' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
@@ -234,7 +289,7 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    expect((await screen.findAllByText(/CNY/)).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: 'P7 人数' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
@@ -354,11 +409,12 @@ describe('requirements panel', () => {
     render(<RequirementsPanel taskId={taskId} />);
 
     const profit = await screen.findByLabelText('必答指标 1');
-    expect(within(profit).getByText('actual_ytd ×')).toBeTruthy();
-    const input = within(profit).getByLabelText('添加结果情景 1');
-    fireEvent.change(input, { target: { value: 'budget_ytd' } });
+    expect(within(profit).getByText('累计实际 ×')).toBeTruthy();
+    fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /^累计预算/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
-    fireEvent.change(input, { target: { value: 'achievement_ratio' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /^达成率/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
 
@@ -423,7 +479,7 @@ describe('requirements panel', () => {
     render(<RequirementsPanel taskId={taskId} />);
 
     expect(await screen.findByDisplayValue('2026-01至2026-08（月结）及2026全年（BUD/LE）')).toBeTruthy();
-    expect(screen.getByText(/元（GL与三大报表）\/ 万元（分析表，按各工作表注明）/)).toBeTruthy();
+    expect(screen.getAllByText(/元（GL与三大报表）\/ 万元（分析表，按各工作表注明）/).length).toBeTruthy();
     expect(screen.getByRole('button', { name: '指标 1' }).textContent).toContain('科目合计');
     expect(screen.getByRole('button', { name: '指标 2' }).textContent).toContain('总额差异');
     expect(screen.queryByText(/当前选择已失效/)).toBeNull();
