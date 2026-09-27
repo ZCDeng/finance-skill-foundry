@@ -4,7 +4,7 @@
 .fnd-head { display: flex; align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
 .fnd-head__brand { flex: 1 0 0; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .fnd-head__logo { width: 18.5px; height: 24px; flex: 0 0 auto; background: url('../assets/mark.png') center / contain no-repeat; }
-.fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-ink); }
+.fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
 .fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
 .fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
 .fnd-head__tab:hover {
@@ -16,7 +16,43 @@
   background: var(--fnd-selection-surface);
 }
 
-.fnd-head__tab[aria-current='page'] { color: var(--fnd-ink); background: var(--fnd-selection-surface); }
+/*
+ * The title bar's own tabs (R14, KTD13). Gold marks where the reader is: the
+ * current tab, a hover. At rest they keep the neutral rule above. Written under
+ * `.fnd-head` because `.fnd-head__tab` is also the back button on 交付物 and
+ * 任务 and the Formulator start and stop button, and those stay neutral.
+ * Focus keeps whichever state the tab is in and adds its own ring.
+ */
+.fnd-head .fnd-head__tab:hover:not(:disabled):not([aria-current='page']) {
+  color: var(--fnd-selected);
+  background: transparent;
+}
+
+.fnd-head .fnd-head__tab:active:not(:disabled):not([aria-current='page']) {
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-head .fnd-head__tab[aria-current='page'] {
+  position: relative;
+  color: var(--fnd-selected);
+  background: var(--fnd-selection-surface);
+}
+
+/* The mark that does not depend on colour: the result tabs' 1px gold underline, under the label. */
+.fnd-head .fnd-head__tab[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 1px;
+  background: var(--fnd-selected);
+}
+
+.fnd-head .fnd-head__tab:focus-visible {
+  outline: 1px solid var(--fnd-focus);
+  outline-offset: -1px;
+}
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
 /* -- the five words ------------------------------------------------------- */
@@ -385,8 +421,13 @@ textarea.fnd-field {
   transition: color var(--fnd-transition), border-color var(--fnd-transition);
 }
 
+/*
+ * The help control renders as the shadcn ghost Button, whose colour utilities
+ * sit in a later cascade layer and win over this one. Shell.tsx passes the same
+ * hover gold as classes; this rule says the same thing for the record.
+ */
 .fnd-head__help:hover {
-  color: var(--fnd-ink);
+  color: var(--fnd-selected);
   border-color: var(--fnd-line-hover);
 }
 

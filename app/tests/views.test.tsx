@@ -297,6 +297,68 @@ describe('the shell', () => {
     );
     expect(container.querySelector('.fnd-head__help')).toBeNull();
   });
+
+  /*
+   * R14, KTD13. The gold title-bar rules in components.css are written as
+   * `.fnd-head .fnd-head__tab…`. This is the DOM those selectors have to hit,
+   * and the reused back and Formulator buttons they have to miss.
+   */
+  it('lets the gold title-bar selectors reach the two tabs and none of the reused ones', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    const { DataBar } = await import('../src/views/Formulator.js');
+    const { container } = render(
+      <Shell
+        screen="deliverables"
+        onScreen={() => {}}
+        strip={<DataBar task={null} detail={null} running={null} busy={false} onLaunch={() => {}} onStop={() => {}} />}
+      >
+        <Deliverables
+          rows={[{ task: TASK, row: ROW }]}
+          open={{ task: TASK, row: ROW, text: null }}
+          onOpen={() => {}}
+          onOpenWorkbook={() => {}}
+          onExport={() => {}}
+          busy={null}
+          onBack={() => {}}
+        />
+      </Shell>,
+    );
+    const scoped = [...container.querySelectorAll('.fnd-head .fnd-head__tab')].map((n) => n.textContent);
+    expect(scoped).toEqual(['工作区', '成果库']);
+    const current = [...container.querySelectorAll(".fnd-head .fnd-head__tab[aria-current='page']")];
+    expect(current.map((n) => n.textContent)).toEqual(['成果库']);
+    const reused = [...container.querySelectorAll('.fnd-head__tab')].filter((n) => !n.closest('.fnd-head'));
+    expect(reused.map((n) => n.textContent?.trim())).toEqual(expect.arrayContaining(['起 Data Formulator', '交付物']));
+    for (const node of reused) expect(node.hasAttribute('aria-current')).toBe(false);
+  });
+
+  /*
+   * The help control is the shadcn ghost Button. Its colour utilities sit in a
+   * later cascade layer than components.css, so its title-bar colours are the
+   * classes it renders with, and they are read here.
+   */
+  it('keeps the help control neutral at rest and gold only on hover', async () => {
+    const { Shell } = await import('../src/components/Shell.js');
+    render(
+      <Shell screen="workbench" onScreen={() => {}} onGuide={() => {}}>
+        <p>x</p>
+      </Shell>,
+    );
+    const classes = screen.getByRole('button', { name: '怎么用' }).className.split(/\s+/);
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        'text-[var(--fnd-muted)]',
+        'bg-transparent',
+        'enabled:hover:text-[var(--fnd-selected)]',
+        'enabled:hover:bg-transparent',
+      ]),
+    );
+    expect(classes).not.toContain('enabled:hover:text-foreground');
+    expect(classes).not.toContain('enabled:hover:bg-[var(--fnd-surface-strong)]');
+    // Keyboard focus keeps the state it is in and adds the separate ring from
+    // `.fnd-head__help:focus-visible`; no focus class repaints the icon.
+    expect(classes.filter((name) => /(^|:)focus(-visible)?:.*(text|bg)-/.test(name))).toEqual([]);
+  });
 });
 
 

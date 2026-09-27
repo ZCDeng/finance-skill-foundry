@@ -18,7 +18,7 @@ components:
   button-primary: {backgroundColor: '{colors.fnd-accent}', textColor: '{colors.fnd-on-accent}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
   button-secondary: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 14px, height: 36px}
   input: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 12px, height: 36px}
-  nav-current: {backgroundColor: '{colors.fnd-selection-surface}', textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 16px, height: 32px}
+  nav-current: {backgroundColor: '{colors.fnd-selection-surface}', textColor: '{colors.fnd-selected}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 16px, height: 36px}
   chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.chip}', padding: 4px 10px}
   card: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 18px 20px}
   workspace-tab: {backgroundColor: transparent, textColor: '{colors.fnd-muted}', typography: '{typography.small}', padding: 12px 0}
@@ -43,13 +43,13 @@ components:
 
 ## Colors
 
-主操作使用 `fnd-accent/on-accent` 的中性反差；当前导航使用中性选择底色与正文色，成果页签用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
+主操作使用 `fnd-accent/on-accent` 的中性反差。标题栏品牌字「FA Foundry」用 `fnd-selected` 金色。标题栏按钮平时用次要文字色、透明底，悬停时文字变金；当前页签用金色文字、选择底色，标签下方加一条 1px 金色下划线，当前位置因此不只靠颜色区分；键盘聚焦保留所在状态，另加 1px `fnd-focus` 焦点框，不改文字颜色。这几条只写在 `.fnd-head` 里，其他页面复用 `.fnd-head__tab` 的返回按钮和 Formulator 按钮保持中性。`fnd-selected` 作文字时，浅色在标题栏白底上 5.18:1、在选择底色 #efefed 上 4.50:1，正好压在下限，改这两个 token 前先跑 tokens.test.ts；深色分别为 9.55:1 和 8.43:1。成果页签同样用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点框，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
 
 警告、错误、不可逆删除和输入错误使用砖红警示色 `fnd-warning`，文字用主色，边用 `fnd-warning-line`，浅底用 `fnd-warning-fill`。浅色主色 #a3372b 在白底上 6.69:1，深色主色 #eb9a8c 在 #1f1f1f 上 7.48:1。三件一起换，警示文字旁边不留金色边或金色浅底。
 
 前置 YAML 的 `-dark` 项是同名 CSS token 的深色覆盖值。壳跟随系统主题；原生对话在自身主题完成解析后，通过 DSW 语义别名映射同一套底色、文字、边界、金色强调色和警示色；原生的错误色和危险悬停底映射到 `fnd-warning` 与 `fnd-warning-fill`。原生 composer 默认中性边界，悬停保持中性色，仅在聚焦时使用 1px 金色边界。历史标记保留原有金色、灰色、蓝色语义，FA 图形保持自身颜色。
 
-**The Location Rule.** 金色只服务于品牌、当前位置、选择、焦点和原有的历史标记（稿外追问 chip）；警告、错误、删除和输入错误一律用警示色，不用金色。主操作使用既有中性反差，数值与业务状态保留文字。
+**The Location Rule.** 金色只服务于品牌、当前位置、选择、焦点和原有的历史标记（稿外追问 chip）；警告、错误、删除和输入错误一律用警示色，不用金色。标题栏按钮平时保持中性，只在当前页签、悬停和聚焦时出现金色。主操作使用既有中性反差，数值与业务状态保留文字。
 
 ## Typography
 

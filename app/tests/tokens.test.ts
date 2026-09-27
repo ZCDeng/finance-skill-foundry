@@ -375,3 +375,107 @@ describe('where the warning colour is drawn', () => {
     expect(users).toEqual(["components.css .fnd-chip[data-coloured='yes'][data-mark='outside']"]);
   });
 });
+
+/*
+ * R14, KTD13. The title bar says where the reader is, so it carries the gold:
+ * the wordmark, the current tab and a hover. Its buttons stay neutral at rest.
+ * `.fnd-head__tab` is also the back button on 交付物 and 任务 and the
+ * Formulator start and stop button, so every gold title-bar rule is written
+ * under `.fnd-head` and those reuses keep their own colours.
+ */
+describe('the title bar gold', () => {
+  const COMPONENTS = readFileSync(fileURLToPath(new URL('../src/components/components.css', import.meta.url)), 'utf8');
+  const light = block(TOKENS, ':root');
+  const media = block(TOKENS, '@media (prefers-color-scheme: dark)');
+  const dark = block(TOKENS, ":root[data-theme='dark']");
+  const CURRENT = ".fnd-head .fnd-head__tab[aria-current='page']";
+  const HOVER = ".fnd-head .fnd-head__tab:hover:not(:disabled):not([aria-current='page'])";
+
+  /** Every rule in the sheet as [one selector, its body], comments removed. */
+  function rules(css: string): [string, string][] {
+    const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const found: [string, string][] = [];
+    for (const [, selectors, body] of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const name of selectors.split(',')) found.push([name.trim().replace(/\s+/g, ' '), body]);
+    }
+    return found;
+  }
+
+  it('writes the wordmark in the selection gold', () => {
+    expect(declarations(COMPONENTS, '.fnd-head__mark').color).toBe('var(--fnd-selected)');
+  });
+
+  it('leaves a tab at rest in the secondary text colour and turns it gold on hover', () => {
+    expect(declarations(COMPONENTS, '.fnd-head__tab')).toMatchObject({
+      color: 'var(--fnd-muted)',
+      background: 'transparent',
+    });
+    expect(declarations(COMPONENTS, HOVER)).toMatchObject({
+      color: 'var(--fnd-selected)',
+      background: 'transparent',
+    });
+  });
+
+  it('marks the current tab with gold text, the selection surface and a 1px gold underline', () => {
+    expect(declarations(COMPONENTS, CURRENT)).toMatchObject({
+      color: 'var(--fnd-selected)',
+      background: 'var(--fnd-selection-surface)',
+      position: 'relative',
+    });
+    // The underline is the mark that does not depend on colour. Drawn by a
+    // positioned pseudo-element, so the tab and the header keep their height.
+    expect(declarations(COMPONENTS, `${CURRENT}::after`)).toMatchObject({
+      position: 'absolute',
+      bottom: '0',
+      height: '1px',
+      background: 'var(--fnd-selected)',
+    });
+  });
+
+  it('keeps the keyboard focus ring a mark of its own, apart from the gold text', () => {
+    for (const selector of ['.fnd-head .fnd-head__tab:focus-visible', '.fnd-head__help:focus-visible']) {
+      const rule = declarations(COMPONENTS, selector);
+      expect(rule, selector).toMatchObject({ outline: '1px solid var(--fnd-focus)', 'outline-offset': '-1px' });
+      expect(rule, selector).not.toHaveProperty('color');
+      expect(rule, selector).not.toHaveProperty('background');
+    }
+    // `--fnd-focus` draws rings only; the gold text is always `--fnd-selected`.
+    for (const [selector, body] of rules(COMPONENTS)) {
+      if (!selector.startsWith('.fnd-head')) continue;
+      if (body.includes('--fnd-focus')) expect(selector, selector).toContain(':focus-visible');
+      if (selector.includes(':focus-visible')) expect(body, selector).not.toContain('--fnd-selected');
+    }
+  });
+
+  it('keeps every gold title-bar rule inside .fnd-head, so the reused tab keeps its colours', () => {
+    for (const [selector, body] of rules(COMPONENTS)) {
+      if (!selector.includes('.fnd-head__tab') || !body.includes('--fnd-selected')) continue;
+      expect(selector, selector).toMatch(/^\.fnd-head \.fnd-head__tab/);
+    }
+    // What the back buttons and the Formulator button draw with, unchanged.
+    expect(declarations(COMPONENTS, '.fnd-head__tab:hover')).toMatchObject({
+      color: 'var(--fnd-ink)',
+      background: 'var(--fnd-surface-strong)',
+    });
+    expect(declarations(COMPONENTS, ".fnd-head__tab:active:not([aria-current='page'])").background).toBe(
+      'var(--fnd-selection-surface)',
+    );
+  });
+
+  it('clears 4.5:1 for the gold text on the title bar and on the selection surface', () => {
+    expect(declarations(COMPONENTS, '.fnd-head').background).toBe('var(--fnd-surface)');
+    for (const [theme, table] of [
+      ['light', light],
+      ['dark (system)', media],
+      ['dark (stamped)', dark],
+    ] as const) {
+      for (const ground of ['--fnd-surface', '--fnd-selection-surface']) {
+        const ratio = contrast(table['--fnd-selected'], table[ground]);
+        expect(
+          ratio,
+          `${theme} --fnd-selected ${table['--fnd-selected']} on ${ground} ${table[ground]} is ${ratio.toFixed(4)}:1`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});
