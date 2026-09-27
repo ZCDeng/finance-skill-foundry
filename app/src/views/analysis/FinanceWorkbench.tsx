@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Play } from 'lucide-react';
-import { bridge, shortSha, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState } from '../../bridge.js';
+import { bridge, shortSha, timeWait, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState, type WaitKind } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountMapEditor } from './AccountMapEditor.js';
@@ -137,19 +137,23 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
       setComparePeriod(text(budgetScope.period) !== text(actualScope.period) ? text(budgetScope.period) : '');
     }
   }
-  async function track(label: string, work: (done: (message: string) => void) => Promise<void>) {
-    if (running) return;
-    onOutcome(null); setMessage(''); setError('');
-    onRunning(label, true);
-    let succeeded = false;
-    try {
-      await work((message) => { succeeded = true; onOutcome({ label, result: 'ok', message, at: new Date().toISOString() }); });
-    } catch (failure) {
-      const message = failure instanceof Error ? failure.message : String(failure);
-      // After done only reading the page back can fail; the operation itself went through.
-      if (succeeded) setError(message);
-      else onOutcome({ label, result: 'error', message, at: new Date().toISOString() });
-    } finally { onRunning(label, false); }
+  /** One operation as the manager waits on it: both calls of 保存并运行 and the read-back after are one timed wait. */
+  function track(kind: WaitKind, label: string, work: (done: (message: string, run?: unknown) => void) => Promise<void>) {
+    if (running) return Promise.resolve();
+    return timeWait(kind, async (note) => {
+      onOutcome(null); setMessage(''); setError('');
+      onRunning(label, true);
+      let succeeded = false;
+      try {
+        await work((message, run) => { succeeded = true; note('ok', run); onOutcome({ label, result: 'ok', message, at: new Date().toISOString() }); });
+        if (!succeeded) note('cancelled');
+      } catch (failure) {
+        const message = failure instanceof Error ? failure.message : String(failure);
+        // After done only reading the page back can fail; the operation itself went through.
+        if (succeeded) setError(message);
+        else { note('error'); onOutcome({ label, result: 'error', message, at: new Date().toISOString() }); }
+      } finally { onRunning(label, false); }
+    });
   }
   useEffect(() => {
     let cancelled = false;
@@ -165,7 +169,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
     return () => { cancelled = true; };
   }, [taskId]);
   function saveContext(runAfter?: 'pnl' | 'bridge') {
-    return track(runAfter === 'pnl' ? '正在保存口径并运行管理口径损益…' : runAfter === 'bridge' ? '正在保存口径并运行预算差异桥…' : '正在保存口径…', async (done) => {
+    return track(runAfter === 'pnl' ? 'finance.pnl' : runAfter === 'bridge' ? 'finance.bridge' : 'finance.save',
+      runAfter === 'pnl' ? '正在保存口径并运行管理口径损益…' : runAfter === 'bridge' ? '正在保存口径并运行预算差异桥…' : '正在保存口径…', async (done) => {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
       const bindings = { actual, ...(budget ? { budget } : {}) };
       const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope, ...(comparePeriod ? { period: comparePeriod } : {}) } } : {}) };
@@ -185,16 +190,16 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
         contexts: value.contexts.some((item) => item.id === context.id) ? value.contexts : [...value.contexts, context],
       } : value);
       if (runAfter === 'pnl') {
-        unwrap(await api.financeCall(taskId, 'run-metric', { context_id: context.id, metric: { kind: 'management_pnl' } }));
-        done('已保存口径并运行管理口径损益。');
+        const run = unwrap(await api.financeCall(taskId, 'run-metric', { context_id: context.id, metric: { kind: 'management_pnl' } }));
+        done('已保存口径并运行管理口径损益。', run);
         setSetupOpen(false);
       } else if (runAfter === 'bridge') {
         const labels = bridgeScenarioLabels(context);
-        unwrap(await api.financeCall(taskId, 'explain-variance', {
+        const run = unwrap(await api.financeCall(taskId, 'explain-variance', {
           context_id: context.id, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
           dimensions: bridgeDimensions,
         }));
-        done('已保存口径并运行预算差异桥。');
+        done('已保存口径并运行预算差异桥。', run);
         setSetupOpen(false);
       } else {
         done('已保存财务分析口径。');
@@ -203,7 +208,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
     });
   }
   function saveMap() {
-    return track('正在保存映射…', async (done) => {
+    return track('finance.save', '正在保存映射…', async (done) => {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持管理科目映射。');
       const parsed = JSON.parse(mapRows);
       if (!Array.isArray(parsed)) throw new Error('映射 JSON 需要是数组。');
@@ -213,17 +218,18 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
       done('已保存管理科目映射，可用于下一次口径保存。');
     });
   }
-  const runExisting = (kind: 'pnl' | 'bridge') => track(kind === 'pnl' ? '正在运行管理口径损益…' : '正在运行预算差异桥…', async (done) => {
+  const runExisting = (kind: 'pnl' | 'bridge') => track(kind === 'pnl' ? 'finance.pnl' : 'finance.bridge', kind === 'pnl' ? '正在运行管理口径损益…' : '正在运行预算差异桥…', async (done) => {
     const api = bridge(); if (!api?.financeCall || !contextId) return;
-    if (kind === 'pnl') unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' } }));
+    let run: unknown;
+    if (kind === 'pnl') run = unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' } }));
     else {
       const labels = bridgeScenarioLabels(selectedContext);
-      unwrap(await api.financeCall(taskId, 'explain-variance', {
+      run = unwrap(await api.financeCall(taskId, 'explain-variance', {
         context_id: contextId, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
         dimensions: bridgeDimensions,
       }));
     }
-    done(kind === 'pnl' ? '已运行管理口径损益。' : '已运行预算差异桥。');
+    done(kind === 'pnl' ? '已运行管理口径损益。' : '已运行预算差异桥。', run);
     setSetupOpen(false);
     await onRefresh();
   });
@@ -234,7 +240,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
   }, [aliases.join('|')]);
   useEffect(() => { setBaselineScenarioId(''); }, [contextId, scenarioKind]);
   function runScenario(child = false) {
-    return track(child ? '正在运行延迟回款子情景…' : '正在运行基准情景…', async (done) => {
+    return track('finance.scenario', child ? '正在运行延迟回款子情景…' : '正在运行基准情景…', async (done) => {
       const api = bridge(); if (!api?.financeCall || !contextId) throw new Error('请先保存或选择财务口径。');
       const scenarioScope = selectedContext?.scopes?.[scenarioPrimary] ?? scope;
       let scenario: Record<string, unknown>;
@@ -260,10 +266,10 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
         }));
         setBaselineScenarioId(String(scenario.id ?? ''));
       }
-      unwrap(await api.financeCall(taskId, 'finance-scenario-run', { scenario_id: String(scenario.id) }));
+      const run = unwrap(await api.financeCall(taskId, 'finance-scenario-run', { scenario_id: String(scenario.id) }));
       setFinance((value) => value && !value.scenarios.some((item) => item.id === scenario.id)
         ? { ...value, scenarios: [...value.scenarios, scenario] } : value);
-      done(child ? '已运行延迟回款子情景。' : '已运行基准情景。');
+      done(child ? '已运行延迟回款子情景。' : '已运行基准情景。', run);
       setSetupOpen(false);
       await onRefresh();
     });

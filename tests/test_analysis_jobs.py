@@ -275,3 +275,79 @@ def test_background_script_completion_report_carries_result_contract_warnings(tm
     run = AnalysisStore(task).get_run(result["result"]["run_id"])
     assert run["execution_status"] == "succeeded"
     assert warnings == run["row_declarations"]["warnings"]
+
+
+def _runner_reporting(monkeypatch, seconds):
+    """The runner's own answer, with the durations it reports in order; everything else identical."""
+    import foundry.runner as runner
+
+    durations = iter(seconds)
+
+    def run(workspace, code, **options):
+        return {"status": "succeeded", "stdout": "budget result: 42\n", "stderr": "", "exit_code": 0,
+                "outputs": [], "workspace": str(workspace), "environment": {"python": "3"},
+                "duration_seconds": next(durations)}
+
+    monkeypatch.setattr(runner, "run_script", run)
+
+
+def test_script_run_keeps_the_runner_duration_beside_its_result(tmp_path: Path, monkeypatch):
+    task, _ = _context(tmp_path)
+    _runner_reporting(monkeypatch, [1.25])
+    store = AnalysisStore(task)
+    run = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    assert run["duration_seconds"] == 1.25
+    assert "duration_seconds" not in run["result"]
+    assert store.get_run(run["id"])["duration_seconds"] == 1.25
+
+
+def test_script_runs_that_differ_only_in_duration_keep_one_output_hash(tmp_path: Path, monkeypatch):
+    task, _ = _context(tmp_path)
+    _runner_reporting(monkeypatch, [0.4, 3.9])
+    store = AnalysisStore(task)
+    first = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    second = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    assert (first["duration_seconds"], second["duration_seconds"]) == (0.4, 3.9)
+    assert first["output_hash"] is not None
+    assert first["output_hash"] == second["output_hash"]
+
+
+def test_cancelled_job_records_a_duration_from_its_own_timestamps(tmp_path: Path, monkeypatch):
+    from datetime import datetime
+    import foundry.analysis_jobs as module
+    from foundry.analysis_jobs import _worker
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    monkeypatch.setattr(jobs, "_launch", lambda record: None)
+    # Each stamp this module takes is three seconds after the last.
+    ticks = iter(range(0, 3000, 3))
+
+    def stamp_now():
+        second = next(ticks)
+        return f"2026-09-27T10:{second // 60:02d}:{second % 60:02d}Z"
+
+    monkeypatch.setattr(module, "now_iso", stamp_now)
+    row = jobs.create(context, "script", {"code": "print('must not run')", "bindings": {}})
+    jobs.cancel(row["id"], session_id="parent")
+    _worker(task.store.var_root, task.id, row["id"])
+
+    result = jobs.get(row["id"])
+    assert result["status"] == "cancelled"
+    stamp = lambda text: datetime.fromisoformat(text.replace("Z", "+00:00"))
+    assert result["duration_seconds"] == (stamp(result["finished_at"]) - stamp(result["started_at"])).total_seconds()
+    assert result["duration_seconds"] > 0
+    assert "duration_seconds" not in result["result"]
+
+
+def test_job_that_never_started_measures_from_creation(tmp_path: Path, monkeypatch):
+    import foundry.analysis_jobs as module
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    stamps = iter(["2026-09-27T10:00:00Z", "2026-09-27T10:00:04Z"])
+    monkeypatch.setattr(module, "now_iso", lambda: next(stamps))
+    row = jobs.create(context, "child", {"prompt": "核对"})
+    failed = jobs.settle(row["id"], "failed", {"error": "harness runtime stopped"},
+                         session_id="parent", child_session_id=row["child_session_id"])
+    assert failed["duration_seconds"] == 4.0

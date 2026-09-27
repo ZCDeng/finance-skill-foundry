@@ -111,6 +111,8 @@ export interface Bridge {
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   sourceLocatorOpen?(task: string, spec: { fact_id: string } | { run_id: string; row: number; column?: string }): Promise<Answer<SourceLocatorResult>>;
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
+  timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
@@ -203,6 +205,38 @@ export function bridge(): Bridge | null {
   return (globalThis as { foundry?: Bridge }).foundry ?? null;
 }
 
+export type WaitKind = import('../electron/ipc/contract').WaitKind;
+export type WaitOutcome = import('../electron/ipc/contract').WaitOutcome;
+/** One user wait as the timing log takes it: what, how it ended, and two durations. */
+export type WaitEntry = import('../electron/timing').WaitEntry;
+
+/**
+ * Times one user wait: from the call, made on the click, to the end of `work`,
+ * the page read back after it included. `work` says how it ended through
+ * `note`, with the run record whose engine time it carries; otherwise it is
+ * ok when `work` returns and an error when it throws. The log is best effort:
+ * a build without it, or a write that fails, changes nothing on screen.
+ */
+export async function timeWait<T>(kind: WaitKind, work: (note: (outcome: WaitOutcome, run?: unknown) => void) => Promise<T>): Promise<T> {
+  const started = performance.now();
+  let outcome: WaitOutcome | undefined;
+  let run: unknown;
+  try {
+    return await work((ended, record) => { outcome = ended; run = record; });
+  } catch (failure) {
+    outcome ??= 'error';
+    throw failure;
+  } finally {
+    const seconds = (run as { duration_seconds?: unknown } | undefined)?.duration_seconds;
+    const entry: WaitEntry = {
+      kind, outcome: outcome ?? 'ok', waitMs: Math.round(performance.now() - started),
+      engineMs: typeof seconds === 'number' && Number.isFinite(seconds) ? Math.round(seconds * 1000) : null,
+    };
+    const api = bridge();
+    if (api?.timingLog) void Promise.resolve().then(() => api.timingLog!(entry)).catch(() => {});
+  }
+}
+
 /** Short forms for a screen: a digest is an identity, not a number to read. */
 export const shortSha = (sha: string) => sha.slice(0, 12);
 
@@ -283,6 +317,8 @@ export interface AnalysisRun extends AnalysisObject {
   output_hash?: string;
   error?: string | null;
   engine?: string;
+  /** Engine seconds, beside the result so output_hash does not move with it. Absent on older and SQL runs. */
+  duration_seconds?: number | null;
   code?: string;
   stdout?: string;
   stderr?: string;

@@ -1829,6 +1829,9 @@ class AnalysisStore:
             stdout=execution.get("stdout", ""),
             stderr=execution.get("stderr", ""),
             exit_code=execution.get("exit_code"),
+            # Beside the result, never in it: output_hash covers the result, and a slower run of the same output
+            # must keep its hash.
+            duration_seconds=execution.get("duration_seconds"),
             outputs=outputs,
             assumptions=assumptions,
             missing_inputs=[],

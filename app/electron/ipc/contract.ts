@@ -29,6 +29,11 @@ export const CHANNELS = {
   analysisMethodApply: 'analysis:method-apply',
   financeCall: 'finance:call',
   financeSourceRefresh: 'finance:source-refresh',
+  /**
+   * Write-only: one line per user wait, appended to a file in this app's own
+   * folder. Nothing reads it back over IPC, and it never reaches the task store.
+   */
+  timingLog: 'timing:log',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',
@@ -78,3 +83,14 @@ export const CHANNELS = {
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+/**
+ * What a timed wait was doing. A fixed list: the timing log names one of these
+ * and never a task, a file or anything a person typed.
+ */
+export const WAIT_KINDS = [
+  'finance.save', 'finance.pnl', 'finance.bridge', 'finance.scenario',
+  'analysis.run', 'materials.import', 'source.refresh',
+] as const;
+export type WaitKind = (typeof WAIT_KINDS)[number];
+export type WaitOutcome = 'ok' | 'error' | 'cancelled';

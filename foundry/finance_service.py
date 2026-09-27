@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from decimal import localcontext
+from time import perf_counter
 
 from foundry.analysis import AnalysisStore, _assert_id, _hash, _hash_bytes, _new, _safe_text
 from foundry.errors import FoundryError
@@ -420,6 +421,7 @@ class FinanceStore:
 
     def run_revision(self, revision):
         from foundry.finance_requirement_semantics import capture_requirements
+        started = perf_counter()
         requirements_snapshot = capture_requirements(self.analysis, self._authorize)
         self._authorize(revision["bindings"])
         context = self._read("contexts", revision["finance_context_id"])
@@ -552,6 +554,8 @@ class FinanceStore:
             reproducibility_status = "unverified"
             execution_status = "failed"
             error_fields = {"error": error, "error_code": "finance_calculation_failed"}
+        # Engine time, beside the result like calculation_version: a slower run of the same output keeps its hash.
+        duration_seconds = round(perf_counter() - started, 3)
         record = _new(
             self.task,
             engine="finance",
@@ -566,6 +570,7 @@ class FinanceStore:
             code_hash=code_hash,
             fingerprint=fingerprint,
             calculation_version=FINANCE_CALCULATION_VERSION,
+            duration_seconds=duration_seconds,
             environment={"runner": "finance-v1", "decimal_precision": 80},
             parameters=[],
             parameter_metadata=[],

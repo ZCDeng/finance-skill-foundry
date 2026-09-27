@@ -2655,3 +2655,83 @@ ${canonicalAppendix} 已改写`;
   });
 
 });
+
+describe('wait timing', () => {
+  type Entry = { kind: string; outcome: string; waitMs: number; engineMs: number | null };
+  /** The renderer's clock, moved forward by hand inside a mocked call so a test can say where time went. */
+  function skewedClock() {
+    const real = performance.now.bind(performance);
+    let skew = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => real() + skew);
+    return (ms: number) => { skew += ms; };
+  }
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('logs 保存口径并运行 as one wait that ends after the page is read back', async () => {
+    const advance = skewedClock();
+    const refreshGate = deferred<Answer<AnalysisState>>();
+    const analysisState = vi.fn(async () => analysisState.mock.calls.length === 1 ? success(initial) : refreshGate.promise);
+    const financeCall = vi.fn(async (_taskId: string, command: string, spec?: Record<string, unknown>) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'finance-context-save') { advance(100); return success({ ...object, id: '4'.repeat(32), name: spec?.name, bindings: spec?.bindings, scopes: spec?.scopes, diagnostics: [] }); }
+      if (command === 'run-metric') { advance(300); return success({ ...run, engine: 'finance', finance_context_id: '4'.repeat(32), duration_seconds: 0.412 }); }
+      return success({});
+    });
+    const timingLog = vi.fn(async (_entry: Entry) => success({ written: true }));
+    mountBridge({ analysisState, financeCall, timingLog } as Partial<Bridge>);
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText('财务业务口径');
+    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
+    expect(timingLog).not.toHaveBeenCalled();
+    advance(2_000);
+    await act(async () => refreshGate.resolve(success(initial)));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(1));
+    const [entry] = timingLog.mock.calls[0];
+    expect(entry).toEqual({ kind: 'finance.pnl', outcome: 'ok', waitMs: expect.any(Number), engineMs: 412 });
+    // Both calls and the read-back: without the refresh it would be about 400 ms.
+    expect(entry.waitMs).toBeGreaterThanOrEqual(2_400);
+  });
+
+  it('times a materials import after it is read back, and a closed dialog as cancelled', async () => {
+    const analysisAddFiles = vi.fn(async () => analysisAddFiles.mock.calls.length === 1 ? success([source]) : success([]));
+    const timingLog = vi.fn(async (_entry: Entry) => success({ written: true }));
+    const api = mountBridge({ analysisAddFiles, timingLog } as Partial<Bridge>);
+    render(<Analysis {...props} embedded section="materials" />);
+    await screen.findByText('本月实际');
+    fireEvent.click(screen.getByRole('button', { name: '添加资料' }));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(1));
+    expect(api.analysisState).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '添加资料' }));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(2));
+    expect(timingLog.mock.calls.map(([entry]) => [entry.kind, entry.outcome, entry.engineMs])).toEqual([
+      ['materials.import', 'ok', null], ['materials.import', 'cancelled', null]]);
+  });
+
+  it('times a source refresh and a rerun under their own kinds, with the engine time a run reports', async () => {
+    const analysisRun = vi.fn(async () => analysisRun.mock.calls.length === 1
+      ? success({ ...run, duration_seconds: 1.25 }) : { ok: false as const, refused: true, message: '计算超时' });
+    const financeSourceRefresh = vi.fn(async () => success({ cancelled: true }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] })
+      : command === 'list-finance-context' ? success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] })
+      : success({}));
+    const timingLog = vi.fn(async (_entry: Entry) => success({ written: true }));
+    mountBridge({ analysisRun, financeSourceRefresh, financeCall, timingLog } as Partial<Bridge>);
+    render(<Analysis {...props} />); await screen.findByText('本月实际');
+    openAnalysisEditor();
+    fireEvent.click(screen.getByRole('button', { name: '重跑当前已保存版本' }));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '重跑当前已保存版本' }));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
+    await openSourceRefreshDetails();
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(timingLog).toHaveBeenCalledTimes(3));
+    expect(timingLog.mock.calls.map(([entry]) => [entry.kind, entry.outcome, entry.engineMs])).toEqual([
+      ['analysis.run', 'ok', 1250], ['analysis.run', 'error', null], ['source.refresh', 'cancelled', null]]);
+  });
+});

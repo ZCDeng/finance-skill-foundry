@@ -7,6 +7,7 @@ surfaces expose start/read/cancel/retry; started/settle are runtime-only hooks.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -48,6 +49,11 @@ def _object(value: str) -> dict[str, Any]:
         raise FoundryError("job argument must be a JSON object")
     return result
 
+
+
+def _elapsed(start: str, end: str) -> float:
+    """Seconds between two of this module's stamps; they have seconds resolution, so this does too."""
+    return (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
 
 
 def _process_identity(pid: int) -> dict[str, Any] | None:
@@ -290,6 +296,9 @@ class JobStore:
             if record["status"] in TERMINAL:
                 return record
             record.update(status=status, result=result, finished_at=now_iso())
+            # Kept on the job beside its result, so a cancelled, failed or timed-out job has a time even
+            # when no run record was written; one that never started counts from when it was queued.
+            record["duration_seconds"] = _elapsed(record.get("started_at") or record["created_at"], record["finished_at"])
             record["events"].append({"status": status, "at": record["finished_at"]})
             self._write(record)
             return record

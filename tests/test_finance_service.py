@@ -266,6 +266,31 @@ def test_finance_run_records_its_calculation_version_outside_the_result(finance)
     assert run["environment"]["runner"] == "finance-v1"
 
 
+def _clock_reading(monkeypatch, readings):
+    """The clock the finance engine reads, returning these seconds in order."""
+    values = iter(readings)
+    monkeypatch.setattr("foundry.finance_service.perf_counter", lambda: next(values))
+
+
+def test_finance_run_records_its_duration_outside_the_result(finance, monkeypatch):
+    service, context = finance
+    _clock_reading(monkeypatch, [10.0, 10.75, 20.0, 22.5])
+    first = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    second = service.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    assert (first["duration_seconds"], second["duration_seconds"]) == (0.75, 2.5)
+    assert "duration_seconds" not in first["result"]
+    assert first["output_hash"] == second["output_hash"]
+    assert service.analysis.get_run(first["id"])["duration_seconds"] == 0.75
+
+
+def test_failed_finance_run_still_records_its_duration(finance, monkeypatch):
+    service, context = finance
+    _clock_reading(monkeypatch, [5.0, 5.5])
+    run = service.explain_variance({"context_id": context["id"], "actual_filters": ["not", "an", "object"]})
+    assert run["execution_status"] == "failed"
+    assert run["duration_seconds"] == 0.5
+
+
 def test_complete_variance_rerun_after_upgrade_keeps_output_and_stays_reproducible(finance):
     service, context = finance
     old = _recorded_before_calculation_version(

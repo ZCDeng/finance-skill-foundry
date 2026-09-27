@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, when, type Answer, type AnalysisDraft, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
+import { bridge, shortSha, timeWait, when, type Answer, type AnalysisDraft, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
 import { STATUS, textValue } from './analysis/presentation.js';
@@ -149,15 +149,22 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       if (active.current && currentTask.current === taskId) setError(failure instanceof Error ? failure.message : String(failure));
     } finally { operation.current = false; if (active.current) setBusy(false); }
   }
-  async function addFiles(taskId: string) {
+  // Timed from the click, but main takes off the minutes the file dialog stood open.
+  const addFiles = (taskId: string) => timeWait('materials.import', async (note) => {
     const api = bridge();
     if (!api?.analysisAddFiles) throw new Error('此版本暂不支持添加分析资料。');
     const added = unwrap(await api.analysisAddFiles(taskId));
     await refresh(taskId);
+    note(added.length ? 'ok' : 'cancelled');
     if (currentTask.current === taskId) {
       chooseTab('datasets');
       if (added.length) setNotice(`已加入 ${added.length} 份资料。可以继续提问。`);
     }
+  });
+  /** Runs a saved analysis and reads the page back even if the run fails; the wait ends after the read-back. */
+  async function runSaved(taskId: string, id: string, note: (outcome: 'ok', run: unknown) => void) {
+    const api = bridge(); if (!api?.analysisRun) throw new Error('此版本暂不支持计算。');
+    try { note('ok', unwrap(await api.analysisRun(taskId, id))); } finally { await refresh(taskId); }
   }
   useEffect(() => {
     if (busy || operation.current || !pendingStart.current?.taskId) return;
@@ -407,17 +414,14 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                   await refresh(taskId); if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(id);
                 }
                 await handoff(`请调整分析「${analysis.question}」的口径或假设。先读取分析版本 ${id}，保留之前结果。`, undefined, { targetTaskId: taskId });
-              })} onSave={(spec) => void perform(async (taskId) => {
+              })} onSave={(spec) => void perform((taskId) => timeWait('analysis.run', async (note) => {
                 const api = bridge(); if (!api?.analysisSave || !api.analysisRun) throw new Error('此版本暂不支持保存并运行分析。');
                 const next = unwrap(await api.analysisSave(taskId, spec));
                 analysisEdits.current.delete(analysisKey); removeCopy(analysisKey);
                 if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(next.id);
                 // Save and run are distinct records; refresh the saved definition even if execution fails.
-                try { unwrap(await api.analysisRun(taskId, next.id)); } finally { await refresh(taskId); }
-              })} onRun={() => void perform(async (taskId) => {
-                const api = bridge(); if (!api?.analysisRun) throw new Error('此版本暂不支持计算。');
-                try { unwrap(await api.analysisRun(taskId, analysis.id)); } finally { await refresh(taskId); }
-              })} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
+                await runSaved(taskId, next.id, note);
+              }))} onRun={() => void perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)))} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
                 <p className="analysis-note">{analysis.engine === 'structured_aggregate' ? '这项分析按已保存的筛选、分组和汇总规则计算，来源与剔除记录可在结果中查看。' : '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。'}</p>
                 {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
                 <details className="analysis-details"><summary>{analysis.engine === 'structured_aggregate' ? '高级：查看汇总规则' : '高级：查看计算脚本'}</summary><pre className="analysis-source-text">{analysis.engine === 'structured_aggregate' ? JSON.stringify(analysis.aggregate_plan, null, 2) : analysis.code}</pre></details>

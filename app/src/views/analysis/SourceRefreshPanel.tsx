@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
+import { bridge, shortSha, timeWait, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
@@ -29,19 +29,22 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const api = bridge(); if (!api?.financeSourceRefresh) throw new Error('此版本暂不支持刷新财务来源文件。');
-      setError(''); setMessage('');
-      const cleanScope = Object.fromEntries(Object.entries(scope).filter(([, value]) => value.trim())) as Record<string, string>;
-      const result = unwrap(await api.financeSourceRefresh(taskId, {
-        product, version, name: name.trim() || undefined, file_identity_policy: policy, scope: cleanScope,
-      }));
-      if (result.cancelled) { setMessage('已取消刷新。'); return; }
-      await onRefresh(); await load();
-      const usable = typeof result.effective_dataset_id === 'string' ? result.effective_dataset_id : result.dataset_id;
-      const datasetId = typeof usable === 'string' ? shortSha(usable) : '';
-      setMessage(typeof result.dataset_id === 'string'
-        ? `已发布新来源快照 ${datasetId}。历史结果仍按原快照保留。`
-        : '文件内容与已发布快照一致，已保留原结果引用。');
+      // Timed from the click, but main takes off the minutes the file dialog stood open.
+      await timeWait('source.refresh', async (note) => {
+        const api = bridge(); if (!api?.financeSourceRefresh) throw new Error('此版本暂不支持刷新财务来源文件。');
+        setError(''); setMessage('');
+        const cleanScope = Object.fromEntries(Object.entries(scope).filter(([, value]) => value.trim())) as Record<string, string>;
+        const result = unwrap(await api.financeSourceRefresh(taskId, {
+          product, version, name: name.trim() || undefined, file_identity_policy: policy, scope: cleanScope,
+        }));
+        if (result.cancelled) { note('cancelled'); setMessage('已取消刷新。'); return; }
+        await onRefresh(); await load();
+        const usable = typeof result.effective_dataset_id === 'string' ? result.effective_dataset_id : result.dataset_id;
+        const datasetId = typeof usable === 'string' ? shortSha(usable) : '';
+        setMessage(typeof result.dataset_id === 'string'
+          ? `已发布新来源快照 ${datasetId}。历史结果仍按原快照保留。`
+          : '文件内容与已发布快照一致，已保留原结果引用。');
+      });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {

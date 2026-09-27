@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
@@ -412,5 +412,76 @@ describe('embedded workspace IPC', () => {
     expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task,actor:'manager'},'task-rename',['--title','月度利润复盘']);
     expect((await invoke(CHANNELS.taskRename,task,'bad\nname')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledOnce();
+  });
+});
+
+describe('wait timing log', () => {
+  const tempRoots: string[] = [];
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    const { rm } = await import('node:fs/promises');
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+  async function userData() {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const dir = await mkdtemp(`${tmpdir()}/fnd-timing-`);
+    tempRoots.push(dir);
+    return dir;
+  }
+  async function lines(dir: string) {
+    const { readFile } = await import('node:fs/promises');
+    return (await readFile(`${dir}/wait-timing.jsonl`, 'utf8')).trim().split('\n');
+  }
+
+  it('appends one fixed-shape line per wait under userData, and nothing a person typed or a file held', async () => {
+    const dir = await userData();
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    const sent = { kind: 'finance.pnl', outcome: 'ok', waitMs: 1834.6, engineMs: 412,
+      amount: '900719925474099.99', file: '/chosen/预算.xlsx', task, title: '华东经营分析' };
+    expect(await invoke(CHANNELS.timingLog, sent)).toEqual({ ok: true, value: { written: true } });
+    const [line, ...rest] = await lines(dir);
+    expect(rest).toEqual([]);
+    const row = JSON.parse(line);
+    expect(Object.keys(row).sort()).toEqual(['at', 'engine_ms', 'kind', 'outcome', 'wait_ms']);
+    expect(row).toMatchObject({ kind: 'finance.pnl', outcome: 'ok', wait_ms: 1835, engine_ms: 412 });
+    expect(Number.isNaN(Date.parse(row.at))).toBe(false);
+    for (const secret of ['900719925474099', '预算', 'chosen', task, '华东']) expect(line).not.toContain(secret);
+    // A kind or a number is refused rather than written when it could carry anything else.
+    expect((await invoke(CHANNELS.timingLog, { ...sent, kind: '华东 900719925474099.99' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.timingLog, { ...sent, waitMs: '1834' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.timingLog, { ...sent, outcome: '已完成' })).ok).toBe(false);
+    expect(await lines(dir)).toHaveLength(1);
+    // Never the task store: no foundry call was made.
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it('takes the time the materials dialog was open off the import wait', async () => {
+    const dir = await userData();
+    let clock = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    mocks.chooser.mockImplementation(async () => { clock += 30_000; return { canceled: false, filePaths: ['/chosen/actual.csv'] }; });
+    expect((await invoke(CHANNELS.analysisAddFiles, task)).ok).toBe(true);
+    // The renderer timed 31.2 s from its click; 30 s of that was the manager picking a file.
+    await invoke(CHANNELS.timingLog, { kind: 'materials.import', outcome: 'ok', waitMs: 31_200 });
+    // Used once: a later wait with no dialog of its own keeps all of its time.
+    await invoke(CHANNELS.timingLog, { kind: 'materials.import', outcome: 'error', waitMs: 500 });
+    expect((await lines(dir)).map((line) => JSON.parse(line).wait_ms)).toEqual([1_200, 500]);
+  });
+
+  it('takes the time the source dialog was open off the source refresh wait, cancelled or not', async () => {
+    const dir = await userData();
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    mocks.chooser.mockImplementation(async () => { clock += 12_000; return { canceled: true, filePaths: [] }; });
+    expect(await invoke(CHANNELS.financeSourceRefresh, task, { product: 'file' })).toEqual({ ok: true, value: { cancelled: true } });
+    await invoke(CHANNELS.timingLog, { kind: 'source.refresh', outcome: 'cancelled', waitMs: 12_040 });
+    // Another kind's wait is not shortened by this dialog.
+    mocks.chooser.mockImplementation(async () => { clock += 9_000; return { canceled: false, filePaths: ['/chosen/erp.csv'] }; });
+    await invoke(CHANNELS.financeSourceRefresh, task, { product: 'file' });
+    await invoke(CHANNELS.timingLog, { kind: 'finance.pnl', outcome: 'ok', waitMs: 2_000 });
+    expect((await lines(dir)).map((line) => JSON.parse(line).wait_ms)).toEqual([40, 2_000]);
   });
 });

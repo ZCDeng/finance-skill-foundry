@@ -1,4 +1,4 @@
-import { type BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { type BrowserWindow, type OpenDialogOptions, ipcMain, shell, dialog } from 'electron';
 
 import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
@@ -19,7 +19,8 @@ import {
 import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
 import { newTask } from '../writes.js';
-import { CHANNELS } from './contract.js';
+import { CHANNELS, type WaitKind } from './contract.js';
+import { appendWait, waitEntry } from '../timing.js';
 import * as path from 'node:path';
 import type { ReportHost } from '../reports/host.js';
 import { withDraftSpec } from '../reports/input.js';
@@ -118,6 +119,24 @@ export function registerIpc(
    * add of the same file asks again.
    */
   const allowDuplicates = new Set<string>();
+  /**
+   * How long the last file dialog of each kind stayed open, in milliseconds.
+   *
+   * The renderer times a wait from the click, and the dialog opens inside the
+   * handler it is waiting on; the time spent picking a file is the manager's,
+   * not the app's. It comes off that wait when the wait is logged, once. One
+   * entry per kind is enough: the screen runs one import or refresh at a time,
+   * and each new dialog replaces the last.
+   */
+  const dialogOpen = new Map<WaitKind, number>();
+  const chooseFiles = async (kind: WaitKind, options: OpenDialogOptions) => {
+    const opened = performance.now();
+    try {
+      return await dialog.showOpenDialog(options);
+    } finally {
+      dialogOpen.set(kind, performance.now() - opened);
+    }
+  };
   ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
 
   ipcMain.handle(CHANNELS.task, (_event, task: unknown) =>
@@ -311,7 +330,7 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.financeSourceRefresh, (_e, rawTask: unknown, rawSpec: unknown) =>
     answer(async () => {
       if (!rawSpec || typeof rawSpec !== 'object' || Array.isArray(rawSpec)) throw new Error('expected a source refresh object');
-      const selected = await dialog.showOpenDialog({
+      const selected = await chooseFiles('source.refresh', {
         title: '刷新财务来源文件',
         properties: ['openFile'],
         filters: [{ name: '财务来源文件', extensions: ['csv', 'xlsx', 'json'] }],
@@ -362,7 +381,7 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.analysisAddFiles, (_e, rawTask: unknown) =>
     answer(async () => {
       const task = taskId(rawTask);
-      const selected = await dialog.showOpenDialog({
+      const selected = await chooseFiles('materials.import', {
         title: '加入分析资料', properties: ['openFile', 'multiSelections'],
         filters: [{ name: '表格与背景资料', extensions: ['csv', 'xlsx', 'json', 'md', 'txt'] }],
       });
@@ -398,6 +417,22 @@ export function registerIpc(
       if (selected.canceled || selected.filePaths.length === 0) return { cancelled: true };
       const file = selected.filePaths[0];
       return analysisCall(task, 'report-template-publish', ['--spec', objectJson({ path: file, name: path.basename(file), label: path.parse(file).name })]);
+    }));
+
+  /**
+   * One line per user wait, appended to the local timing log in this app's own
+   * folder (see `timing.ts`). Write-only: nothing reads it back over IPC, and it
+   * never touches the task store. The dialog time of that kind comes off here.
+   */
+  ipcMain.handle(CHANNELS.timingLog, (_e, raw: unknown) =>
+    answer(async () => {
+      const entry = waitEntry(raw);
+      const folder = panes?.userData();
+      if (!folder) throw new Error('no local folder for the timing log');
+      const picking = dialogOpen.get(entry.kind) ?? 0;
+      dialogOpen.delete(entry.kind);
+      await appendWait(folder, entry, picking);
+      return { written: true };
     }));
 
   if (!panes) return { shutdown };
