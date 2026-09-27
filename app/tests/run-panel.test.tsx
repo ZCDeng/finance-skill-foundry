@@ -395,6 +395,24 @@ describe('RunPanel finance conclusion', () => {
   });
 });
 
+describe('RunPanel 推断 marks', () => {
+  // run_metric management_pnl's own shape (foundry/finance_metrics.py): one row per organization and scenario.
+  const managementPnl: AnalysisRun = { ...baseRun, engine: 'finance', result: {
+    columns: ['organization', 'scenario', 'currency', 'unit', 'revenue', 'cost', 'expense', 'profit'].map((name) => ({ name, type: ['revenue', 'cost', 'expense', 'profit'].includes(name) ? 'DECIMAL' : 'VARCHAR' })),
+    rows: [
+      { organization: '华东区域', scenario: 'actual', currency: 'CNY', unit: '万元', revenue: '120', cost: '-70', expense: '-20', profit: '30' },
+      { organization: '华东区域', scenario: 'budget', currency: 'CNY', unit: '万元', revenue: '130', cost: '-72', expense: '-21', profit: '37' },
+    ],
+    row_count: 2, truncated: false,
+  } };
+
+  it.each([['a management_pnl run', managementPnl], ['a structured aggregate run', structuredRun()]])('never says 推断 on %s', (_, run) => {
+    render(<RunPanel {...props} runs={[run]} />);
+    expect(screen.getByRole('table', { name: /业务结果|结构化汇总结果/ })).toBeTruthy();
+    expect(screen.queryByText(/推断/)).toBeNull();
+  });
+});
+
 describe('RunPanel result contract warnings', () => {
   const declarations = (warnings: NonNullable<AnalysisRun['row_declarations']>['warnings']): AnalysisRun['row_declarations'] => ({
     rules_version: '2.1.1', requirements_id: null, requirements_fingerprint: null, complete: true, incomplete_reason: null, row_count: 2, rows: [], warnings,

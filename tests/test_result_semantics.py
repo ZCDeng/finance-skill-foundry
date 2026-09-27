@@ -335,6 +335,28 @@ def test_grain_basis_saved_after_the_run_marks_the_budget_an_estimate_at_read_ti
     assert 'latest_requirements_id' not in analysis.get_run(run['id'])['row_declarations']
 
 
+def test_a_declaration_is_read_with_the_tasks_current_requirements_version_and_fingerprint(analysis, requirements):
+    first = requirements(plain_items())
+    run = run_rows(analysis, HUACHEN_ROWS)
+    before = run_file(analysis, run).read_bytes()
+    assert state_run(analysis, run)['row_declarations']['current_requirements'] == {
+        'id': first['id'], 'fingerprint': first['semantic_fingerprint']}
+
+    # Renaming an item is a new version with the same meaning: its fingerprint does not move.
+    renamed = requirements([{**item, 'label': f"{item['label']}（改名）"} for item in plain_items()], parent=first)
+    assert renamed['id'] != first['id'] and renamed['semantic_fingerprint'] == first['semantic_fingerprint']
+    assert state_run(analysis, run)['row_declarations']['current_requirements'] == {
+        'id': renamed['id'], 'fingerprint': first['semantic_fingerprint']}
+
+    revised = requirements(with_estimate(plain_items(), 'profit_1_8', ['华南区域']), parent=renamed)
+    declaration = state_run(analysis, run)['row_declarations']
+    assert declaration['current_requirements'] == {'id': revised['id'], 'fingerprint': revised['semantic_fingerprint']}
+    assert declaration['requirements_fingerprint'] == first['semantic_fingerprint'] != revised['semantic_fingerprint']
+    # Read-time only: the run record keeps what it stored.
+    assert run_file(analysis, run).read_bytes() == before
+    assert 'current_requirements' not in analysis.get_run(run['id'])['row_declarations']
+
+
 def test_rerun_of_a_version_bound_to_old_requirements_declares_against_the_old_version(analysis, requirements):
     old = requirements(with_estimate(plain_items(), 'profit_1_8', ['华南区域']))
     first = run_rows(analysis, HUACHEN_ROWS, requirements_id=old['id'])
@@ -373,6 +395,16 @@ def test_a_bumped_rules_version_returns_a_recomputed_declaration_and_leaves_the_
 def test_a_current_declaration_is_returned_as_stored(analysis):
     run = run_rows(analysis, HUACHEN_ROWS)
     assert state_run(analysis, run) == analysis.get_run(run['id'])
+
+
+FRONTEND_DECLARED_FIXTURE = Path(__file__).resolve().parents[1] / 'app' / 'tests' / 'fixtures' / 'huachen-row-declarations.json'
+
+
+def test_the_frontend_declared_run_fixture_is_what_the_server_declares():
+    """The result area's declared-run tests read this file; it must stay the server's own output for its rows."""
+    fixture = json.loads(FRONTEND_DECLARED_FIXTURE.read_text(encoding='utf-8'))
+    assert declare_rows(fixture['columns'], fixture['rows'], fixture['requirements'],
+                        fingerprint=fixture['fingerprint']) == fixture['row_declarations']
 
 
 FRONTEND_RESULTS = Path(__file__).resolve().parents[1] / 'app' / 'src' / 'views' / 'analysis' / 'businessResults.ts'

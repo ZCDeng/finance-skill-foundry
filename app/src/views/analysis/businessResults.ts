@@ -1,4 +1,4 @@
-import type { AnalysisDraft, AnalysisRevision, AnalysisRun } from '../../bridge.js';
+import type { AnalysisDraft, AnalysisRevision, AnalysisRun, RowDeclaration, RowDeclarations } from '../../bridge.js';
 
 export type RunPresentationRole = 'business' | 'activity' | 'failure';
 
@@ -15,6 +15,39 @@ export type RowBasisKind = 'source' | 'direct' | 'calculation' | 'estimate' | 'j
 
 export type DisplayColumn = { name: string; type?: string; label: string; semantics: FieldSemantics };
 type CanonicalMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
+/** The measures a declared pair names its member rows by (result_semantics.LONG_SCENARIO_MEASURES). */
+export type PairMeasure = CanonicalMeasure;
+/** The backend's sentence for one fully declared pair: its own words, never verified, never a draft's fact. */
+export type ScriptConclusion = {
+  text: string;
+  basis: string;
+  verified: false;
+  /** The figures the sentence states, as Decimal strings; ratio_percent only when it states a 达成率. */
+  values: Partial<Record<'actual' | 'budget' | 'variance' | 'ratio_percent', string>>;
+  variance_from: 'row' | 'computed';
+};
+/** One comparison the backend paired from the declared rows; members are row indexes in the declaration. */
+export type DeclaredPair = {
+  metric: string;
+  organization: unknown;
+  period: unknown;
+  period_key: string;
+  span: 'ytd' | 'month' | null;
+  unit: string | null;
+  members: Partial<Record<PairMeasure, number>>;
+  /** Whether the vocabulary names the pair's metric; a pair known only from its scenarios is inferred and gets no sentence. */
+  declared: boolean;
+  estimate: { estimated: boolean; measures: PairMeasure[] };
+  conclusion: ScriptConclusion | null;
+};
+/**
+ * A declaration as the workbench reads it (result_semantics.declared_runs): with its pairs, and the task's current
+ * requirements version and its verified fingerprint when the task has requirements.
+ */
+export type PairedDeclarations = RowDeclarations & {
+  pairs?: DeclaredPair[];
+  current_requirements?: { id: string; fingerprint: string | null };
+};
 type ParsedWideColumn = { name: string; metric?: string; measure: CanonicalMeasure; period: string; order: number };
 
 const explicitBusinessRoles = new Set(['business', 'business_result', 'calculation', 'analysis_result']);
@@ -251,11 +284,24 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
   return metric;
 }
 
+/**
+ * One value as every part of the result area shows it, by its declared unit alone (KTD9): a fraction reads ×100
+ * as a percentage, a percent as written with %, an unmarked value as written and said to be so. Without a table
+ * unit it keeps the semantics it was given.
+ */
+function formatUnitValue(value: unknown, kind: UnitKind | null | undefined, semantics: FieldSemantics = 'amount'): string {
+  if (kind === 'decimal') return formatBusinessValue(value, 'ratio');
+  if (kind === 'percent') return formatBusinessValue(value, 'ratio_pct');
+  if (kind === 'unmarked') return value == null || value === '' ? '—' : `${typeof value === 'object' ? JSON.stringify(value) : String(value)}（未标单位）`;
+  return formatBusinessValue(value, kind === 'amount' ? 'amount' : semantics);
+}
+
 export function formatBusinessCell(value: unknown, column: DisplayColumn, row: Record<string, unknown>): string {
   // A row shown as it is keeps its estimate visible even when its label does not say so.
-  if (column.name === 'metric_label' && typeof value === 'string' && value && declaresEstimate(row) && !mentionsEstimate(value)) return `${value}（估算）`;
-  // A long-form value column mixes amounts and ratios; the row's own unit says which.
-  if (column.name === 'value' && fractionUnits.has(String(unitColumn(row) ?? '').trim().toLowerCase())) return formatBusinessValue(value, 'ratio');
+  // In a declared run the declaration says it, grain_basis included; its own words still count (KTD3).
+  if (column.name === 'metric_label' && typeof value === 'string' && value && (row[declaredEstimateField] === true || declaresEstimate(row)) && !mentionsEstimate(value)) return `${value}（估算）`;
+  // A long-form value column mixes amounts and ratios; the row's own unit says which, as its declaration read it.
+  if (column.name === 'value') return formatUnitValue(value, declaredUnitField in row ? row[declaredUnitField] as UnitKind | null : unitKind(unitColumn(row)), column.semantics);
   return formatBusinessValue(value, column.semantics);
 }
 
@@ -346,10 +392,22 @@ function canonicalBasis(row: Record<string, unknown>): string {
 // is a different comparison and is left unpaired. A bare year (actual_2026) is
 // left unpaired too: it cannot tell year-to-date from the full year.
 const scenarioWithPeriod = /^(actual|budget|variance)_(\d{1,2}_\d{1,2}|\d{4}_\d{2})$/;
-// Units that mark a row as a ratio rather than an amount. 比率 and ratio hold a
-// fraction (0.945 = 94.5%); the others hold a percent or percentage-point number.
+// The unit table (KTD9, result_semantics.py FRACTION_UNITS / PERCENT_UNITS / UNMARKED_UNITS). 比率 and ratio
+// hold a fraction (0.945 = 94.5%); %, pct and 百分比 a percent; 「-」 says no unit was marked. Only the unit
+// converts a value; a name never does.
 const fractionUnits = new Set(['比率', 'ratio']);
 const ratioUnits = new Set([...fractionUnits, '%', 'pct', '百分比']);
+const unmarkedUnits = new Set(['-']);
+
+/** How a row's unit reads its value (result_semantics.py unit_kind); null for an amount unit or none. */
+type UnitKind = 'amount' | 'decimal' | 'percent' | 'unmarked';
+function unitKind(unit: unknown): UnitKind | null {
+  const text = String(unit ?? '').trim().toLowerCase();
+  if (fractionUnits.has(text)) return 'decimal';
+  if (ratioUnits.has(text)) return 'percent';
+  if (unmarkedUnits.has(text)) return 'unmarked';
+  return null;
+}
 
 function longScenarioMeasure(row: Record<string, unknown>): { measure: CanonicalMeasure; suffix: string; span?: string } | null {
   const scenario = String(row.scenario ?? row['情景'] ?? '').trim().toLowerCase();
@@ -373,20 +431,23 @@ function longScenarioMeasure(row: Record<string, unknown>): { measure: Canonical
  * variance scenario; revenue_achievement_ratio in 比率, whose scenario word is
  * unreliable, so only its period suffix counts). Both signals must agree.
  */
-function longScenarioEntry(row: Record<string, unknown>): { measure: CanonicalMeasure; suffix: string; span?: string; metric: string } | null {
+function longScenarioEntry(row: Record<string, unknown>): { measure: CanonicalMeasure; suffix: string; span?: string; metric: string; unmarked?: boolean } | null {
   const scenario = longScenarioMeasure(row);
   if (!scenario) return null;
   const metric = String(rowMetric(row) ?? '');
   const unit = String(unitColumn(row) ?? '').trim().toLowerCase();
+  // 「-」 states no unit: such a 达成率 is kept out of its comparison (unmarked), and an amount in it fills none.
+  const unmarked = unmarkedUnits.has(unit);
   const ratioUnit = ratioUnits.has(unit);
   const percentUnit = ratioUnit && !fractionUnits.has(unit);
   const rate = /^(.+)_(?:achievement|attainment)_ratio$/.exec(metric);
-  if (rate && ratioUnit) return { measure: percentUnit ? 'rate_pct' : 'rate', suffix: scenario.suffix, metric: rate[1] };
-  // A 达成率 given in % or pct is already a percentage; as a fraction it would read 100 times too large.
-  if (scenario.measure === 'rate' && percentUnit) return { ...scenario, measure: 'rate_pct', metric };
+  if (rate && (ratioUnit || unmarked)) return { measure: percentUnit ? 'rate_pct' : 'rate', suffix: scenario.suffix, metric: rate[1], unmarked };
+  // The unit, not the scenario word, says whether a 达成率 is a fraction or already a percentage:
+  // achievement_pct in 比率 is a fraction, achievement_ratio in % is already a percentage.
+  if (isRatioMeasure(scenario.measure) && (ratioUnit || unmarked)) return { ...scenario, measure: percentUnit ? 'rate_pct' : 'rate', metric, unmarked };
   if (isRatioMeasure(scenario.measure)) return { ...scenario, metric };
-  // An amount comparison in a ratio unit would sit beside amounts as if it were one.
-  if (ratioUnit) return null;
+  // An amount comparison in a ratio unit (or none marked) would sit beside amounts as if it were one.
+  if (ratioUnit || unmarked) return null;
   const variance = /^(.+)_variance$/.exec(metric);
   if (variance && scenario.measure === 'variance') return { ...scenario, metric: variance[1] };
   // Other metrics named for a base (revenue_budget_bud_fy, profit_actual_py) are their own figures.
@@ -425,6 +486,8 @@ function longScenarioBaseKey(row: Record<string, unknown>, metric: string, suffi
 type LongScenarioGroup = {
   /** Whether the figure shown as 同期预算 is itself an estimate. */
   budgetEstimated?: boolean;
+  /** Whether this comparison's 达成率 row was left out for an unmarked unit. */
+  unitUnmarked?: boolean;
   order: number;
   metric: string;
   region?: unknown;
@@ -469,21 +532,123 @@ export function isEstimateRow(row: Record<string, unknown>): boolean {
   return declaresEstimate(row);
 }
 
+function isScriptRun(run: AnalysisRun): boolean {
+  return run.engine === 'python' || run.engine === 'shell';
+}
+
 function isLongFormat(run: AnalysisRun): boolean {
   const names = new Set(run.result?.columns.map((column) => column.name.toLowerCase()) ?? []);
   return names.has('scenario') && names.has('value') && (names.has('metric_key') || names.has('metric') || names.has('指标'));
 }
 
-/** The comparison rows a long-form table pairs into, and which source rows they used. */
-function longScenarioPairing(run: AnalysisRun): { business: Record<string, unknown>[]; used: Set<number> } | null {
-  if (!isLongFormat(run)) return null;
+type LongPairing = { business: Record<string, unknown>[]; used: Set<number> };
 
+/** The run's declaration when it can pair: a declaration the backend paired (every one it serves today). */
+function pairedDeclarations(run: AnalysisRun): PairedDeclarations | null {
+  const declarations = run.row_declarations as PairedDeclarations | undefined;
+  return declarations && Array.isArray(declarations.pairs) && Array.isArray(declarations.rows) ? declarations : null;
+}
+
+/**
+ * The comparison rows a long-form table pairs into, and which source rows they used. A declared run pairs
+ * strictly as its declaration does (R1); only a run saved without one is inferred here (R2), so declared and
+ * inferred rows never meet in one card.
+ */
+function longScenarioPairing(run: AnalysisRun): LongPairing | null {
+  if (!isLongFormat(run)) return null;
+  const declarations = pairedDeclarations(run);
+  return declarations ? declaredPairing(run, declarations) : inferredPairing(run);
+}
+
+function nonEmpty(value: unknown): boolean {
+  return value != null && value !== '';
+}
+
+/**
+ * Cards from the backend's pairs. Every figure is the declared row's own value (a Decimal string, present even
+ * past the stored preview); whether it is an estimate is the declaration's union (KTD3); a 达成率 reads by its
+ * declared unit. The preview row adds only its source and note, when the preview holds it.
+ */
+function declaredPairing(run: AnalysisRun, declarations: PairedDeclarations): LongPairing {
+  const entries = new Map(declarations.rows.map((entry) => [entry.row, entry]));
+  const preview = run.result?.rows ?? [];
+  const olderRequirements = readsOlderRequirements(declarations);
+  // A 达成率 the backend left out for an unmarked unit, by the comparison it would have filled.
+  const comparisonKey = (metric: unknown, organization: unknown, periodKey: unknown) => [metric, organization, periodKey].map((part) => String(part ?? '')).join('|');
+  const unmarked = new Set(declarations.rows.filter((entry) => entry.role === 'ratio' && entry.unit_kind === 'unmarked')
+    .map((entry) => comparisonKey(entry.metric, entry.organization, entry.period_key)));
+  const groups = (declarations.pairs ?? []).flatMap((pair) => {
+    const members = (Object.entries(pair.members) as [PairMeasure, number][]).filter(([, index]) => entries.has(index)).sort((left, right) => left[1] - right[1]);
+    const byMeasure = new Map<PairMeasure, RowDeclaration>(members.map(([measure, index]) => [measure, entries.get(index)!]));
+    const entry = (measure: PairMeasure): RowDeclaration | undefined => byMeasure.get(measure);
+    const value = (measure: PairMeasure): unknown => entry(measure)?.value ?? undefined;
+    const label = (measure: PairMeasure): string | undefined => entry(measure)?.scope_label ?? undefined;
+    if (!nonEmpty(value('actual'))) return [];
+    const estimated = new Set<PairMeasure>([...(pair.estimate?.measures ?? []),
+      ...members.filter(([measure, index]) => measure === 'estimated_budget' || entries.get(index)?.estimate).map(([measure]) => measure)]);
+    const rate = (['rate', 'rate_pct'] as const).find((measure) => entry(measure));
+    const rateKind = rate ? entry(rate)!.unit_kind : null;
+    const rateField = rateKind === 'decimal' || (rateKind !== 'percent' && rate === 'rate') ? 'attainment_rate' : 'attainment_pct';
+    const sources = members.map(([measure, index]) => {
+      const row = preview[index];
+      const detail = [label(measure) ?? row?.metric_label, row && sourceColumn(row), row && (row.note ?? row['说明'])].filter(nonEmpty).join('；');
+      return detail ? `${scenarioDetailLabel(measure)}：${detail}` : '';
+    }).filter(Boolean);
+    return [{
+      order: members[0][1],
+      used: members.map(([, index]) => index),
+      row: {
+        metric: preferredMetricLabel(pair.metric),
+        ...(nonEmpty(pair.organization) ? { region: pair.organization } : {}),
+        period: pair.period,
+        actual: value('actual'),
+        same_period_budget: value('budget') ?? value('estimated_budget'),
+        // Only when the budget shown is itself the estimate; an approved budget beside an estimate stays 预算.
+        same_period_budget_estimated: entry('budget') ? estimated.has('budget') : Boolean(entry('estimated_budget')),
+        ...(label('actual') ? { actual_label: label('actual') } : {}),
+        ...(label('budget') ?? label('estimated_budget') ? { budget_label: label('budget') ?? label('estimated_budget') } : {}),
+        ...(entry('budget') && entry('estimated_budget') ? { estimated_same_period_budget: value('estimated_budget') } : {}),
+        variance: value('variance'),
+        attainment_rate: rate && rateField === 'attainment_rate' ? value(rate) : undefined,
+        ...(rate && rateField === 'attainment_pct' ? { attainment_pct: value(rate) } : {}),
+        unit: pair.unit ?? undefined,
+        basis: estimated.size ? basisLabels.estimate : basisLabels.calculation,
+        source: Array.from(new Set(sources)).join('；'),
+        // A pair the backend knows only from its scenarios is inferred there too.
+        ...(pair.declared === false ? { inferred: true } : {}),
+        ...(olderRequirements ? { requirements_outdated: true } : {}),
+        ...(unmarked.has(comparisonKey(pair.metric, pair.organization, pair.period_key)) ? { unit_unmarked: true } : {}),
+      },
+    }];
+  }).sort((left, right) => left.order - right.order);
+  return { business: groups.map((group) => group.row), used: new Set(groups.flatMap((group) => group.used)) };
+}
+
+/**
+ * Whether the declaration was read against an older requirements version than the task's current one (R4).
+ * Versions compare by their verified semantic fingerprints, so a resave that changes nothing they mean (a renamed
+ * item) says nothing; when either fingerprint could not be verified, a different version errs toward saying so.
+ * A run pinned to no requirements has no older version to name.
+ */
+function readsOlderRequirements(declarations: PairedDeclarations): boolean {
+  const current = declarations.current_requirements;
+  const pinned = declarations.requirements_id;
+  if (!pinned || !current?.id || current.id === pinned) return false;
+  const before = declarations.requirements_fingerprint;
+  return !(before && current.fingerprint && before === current.fingerprint);
+}
+
+/** Today's inference, kept for script runs saved before declarations existed (and for SQL long forms). */
+function inferredPairing(run: AnalysisRun): LongPairing | null {
   const buckets = new Map<string, { metric: string; rows: { order: number; row: Record<string, unknown>; measure: CanonicalMeasure }[]; units: Set<string>; currencies: Set<string>; spans: Set<string> }>();
+  // The comparisons whose 达成率 row was left out for an unmarked unit (KTD9).
+  const unmarked = new Set<string>();
   for (const [order, row] of (run.result?.rows ?? []).entries()) {
     const entry = longScenarioEntry(row);
     if (!entry) continue;
     const { measure } = entry;
     const key = longScenarioBaseKey(row, entry.metric, entry.suffix);
+    if (entry.unmarked) { unmarked.add(key); continue; }
     const bucket = buckets.get(key) ?? { metric: entry.metric, rows: [], units: new Set<string>(), currencies: new Set<string>(), spans: new Set<string>() };
     bucket.rows.push({ order, row, measure });
     if (entry.span) bucket.spans.add(entry.span);
@@ -497,11 +662,12 @@ function longScenarioPairing(run: AnalysisRun): { business: Record<string, unkno
   }
 
   const output: (LongScenarioGroup & { used: number[] })[] = [];
-  for (const bucket of buckets.values()) {
+  for (const [key, bucket] of buckets) {
     if (bucket.units.size > 1 || bucket.currencies.size > 1) return null;
     // A year-to-date figure beside a monthly one (actual_ytd, budget_month): not one comparison.
     if (bucket.spans.size > 1) continue;
     const group: LongScenarioGroup & { used: number[] } = {
+      unitUnmarked: unmarked.has(key),
       used: bucket.rows.map((item) => item.order),
       order: Math.min(...bucket.rows.map((item) => item.order)),
       metric: preferredMetricLabel(bucket.metric),
@@ -566,8 +732,41 @@ function longScenarioPairing(run: AnalysisRun): { business: Record<string, unkno
       unit: group.unit,
       basis: group.basis,
       source: Array.from(new Set(group.sources)).join('；'),
+      // Only a script's long form is paired by guesswork worth saying so; SQL, finance-engine and structured
+      // results state their own structure (R2).
+      ...(isScriptRun(run) ? { inferred: true } : {}),
+      ...(group.unitUnmarked ? { unit_unmarked: true } : {}),
     }));
   return { business, used: new Set(paired.flatMap((group) => group.used)) };
+}
+
+/** The notes one card carries under its figures, in their fixed order; an estimate stays on the figure's own label. */
+export function cardNotes(row: Record<string, unknown>): string[] {
+  return [
+    row.inferred === true ? '推断' : '',
+    row.requirements_outdated === true ? '依据旧版需求' : '',
+    row.unit_unmarked === true ? '未标单位' : '',
+  ].filter(Boolean);
+}
+
+// Fields a declared run's preview rows carry for display only, never shown as columns.
+const declaredUnitField = '__unit_kind';
+const declaredEstimateField = '__estimate';
+
+/**
+ * A long-form run's preview rows as the tables show them: in a declared run each carries its declared unit
+ * kind, so a 比率 row whose unit the table cannot read shows 未标单位 as the backend promised, and its
+ * declared estimate. A run without a declaration gets its own rows back.
+ */
+function shownLongRows(run: AnalysisRun): Record<string, unknown>[] {
+  const rows = run.result?.rows ?? [];
+  const declarations = run.row_declarations;
+  if (!declarations?.rows?.length || !isLongFormat(run)) return rows;
+  const entries = new Map(declarations.rows.map((entry) => [entry.row, entry]));
+  return rows.map((row, index) => {
+    const entry = entries.get(index);
+    return entry ? { ...row, [declaredUnitField]: entry.unit_kind, ...(entry.estimate ? { [declaredEstimateField]: true } : {}) } : row;
+  });
 }
 
 function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | null {
@@ -584,7 +783,7 @@ function safeLongScenarioRows(run: AnalysisRun): Record<string, unknown>[] | nul
 export function otherLongRows(run: AnalysisRun): Record<string, unknown>[] {
   const pairing = longScenarioPairing(run);
   if (!pairing?.business.length) return [];
-  return (run.result?.rows ?? []).filter((_, index) => !pairing.used.has(index));
+  return shownLongRows(run).filter((_, index) => !pairing.used.has(index));
 }
 
 /**
@@ -625,7 +824,7 @@ function hasLongScenarioBusinessShape(run: AnalysisRun): boolean {
 }
 
 function longScenarioRows(run: AnalysisRun): Record<string, unknown>[] {
-  return safeLongScenarioRows(run) ?? run.result?.rows ?? [];
+  return safeLongScenarioRows(run) ?? shownLongRows(run);
 }
 
 function hasBusinessTableShape(run: AnalysisRun): boolean {
@@ -635,7 +834,7 @@ function hasBusinessTableShape(run: AnalysisRun): boolean {
 export function businessRows(run: AnalysisRun): Record<string, unknown>[] {
   if (run.result?.rows.some((row) => 'actual' in row || 'same_period_budget' in row || 'attainment_rate' in row)) return run.result.rows;
   if (hasLongScenarioBusinessShape(run)) return longScenarioRows(run);
-  if (!hasWideBusinessShape(run)) return run.result?.rows ?? [];
+  if (!hasWideBusinessShape(run)) return shownLongRows(run);
   const columns = wideColumns(run);
   const output: Record<string, unknown>[] = [];
   for (const sourceRow of run.result?.rows ?? []) {

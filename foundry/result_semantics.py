@@ -608,16 +608,27 @@ def merge_latest(declaration: dict, latest: dict | None) -> dict:
     return {**declaration, 'rows': rows, 'pairs': pairs, 'latest_requirements_id': latest['id']}
 
 
-def declared_run(analysis, run: dict, latest: dict | None) -> dict:
-    """The run as the workbench reads it: a stale declaration recomputed, the latest estimates merged in."""
+def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: str | None = None) -> dict:
+    """The run as the workbench reads it: a stale declaration recomputed, the latest estimates merged in.
+
+    It also names the task's current requirements version and that record's verified fingerprint, so the result
+    area can tell a declaration read against an older version of the requirements from a resave that changed
+    nothing they mean (R4).
+    """
     declaration = run.get('row_declarations')
     if not isinstance(declaration, dict):
         return run
     if is_stale(declaration.get('rules_version')):
         declaration = redeclare(analysis, run)
     declaration = merge_latest(declaration, latest)
+    if latest:
+        declaration = {**declaration, 'current_requirements': {'id': latest['id'], 'fingerprint': latest_fingerprint}}
     return run if declaration is run['row_declarations'] else {**run, 'row_declarations': declaration}
 
 
 def declared_runs(analysis, runs: list[dict], latest: dict | None) -> list[dict]:
-    return [declared_run(analysis, run, latest) for run in runs]
+    from foundry.finance_requirement_semantics import verified_requirement_fingerprint
+
+    fingerprint = (verified_requirement_fingerprint(analysis, latest)
+                   if latest and any(isinstance(run.get('row_declarations'), dict) for run in runs) else None)
+    return [declared_run(analysis, run, latest, fingerprint) for run in runs]

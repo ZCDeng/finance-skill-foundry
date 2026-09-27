@@ -1,39 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AnalysisRun, RowDeclarations } from '../../bridge.js';
+import type { AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
+import { businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn, type PairedDeclarations, type ScriptConclusion } from './businessResults.js';
 import { assumptionSummary, Table } from './presentation.js';
 
-/** The measures a declared pair names its member rows by (result_semantics.LONG_SCENARIO_MEASURES). */
-type PairMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
-/** The backend's sentence for one fully declared pair: its own words, never verified, never a draft's fact. */
-type ScriptConclusion = {
-  text: string;
-  basis: string;
-  verified: false;
-  /** The figures the sentence states, as Decimal strings; ratio_percent only when it states a 达成率. */
-  values: Partial<Record<'actual' | 'budget' | 'variance' | 'ratio_percent', string>>;
-  variance_from: 'row' | 'computed';
-};
-/** One comparison the backend paired from the declared rows; members are row indexes in the declaration. */
-type DeclaredPair = {
-  metric: string;
-  organization: unknown;
-  period: unknown;
-  period_key: string;
-  span: 'ytd' | 'month' | null;
-  unit: string | null;
-  members: Partial<Record<PairMeasure, number>>;
-  /** Whether the vocabulary names the pair's metric; an undeclared pair gets no sentence. */
-  declared: boolean;
-  estimate: { estimated: boolean; measures: PairMeasure[] };
-  conclusion: ScriptConclusion | null;
-};
-type PairedDeclarations = RowDeclarations & { pairs?: DeclaredPair[] };
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
 
-type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string };
+type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; notes: string[] };
 
 function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
   for (const name of names) {
@@ -97,6 +71,7 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
     difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
     rate: valueFor(row, columns, ['attainment_rate', 'attainment_pct', 'achievement_pct', 'completion_pct', 'attainment', 'attainment_ratio', 'budget_attainment', 'budget_attainment_rate', 'budget_completion', 'budget_completion_rate', 'completion_rate', 'completion', 'achievement_rate', 'achievement', 'actual_budget_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio']),
+    notes: cardNotes(row),
   };
 }
 
@@ -166,6 +141,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
           <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
         </dl>
         {kpi.budgetLabel ? <small className="analysis-kpi-source">预算：{kpi.budgetLabel}</small> : null}
+        {kpi.notes.length ? <small className="analysis-kpi-notes">{kpi.notes.join(' · ')}</small> : null}
       </article>)}
     </div> : null}
     {/* The run's own caveats stand next to the numbers they qualify, whatever words they use. */}
