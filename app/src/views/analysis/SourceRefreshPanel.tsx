@@ -6,11 +6,14 @@ import { AccountingPeriodInput, FieldShell, TextField } from '../../components/F
 import { Button } from '../../components/ui/button.js';
 import { unwrap } from './shared.js';
 
+// The engine refreshes a whole period or only what changed since the last refresh; it takes nothing else.
+type SourceRefreshMode = 'full_period' | 'incremental';
+
 export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string; busy: boolean; onRefresh(): Promise<void> }) {
   const [batches, setBatches] = useState<FinanceSourceBatch[]>([]);
   const [scope, setScope] = useState({
     source_id: 'erp-export', tenant_id: 'default', ledger_id: '', organization_id: '', period: '',
-    currency: 'CNY', cutoff_at: '', calendar: '', mode: 'snapshot',
+    currency: 'CNY', cutoff_at: '', calendar: '', mode: 'full_period' as SourceRefreshMode,
   });
   const [product, setProduct] = useState('file');
   const [version, setVersion] = useState('export');
@@ -71,7 +74,8 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
       <TextField label="版本" value={version} onChange={setVersion} />
       <TextField label="资料名称" value={name} onChange={setName} />
       <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
-      <TextField label="刷新模式" value={scope.mode} onChange={(value) => setScope({ ...scope, mode: value })} />
+      <FieldShell label="刷新模式"><select aria-label="刷新模式" className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value as SourceRefreshMode })}>
+        <option value="full_period">整期</option><option value="incremental">增量</option></select></FieldShell>
       <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
         <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
     </div></details></fieldset>

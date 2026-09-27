@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
-import { bridge, shortSha, timeWait, when, type Answer, type AnalysisDraft, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
+import { bridge, shortSha, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
 import { STATUS, textValue } from './analysis/presentation.js';
@@ -430,10 +430,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
                 // Save and run are distinct records; refresh the saved definition even if execution fails.
                 await runSaved(taskId, next.id, note);
               }))} onRun={() => void perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)))} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
-                <p className="analysis-note">{analysis.engine === 'structured_aggregate' ? '这项分析按已保存的筛选、分组和汇总规则计算，来源与剔除记录可在结果中查看。' : '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。'}</p>
+                <p className="analysis-note">{definitionCopy(analysis).note}</p>
                 {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
-                <details className="analysis-details"><summary>{analysis.engine === 'structured_aggregate' ? '高级：查看汇总规则' : '高级：查看计算脚本'}</summary><pre className="analysis-source-text">{analysis.engine === 'structured_aggregate' ? JSON.stringify(analysis.aggregate_plan, null, 2) : analysis.code}</pre></details>
-                <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${analysis.engine === 'structured_aggregate' ? '结构化汇总' : '脚本'}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
+                <details className="analysis-details"><summary>{definitionCopy(analysis).detailSummary}</summary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
+                <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
               </div>}
 
           </>}
@@ -474,6 +474,22 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       </section>
     </>}
   </div>;
+}
+
+const FINANCE_OPERATION: Record<string, string> = { metric: '损益指标', variance: '差异分析', scenario: '情景测算' };
+
+/** How a saved analysis says what computed it: a script, the saved aggregate rules, or the finance engine. */
+function definitionCopy(analysis: AnalysisRevision): { note: string; detailSummary: string; detail: string | undefined; kind: string } {
+  if (analysis.engine === 'structured_aggregate') {
+    return { note: '这项分析按已保存的筛选、分组和汇总规则计算，来源与剔除记录可在结果中查看。', detailSummary: '高级：查看汇总规则',
+      detail: JSON.stringify(analysis.aggregate_plan, null, 2), kind: '结构化汇总' };
+  }
+  if (analysis.engine === 'finance') {
+    const operation = analysis.operation ? FINANCE_OPERATION[analysis.operation] : undefined;
+    return { note: `这项分析由财务引擎按已保存的业务口径计算${operation ? `（${operation}）` : ''}，没有脚本；结果中的每一行都可以查看来源行。`,
+      detailSummary: '高级：查看计算口径', detail: JSON.stringify(analysis.finance_spec ?? {}, null, 2), kind: '财务' };
+  }
+  return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };
 }
 
 function Empty({ title, body, onAddFiles, onChat }: { title: string; body: string; onAddFiles?(): void; onChat(): void }) {

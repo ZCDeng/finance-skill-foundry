@@ -915,6 +915,32 @@ ${canonicalAppendix} 已改写`;
     expect(financeSourceRefresh).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes an ERP source in a mode the engine accepts, chosen by its Chinese name', async () => {
+    const financeSourceRefresh = vi.fn(async (_task: string, _spec: Record<string, unknown>) =>
+      success({ dataset_id: '6'.repeat(32), effective_dataset_id: '6'.repeat(32) }));
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState: async () => success(initial), financeSourceRefresh, financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    await openSourceRefreshDetails();
+    fireEvent.change(sourceRefreshField('账簿'), { target: { value: '经营总账' } });
+    fireEvent.change(sourceRefreshField('组织'), { target: { value: '华东' } });
+    fireEvent.change(sourceRefreshField('期间'), { target: { value: '2026-09' } });
+    fireEvent.change(sourceRefreshField('截止时间'), { target: { value: '2026-09-30T23:59:59+08:00' } });
+    // The engine takes full_period or incremental and nothing else; the field offers exactly those, by name.
+    const mode = sourceRefreshField('刷新模式') as HTMLSelectElement;
+    expect(mode.tagName).toBe('SELECT');
+    expect(Array.from(mode.options).map((option) => [option.value, option.textContent])).toEqual([['full_period', '整期'], ['incremental', '增量']]);
+    expect(mode.value).toBe('full_period');
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledTimes(1));
+    expect((financeSourceRefresh.mock.calls[0][1].scope as Record<string, string>).mode).toBe('full_period');
+    await screen.findByText(/已发布新来源快照/);
+    fireEvent.change(mode, { target: { value: 'incremental' } });
+    fireEvent.click(screen.getByRole('button', { name: /选择文件并刷新/ }));
+    await waitFor(() => expect(financeSourceRefresh).toHaveBeenCalledTimes(2));
+    expect((financeSourceRefresh.mock.calls[1][1].scope as Record<string, string>).mode).toBe('incremental');
+  });
+
   it('does not let a delayed source refresh from the previous task replace the current draft', async () => {
     const other = { ...task, id: '8'.repeat(32), title: '西南经营分析' };
     const refreshGate = deferred<Answer<AnalysisState>>();
@@ -2345,6 +2371,33 @@ ${canonicalAppendix} 已改写`;
     await act(async () => resolveDrilldown(success({ run_id: firstRun.id, row: 0, rows: [], total: 1, offset: 0, has_more: false, message: '旧运行来源' })));
     expect(screen.queryByText(/旧运行来源/)).toBeNull();
     expect((screen.getByLabelText('结果行来源') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('describes a finance-engine analysis as the finance engine and names its source columns in Chinese', async () => {
+    const financeRun: AnalysisRun = { ...run, engine: 'finance', finance_context_id: '4'.repeat(32), result: {
+      columns: [{ name: 'ledger', type: 'VARCHAR' }, { name: 'organization', type: 'VARCHAR' }, { name: 'metric', type: 'VARCHAR' },
+        { name: 'actual', type: 'DECIMAL' }, { name: 'baseline', type: 'DECIMAL' }, { name: 'amount_change', type: 'DECIMAL' },
+        { name: 'contribution', type: 'DECIMAL' }, { name: 'ratio', type: 'DECIMAL' }, { name: 'ratio_status', type: 'VARCHAR' }],
+      rows: [{ ledger: '经营总账', organization: '华东', metric: 'revenue', actual: '120.00', baseline: '100.00', amount_change: '20.00',
+        contribution: '20.00', ratio: '0.2', ratio_status: 'ok', source_rows: [{ dataset_id: source.id, row_index: 1 }] }],
+      row_count: 1, truncated: false } };
+    const financeAnalysis: AnalysisRevision = { ...analysis, engine: 'finance', sql: null, operation: 'variance',
+      finance_spec: { context_id: '4'.repeat(32), actual_scenario: 'actual', baseline_scenario: 'budget' } };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'list-finance-context'
+      ? success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['drilldown'] })
+      : success({}));
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [financeAnalysis], runs: [financeRun] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await screen.findByText(/财务引擎/);
+    expect(screen.queryByText(/这项分析使用脚本计算/)).toBeNull();
+    expect(screen.queryByText('高级：查看计算脚本')).toBeNull();
+    expect(screen.getByText('高级：查看计算口径')).toBeTruthy();
+    const column = screen.getByLabelText('来源列（可选）') as HTMLSelectElement;
+    const options = Array.from(column.options).slice(1);
+    // The choice reads in the words of the tables above it; the value sent is still the column's own name.
+    expect(options.map((option) => option.value)).toEqual(['ledger', 'organization', 'metric', 'actual', 'baseline', 'amount_change', 'contribution', 'ratio', 'ratio_status']);
+    expect(options.map((option) => option.textContent).filter((text) => /^[a-z_]+$/.test(text ?? ''))).toEqual([]);
+    expect(options.map((option) => option.textContent)).toEqual(expect.arrayContaining(['账簿', '组织', '科目增减', '差异贡献', '差异率']));
   });
 
   it('passes structured aggregate excluded-detail section through the Analysis drilldown IPC wiring', async () => {

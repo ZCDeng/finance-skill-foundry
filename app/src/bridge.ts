@@ -338,6 +338,9 @@ export interface AnalysisRevision extends AnalysisObject {
   engine?: 'sql' | 'python' | 'shell' | 'finance' | 'structured_aggregate';
   aggregate_plan?: Record<string, unknown>;
   code?: string;
+  /** Finance-engine versions: which calculation (metric, variance, scenario) and the spec it ran. */
+  operation?: 'metric' | 'variance' | 'scenario';
+  finance_spec?: Record<string, unknown>;
   bindings: Record<string, string>;
   parameters: unknown[] | Record<string, unknown>;
   timeout_seconds?: number;
