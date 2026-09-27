@@ -1,0 +1,50 @@
+import { when } from '../../bridge.js';
+import { textValue } from './presentation.js';
+import { Button } from '../../components/ui/button.js';
+
+export interface FinanceCompletionRecovery {
+  operation_id: string; status: string; revision?: number; title?: string; body?: string; limitations?: string[] | string; run_ids?: string[]; fact_ids?: string[];
+  claims?: unknown[]; materiality?: Record<string, unknown>; requirements_id?: string | null; parent_id?: string | null; updated_at?: string;
+  evidence_recipes?: Record<string, unknown>[]; consistency_rules?: Record<string, unknown>[]; consistency_sources?: Record<string, unknown>[] | Record<string, unknown>;
+  attempt_status?: string | null; validation_error?: { code?: string; message?: string; details?: unknown[] } | null;
+}
+
+function recoveryLimitationsText(value: FinanceCompletionRecovery['limitations']): string {
+  return Array.isArray(value) ? value.filter(Boolean).join('；') : textValue(value ?? '');
+}
+
+function recoveryStatusLabel(status: string): string {
+  return ({ repair_available: '可修复', timed_out: '超时', cancelled: '已取消', failed: '失败', needs_review: '待审阅', awaiting_input: '等待输入' } as Record<string, string>)[status] ?? status;
+}
+
+function recoveryValidationText(item: FinanceCompletionRecovery): string {
+  const error = item.validation_error;
+  if (!error) return '';
+  const first = Array.isArray(error.details) ? error.details[0] : null;
+  if (first && typeof first === 'object') {
+    const detail = first as Record<string, unknown>;
+    const location = [detail.run_id, detail.row, detail.column].filter((part) => part !== undefined && part !== null && String(part).trim()).join(' / ');
+    const values = detail.expected !== undefined || detail.actual !== undefined
+      ? `填报 ${textValue(detail.expected ?? '')}，结果 ${textValue(detail.actual ?? '')}`
+      : '';
+    return [location, values].filter(Boolean).join('：');
+  }
+  return textValue(error.message ?? '');
+}
+
+export function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry, onLoad }: {
+  recoveries: FinanceCompletionRecovery[]; error?: string; disabled: boolean; onRetry(): void; onLoad(recovery: FinanceCompletionRecovery): void;
+}) {
+  if (!recoveries.length && !error) return null;
+  return <details className="analysis-details analysis-recovery-panel">
+    <summary>可恢复的未保存文稿 · {recoveries.length} 条</summary>
+    <p className="analysis-note">这些内容来自已终止但尚未落成文稿版本的操作。载入后只是可编辑副本，需要你检查并保存。</p>
+    {error && <p role="alert" className="analysis-message analysis-message--error">恢复稿读取失败：{error} <Button variant="outline" type="button" onClick={onRetry}>重试</Button></p>}
+    <div className="analysis-history-list">{recoveries.map((item) => <div className="analysis-history-row analysis-history-row--static" key={item.operation_id}>
+      <span>{item.title?.trim() || '未命名恢复稿'}</span>
+      <span>{recoveryStatusLabel(item.status)}{item.updated_at ? ` · ${when(item.updated_at)}` : ''}{item.revision ? ` · ${item.revision}` : ''}</span>
+      <span>{recoveryValidationText(item) || recoveryLimitationsText(item.limitations) || `${item.run_ids?.length ?? 0} 次运行 · ${item.fact_ids?.length ?? 0} 条事实`}</span>
+      <Button variant="outline" type="button" disabled={disabled} onClick={() => onLoad(item)}>载入可编辑副本</Button>
+    </div>)}</div>
+  </details>;
+}
