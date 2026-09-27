@@ -1,7 +1,7 @@
 ---
 name: FA Foundry
 description: 以任务、持续对话与真实成果组织的财务经理工作台。
-colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f'}
+colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-warning: '#a3372b', fnd-warning-line: '#c96a5c', fnd-warning-fill: '#c96a5c1f', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f', fnd-warning-dark: '#eb9a8c', fnd-warning-line-dark: '#eb9a8c', fnd-warning-fill-dark: '#eb9a8c1f'}
 typography:
   headline: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 24px, fontWeight: 600, lineHeight: 32px}
   task-title: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 20px, fontWeight: 600, lineHeight: 28px}
@@ -45,9 +45,11 @@ components:
 
 主操作使用 `fnd-accent/on-accent` 的中性反差；当前导航使用中性选择底色与正文色，成果页签用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
 
-前置 YAML 的 `-dark` 项是同名 CSS token 的深色覆盖值。壳跟随系统主题；原生对话在自身主题完成解析后，通过 DSW 语义别名映射同一套底色、文字、边界和金色强调色。原生 composer 默认中性边界，悬停保持中性色，仅在聚焦时使用 1px 金色边界。历史标记保留原有金色、灰色、蓝色语义，FA 图形保持自身颜色。
+警告、错误、不可逆删除和输入错误使用砖红警示色 `fnd-warning`，文字用主色，边用 `fnd-warning-line`，浅底用 `fnd-warning-fill`。浅色主色 #a3372b 在白底上 6.69:1，深色主色 #eb9a8c 在 #1f1f1f 上 7.48:1。三件一起换，警示文字旁边不留金色边或金色浅底。
 
-**The Location Rule.** 金色服务于当前位置、选择和焦点；主操作使用既有中性反差，数值与业务状态保留文字。
+前置 YAML 的 `-dark` 项是同名 CSS token 的深色覆盖值。壳跟随系统主题；原生对话在自身主题完成解析后，通过 DSW 语义别名映射同一套底色、文字、边界、金色强调色和警示色；原生的错误色和危险悬停底映射到 `fnd-warning` 与 `fnd-warning-fill`。原生 composer 默认中性边界，悬停保持中性色，仅在聚焦时使用 1px 金色边界。历史标记保留原有金色、灰色、蓝色语义，FA 图形保持自身颜色。
+
+**The Location Rule.** 金色只服务于品牌、当前位置、选择、焦点和原有的历史标记（稿外追问 chip）；警告、错误、删除和输入错误一律用警示色，不用金色。主操作使用既有中性反差，数值与业务状态保留文字。
 
 ## Typography
 
@@ -77,7 +79,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Components
 
-**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-mark-outside`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-mark-outside` 金，不是红）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
+**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-warning-line`，错误文字使用 `fnd-warning`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-warning` 砖红文字与 `fnd-warning-line` 边，悬停为 `fnd-warning-fill`）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
 
 **导航与焦点。** 顶层为工作区/成果库，方法库、数据台、历史任务从次级入口可达。资料/结果/文稿用带计数的 tablist，支持左右键、Home/End 与 roving tabindex。任务抽屉聚焦搜索、限制 Tab、使主工作区 inert；Escape 关闭并返回开关。图标动作有名称和状态，分隔条提供方向与数值。
 

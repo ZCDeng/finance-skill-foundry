@@ -21,13 +21,13 @@
 }
 
 .fnd-control__error {
-  color: var(--fnd-mark-outside);
+  color: var(--fnd-warning);
 }
 
 .fnd-control[data-invalid='true'] .fnd-field,
 .fnd-control[data-invalid='true'] .fnd-combobox__button,
 .fnd-combobox__button[aria-invalid='true'] {
-  border-color: var(--fnd-mark-outside-line);
+  border-color: var(--fnd-warning-line);
 }
 
 .fnd-period-field,
@@ -312,7 +312,7 @@
 }
 
 .fnd-combobox__state[data-state='error'] {
-  color: var(--fnd-mark-outside);
+  color: var(--fnd-warning);
 }
 
 .fnd-combobox__state[data-state='unconfigured'] {
@@ -332,7 +332,7 @@
   z-index: 1;
   border: 0;
   background: transparent;
-  color: var(--fnd-mark-outside);
+  color: var(--fnd-warning);
   font: inherit;
   font-size: var(--fnd-size-label);
   cursor: pointer;

@@ -208,8 +208,8 @@
 }
 
 .fnd-refusal {
-  border: 1px solid var(--fnd-mark-outside);
-  background: var(--fnd-mark-outside-fill);
+  border: 1px solid var(--fnd-warning);
+  background: var(--fnd-warning-fill);
   color: var(--fnd-ink);
   border-radius: var(--fnd-radius-control);
   padding: 14px 16px;
@@ -346,7 +346,7 @@ textarea.fnd-field {
 }
 
 .fnd-field[aria-invalid='true'] {
-  border-color: var(--fnd-mark-outside-line);
+  border-color: var(--fnd-warning-line);
 }
 
 /* The outline overlaps the neutral border: hover + focus paints one edge.

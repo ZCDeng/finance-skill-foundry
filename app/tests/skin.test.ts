@@ -80,6 +80,40 @@ describe('the edge this window draws on the embedded page', () => {
     expect(DARK_THEME.selectionSurface).toBe(token('--fnd-selection-surface', 'dark'));
   });
 
+  /*
+   * The embedded page has its own red for errors and danger hovers. Left alone,
+   * a failed tool call there would be a third colour next to the host's
+   * warning; mapped to gold, it would read as the current place.
+   */
+  it('carries the host warning colour in both themes, apart from the gold', () => {
+    expect(LIGHT_THEME.warning).toBe(token('--fnd-warning', 'light'));
+    expect(LIGHT_THEME.warningFill).toBe(token('--fnd-warning-fill', 'light'));
+    expect(DARK_THEME.warning).toBe(token('--fnd-warning', 'dark'));
+    expect(DARK_THEME.warningFill).toBe(token('--fnd-warning-fill', 'dark'));
+    for (const theme of [LIGHT_THEME, DARK_THEME]) {
+      expect(theme.warning).not.toBe(theme.selected);
+      expect(theme.warning).not.toBe(theme.focus);
+    }
+    expect(HARNESS_SKIN).toMatch(
+      new RegExp(`body \\{[^}]*--foundry-native-warning:${LIGHT_THEME.warning};[^}]*--foundry-native-warning-fill:${LIGHT_THEME.warningFill};`),
+    );
+    expect(HARNESS_SKIN).toMatch(
+      new RegExp(
+        `body\\[${DSH_DARK_ATTRIBUTE}\\] \\{[^}]*--foundry-native-warning:${DARK_THEME.warning};[^}]*--foundry-native-warning-fill:${DARK_THEME.warningFill};`,
+      ),
+    );
+  });
+
+  it('maps the native danger aliases to the warning colour', () => {
+    for (const alias of [
+      '--dsw-alias-state-error-primary:var(--foundry-native-warning) !important',
+      '--dsw-alias-label-error:var(--foundry-native-warning) !important',
+      '--dsw-alias-interactive-bg-hover-danger:var(--foundry-native-warning-fill) !important',
+    ]) {
+      expect(HARNESS_SKIN).toContain(alias);
+    }
+  });
+
   it('follows the resolved DSH theme attribute rather than the OS media query', () => {
     expect(LAYOUT).toContain(`const DARK_ATTRIBUTE = "${DSH_DARK_ATTRIBUTE}"`);
     expect(LAYOUT).toContain(`body.setAttribute(DARK_ATTRIBUTE, "")`);

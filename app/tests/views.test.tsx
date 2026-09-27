@@ -903,8 +903,9 @@ describe('the export button can be read', () => {
     expect(button).not.toContain('hover:bg-primary/90');
   });
 
-  it('colours irreversible delete with the mark-outside gold', () => {
-    expect(button).toContain('var(--fnd-mark-outside)');
+  it('colours irreversible delete with the warning colour, not the gold', () => {
+    expect(button).toContain('var(--fnd-warning)');
+    expect(button).not.toContain('var(--fnd-mark-outside)');
     expect(button).not.toContain('bg-destructive text-white');
   });
 
