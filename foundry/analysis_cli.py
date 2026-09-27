@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import AnalysisStore
+from foundry.analysis import REPORT_EXPORT_FORMATS, AnalysisStore
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -30,6 +30,8 @@ COMMANDS = {
     "report-source-read",
     "report-xlsx-read",
     "report-export-register",
+    "analysis-deliverables",
+    "analysis-export-path",
 }
 
 
@@ -79,6 +81,10 @@ def add_parsers(sub):
     p.add_argument("--path", required=True)
     p.add_argument("--mode", choices=["management", "audit"], default="management")
     p.add_argument("--projection-hash")
+    sub.add_parser("analysis-deliverables", help="成果库: newest draft per revision chain and every filed export")
+    p = sub.add_parser("analysis-export-path", help="where this task filed one export, by digest and format")
+    p.add_argument("--sha", required=True, help="sha256 of a filed export")
+    p.add_argument("--format", choices=sorted(REPORT_EXPORT_FORMATS), required=True)
     p = sub.add_parser("analysis-method-save")
     p.add_argument("--analysis", required=True)
     p.add_argument("--name", required=True)
@@ -368,6 +374,17 @@ def dispatch(args) -> bool:
         _bound_draft(context, service, service.get_draft(args.draft))
         result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path),
                                                 content_mode=args.mode, projection_hash=args.projection_hash)
+    elif args.cmd in {"analysis-deliverables", "analysis-export-path"}:
+        from foundry.analysis_deliverables import export_path, list_analysis_deliverables
+
+        # The manager's library across every draft; a conversation reads what its context grants instead.
+        if context.session_id:
+            raise FoundryError(f"{args.cmd} is the desktop library view and does not take a session")
+        result = (
+            list_analysis_deliverables(service)
+            if args.cmd == "analysis-deliverables"
+            else {"path": str(export_path(service, args.sha, args.format))}
+        )
     elif args.cmd == "analysis-output":
         run = service.get_run(args.run)
         _bound(context, run["bindings"])

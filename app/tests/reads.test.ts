@@ -1,8 +1,27 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { READS } from '../electron/reads.js';
+const mocks = vi.hoisted(() => ({ run: vi.fn() }));
+// Only the exec is replaced; the argv, the JSON contract and every check on this side stay real.
+vi.mock('../electron/foundry.js', async (original) => {
+  const real = await original<typeof import('../electron/foundry.js')>();
+  return {
+    ...real,
+    runFoundry: mocks.run,
+    runFoundryJson: async (...args: unknown[]) => JSON.parse(await mocks.run(...args)),
+  };
+});
+
+import {
+  type AnalysisDeliverables,
+  type DeliverableRow,
+  type GalleryRow,
+  type TaskRow,
+  READS,
+  analysisExportPath,
+  galleryRows,
+} from '../electron/reads.js';
 import { CHANNELS } from '../electron/ipc/contract.js';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
@@ -57,10 +76,12 @@ describe('every data path is a CLI call', () => {
     }
   });
 
-  it('keeps the read surface to the three views it answers', () => {
+  it('keeps the read surface to the four views it answers', () => {
     // A screen that wants something not in here needs a new read-only
-    // subcommand, not a new way into the files.
-    expect(Object.values(READS)).toEqual(['task-list', 'task-show', 'deliverables']);
+    // subcommand, not a new way into the files. The fourth is 成果库's analysis
+    // half: drafts and filed exports live in the analysis store, not in
+    // `deliverables`.
+    expect(Object.values(READS)).toEqual(['task-list', 'task-show', 'deliverables', 'analysis-deliverables']);
   });
 
   it('holds the preload literals to the contract', () => {
@@ -78,5 +99,99 @@ describe('every data path is a CLI call', () => {
     // that exists. Both guards are shape checks on this side of the bridge.
     expect(read('../electron/ipc/register.ts')).toMatch(/\^\[0-9a-f\]\{32\}\$/);
     expect(read('../electron/reads.ts')).toMatch(/\^\[0-9a-f\]\{64\}\$/);
+  });
+});
+
+/*
+ * 成果库 as one list (R10, KTD11): the old flow's versions, the newest draft of
+ * each revision chain, and every filed export, in one order with one key space.
+ */
+describe('the deliverables union', () => {
+  const SECOND = '2026-09-27T03:00:00Z';
+  const task = (key: string, title: string): TaskRow => ({
+    id: key.repeat(32), title, period: '2026-08', skill_id: null, created_at: SECOND, windows: 1,
+  });
+  const A = task('a', '八月经营分析');
+  const B = task('b', '回款跟进');
+  const brief = (seq: number): DeliverableRow => ({
+    seq, kind: 'brief', window_id: 'w'.repeat(32), sha256: String(seq).repeat(64), bytes: 10,
+    cause: 'emit-brief', session_id: null, at: SECOND,
+  });
+  // Draft v1 has seq 1, v2 seq 2; the listing carries only v2, and an export of v1.
+  const analysis = (drafts: 'forward' | 'reverse'): AnalysisDeliverables => {
+    const exports = [
+      { export_id: 'e'.repeat(32), draft_id: '1'.repeat(32), revision: 1, title: '八月经营分析', format: 'pdf' as const,
+        content_mode: 'management' as const, sha256: 'f'.repeat(64), created_at: SECOND,
+        review_status: 'unreviewed', publication_status: 'draft', review_marker: '分析草稿·待复核' },
+      { export_id: 'd'.repeat(32), draft_id: '1'.repeat(32), revision: 1, title: '八月经营分析', format: 'docx' as const,
+        content_mode: 'audit' as const, sha256: 'c'.repeat(64), created_at: SECOND,
+        review_status: 'unreviewed', publication_status: 'draft', review_marker: '分析草稿·待复核' },
+    ];
+    return {
+      task_id: A.id,
+      drafts: [{ draft_id: '2'.repeat(32), revision: 2, versions: 2, title: '八月经营分析', created_at: SECOND, seq: 2,
+        review_status: 'accepted', publication_status: 'archived' }],
+      exports: drafts === 'forward' ? exports : [...exports].reverse(),
+    };
+  };
+  const store = (order: 'forward' | 'reverse') => mocks.run.mockImplementation(async (binding, command) => {
+    if (command === 'task-list') return JSON.stringify(order === 'forward' ? [A, B] : [B, A]);
+    // Both tasks' old flow filed seq 1 in the same second, and task A's draft v1 also has seq 1.
+    if (command === 'deliverables') return JSON.stringify([brief(1)]);
+    if (command === 'analysis-deliverables') {
+      return JSON.stringify(binding.task === A.id ? analysis(order) : { task_id: B.id, drafts: [], exports: [] });
+    }
+    throw new Error(`unexpected ${command}`);
+  });
+  const described = (rows: GalleryRow[]) => rows.map((row) => row.key);
+  beforeEach(() => { mocks.run.mockReset(); });
+
+  it('orders a same-second brief, draft and export the same way whatever order the store answers in', async () => {
+    store('forward');
+    const first = await galleryRows({ varRoot: '/store' });
+    store('reverse');
+    const second = await galleryRows({ varRoot: '/store' });
+    expect(described(second)).toEqual(described(first));
+    // Keys are the kind and its own id, so a draft's seq 1 and two tasks' brief seq 1 never meet.
+    expect(new Set(described(first)).size).toBe(first.length);
+    expect(described(first)).toEqual([
+      `export:${'d'.repeat(32)}`,
+      `export:${'e'.repeat(32)}`,
+      `draft:${'2'.repeat(32)}`,
+      `deliverable:${A.id}:1`,
+      `deliverable:${B.id}:1`,
+    ]);
+  });
+
+  it('lists the draft chain once, at its newest version, with that version\'s own state', async () => {
+    store('forward');
+    const drafts = (await galleryRows({ varRoot: '/store' })).filter((row) => row.type === 'draft');
+    expect(drafts).toHaveLength(1);
+    const [only] = drafts;
+    if (only.type !== 'draft') throw new Error('not a draft row');
+    expect(only.task.id).toBe(A.id);
+    expect([only.draft.revision, only.draft.review_status, only.draft.publication_status]).toEqual([2, 'accepted', 'archived']);
+  });
+
+  it('keeps newer rows first and the old flow\'s own seq rule inside a tie', async () => {
+    mocks.run.mockImplementation(async (_binding, command) => {
+      if (command === 'task-list') return JSON.stringify([A]);
+      if (command === 'deliverables') return JSON.stringify([brief(1), { ...brief(2), kind: 'workpaper' }, { ...brief(3), at: '2026-09-27T03:00:05Z' }]);
+      return JSON.stringify({ task_id: A.id, drafts: [{ ...analysis('forward').drafts[0], created_at: '2026-09-27T03:00:02Z' }], exports: [] });
+    });
+    expect(described(await galleryRows({ varRoot: '/store' }))).toEqual([
+      `deliverable:${A.id}:3`, `draft:${'2'.repeat(32)}`, `deliverable:${A.id}:2`, `deliverable:${A.id}:1`,
+    ]);
+  });
+
+  it('resolves an export only from a digest and a known format, never from a path', async () => {
+    mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/tasks/a/analysis/exports/registered/x.pdf' }));
+    const binding = { varRoot: '/store', task: A.id };
+    await expect(analysisExportPath(binding, '../../etc/passwd', 'pdf')).rejects.toThrow(/not a sha256/);
+    await expect(analysisExportPath(binding, 'f'.repeat(64), '.pdf')).rejects.toThrow(/not an export format/);
+    await expect(analysisExportPath(binding, 'f'.repeat(64), 'pdf/../../x')).rejects.toThrow(/not an export format/);
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(await analysisExportPath(binding, 'f'.repeat(64), 'pdf')).toBe('/store/tasks/a/analysis/exports/registered/x.pdf');
+    expect(mocks.run).toHaveBeenCalledWith(binding, 'analysis-export-path', ['--sha', 'f'.repeat(64), '--format', 'pdf'], undefined);
   });
 });

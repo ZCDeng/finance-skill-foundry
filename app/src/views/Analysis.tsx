@@ -39,12 +39,14 @@ type Props = {
   onNew(question: string): void | Promise<string | void>;
   onChat(question?: string, draftId?: string, options?: AnalysisChatOptions): void | Promise<void>;
   onLocatorPreview?(preview: import('../bridge.js').LocatorPreviewSpec): void;
+  /** 成果库 asks for one draft version of a task; a new count is a new request. */
+  draftRequest?: { count: number; taskId: string; draftId: string };
 };
 const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
-export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview }: Props) {
+export function Analysis({ task, tasks, active: visible = true, embedded = false, section, onSectionChange, onPick, onNew, onChat, onLocatorPreview, draftRequest }: Props) {
   const [state, setState] = useState<AnalysisState | null>(null);
   const [tab, setTab] = useState<Tab>('datasets');
   const [question, setQuestionState] = useState(() => readCopy<string>(`${task?.id ?? 'new'}:question`) ?? '');
@@ -55,6 +57,12 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   const [dataset, setDataset] = useState<{ source: DatasetSnapshot; content: Record<string, unknown> } | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<string | null>(null);
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null);
+  const handledDraftRequest = useRef(0);
+  useEffect(() => {
+    if (!draftRequest || draftRequest.count === handledDraftRequest.current || draftRequest.taskId !== task?.id) return;
+    handledDraftRequest.current = draftRequest.count;
+    setSelectedDraft(draftRequest.draftId);
+  }, [draftRequest, task?.id]);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
   // it started keeps going. One entry per task, so a run in another task neither

@@ -41,6 +41,8 @@ const api = {
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
   deliverableOpen: (task: string, sha: string, ext: string) =>
     ipcRenderer.invoke('foundry:deliverable-open', task, sha, ext),
+  analysisExportOpen: (task: string, sha: string, format: string) =>
+    ipcRenderer.invoke('analysis:export-open', task, sha, format),
   exportWorkbook: (task: string, window: string) =>
     ipcRenderer.invoke('foundry:export-workbook', task, window),
   taskRename: (task: string, title: string) => ipcRenderer.invoke('foundry:task-rename', task, title),

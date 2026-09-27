@@ -72,6 +72,50 @@ export interface TaskDetail {
   deliverables: DeliverableRow[];
 }
 
+/** The newest version of one draft revision chain, with the state saved on that version. */
+export interface AnalysisDraftRow {
+  draft_id: string;
+  /** The 修订 N the 文稿 tab shows: position among all of the task's drafts. */
+  revision: number;
+  /** How many versions the chain holds. */
+  versions: number;
+  title: string;
+  created_at: string;
+  seq: number;
+  review_status: string;
+  publication_status: string;
+}
+
+export type ExportFormat = 'md' | 'xlsx' | 'docx' | 'pdf' | 'html';
+
+/** One filed export, with the state of the revision it was exported from. */
+export interface AnalysisExportRow {
+  export_id: string;
+  draft_id: string;
+  revision: number;
+  title: string;
+  format: ExportFormat;
+  content_mode: 'management' | 'audit' | null;
+  sha256: string;
+  created_at: string;
+  review_status: string;
+  publication_status: string;
+  /** 「分析草稿·待复核」 unless the source revision is accepted and archived; empty otherwise. */
+  review_marker: string;
+}
+
+/**
+ * One row of 成果库: an old-flow version, the newest draft of a revision chain,
+ * or a filed export. `key` is the kind and that kind's own id.
+ *
+ * Main always sends `type`, `key` and `at`. They are optional on the old-flow
+ * row only so a `{ task, row }` built by hand still reads as one.
+ */
+export type GalleryRow =
+  | { type?: 'deliverable'; key?: string; at?: string; task: TaskRow; row: DeliverableRow }
+  | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
+  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
+
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
 /**
@@ -115,7 +159,13 @@ export interface Bridge {
   timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
-  gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
+  /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
+  gallery(): Promise<Answer<GalleryRow[]>>;
+  /**
+   * Hand one filed analysis export to the default program. The renderer names
+   * the task, the digest and the format; main resolves the file through the CLI.
+   */
+  analysisExportOpen?(task: string, sha: string, format: ExportFormat): Promise<Answer<{ opened: string }>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
   /**
    * Hand one archived version to whatever this machine opens it with.

@@ -39,6 +39,12 @@ export const CHANNELS = {
   gallery: 'foundry:gallery',
   deliverableText: 'foundry:deliverable-text',
   deliverableOpen: 'foundry:deliverable-open',
+  /**
+   * Hand one filed analysis export (md, xlsx, docx, pdf, html) to the default
+   * program. The renderer names a task, a digest and a format; main asks the
+   * CLI where this task filed those bytes, as it does for `deliverableOpen`.
+   */
+  analysisExportOpen: 'analysis:export-open',
   exportWorkbook: 'foundry:export-workbook',
   /** The one channel that changes the store. See `writes.ts`. */
   taskNew: 'foundry:task-new',

@@ -10,6 +10,8 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../electron/foundry.js', async (original) => ({
   ...await original<typeof import('../electron/foundry.js')>(), runFoundry: mocks.run,
+  // The reads parse JSON through their own helper; route it through the same fake exec.
+  runFoundryJson: async (...args: unknown[]) => JSON.parse(await mocks.run(...args)),
 }));
 vi.mock('../electron/harness/workspace.js', () => ({ ensureTaskWorkspace: mocks.workspace }));
 vi.mock('../electron/reports/host.js', () => ({ ReportHost: class { export = mocks.reportExport; } }));
@@ -272,6 +274,49 @@ describe('analysis IPC task and session binding', () => {
     expect((await invoke(CHANNELS.analysisExport, task, '../escape', 'xlsx')).ok).toBe(false);
     expect(mocks.reportExport).toHaveBeenCalledTimes(5);
     expect(mocks.openPath).not.toHaveBeenCalled();
+  });
+
+  it('opens a filed export in the default program from a digest and a format, never a renderer path', async () => {
+    registerIpc({ varRoot: '/store' });
+    const filed = '/store/tasks/a/analysis/exports/registered/draft-management.pdf';
+    mocks.run.mockResolvedValue(JSON.stringify({ path: filed }));
+    const sha = 'f'.repeat(64);
+    expect(await invoke(CHANNELS.analysisExportOpen, task, sha, 'pdf')).toEqual({ ok: true, value: { opened: filed } });
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'analysis-export-path',
+      ['--sha', sha, '--format', 'pdf'], undefined);
+    expect(mocks.openPath).toHaveBeenCalledWith(filed);
+    // A path, a padded format, an unknown format or a foreign task id never reach argv or the opener.
+    for (const [who, digest, format] of [
+      [task, '/Users/someone/secret.pdf', 'pdf'], [task, sha, '../x.pdf'], [task, sha, 'exe'], [task, sha, '.pdf'], ['../b', sha, 'pdf'],
+    ]) {
+      expect((await invoke(CHANNELS.analysisExportOpen, who, digest, format)).ok).toBe(false);
+    }
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the default program cannot open the file', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/x.docx' }));
+    mocks.openPath.mockResolvedValue('No application knows how to open this file');
+    const result = await invoke(CHANNELS.analysisExportOpen, task, 'c'.repeat(64), 'docx');
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('No application knows how to open this file');
+  });
+
+  it('answers 成果库 with the old flow, the newest drafts and the filed exports in one list', async () => {
+    registerIpc({ varRoot: '/store' });
+    const at = '2026-09-27T03:00:00Z';
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-list'
+      ? JSON.stringify([{ id: task, title: '八月', period: '2026-08', skill_id: null, created_at: at, windows: 1 }])
+      : command === 'deliverables'
+        ? JSON.stringify([{ seq: 1, kind: 'brief', window_id: task, sha256: '1'.repeat(64), bytes: 1, cause: 'emit-brief', session_id: null, at }])
+        : JSON.stringify({ task_id: task, drafts: [{ draft_id: '2'.repeat(32), revision: 2, versions: 2, title: '八月', created_at: at, seq: 2,
+          review_status: 'unreviewed', publication_status: 'draft' }], exports: [] }));
+    const result = await invoke(CHANNELS.gallery);
+    expect(result.ok).toBe(true);
+    expect(result.value.map((row: { key: string }) => row.key)).toEqual([`draft:${'2'.repeat(32)}`, `deliverable:${task}:1`]);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['task-list', 'deliverables', 'analysis-deliverables']);
   });
 
   it('allows only bounded finance business commands through one IPC call', async () => {

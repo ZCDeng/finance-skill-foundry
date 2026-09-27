@@ -64,11 +64,60 @@ export interface TaskDetail {
   deliverables: DeliverableRow[];
 }
 
+/** The newest version of one draft revision chain, with the state saved on that version. */
+export interface AnalysisDraftRow {
+  draft_id: string;
+  /** The 修订 N the 文稿 tab shows: position among all of the task's drafts. */
+  revision: number;
+  /** How many versions the chain holds. */
+  versions: number;
+  title: string;
+  created_at: string;
+  seq: number;
+  review_status: string;
+  publication_status: string;
+}
+
+export type ExportFormat = 'md' | 'xlsx' | 'docx' | 'pdf' | 'html';
+
+/** One filed export, with the state of the revision it was exported from. */
+export interface AnalysisExportRow {
+  export_id: string;
+  draft_id: string;
+  revision: number;
+  title: string;
+  format: ExportFormat;
+  content_mode: 'management' | 'audit' | null;
+  sha256: string;
+  created_at: string;
+  review_status: string;
+  publication_status: string;
+  /** 「分析草稿·待复核」 unless the source revision is accepted and archived; empty otherwise. */
+  review_marker: string;
+}
+
+/** What `analysis-deliverables` answers for one task. */
+export interface AnalysisDeliverables {
+  task_id: string;
+  drafts: AnalysisDraftRow[];
+  exports: AnalysisExportRow[];
+}
+
+/**
+ * One row of 成果库. `key` is the kind and that kind's own id: a draft's seq and
+ * an old-flow version's seq count in different stores, so neither is a key.
+ */
+export type GalleryRow =
+  | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }
+  | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
+  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
+
 /** The read surface, one entry per screen question. */
 export const READS = {
   tasks: 'task-list',
   task: 'task-show',
   deliverables: 'deliverables',
+  analysis: 'analysis-deliverables',
 } as const;
 
 export type ReadName = keyof typeof READS;
@@ -85,6 +134,10 @@ export function listDeliverables(binding: Binding, env?: FoundryEnv): Promise<De
   return runFoundryJson<DeliverableRow[]>(binding, READS.deliverables, [], env);
 }
 
+export function listAnalysisDeliverables(binding: Binding, env?: FoundryEnv): Promise<AnalysisDeliverables> {
+  return runFoundryJson<AnalysisDeliverables>(binding, READS.analysis, [], env);
+}
+
 /**
  * The deliverable gallery, newest first, with the task each version belongs to.
  *
@@ -96,8 +149,9 @@ export function listDeliverables(binding: Binding, env?: FoundryEnv): Promise<De
 export async function deliverableGallery(
   binding: Omit<Binding, 'task'>,
   env?: FoundryEnv,
+  known?: TaskRow[],
 ): Promise<{ task: TaskRow; row: DeliverableRow }[]> {
-  const tasks = await listTasks(binding, env);
+  const tasks = known ?? await listTasks(binding, env);
   const gathered: { task: TaskRow; row: DeliverableRow }[] = [];
   for (const task of tasks) {
     for (const row of await listDeliverables({ ...binding, task: task.id }, env)) {
@@ -112,6 +166,62 @@ export async function deliverableGallery(
     if (a.row.at !== b.row.at) return a.row.at < b.row.at ? 1 : -1;
     return b.row.seq - a.row.seq;
   });
+}
+
+/**
+ * Which kind goes first when two rows share a second.
+ *
+ * An export is made after the revision it came from, so within one second it
+ * goes above that revision. Between stores there is no real order at all: the
+ * old flow writes elsewhere and goes last. Ranking kinds instead of guessing
+ * keeps the list the same on every read.
+ */
+const SAME_SECOND_RANK: Record<GalleryRow['type'], number> = { export: 0, draft: 1, deliverable: 2 };
+
+/** A row's own sequence inside its kind: the old flow's seq, the draft's seq, the source revision. */
+function ordinal(row: GalleryRow): number {
+  return row.type === 'deliverable' ? row.row.seq : row.type === 'draft' ? row.draft.seq : row.exported.revision;
+}
+
+/**
+ * 成果库's order: newest first, and total.
+ *
+ * Two old-flow rows compare exactly as `deliverableGallery` does -- time, then
+ * seq -- and everything else falls through to the kind and then the key, so
+ * the order never depends on which task or which store answered first.
+ */
+export function newestFirst(a: GalleryRow, b: GalleryRow): number {
+  if (a.at !== b.at) return a.at < b.at ? 1 : -1;
+  if (a.type !== b.type) return SAME_SECOND_RANK[a.type] - SAME_SECOND_RANK[b.type];
+  const later = ordinal(b) - ordinal(a);
+  if (later !== 0) return later;
+  return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+}
+
+/**
+ * 成果库: the old flow's versions, the newest draft of each revision chain, and
+ * every filed export, as one list.
+ *
+ * Composed here for the same reason as `deliverableGallery`: each store already
+ * answers its half. The analysis half is its own read because drafts and
+ * exports live in the analysis store, and it carries their review and
+ * publication state as the store saved it; nothing here decides a status.
+ */
+export async function galleryRows(binding: Omit<Binding, 'task'>, env?: FoundryEnv): Promise<GalleryRow[]> {
+  const tasks = await listTasks(binding, env);
+  const rows: GalleryRow[] = (await deliverableGallery(binding, env, tasks)).map(({ task, row }) => ({
+    type: 'deliverable', key: `deliverable:${task.id}:${row.seq}`, at: row.at, task, row,
+  }));
+  for (const task of tasks) {
+    const { drafts, exports } = await listAnalysisDeliverables({ ...binding, task: task.id }, env);
+    for (const draft of drafts) {
+      rows.push({ type: 'draft', key: `draft:${draft.draft_id}`, at: draft.created_at, task, draft });
+    }
+    for (const exported of exports) {
+      rows.push({ type: 'export', key: `export:${exported.export_id}`, at: exported.created_at, task, exported });
+    }
+  }
+  return rows.sort(newestFirst);
 }
 
 /**
@@ -153,6 +263,28 @@ export async function deliverablePath(
   return found.trim();
 }
 
+/**
+ * Where this task filed one analysis export, for the operator's own software.
+ *
+ * The same rule as `deliverablePath`: the renderer passes a digest and a format
+ * from a fixed list, both checked here before they reach argv, and the CLI
+ * answers with a file only if this task filed those bytes under that format
+ * and they still match their receipt.
+ */
+export async function analysisExportPath(
+  binding: Binding,
+  sha256: string,
+  format: string,
+  env?: FoundryEnv,
+): Promise<string> {
+  if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`not a sha256: ${sha256}`);
+  if (!EXPORT_FORMATS.has(format)) throw new Error(`not an export format: ${format}`);
+  const found = await runFoundryJson<{ path: string }>(
+    binding, 'analysis-export-path', ['--sha', sha256, '--format', format], env,
+  );
+  return found.path;
+}
+
 export async function sourceLocatorPreviewFile(
   binding: Binding,
   spec: Record<string, unknown>,
@@ -164,3 +296,6 @@ export async function sourceLocatorPreviewFile(
 
 /** Every extension the store files a deliverable under. */
 const ARCHIVED_EXTS = new Set(['.md', '.xlsx']);
+
+/** Every format the analysis store files an export under. */
+const EXPORT_FORMATS = new Set<string>(['md', 'xlsx', 'docx', 'pdf', 'html'] satisfies ExportFormat[]);

@@ -9,8 +9,9 @@ import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
 import { followupDraft } from '../harness/handoff.js';
 import {
-  deliverableGallery,
+  analysisExportPath,
   deliverablePath,
+  galleryRows,
   listTasks,
   readDeliverable,
   showTask,
@@ -143,7 +144,7 @@ export function registerIpc(
     answer(() => showTask({ ...binding, task: taskId(task) })),
   );
 
-  ipcMain.handle(CHANNELS.gallery, () => answer(() => deliverableGallery(binding)));
+  ipcMain.handle(CHANNELS.gallery, () => answer(() => galleryRows(binding)));
 
   ipcMain.handle(CHANNELS.deliverableText, (_event, task: unknown, sha: unknown) =>
     answer(() => readDeliverable({ ...binding, task: taskId(task) }, String(sha ?? ''))),
@@ -174,6 +175,29 @@ export function registerIpc(
         const trouble = await shell.openPath(path);
         if (trouble) throw new Error(`打不开 ${path}: ${trouble}`);
         return { opened: path };
+      }),
+  );
+
+  /**
+   * Open one filed analysis export in the default program, from 成果库.
+   *
+   * The same handoff as `deliverableOpen`, for the analysis store's exports:
+   * the renderer passes a digest and a format, `analysisExportPath` checks both
+   * before argv, and the CLI names the file only if this task filed those bytes
+   * under that format and they still match their receipt.
+   */
+  ipcMain.handle(
+    CHANNELS.analysisExportOpen,
+    (_event, task: unknown, sha: unknown, format: unknown) =>
+      answer(async () => {
+        const file = await analysisExportPath(
+          { ...binding, task: taskId(task) },
+          String(sha ?? ''),
+          String(format ?? ''),
+        );
+        const trouble = await shell.openPath(file);
+        if (trouble) throw new Error(`打不开 ${file}: ${trouble}`);
+        return { opened: file };
       }),
   );
 

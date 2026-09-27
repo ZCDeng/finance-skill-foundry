@@ -5,8 +5,11 @@ import './styles/base.css';
 import { Shell, type Screen } from './components/Shell.js';
 import { Workspace, type WorkspaceRect } from './components/Workspace.js';
 import {
+  type AnalysisDraftRow,
+  type AnalysisExportRow,
   type Answer,
   type DeliverableRow,
+  type GalleryRow,
   type LaunchSpec,
   type PreviewSpec,
   type TaskDetail as Detail,
@@ -21,6 +24,7 @@ import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
 import { Analysis } from './views/Analysis.js';
+import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 import { Button } from './components/ui/button.js';
 
@@ -66,7 +70,7 @@ export function App() {
   const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   /** Until this is true, an empty list is "not asked yet", not "no tasks". */
-  const [gallery, setGallery] = useState<{ task: TaskRow; row: DeliverableRow }[]>([]);
+  const [gallery, setGallery] = useState<GalleryRow[]>([]);
   /** The version the gallery is showing, and its text once the store answers. */
   const [opened, setOpened] = useState<OpenDeliverable | null>(null);
   /** The window whose workbook is being written, so its button can say so. */
@@ -83,6 +87,7 @@ export function App() {
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
   const [sections, setSections] = useState<Record<string, 'materials' | 'results' | 'drafts' | 'methods'>>({});
   const analysisSection = sections[current ?? ''] ?? 'results';
+  const [draftRequest, setDraftRequest] = useState({ count: 0, taskId: '', draftId: '' });
   const setAnalysisSection = useCallback((value: 'materials' | 'results' | 'drafts' | 'methods') => {
     setSections((held) => ({ ...held, [current ?? '']: value }));
   }, [current]);
@@ -452,6 +457,20 @@ export function App() {
     [api, take],
   );
 
+  /**
+   * Hand a filed analysis export to the default program.
+   *
+   * The row's task, digest and format go over the bridge and nothing else; main
+   * asks the CLI where this task filed those bytes.
+   */
+  const openExport = useCallback(
+    (task: TaskRow, exported: AnalysisExportRow) => {
+      if (!api?.analysisExportOpen) return;
+      void api.analysisExportOpen(task.id, exported.sha256, exported.format).then((a) => take(a, () => undefined));
+    },
+    [api, take],
+  );
+
   /** Hand the open workbook to whatever this machine opens spreadsheets with. */
   const openWorkbook = useCallback(() => {
     if (!api || !opened) return;
@@ -547,6 +566,25 @@ export function App() {
     explicitSelection.current = true; currentRef.current = id || null;
     setCurrent(id || null); setDetail(null); setSession(null); setConversationProblem(null); setScreen('analysis');
   };
+  /**
+   * Open a draft from 成果库 on its task's 文稿 tab, with that version selected.
+   *
+   * The selection is written first, because the analysis screen reads it when
+   * another task is bound the way the task picker binds it. The task already
+   * bound gets the version through `draftRequest` instead.
+   */
+  const openDraft = (task: TaskRow, draft: AnalysisDraftRow) => {
+    const saved = `${task.id}:selection`;
+    writeCopy(saved, { ...readCopy<{ analysis?: string; draft?: string }>(saved), draft: draft.draft_id });
+    setSections((held) => ({ ...held, [task.id]: 'drafts' }));
+    setOpened(null);
+    setDraftRequest((held) => ({ count: held.count + 1, taskId: task.id, draftId: draft.draft_id }));
+    if (task.id === current) {
+      setScreen('analysis');
+    } else {
+      pickAnalysisTask(task.id);
+    }
+  };
 
   return (
     <Shell
@@ -598,7 +636,7 @@ export function App() {
             : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button variant="outline" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
           <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
-            task={bound} tasks={tasks} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
+            task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
             onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
               // The locator answer carries no origin. Where the viewer is
               // comes from `previewStatus`, as it does for every other preview.
@@ -636,6 +674,8 @@ export function App() {
           rows={gallery}
           open={opened}
           onOpen={openDeliverable}
+          onOpenDraft={openDraft}
+          onOpenExport={api.analysisExportOpen ? openExport : undefined}
           onOpenWorkbook={openWorkbook}
           onPreview={
             api.previewOpen ? (task, row) => openPreview(task.id, row.sha256, row.ext ?? '.xlsx') : undefined
