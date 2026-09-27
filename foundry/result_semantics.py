@@ -14,6 +14,9 @@ Estimates are a union that only ever adds (KTD3): grain_basis estimates in the r
 pinned to, the row's own basis columns, a filled 估算方法, an estimated_ scenario, or an estimate word in its label,
 note or source. The task's latest requirements are merged in at read time (``declared_runs``), since the
 assistant often declares grain_basis after the run it describes.
+
+The declaration also carries the rows that break the result-row contract (R5) as warnings in the diagnostic shape.
+A warning never fails the run and never changes how a row is declared.
 """
 from __future__ import annotations
 
@@ -32,11 +35,16 @@ from foundry.finance_requirements import (
 )
 
 # The declaration rules are versioned by part; a stored declaration older than any part is recomputed on read.
-VOCABULARY_VERSION = 1
+# Vocabulary 2: the vocabulary also decides the contract warnings.
+VOCABULARY_VERSION = 2
 UNIT_TABLE_VERSION = 1
 ESTIMATE_WORDS_VERSION = 1
 # A declaration covers at most this many rows; a longer result is declared up to here and marked incomplete.
 MAX_DECLARED_ROWS = 5000
+# A contract warning lists at most this many rows and names; its row_count says how many rows it concerns in all.
+MAX_WARNING_ROWS = 20
+# How many of those names its message spells out.
+MAX_WARNING_NAMES = 5
 
 # Long-form scenarios by the comparison they fill (businessResults.ts longScenarioMeasure), in its order.
 LONG_SCENARIO_MEASURES = {
@@ -121,10 +129,13 @@ def is_stale(version: Any) -> bool:
 def vocabulary(requirements: dict | None = None) -> dict:
     """The declared metric and scenario names: this module's tables plus the names the requirements list."""
     items = (requirements or {}).get('items') or []
+    # A scenario the requirements name once for every item (scope) or as one item's dimension is listed too.
+    single = [(requirements or {}).get('scope') or {}, *((item.get('dimensions') or {}) for item in items)]
     return {
         'metrics': frozenset(RESULT_METRIC_LABELS) | {item['metric'] for item in items if item.get('metric')},
         'scenarios': frozenset(name for names in LONG_SCENARIO_MEASURES.values() for name in names)
-        | {scenario for item in items for scenario in item.get('scenarios') or []},
+        | {scenario for item in items for scenario in item.get('scenarios') or []}
+        | {entry['scenario'] for entry in single if isinstance(entry.get('scenario'), str) and entry['scenario']},
     }
 
 
@@ -275,6 +286,71 @@ def _declare_row(index: int, row: dict, long_format: bool, requirements: dict | 
     }
 
 
+def _names(names: list[str]) -> str:
+    shown = '、'.join(names[:MAX_WARNING_NAMES])
+    return shown if len(names) <= MAX_WARNING_NAMES else f'{shown} 等 {len(names)} 个'
+
+
+def _contract_message(code: str, count: int, names: list[str]) -> str:
+    if code == 'unit_unmarked':
+        return (f'{count} 行没有标明单位：单位写成「-」，或比率行没有写单位表里的单位。这些行不参与金额配对，'
+                '结果区原样显示并注明「未标单位」。比率写「比率」或 ratio（小数，0.945 即 94.5%），'
+                '百分数写 %、pct 或「百分比」，金额写实际单位。')
+    if code == 'scenario_undeclared':
+        return (f'情景名 {_names(names)} 不在约定情景里，本次运行固定的需求版本也没有列出（共 {count} 行），'
+                '这些行不参与实际与预算配对。请改用约定情景名（actual、budget、variance，或带期间后缀的 '
+                'actual_1_8、budget_2026_08），或把它列进需求版本的 scenarios。')
+    if code == 'metric_undeclared':
+        return (f'指标名 {_names(names)} 不在约定指标里，这些行也没有写 metric_label（共 {count} 行），'
+                '结果区只能显示原名。请改用约定指标名，或在 metric_label 列写口径标签。')
+    return (f'{count} 行的文字写了估算用语，但依据列 basis 没有写 estimate。这些行仍按估算显示；'
+            '请在这些行的 basis 列写 estimate，估算就不只靠文字识别。')
+
+
+def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, requirements: dict | None, *,
+                      names_known: bool = True) -> list[dict]:
+    """Where declared rows break the result-row contract, one warning per kind in the diagnostic shape.
+
+    Scenario and metric names are checked in a long-form table only, and only when the pinned requirements could be
+    read: a name they list is part of the vocabulary. A metric outside it warns only on a row that fills a
+    comparison and has no metric_label to be shown by.
+    """
+    names = vocabulary(requirements)
+    scenarios = {name.lower() for name in names['scenarios']}
+    hits: dict[str, list[tuple[int, str | None]]] = {
+        'unit_unmarked': [], 'scenario_undeclared': [], 'metric_undeclared': [], 'estimate_basis_missing': []}
+    for row, entry in zip(rows, entries):
+        index = entry['row']
+        if entry['unit_kind'] == 'unmarked':
+            hits['unit_unmarked'].append((index, None))
+        scenario = _text(_first(row, ('scenario', '情景'))).strip()
+        if (long_format and names_known and scenario and scenario.lower() not in scenarios
+                and not SCENARIO_WITH_PERIOD.fullmatch(scenario.lower())):
+            hits['scenario_undeclared'].append((index, scenario))
+        metric = _text(entry['metric'])
+        if (long_format and names_known and entry['role'] is not None and entry['scope_label'] is None
+                and metric not in names['metrics']):
+            hits['metric_undeclared'].append((index, metric or '（空）'))
+        sources = entry['estimate_sources']
+        if any(source['source'] == 'text' for source in sources) and not any(
+                source['source'] == 'row' and source['field'] in BASIS_FIELDS for source in sources):
+            hits['estimate_basis_missing'].append((index, None))
+    warnings = []
+    for code, found in hits.items():
+        if not found:
+            continue
+        found_names = list(dict.fromkeys(name for _, name in found if name is not None))
+        warnings.append({
+            'severity': 'warning',
+            'code': code,
+            'rows': [index for index, _ in found[:MAX_WARNING_ROWS]],
+            'row_count': len(found),
+            **({'names': found_names[:MAX_WARNING_ROWS]} if found_names else {}),
+            'message': _contract_message(code, len(found), found_names),
+        })
+    return warnings
+
+
 def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, fingerprint: str | None,
                  complete: bool = True, incomplete_reason: str | None = None) -> dict:
     """A declaration of `rows`, which must be the full result table unless `complete` says otherwise."""
@@ -282,6 +358,7 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
     declared = rows[:MAX_DECLARED_ROWS]
     if len(rows) > MAX_DECLARED_ROWS and complete:
         complete, incomplete_reason = False, 'too_many_rows'
+    entries = [_declare_row(index, row, long_format, requirements) for index, row in enumerate(declared)]
     return {
         'rules_version': rules_version(),
         'requirements_id': (requirements or {}).get('id'),
@@ -289,7 +366,9 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
         'complete': complete,
         'incomplete_reason': None if complete else incomplete_reason,
         'row_count': len(rows),
-        'rows': [_declare_row(index, row, long_format, requirements) for index, row in enumerate(declared)],
+        'rows': entries,
+        'warnings': contract_warnings(declared, entries, long_format, requirements,
+                                      names_known=incomplete_reason != 'requirements_unavailable'),
     }
 
 

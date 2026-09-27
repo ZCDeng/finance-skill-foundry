@@ -1834,7 +1834,7 @@ class AnalysisStore:
             missing_inputs=[],
             result=result,
             warnings=[
-                "Script outputs are retained with code and inputs; reproducibility has not been verified."
+                "脚本输出已随代码和输入一并保存，尚未核验能否复现。"
             ],
         )
         record["id"] = run_id

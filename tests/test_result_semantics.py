@@ -426,3 +426,135 @@ def test_backend_vocabulary_agrees_with_the_frontend_inference_lists():
     assert tuple(a or b for a, b in re.findall(r"row(?:\.(\w+)|\['([^']+)'\])", row_metric)) == result_semantics.METRIC_FIELDS
     labels = _ts_declaration(source, 'metricLabels')
     assert dict(re.findall(r"'?([^\s:'{}]+)'?:\s*'([^']+)'", labels)) == result_semantics.RESULT_METRIC_LABELS
+
+
+# The result-row contract (R5): a run that breaks it still succeeds; its declaration carries Chinese warnings in the
+# diagnostic shape, beside the result and never inside it.
+# Huachen's rows as the contract asks for them: the full-year BUD row, whose scenario only a requirements version can
+# declare, left out, and the regional budget labelled 推算 carrying basis=estimate.
+CONFORMING_ROWS = [{**row, 'basis': 'estimate' if '推算' in row['metric_label'] else None}
+                   for row in HUACHEN_ROWS if row['scenario'] != 'budget_bud_fy']
+CONFORMING_COLUMNS = [*COLUMNS, 'basis']
+# Captured on the base commit (361ea35), before contract warnings existed: the run's output_hash, the canonical bytes
+# of its stored result and of its declared rows. Warnings are a new declaration field and must leave all three alone.
+CONFORMING_OUTPUT_HASH = 'f2506f20e133c7505a2ee0323231d7b881c5fc3a475ac5899f6329e2a25cf4b3'
+CONFORMING_RESULT_SHA256 = '0823d4151bc581f15e243e8a7c8547596d60d963b3524de0b6de28accd5b5fee'
+CONFORMING_DECLARED_ROWS_SHA256 = '08f974954384ed2d936c32c9864977b8ce3a3e140527d1b08eb62772a1bcd402'
+RATIO_ROW = next(index for index, row in enumerate(CONFORMING_ROWS) if row['metric_key'].endswith('_achievement_ratio'))
+
+
+def warnings_by_code(declaration):
+    return {warning['code']: warning for warning in declaration['warnings']}
+
+
+def assert_chinese(message):
+    assert re.search('[一-鿿]', message), message
+    assert not re.search(r'[A-Za-z]+ [A-Za-z]+ [A-Za-z]+', message), message
+
+
+def test_a_conforming_run_has_no_warnings_and_its_output_is_unchanged(analysis):
+    run = run_rows(analysis, CONFORMING_ROWS)
+
+    assert run['row_declarations']['warnings'] == []
+    assert run['output_hash'] == CONFORMING_OUTPUT_HASH
+    assert result_sha256(run) == CONFORMING_RESULT_SHA256
+    assert hashlib.sha256(_bytes(run['row_declarations']['rows'])).hexdigest() == CONFORMING_DECLARED_ROWS_SHA256
+
+
+def test_the_run_records_own_warnings_are_chinese(analysis):
+    run = run_rows(analysis, CONFORMING_ROWS)
+    assert run['warnings'] == ['脚本输出已随代码和输入一并保存，尚未核验能否复现。']
+    for warning in run['warnings']:
+        assert_chinese(warning)
+
+
+def test_a_ratio_row_with_an_unmarked_unit_warns_once_and_the_run_still_succeeds(analysis):
+    rows = [{**row, 'unit': '-'} if index == RATIO_ROW else row for index, row in enumerate(CONFORMING_ROWS)]
+    run = run_rows(analysis, rows)
+
+    assert run['execution_status'] == 'succeeded'
+    warnings = run['row_declarations']['warnings']
+    assert [(warning['severity'], warning['code'], warning['rows'], warning['row_count']) for warning in warnings] == [
+        ('warning', 'unit_unmarked', [RATIO_ROW], 1)]
+    assert '未标单位' in warnings[0]['message']
+    assert_chinese(warnings[0]['message'])
+    assert 'warnings' not in run['result']
+
+
+def test_a_scenario_outside_the_vocabulary_warns_and_leaves_other_rows_declared_as_before():
+    forecast = {**CONFORMING_ROWS[1], 'scenario': 'forecast_1_8', 'metric_label': '营业收入 1-8 月滚动预测'}
+    before = declare(CONFORMING_ROWS, columns=CONFORMING_COLUMNS)
+    after = declare([*CONFORMING_ROWS, forecast], columns=CONFORMING_COLUMNS)
+
+    assert before['warnings'] == []
+    assert after['rows'][:len(CONFORMING_ROWS)] == before['rows']
+    warning = warnings_by_code(after)['scenario_undeclared']
+    assert (warning['severity'], warning['names'], warning['rows']) == ('warning', ['forecast_1_8'], [len(CONFORMING_ROWS)])
+    assert 'forecast_1_8' in warning['message']
+    assert_chinese(warning['message'])
+    assert set(warnings_by_code(after)) == {'scenario_undeclared'}
+
+
+def test_a_scenario_the_pinned_requirements_list_does_not_warn(analysis, requirements):
+    full_year = HUACHEN_ROWS[4]
+    assert warnings_by_code(declare([full_year]))['scenario_undeclared']['names'] == ['budget_bud_fy']
+    listed = {'id': 'a' * 32, 'items': [{'id': 'fy', 'metric': 'revenue', 'scenarios': ['budget_bud_fy']}]}
+    assert declare([full_year], listed)['warnings'] == []
+    # Named once for every item, or as one item's dimension, is listed too.
+    for requirements_record in ({'id': 'a' * 32, 'scope': {'scenario': 'budget_bud_fy'}, 'items': [{'id': 'fy', 'metric': 'revenue'}]},
+                                {'id': 'a' * 32, 'items': [{'id': 'fy', 'metric': 'revenue', 'dimensions': {'scenario': 'budget_bud_fy'}}]}):
+        assert declare([full_year], requirements_record)['warnings'] == []
+
+    items = [{**item, 'scenarios': [*item['scenarios'], 'budget_bud_fy']} for item in plain_items()]
+    run = run_rows(analysis, [*CONFORMING_ROWS, {**full_year, 'basis': None}], requirements_id=requirements(items)['id'])
+    assert run['row_declarations']['warnings'] == []
+
+
+@pytest.mark.parametrize('basis', ['', None])
+def test_a_row_labelled_推算_with_an_empty_basis_warns_to_add_it_and_is_still_an_estimate(basis):
+    declaration = declare([{**HUACHEN_ROWS[6], 'basis': basis}], columns=CONFORMING_COLUMNS)
+
+    entry = declaration['rows'][0]
+    assert entry['estimate'] is True
+    assert entry['estimate_sources'] == [{'source': 'text', 'field': 'metric_label'}]
+    warning = warnings_by_code(declaration)['estimate_basis_missing']
+    assert (warning['rows'], warning['row_count']) == ([0], 1)
+    assert 'basis' in warning['message'] and 'estimate' in warning['message']
+    assert_chinese(warning['message'])
+
+
+def test_a_negated_estimate_word_asks_for_no_basis():
+    row = {**HUACHEN_ROWS[1], 'metric_label': '营业收入 1-8 月预算（非估算）', 'basis': None}
+    assert declare([row], columns=CONFORMING_COLUMNS)['warnings'] == []
+
+
+def test_a_declaration_stored_before_contract_warnings_is_read_with_them(analysis):
+    from foundry.analysis import _hash
+
+    run = run_rows(analysis, [{**CONFORMING_ROWS[RATIO_ROW], 'unit': '-'}])
+    path = run_file(analysis, run)
+    record = json.loads(path.read_text(encoding='utf-8'))
+    record.pop('_integrity_hash')
+    del record['row_declarations']['warnings']
+    record['row_declarations']['rules_version'] = '1.1.1'
+    record['_integrity_hash'] = _hash(record)
+    path.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+
+    declaration = state_run(analysis, run)['row_declarations']
+    assert declaration['rules_version'] == result_semantics.rules_version()
+    assert [warning['code'] for warning in declaration['warnings']] == ['unit_unmarked']
+
+
+def test_a_compared_metric_outside_the_vocabulary_warns_only_without_a_label():
+    unnamed = {**CONFORMING_ROWS[0], 'metric_key': 'op_adj', 'metric_label': None}
+    labelled = {**CONFORMING_ROWS[0], 'metric_key': 'op_adj'}
+    detail = {**CONFORMING_ROWS[0], 'metric_key': 'line_1', 'scenario': 'actual_1_8', 'metric_label': None,
+              'unit': '-'}
+    declaration = declare([unnamed, labelled], columns=CONFORMING_COLUMNS)
+    warning = warnings_by_code(declaration)['metric_undeclared']
+    assert (warning['names'], warning['rows']) == (['op_adj'], [0])
+    assert_chinese(warning['message'])
+    # A row that fills no comparison is shown as written; only its unit is flagged.
+    assert set(warnings_by_code(declare([detail], columns=CONFORMING_COLUMNS))) == {'unit_unmarked'}
+    listed = {'id': 'a' * 32, 'items': [{'id': 'adj', 'metric': 'op_adj'}]}
+    assert declare([unnamed], listed, columns=CONFORMING_COLUMNS)['warnings'] == []

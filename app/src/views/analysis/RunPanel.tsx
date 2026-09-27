@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
-import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
+import { TriangleAlert, X } from 'lucide-react';
+import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
@@ -44,6 +44,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
+      {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><summary>脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</summary>
@@ -116,6 +117,18 @@ function NotRunYet({ runs, onPick }: { runs: AnalysisRun[]; onPick(run: Analysis
   return <div className="analysis-actions"><p className="analysis-note">此版本尚未运行。{business.length
     ? `本任务另有 ${business.length} 个业务结果。` : '检查口径后即可计算。'}</p>
     {newest && <Button variant="outline" type="button" onClick={() => onPick(newest)}>查看最新结果</Button>}</div>;
+}
+
+/**
+ * Result rows that break the result-row contract. The run still succeeded, so
+ * this stays folded to one line above the table; the assistant reads the same
+ * messages from the run record.
+ */
+function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
+  return <details className="analysis-details">
+    <summary><TriangleAlert size={15} strokeWidth={1.5} aria-hidden /> {`结果行有 ${warnings.length} 处不合约定`}</summary>
+    {warnings.map((warning, index) => <p key={`${warning.code}:${index}`}>{warning.message}</p>)}
+  </details>;
 }
 
 function RunResultTable({ run }: { run: AnalysisRun }) {

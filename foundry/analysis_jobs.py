@@ -337,8 +337,11 @@ def _worker(var_root: Path, task_id: str, job_id: str) -> None:
                 cancel_check=lambda: jobs.get(job_id)["cancel_requested"],
             )
             status = "completed" if run["execution_status"] == "succeeded" else ("cancelled" if run.get("runner_status") == "cancelled" else "failed")
+            # Result rows that break the contract: the run still completed, and the assistant reads what to fix here.
+            warnings = (run.get("row_declarations") or {}).get("warnings", [])
             jobs.settle(job_id, status, {"run_id": run["id"], "runner_status": run.get("runner_status"),
-                                      "stdout": run.get("stdout", ""), "stderr": run.get("stderr", ""), "outputs": run.get("outputs", [])},
+                                      "stdout": run.get("stdout", ""), "stderr": run.get("stderr", ""), "outputs": run.get("outputs", []),
+                                      "warnings": warnings},
                         session_id=parent, child_session_id=child)
         except Exception as exc:
             jobs.settle(job_id, "failed", {"error": str(exc)}, session_id=parent, child_session_id=child)

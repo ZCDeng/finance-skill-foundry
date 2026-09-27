@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunPanel } from '../src/views/analysis/RunPanel.js';
-import type { AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown } from '../src/bridge.js';
+import type { AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown, ResultContractWarning } from '../src/bridge.js';
 
 const taskId = 'a'.repeat(32);
 const analysis: AnalysisRevision = { id: 'b'.repeat(32), task_id: taskId, schema_version: 1, created_at: '2026-09-07T00:00:00Z',
@@ -392,5 +392,39 @@ describe('RunPanel finance conclusion', () => {
     cleanup();
     render(<RunPanel {...props} runs={[structuredRun()]} onAdjustScope={onAdjustScope} />);
     expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+  });
+});
+
+describe('RunPanel result contract warnings', () => {
+  const declarations = (warnings: NonNullable<AnalysisRun['row_declarations']>['warnings']): AnalysisRun['row_declarations'] => ({
+    rules_version: '2.1.1', requirements_id: null, requirements_fingerprint: null, complete: true, incomplete_reason: null, row_count: 2, rows: [], warnings,
+  });
+  const contractWarnings: ResultContractWarning[] = [
+    { severity: 'warning', code: 'unit_unmarked', rows: [0], row_count: 1,
+      message: '1 行没有标明单位，这些行不参与金额配对，结果区原样显示并注明「未标单位」。' },
+    { severity: 'warning', code: 'estimate_basis_missing', rows: [1], row_count: 1,
+      message: '1 行的文字写了估算用语，但依据列 basis 没有写 estimate。' },
+  ];
+  const englishSentence = 'Script outputs are retained with code and inputs; reproducibility has not been verified.';
+
+  it('folds the warnings into one Chinese line above the result table, and shows no English sentence', () => {
+    render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations(contractWarnings), warnings: [englishSentence] })]} />);
+    const summary = screen.getByText('结果行有 2 处不合约定');
+    const disclosure = summary.closest('details') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(false);
+    expect(within(disclosure).getByText(contractWarnings[0].message)).toBeTruthy();
+    expect(within(disclosure).getByText(contractWarnings[1].message)).toBeTruthy();
+    const table = screen.getByRole('region', { name: '计算结果' });
+    expect(disclosure.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.body.textContent).not.toContain(englishSentence);
+    expect(document.body.textContent).not.toMatch(/reproducibility|retained/i);
+  });
+
+  it('says nothing when the declaration has no warnings or predates them', () => {
+    const { unmount } = render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations([]) })]} />);
+    expect(screen.queryByText(/不合约定/)).toBeNull();
+    unmount();
+    render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations(undefined) })]} />);
+    expect(screen.queryByText(/不合约定/)).toBeNull();
   });
 });

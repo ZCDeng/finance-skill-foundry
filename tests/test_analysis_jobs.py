@@ -251,3 +251,27 @@ def test_unreadable_runtime_birth_is_not_treated_as_proof_of_death(tmp_path: Pat
     row = jobs.create(context, "child", {"prompt": "still running"}, runtime_pid=os.getpid())
     monkeypatch.setattr(module, "_process_identity", lambda pid: {"pid": pid, "birth": None})
     assert jobs.refresh(row["id"])["status"] == "queued"
+
+
+@pytest.mark.skipif(not runner_capabilities()["available"], reason="requires macOS isolated runner")
+def test_background_script_completion_report_carries_result_contract_warnings(tmp_path: Path, monkeypatch):
+    """A result row that breaks the contract still completes; the report says what to fix, in Chinese."""
+    from foundry.analysis_jobs import _worker
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    monkeypatch.setattr(jobs, "_launch", lambda record: None)
+    rows = [{"metric_key": "revenue_achievement_ratio", "organization": "集团合并", "period": "2026-01:2026-08",
+             "scenario": "budget_1_8", "value": "0.945301", "unit": "-", "metric_label": "营业收入达成率"}]
+    code = f"from pathlib import Path\nPath('result.json').write_text({json.dumps(rows, ensure_ascii=False)!r}, encoding='utf-8')\n"
+    row = jobs.create(context, "script", {"code": code, "bindings": {}, "result_file": "result.json"})
+    _worker(task.store.var_root, task.id, row["id"])
+
+    result = jobs.get(row["id"])
+    assert result["status"] == "completed", result
+    warnings = result["result"]["warnings"]
+    assert [(warning["severity"], warning["code"]) for warning in warnings] == [("warning", "unit_unmarked")]
+    assert "未标单位" in warnings[0]["message"]
+    run = AnalysisStore(task).get_run(result["result"]["run_id"])
+    assert run["execution_status"] == "succeeded"
+    assert warnings == run["row_declarations"]["warnings"]

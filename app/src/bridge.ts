@@ -305,6 +305,8 @@ export interface AnalysisRun extends AnalysisObject {
   };
   /** Script runs saved with declarations only; a run without one is paired by inference. */
   row_declarations?: RowDeclarations;
+  /** Caveat sentences stored with the run record; the result area does not show them. */
+  warnings?: unknown[];
 }
 /** Why a row is an estimate: its grain declared in requirements, its own basis columns, or its wording. */
 export type RowEstimateSource =
@@ -344,6 +346,19 @@ export interface RowDeclarations {
   incomplete_reason: 'result_file_unavailable' | 'requirements_unavailable' | 'too_many_rows' | null;
   row_count: number;
   rows: RowDeclaration[];
+  /** Rows that break the result-row contract; the run still succeeded. Absent on declarations stored before them. */
+  warnings?: ResultContractWarning[];
+}
+/** One kind of result-row contract break, in the backend's diagnostic shape with a Chinese message. */
+export interface ResultContractWarning {
+  severity: 'warning';
+  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing';
+  message: string;
+  /** Zero-based rows of the full result file, at most 20; row_count counts every row it concerns. */
+  rows: number[];
+  row_count: number;
+  /** The scenario or metric names it concerns, for the name checks. */
+  names?: string[];
 }
 export interface AnalysisDraft extends AnalysisObject {
   document?: import('../electron/reports/model').ReportDocument;
