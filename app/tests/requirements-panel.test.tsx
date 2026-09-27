@@ -176,8 +176,8 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/JPY/)).toBeTruthy();
-    expect(screen.getByText(/千元/)).toBeTruthy();
+    expect((await screen.findAllByText(/JPY/)).length).toBeTruthy();
+    expect(screen.getAllByText(/千元/).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '分析日本子公司费用' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
@@ -208,7 +208,7 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    expect((await screen.findAllByText(/CNY/)).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: '解释费用' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
@@ -234,7 +234,7 @@ describe('requirements panel', () => {
     });
     render(<RequirementsPanel taskId={taskId} contextId={contextId} />);
 
-    expect(await screen.findByText(/CNY/)).toBeTruthy();
+    expect((await screen.findAllByText(/CNY/)).length).toBeTruthy();
     fireEvent.change(screen.getByLabelText('用户问题'), { target: { value: 'P7 人数' } });
     fireEvent.click(screen.getByRole('button', { name: /添加指标/ }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
@@ -424,7 +424,7 @@ describe('requirements panel', () => {
     render(<RequirementsPanel taskId={taskId} />);
 
     expect(await screen.findByDisplayValue('2026-01至2026-08（月结）及2026全年（BUD/LE）')).toBeTruthy();
-    expect(screen.getByText(/元（GL与三大报表）\/ 万元（分析表，按各工作表注明）/)).toBeTruthy();
+    expect(screen.getAllByText(/元（GL与三大报表）\/ 万元（分析表，按各工作表注明）/).length).toBeTruthy();
     expect(screen.getByRole('button', { name: '指标 1' }).textContent).toContain('科目合计');
     expect(screen.getByRole('button', { name: '指标 2' }).textContent).toContain('总额差异');
     expect(screen.queryByText(/当前选择已失效/)).toBeNull();

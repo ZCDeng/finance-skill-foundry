@@ -858,8 +858,8 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState, financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
-    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    await screen.findByText('计算设置');
+    fireEvent.click(screen.getByRole('button', { name: '计算损益表' }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('tab', { name: /文稿/ }));
     await screen.findByRole('tabpanel', { name: /文稿/ });
@@ -984,7 +984,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     chooseSearchable('预算资料（可选）', /本月预算/);
     fireEvent.change(screen.getByLabelText('账簿'), { target: { value: '经营总账' } });
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
@@ -1001,11 +1001,11 @@ ${canonicalAppendix} 已改写`;
     fireEvent.click(screen.getByRole('button', { name: '已保存映射' }));
     fireEvent.mouseDown(await screen.findByRole('option', { name: /标准管理科目映射/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '已保存映射' }).textContent).toContain('标准管理科目映射'));
-    expect(screen.getByText(/当前口径保存时会使用映射/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    expect(screen.getByText(/计算损益表时使用管理科目映射/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '计算损益表' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', { context_id: '4'.repeat(32), metric: { kind: 'management_pnl' } }));
     expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(false);
-    fireEvent.click(screen.getByText('财务业务口径'));
+    fireEvent.click(screen.getByText('计算设置'));
     expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(true);
     expect(screen.getByText('情景测算').closest('details')?.open).toBe(false);
     expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({
@@ -1023,10 +1023,10 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [sqlRun] }),
       financeCall: async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] }) });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     const setup = screen.getByLabelText('财务分析设置') as HTMLDetailsElement;
     expect(setup.open).toBe(false);
-    fireEvent.click(screen.getByText('财务业务口径'));
+    fireEvent.click(screen.getByText('计算设置'));
     expect(setup.open).toBe(true);
   });
 
@@ -1057,7 +1057,7 @@ ${canonicalAppendix} 已改写`;
       financeCall: async (_taskId: string, command: string) => command === 'finance-source-list' ? success({ batches: [] }) : success({}) });
     render(<Analysis {...props} embedded section="materials" />);
     const file = (await screen.findAllByText(source.name)).find((element) => element.closest('.analysis-source-list'))!;
-    const scope = await screen.findByRole('region', { name: '分析口径' });
+    const scope = await screen.findByRole('region', { name: '分析范围' });
     expect(file.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scope.compareDocumentPosition(screen.getByText('更新 ERP 来源')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -1066,17 +1066,17 @@ ${canonicalAppendix} 已改写`;
     const financeCall = async () => success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: [] });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [{ ...run, engine: 'sql' }] }), financeCall });
     const { unmount } = render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     const result = document.querySelector('.analysis-result')!;
     expect(result.compareDocumentPosition(screen.getByLabelText('财务分析设置')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     const empty = screen.getByRole('heading', { name: '从资料到可检查的结果' });
     expect(screen.getByLabelText('财务分析设置').compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(true);
-    expect(screen.getByLabelText('组织').closest('details')?.open).toBe(false);
+    expect(screen.getByLabelText('账簿').closest('details')?.open).toBe(false);
   });
 
   it('says what is running while a finance run is pending and keeps the outcome readable after the settings fold', async () => {
@@ -1092,21 +1092,21 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    const rerun = await screen.findByRole('button', { name: '用已保存口径重跑 P&L' });
+    const rerun = await screen.findByRole('button', { name: '按已保存范围重算损益表' });
     fireEvent.click(rerun);
-    expect(await screen.findByText('正在运行管理口径损益…')).toBeTruthy();
+    expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     expect((rerun as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: '保存并运行 P&L' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
     // The workbench unmounts with its tab; the run it started does not stop.
     fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
     fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
-    expect(await screen.findByText('正在运行管理口径损益…')).toBeTruthy();
-    const again = await screen.findByRole('button', { name: '用已保存口径重跑 P&L' });
+    expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
+    const again = await screen.findByRole('button', { name: '按已保存范围重算损益表' });
     expect((again as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(again);
     await act(async () => gate.resolve(success({ ...run, engine: 'finance', finance_context_id: context.id })));
-    await waitFor(() => expect(screen.queryByText('正在运行管理口径损益…')).toBeNull());
-    expect((screen.getByRole('button', { name: '用已保存口径重跑 P&L' }) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(screen.queryByText('正在计算损益表…')).toBeNull());
+    expect((screen.getByRole('button', { name: '按已保存范围重算损益表' }) as HTMLButtonElement).disabled).toBe(false);
     expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toHaveLength(1);
   });
 
@@ -1123,14 +1123,14 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
-    await screen.findByText('正在运行管理口径损益…');
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('正在计算损益表…');
     await act(async () => gate.resolve(success({ ...run, engine: 'finance', finance_context_id: context.id })));
-    const outcome = await screen.findByText('已运行管理口径损益。');
+    const outcome = await screen.findByText('已计算损益表。');
     const setup = screen.getByLabelText('财务分析设置') as HTMLDetailsElement;
     expect(setup.open).toBe(false);
     expect(setup.contains(outcome)).toBe(false);
-    expect(screen.queryByText('正在运行管理口径损益…')).toBeNull();
+    expect(screen.queryByText('正在计算损益表…')).toBeNull();
   });
 
   it('opens the folded finance settings from 调整口径 on the scope that result used, once', async () => {
@@ -1146,7 +1146,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [{ ...run, engine: 'finance', finance_context_id: julyContext.id }] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'list-finance-context'));
     const setup = screen.getByLabelText('财务分析设置') as HTMLDetailsElement;
     expect(setup.open).toBe(false);
@@ -1154,12 +1154,12 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(setup.open).toBe(true));
     expect(document.activeElement).toBe(setup.querySelector('summary'));
     expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07');
-    fireEvent.click(screen.getByRole('button', { name: '用已保存口径重跑 P&L' }));
+    fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', expect.objectContaining({ context_id: julyContext.id })));
     // A remount with the request already counted must not open the settings again.
     fireEvent.click(screen.getByRole('tab', { name: /^文稿/ }));
     fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     expect((screen.getByLabelText('财务分析设置') as HTMLDetailsElement).open).toBe(false);
   });
 
@@ -1179,12 +1179,13 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [{ ...run, engine: 'finance', finance_context_id: mapped.id }] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     await waitFor(() => expect(lists).toBe(1));
     fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
     await waitFor(() => expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07'));
-    expect(screen.getByText(`当前口径保存时会使用映射 ${'9'.repeat(12)}。`)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '保存口径' }));
+    // The map is named, not shown as its identifier.
+    expect(screen.getByText('计算损益表时使用管理科目映射：已保存的映射。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '保存范围' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({
       account_map_id: '9'.repeat(32), policies: { actual: { field_map: { amount: '本期金额' }, target_unit: '万元' } },
     })));
@@ -1200,9 +1201,9 @@ ${canonicalAppendix} 已改写`;
         return success({});
       } });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     fireEvent.click(screen.getByRole('button', { name: '调整口径' }));
-    expect(await screen.findByText('没有找到这条结果用的财务口径，设置区显示的是当前选中的口径。')).toBeTruthy();
+    expect(await screen.findByText('没有找到这条结果用的范围，下面显示的是当前选中的范围。')).toBeTruthy();
   });
 
   it('keeps a run locked in its own task while another task runs and finishes', async () => {
@@ -1218,16 +1219,16 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async (taskId: string) => success({ ...initial, task_id: taskId, analyses: [], runs: [], drafts: [] }), financeCall });
     const { rerender } = render(<Analysis {...props} tasks={[task, other]} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
-    await screen.findByText('正在运行管理口径损益…');
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('正在计算损益表…');
     rerender(<Analysis {...props} task={other} tasks={[task, other]} embedded section="results" />);
-    await waitFor(() => expect(screen.queryByText('正在运行管理口径损益…')).toBeNull());
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
-    await screen.findByText('正在运行管理口径损益…');
+    await waitFor(() => expect(screen.queryByText('正在计算损益表…')).toBeNull());
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('正在计算损益表…');
     await act(async () => gates.get(other.id)!.resolve(success({ ...run, engine: 'finance' })));
     rerender(<Analysis {...props} tasks={[task, other]} embedded section="results" />);
-    expect(await screen.findByText('正在运行管理口径损益…')).toBeTruthy();
-    expect((await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
+    expect((await screen.findByRole('button', { name: '按已保存范围重算损益表' }) as HTMLButtonElement).disabled).toBe(true);
     expect(financeCall.mock.calls.filter(([taskId, command]) => taskId === task.id && command === 'run-metric')).toHaveLength(1);
   });
 
@@ -1243,13 +1244,13 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     expect((await screen.findByText('管理科目映射缺少收入科目')).getAttribute('role')).toBe('alert');
     fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
     await screen.findByRole('tabpanel', { name: /资料/ });
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     expect((await screen.findByText('管理科目映射缺少收入科目')).getAttribute('role')).toBe('alert');
   });
 
@@ -1269,10 +1270,10 @@ ${canonicalAppendix} 已改写`;
     render(<Analysis {...props} embedded section="results" />);
     const empty = await screen.findByRole('heading', { name: '从资料到可检查的结果' });
     expect(screen.getByLabelText('财务分析设置').compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(document.querySelector('.analysis-result')).toBeTruthy());
     expect(document.querySelector('.analysis-result')!.compareDocumentPosition(screen.getByLabelText('财务分析设置')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(await screen.findByText('已运行管理口径损益。')).toBeTruthy();
+    expect(await screen.findByText('已计算损益表。')).toBeTruthy();
   });
 
   it('shows a finance run\'s notice only in the task that started it, and still on return', async () => {
@@ -1287,14 +1288,14 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async (taskId: string) => success({ ...initial, task_id: taskId, analyses: [], runs: [], drafts: [] }), financeCall });
     const { rerender } = render(<Analysis {...props} tasks={[task, other]} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
-    await screen.findByText('已运行管理口径损益。');
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
+    await screen.findByText('已计算损益表。');
     rerender(<Analysis {...props} task={other} tasks={[task, other]} embedded section="results" />);
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(other.id, 'list-finance-context'));
-    await screen.findByRole('button', { name: '用已保存口径重跑 P&L' });
-    expect(screen.queryByText('已运行管理口径损益。')).toBeNull();
+    await screen.findByRole('button', { name: '按已保存范围重算损益表' });
+    expect(screen.queryByText('已计算损益表。')).toBeNull();
     rerender(<Analysis {...props} tasks={[task, other]} embedded section="results" />);
-    expect(await screen.findByText('已运行管理口径损益。')).toBeTruthy();
+    expect(await screen.findByText('已计算损益表。')).toBeTruthy();
   });
 
   it('replaces the previous finance notice with the running state when a new run starts', async () => {
@@ -1311,19 +1312,19 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    fireEvent.click(await screen.findByRole('button', { name: '用已保存口径重跑 P&L' }));
+    fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     await screen.findByText('管理科目映射缺少收入科目');
-    fireEvent.click(screen.getByRole('button', { name: '用已保存口径重跑 P&L' }));
-    expect(await screen.findByText('正在运行管理口径损益…')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
+    expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
     // A remount while it runs must not bring the replaced failure back.
     fireEvent.click(screen.getByRole('tab', { name: /^资料/ }));
     fireEvent.click(screen.getByRole('tab', { name: /^分析结果/ }));
-    expect(await screen.findByText('正在运行管理口径损益…')).toBeTruthy();
+    expect(await screen.findByText('正在计算损益表…')).toBeTruthy();
     expect(screen.queryByText('管理科目映射缺少收入科目')).toBeNull();
     await act(async () => gate.resolve(success({ ...run, engine: 'finance', finance_context_id: context.id })));
-    expect(await screen.findByText('已运行管理口径损益。')).toBeTruthy();
-    expect(screen.queryByText('正在运行管理口径损益…')).toBeNull();
+    expect(await screen.findByText('已计算损益表。')).toBeTruthy();
+    expect(screen.queryByText('正在计算损益表…')).toBeNull();
   });
 
   it('keeps a failed adjustment list visible while the panel is folded', async () => {
@@ -1352,11 +1353,11 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
+    await screen.findByText('计算设置');
     chooseSearchable('预算资料（可选）', /本月预算/);
     fireEvent.change(screen.getByLabelText('组织'), { target: { value: '华东' } });
     fireEvent.change(screen.getByLabelText('期间'), { target: { value: '2026-09' } });
-    fireEvent.click(screen.getByRole('button', { name: '运行预算桥' }));
+    fireEvent.click(screen.getByRole('button', { name: '计算预算差异' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
       context_id: '4'.repeat(32), actual_scenario: 'actual', baseline_scenario: 'budget',
       dimensions: ['organization', 'period'],
@@ -2080,7 +2081,8 @@ ${canonicalAppendix} 已改写`;
     fireEvent.click(screen.getByRole('button', { name: '刷新适用背景' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-background-list', expect.objectContaining({ context_id: 'ctx-a' })));
     expect(await screen.findByText('季节性')).toBeTruthy();
-    expect(screen.getByText(/账簿 总账 · 组织 华东 · 期间 2026-09/)).toBeTruthy();
+    // The scope line appears twice: the folded 适用范围 summary and the applicability list.
+    expect(screen.getAllByText(/账簿 总账 · 组织 华东 · 期间 2026-09/).length).toBeGreaterThanOrEqual(2);
   });
 
   it('confirms a pending management adjustment from the results sidebar without auto-rerunning', async () => {
@@ -2325,7 +2327,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('八月经营口径');
-    fireEvent.click(screen.getByRole('button', { name: '用已保存口径运行预算桥' }));
+    fireEvent.click(screen.getByRole('button', { name: '按已保存范围计算预算差异' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'explain-variance', expect.objectContaining({
       context_id: customContext.id, actual_scenario: 'current', baseline_scenario: 'prior-plan',
       dimensions: ['organization', 'period'],
@@ -2342,8 +2344,8 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, budgetSource] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await screen.findByText('八月经营口径');
-    fireEvent.click(screen.getByRole('button', { name: '用已保存口径运行预算桥' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('明确的 actual 与 budget 情景别名');
+    fireEvent.click(screen.getByRole('button', { name: '按已保存范围计算预算差异' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('实际资料和预算资料');
     expect(financeCall).not.toHaveBeenCalledWith(task.id, 'explain-variance', expect.anything());
   });
 
@@ -2466,24 +2468,24 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(screen.getByLabelText('账龄日期'), { target: { value: '2026-08-31' } });
     fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
     fireEvent.mouseDown(screen.getByRole('option', { name: /争议应收/ }));
-    fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
+    fireEvent.click(screen.getByRole('button', { name: /计算基准情景/ }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-run', { scenario_id: '5'.repeat(32) }));
     expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
       context_id: context.id, kind: 'receivables_aging', inputs: expect.objectContaining({ as_of: '2026-08-31', invoices_alias: 'actual',
         status_filter: expect.objectContaining({ field: 'invoice_status', include: ['disputed'] }) }),
     }));
-    expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '计算延迟回款情景' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('情景类型'), { target: { value: 'cash_13_weeks' } });
-    expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '计算延迟回款情景' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('期初现金'), { target: { value: '5000000.00' } });
     fireEvent.change(screen.getByLabelText('预测开始日'), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText('实际收支截止日'), { target: { value: '2026-08-31' } });
-    fireEvent.click(screen.getByRole('button', { name: /运行基准情景/ }));
+    fireEvent.click(screen.getByRole('button', { name: /计算基准情景/ }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
       context_id: context.id, kind: 'cash_13_weeks', inputs: expect.objectContaining({ opening_cash: '5000000.00', start_date: '2026-09-01', actual_cutoff: '2026-08-31', scenario: { delay_receipts_days: 0 } }),
     })));
-    await waitFor(() => expect((screen.getByRole('button', { name: '运行延迟回款子情景' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: '运行延迟回款子情景' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: '计算延迟回款情景' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '计算延迟回款情景' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({
       parent_id: '7'.repeat(32), changes: { scenario: expect.objectContaining({ delay_receipts_days: 14 }) },
     })));
@@ -2756,8 +2758,8 @@ describe('wait timing', () => {
     const timingLog = vi.fn(async (_entry: Entry) => success({ written: true }));
     mountBridge({ analysisState, financeCall, timingLog } as Partial<Bridge>);
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('财务业务口径');
-    fireEvent.click(screen.getByRole('button', { name: '保存并运行 P&L' }));
+    await screen.findByText('计算设置');
+    fireEvent.click(screen.getByRole('button', { name: '计算损益表' }));
     await waitFor(() => expect(analysisState).toHaveBeenCalledTimes(2));
     expect(timingLog).not.toHaveBeenCalled();
     advance(2_000);

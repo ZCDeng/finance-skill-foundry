@@ -6,7 +6,8 @@ import './analysis.css';
 import { STATUS, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
 import { runPresentationRole } from './analysis/businessResults.js';
-import { AnalysisScopeCard } from './analysis/AnalysisScopeCard.js';
+import { ScopePanel } from './analysis/ScopePanel.js';
+import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
@@ -64,6 +65,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     setSelectedDraft(draftRequest.draftId);
   }, [draftRequest, task?.id]);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
+  // One scope per task, edited from the 资料 page and the finance settings alike.
+  const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? []);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
   // it started keeps going. One entry per task, so a run in another task neither
   // shows here nor unlocks this one.
@@ -260,7 +263,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     }
   }, [draftKey, draft?.id]);
   const financeWorkbench = task && view && view.datasets.length > 0
-    ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
+    ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} scope={analysisScope}
       openRequest={scopeRequest} running={financeRunning[task.id] ?? ''} outcome={financeOutcome[task.id]}
       onRunning={(label, active) => setFinanceRunning((current) => {
         if (active) return { ...current, [task.id]: label };
@@ -303,7 +306,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   return <div className="analysis-workspace">
     {!embedded && <header className="analysis-header">
       <div><h2>{task?.title ?? '从一个问题开始'}</h2>
-        <p className="analysis-note">{task ? '补充资料、调整口径，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
+        <p className="analysis-note">{task ? '补充资料、确认范围，继续推进这项分析。' : '带上手头资料，比较数字，形成你的判断。'}</p></div>
       {tasks.length > 0 && <div className="analysis-task-controls"><SearchableSelect label="切换任务" ariaLabel="切换分析任务"
         value={task?.id ?? ''} disabled={busy} options={tasks.map((row) => ({ value: row.id, label: row.title, meta: when(row.created_at) }))}
         onChange={onPick} placeholder="搜索任务" />{task && <Button variant="outline" type="button" disabled={busy} onClick={() => onPick('')}>新建分析任务</Button>}</div>}
@@ -349,7 +352,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'datasets' && <>
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3>{view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>}
-          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说口径。"
+          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
@@ -367,7 +370,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
           </button>)}</div>
           {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
-          {bridge()?.financeCall && view.datasets.length > 0 && <AnalysisScopeCard taskId={task.id} question={task.title} datasets={view.datasets}
+          {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
@@ -378,7 +381,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
-          {!analysis ? <Empty title="从资料到可检查的结果" body="提出比较口径后，结果和依据会出现在这里。"
+          {!analysis ? <Empty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
@@ -469,7 +472,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'methods' && <Methods state={view} busy={busy} onApply={(methodId, bindings, parameters) => void perform(async (taskId) => {
             const api = bridge(); if (!api?.analysisMethodApply) throw new Error('此版本暂不支持复用方法。');
             const next = unwrap(await api.analysisMethodApply(taskId, methodId, bindings, parameters)); await refresh(taskId);
-            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整口径后运行。'); }
+            if (currentTask.current === taskId) { setSelectedAnalysis(next.id); chooseTab('results'); setNotice('已生成分析版本，可以调整范围后计算。'); }
           })} />}
       </section>
     </>}

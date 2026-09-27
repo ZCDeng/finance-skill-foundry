@@ -22,7 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
   period: '期间',
   currency: '币种',
   unit: '单位',
-  ledger: '账套',
+  ledger: '账簿',
   organization: '组织',
   management_account: '管理科目',
   table_structure: '表结构',

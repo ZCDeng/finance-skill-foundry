@@ -5,7 +5,7 @@ import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField, type Se
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, RESULT_SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
-import { errorText, unwrap } from './shared.js';
+import { errorText, scopeSummary, unwrap } from './shared.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -510,20 +510,23 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
     <fieldset className="analysis-fieldset" disabled={loading || saving || !api?.financeCall}>
       <label>用户问题<Textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
-      <div className="analysis-edit-grid">
-        <TextField label="账套" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="ledger 或账套名称" />
-        <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)}
-          help="只填单个共同组织；多组织请清空这里，并在必答指标中逐一添加。" placeholder="单个组织名称" />
-        {hasSavedCustomPeriod
-          ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
-            help="只填各指标共同的单个期间；累计加单月等多期间要求请清空这里，并在指标中逐一添加。" placeholder="YYYY-MM 或范围说明" />
-          : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
-            help="只填各指标共同的单个期间；多期间要求请清空这里，并在指标中逐一添加。" />}
-        <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
-          options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
-        <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
-          options={optionsWithSavedValue(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
-      </div>
+      <details className="analysis-details"><summary>范围 · {scopeSummary(scope)}</summary>
+        <p className="analysis-note">与资料页的「分析范围」是同一份记录；这里改动后保存，资料页会显示新版本。</p>
+        <div className="analysis-edit-grid">
+          {hasSavedCustomPeriod
+            ? <TextField label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+              help="只填各指标共同的单个期间；累计加单月等多期间要求请清空这里，并在指标中逐一添加。" placeholder="YYYY-MM 或范围说明" />
+            : <AccountingPeriodInput label="期间" value={periodValue} onChange={(value) => setScopeField('period', value)}
+              help="只填各指标共同的单个期间；多期间要求请清空这里，并在指标中逐一添加。" />}
+          <TextField label="组织" value={String(scope.organization ?? '')} onChange={(value) => setScopeField('organization', value)}
+            help="只填单个共同组织；多组织请清空这里，并在必答指标中逐一添加。" placeholder="单个组织名称" />
+          <SearchableSelect label="单位" value={String(scope.unit ?? '')} onChange={(value) => setScopeField('unit', value)}
+            options={optionsWithSavedValue(unitOptions, scope.unit)} allowEmptyLabel="未指定" clearable />
+          <SearchableSelect label="币种" value={String(scope.currency ?? '')} onChange={(value) => setScopeField('currency', value)}
+            options={optionsWithSavedValue(currencyOptions, scope.currency)} allowEmptyLabel="未指定" clearable />
+          <TextField label="账簿" value={String(scope.ledger ?? '')} onChange={(value) => setScopeField('ledger', value)} placeholder="例如：经营总账" />
+        </div>
+      </details>
       <div className="analysis-section-heading"><h4>必答指标</h4><Button variant="outline" type="button" onClick={addItem}><Plus size={14} aria-hidden />添加指标</Button></div>
       {items.length ? <div className="analysis-history-list">
         {items.map((item, index) => <RequirementItemEditor key={item.id} item={item} index={index} support={supportByItem.get(item.id)} supportStale={isSupportStale(item)} onChange={(patch) => setItem(item.id, patch)}
