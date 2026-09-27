@@ -42,13 +42,17 @@ const agingStatusMapping = {
 };
 
 export type ScopeRequest = { count: number; contextId?: string };
+/** How the last finance operation ended: its name, the sentence shown for it, and when. */
+export type FinanceOutcome = { label: string; result: 'ok' | 'error'; message: string; at: string };
 
-export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count: 0 }, running = '', onRunning, onRefresh }: {
+export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = { count: 0 }, running = '', outcome, onRunning, onOutcome, onRefresh }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean;
   /** Bumped by 调整口径 on a result; each new count opens the settings on that result's scope. */
   openRequest?: ScopeRequest;
   /** What is running right now, in words; owned by the parent so it outlives this component. */
   running?: string; onRunning(label: string, active: boolean): void;
+  /** Owned by the parent for the same reason; null clears it. */
+  outcome?: FinanceOutcome; onOutcome(outcome: FinanceOutcome | null): void;
   onRefresh(): Promise<void>;
 }) {
   const [finance, setFinance] = useState<FinanceContextState | null>(null);
@@ -97,7 +101,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
    * it were this result's.
    */
   async function openScopeOf(wanted?: string) {
-    setError('');
+    setError(''); onOutcome(null);
     if (!wanted) { setMessage('这条结果没有记录财务口径，设置区显示的是当前选中的口径。'); return; }
     let context = finance?.contexts.find((item) => item.id === wanted);
     if (!context) {
@@ -133,10 +137,19 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
       setComparePeriod(text(budgetScope.period) !== text(actualScope.period) ? text(budgetScope.period) : '');
     }
   }
-  async function track(label: string, work: () => Promise<void>) {
+  async function track(label: string, work: (done: (message: string) => void) => Promise<void>) {
     if (running) return;
+    onOutcome(null); setMessage(''); setError('');
     onRunning(label, true);
-    try { await work(); } finally { onRunning(label, false); }
+    let succeeded = false;
+    try {
+      await work((message) => { succeeded = true; onOutcome({ label, result: 'ok', message, at: new Date().toISOString() }); });
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : String(failure);
+      // After done only reading the page back can fail; the operation itself went through.
+      if (succeeded) setError(message);
+      else onOutcome({ label, result: 'error', message, at: new Date().toISOString() });
+    } finally { onRunning(label, false); }
   }
   useEffect(() => {
     let cancelled = false;
@@ -152,9 +165,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
     return () => { cancelled = true; };
   }, [taskId]);
   function saveContext(runAfter?: 'pnl' | 'bridge') {
-    return track(runAfter === 'pnl' ? '正在保存口径并运行管理口径损益…' : runAfter === 'bridge' ? '正在保存口径并运行预算差异桥…' : '正在保存口径…', async () => { try {
+    return track(runAfter === 'pnl' ? '正在保存口径并运行管理口径损益…' : runAfter === 'bridge' ? '正在保存口径并运行预算差异桥…' : '正在保存口径…', async (done) => {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持财务业务口径。');
-      setError(''); setMessage('');
       const bindings = { actual, ...(budget ? { budget } : {}) };
       const scopes = { actual: scope, ...(budget ? { budget: { ...scope, ...budgetScope, ...(comparePeriod ? { period: comparePeriod } : {}) } } : {}) };
       // A form refilled from a saved scope keeps what it does not show: each alias's
@@ -174,7 +186,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
       } : value);
       if (runAfter === 'pnl') {
         unwrap(await api.financeCall(taskId, 'run-metric', { context_id: context.id, metric: { kind: 'management_pnl' } }));
-        setMessage('已保存口径并运行管理口径损益。');
+        done('已保存口径并运行管理口径损益。');
         setSetupOpen(false);
       } else if (runAfter === 'bridge') {
         const labels = bridgeScenarioLabels(context);
@@ -182,48 +194,38 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
           context_id: context.id, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
           dimensions: bridgeDimensions,
         }));
-        setMessage('已保存口径并运行预算差异桥。');
+        done('已保存口径并运行预算差异桥。');
         setSetupOpen(false);
       } else {
-        setMessage('已保存财务分析口径。');
+        done('已保存财务分析口径。');
       }
       await onRefresh();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } });
+    });
   }
   function saveMap() {
-    return track('正在保存映射…', async () => { try {
+    return track('正在保存映射…', async (done) => {
       const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持管理科目映射。');
-      setError(''); setMessage('');
       const parsed = JSON.parse(mapRows);
       if (!Array.isArray(parsed)) throw new Error('映射 JSON 需要是数组。');
       const record = unwrap(await api.financeCall(taskId, 'finance-map-save', { name: mapName, rows: parsed }) as Answer<Record<string, unknown>>);
       setAccountMapId(String(record.id ?? ''));
       setFinance((value) => value ? { ...value, account_maps: [...value.account_maps, record] } : value);
-      setMessage('已保存管理科目映射，可用于下一次口径保存。');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } });
+      done('已保存管理科目映射，可用于下一次口径保存。');
+    });
   }
-  const runExisting = (kind: 'pnl' | 'bridge') => track(kind === 'pnl' ? '正在运行管理口径损益…' : '正在运行预算差异桥…', async () => {
-    try {
-      const api = bridge(); if (!api?.financeCall || !contextId) return;
-      setError(''); setMessage('');
-      if (kind === 'pnl') unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' } }));
-      else {
-        const labels = bridgeScenarioLabels(selectedContext);
-        unwrap(await api.financeCall(taskId, 'explain-variance', {
-          context_id: contextId, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
-          dimensions: bridgeDimensions,
-        }));
-      }
-      setMessage(kind === 'pnl' ? '已运行管理口径损益。' : '已运行预算差异桥。');
-      setSetupOpen(false);
-      await onRefresh();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+  const runExisting = (kind: 'pnl' | 'bridge') => track(kind === 'pnl' ? '正在运行管理口径损益…' : '正在运行预算差异桥…', async (done) => {
+    const api = bridge(); if (!api?.financeCall || !contextId) return;
+    if (kind === 'pnl') unwrap(await api.financeCall(taskId, 'run-metric', { context_id: contextId, metric: { kind: 'management_pnl' } }));
+    else {
+      const labels = bridgeScenarioLabels(selectedContext);
+      unwrap(await api.financeCall(taskId, 'explain-variance', {
+        context_id: contextId, actual_scenario: labels.actual, baseline_scenario: labels.baseline,
+        dimensions: bridgeDimensions,
+      }));
     }
+    done(kind === 'pnl' ? '已运行管理口径损益。' : '已运行预算差异桥。');
+    setSetupOpen(false);
+    await onRefresh();
   });
   const selectedContext = finance?.contexts.find((context) => context.id === contextId);
   const aliases = Object.keys(selectedContext?.bindings ?? {});
@@ -232,9 +234,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
   }, [aliases.join('|')]);
   useEffect(() => { setBaselineScenarioId(''); }, [contextId, scenarioKind]);
   function runScenario(child = false) {
-    return track(child ? '正在运行延迟回款子情景…' : '正在运行基准情景…', async () => { try {
+    return track(child ? '正在运行延迟回款子情景…' : '正在运行基准情景…', async (done) => {
       const api = bridge(); if (!api?.financeCall || !contextId) throw new Error('请先保存或选择财务口径。');
-      setError(''); setMessage('');
       const scenarioScope = selectedContext?.scopes?.[scenarioPrimary] ?? scope;
       let scenario: Record<string, unknown>;
       if (child) {
@@ -262,12 +263,10 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
       unwrap(await api.financeCall(taskId, 'finance-scenario-run', { scenario_id: String(scenario.id) }));
       setFinance((value) => value && !value.scenarios.some((item) => item.id === scenario.id)
         ? { ...value, scenarios: [...value.scenarios, scenario] } : value);
-      setMessage(child ? '已运行延迟回款子情景。' : '已运行基准情景。');
+      done(child ? '已运行延迟回款子情景。' : '已运行基准情景。');
       setSetupOpen(false);
       await onRefresh();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } });
+    });
   }
   const locked = busy || Boolean(running);
   const disabled = locked || !actual;
@@ -350,7 +349,9 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
   </details>
   {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
   {running ? <p role="status" className="analysis-message"><WaitOrb state="solving" />{running}</p>
+    : outcome?.result === 'ok' ? <p role="status" className="analysis-message">{outcome.message}</p>
     : message ? <p role="status" className="analysis-message">{message}</p> : null}
+  {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}
   {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
   {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={locked} onRefresh={onRefresh} /> : null}

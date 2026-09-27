@@ -18,7 +18,7 @@ import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { StructurePanel } from './analysis/StructurePanel.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
-import { FinanceWorkbench, type ScopeRequest } from './analysis/FinanceWorkbench.js';
+import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
@@ -60,6 +60,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   // it started keeps going. One entry per task, so a run in another task neither
   // shows here nor unlocks this one.
   const [financeRunning, setFinanceRunning] = useState<Record<string, string>>({});
+  // How the last one ended, kept here and per task for the same reasons.
+  const [financeOutcome, setFinanceOutcome] = useState<Record<string, FinanceOutcome>>({});
   const currentTask = useRef(task?.id);
   currentTask.current = task?.id;
   const active = useRef(true);
@@ -244,11 +246,17 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   }, [draftKey, draft?.id]);
   const financeWorkbench = task && view && view.datasets.length > 0
     ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy}
-      openRequest={scopeRequest} running={financeRunning[task.id] ?? ''}
+      openRequest={scopeRequest} running={financeRunning[task.id] ?? ''} outcome={financeOutcome[task.id]}
       onRunning={(label, active) => setFinanceRunning((current) => {
         if (active) return { ...current, [task.id]: label };
         if (current[task.id] !== label) return current;
         const { [task.id]: _finished, ...rest } = current;
+        return rest;
+      })}
+      onOutcome={(outcome) => setFinanceOutcome((current) => {
+        if (outcome) return { ...current, [task.id]: outcome };
+        if (!current[task.id]) return current;
+        const { [task.id]: _cleared, ...rest } = current;
         return rest;
       })}
       onRefresh={() => refresh(task.id)} />
