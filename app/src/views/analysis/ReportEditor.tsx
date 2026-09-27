@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import type { Answer } from "../../bridge.js";
 import { bridge } from "../../bridge.js";
+import { WaitOrb } from "../../components/WaitOrb.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Textarea } from "../../components/ui/textarea.js";
@@ -928,6 +929,7 @@ export function ReportEditor({
       {(importing || exporting || reportPhase) && (
         <div className="report-progress" role="status">
           <span>
+            <WaitOrb state={importing ? "working" : "composing"} />
             {reportPhase || (importing ? "正在导入转换" : "正在导出转换")}
           </span>
           <Button

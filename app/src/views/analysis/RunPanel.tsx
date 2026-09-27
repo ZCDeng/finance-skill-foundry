@@ -9,11 +9,13 @@ import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { runPresentationRole, selectBusinessResult } from './businessResults.js';
 
-export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown }: {
+export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
+  /** Opens the finance scope settings, which sit below the result, on the scope this run used. */
+  onAdjustScope?(run: AnalysisRun): void;
 }) {
   const [selected, setSelected] = useState(() => readCopy<string>(`${analysis.task_id}:run`) ?? '');
   const [evidence, setEvidence] = useState(false);
@@ -41,6 +43,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note">{when(run.created_at)} · 运行 {shortSha(run.id)} · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
       {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
+      {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre>}
@@ -50,6 +53,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       <div className="analysis-actions">
         <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
         <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的运行 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
+        {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整口径</Button>}
         {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
       {analysis.sql && <details className="analysis-details"><summary>保存这次分析方法</summary><form className="analysis-method-form" onSubmit={(event) => {
@@ -230,6 +234,8 @@ function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
 
 type FinanceVarianceResult = NonNullable<AnalysisRun['result']> & {
   method?: unknown;
+  /** The backend's own caveat on what the bridge does and does not show. */
+  interpretation?: unknown;
   comparison?: { actual_scenario?: unknown; baseline_scenario?: unknown } | Record<string, unknown>;
 };
 
@@ -280,16 +286,38 @@ function financeVarianceDimensionColumns(run: AnalysisRun): { name: string; type
   return run.result?.columns.filter((column) => !financeVarianceReservedColumns.has(column.name) && distinctFinanceValues(rows, column.name).length > 1) ?? [];
 }
 
+/** One side of a comparison in words. An estimate says 估算; a label it cannot name stays as written. */
+function scenarioWords(label: string, side: 'actual' | 'baseline'): string {
+  if (/^actual$/i.test(label) || label === '实际') return '实际';
+  const estimate = /estimat|估算|推算|预估/i.test(label);
+  if (/budget|预算/i.test(label)) return estimate ? '预算（估算）' : '预算';
+  if (/forecast|预测|rolling|滚动/i.test(label)) return '预测';
+  if (label === 'baseline') return '对照';
+  return side === 'actual' ? label : `对照（${label}）`;
+}
+
 function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel: string; actualLabel: string } {
-  const comparison = financeVarianceResult(run)?.comparison;
+  const comparison = financeVarianceResult(run)?.comparison as Record<string, unknown> | undefined;
   const actual = textValue(comparison?.actual_scenario ?? 'actual');
   const baseline = textValue(comparison?.baseline_scenario ?? 'baseline');
-  const baselineIsBudget = /budget|预算/i.test(baseline);
-  const actualIsDefault = /^actual$/i.test(actual) || actual === '实际';
+  const period = (filters: unknown) => {
+    const value = filters && typeof filters === 'object' ? (filters as Record<string, unknown>).period : undefined;
+    return typeof value === 'string' ? value : '';
+  };
+  const actualPeriod = period(comparison?.actual_filters);
+  const baselinePeriod = period(comparison?.baseline_filters);
+  // Periods are named only when the two sides differ; the same words on both sides get their codes.
+  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${value}）` : words;
+  const actualLabel = withPeriod(scenarioWords(actual, 'actual'), actualPeriod);
+  let baselineLabel = withPeriod(scenarioWords(baseline, 'baseline'), baselinePeriod);
+  // Same words on both sides (the same scenario under other filters) must still read as two sides.
+  if (actualLabel === baselineLabel) baselineLabel = `对照（${baselineLabel}）`;
+  const budget = /budget|预算/i.test(baseline);
+  const estimate = /estimat|估算|推算|预估/i.test(baseline);
   return {
-    caption: baselineIsBudget ? '预算差异桥' : actualIsDefault ? '损益差异桥' : '对照损益差异桥',
-    actualLabel: actualIsDefault ? '实际' : actual,
-    baselineLabel: baselineIsBudget ? '预算' : baseline === 'baseline' ? '对照' : `对照（${baseline}）`,
+    caption: budget ? (estimate ? '估算预算差异桥' : '预算差异桥') : /^actual$/i.test(actual) || actual === '实际' ? '损益差异桥' : '对照损益差异桥',
+    actualLabel,
+    baselineLabel,
   };
 }
 
@@ -318,6 +346,81 @@ function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
       <Table key={`${run.id}:raw`} columns={run.result!.columns} rows={run.result!.rows} caption="原始计算结果" />
     </details>
   </section>;
+}
+
+/**
+ * The conclusion a manager reads before the bridge table. Every figure is a
+ * string the backend computed; this only picks rows and reads the sign, so no
+ * amount passes through Number. Groups without a profit change say nothing.
+ */
+function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
+  const result = financeVarianceResult(run);
+  const dimensions = financeVarianceDimensionColumns(run).map((column) => column.name);
+  const copy = financeVarianceCopy(run);
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of result?.rows ?? []) {
+    const key = JSON.stringify(dimensions.map((name) => row[name] ?? null));
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  // Dimension columns skip empty values, so two groups can share a key. One
+  // group with two profit rows is that case; say nothing rather than pick one.
+  if ([...groups.values()].some((rows) => rows.filter((row) => row.metric === 'profit').length > 1)) return null;
+  const lines = [...groups.values()].map((rows) => {
+    const profit = rows.find((row) => row.metric === 'profit');
+    return {
+      label: dimensions.map((name) => textValue(rows[0][name])).join(' · '),
+      headline: profit ? changePhrase(profit, true) : null,
+      drivers: ['revenue', 'cost', 'expense'].map((metric) => rows.find((row) => row.metric === metric))
+        .flatMap((row) => row ? [changePhrase(row, false)] : []).filter((phrase): phrase is string => Boolean(phrase)),
+      assumedZero: rows.some((row) => row.comparison_status === 'assumed_zero'),
+    };
+  }).filter((line) => line.headline);
+  if (!lines.length) return null;
+  const shown = lines.slice(0, 3);
+  const interpretation = typeof result?.interpretation === 'string' ? result.interpretation : '';
+  return <section className="analysis-headline" aria-label="结论">
+    {shown.map((line, index) => <div key={index} className="analysis-headline-line">
+      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}{copy.actualLabel}与{copy.baselineLabel}相比，{line.headline}</p>
+      {line.drivers.length > 0 && <p className="analysis-note">{line.drivers.join(' · ')}</p>}
+      {line.assumedZero && <p className="analysis-note">这一组有一侧没有数据，已按 0 计入，差异等于另一侧的全额。</p>}
+    </div>)}
+    {groups.size > shown.length && <p className="analysis-note">共 {groups.size} 组，其余见下表。</p>}
+    {interpretation && <p className="analysis-note">{interpretation}</p>}
+  </section>;
+}
+
+/**
+ * The backend's own phrase when it wrote one with a unit, otherwise the same
+ * phrase from the sign of amount_change. Bridges grouped by organization and
+ * period carry the unit only in the side scopes, and the backend phrase then
+ * has none; a figure without its unit is off by 10,000 between 元 and 万元.
+ */
+function changePhrase(row: Record<string, unknown>, profit: boolean): string | null {
+  const unit = rowUnit(row);
+  if (unit === null) return null;
+  if (typeof row.amount_change_display === 'string' && row.amount_change_display && typeof row.unit === 'string' && row.unit) return row.amount_change_display;
+  const value = row.amount_change ?? (profit ? row.contribution : undefined);
+  if (value == null || value === '') return null;
+  const text = String(value).trim();
+  const amount = text.replace(/^[-+]/, '');
+  if (!/^\d*\.?\d+$/.test(amount)) return null;
+  const word = /^0*\.?0*$/.test(amount) ? '持平' : text.startsWith('-') ? '减少' : '增加';
+  return `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${word}${word === '持平' ? '' : ` ${amount}${unit ? ` ${unit}` : ''}`}`;
+}
+
+/** The row's unit, or the one both sides declare; null when the two sides disagree. */
+function rowUnit(row: Record<string, unknown>): string | null {
+  if (typeof row.unit === 'string' && row.unit) return row.unit;
+  // A side scope lists several units when its rows mixed them; that is a conflict too.
+  const side = (scope: unknown): string | null => {
+    const unit = scope && typeof scope === 'object' ? (scope as Record<string, unknown>).unit : undefined;
+    if (Array.isArray(unit)) return null;
+    return typeof unit === 'string' ? unit : '';
+  };
+  const actual = side(row.actual_scope);
+  const baseline = side(row.baseline_scope);
+  if (actual === null || baseline === null || (actual && baseline && actual !== baseline)) return null;
+  return actual || baseline;
 }
 
 function textValue(value: unknown): string {

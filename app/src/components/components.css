@@ -512,20 +512,13 @@ textarea.fnd-field {
   padding: 96px 0;
 }
 
-.fnd-spin {
-  animation: fnd-turn 1.1s linear infinite;
+/* The wait orb sits on a text line; the text beside it carries the status. */
+.fnd-wait-orb {
+  margin-right: 6px;
 }
 
-@keyframes fnd-turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fnd-spin {
-    animation: none;
-  }
+.fnd-booting .fnd-wait-orb {
+  margin-right: 0;
 }
 
 /* -- the guide ------------------------------------------------------------ */
