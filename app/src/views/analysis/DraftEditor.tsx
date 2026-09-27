@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { bridge, type Answer, type AnalysisDraft, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
-import { RunStatus, STATUS, textValue } from './presentation.js';
+import { RunStatus, draftStateText, textValue } from './presentation.js';
 import { ClaimBindingRepair } from './ClaimBindingRepair.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { ReportEditor, type ReportDraftDocument } from './ReportEditor.js';
@@ -345,7 +345,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
     </div>
     <ReportEditor key={`${draft?.id ?? 'new'}`} taskId={taskId} draftId={draft?.id} contextId={contextId} title={title} body={body} appendix={reading.appendix}
       toolbarLabel={draft ? '文稿' : '写下判断与建议'}
-      status={draft ? `${STATUS[draft.publication_status] ?? draft.publication_status} · ${STATUS[draft.review_status] ?? draft.review_status} · 检查：${qualityShortLabel(qualityState)}` : undefined}
+      status={draft ? `${draftStateText(draft)} · 检查：${qualityShortLabel(qualityState)}` : undefined}
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}

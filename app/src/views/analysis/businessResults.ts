@@ -15,9 +15,6 @@ export type RowBasisKind = 'source' | 'direct' | 'calculation' | 'estimate' | 'j
 
 export type DisplayColumn = { name: string; type?: string; label: string; semantics: FieldSemantics };
 type CanonicalMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
-export type { DeclaredPair, PairMeasure, ScriptConclusion } from '../../bridge.js';
-/** A declaration as the workbench reads it (result_semantics.declared_runs), with its pairs and current requirements. */
-export type PairedDeclarations = RowDeclarations;
 type ParsedWideColumn = { name: string; metric?: string; measure: CanonicalMeasure; period: string; order: number };
 
 const explicitBusinessRoles = new Set(['business', 'business_result', 'calculation', 'analysis_result']);
@@ -405,11 +402,11 @@ function longScenarioEntry(row: Record<string, unknown>): { measure: CanonicalMe
   const scenario = longScenarioMeasure(row);
   if (!scenario) return null;
   const metric = String(rowMetric(row) ?? '');
-  const unit = String(unitColumn(row) ?? '').trim().toLowerCase();
+  const kind = unitKind(unitColumn(row));
   // 「-」 states no unit: such a 达成率 is kept out of its comparison (unmarked), and an amount in it fills none.
-  const unmarked = unmarkedUnits.has(unit);
-  const ratioUnit = ratioUnits.has(unit);
-  const percentUnit = ratioUnit && !fractionUnits.has(unit);
+  const unmarked = kind === 'unmarked';
+  const ratioUnit = kind === 'decimal' || kind === 'percent';
+  const percentUnit = kind === 'percent';
   const rate = /^(.+)_(?:achievement|attainment)_ratio$/.exec(metric);
   if (rate && (ratioUnit || unmarked)) return { measure: percentUnit ? 'rate_pct' : 'rate', suffix: scenario.suffix, metric: rate[1], unmarked };
   // The unit, not the scenario word, says whether a 达成率 is a fraction or already a percentage:
@@ -514,8 +511,8 @@ function isLongFormat(run: AnalysisRun): boolean {
 type LongPairing = { business: Record<string, unknown>[]; used: Set<number> };
 
 /** The run's declaration when it can pair: a declaration the backend paired (every one it serves today). */
-function pairedDeclarations(run: AnalysisRun): PairedDeclarations | null {
-  const declarations = run.row_declarations as PairedDeclarations | undefined;
+function pairedDeclarations(run: AnalysisRun): RowDeclarations | null {
+  const declarations = run.row_declarations;
   return declarations && Array.isArray(declarations.pairs) && Array.isArray(declarations.rows) ? declarations : null;
 }
 
@@ -525,10 +522,18 @@ function pairedDeclarations(run: AnalysisRun): PairedDeclarations | null {
  * inferred rows never meet in one card.
  */
 function longScenarioPairing(run: AnalysisRun): LongPairing | null {
-  if (!isLongFormat(run)) return null;
-  const declarations = pairedDeclarations(run);
-  return declarations ? declaredPairing(run, declarations) : inferredPairing(run);
+  if (pairings.has(run)) return pairings.get(run) ?? null;
+  let pairing: LongPairing | null = null;
+  if (isLongFormat(run)) {
+    const declarations = pairedDeclarations(run);
+    pairing = declarations ? declaredPairing(run, declarations) : inferredPairing(run);
+  }
+  pairings.set(run, pairing);
+  return pairing;
 }
+// The cards, 其他结果 and the period tabs all read one run's pairing. A state read replaces run objects rather than
+// editing them, so the pairing is kept per run object.
+const pairings = new WeakMap<AnalysisRun, LongPairing | null>();
 
 function nonEmpty(value: unknown): boolean {
   return value != null && value !== '';
@@ -539,7 +544,7 @@ function nonEmpty(value: unknown): boolean {
  * past the stored preview); whether it is an estimate is the declaration's union (KTD3); a 达成率 reads by its
  * declared unit. The preview row adds only its source and note, when the preview holds it.
  */
-function declaredPairing(run: AnalysisRun, declarations: PairedDeclarations): LongPairing {
+function declaredPairing(run: AnalysisRun, declarations: RowDeclarations): LongPairing {
   const entries = new Map(declarations.rows.map((entry) => [entry.row, entry]));
   const preview = run.result?.rows ?? [];
   const olderRequirements = readsOlderRequirements(declarations);
@@ -600,7 +605,7 @@ function declaredPairing(run: AnalysisRun, declarations: PairedDeclarations): Lo
  * item) says nothing; when either fingerprint could not be verified, a different version errs toward saying so.
  * A run pinned to no requirements has no older version to name.
  */
-function readsOlderRequirements(declarations: PairedDeclarations): boolean {
+function readsOlderRequirements(declarations: RowDeclarations): boolean {
   const current = declarations.current_requirements;
   const pinned = declarations.requirements_id;
   if (!pinned || !current?.id || current.id === pinned) return false;

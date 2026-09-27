@@ -567,7 +567,19 @@ def _archived_result(analysis, run: dict) -> tuple[list, list[dict]] | None:
     return (parsed['schema'], parsed['rows']) if parsed.get('kind') == 'table' else None
 
 
-def redeclare(analysis, run: dict) -> dict:
+def _pinned_requirements(analysis, requirements_id: str | None, cache: dict[str, dict | None]) -> dict | None:
+    """The requirements record a declaration is pinned to, read once per state read: records are immutable."""
+    if not requirements_id:
+        return None
+    if requirements_id not in cache:
+        try:
+            cache[requirements_id] = analysis._get('requirements', requirements_id)
+        except FoundryError:
+            cache[requirements_id] = None
+    return cache[requirements_id]
+
+
+def redeclare(analysis, run: dict, requirements_cache: dict[str, dict | None] | None = None) -> dict:
     """Recompute a stored declaration under the current rules; the run record itself is never rewritten.
 
     The pinned requirements and their fingerprint are the stored ones: the requirements record is immutable.
@@ -575,10 +587,7 @@ def redeclare(analysis, run: dict) -> dict:
     """
     stored = run['row_declarations']
     requirements_id = stored.get('requirements_id')
-    try:
-        requirements = analysis._get('requirements', requirements_id) if requirements_id else None
-    except FoundryError:
-        requirements = None
+    requirements = _pinned_requirements(analysis, requirements_id, {} if requirements_cache is None else requirements_cache)
     archived = _archived_result(analysis, run)
     result = run.get('result') or {}
     columns, rows = archived or (result.get('columns') or [], result.get('rows') or [])
@@ -608,7 +617,8 @@ def merge_latest(declaration: dict, latest: dict | None) -> dict:
     return {**declaration, 'rows': rows, 'pairs': pairs, 'latest_requirements_id': latest['id']}
 
 
-def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: str | None = None) -> dict:
+def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: str | None = None,
+                 requirements_cache: dict[str, dict | None] | None = None) -> dict:
     """The run as the workbench reads it: a stale declaration recomputed, the latest estimates merged in.
 
     It also names the task's current requirements version and that record's verified fingerprint, so the result
@@ -619,7 +629,7 @@ def declared_run(analysis, run: dict, latest: dict | None, latest_fingerprint: s
     if not isinstance(declaration, dict):
         return run
     if is_stale(declaration.get('rules_version')):
-        declaration = redeclare(analysis, run)
+        declaration = redeclare(analysis, run, requirements_cache)
     declaration = merge_latest(declaration, latest)
     if latest:
         declaration = {**declaration, 'current_requirements': {'id': latest['id'], 'fingerprint': latest_fingerprint}}
@@ -631,4 +641,5 @@ def declared_runs(analysis, runs: list[dict], latest: dict | None) -> list[dict]
 
     fingerprint = (verified_requirement_fingerprint(analysis, latest)
                    if latest and any(isinstance(run.get('row_declarations'), dict) for run in runs) else None)
-    return [declared_run(analysis, run, latest, fingerprint) for run in runs]
+    requirements_cache: dict[str, dict | None] = {}
+    return [declared_run(analysis, run, latest, fingerprint, requirements_cache) for run in runs]

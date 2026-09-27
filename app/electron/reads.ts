@@ -152,12 +152,8 @@ export async function deliverableGallery(
   known?: TaskRow[],
 ): Promise<{ task: TaskRow; row: DeliverableRow }[]> {
   const tasks = known ?? await listTasks(binding, env);
-  const gathered: { task: TaskRow; row: DeliverableRow }[] = [];
-  for (const task of tasks) {
-    for (const row of await listDeliverables({ ...binding, task: task.id }, env)) {
-      gathered.push({ task, row });
-    }
-  }
+  const answers = await perTask(tasks, (task) => listDeliverables({ ...binding, task: task.id }, env));
+  const gathered = tasks.flatMap((task, index) => answers[index].map((row) => ({ task, row })));
   // Newest first, and `seq` breaks the ties rather than leaving them to input
   // order. Timestamps are second-resolution and `emit-brief` files the brief and
   // the workpaper in the same instant, so a tie is the normal case, not an edge:
@@ -166,6 +162,32 @@ export async function deliverableGallery(
     if (a.row.at !== b.row.at) return a.row.at < b.row.at ? 1 : -1;
     return b.row.seq - a.row.seq;
   });
+}
+
+/** How many per-task CLI reads 成果库 runs at once; each is its own foundry process. */
+const TASK_READS_AT_ONCE = 4;
+
+/**
+ * One read per task, a few at a time, answered in task order. They start in
+ * task order too, and the first failure stops new ones from starting.
+ */
+async function perTask<T>(tasks: TaskRow[], read: (task: TaskRow) => Promise<T>): Promise<T[]> {
+  const answers: T[] = new Array(tasks.length);
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next < tasks.length) {
+      const index = next++;
+      try {
+        answers[index] = await read(tasks[index]);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(TASK_READS_AT_ONCE, tasks.length) }, worker));
+  return answers;
 }
 
 /**
@@ -212,8 +234,9 @@ export async function galleryRows(binding: Omit<Binding, 'task'>, env?: FoundryE
   const rows: GalleryRow[] = (await deliverableGallery(binding, env, tasks)).map(({ task, row }) => ({
     type: 'deliverable', key: `deliverable:${task.id}:${row.seq}`, at: row.at, task, row,
   }));
-  for (const task of tasks) {
-    const { drafts, exports } = await listAnalysisDeliverables({ ...binding, task: task.id }, env);
+  const answers = await perTask(tasks, (task) => listAnalysisDeliverables({ ...binding, task: task.id }, env));
+  for (const [index, task] of tasks.entries()) {
+    const { drafts, exports } = answers[index];
     for (const draft of drafts) {
       rows.push({ type: 'draft', key: `draft:${draft.draft_id}`, at: draft.created_at, task, draft });
     }

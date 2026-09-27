@@ -7,6 +7,10 @@ export const STATUS: Record<string, string> = {
   verified: '可复算', reproducible: '可复算', unverified: '未验证复算', non_reproducible: '不可复算',
   unreviewed: '未阅', reviewed: '已阅', accepted: '经理认可', draft: '草稿', archived: '已归档',
 };
+/** A draft revision's state in the words the 文稿 toolbar uses: 草稿 · 未阅. */
+export function draftStateText(row: { publication_status: string; review_status: string }): string {
+  return `${STATUS[row.publication_status] ?? row.publication_status} · ${STATUS[row.review_status] ?? row.review_status}`;
+}
 export const textValue = (value: unknown): string => value == null ? '—' : typeof value === 'object'
   ? Object.entries(value).map(([key, item]) => `${key}：${textValue(item)}`).join(' · ')
   : String(value);

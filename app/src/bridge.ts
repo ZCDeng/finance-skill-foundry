@@ -107,9 +107,6 @@ export interface AnalysisExportRow {
 /**
  * One row of 成果库: an old-flow version, the newest draft of a revision chain,
  * or a filed export. `key` is the kind and that kind's own id.
- *
- * Main always sends `type`, `key` and `at`. They are optional on the old-flow
- * row only so a `{ task, row }` built by hand still reads as one.
  */
 export type GalleryRow =
   | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }

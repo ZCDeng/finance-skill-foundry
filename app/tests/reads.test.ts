@@ -184,6 +184,39 @@ describe('the deliverables union', () => {
     ]);
   });
 
+  it('reads tasks a few at a time, keeps their order, and stops starting reads after a failure', async () => {
+    const tasks = Array.from({ length: 9 }, (_, index) => ({ ...A, id: `${index}`.repeat(32) }));
+    let inFlight = 0;
+    let most = 0;
+    const started: string[] = [];
+    mocks.run.mockImplementation(async (binding, command) => {
+      if (command === 'task-list') return JSON.stringify(tasks);
+      started.push(`${command}:${binding.task}`);
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      if (command === 'deliverables') return JSON.stringify([{ ...brief(1), at: `2026-09-27T03:00:0${binding.task[0]}Z` }]);
+      return JSON.stringify({ task_id: binding.task, drafts: [], exports: [] });
+    });
+    const rows = await galleryRows({ varRoot: '/store' });
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(4);
+    expect(started.slice(0, 9)).toEqual(tasks.map((task) => `deliverables:${task.id}`));
+    expect(described(rows)).toEqual([...tasks].reverse().map((task) => `deliverable:${task.id}:1`));
+
+    started.length = 0;
+    mocks.run.mockImplementation(async (binding, command) => {
+      if (command === 'task-list') return JSON.stringify(tasks);
+      started.push(binding.task);
+      if (binding.task === tasks[0].id) throw new Error('store unreadable');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return JSON.stringify([]);
+    });
+    await expect(galleryRows({ varRoot: '/store' })).rejects.toThrow(/store unreadable/);
+    expect(started.length).toBeLessThan(tasks.length);
+  });
+
   it('resolves an export only from a digest and a known format, never from a path', async () => {
     mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/tasks/a/analysis/exports/registered/x.pdf' }));
     const binding = { varRoot: '/store', task: A.id };

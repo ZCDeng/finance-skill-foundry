@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AnalysisRun } from '../../bridge.js';
+import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn, type PairedDeclarations, type ScriptConclusion } from './businessResults.js';
+import { businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table } from './presentation.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
@@ -77,7 +77,7 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
 
 /** The sentences the backend concluded for this period's pairs; a pair without a period belongs to every tab. */
 function periodConclusions(run: AnalysisRun, period: string): ScriptConclusion[] {
-  const pairs = (run.row_declarations as PairedDeclarations | undefined)?.pairs ?? [];
+  const pairs = run.row_declarations?.pairs ?? [];
   return pairs
     .filter((pair) => !period || pair.period == null || pair.period === '' || String(pair.period) === period)
     .flatMap((pair) => (pair.conclusion ? [pair.conclusion] : []));

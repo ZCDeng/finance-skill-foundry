@@ -14,7 +14,7 @@ import {
   shortSha,
   when,
 } from '../bridge.js';
-import { STATUS } from './analysis/presentation.js';
+import { draftStateText } from './analysis/presentation.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -29,21 +29,17 @@ const FORMAT_LABEL: Record<ExportFormat, string> = {
 
 const MODE_LABEL: Record<string, string> = { management: '管理版', audit: '审计版' };
 
-/** A revision's state in the words the 文稿 toolbar uses: 草稿 · 未阅. */
-function stateText(row: { publication_status: string; review_status: string }): string {
-  return `${STATUS[row.publication_status] ?? row.publication_status} · ${STATUS[row.review_status] ?? row.review_status}`;
-}
 
 /**
  * An export's state is its source revision's. Unless that revision is accepted
  * and archived, the file carries the review stamp, so the list says so first.
  */
 function ExportState({ exported }: { exported: AnalysisExportRow }) {
-  if (!exported.review_marker) return <>{stateText(exported)}</>;
+  if (!exported.review_marker) return <>{draftStateText(exported)}</>;
   return (
     <>
       {exported.review_marker}
-      <span className="fnd-muted">（{stateText(exported)}）</span>
+      <span className="fnd-muted">（{draftStateText(exported)}）</span>
     </>
   );
 }
@@ -255,7 +251,7 @@ export function Deliverables({
                   <td>{task.title}</td>
                   <td>{task.period ?? '—'}</td>
                   <td>分析文稿</td>
-                  <td>{stateText(draft)}</td>
+                  <td>{draftStateText(draft)}</td>
                   <td>{`${draft.title} · 修订 ${draft.revision}`}</td>
                 </tr>
               );
@@ -292,7 +288,7 @@ export function Deliverables({
             }
             const { row } = entry;
             return (
-              <tr key={entry.key ?? `deliverable:${task.id}:${row.seq}`} className="fnd-table__open">
+              <tr key={entry.key} className="fnd-table__open">
                 <td>
                   {/*
                     * The button carries the whole row's name, so a pointer has
