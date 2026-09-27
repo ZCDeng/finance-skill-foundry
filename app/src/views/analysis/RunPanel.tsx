@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { runPresentationRole, selectBusinessResult } from './businessResults.js';
+import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -283,6 +283,30 @@ const financeScopeLabels: Record<string, string> = {
   ledger: '账簿', ledger_id: '账簿', organization: '组织', organization_id: '组织', period: '期间', currency: '币种', unit: '单位', scenario: '情景',
 };
 
+const sourceColumnLabels: Record<string, string> = {
+  ratio_status: '差异率说明', favorability: '有利或不利', comparison_status: '比较状态',
+  management_account: '管理科目', amount: '金额', signed_amount: '带符号金额', numerator: '分子', denominator: '分母',
+  display_value: '显示值', row_count: '行数', bucket: '账龄段', customer: '客户', open_amount: '未清金额', invoice_id: '发票号',
+  as_of: '截至日期', week: '周', week_start: '周起始日', week_end: '周结束日', opening_cash: '期初现金', receipts: '收款',
+  payments: '付款', closing_cash: '期末现金', quantity_contribution: '数量影响', price_contribution: '价格影响',
+  interaction: '交互影响', total_variance: '总差异', residual: '残差',
+};
+
+/**
+ * A result column in the words the tables above use, for choosing which column's sources to open. The option's
+ * value stays the column's own name; two columns that read alike keep their names beside the label.
+ */
+function sourceColumnOptions(run: AnalysisRun, names: string[]): { name: string; label: string }[] {
+  const copy = isFinanceVarianceRun(run) ? financeVarianceCopy(run) : null;
+  const varianceLabels: Record<string, string> = copy ? { metric: '科目', actual: copy.actualLabel, baseline: copy.baselineLabel } : {};
+  const label = (name: string): string => varianceLabels[name] ?? financeScopeLabels[name] ?? sourceColumnLabels[name] ?? businessColumnLabel(name);
+  // The engine's exact companions (ratio_exact beside ratio) read as their base column, exactly.
+  const labels = names.map((name) => name.endsWith('_exact') && label(name) === name ? `${label(name.slice(0, -'_exact'.length))}（精确值）` : label(name));
+  return names.map((name, index) => ({
+    name, label: labels.indexOf(labels[index]) !== labels.lastIndexOf(labels[index]) && labels[index] !== name ? `${labels[index]}（${name}）` : labels[index],
+  }));
+}
+
 function formatVarianceRatio(value: unknown): string {
   if (value == null || value === '') return '—';
   const numeric = Number(value);
@@ -526,7 +550,7 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
       <div className="analysis-edit-grid"><label>结果行来源<select className="fnd-field" value={target} onChange={(event) => setTarget(event.target.value)}>
         <option value="">选择一行查看来源</option>{sourceRows.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
       </select></label><label>来源列（可选）<select className="fnd-field" value={column} onChange={(event) => setColumn(event.target.value)}>
-        <option value="">整行来源</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</select></label></div>
+        <option value="">整行来源</option>{sourceColumnOptions(run, columns).map(({ name, label }) => <option key={name} value={name}>{label}</option>)}</select></label></div>
       <Button variant="outline" type="button" disabled={busy || !target} onClick={() => void open()}>查看来源行</Button>
       {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
       {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>

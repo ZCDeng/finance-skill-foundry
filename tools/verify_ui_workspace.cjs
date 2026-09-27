@@ -8,10 +8,19 @@ const { execFileSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const assert = require('node:assert/strict');
 (async () => {
+  // UI_CHECKS picks the phases: first-screen (R12) and workspace (the flow below it); both by default. A run that
+  // leaves one out records status 'partial' and names it in skippedPhases; only a run of both can record 'passed'.
   const root = path.resolve(__dirname, '..');
-  const qa = fs.mkdtempSync('/tmp/finance-ui-workspace-');
   const output = path.resolve(process.env.UI_EVIDENCE_DIR || path.join(root, 'build/ui-workspace-review'));
   fs.mkdirSync(output, { recursive: true });
+  // No earlier verdict survives this run: until this run writes its own, there is no verification.json at all.
+  fs.rmSync(path.join(output, 'verification.json'), { force: true });
+  const allPhases = ['first-screen', 'workspace'];
+  const phases = (process.env.UI_CHECKS || allPhases.join(',')).split(',').map(phase => phase.trim()).filter(Boolean);
+  const unknownPhases = phases.filter(phase => !allPhases.includes(phase));
+  if (unknownPhases.length || !phases.length) throw new Error(`UI_CHECKS must name ${allPhases.join(' and/or ')}; got ${JSON.stringify(process.env.UI_CHECKS)}`);
+  const skippedPhases = allPhases.filter(phase => !phases.includes(phase));
+  const qa = fs.mkdtempSync('/tmp/finance-ui-workspace-');
   const bundle = path.resolve(process.env.UI_APP_BUNDLE || path.join(root, 'app/release/mac-arm64/FA Foundry.app'));
   const bin = path.join(bundle, 'Contents/Resources/foundry/foundry');
   const cli = (command, args = [], task) => { const raw = execFileSync(bin, ['--var', qa + '/var', ...(task ? ['--task', task] : []), command, ...args], { encoding: 'utf8' }).trim(); return command === 'task-new' ? { id: raw } : JSON.parse(raw); };
@@ -40,8 +49,13 @@ const assert = require('node:assert/strict');
   const app = await _electron.launch({ executablePath: path.join(bundle, 'Contents/MacOS/FA Foundry'), args: ['--user-data-dir=' + qa + '/profile'],
     env: { ...process.env, FOUNDRY_VAR: qa + '/var', FOUNDRY_BIN: undefined, FOUNDRY_DSH_INSTALL: undefined, FOUNDRY_FORMULATOR_BIN: undefined }, timeout: 45000 });
   const checks = []; const measures = []; const firstScreenMeasures = [];
-  // UI_CHECKS picks the phases: first-screen (R12) and workspace (the flow below it); both by default.
-  const phases = (process.env.UI_CHECKS || 'first-screen,workspace').split(',').map(phase => phase.trim());
+  // Every run rewrites verification.json, so a failed or partial run never leaves an earlier 'passed' in place.
+  const writeEvidence = (fields) => {
+    const evidence = { status: skippedPhases.length ? 'partial' : 'passed', skippedPhases, qa, output, synthetic: true, providerCalls: 0, phases,
+      notRun: skippedPhases.map(phase => `${phase}: UI_CHECKS leaves it out`), ...fields, checks, measures, firstScreen: firstScreenMeasures,
+      appAsarSha256: createHash('sha256').update(fs.readFileSync(bundle + '/Contents/Resources/app.asar')).digest('hex') };
+    fs.writeFileSync(output + '/verification.json', JSON.stringify(evidence, null, 2)); return evidence;
+  };
   try {
     const page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
     await page.locator('.workspace-header').waitFor();
@@ -75,7 +89,7 @@ const assert = require('node:assert/strict');
       } catch (error) { console.log('Full native-layer window capture unavailable:', error.message.slice(0,150)); }
       const measurement = await page.evaluate(() => ({ viewport: [innerWidth, innerHeight], font: getComputedStyle(document.body).fontFamily,
         horizontalOverflow: document.documentElement.scrollWidth > innerWidth, background: getComputedStyle(document.body).backgroundColor,
-        boxes: Object.fromEntries(['.fnd-head', '.workspace-header', '.workspace-native', '.workspace-results', '.analysis-result', '.analysis-table', '.analysis-draft-reading'].map(selector => {
+        boxes: Object.fromEntries(['.fnd-head', '.workspace-header', '.workspace-native', '.workspace-results', '.analysis-result', '.analysis-table', '.report-reading'].map(selector => {
           const node = document.querySelector(selector), rect = node?.getBoundingClientRect();
           return [selector, rect && node.checkVisibility() ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null];
         })) }));
@@ -147,35 +161,46 @@ const assert = require('node:assert/strict');
       }
       checks.push(`first screen at 1280 × 800, light and dark: ${seeded.title} shows its ${kind === 'finance' ? 'conclusion bar' : 'key figures'} unscrolled, above any settings, with no technical names${kind === 'legacy' ? ', cards marked 推断' : kind === 'declared' ? ', no card marked 推断' : ''}`);
     }
-    if (!phases.includes('workspace')) {
-      const evidence = { status: 'passed', qa, output, synthetic: true, providerCalls: 0, phases, notRun: ['workspace flow: UI_CHECKS leaves it out'], checks, measures, firstScreen: firstScreenMeasures,
-        appAsarSha256: createHash('sha256').update(fs.readFileSync(bundle + '/Contents/Resources/app.asar')).digest('hex') };
-      fs.writeFileSync(output + '/verification.json', JSON.stringify(evidence, null, 2)); console.log(JSON.stringify(evidence)); return;
-    }
+    if (!phases.includes('workspace')) { console.log(JSON.stringify(writeEvidence({}))); return; }
     await openTask('华东八月经营分析');
     await page.getByRole('table', { name: '业务结果' }).waitFor({ timeout: 30000 });
     await capture('results-1440', 1440, 900);
     await capture('results-1280', 1280, 800);
-    assert.ok(measures.at(-1).boxes['.analysis-table'].y < 450, 'result table in first viewport');
-    checks.push('first viewport contains result table at 1280 × 800');
+    // The whole 业务结果 table sits inside the visible part of the results pane, unscrolled.
+    const resultTable = await page.getByRole('table', { name: '业务结果' }).evaluate(node => {
+      const frame = document.querySelector('.workspace-results'), rect = node.getBoundingClientRect(), pane = frame.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, visibleTop: Math.max(0, pane.top), visibleBottom: Math.min(innerHeight, pane.bottom), scrollTop: frame.scrollTop };
+    });
+    measures.push({ name: 'results-1280 业务结果 table', resultTable });
+    assert.equal(resultTable.scrollTop, 0, 'results pane opens unscrolled');
+    assert.ok(resultTable.top >= resultTable.visibleTop && resultTable.bottom <= resultTable.visibleBottom,
+      `业务结果 table ${resultTable.top}–${resultTable.bottom} inside the first screen (${resultTable.visibleTop}–${resultTable.visibleBottom})`);
+    checks.push('first viewport contains the whole 业务结果 table at 1280 × 800');
     await page.getByRole('tab', { name: /资料/ }).click();
     assert.equal(await page.locator('.analysis-source-refresh').getAttribute('open'), null, 'ERP refresh starts collapsed');
     await capture('materials-collapsed-1280', 1280, 800);
     await page.getByText('更新 ERP 来源', { exact: true }).click();
     const ledger = page.getByLabel('账簿', { exact: true });
+    await ledger.evaluate(node => node.scrollIntoView({ block: 'center' }));
     await ledger.focus();
     await ledger.hover();
-    await capture('materials-focus-light-1280', 1280, 800);
-    await capture('materials-focus-dark-1280', 1280, 800, true);
-    const focus = await ledger.evaluate(node => {const css=getComputedStyle(node);return {outline:css.outlineWidth,offset:css.outlineOffset,border:css.borderColor,color:css.outlineColor};});
-    assert.equal(focus.outline, '2px'); assert.equal(focus.offset, '-1px'); assert.equal(focus.border, 'rgba(255, 255, 255, 0.14)'); assert.equal(focus.color, 'rgb(226, 193, 128)');
-    checks.push('ERP refresh starts collapsed; real ledger hover+focus has one inset edge in both themes');
+    // DESIGN.md 按钮与字段: a focused field keeps its neutral --fnd-line border (no hover paint) under a 1px --fnd-focus
+    // outline offset -1px, so hover + focus paints one edge. Token values from the DESIGN.md front matter / tokens.css.
+    const fieldFocus = { light: { border: 'rgba(31, 31, 31, 0.14)', color: 'rgb(138, 103, 41)' }, dark: { border: 'rgba(255, 255, 255, 0.14)', color: 'rgb(191, 163, 108)' } };
+    for (const theme of ['light', 'dark']) {
+      await capture(`materials-focus-${theme}-1280`, 1280, 800, theme === 'dark');
+      const focus = await ledger.evaluate(node => { const css = getComputedStyle(node);
+        return { focusVisible: node.matches(':focus-visible'), hovered: node.matches(':hover'), outline: css.outlineWidth, style: css.outlineStyle, offset: css.outlineOffset, border: css.borderColor, color: css.outlineColor }; });
+      measures.push({ name: `materials-focus-${theme}-1280 ledger`, focus });
+      assert.deepEqual(focus, { focusVisible: true, hovered: true, outline: '1px', style: 'solid', offset: '-1px', ...fieldFocus[theme] }, `${theme} ledger hover + focus`);
+    }
+    checks.push('ERP refresh starts collapsed; hovered and focused ledger field keeps its neutral border under one 1px inset --fnd-focus outline, light and dark');
     await page.getByText('更新 ERP 来源', { exact: true }).click();
     await page.getByRole('tab', { name: /分析结果/ }).click();
     await page.getByText('口径与计算定义', { exact: true }).click();
     await page.getByLabel('总部费用分摊（万元）', { exact: true }).fill('30.00');
     await page.getByRole('button', { name: '保存新版并重跑', exact: true }).click();
-    await page.getByRole('cell', { name: '240.00', exact: true }).waitFor({ timeout: 20000 });
+    await page.getByRole('table', { name: '业务结果' }).getByRole('cell', { name: '240.00', exact: true }).waitFor({ timeout: 20000 });
     await page.locator('.workspace-results').evaluate(node => { node.scrollTop = 0; });
     checks.push('named decimal parameter saves a new version and changes actual result 250 → 240');
     await page.getByRole('button', { name: '查看本次计算依据' }).click();
@@ -184,8 +209,11 @@ const assert = require('node:assert/strict');
     assert.equal(await page.getByRole('button', { name: '查看本次计算依据' }).evaluate(node => node === document.activeElement), true);
     await page.getByRole('button', { name: '查看本次计算依据' }).click();
     await page.getByRole('button', { name: '查看 八月经营数据', exact: true }).click();
-    await page.getByRole('heading', { name: '八月经营数据', exact: true }).waitFor();
-    checks.push('run alias opens the exact source snapshot in the material view');
+    // The snapshot opens in the 依据资料 preview on the results tab, naming the dataset version the run bound.
+    const preview = page.getByRole('region', { name: '依据资料预览' });
+    await preview.getByRole('heading', { name: '八月经营数据', exact: true }).waitFor();
+    assert.ok((await preview.locator('details').first().textContent()).includes(`资料版本：${dataset.id}`), 'preview names the bound snapshot');
+    checks.push('run alias opens the exact source snapshot in the 依据资料 preview');
     await page.getByRole('tab', { name: /分析结果/ }).click();
     const closeEvidence = page.getByRole('button', { name: '关闭计算依据' });
     if (await closeEvidence.isVisible()) await closeEvidence.click();
@@ -196,22 +224,59 @@ const assert = require('node:assert/strict');
     await page.getByRole('table', { name: '对照版本数据' }).scrollIntoViewIfNeeded();
     await capture('comparison-1440', 1440, 900);
     checks.push('saved runs compare and evidence closes with Escape returning focus');
+    // 文稿 (DraftEditor + ReportEditor): a saved draft opens in 阅读 mode inside the 文稿工作区, its toolbar saying
+    // 文稿 · 草稿 · 未阅, the Markdown rendered as a document at the 16px/28px reading size with 18px after each paragraph.
     await page.getByRole('tab', { name: /文稿/ }).click();
-    await page.locator('.analysis-draft-reading').scrollIntoViewIfNeeded();
+    const reading = page.getByRole('article', { name: '文稿阅读' });
+    await reading.waitFor();
+    const modes = page.getByRole('tablist', { name: '文稿模式' });
+    assert.equal(await modes.getByRole('tab', { name: '阅读', exact: true }).getAttribute('aria-selected'), 'true', 'a saved draft opens in 阅读');
+    const toolbar = page.getByRole('group', { name: '文稿工具栏' });
+    assert.equal(await toolbar.getByRole('heading', { level: 3 }).innerText(), '文稿');
+    assert.match(await toolbar.locator('.report-status').innerText(), /^草稿 · 未阅 · 检查：/, 'toolbar states the draft revision');
+    await reading.getByRole('heading', { name: '八月经营分析备忘', exact: true }).waitFor();
+    for (const section of ['经营表现', '口径与判断']) await reading.getByRole('heading', { name: section, exact: true }).waitFor();
+    assert.equal(await reading.locator('strong').filter({ hasText: '250 万元' }).count(), 1, 'Markdown emphasis rendered, not shown as **');
+    assert.deepEqual(await reading.getByRole('listitem').allInnerTexts(), ['继续核对区域费用明细。', '将预算与实际数据按同一口径比较。']);
+    assert.equal((await reading.innerText()).includes('**'), false, 'no raw Markdown markers in the reading view');
+    const readingType = await reading.evaluate(node => { const css = getComputedStyle(node), paragraph = getComputedStyle(node.querySelector('p'));
+      return { font: css.fontFamily.split(',')[0].replaceAll('"', ''), size: css.fontSize, leading: css.lineHeight, after: paragraph.marginBottom }; });
+    measures.push({ name: 'draft reading type', readingType });
+    assert.deepEqual(readingType, { font: 'Noto Sans SC', size: '16px', leading: '28px', after: '18px' }, 'reading typography per DESIGN.md');
+    await reading.scrollIntoViewIfNeeded();
     await capture('draft-1440', 1440, 900);
     await capture('draft-dark-1280', 1280, 800, true);
-    await page.getByRole('button', { name: '编辑文稿', exact: true }).click();
+    checks.push('saved draft opens in 阅读 with its revision state, rendered Markdown and 16px/28px reading type');
+    // 编辑: the manager rewrites the body through the Markdown source field; the visual editor follows it and the
+    // draft is marked changed (未阅, not rechecked) with the note that export saves it first.
+    await modes.getByRole('tab', { name: '编辑', exact: true }).click();
+    assert.equal(await page.getByRole('textbox', { name: '文稿标题', exact: true }).inputValue(), '八月经营分析备忘');
+    const source = page.getByRole('textbox', { name: '文稿正文', exact: true });
+    assert.ok((await source.inputValue()).startsWith('## 经营表现'), 'Markdown source holds the saved body');
     const body = '经理补充：继续核对实际费用归属；本文所附计算仍保留原来的分摊口径，后续采用新版测算时再更新引用。';
-    await page.locator('.analysis-draft-fields textarea').first().fill(body);
-    await app.evaluate(({ shell }) => { globalThis.__uiOpened = []; shell.openPath = async file => { globalThis.__uiOpened.push(file); return ''; }; });
-    await page.getByText('导出', { exact: true }).click();
+    await source.fill(body);
+    await page.getByLabel('可视化文稿编辑器', { exact: true }).filter({ hasText: body }).waitFor();
+    assert.match(await toolbar.locator('.report-status').innerText(), /^草稿 · 未阅 · 检查：改稿后未重检$/, 'an edited body reads as not rechecked');
+    await page.getByRole('button', { name: '保存文稿新版', exact: true }).waitFor();
+    await page.getByText('交给助手或导出时，会先保存当前内容为新版本。', { exact: true }).waitFor();
+    await toolbar.evaluate(node => node.scrollIntoView({ block: 'start' }));
+    await capture('draft-edit-1280', 1280, 800);
+    // Export asks main for a save path; answer it inside the isolated QA folder instead of showing the dialog.
+    const exportPath = qa + '/exports/八月经营分析备忘-management.xlsx';
+    fs.mkdirSync(path.dirname(exportPath), { recursive: true });
+    await app.evaluate(({ dialog }, file) => { globalThis.__uiSaveDialogs = []; dialog.showSaveDialog = async (...args) => { globalThis.__uiSaveDialogs.push(args.at(-1)); return { canceled: false, filePath: file }; }; }, exportPath);
+    await toolbar.getByRole('button', { name: '导出', exact: true }).click();
     await page.getByRole('menuitem', { name: /导出工作簿/ }).click();
-    await page.getByRole('status').filter({ hasText: '已导出工作簿' }).waitFor({ timeout: 15000 });
-    const exported = await app.evaluate(() => globalThis.__uiOpened);
-    assert.equal(exported.length, 1); assert.ok(fs.readFileSync(exported[0]).subarray(0, 2).equals(Buffer.from('PK')));
+    await page.getByRole('status').filter({ hasText: `已导出工作簿：${exportPath}` }).waitFor({ timeout: 30000 });
+    const dialogs = await app.evaluate(() => globalThis.__uiSaveDialogs);
+    assert.equal(dialogs.length, 1); assert.equal(dialogs[0].title, '导出财务文稿');
+    const exported = [exportPath]; assert.ok(fs.readFileSync(exportPath).subarray(0, 2).equals(Buffer.from('PK')), 'exported workbook is a zip');
     const state = cli('analysis-state', [], task.id);
-    assert.equal(state.drafts.at(-1).body, body); assert.equal(state.analyses.length, 2); assert.equal(state.runs.length, 2);
-    checks.push('export saves dirty draft and writes a valid workbook for that exact version');
+    assert.equal(state.drafts.length, 2, 'export saved the edited body as a new draft version');
+    assert.equal(state.drafts.at(-1).body, body); assert.equal(state.drafts.at(-1).parent_id, state.drafts[0].id);
+    assert.deepEqual(state.drafts.at(-1).run_ids, [run.id], 'editing the body keeps the cited run');
+    assert.equal(state.analyses.length, 2); assert.equal(state.runs.length, 2);
+    checks.push('编辑 via Markdown source marks the draft changed; export saves it as a new version citing the same run and writes a valid workbook');
     await page.getByRole('tab', { name: /分析结果/ }).click();
     await capture('results-narrow-1080', 1080, 760);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children
@@ -232,12 +297,12 @@ const assert = require('node:assert/strict');
     await capture('new-task-1280', 1280, 800);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].contentView.children
       .filter(child => child.webContents).some(child => child.getVisible())), false, 'native layer is hidden on new task');
-    const evidence = { status: 'passed', qa, output, task: task.id, synthetic: true, providerCalls: 0, phases, checks, measures, firstScreen: firstScreenMeasures,
-      exportedDraft: state.drafts.at(-1), exportedRuns: state.drafts.at(-1).run_ids.map(id => state.runs.find(row => row.id === id)),
-      exported: exported[0], appAsarSha256: createHash('sha256').update(fs.readFileSync(bundle + '/Contents/Resources/app.asar')).digest('hex') };
-    fs.writeFileSync(output + '/verification.json', JSON.stringify(evidence, null, 2)); console.log(JSON.stringify(evidence));
+    console.log(JSON.stringify(writeEvidence({ task: task.id, exportedDraft: state.drafts.at(-1),
+      exportedRuns: state.drafts.at(-1).run_ids.map(id => state.runs.find(row => row.id === id)), exported: exported[0] })));
   } catch (error) {
-    console.error('DOM:', await (await app.firstWindow()).locator('body').innerText());
+    writeEvidence({ status: 'failed', error: String(error) });
+    try { console.error('DOM:', await (await app.firstWindow()).locator('body').innerText()); }
+    catch (dump) { console.error('DOM unavailable:', String(dump)); }
     console.error(JSON.stringify({ qa, output, checks, measures, firstScreen: firstScreenMeasures, error: String(error) })); throw error;
   } finally { await app.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
