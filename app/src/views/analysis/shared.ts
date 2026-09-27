@@ -1,6 +1,9 @@
 import { shortSha, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import type { SelectOption } from '../../components/FinancialControls.js';
+import { friendlyError } from './glossary.js';
+
+export { errorText, friendlyError } from './glossary.js';
 
 export const metricLabel = (value: unknown): string => {
   if (value && typeof value === 'object' && 'name' in value && 'expression' in value
@@ -10,8 +13,9 @@ export const metricLabel = (value: unknown): string => {
   return textValue(value);
 };
 
+/** The engine's answer, or its refusal as the manager should read it (the engine sentence stays as 系统提示). */
 export function unwrap<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
+  if (!answer.ok) throw new Error(friendlyError(answer.message));
   return answer.value;
 }
 

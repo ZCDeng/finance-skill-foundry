@@ -36,7 +36,7 @@ export function RevisionDiff({ current, previous, currentRevision, previousRevis
   const hasBackendComparison = Boolean(comparison);
   const backendIssues = comparison?.issues ?? [];
   const changes = hasBackendComparison ? [] : compareBusinessRuns(current, previous);
-  if (!previous && !hasBackendComparison) return <p className="analysis-note">暂无可比较的上一版业务结果。</p>;
+  if (!previous && !hasBackendComparison) return <p className="analysis-note">暂无可比较的上一版结果。</p>;
   return <section className="analysis-revision-diff" aria-label="修订差异">
     <div className="analysis-section-heading">
       <div><h4>修订差异</h4><p className="analysis-note">基于稳定业务身份比较，不按行号推断。</p></div>
@@ -68,15 +68,15 @@ function BackendComparisonBody({ comparison, issues }: { comparison: BackendRevi
     </div>;
   }
   if (status === 'no_comparable_runs') {
-    return <p className="analysis-note">后端没有找到可比较运行；未回退到本地行序或字段猜测。</p>;
+    return <p className="analysis-note">没有找到可以比较的上一次计算；系统不会按行序或字段名猜测对应关系。</p>;
   }
   if (status === 'no_parent') {
-    return <p className="analysis-note">后端没有找到上一版修订，无法生成修订差异。</p>;
+    return <p className="analysis-note">没有找到上一版修订，无法生成修订差异。</p>;
   }
   if (status === 'ambiguous' || status === 'revision_comparison_ambiguous') {
-    return <p className="analysis-note">后端判定可比较范围存在歧义；未回退到本地行序或字段猜测。</p>;
+    return <p className="analysis-note">两次计算的可比范围有歧义，无法自动对应；系统不会按行序或字段名猜测。</p>;
   }
-  return <p className="analysis-note">后端比较完成：{comparedCountText(comparison)}未发现需要处理的修订差异。</p>;
+  return <p className="analysis-note">比较完成：{comparedCountText(comparison)}未发现需要处理的修订差异。</p>;
 }
 
 function comparisonSummary(comparison?: BackendRevisionComparison): string {
@@ -98,7 +98,7 @@ function statusLabel(status: string): string {
     needs_attention: '需要处理',
     pass: '已比较',
     no_parent: '无上版',
-    no_comparable_runs: '无可比运行',
+    no_comparable_runs: '无可比计算',
     ambiguous: '比较歧义',
     revision_comparison_ambiguous: '比较歧义',
   } as Record<string, string>)[status] ?? status;

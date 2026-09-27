@@ -4,6 +4,8 @@ import { bridge, type Answer, type FinanceContextState } from '../../bridge.js';
 import { AccountingPeriodInput, FieldShell, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
+import { CURRENCY_OPTIONS, RESULT_SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
+import { errorText, unwrap } from './shared.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -86,32 +88,20 @@ export type RequirementsPanelProps = {
 
 const blankScope: RequirementScope = {};
 const metricOptions = [
-  { value: 'profit', label: '利润', meta: 'profit / management_profit' },
-  { value: 'revenue', label: '收入', meta: 'revenue' },
-  { value: 'cost', label: '成本', meta: 'cost' },
-  { value: 'expense', label: '费用', meta: 'expense' },
-  { value: 'open_amount', label: '应收余额', meta: '账龄 open_amount' },
-  { value: 'closing_cash', label: '期末现金', meta: '13周现金 closing_cash' },
-  { value: 'ratio', label: '比率', meta: 'ratio' },
-  { value: 'control_totals', label: '控制合计', meta: 'control_totals' },
-  { value: 'account_total', label: '科目合计', meta: 'account_total' },
-  { value: 'total_variance', label: '总额差异', meta: 'total_variance' },
-  { value: 'price_quantity', label: '量价分解', meta: 'price_quantity' },
+  { value: 'profit', label: '利润', meta: '营业利润或管理口径利润' },
+  { value: 'revenue', label: '收入' },
+  { value: 'cost', label: '成本' },
+  { value: 'expense', label: '费用' },
+  { value: 'open_amount', label: '应收余额', meta: '账龄分析' },
+  { value: 'closing_cash', label: '期末现金', meta: '13 周现金预测' },
+  { value: 'ratio', label: '比率' },
+  { value: 'control_totals', label: '控制合计' },
+  { value: 'account_total', label: '科目合计' },
+  { value: 'total_variance', label: '总额差异' },
+  { value: 'price_quantity', label: '量价分解' },
 ];
-const currencyOptions = [
-  { value: 'CNY', label: 'CNY', meta: '人民币' },
-  { value: 'USD', label: 'USD', meta: '美元' },
-  { value: 'EUR', label: 'EUR', meta: '欧元' },
-];
-const unitOptions = [
-  { value: '万元', label: '万元', meta: '管理报表常用' },
-  { value: '元', label: '元', meta: '明细账常用' },
-];
-
-function unwrap<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value;
-}
+const currencyOptions = CURRENCY_OPTIONS;
+const unitOptions = UNIT_OPTIONS;
 
 function normalizeScope(value: unknown): RequirementScope & Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...blankScope };
@@ -372,7 +362,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       setInvalidItemDimensions(new Set());
     })().catch((reason: unknown) => {
       if (requestSeq.current !== seq) return;
-      setError(reason instanceof Error ? reason.message : '读取分析要求失败。');
+      setError(errorText(reason));
       setRecords([]);
       setCurrent(null);
       setQuestion('');
@@ -478,7 +468,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       setMessage(`已保存要求版本 ${shortId(saved.id)}。保存不会自动计算或批准文稿。`);
       onChanged?.(saved);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存分析要求失败。');
+      setError(errorText(reason));
     } finally {
       setSaving(false);
     }
@@ -542,7 +532,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, onCh
       {removedExisting.length ? <TextField label="删除要求的变更原因" value={changeReason} onChange={setChangeReason}
         error={changeReason.trim() ? undefined : '删要求必须写明变更原因。'} placeholder="例如：经理改为只核对范围，不再要求费用下钻。" /> : null}
       <details className="analysis-details"><summary>高级：绑定与历史版本</summary>
-        <p className="analysis-note">绑定随当前口径保存。上下文口径存在时，后端会校验并补齐授权绑定。</p>
+        <p className="analysis-note">Excel 区域随当前范围一起保存；有已保存的财务范围时，系统会自动核对并补齐。</p>
         <pre className="analysis-source-text">{JSON.stringify({ context_id: contextId ?? current?.context_id ?? null, bindings, versions: records.map((record) => record.id) }, null, 2)}</pre>
       </details>
     </fieldset>
@@ -639,17 +629,18 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     </FieldShell>
     <FieldShell label="须逐一覆盖的结果情景">
       <div className="analysis-actions">
-        <TextField label={`添加结果情景 ${index + 1}`} value={nextScenario} onChange={setNextScenario} placeholder="例如：actual_ytd、budget_ytd、achievement_ratio" />
+        <SearchableSelect label={`添加结果情景 ${index + 1}`} value={nextScenario} onChange={setNextScenario} placeholder="选择情景"
+          options={RESULT_SCENARIO_OPTIONS.filter((option) => !scenarios.includes(option.value))} />
         <Button variant="outline" type="button" onClick={addScenario} disabled={!nextScenario.trim() || scenarios.includes(nextScenario.trim())}>添加情景</Button>
       </div>
       {scenarios.length ? <div className="analysis-actions" aria-label={`已选结果情景 ${index + 1}`}>
-        {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" onClick={() => removeScenario(scenario)}>{scenario} ×</Button>)}
-      </div> : <p className="analysis-note">只在承诺多个结果情景时填写；每个组织、期间和情景都须有对应结果。情景键须与运行结果中的 scenario 一致。</p>}
+        {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" title={scenario} onClick={() => removeScenario(scenario)}>{scenarioLabel(scenario)} ×</Button>)}
+      </div> : <p className="analysis-note">只在同一指标要同时给出多个口径（如累计实际、累计预算、达成率）时填写；每个组织、期间和情景都须有对应结果。</p>}
     </FieldShell>
-    <div>
+    <details className="analysis-details"><summary>高级：精确结果键</summary>
       <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
-      <p className="analysis-note">与运行结果中的 metric_key 完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
-    </div>
+      <p className="analysis-note">与计算结果中的指标键完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
+    </details>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {
         const next = event.target.value;
@@ -659,7 +650,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
       }} /></label>
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
     {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
-    <div className="analysis-actions"><span className="analysis-note">稳定 ID：{item.id}</span>
+    <div className="analysis-actions"><span className="analysis-note" title={item.id}>编号 {item.id.slice(0, 8)}</span>
       <Button variant="destructive" type="button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</Button></div>
   </article>;
 }
@@ -669,7 +660,7 @@ function RequirementSupportHint({ support, stale }: { support: RequirementSuppor
     return <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />条件已修改，保存后重新检查资料匹配。</p>;
   }
   if (support.status === 'requires_execution') {
-    return <p className="analysis-note">{support.next_action || `已识别为 ${support.canonical_metric || '可分析指标'}，保存后可运行分析。`}</p>;
+    return <p className="analysis-note">{support.next_action || `已识别为 ${support.canonical_metric || '可分析指标'}，保存后即可计算。`}</p>;
   }
   const missing = support.missing_inputs?.length ? `缺少资料：${support.missing_inputs.map(formatMissingInput).join('、')}。` : '';
   const action = support.next_action || ({

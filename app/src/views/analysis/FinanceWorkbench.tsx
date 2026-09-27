@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
 import { FinanceChartPanel } from './FinanceChartPanel.js';
-import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap } from './shared.js';
+import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
 
 function bridgeScenarioLabels(context?: FinanceContext): { actual: string; baseline: string } {
   const scopes = context?.scopes ?? {};
@@ -111,7 +111,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
         setFinance(value);
         context = value.contexts.find((item) => item.id === wanted);
       } catch (failure) {
-        setError(failure instanceof Error ? failure.message : String(failure));
+        setError(errorText(failure));
         return;
       }
     }
@@ -148,7 +148,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
         await work((message, run) => { succeeded = true; note('ok', run); onOutcome({ label, result: 'ok', message, at: new Date().toISOString() }); });
         if (!succeeded) note('cancelled');
       } catch (failure) {
-        const message = failure instanceof Error ? failure.message : String(failure);
+        const message = errorText(failure);
         // After done only reading the page back can fail; the operation itself went through.
         if (succeeded) setError(message);
         else { note('error'); onOutcome({ label, result: 'error', message, at: new Date().toISOString() }); }
@@ -165,7 +165,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, openRequest = {
         setFinance(value);
         setContextId((current) => current || value.contexts.at(-1)?.id || '');
       }
-    }).catch((failure) => { if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure)); });
+    }).catch((failure) => { if (!cancelled) setError(errorText(failure)); });
     return () => { cancelled = true; };
   }, [taskId]);
   function saveContext(runAfter?: 'pnl' | 'bridge') {

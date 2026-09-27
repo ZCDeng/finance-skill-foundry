@@ -4,6 +4,7 @@ import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import './WorkbookBrowser.css';
+import { errorText, unwrap } from './shared.js';
 
 export interface WorkbookCellPreview {
   address: string;
@@ -140,7 +141,7 @@ export function WorkbookBrowser({
       onRangePicked?.({ sheet: next.sheet, range: next.range, preview: next });
     } catch (failure) {
       if (requestSeq.current !== seq) return;
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       if (requestSeq.current === seq) setWorking(false);
     }
@@ -233,8 +234,7 @@ export function WorkbookBrowser({
 }
 
 function unwrapAnswer<T>(answer: Answer<Record<string, unknown>>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value as T;
+  return unwrap(answer) as T;
 }
 
 function cellTitle(cell: WorkbookCellPreview): string {

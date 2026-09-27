@@ -694,8 +694,8 @@ describe('business result components', () => {
     const current = run([{ metric_key: 'revenue', actual: '344487.0552' }]);
     render(<RevisionDiff current={current} previous={previous} currentRevision={4} previousRevision={3}
       comparison={{ summary: { status: 'no_comparable_runs', issue_count: 0, compared_business_keys: 0 }, issues: [] }} />);
-    expect(screen.getByText(/无可比运行/)).toBeTruthy();
-    expect(screen.getByText('后端没有找到可比较运行；未回退到本地行序或字段猜测。')).toBeTruthy();
+    expect(screen.getByText(/无可比计算/)).toBeTruthy();
+    expect(screen.getByText('没有找到可以比较的上一次计算；系统不会按行序或字段名猜测对应关系。')).toBeTruthy();
     expect(screen.queryByText(/344,487.06/)).toBeNull();
   });
 

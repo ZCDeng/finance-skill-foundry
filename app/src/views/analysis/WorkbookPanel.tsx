@@ -6,7 +6,7 @@ import { WaitOrb } from '../../components/WaitOrb.js';
 import { FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
-import { datasetOptions, runOptions, unwrap } from './shared.js';
+import { datasetOptions, runOptions, unwrap, errorText } from './shared.js';
 
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
@@ -67,7 +67,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       setInspection(result); setMessage('已读取工作簿结构。');
     } catch (failure) {
       if (request === workbookRequest.current) {
-        const text = failure instanceof Error ? failure.message : String(failure);
+        const text = errorText(failure);
         setInspectionError(text);
         setError(text);
       }
@@ -84,7 +84,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       const result = await call('workbook-bind', { dataset_id: datasetId, source: sourceSpec(), fields: parsed, role, writable: role === 'output', header: true });
       if (request !== workbookRequest.current) return;
       setBindingId(String(result.id ?? '')); setPreview(null); setResolutions({}); setMessage('已保存 Excel 区域绑定。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function circleSelect() {
     try {
@@ -92,7 +92,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       if (!contextId) throw new Error('请先保存财务口径。');
       await call('analysis-circle-select', { kind: 'workbook', binding_id: bindingId, range: range || sourceName || 'A:A', instruction: '改成开票口径', context_id: contextId });
       setMessage('已按圈选生成开票口径修订。');
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { setError(errorText(failure)); }
   }
   async function read() {
     const request = ++workbookRequest.current;
@@ -101,7 +101,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       const result = await call('workbook-read', { binding_id: bindingId, dataset_id: datasetId });
       if (request !== workbookRequest.current) return;
       setReadResult(result); setMessage('已读取绑定区域。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function previewPatch() {
     const request = ++workbookRequest.current;
@@ -117,7 +117,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
         .filter((cell) => cell.conflict === true && cell.cell)
         .map((cell) => [String(cell.cell), 'keep'])));
       setPreview(result); setMessage('已生成写回预览。冲突单元格需要选择保留或应用后再生成文件。');
-    } catch (failure) { if (request === workbookRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === workbookRequest.current) setError(errorText(failure)); }
   }
   async function applyPatch() {
     try {
@@ -125,7 +125,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       if (!preview?.patch_id) throw new Error('请先生成写回预览。');
       const result = await call('workbook-apply', { patch_id: preview.patch_id, resolutions });
       setMessage(`已生成协作工作簿：${textValue(result.artifact_path ?? result.path ?? result.id)}`);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { setError(errorText(failure)); }
   }
   const sheetNames = Array.isArray(inspection?.sheet_names) ? inspection.sheet_names.map(String) : [];
   const tables = Array.isArray(inspection?.tables) ? inspection.tables.map(String) : [];

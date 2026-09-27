@@ -22,7 +22,7 @@ import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './anal
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
-import { datasetSize, structureLabel, unwrap } from './analysis/shared.js';
+import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
 type Selection = { analysis?: string; draft?: string };
@@ -117,7 +117,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     const taskId = task.id;
     setLoading(true);
     void refresh(taskId).catch((failure: unknown) => {
-      if (active.current && currentTask.current === taskId) setError(String(failure instanceof Error ? failure.message : failure));
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
     }).finally(() => { if (active.current && currentTask.current === taskId) setLoading(false); });
   }, [task?.id, refresh]);
   useEffect(() => {
@@ -129,7 +129,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     const taskId = task.id;
     setLoading(true);
     void refresh(taskId).catch((failure: unknown) => {
-      if (active.current && currentTask.current === taskId) setError(failure instanceof Error ? failure.message : String(failure));
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
     }).finally(() => { if (active.current && currentTask.current === taskId) setLoading(false); });
   }, [visible, task?.id, refresh]);
   useEffect(() => {
@@ -154,7 +154,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     operation.current = true; setBusy(true); setError(''); setNotice('');
     try { await work(taskId); }
     catch (failure) {
-      if (active.current && currentTask.current === taskId) setError(failure instanceof Error ? failure.message : String(failure));
+      if (active.current && currentTask.current === taskId) setError(errorText(failure));
     } finally { operation.current = false; if (active.current) setBusy(false); }
   }
   // Timed from the click, but main takes off the minutes the file dialog stood open.
@@ -200,7 +200,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         submit: !pending.withFiles, requestId: pending.requestId, targetTaskId: pending.taskId,
       });
     } catch (failure) {
-      if (currentTask.current === pending.taskId) setError(failure instanceof Error ? failure.message : String(failure));
+      if (currentTask.current === pending.taskId) setError(errorText(failure));
     } finally { operation.current = false; if (active.current) setBusy(false); }
   }
   async function create(withFiles = false) {
@@ -218,7 +218,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       }
       if (pendingStart.current?.taskId) submission.current.taskId = pendingStart.current.taskId;
     }
-    catch (failure) { pendingStart.current = null; setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { pendingStart.current = null; setError(errorText(failure)); }
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   async function chat(prompt?: string, draftId?: string) {
@@ -229,7 +229,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       await handoff(prompt, draftId, retry && retry.taskId === task?.id && retry.question === prompt
         ? { submit: retry.submit, requestId: retry.requestId, targetTaskId: retry.taskId } : undefined);
     }
-    catch (failure) { if (active.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { if (active.current) setError(errorText(failure)); }
     finally { operation.current = false; if (active.current) setBusy(false); }
   }
   const view = state?.task_id === task?.id ? state : null;

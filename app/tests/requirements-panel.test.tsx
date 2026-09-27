@@ -354,11 +354,12 @@ describe('requirements panel', () => {
     render(<RequirementsPanel taskId={taskId} />);
 
     const profit = await screen.findByLabelText('必答指标 1');
-    expect(within(profit).getByText('actual_ytd ×')).toBeTruthy();
-    const input = within(profit).getByLabelText('添加结果情景 1');
-    fireEvent.change(input, { target: { value: 'budget_ytd' } });
+    expect(within(profit).getByText('累计实际 ×')).toBeTruthy();
+    fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /^累计预算/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
-    fireEvent.change(input, { target: { value: 'achievement_ratio' } });
+    fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /^达成率/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
 

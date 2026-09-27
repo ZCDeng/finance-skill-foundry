@@ -69,6 +69,7 @@ import {
   textContent,
 } from "../../../electron/reports/format.js";
 import "./report.css";
+import { errorText, unwrap } from './shared.js';
 
 type ReportMode = "read" | "edit" | "print";
 type ExportFormat = ReportFormat;
@@ -208,11 +209,6 @@ const ReportNote = Node.create({
     0,
   ],
 });
-
-function unwrap<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value;
-}
 
 function documentFromEditor(
   editor: Editor,
@@ -536,7 +532,7 @@ export function ReportEditor({
       }) as Answer<Record<string, unknown>>);
       setCircleMessage("已按圈选生成开票口径修订。");
     } catch (failure) {
-      setToolError(failure instanceof Error ? failure.message : String(failure));
+      setToolError(errorText(failure));
     } finally {
       setCircleBusy(false);
     }
@@ -590,7 +586,7 @@ export function ReportEditor({
             renderReportHtml(workingDocument, title, { print: true }),
           );
           setToolError(
-            failure instanceof Error ? failure.message : String(failure),
+            errorText(failure),
           );
         }
       }
@@ -663,7 +659,7 @@ export function ReportEditor({
       const listed = unwrap(await api.financeCall(taskId, 'report-template-list', {}) as Answer<{ templates?: { template_id: string; label: string; kind: string }[] }>);
       setTemplates(listed.templates ?? []);
     } catch (failure) {
-      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+      setTemplateError(errorText(failure));
     }
   }
 
@@ -676,7 +672,7 @@ export function ReportEditor({
       if (published && published.cancelled) return;
       await loadTemplates();
     } catch (failure) {
-      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+      setTemplateError(errorText(failure));
     }
   }
 
@@ -691,7 +687,7 @@ export function ReportEditor({
       if (onAppliedDraft) onAppliedDraft(draft);
       else if (draft.document) commitDocument({ ...draft.document, template_id: templateId });
     } catch (failure) {
-      setTemplateError(failure instanceof Error ? failure.message : String(failure));
+      setTemplateError(errorText(failure));
     }
   }
 
@@ -857,7 +853,7 @@ export function ReportEditor({
       } else setPdfSource(null);
     } catch (failure) {
       setToolError(
-        failure instanceof Error ? failure.message : String(failure),
+        errorText(failure),
       );
     } finally {
       setImporting(false);

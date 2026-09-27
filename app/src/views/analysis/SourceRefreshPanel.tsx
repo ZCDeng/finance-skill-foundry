@@ -4,7 +4,7 @@ import { bridge, shortSha, timeWait, when, type Answer, type FinanceSourceBatch 
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 // The engine refreshes a whole period or only what changed since the last refresh; it takes nothing else.
 type SourceRefreshMode = 'full_period' | 'incremental';
@@ -49,7 +49,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
           : '文件内容与已发布快照一致，已保留原结果引用。');
       });
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setRefreshing(false);
     }
@@ -58,27 +58,27 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
     && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
   return <details className="analysis-source-refresh" aria-label="刷新财务来源">
     <summary><span><span className="analysis-source-refresh-title">更新 ERP 来源</span>
-      <span className="analysis-note">已有来源导出变化时，生成新的资料版本；旧运行仍引用旧快照。</span></span>
+      <span className="analysis-note">来源系统重新导出后，在这里生成新的资料版本；已完成的计算仍按当时的资料保留。</span></span>
       <ChevronDown size={16} aria-hidden /></summary>
     <fieldset className="analysis-fieldset" disabled={busy || refreshing}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
-      <TextField label="租户/账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
+      <TextField label="账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
       <TextField label="账簿" value={scope.ledger_id} onChange={(value) => setScope({ ...scope, ledger_id: value })} />
       <TextField label="组织" value={scope.organization_id} onChange={(value) => setScope({ ...scope, organization_id: value })} />
       <AccountingPeriodInput label="期间" value={scope.period} onChange={(value) => setScope({ ...scope, period: value })} />
       <TextField label="截止时间" value={scope.cutoff_at} placeholder="2026-08-31T23:59:59+08:00" onChange={(value) => setScope({ ...scope, cutoff_at: value })} />
       <TextField label="币种" value={scope.currency} onChange={(value) => setScope({ ...scope, currency: value })} />
-      <TextField label="来源产品" value={product} onChange={setProduct} />
+      <TextField label="来源系统" value={product} onChange={setProduct} />
     </div>
-    <details className="analysis-details"><summary>高级：来源身份与刷新方式</summary><div className="analysis-edit-grid">
+    <details className="analysis-details"><summary>高级：来源识别与刷新方式</summary><div className="analysis-edit-grid">
       <TextField label="版本" value={version} onChange={setVersion} />
       <TextField label="资料名称" value={name} onChange={setName} />
       <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
       <FieldShell label="刷新模式"><select aria-label="刷新模式" className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value as SourceRefreshMode })}>
         <option value="full_period">整期</option><option value="incremental">增量</option></select></FieldShell>
-      <p className="analysis-note">按业务键识别时生效：整期把文件视为整个期间，文件里没有的行在新快照中记为已删除；增量只更新文件里出现的行。旧结果仍按原快照保留。</p>
-      <FieldShell label="文件身份策略"><select aria-label="文件身份策略" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
-        <option value="snapshot_only">按文件快照</option><option value="business_key">按业务键识别</option></select></FieldShell>
+      <p className="analysis-note">按业务键逐行比对时生效：整期把文件视为整个期间，文件里没有的行记为已删除；增量只更新文件里出现的行。旧结果仍按原资料保留。</p>
+      <FieldShell label="文件识别方式"><select aria-label="文件识别方式" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
+        <option value="snapshot_only">整份替换</option><option value="business_key">按业务键逐行比对</option></select></FieldShell>
     </div></details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
       <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>

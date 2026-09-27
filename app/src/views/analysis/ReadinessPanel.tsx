@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CircleCheck, CircleSlash, ClipboardList, RefreshCw } from 'lucide-react';
 import { bridge, type Answer, type ReadinessDataset, type ReadinessReport } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
+import { errorText } from './shared.js';
 
 const CAPABILITY_LABELS: Record<string, string> = {
   management_pnl: '管理损益',
@@ -66,7 +67,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
       if (!answer.ok) throw new Error(answer.message);
       setReport(answer.value ?? null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking(false);
     }

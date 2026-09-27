@@ -3,6 +3,7 @@ import { Save } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
+import { errorText } from './shared.js';
 
 type ScopeRecord = {
   id: string;
@@ -85,7 +86,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       setExtraScope(carriedScope(next?.scope));
     }).catch((reason: unknown) => {
       if (request.current !== seq) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorText(reason));
     }).finally(() => {
       if (request.current === seq) setLoading(false);
     });
@@ -116,7 +117,7 @@ export function AnalysisScopeCard({ taskId, question, datasets, disabled, onSave
       onSaved?.(record);
     } catch (reason) {
       if (saveRequest.current !== seq) return;
-      setError(reason instanceof Error ? reason.message : '保存口径失败。');
+      setError(errorText(reason));
     } finally {
       if (saveRequest.current === seq) setSaving(false);
     }

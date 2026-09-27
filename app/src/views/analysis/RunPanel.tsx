@@ -8,6 +8,8 @@ import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
+import { errorText } from './shared.js';
+import { RUN_ROLE_LABELS } from './glossary.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -38,10 +40,10 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   };
   return <div className="analysis-result-area" data-evidence-open={evidence || undefined}>
     {latest && run && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
-      最近一次运行失败，当前保留已成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看失败记录</Button></p>}
+      最近一次计算没有完成，当前保留的是上一次成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看未完成的计算</Button></p>}
     {!run ? <NotRunYet runs={runs} onPick={(next) => pick(next)} /> : <article className="analysis-result">
-      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次运行 · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
-      {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
+      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
+      {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果是最新文稿引用的那次计算；之后的探查和重试保留在「中间步骤」里。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
@@ -54,7 +56,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
           onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}
       <div className="analysis-actions">
         <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
-        <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的运行 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
+        <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的计算 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
         {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整口径</Button>}
         {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
@@ -66,7 +68,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     </article>}
     {run && evidence && <div className="analysis-evidence-anchor"><aside id={`analysis-evidence-${analysis.task_id}`} role="dialog" aria-modal="false" className="analysis-evidence" aria-label="本次计算依据" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeEvidence(); } }}>
       <div className="analysis-section-heading"><h3>本次计算依据</h3><Button variant="outline" ref={closeButton} type="button" onClick={closeEvidence} aria-label="关闭计算依据"><X size={16} aria-hidden /></Button></div>
-      <p className="analysis-note">按实际保存的资料版本和运行记录核对。</p>
+      <p className="analysis-note">按实际保存的资料版本和这次计算的记录核对。</p>
       <div className="analysis-evidence-sources">{Object.entries(run.input_hashes ?? {}).map(([id, hash]) => {
         // SQL and script runs store alias -> data_hash. Bindings are immutable
         // snapshot IDs; never resolve by display name or the latest upload.
@@ -75,7 +77,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
         const mismatch = source?.data_hash != null && source.data_hash !== hash;
         return <div key={id}><strong>{source?.name ?? '资料快照'}</strong><p className="analysis-note">{source?.source_name ?? datasetId}</p>
           {source && <Button variant="outline" type="button" disabled={busy || mismatch} onClick={() => { if (!mismatch) onSource(source); }}>查看 {source.name}</Button>}
-          {mismatch && <p className="analysis-note">资料摘要与运行记录不一致，暂不可预览。</p>}
+          {mismatch && <p className="analysis-note">资料内容与这次计算用的版本不一致，暂不可预览。</p>}
           <details className="analysis-details"><summary>资料标识与摘要</summary><p>{datasetId}</p><p>{hash}</p></details></div>;
       })}</div>
       <p>参数：{parameterSummary(run.parameters ?? analysis.parameters, run.parameter_metadata ?? analysis.parameter_metadata)}</p>
@@ -87,16 +89,16 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
       <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
       <label className="analysis-select-label">对照运行<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
-        <option value="">选择一个已保存的运行</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
+        <option value="">选择一次已保存的计算</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
           <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · {when(row.created_at)} · {shortSha(row.id)}</option>)}</select></label>
       {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} />
-      <p className="analysis-note">完整原始结果仍按各次运行自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
+      <p className="analysis-note">完整原始结果仍按各次计算自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
         const definition = analyses.find((item) => item.id === row.analysis_id);
         return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · {shortSha(row.id)}</h4><RunStatus run={row} />
           <p>参数：{parameterSummary(row.parameters ?? definition?.parameters, row.parameter_metadata ?? definition?.parameter_metadata)}</p>
           <p>假设说明：{assumptionSummary(row.assumptions ?? definition?.assumptions)}</p>
           {row.result?.columns.length ? <Table columns={row.result.columns} rows={row.result.rows} caption={index === 0 ? '当前版本数据' : '对照版本数据'} />
-            : <p className="analysis-note">{row.error ?? '此运行没有表格结果。'}</p>}</div>;
+            : <p className="analysis-note">{row.error ?? '这次计算没有表格结果。'}</p>}</div>;
       })}</div></>}
     </section>}
     <details className="analysis-details analysis-history"><summary>运行历史 · 业务 {selection.businessRuns.length} · 活动 {selection.activityRuns.length} · 失败 {selection.failedRuns.length}</summary>
@@ -114,8 +116,8 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
 function NotRunYet({ runs, onPick }: { runs: AnalysisRun[]; onPick(run: AnalysisRun): void }) {
   const business = runs.filter((row) => runPresentationRole(row) === 'business');
   const newest = business.at(-1);
-  return <div className="analysis-actions"><p className="analysis-note">此版本尚未运行。{business.length
-    ? `本任务另有 ${business.length} 个业务结果。` : '检查口径后即可计算。'}</p>
+  return <div className="analysis-actions"><p className="analysis-note">此版本尚未计算。{business.length
+    ? `本任务另有 ${business.length} 个结果。` : '确认范围后即可计算。'}</p>
     {newest && <Button variant="outline" type="button" onClick={() => onPick(newest)}>查看最新结果</Button>}</div>;
 }
 
@@ -141,7 +143,7 @@ function RunResultTable({ run }: { run: AnalysisRun }) {
 }
 
 function runRoleLabel(run: AnalysisRun): string {
-  return ({ business: '业务结果', activity: '技术活动', failure: '失败记录' } as const)[runPresentationRole(run)];
+  return RUN_ROLE_LABELS[runPresentationRole(run)];
 }
 
 function revisionLabel(run: AnalysisRun, runs: AnalysisRun[]): string {
@@ -538,7 +540,7 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
       const result = await onDrilldown(run, selectedSource.index, column || undefined, run.engine === 'structured_aggregate' ? selectedSource.section : undefined);
       if (request === drilldownRequest.current) setDrilldown(result);
     }
-    catch (failure) { if (request === drilldownRequest.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { if (request === drilldownRequest.current) setError(errorText(failure)); }
   }
   return <section className="analysis-finance-run" aria-label="结果范围与来源">
     {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}

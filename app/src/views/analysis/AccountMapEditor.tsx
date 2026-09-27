@@ -6,9 +6,9 @@ import { Textarea } from '../../components/ui/textarea.js';
 
 /** The three the engine knows. Chinese account names map onto these. */
 const ACCOUNTS: { value: string; label: string }[] = [
-  { value: 'revenue', label: '收入 revenue' },
-  { value: 'cost', label: '成本 cost' },
-  { value: 'expense', label: '费用 expense' },
+  { value: 'revenue', label: '收入' },
+  { value: 'cost', label: '成本' },
+  { value: 'expense', label: '费用' },
 ];
 
 export interface AccountMapRow {

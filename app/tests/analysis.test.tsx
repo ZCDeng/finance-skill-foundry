@@ -168,7 +168,7 @@ describe('analysis workbench', () => {
     openAnalysisEditor();
     expect(screen.getByText('900719925474099.99')).toBeTruthy();
     expect(screen.getByText('指标：经营利润：收入−成本−费用；利润率')).toBeTruthy();
-    expect(within(screen.getByLabelText('结果状态')).getByText('运行成功')).toBeTruthy();
+    expect(within(screen.getByLabelText('结果状态')).getByText('计算成功')).toBeTruthy();
     expect(screen.getByText('可复算')).toBeTruthy();
     expect(screen.getByText('未阅')).toBeTruthy();
     const sql = screen.getByLabelText('计算 SQL');
@@ -494,7 +494,7 @@ describe('analysis workbench', () => {
     expect(screen.getByText('900719925474099.99').classList.contains('analysis-number')).toBe(true);
     const definition = screen.getByText(/^口径与计算定义/).closest('details');
     expect(definition?.open).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '查看失败记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看未完成的计算' }));
     expect((await screen.findByRole('alert')).textContent).toBe('缺少成本列');
     // A failed run shows no result table. The account-map editor is a table of
     // its own elsewhere on the page, so this looks where the result would be.
@@ -805,7 +805,7 @@ ${canonicalAppendix} 已改写`;
     expect(analysisReadDataset).not.toHaveBeenCalled();
     expect(within(panel).getByText(source.id)).toBeTruthy();
     expect(within(panel).getByText(recordedHash)).toBeTruthy();
-    expect(within(panel).getByText(/资料摘要与运行记录不一致/)).toBeTruthy();
+    expect(within(panel).getByText(/资料内容与这次计算用的版本不一致/)).toBeTruthy();
   });
 
   it('uses each saved run\'s business labels, exact values, units and structured assumptions in evidence and comparison', async () => {
@@ -1783,9 +1783,9 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     const summary = await screen.findByLabelText('待处理核对');
-    expect(summary.textContent).toBe('运行成功 · 引用值一致 · 源数据核验通过 · 已专业复核');
+    expect(summary.textContent).toBe('计算成功 · 引用值一致 · 源数据核验通过 · 已专业复核');
     expect(screen.queryByText(/均已通过/)).toBeNull();
-    const caveat = screen.getByText('运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。');
+    const caveat = screen.getByText('计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。');
     expect(caveat.closest('details')).toBeNull();
     expect(screen.getByText('问题覆盖已核对，其中含经理已接受的估算。')).toBeTruthy();
     expect(within(screen.getByLabelText('分项核对状态')).getByText('已核对（含已接受的估算）')).toBeTruthy();

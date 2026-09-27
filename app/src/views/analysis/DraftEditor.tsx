@@ -12,7 +12,7 @@ import { CompletionRecoveriesPanel, type FinanceCompletionRecovery } from './Com
 import { ExplanationQualityPanel, type ExplanationFact, type ExplanationQuality } from './ExplanationQualityPanel.js';
 import { FinanceBackgroundPanel, type FinanceBackground } from './FinanceBackgroundPanel.js';
 import { MaterialityFields, materialityScopeSummary, materialityToEdit, materialityToSpec, sameMateriality, type MaterialityEdit } from './MaterialityFields.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 export type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 type ReportMode = 'read' | 'edit' | 'print';
@@ -129,7 +129,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
     } catch (failure) {
       if (request === recoveryRequest.current) {
         setRecoveries([]);
-        setRecoveryError(failure instanceof Error ? failure.message : String(failure));
+        setRecoveryError(errorText(failure));
       }
     }
   }, [taskId]);
@@ -172,7 +172,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
         setQuality(value);
         setQualityState(qualityStateFromResult(value));
       } else setQualityState('unavailable');
-    }).catch((failure) => { if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); } });
+    }).catch((failure) => { if (request === qualityRequest.current) { setQualityState('unavailable'); setToolError(errorText(failure)); } });
     void loadBackgrounds(bgRequest, defaultScope);
     return () => { qualityRequest.current += 1; factRequest.current += 1; backgroundRequest.current += 1; };
   }, [draft?.id, taskId]);
@@ -204,7 +204,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       if (request !== qualityRequest.current) return;
       setQuality(checked); setQualityState(qualityStateFromResult(checked));
     } catch (failure) {
-      if (request === qualityRequest.current) { setQuality(null); setQualityState('unavailable'); setToolError(failure instanceof Error ? failure.message : String(failure)); }
+      if (request === qualityRequest.current) { setQuality(null); setQualityState('unavailable'); setToolError(errorText(failure)); }
     }
   }
   async function openFact(fact: ExplanationFact) {
@@ -214,7 +214,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       setToolError('');
       const result = unwrap(await api.financeCall(taskId, 'drilldown-fact', { run_id: fact.run_id, row: fact.row, ...(fact.column ? { column: fact.column } : {}), offset: 0, limit: 100 }) as Answer<FinanceDrilldown>);
       if (request === factRequest.current) setFactDetails((value) => ({ ...value, [fact.id]: result }));
-    } catch (failure) { if (request === factRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === factRequest.current) setToolError(errorText(failure)); }
   }
   async function openLocator(fact: ExplanationFact) {
     const api = bridge();
@@ -297,7 +297,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, edit,
       if (request !== backgroundRequest.current) return;
       setBackgroundMessage('已保存财务背景。'); setBackground({ ...background, label: '', text: '', paragraph: '', source: '', retrieved_at: '' });
       setBackgrounds((value) => [saved, ...value.filter((item) => item.id !== saved.id)]);
-    } catch (failure) { if (request === backgroundRequest.current) setToolError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) { if (request === backgroundRequest.current) setToolError(errorText(failure)); }
   }
   function markQualityStale() {
     qualityRequest.current += 1;
@@ -468,6 +468,6 @@ const LOCATOR_FAILURES: Record<string, string> = {
 };
 
 function locatorFailureText(failure: unknown): string {
-  const message = failure instanceof Error ? failure.message : String(failure);
+  const message = errorText(failure);
   return LOCATOR_FAILURES[message] ?? message;
 }

@@ -10,7 +10,7 @@ describe('EvidenceQuality', () => {
   it('keeps execution and numeric citation success separate from missing source checks and professional review', () => {
     render(<EvidenceQuality taskId="task" dimensions={{ execution: { status: 'pass' }, numeric_citation: { status: 'pass' }, source_validation: { status: 'not_configured' }, professional_review: { status: 'unreviewed' } }} issues={[]} />);
     const board = screen.getByLabelText('四项独立核验状态');
-    expect(within(board).getByText('运行成功')).toBeTruthy();
+    expect(within(board).getByText('计算成功')).toBeTruthy();
     expect(within(board).getByText('引用值一致')).toBeTruthy();
     expect(within(board).getByText('尚未独立核验')).toBeTruthy();
     expect(within(board).getByText('待专业复核')).toBeTruthy();

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { bridge, type Answer, type AnalysisRun } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
-import { unwrap } from './shared.js';
+import { unwrap, errorText } from './shared.js';
 
 type FinanceChart = {
   id: string;
@@ -26,7 +26,7 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
     const listed = unwrap(await api.financeCall(taskId, 'chart-deliverable-list', {}) as Answer<{ charts?: FinanceChart[] }>);
     setCharts(listed.charts ?? []);
   }, [taskId]);
-  useEffect(() => { void load().catch((failure) => setError(failure instanceof Error ? failure.message : String(failure))); }, [load]);
+  useEffect(() => { void load().catch((failure) => setError(errorText(failure))); }, [load]);
   async function archive() {
     const api = bridge(); if (!api?.financeCall || !latest) return;
     setPending(true); setError(''); setMessage('');
@@ -36,7 +36,7 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
       await load();
       await onRefresh();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally { setPending(false); }
   }
   async function open(id: string) {
@@ -46,7 +46,7 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
       const record = unwrap(await api.financeCall(taskId, 'chart-deliverable-open', { id }) as Answer<FinanceChart>);
       setOpened(record);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally { setPending(false); }
   }
   const rows = opened?.series?.rows ?? [];

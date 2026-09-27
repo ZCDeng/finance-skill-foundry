@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, FileSpreadsheet, RotateCcw, X } from 'lucide-react';
-import { bridge, type Answer } from '../../bridge.js';
+import { bridge } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { Input } from '../../components/ui/input.js';
+import { errorText, unwrap } from './shared.js';
 
 /** One column of a sheet, as the engine read it. */
 export interface ProposedColumn {
@@ -201,12 +202,12 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
     const api = bridge(); if (!api?.financeCall) return;
     setWorking(true); setError('');
     try {
-      unwrapAnswer(await api.financeCall(taskId, 'structure-proposal-confirm', {
+      unwrap(await api.financeCall(taskId, 'structure-proposal-confirm', {
         dataset_id: proposal.dataset_id, revision: proposal.revision, sheets: selected,
       }));
       await onSettled();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking(false);
     }
@@ -486,10 +487,10 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
     const api = bridge(); if (!api?.financeCall) return;
     setWorking(command); setError('');
     try {
-      unwrapAnswer(await api.financeCall(taskId, command, { id: confirmation.id }));
+      unwrap(await api.financeCall(taskId, command, { id: confirmation.id }));
       await onSettled();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      setError(errorText(failure));
     } finally {
       setWorking('');
     }
@@ -520,9 +521,4 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
       </div>
     </section>
   );
-}
-
-function unwrapAnswer<T>(answer: Answer<T>): T {
-  if (!answer.ok) throw new Error(answer.message);
-  return answer.value;
 }

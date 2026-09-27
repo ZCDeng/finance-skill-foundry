@@ -238,14 +238,14 @@ describe('RunPanel version without a run', () => {
     const other: AnalysisRevision = { ...analysis, id: 'f'.repeat(32), question: '另一版分析' };
     const onPick = vi.fn();
     render(<RunPanel {...props} analyses={[analysis, other]} runs={[structuredRun({ analysis_id: other.id })]} onPick={onPick} />);
-    expect(screen.getByText('此版本尚未运行。本任务另有 1 个业务结果。')).toBeTruthy();
+    expect(screen.getByText('此版本尚未计算。本任务另有 1 个结果。')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '查看最新结果' }));
     expect(onPick).toHaveBeenCalledWith(other.id);
   });
 
   it('keeps the old hint when the task has no result yet', () => {
     render(<RunPanel {...props} runs={[]} />);
-    expect(screen.getByText('此版本尚未运行。检查口径后即可计算。')).toBeTruthy();
+    expect(screen.getByText('此版本尚未计算。确认范围后即可计算。')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '查看最新结果' })).toBeNull();
   });
 });
@@ -260,7 +260,7 @@ describe('RunPanel finance conclusion', () => {
     ], { interpretation: '分量表示算术贡献。业务原因需经理判断或独立证据。' });
     render(<RunPanel {...props} runs={[run]} />);
     // The run is named by its order, not by a hash prefix; the id stays on hover.
-    const header = screen.getByText(/第 1 次运行/);
+    const header = screen.getByText(/第 1 次计算/);
     expect(header.getAttribute('title')).toBe(run.id);
     expect(header.textContent).not.toContain(run.id.slice(0, 12));
     const conclusion = screen.getByRole('region', { name: '结论' });

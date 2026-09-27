@@ -64,7 +64,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     {/* Never one merged "all passed": with nothing open, the four verification states are named one by one. */}
     {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : dimensionStates(quality?.status_dimensions).join(' · ')}</p>}
     {quality && accepted.length > 0 && <p className="analysis-note">{accepted.join('、')}已核对，其中含经理已接受的估算。</p>}
-    <p className="analysis-note">运行成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
+    <p className="analysis-note">计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
     <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>
       {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
         {qualityChecks.map(([key, label]) => {

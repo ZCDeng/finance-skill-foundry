@@ -3,7 +3,7 @@ import type { AnalysisParameterMetadata, AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 
 export const STATUS: Record<string, string> = {
-  pending: '未运行', running: '运行中', succeeded: '运行成功', success: '运行成功', failed: '运行失败',
+  pending: '未计算', running: '计算中', succeeded: '计算成功', success: '计算成功', failed: '计算失败',
   verified: '可复算', reproducible: '可复算', unverified: '未验证复算', non_reproducible: '不可复算',
   unreviewed: '未阅', reviewed: '已阅', accepted: '经理认可', draft: '草稿', archived: '已归档',
 };
