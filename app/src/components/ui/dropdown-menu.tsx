@@ -62,7 +62,7 @@ function DropdownMenuItem({
         'focus:bg-[var(--fnd-surface-strong)] focus:text-foreground',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
         'data-[inset]:pl-8',
-        'data-[variant=destructive]:text-[var(--fnd-mark-outside)] data-[variant=destructive]:focus:bg-[var(--fnd-mark-outside-fill)]',
+        'data-[variant=destructive]:text-[var(--fnd-warning)] data-[variant=destructive]:focus:bg-[var(--fnd-warning-fill)]',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0',
         className,
       )}

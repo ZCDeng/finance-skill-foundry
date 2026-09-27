@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunPanel } from '../src/views/analysis/RunPanel.js';
-import type { AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown } from '../src/bridge.js';
+import type { AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown, ResultContractWarning } from '../src/bridge.js';
 
 const taskId = 'a'.repeat(32);
 const analysis: AnalysisRevision = { id: 'b'.repeat(32), task_id: taskId, schema_version: 1, created_at: '2026-09-07T00:00:00Z',
@@ -332,6 +332,46 @@ describe('RunPanel finance conclusion', () => {
     expect(screen.getByRole('region', { name: caption })).toBeTruthy();
   });
 
+  it('marks a line one side never booked as 缺项 and leaves it and the profit out of the conclusion', () => {
+    const run = varianceRun([
+      bridgeRow('revenue', '20', { amount_change_display: '收入增加 20 万元' }),
+      bridgeRow('cost', '70', { amount_change_display: '成本增加 70 万元', comparison_status: 'partial' }),
+      bridgeRow('expense', '5', { amount_change_display: '费用增加 5 万元' }),
+      bridgeRow('profit', '-55', { amount_change_display: '利润减少 55 万元', comparison_status: 'partial' }),
+    ]);
+    render(<RunPanel {...props} runs={[run]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('成本是缺项，只在一侧有来源行，利润差异不完整，见下表。')).toBeTruthy();
+    expect(within(conclusion).queryByText(/利润减少/)).toBeNull();
+    expect(within(conclusion).queryByText(/成本增加/)).toBeNull();
+    expect(within(conclusion).getByText('收入增加 20 万元 · 费用增加 5 万元')).toBeTruthy();
+    const table = screen.getByRole('region', { name: '预算差异桥' });
+    expect(within(table).getByRole('cell', { name: '成本（缺项）' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '利润（缺项）' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '收入' })).toBeTruthy();
+  });
+
+  it('names the group of a 缺项 line and still concludes on complete groups', () => {
+    render(<RunPanel {...props} runs={[varianceRun([
+      bridgeRow('profit', '30', { organization: '华东' }),
+      bridgeRow('expense', '8', { organization: '华南', comparison_status: 'partial' }),
+      bridgeRow('profit', '-8', { organization: '华南', comparison_status: 'partial' }),
+    ])]} />);
+    const conclusion = screen.getByRole('region', { name: '结论' });
+    expect(within(conclusion).getByText('华东：实际与预算相比，利润增加 30 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('华南：费用是缺项，只在一侧有来源行，利润差异不完整，见下表。')).toBeTruthy();
+  });
+
+  it('reads an old run without a partial status as it was recorded', () => {
+    const rows = [bridgeRow('cost', '70'), bridgeRow('profit', '-55')].map(({ comparison_status: _recorded, ...row }) => row);
+    const run = varianceRun(rows);
+    run.result!.columns = run.result!.columns.filter((column) => column.name !== 'comparison_status');
+    render(<RunPanel {...props} runs={[run]} />);
+    expect(within(screen.getByRole('region', { name: '结论' })).getByText('实际与预算相比，利润减少 55 万元')).toBeTruthy();
+    expect(screen.queryByText(/缺项/)).toBeNull();
+    expect(within(screen.getByRole('region', { name: '预算差异桥' })).getByRole('cell', { name: '成本' })).toBeTruthy();
+  });
+
   it('writes no conclusion when there is no profit change to state', () => {
     render(<RunPanel {...props} runs={[varianceRun([bridgeRow('revenue', '50'), bridgeRow('profit', '', { amount_change: null, contribution: null, comparison_status: 'incomplete' })])]} />);
     expect(screen.queryByRole('region', { name: '结论' })).toBeNull();
@@ -352,5 +392,57 @@ describe('RunPanel finance conclusion', () => {
     cleanup();
     render(<RunPanel {...props} runs={[structuredRun()]} onAdjustScope={onAdjustScope} />);
     expect(screen.queryByRole('button', { name: '调整口径' })).toBeNull();
+  });
+});
+
+describe('RunPanel 推断 marks', () => {
+  // run_metric management_pnl's own shape (foundry/finance_metrics.py): one row per organization and scenario.
+  const managementPnl: AnalysisRun = { ...baseRun, engine: 'finance', result: {
+    columns: ['organization', 'scenario', 'currency', 'unit', 'revenue', 'cost', 'expense', 'profit'].map((name) => ({ name, type: ['revenue', 'cost', 'expense', 'profit'].includes(name) ? 'DECIMAL' : 'VARCHAR' })),
+    rows: [
+      { organization: '华东区域', scenario: 'actual', currency: 'CNY', unit: '万元', revenue: '120', cost: '-70', expense: '-20', profit: '30' },
+      { organization: '华东区域', scenario: 'budget', currency: 'CNY', unit: '万元', revenue: '130', cost: '-72', expense: '-21', profit: '37' },
+    ],
+    row_count: 2, truncated: false,
+  } };
+
+  it.each([['a management_pnl run', managementPnl], ['a structured aggregate run', structuredRun()]])('never says 推断 on %s', (_, run) => {
+    render(<RunPanel {...props} runs={[run]} />);
+    expect(screen.getByRole('table', { name: /业务结果|结构化汇总结果/ })).toBeTruthy();
+    expect(screen.queryByText(/推断/)).toBeNull();
+  });
+});
+
+describe('RunPanel result contract warnings', () => {
+  const declarations = (warnings: NonNullable<AnalysisRun['row_declarations']>['warnings']): AnalysisRun['row_declarations'] => ({
+    rules_version: '2.1.1', requirements_id: null, requirements_fingerprint: null, complete: true, incomplete_reason: null, row_count: 2, rows: [], warnings,
+  });
+  const contractWarnings: ResultContractWarning[] = [
+    { severity: 'warning', code: 'unit_unmarked', rows: [0], row_count: 1,
+      message: '1 行没有标明单位，这些行不参与金额配对，结果区原样显示并注明「未标单位」。' },
+    { severity: 'warning', code: 'estimate_basis_missing', rows: [1], row_count: 1,
+      message: '1 行的文字写了估算用语，但依据列 basis 没有写 estimate。' },
+  ];
+  const englishSentence = 'Script outputs are retained with code and inputs; reproducibility has not been verified.';
+
+  it('folds the warnings into one Chinese line above the result table, and shows no English sentence', () => {
+    render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations(contractWarnings), warnings: [englishSentence] })]} />);
+    const summary = screen.getByText('结果行有 2 处不合约定');
+    const disclosure = summary.closest('details') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(false);
+    expect(within(disclosure).getByText(contractWarnings[0].message)).toBeTruthy();
+    expect(within(disclosure).getByText(contractWarnings[1].message)).toBeTruthy();
+    const table = screen.getByRole('region', { name: '计算结果' });
+    expect(disclosure.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.body.textContent).not.toContain(englishSentence);
+    expect(document.body.textContent).not.toMatch(/reproducibility|retained/i);
+  });
+
+  it('says nothing when the declaration has no warnings or predates them', () => {
+    const { unmount } = render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations([]) })]} />);
+    expect(screen.queryByText(/不合约定/)).toBeNull();
+    unmount();
+    render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations(undefined) })]} />);
+    expect(screen.queryByText(/不合约定/)).toBeNull();
   });
 });

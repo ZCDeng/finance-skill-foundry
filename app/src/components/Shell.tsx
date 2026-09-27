@@ -31,7 +31,10 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
             onClick={() => onScreen('deliverables')}>成果库</button>
         </nav>
         <span className="fnd-head__end">
-          {onGuide ? <Button type="button" variant="ghost" size="icon" className="fnd-head__help" onClick={onGuide} aria-label="怎么用" title="怎么用">
+          {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. */}
+          {onGuide ? <Button type="button" variant="ghost" size="icon"
+            className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)]"
+            onClick={onGuide} aria-label="怎么用" title="怎么用">
             <BookOpen size={16} strokeWidth={1.5} aria-hidden />
           </Button> : null}
         </span>

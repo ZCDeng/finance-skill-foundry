@@ -251,3 +251,103 @@ def test_unreadable_runtime_birth_is_not_treated_as_proof_of_death(tmp_path: Pat
     row = jobs.create(context, "child", {"prompt": "still running"}, runtime_pid=os.getpid())
     monkeypatch.setattr(module, "_process_identity", lambda pid: {"pid": pid, "birth": None})
     assert jobs.refresh(row["id"])["status"] == "queued"
+
+
+@pytest.mark.skipif(not runner_capabilities()["available"], reason="requires macOS isolated runner")
+def test_background_script_completion_report_carries_result_contract_warnings(tmp_path: Path, monkeypatch):
+    """A result row that breaks the contract still completes; the report says what to fix, in Chinese."""
+    from foundry.analysis_jobs import _worker
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    monkeypatch.setattr(jobs, "_launch", lambda record: None)
+    rows = [{"metric_key": "revenue_achievement_ratio", "organization": "集团合并", "period": "2026-01:2026-08",
+             "scenario": "budget_1_8", "value": "0.945301", "unit": "-", "metric_label": "营业收入达成率"}]
+    code = f"from pathlib import Path\nPath('result.json').write_text({json.dumps(rows, ensure_ascii=False)!r}, encoding='utf-8')\n"
+    row = jobs.create(context, "script", {"code": code, "bindings": {}, "result_file": "result.json"})
+    _worker(task.store.var_root, task.id, row["id"])
+
+    result = jobs.get(row["id"])
+    assert result["status"] == "completed", result
+    warnings = result["result"]["warnings"]
+    assert [(warning["severity"], warning["code"]) for warning in warnings] == [("warning", "unit_unmarked")]
+    assert "未标单位" in warnings[0]["message"]
+    run = AnalysisStore(task).get_run(result["result"]["run_id"])
+    assert run["execution_status"] == "succeeded"
+    assert warnings == run["row_declarations"]["warnings"]
+
+
+def _runner_reporting(monkeypatch, seconds):
+    """The runner's own answer, with the durations it reports in order; everything else identical."""
+    import foundry.runner as runner
+
+    durations = iter(seconds)
+
+    def run(workspace, code, **options):
+        return {"status": "succeeded", "stdout": "budget result: 42\n", "stderr": "", "exit_code": 0,
+                "outputs": [], "workspace": str(workspace), "environment": {"python": "3"},
+                "duration_seconds": next(durations)}
+
+    monkeypatch.setattr(runner, "run_script", run)
+
+
+def test_script_run_keeps_the_runner_duration_beside_its_result(tmp_path: Path, monkeypatch):
+    task, _ = _context(tmp_path)
+    _runner_reporting(monkeypatch, [1.25])
+    store = AnalysisStore(task)
+    run = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    assert run["duration_seconds"] == 1.25
+    assert "duration_seconds" not in run["result"]
+    assert store.get_run(run["id"])["duration_seconds"] == 1.25
+
+
+def test_script_runs_that_differ_only_in_duration_keep_one_output_hash(tmp_path: Path, monkeypatch):
+    task, _ = _context(tmp_path)
+    _runner_reporting(monkeypatch, [0.4, 3.9])
+    store = AnalysisStore(task)
+    first = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    second = store.run_script({"code": "print('budget result: 42')", "bindings": {}})
+    assert (first["duration_seconds"], second["duration_seconds"]) == (0.4, 3.9)
+    assert first["output_hash"] is not None
+    assert first["output_hash"] == second["output_hash"]
+
+
+def test_cancelled_job_records_a_duration_from_its_own_timestamps(tmp_path: Path, monkeypatch):
+    from datetime import datetime
+    import foundry.analysis_jobs as module
+    from foundry.analysis_jobs import _worker
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    monkeypatch.setattr(jobs, "_launch", lambda record: None)
+    # Each stamp this module takes is three seconds after the last.
+    ticks = iter(range(0, 3000, 3))
+
+    def stamp_now():
+        second = next(ticks)
+        return f"2026-09-27T10:{second // 60:02d}:{second % 60:02d}Z"
+
+    monkeypatch.setattr(module, "now_iso", stamp_now)
+    row = jobs.create(context, "script", {"code": "print('must not run')", "bindings": {}})
+    jobs.cancel(row["id"], session_id="parent")
+    _worker(task.store.var_root, task.id, row["id"])
+
+    result = jobs.get(row["id"])
+    assert result["status"] == "cancelled"
+    stamp = lambda text: datetime.fromisoformat(text.replace("Z", "+00:00"))
+    assert result["duration_seconds"] == (stamp(result["finished_at"]) - stamp(result["started_at"])).total_seconds()
+    assert result["duration_seconds"] > 0
+    assert "duration_seconds" not in result["result"]
+
+
+def test_job_that_never_started_measures_from_creation(tmp_path: Path, monkeypatch):
+    import foundry.analysis_jobs as module
+
+    task, context = _context(tmp_path)
+    jobs = JobStore(task)
+    stamps = iter(["2026-09-27T10:00:00Z", "2026-09-27T10:00:04Z"])
+    monkeypatch.setattr(module, "now_iso", lambda: next(stamps))
+    row = jobs.create(context, "child", {"prompt": "核对"})
+    failed = jobs.settle(row["id"], "failed", {"error": "harness runtime stopped"},
+                         session_id="parent", child_session_id=row["child_session_id"])
+    assert failed["duration_seconds"] == 4.0

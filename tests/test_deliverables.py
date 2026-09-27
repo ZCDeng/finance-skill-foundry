@@ -463,3 +463,177 @@ def test_a_reference_filed_after_the_brief_versions_the_workpaper(
     latest = rows[-1]
     assert latest["cause"] == "record-reference:ref-1"
     assert latest["session_id"] == "sess-leader"
+
+
+# -- 成果库: analysis drafts and their exports (R10, KTD11) -------------------------
+
+
+def _analysis_listing(var: Path, task_id: str, capsys: pytest.CaptureFixture[str]) -> dict:
+    assert main(["--var", str(var), "--task", task_id, "analysis-deliverables"]) == 0
+    return json.loads(_out(capsys))
+
+
+def _export_path(var: Path, task_id: str, sha: str, fmt: str, capsys: pytest.CaptureFixture[str]) -> int:
+    return main(["--var", str(var), "--task", task_id, "analysis-export-path", "--sha", sha, "--format", fmt])
+
+
+def _chain(var: Path, task_id: str, tmp_path: Path) -> dict:
+    """Two chains: v1 then v2 (accepted and archived), and a separate single draft; a pdf of v1."""
+    from foundry.analysis import AnalysisStore
+
+    work = AnalysisStore(TaskStore(var).get(task_id))
+    v1 = work.save_draft({"title": "八月经营分析", "body": "收入增长 12%"})
+    # Same body, so the review is not reset by a content change.
+    v2 = work.save_draft({"parent_id": v1["id"], "review_status": "accepted", "publication_status": "archived"})
+    other = work.save_draft({"title": "回款说明", "body": "回款晚两周", "review_status": "reviewed"})
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.7 v1")
+    exported = work.register_report_export(v1["id"], "pdf", pdf)
+    return {"v1": v1, "v2": v2, "other": other, "pdf": exported, "work": work}
+
+
+def test_the_library_lists_only_the_newest_revision_of_each_draft_chain(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    made = _chain(var, task_id, tmp_path)
+
+    listing = _analysis_listing(var, task_id, capsys)
+    drafts = {row["draft_id"]: row for row in listing["drafts"]}
+    assert set(drafts) == {made["v2"]["id"], made["other"]["id"]}
+    v2 = drafts[made["v2"]["id"]]
+    # The state saved on v2 itself, not on the chain's first version.
+    assert (v2["review_status"], v2["publication_status"]) == ("accepted", "archived")
+    # The same numbering the 文稿 tab shows: position among the task's drafts.
+    assert v2["revision"] == 2
+    assert v2["versions"] == 2
+    assert v2["title"] == "八月经营分析"
+    assert v2["created_at"] == made["v2"]["created_at"]
+    other = drafts[made["other"]["id"]]
+    assert (other["revision"], other["versions"], other["review_status"]) == (3, 1, "reviewed")
+
+
+def test_an_export_carries_the_state_of_the_revision_it_came_from(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    made = _chain(var, task_id, tmp_path)
+    html = tmp_path / "report.html"
+    html.write_text("<p>v2</p>", encoding="utf-8")
+    made["work"].register_report_export(made["v2"]["id"], "html", html)
+
+    listing = _analysis_listing(var, task_id, capsys)
+    exports = {row["draft_id"]: row for row in listing["exports"]}
+    of_v1 = exports[made["v1"]["id"]]
+    assert of_v1["format"] == "pdf"
+    assert of_v1["sha256"] == made["pdf"]["sha256"]
+    assert of_v1["revision"] == 1
+    # v1 is neither accepted nor archived, whatever v2 became.
+    assert (of_v1["review_status"], of_v1["publication_status"]) == ("unreviewed", "draft")
+    assert of_v1["review_marker"] == "分析草稿·待复核"
+    assert len(of_v1["export_id"]) == 32
+    of_v2 = exports[made["v2"]["id"]]
+    assert (of_v2["format"], of_v2["review_marker"]) == ("html", "")
+    assert of_v2["export_id"] != of_v1["export_id"]
+
+
+def test_an_accepted_draft_that_is_not_archived_still_exports_as_awaiting_review(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from foundry.analysis import AnalysisStore
+
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    work = AnalysisStore(TaskStore(var).get(task_id))
+    accepted = work.save_draft({"body": "只认可未归档", "review_status": "accepted"})
+    pdf = tmp_path / "accepted.pdf"
+    pdf.write_bytes(b"%PDF accepted")
+    work.register_report_export(accepted["id"], "pdf", pdf)
+    (row,) = _analysis_listing(var, task_id, capsys)["exports"]
+    assert (row["review_status"], row["publication_status"]) == ("accepted", "draft")
+    assert row["review_marker"] == "分析草稿·待复核"
+
+
+def test_md_and_xlsx_exports_written_by_analysis_export_are_listed_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The app files md and xlsx through `analysis-export`, not the register, and they belong here as well."""
+    from foundry.analysis import AnalysisStore
+
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    work = AnalysisStore(TaskStore(var).get(task_id))
+    draft = work.save_draft({"body": "工作簿导出"})
+    workbook = work.export_draft(draft["id"], "xlsx")
+    rows = _analysis_listing(var, task_id, capsys)["exports"]
+    assert [(row["format"], row["sha256"], row["content_mode"]) for row in rows] == [
+        ("xlsx", workbook["sha256"], "management")
+    ]
+    assert _export_path(var, task_id, workbook["sha256"], "xlsx", capsys) == 0
+    assert json.loads(_out(capsys))["path"] == workbook["path"]
+
+
+def test_a_task_with_no_analysis_lists_nothing_and_creates_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    listing = _analysis_listing(var, task_id, capsys)
+    assert (listing["drafts"], listing["exports"]) == ([], [])
+    assert not (TaskStore(var).get(task_id).root / "analysis").exists()
+
+
+def test_an_export_opens_by_digest_and_format_and_never_by_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    made = _chain(var, task_id, tmp_path)
+    sha = made["pdf"]["sha256"]
+
+    assert _export_path(var, task_id, sha, "pdf", capsys) == 0
+    assert json.loads(_out(capsys))["path"] == made["pdf"]["path"]
+    # The right digest with a format it was not filed as reaches nothing.
+    assert _export_path(var, task_id, sha, "docx", capsys) == 3
+    assert "no registered export" in capsys.readouterr().err
+    # Neither does a digest this task never filed, nor a string that is not one.
+    assert _export_path(var, task_id, "0" * 64, "pdf", capsys) == 3
+    capsys.readouterr()
+    assert _export_path(var, task_id, "../../etc/passwd", "pdf", capsys) == 3
+    assert "not a sha256" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        _export_path(var, task_id, sha, "exe", capsys)
+    capsys.readouterr()
+
+
+def test_an_export_whose_bytes_changed_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    made = _chain(var, task_id, tmp_path)
+    Path(made["pdf"]["path"]).write_bytes(b"%PDF-1.7 altered")
+    assert _export_path(var, task_id, made["pdf"]["sha256"], "pdf", capsys) == 3
+    assert "integrity" in capsys.readouterr().err
+
+
+def test_another_tasks_export_is_out_of_reach(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    var = tmp_path / "var"
+    first = _new_task(var, capsys, "一号任务")
+    second = _new_task(var, capsys, "二号任务")
+    made = _chain(var, first, tmp_path)
+    assert _export_path(var, second, made["pdf"]["sha256"], "pdf", capsys) == 3
+    capsys.readouterr()
+
+
+def test_a_session_cannot_read_the_library(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The library is the manager's desktop view; a conversation's reach stays what its context grants."""
+    var = tmp_path / "var"
+    task_id = _new_task(var, capsys)
+    made = _chain(var, task_id, tmp_path)
+    TaskStore(var).get(task_id).record_session("sess-analysis", role="analysis")
+    base = ["--var", str(var), "--task", task_id, "--session", "sess-analysis"]
+    assert main([*base, "analysis-deliverables"]) == 3
+    capsys.readouterr()
+    assert main([*base, "analysis-export-path", "--sha", made["pdf"]["sha256"], "--format", "pdf"]) == 3
+    capsys.readouterr()

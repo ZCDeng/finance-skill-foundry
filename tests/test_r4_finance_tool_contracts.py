@@ -228,3 +228,33 @@ def test_dsh_and_method_r4_contracts_are_mirrored_into_resources():
     assert "Before calculation, save the current question contract" in foundry_note
     assert "excluded_detail_rows" in foundry_note
     assert "completion.repair_allowed" in foundry_note
+
+
+def test_script_tool_descriptions_carry_the_result_row_contract_in_both_shipped_copies(tmp_path: Path):
+    import os
+    import shutil
+    import subprocess
+
+    shipped = (ROOT / "dsh-plugin/analysis.js").read_text(encoding="utf-8")
+    assert shipped == (ROOT / "foundry/resources/dsh-plugin/analysis.js").read_text(encoding="utf-8")
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is unavailable")
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        f'import {{ apply }} from "{(ROOT / "dsh-plugin/analysis.js").as_uri()}";\n'
+        "const seen = [];\n"
+        "apply({on: () => {}, tools: {register: (d) => seen.push(d), restrict: () => {}, schemas: () => [], guard: () => {}}});\n"
+        "process.stdout.write(JSON.stringify(Object.fromEntries(seen.map((d) => [d.name, d.description]))));\n"
+    )
+    ran = subprocess.run([node, str(driver)], text=True, capture_output=True, env=dict(os.environ), timeout=30)
+    assert ran.returncode == 0, ran.stderr
+    descriptions = json.loads(ran.stdout)
+    for tool in ("analysis-script", "analysis-script-start"):
+        text = descriptions[tool]
+        # Metric and scenario names, the period-suffix form, the unit table, the 口径 label and the basis column.
+        for term in ("metric_key", "revenue", "scenario", "actual_1_8", "budget_2026_08", "比率", "ratio", "小数",
+                     "pct", "百分比", "百分数", "未标单位", "metric_label", "口径", "basis", "estimate",
+                     "row_declarations.warnings"):
+            assert term in text, (tool, term)
+    assert "warnings" in descriptions["analysis-job-output"]

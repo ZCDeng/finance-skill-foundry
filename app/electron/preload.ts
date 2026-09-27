@@ -33,6 +33,7 @@ const api = {
   analysisMethodApply: (task: string, id: string, bindings: unknown, parameters: unknown = []) => ipcRenderer.invoke('analysis:method-apply', task, id, bindings, parameters),
   financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),
   financeSourceRefresh: (task: string, spec: unknown) => ipcRenderer.invoke('finance:source-refresh', task, spec),
+  timingLog: (entry: unknown) => ipcRenderer.invoke('timing:log', entry),
   tasks: () => ipcRenderer.invoke('foundry:tasks'),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
@@ -40,6 +41,8 @@ const api = {
     ipcRenderer.invoke('foundry:deliverable-text', task, sha),
   deliverableOpen: (task: string, sha: string, ext: string) =>
     ipcRenderer.invoke('foundry:deliverable-open', task, sha, ext),
+  analysisExportOpen: (task: string, sha: string, format: string) =>
+    ipcRenderer.invoke('analysis:export-open', task, sha, format),
   exportWorkbook: (task: string, window: string) =>
     ipcRenderer.invoke('foundry:export-workbook', task, window),
   taskRename: (task: string, title: string) => ipcRenderer.invoke('foundry:task-rename', task, title),

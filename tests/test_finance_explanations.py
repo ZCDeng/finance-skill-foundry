@@ -1992,6 +1992,37 @@ def test_body_closure_expression_rejects_cross_group_numbers(service):
     assert any(issue["code"] == "body_closure_mismatch" for issue in check["issues"])
 
 
+def test_profit_bridge_with_a_partial_line_is_not_a_complete_closure(service):
+    store, _context = service
+    # The budget books no cost: the cost line and the profit built on it are 缺项.
+    rows = [
+        {"metric": "revenue", "contribution": "20", "actual": "120", "baseline": "100", "unit": "万元", "comparison_status": "complete"},
+        {"metric": "cost", "contribution": "-70", "actual": "70", "baseline": "0", "unit": "万元", "comparison_status": "partial"},
+        {"metric": "expense", "contribution": "-5", "actual": "20", "baseline": "15", "unit": "万元", "comparison_status": "complete"},
+        {"metric": "profit", "contribution": "-55", "actual": "30", "baseline": "85", "unit": "万元", "comparison_status": "partial"},
+    ]
+    run = _write_synthetic_run(store.analysis, _synthetic_profit_bridge_run(rows=rows))
+    prepared = store.prepare_explanation({"run_ids": [run["id"]]})
+    group = next(group for group in prepared["evidence_groups"] if group["group_type"] == "profit_bridge")
+    # The arithmetic still adds up; the comparison is what is incomplete.
+    assert group["closure"]["status"] == "passed"
+    assert group["status"] == "partial"
+    partial_rows = {member["row"] for member in group["members"] if member.get("comparison_status") == "partial"}
+    assert partial_rows == {1, 3}
+
+    check = store.validate_explanation({
+        "body": "利润合计（20 − 70 − 5 = -55）。",
+        "run_ids": [run["id"]],
+        "fact_ids": _fact_ids_for_group(prepared, "profit_bridge", column="contribution"),
+    })
+
+    codes = {issue["code"] for issue in check["issues"]}
+    assert check["status"] == "needs_attention"
+    assert "evidence_group_partial" in codes
+    assert "body_closure_mismatch" in codes
+    assert check["coverage"]["evidence_group_statuses"] == {"partial": 1}
+
+
 @pytest.mark.parametrize("prefix", ["", "利润桥如下。", "利润桥分析："])
 def test_body_closure_expression_does_not_borrow_profit_bridge_for_revenue_target(service, prefix):
     store, _context = service

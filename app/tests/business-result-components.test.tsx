@@ -5,6 +5,7 @@ import { AnalysisScopeCard } from '../src/views/analysis/AnalysisScopeCard.js';
 import { BusinessResultView } from '../src/views/analysis/BusinessResultView.js';
 import { RevisionDiff } from '../src/views/analysis/RevisionDiff.js';
 import type { AnalysisRun, Bridge } from '../src/bridge.js';
+import huachenDeclared from './fixtures/huachen-row-declarations.json';
 
 const taskId = 't'.repeat(32);
 const dataset = { id: 'd'.repeat(32), name: '预算套表' };
@@ -280,7 +281,7 @@ describe('business result components', () => {
         rows: [
           { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'actual_ytd', unit: '万元', value: '33541.3320', source: 'mth/12 C5', note: '累计收入实际' },
           { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'estimated_budget_ytd', unit: '万元', value: '33415.2443', source: '预算按集团比例估算', note: '累计收入估算预算' },
-          { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'attainment_pct', unit: '比率', value: '100.3773', source: '实际 ÷ 估算预算', note: '达成率百分数' },
+          { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'attainment_pct', unit: '%', value: '100.3773', source: '实际 ÷ 估算预算', note: '达成率百分数' },
         ],
         row_count: 3,
         truncated: false,
@@ -458,7 +459,8 @@ describe('business result components', () => {
     expect(within(others).getByRole('cell', { name: '上年同期营业利润' })).toBeTruthy();
     expect(within(others).getByRole('cell', { name: '-6.85%' })).toBeTruthy();
     expect(within(others).getByRole('cell', { name: '61.68%' })).toBeTruthy();
-    expect(within(others).getByRole('cell', { name: '3.30' })).toBeTruthy();
+    // pct is a percent by the unit table (KTD9), in 其他结果 as on a card.
+    expect(within(others).getByRole('cell', { name: '3.30%' })).toBeTruthy();
     expect(within(others).queryByRole('columnheader', { name: /metric_key|scenario|value/ })).toBeNull();
     expect(within(others).queryByRole('cell', { name: '营业收入 1-8 月实际' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: '2026' }));
@@ -783,5 +785,340 @@ describe('business result components', () => {
     expect(screen.getByText(/收入达成率结论：引用了已变化的收入实际数。/)).toBeTruthy();
     fireEvent.click(screen.getByText('未解决问题 · 1 项'));
     expect(screen.getByText('区域收入假设仍待经理确认。')).toBeTruthy();
+  });
+});
+
+// U6: a declared run pairs strictly by its declaration; a script run saved without one keeps the old inference and
+// says 推断; every value reads by its declared unit through one formatter, on a card and in 其他结果 alike.
+describe('result rows by declaration, inference and unit', () => {
+  const ytd = '2026-01:2026-08';
+  const columns = ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label'];
+  const longRun = (rows: Record<string, unknown>[], patch: Partial<AnalysisRun> = {}): AnalysisRun => ({
+    ...run([]),
+    result: { columns: columns.map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })), rows, row_count: rows.length, truncated: false },
+    ...patch,
+  });
+  const row = (metric_key: string, organization: string, scenario: string, value: string, unit: string, metric_label: string, period = ytd) =>
+    ({ metric_key, organization, period, scenario, value, unit, metric_label });
+
+  it.each([{ unit: '比率', value: '0.945' }, { unit: '%', value: '94.5' }])('reads achievement_pct $value in $unit as 94.50% on the card and in 其他结果', ({ unit, value }) => {
+    render(<BusinessResultView run={longRun([
+      row('revenue', '华东区域', 'actual_ytd', '90', '万元', '收入实际'),
+      row('revenue', '华东区域', 'budget_ytd', '100', '万元', '收入预算'),
+      row('revenue', '华东区域', 'achievement_pct', value, unit, '收入达成率'),
+      // No actual to pair with: this one stays in 其他结果.
+      row('revenue', '华南区域', 'achievement_pct', value, unit, '华南收入达成率'),
+    ])} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getByText('94.50%')).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '94.50%' })).toBeTruthy();
+  });
+
+  it('keeps a row whose unit is - out of the amount pairing and shows it as written with 未标单位', () => {
+    render(<BusinessResultView run={longRun([
+      row('revenue', '华东区域', 'actual_1_8', '90', '万元', '收入实际'),
+      row('revenue', '华东区域', 'budget_1_8', '0.945', '-', '收入达成率'),
+      row('profit', '华东区域', 'actual_1_8', '9', '万元', '利润实际'),
+      row('profit', '华东区域', 'budget_1_8', '10', '万元', '利润预算'),
+    ])} />);
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(1);
+    expect(within(cards[0]).getByText('利润 · 华东区域')).toBeTruthy();
+    const others = screen.getByRole('table', { name: '其他结果' });
+    expect(within(others).getByRole('cell', { name: '0.945（未标单位）' })).toBeTruthy();
+    expect(screen.queryByText('0.95')).toBeNull();
+  });
+
+  // Huachen's long form (runs 84b65b7d / 269d9fd9) in miniature: a group pair and two regional pairs whose budgets
+  // were estimated, one saying so in its label (推算) and one saying nothing (declared only in grain_basis).
+  const huachenRows = [
+    row('revenue', '集团合并', 'actual_1_8', '325644.0000', '万元', '营业收入 1-8 月实际'),
+    row('revenue', '集团合并', 'budget_1_8', '344487.0552', '万元', '营业收入 1-8 月预算'),
+    row('revenue_variance', '集团合并', 'variance_1_8', '-18843.0552', '万元', '营业收入差异'),
+    row('revenue_achievement_ratio', '集团合并', 'budget_1_8', '0.945301', '比率', '营业收入达成率'),
+    row('revenue', '华东区域', 'actual_1_8', '109742.0280', '万元', '营业收入 1-8 月实际'),
+    row('revenue', '华东区域', 'budget_1_8', '117814.5729', '万元', '营业收入 1-8 月预算（推算：集团进度率×区域全年预算）'),
+    row('profit', '华南区域', 'actual_1_8', '5210.1100', '万元', '营业利润 1-8 月实际'),
+    row('profit', '华南区域', 'budget_1_8', '6021.3300', '万元', '营业利润 1-8 月预算'),
+  ];
+  const cardFor = (title: string) => screen.getAllByRole('article').find((card) => within(card).queryByText(title))!;
+
+  it('says 推断 on every card of a script run saved without declarations, and still reads 估算 from its wording', () => {
+    render(<BusinessResultView run={longRun(huachenRows)} />);
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(3);
+    for (const card of cards) expect(within(card).getByText('推断')).toBeTruthy();
+    const east = cardFor('收入 · 华东区域');
+    expect(within(east).getByText('预算（估算）')).toBeTruthy();
+    expect(within(east).getByText('117,814.57')).toBeTruthy();
+    // Without a declaration nothing else knows the southern budget is an estimate: its label says nothing.
+    expect(within(cardFor('利润 · 华南区域')).getByText('预算')).toBeTruthy();
+  });
+
+  it.each([
+    ['a finance engine run', { engine: 'finance' }],
+    ['a structured aggregate run', { engine: 'structured_aggregate' }],
+    ['a SQL run', { engine: undefined }],
+  ])('pairs %s as before and never says 推断', (_, patch) => {
+    render(<BusinessResultView run={longRun(huachenRows, patch)} />);
+    expect(screen.getAllByRole('article')).toHaveLength(3);
+    expect(screen.queryByText(/推断/)).toBeNull();
+  });
+
+  // What foundry.result_semantics.declare_rows wrote for Huachen-shaped rows (tests/test_result_semantics.py keeps the
+  // file current): 华东's budget is an estimate by its own label, 华南's only by the pinned requirements' grain_basis.
+  type Declarations = NonNullable<AnalysisRun['row_declarations']>;
+  const declaration = huachenDeclared.row_declarations as unknown as Declarations;
+  const declaredRun = (patch: Partial<Declarations> = {}, rows: Record<string, unknown>[] = huachenDeclared.rows): AnalysisRun =>
+    longRun(rows, { row_declarations: { ...declaration, ...patch } });
+
+  it('pairs a declared Huachen run by its declaration: both regional budgets read 预算（估算） and no card says 推断', () => {
+    render(<BusinessResultView run={declaredRun()} />);
+    expect(screen.getAllByRole('article')).toHaveLength(3);
+    expect(screen.queryByText(/推断/)).toBeNull();
+    for (const title of ['收入 · 华东区域', '利润 · 华南区域']) {
+      expect(within(cardFor(title)).getByText('预算（估算）'), title).toBeTruthy();
+      expect(within(cardFor(title)).getByText(/依据：估算/), title).toBeTruthy();
+    }
+    const group = cardFor('收入 · 集团合并');
+    expect(within(group).getByText('预算')).toBeTruthy();
+    expect(within(group).getByText('-18,843.06')).toBeTruthy();
+    expect(within(group).getByText('94.53%')).toBeTruthy();
+    // A row in no pair stays in 其他结果.
+    expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '应收账款期末余额' })).toBeTruthy();
+  });
+
+  it('shows 其他结果 of a declared run as declared: a budget estimated by grain_basis says 估算, an unmarked 达成率 says 未标单位', () => {
+    // Leave 华南's pair out, as a declaration that could not pair it would: its rows fall to 其他结果.
+    render(<BusinessResultView run={declaredRun({ pairs: (declaration as Declarations & { pairs: unknown[] }).pairs.slice(0, 2) } as Partial<Declarations>)} />);
+    const others = screen.getByRole('table', { name: '其他结果' });
+    // Its label says nothing of an estimate; the pinned requirements do.
+    expect(within(others).getByRole('cell', { name: '营业利润 1-8 月预算（估算）' })).toBeTruthy();
+    // A 达成率 with no unit at all: no table unit to read, but the backend declared it unmarked, so it is shown as written.
+    expect(within(others).getByRole('cell', { name: '0.931481（未标单位）' })).toBeTruthy();
+    expect(within(others).queryByRole('cell', { name: '0.93' })).toBeNull();
+    expect(within(others).getByRole('cell', { name: '0.865271（未标单位）' })).toBeTruthy();
+  });
+
+  // The pinned requirements' fingerprint is ffff…; the task's current version is read with the run (current_requirements).
+  const pinned = { id: declaration.requirements_id!, fingerprint: declaration.requirements_fingerprint };
+  it.each([
+    ['the run read the current version', pinned, false],
+    ['a later version changed what the requirements mean', { id: 'b2'.repeat(16), fingerprint: 'e'.repeat(64) }, true],
+    ['a later version only renamed items', { id: 'b2'.repeat(16), fingerprint: pinned.fingerprint }, false],
+    ['a later version could not be fingerprinted', { id: 'b2'.repeat(16), fingerprint: null }, true],
+  ])('notes 依据旧版需求 on each card only when %s', (_, current, noted) => {
+    render(<BusinessResultView run={declaredRun({ current_requirements: current } as Partial<Declarations>)} />);
+    for (const card of screen.getAllByRole('article')) expect(within(card).queryByText(/依据旧版需求/) !== null).toBe(noted);
+  });
+
+  it('puts a card\'s other notes in one line, 推断 · 依据旧版需求 · 未标单位, while the estimate stays on its figure', () => {
+    // 华南's pair as the backend returns one whose metric its vocabulary does not name: paired from scenarios alone.
+    const pairs = (declaration as Declarations & { pairs: Record<string, unknown>[] }).pairs.map((pair, index) => index === 2 ? { ...pair, declared: false } : pair);
+    render(<BusinessResultView run={declaredRun({ pairs, current_requirements: { id: 'b2'.repeat(16), fingerprint: 'e'.repeat(64) } } as Partial<Declarations>)} />);
+    // Its 达成率 row was left out for an unmarked unit, so the card's 达成率 stays empty and says why.
+    const south = cardFor('利润 · 华南区域');
+    expect(within(south).getByText('推断 · 依据旧版需求 · 未标单位')).toBeTruthy();
+    expect(within(south).getByText('预算（估算）')).toBeTruthy();
+    expect(within(cardFor('收入 · 集团合并')).getByText('依据旧版需求')).toBeTruthy();
+  });
+
+  it('says 推断 · 未标单位 on an inferred card whose 达成率 row was left out for an unmarked unit', () => {
+    render(<BusinessResultView run={longRun([
+      row('revenue', '华东区域', 'actual_1_8', '90', '万元', '收入实际'),
+      row('revenue', '华东区域', 'budget_1_8', '100', '万元', '收入预算'),
+      row('revenue_achievement_ratio', '华东区域', 'budget_1_8', '0.9', '-', '收入达成率'),
+    ])} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getByText('推断 · 未标单位')).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '0.9（未标单位）' })).toBeTruthy();
+  });
+
+  it('never pairs a declared actual row with a budget row the declaration does not call one', () => {
+    // The declaration gives the second row no role; the old inference would read budget_1_8 as the budget.
+    const [actual, budget] = [declaration.rows[6], declaration.rows[7]];
+    render(<BusinessResultView run={declaredRun({
+      row_count: 2, pairs: [], warnings: [],
+      rows: [{ ...actual, row: 0 }, { ...budget, row: 1, role: null, period_key: null, value: null, estimate: false, estimate_sources: [] }],
+    } as Partial<Declarations>, huachenDeclared.rows.slice(6, 8))} />);
+    expect(screen.queryByRole('article')).toBeNull();
+    const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
+    expect(within(table).getByRole('cell', { name: '5,210.11' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '6,021.33' })).toBeTruthy();
+  });
+
+  it('renders a pair whose rows sit past row 1000 of the result preview from the declaration values', () => {
+    const detail = Array.from({ length: 1000 }, (_, index) => row(`line_${index}`, '集团合并', 'actual_py_1_8', `${index}.0000`, '万元', '明细'));
+    const detailEntries = detail.map((item, index) => ({ row: index, fields: {}, role: null, metric: item.metric_key, organization: '集团合并', period: ytd,
+      period_key: null, span: null, unit: '万元', unit_kind: 'amount', value: null, scope_label: '明细', estimate: false, estimate_sources: [] }));
+    const [actual, budget] = [declaration.rows[4], declaration.rows[5]];
+    const east = (declaration as Declarations & { pairs: Record<string, unknown>[] }).pairs[1];
+    const current = declaredRun({
+      row_count: 1500, warnings: [],
+      rows: [...detailEntries, { ...actual, row: 1200 }, { ...budget, row: 1201 }],
+      pairs: [{ ...east, members: { actual: 1200, budget: 1201 } }],
+    } as Partial<Declarations>, detail);
+    render(<BusinessResultView run={{ ...current, result: { ...current.result!, row_count: 1500, truncated: true } }} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getByLabelText('收入 · 华东区域实际').textContent).toBe('109,742.03');
+    expect(within(card).getByText('117,814.57')).toBeTruthy();
+    expect(within(card).getByText('预算（估算）')).toBeTruthy();
+    // The row's own label travels with its declaration.
+    expect(within(card).getByText('营业收入 1-8 月实际')).toBeTruthy();
+    expect(within(card).queryByText(/推断/)).toBeNull();
+  });
+
+  // One declared comparison with an approved budget row beside an estimated one. The backend pairs it even when the
+  // approved row has no value, so the budget shown is picked by value, as the inference does for older runs.
+  const withEstimatedBudget = (budget: string | null) => {
+    const measures = ['actual', 'budget', 'estimated_budget'] as const;
+    const scenarios = ['actual_1_8', 'budget_1_8', 'estimated_budget_1_8'];
+    const labels = ['营业收入 1-8 月实际', '营业收入 1-8 月预算', '营业收入 1-8 月估算预算'];
+    const values = ['1000.0000', budget, '800.0000'];
+    const rows = scenarios.map((scenario, index) => ({ ...row('revenue', '西部区域', scenario, '', '万元', labels[index]), value: values[index] }));
+    const entries = measures.map((measure, index) => ({ ...declaration.rows[4], row: index, fields: {}, role: measure === 'estimated_budget' ? 'budget' : measure,
+      organization: '西部区域', value: values[index], scope_label: labels[index], estimate: measure === 'estimated_budget', estimate_sources: [] }));
+    const pair = { ...declaration.pairs![1], organization: '西部区域', members: { actual: 0, budget: 1, estimated_budget: 2 },
+      estimate: { estimated: true, measures: ['estimated_budget'] }, conclusion: null };
+    return declaredRun({ row_count: 3, warnings: [], rows: entries, pairs: [pair] } as Partial<Declarations>, rows);
+  };
+  const businessTable = () => {
+    const table = screen.getByRole('table', { name: '业务结果' });
+    const headers = within(table).getAllByRole('columnheader').map((cell) => cell.textContent);
+    const cells = within(table).getAllByRole('cell').map((cell) => cell.textContent);
+    return { headers, row: Object.fromEntries(headers.map((header, index) => [header, cells[index]])) };
+  };
+
+  it.each([['null', null], ['empty', '']])('reads the estimate as 预算（估算） when the declared approved budget beside it is %s', (_, budget) => {
+    render(<BusinessResultView run={withEstimatedBudget(budget)} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getAllByText('800.00').map((node) => node.previousSibling?.textContent)).toEqual(['预算（估算）']);
+    expect(within(card).queryByText('预算')).toBeNull();
+    // The table's one budget column holds the estimate its row reads against, 依据 估算, as an estimate-only comparison
+    // always has; no 同期预算（估算） column beside it makes that figure read as an approved budget.
+    const { headers, row: shown } = businessTable();
+    expect(headers).not.toContain('同期预算（估算）');
+    expect(shown).toMatchObject({ 实际: '1,000.00', 同期预算: '800.00', 依据: '估算' });
+  });
+
+  it('keeps a declared approved budget as 预算 and shows the estimated one beside it', () => {
+    render(<BusinessResultView run={withEstimatedBudget('900.0000')} />);
+    const card = screen.getByRole('article');
+    expect(within(card).getByText('900.00').previousSibling?.textContent).toBe('预算');
+    expect(within(card).getByText('800.00').previousSibling?.textContent).toBe('预算（估算）');
+    expect(businessTable().row).toMatchObject({ 同期预算: '900.00', '同期预算（估算）': '800.00' });
+  });
+});
+
+// The backend's conclusion sentences (R6, KTD7): shown above the KPI cards as they were written, with their 脚本结果
+// basis. The frontend does no arithmetic; a run without declared conclusions renders as it did before them.
+describe('script conclusion sentences', () => {
+  const ytd = '2026-01:2026-08';
+  const huachenRow = (metric_key: string, scenario: string, organization: string, value: string, unit: string, metric_label: string, period = ytd) =>
+    ({ metric_key, organization, period, scenario, value, currency: 'CNY', unit, metric_label, source: '预算工作簿 09·预算执行分析' });
+  const huachen: AnalysisRun = {
+    ...run([]),
+    id: '84b65b7dda9b48ee8e1d65e285e22d7a',
+    result: {
+      columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'currency', 'unit', 'metric_label', 'source']
+        .map((name) => ({ name, type: name === 'value' ? 'DECIMAL(38,10)' : 'VARCHAR' })),
+      rows: [
+        huachenRow('revenue', 'actual_1_8', '集团合并', '325644.0000', '万元', '营业收入 1-8 月实际'),
+        huachenRow('revenue', 'budget_1_8', '集团合并', '344487.0552', '万元', '营业收入 1-8 月预算'),
+        huachenRow('revenue_variance', 'variance_1_8', '集团合并', '-18843.0552', '万元', '营业收入差异'),
+        huachenRow('revenue_achievement_ratio', 'budget_1_8', '集团合并', '0.945301', '比率', '营业收入达成率'),
+        huachenRow('profit', 'actual_1_8', '集团合并', '21086.0000', '万元', '营业利润 1-8 月实际（报告口径）'),
+        huachenRow('profit', 'budget_1_8', '集团合并', '27192.3769', '万元', '营业利润 1-8 月预算'),
+        huachenRow('revenue', 'actual_1_8', '华东区域', '109742.0280', '万元', '营业收入 1-8 月实际'),
+        huachenRow('revenue', 'budget_1_8', '华东区域', '117814.5729', '万元', '营业收入 1-8 月预算（估算：集团进度率×区域全年预算）'),
+        huachenRow('revenue_variance', 'variance_1_8', '华东区域', '-8072.5449', '万元', '营业收入差异'),
+        huachenRow('profit', 'actual_1_8', '华东区域', '12451.5443', '万元', '营业利润 1-8 月实际'),
+        huachenRow('profit', 'budget_1_8', '华东区域', '13936.4958', '万元', '营业利润 1-8 月预算（估算）'),
+        huachenRow('revenue', 'actual_2026_08', '集团合并', '41469.6250', '万元', '8 月营业收入实际', '2026-08'),
+        huachenRow('revenue', 'budget_2026_08', '集团合并', '44163.6526', '万元', '8 月营业收入预算', '2026-08'),
+      ],
+      row_count: 13,
+      truncated: false,
+    },
+  };
+  const sentences = {
+    groupRevenue: '1-8 月集团合并收入比预算少 18,843.06 万元（达成 94.53%），实际 325,644.00 万元，预算 344,487.06 万元',
+    groupProfit: '1-8 月集团合并利润比预算少 6106.3769 万元，实际 21086.0000 万元，预算 27192.3769 万元',
+    eastRevenue: '1-8 月华东区域收入比预算少 8072.5449 万元，实际 109742.0280 万元，预算 117814.5729 万元；华东区域预算为估算',
+    eastProfit: '1-8 月华东区域利润比预算少 1484.9515 万元，实际 12451.5443 万元，预算 13936.4958 万元；华东区域预算为估算',
+    august: '2026 年 8 月集团合并收入比预算少 2694.0276 万元，实际 41469.6250 万元，预算 44163.6526 万元',
+  };
+  // A member is an estimate as the backend declares it: by its own label (估算), with or without a sentence.
+  const estimatedMeasures = (members: Record<string, number>) =>
+    Object.entries(members).filter(([, index]) => String(huachen.result!.rows[index].metric_label).includes('估算')).map(([measure]) => measure);
+  const pair = (metric: string, organization: string, period: string, members: Record<string, number>, text: string | null) => ({
+    metric, organization, period, period_key: `${period}|${period === ytd ? '1_8' : '2026_08'}`, span: null, unit: '万元', members, declared: true,
+    estimate: { estimated: estimatedMeasures(members).length > 0, measures: estimatedMeasures(members) },
+    conclusion: text ? { text, basis: '脚本结果', verified: false, values: {}, variance_from: 'row' } : null,
+  });
+  const pairs = (concluded: boolean) => [
+    pair('revenue', '集团合并', ytd, { actual: 0, budget: 1, variance: 2, rate: 3 }, concluded ? sentences.groupRevenue : null),
+    pair('profit', '集团合并', ytd, { actual: 4, budget: 5 }, concluded ? sentences.groupProfit : null),
+    pair('revenue', '华东区域', ytd, { actual: 6, budget: 7, variance: 8 }, concluded ? sentences.eastRevenue : null),
+    pair('profit', '华东区域', ytd, { actual: 9, budget: 10 }, concluded ? sentences.eastProfit : null),
+    pair('revenue', '集团合并', '2026-08', { actual: 11, budget: 12 }, concluded ? sentences.august : null),
+  ];
+  const roles = { actual: 'actual', budget: 'budget', estimated_budget: 'budget', variance: 'variance', rate: 'ratio', rate_pct: 'ratio' } as const;
+  // Each member row as the backend declares it: its own value and label, 估算 where the pair says so.
+  const declaredRows = (list: ReturnType<typeof pairs>) => list.flatMap((item) => Object.entries(item.members).map(([measure, index]) => {
+    const source = huachen.result!.rows[index];
+    return { row: index, fields: {}, role: roles[measure as keyof typeof roles], metric: item.metric, organization: item.organization, period: item.period,
+      period_key: item.period_key, span: null, unit: source.unit, unit_kind: source.unit === '比率' ? 'decimal' : 'amount', value: source.value,
+      scope_label: source.metric_label, estimate: item.estimate.measures.includes(measure), estimate_sources: [] };
+  }));
+  const declared = (concluded: boolean): AnalysisRun => ({
+    ...huachen,
+    row_declarations: {
+      rules_version: '3.1.1', requirements_id: null, requirements_fingerprint: null, complete: concluded, incomplete_reason: concluded ? null : 'result_file_unavailable',
+      row_count: 13, rows: declaredRows(pairs(concluded)), warnings: [], pairs: pairs(concluded),
+    } as unknown as NonNullable<AnalysisRun['row_declarations']>,
+  });
+
+  it('shows the backend sentences above the KPI cards with their 脚本结果 basis, three first and the rest folded', () => {
+    render(<BusinessResultView run={declared(true)} />);
+
+    const conclusions = screen.getByRole('region', { name: '脚本结论' });
+    const cards = screen.getByLabelText('关键指标');
+    expect(conclusions.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Each sentence is the backend's text, character for character.
+    for (const text of [sentences.groupRevenue, sentences.groupProfit, sentences.eastRevenue]) {
+      expect(within(conclusions).getByText(text).closest('details')).toBeNull();
+    }
+    const rest = within(conclusions).getByText('其余 1 句结论').closest('details')!;
+    expect(within(rest).getByText(sentences.eastProfit)).toBeTruthy();
+    expect(within(conclusions).getAllByText('依据：脚本结果')).toHaveLength(4);
+    expect(conclusions.textContent).not.toMatch(/已核验|核验通过/);
+    // The regional budget's estimate is said in the sentence itself.
+    expect(within(conclusions).getByText(sentences.eastRevenue).textContent).toContain('华东区域预算为估算');
+    // A sentence belongs to its period tab, as the cards do.
+    expect(within(conclusions).queryByText(sentences.august)).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+    const august = screen.getByRole('region', { name: '脚本结论' });
+    expect(within(august).getByText(sentences.august)).toBeTruthy();
+    expect(within(august).queryByText(sentences.groupRevenue)).toBeNull();
+    expect(within(august).queryByText(/其余/)).toBeNull();
+  });
+
+  it('adds only the sentences to a declared run, and says 推断 only where no declaration paired the rows', () => {
+    const inferred = render(<BusinessResultView run={huachen} />).container.innerHTML;
+    expect(screen.queryByRole('region', { name: '脚本结论' })).toBeNull();
+    expect(screen.queryByText(/脚本结果/)).toBeNull();
+    expect(screen.getAllByText('推断')).toHaveLength(4);
+    cleanup();
+
+    // An incomplete declaration pairs its rows but concludes nothing: the same cards, without 推断.
+    const before = render(<BusinessResultView run={declared(false)} />).container.innerHTML;
+    expect(before).toBe(inferred.replaceAll('<small class="analysis-kpi-notes">推断</small>', ''));
+    cleanup();
+
+    // With conclusions, the sentences are the only addition.
+    const { container } = render(<BusinessResultView run={declared(true)} />);
+    container.querySelector('[aria-label="脚本结论"]')!.remove();
+    expect(container.innerHTML).toBe(before);
   });
 });

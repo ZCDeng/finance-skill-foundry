@@ -1,0 +1,557 @@
+{
+  "_about": "Written by foundry.result_semantics.declare_rows from these rows and requirements; tests/test_result_semantics.py checks it still matches, so the frontend tests read what the server writes.",
+  "columns": [
+    "metric_key",
+    "organization",
+    "period",
+    "scenario",
+    "value",
+    "unit",
+    "metric_label"
+  ],
+  "rows": [
+    {
+      "metric_key": "revenue",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "325644.0000",
+      "unit": "万元",
+      "metric_label": "营业收入 1-8 月实际"
+    },
+    {
+      "metric_key": "revenue",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "344487.0552",
+      "unit": "万元",
+      "metric_label": "营业收入 1-8 月预算"
+    },
+    {
+      "metric_key": "revenue_variance",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "variance_1_8",
+      "value": "-18843.0552",
+      "unit": "万元",
+      "metric_label": "营业收入差异"
+    },
+    {
+      "metric_key": "revenue_achievement_ratio",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "0.945301",
+      "unit": "比率",
+      "metric_label": "营业收入达成率"
+    },
+    {
+      "metric_key": "revenue",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "109742.0280",
+      "unit": "万元",
+      "metric_label": "营业收入 1-8 月实际"
+    },
+    {
+      "metric_key": "revenue",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "117814.5729",
+      "unit": "万元",
+      "metric_label": "营业收入 1-8 月预算（推算：集团进度率×区域全年预算）"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华南区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "5210.1100",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月实际"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华南区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "6021.3300",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月预算"
+    },
+    {
+      "metric_key": "receivable_balance",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "41400.0000",
+      "unit": "万元",
+      "metric_label": "应收账款期末余额"
+    },
+    {
+      "metric_key": "revenue_budget_bud_fy",
+      "organization": "华东区域",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "180576.0000",
+      "unit": "万元",
+      "metric_label": "区域全年收入预算（源表列示）"
+    },
+    {
+      "metric_key": "revenue",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "achievement_ratio",
+      "value": "0.931481",
+      "unit": "",
+      "metric_label": "营业收入达成率"
+    },
+    {
+      "metric_key": "profit_achievement_ratio",
+      "organization": "华南区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "0.865271",
+      "unit": "-",
+      "metric_label": "营业利润达成率"
+    }
+  ],
+  "requirements": {
+    "id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "items": [
+      {
+        "id": "profit_1_8",
+        "metric": "profit",
+        "organizations": [
+          "集团合并",
+          "华南区域"
+        ],
+        "periods": [
+          "2026-01:2026-08"
+        ],
+        "scenarios": [
+          "actual_1_8",
+          "budget_1_8"
+        ],
+        "grain_basis": [
+          {
+            "basis": "estimate",
+            "method": "区域全年预算 × 集团 1-8 月预算进度",
+            "organizations": [
+              "华南区域"
+            ],
+            "periods": [
+              "2026-01:2026-08"
+            ],
+            "scenarios": [
+              "budget_1_8"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "row_declarations": {
+    "rules_version": "4.1.1",
+    "requirements_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "requirements_fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "complete": true,
+    "incomplete_reason": null,
+    "row_count": 12,
+    "rows": [
+      {
+        "row": 0,
+        "fields": {
+          "metric_key": "revenue",
+          "organization": "集团合并",
+          "period": "2026-01:2026-08",
+          "scenario": "actual_1_8"
+        },
+        "role": "actual",
+        "metric": "revenue",
+        "organization": "集团合并",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "325644.0000",
+        "scope_label": "营业收入 1-8 月实际",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 1,
+        "fields": {
+          "metric_key": "revenue",
+          "organization": "集团合并",
+          "period": "2026-01:2026-08",
+          "scenario": "budget_1_8"
+        },
+        "role": "budget",
+        "metric": "revenue",
+        "organization": "集团合并",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "344487.0552",
+        "scope_label": "营业收入 1-8 月预算",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 2,
+        "fields": {
+          "metric_key": "revenue_variance",
+          "organization": "集团合并",
+          "period": "2026-01:2026-08",
+          "scenario": "variance_1_8"
+        },
+        "role": "variance",
+        "metric": "revenue",
+        "organization": "集团合并",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "-18843.0552",
+        "scope_label": "营业收入差异",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 3,
+        "fields": {
+          "metric_key": "revenue_achievement_ratio",
+          "organization": "集团合并",
+          "period": "2026-01:2026-08",
+          "scenario": "budget_1_8"
+        },
+        "role": "ratio",
+        "metric": "revenue",
+        "organization": "集团合并",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "比率",
+        "unit_kind": "decimal",
+        "value": "0.945301",
+        "scope_label": "营业收入达成率",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 4,
+        "fields": {
+          "metric_key": "revenue",
+          "organization": "华东区域",
+          "period": "2026-01:2026-08",
+          "scenario": "actual_1_8"
+        },
+        "role": "actual",
+        "metric": "revenue",
+        "organization": "华东区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "109742.0280",
+        "scope_label": "营业收入 1-8 月实际",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 5,
+        "fields": {
+          "metric_key": "revenue",
+          "organization": "华东区域",
+          "period": "2026-01:2026-08",
+          "scenario": "budget_1_8"
+        },
+        "role": "budget",
+        "metric": "revenue",
+        "organization": "华东区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "117814.5729",
+        "scope_label": "营业收入 1-8 月预算（推算：集团进度率×区域全年预算）",
+        "estimate": true,
+        "estimate_sources": [
+          {
+            "source": "text",
+            "field": "metric_label"
+          }
+        ]
+      },
+      {
+        "row": 6,
+        "fields": {
+          "metric_key": "profit",
+          "organization": "华南区域",
+          "period": "2026-01:2026-08",
+          "scenario": "actual_1_8"
+        },
+        "role": "actual",
+        "metric": "profit",
+        "organization": "华南区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "5210.1100",
+        "scope_label": "营业利润 1-8 月实际",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 7,
+        "fields": {
+          "metric_key": "profit",
+          "organization": "华南区域",
+          "period": "2026-01:2026-08",
+          "scenario": "budget_1_8"
+        },
+        "role": "budget",
+        "metric": "profit",
+        "organization": "华南区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "6021.3300",
+        "scope_label": "营业利润 1-8 月预算",
+        "estimate": true,
+        "estimate_sources": [
+          {
+            "source": "declared",
+            "requirements_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "item_id": "profit_1_8"
+          }
+        ]
+      },
+      {
+        "row": 8,
+        "fields": {
+          "metric_key": "receivable_balance",
+          "organization": "华东区域",
+          "period": "2026-01:2026-08",
+          "scenario": "actual_1_8"
+        },
+        "role": "actual",
+        "metric": "receivable_balance",
+        "organization": "华东区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": "41400.0000",
+        "scope_label": "应收账款期末余额",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 9,
+        "fields": {
+          "metric_key": "revenue_budget_bud_fy",
+          "organization": "华东区域",
+          "period": "2026",
+          "scenario": "budget_bud_fy"
+        },
+        "role": null,
+        "metric": "revenue_budget_bud_fy",
+        "organization": "华东区域",
+        "period": "2026",
+        "period_key": null,
+        "span": null,
+        "unit": "万元",
+        "unit_kind": "amount",
+        "value": null,
+        "scope_label": "区域全年收入预算（源表列示）",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 10,
+        "fields": {
+          "metric_key": "revenue",
+          "organization": "华东区域",
+          "period": "2026-01:2026-08",
+          "scenario": "achievement_ratio"
+        },
+        "role": "ratio",
+        "metric": "revenue",
+        "organization": "华东区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|",
+        "span": null,
+        "unit": null,
+        "unit_kind": "unmarked",
+        "value": "0.931481",
+        "scope_label": "营业收入达成率",
+        "estimate": false,
+        "estimate_sources": []
+      },
+      {
+        "row": 11,
+        "fields": {
+          "metric_key": "profit_achievement_ratio",
+          "organization": "华南区域",
+          "period": "2026-01:2026-08",
+          "scenario": "budget_1_8"
+        },
+        "role": "ratio",
+        "metric": "profit",
+        "organization": "华南区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "-",
+        "unit_kind": "unmarked",
+        "value": "0.865271",
+        "scope_label": "营业利润达成率",
+        "estimate": false,
+        "estimate_sources": []
+      }
+    ],
+    "pairs": [
+      {
+        "metric": "revenue",
+        "organization": "集团合并",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "members": {
+          "actual": 0,
+          "budget": 1,
+          "variance": 2,
+          "rate": 3
+        },
+        "declared": true,
+        "estimate": {
+          "estimated": false,
+          "measures": []
+        },
+        "conclusion": {
+          "text": "1-8 月集团合并收入比预算少 18,843.06 万元（达成 94.53%），实际 325,644.00 万元，预算 344,487.06 万元",
+          "basis": "脚本结果",
+          "verified": false,
+          "values": {
+            "actual": "325644.0000",
+            "budget": "344487.0552",
+            "variance": "-18843.0552",
+            "ratio_percent": "94.5301"
+          },
+          "variance_from": "row"
+        }
+      },
+      {
+        "metric": "revenue",
+        "organization": "华东区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "members": {
+          "actual": 4,
+          "budget": 5
+        },
+        "declared": true,
+        "estimate": {
+          "estimated": true,
+          "measures": [
+            "budget"
+          ]
+        },
+        "conclusion": {
+          "text": "1-8 月华东区域收入比预算少 8,072.54 万元，实际 109,742.03 万元，预算 117,814.57 万元；华东区域预算为估算",
+          "basis": "脚本结果",
+          "verified": false,
+          "values": {
+            "actual": "109742.0280",
+            "budget": "117814.5729",
+            "variance": "-8072.5449"
+          },
+          "variance_from": "computed"
+        }
+      },
+      {
+        "metric": "profit",
+        "organization": "华南区域",
+        "period": "2026-01:2026-08",
+        "period_key": "2026-01:2026-08|1_8",
+        "span": null,
+        "unit": "万元",
+        "members": {
+          "actual": 6,
+          "budget": 7
+        },
+        "declared": true,
+        "estimate": {
+          "estimated": true,
+          "measures": [
+            "budget"
+          ]
+        },
+        "conclusion": {
+          "text": "1-8 月华南区域利润比预算少 811.22 万元，实际 5,210.11 万元，预算 6,021.33 万元；华南区域预算为估算",
+          "basis": "脚本结果",
+          "verified": false,
+          "values": {
+            "actual": "5210.1100",
+            "budget": "6021.3300",
+            "variance": "-811.2200"
+          },
+          "variance_from": "computed"
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "severity": "warning",
+        "code": "unit_unmarked",
+        "rows": [
+          10,
+          11
+        ],
+        "row_count": 2,
+        "message": "2 行没有标明单位：单位写成「-」，或比率行没有写单位表里的单位。这些行不参与金额配对，结果区原样显示并注明「未标单位」。比率写「比率」或 ratio（小数，0.945 即 94.5%），百分数写 %、pct 或「百分比」，金额写实际单位。"
+      },
+      {
+        "severity": "warning",
+        "code": "scenario_undeclared",
+        "rows": [
+          9
+        ],
+        "row_count": 1,
+        "names": [
+          "budget_bud_fy"
+        ],
+        "message": "情景名 budget_bud_fy 不在约定情景里，本次运行固定的需求版本也没有列出（共 1 行），这些行不参与实际与预算配对。请改用约定情景名（actual、budget、variance，或带期间后缀的 actual_1_8、budget_2026_08），或把它列进需求版本的 scenarios。"
+      },
+      {
+        "severity": "warning",
+        "code": "estimate_basis_missing",
+        "rows": [
+          5
+        ],
+        "row_count": 1,
+        "message": "1 行的文字写了估算用语，但依据列 basis 没有写 estimate。这些行仍按估算显示；请在这些行的 basis 列写 estimate，估算就不只靠文字识别。"
+      }
+    ]
+  }
+}

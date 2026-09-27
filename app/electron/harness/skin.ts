@@ -18,6 +18,8 @@ export const LIGHT_THEME = {
   selected: '#8a6729',
   onSelected: '#f9fafb',
   selectionSurface: '#efefed',
+  warning: '#a3372b',
+  warningFill: '#c96a5c1f',
 } as const;
 
 export const DARK_THEME = {
@@ -32,6 +34,8 @@ export const DARK_THEME = {
   selected: '#e2c180',
   onSelected: '#1f1f1f',
   selectionSurface: '#292929',
+  warning: '#eb9a8c',
+  warningFill: '#eb9a8c1f',
 } as const;
 
 /** The body attribute written by the pinned DSH ThemePresenter for dark mode. */
@@ -81,6 +85,8 @@ body {
   --foundry-native-selected:${LIGHT_THEME.selected};
   --foundry-native-on-selected:${LIGHT_THEME.onSelected};
   --foundry-native-selection-surface:${LIGHT_THEME.selectionSurface};
+  --foundry-native-warning:${LIGHT_THEME.warning};
+  --foundry-native-warning-fill:${LIGHT_THEME.warningFill};
 }
 
 body[${DSH_DARK_ATTRIBUTE}] {
@@ -95,6 +101,8 @@ body[${DSH_DARK_ATTRIBUTE}] {
   --foundry-native-selected:${DARK_THEME.selected};
   --foundry-native-on-selected:${DARK_THEME.onSelected};
   --foundry-native-selection-surface:${DARK_THEME.selectionSurface};
+  --foundry-native-warning:${DARK_THEME.warning};
+  --foundry-native-warning-fill:${DARK_THEME.warningFill};
 }
 
 body {
@@ -129,6 +137,9 @@ body {
   --dsw-static-blue-450:var(--foundry-native-selected) !important;
   --dsw-alias-button-info-fill:var(--foundry-native-selected) !important;
   --dsw-alias-button-info-hover:var(--foundry-native-focus) !important;
+  --dsw-alias-state-error-primary:var(--foundry-native-warning) !important;
+  --dsw-alias-label-error:var(--foundry-native-warning) !important;
+  --dsw-alias-interactive-bg-hover-danger:var(--foundry-native-warning-fill) !important;
 }
 
 body, button, input, textarea, select {

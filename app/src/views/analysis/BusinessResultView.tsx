@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AnalysisRun } from '../../bridge.js';
+import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessRows, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
+import { businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table } from './presentation.js';
 
-type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string };
+/** How many sentences stand above the cards before the rest fold away. */
+const shownConclusions = 3;
+
+type Kpi = { title: string; period: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; notes: string[] };
 
 function valueFor(row: Record<string, unknown>, columns: DisplayColumn[], names: string[], fallback = '—'): string {
   for (const name of names) {
@@ -68,7 +71,23 @@ function kpiFor(row: Record<string, unknown>, columns: DisplayColumn[]): Kpi {
     budget: valueFor(row, columns, ['budget', 'baseline', 'same_period_budget']),
     difference: valueFor(row, columns, ['variance', 'difference', 'amount_change', 'profit_impact', 'contribution']),
     rate: valueFor(row, columns, ['attainment_rate', 'attainment_pct', 'achievement_pct', 'completion_pct', 'attainment', 'attainment_ratio', 'budget_attainment', 'budget_attainment_rate', 'budget_completion', 'budget_completion_rate', 'completion_rate', 'completion', 'achievement_rate', 'achievement', 'actual_budget_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio']),
+    notes: cardNotes(row),
   };
+}
+
+/** The sentences the backend concluded for this period's pairs; a pair without a period belongs to every tab. */
+function periodConclusions(run: AnalysisRun, period: string): ScriptConclusion[] {
+  const pairs = run.row_declarations?.pairs ?? [];
+  return pairs
+    .filter((pair) => !period || pair.period == null || pair.period === '' || String(pair.period) === period)
+    .flatMap((pair) => (pair.conclusion ? [pair.conclusion] : []));
+}
+
+function ConclusionLine({ conclusion }: { conclusion: ScriptConclusion }) {
+  return <div className="analysis-headline-line">
+    <p className="analysis-headline-text">{conclusion.text}</p>
+    <p className="analysis-note">依据：{conclusion.basis}</p>
+  </div>;
 }
 
 export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSources?(): void }) {
@@ -88,6 +107,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
     return output;
   }), [columns, filteredRows]);
   const kpis = useMemo(() => kpiRows(filteredRows).map((row) => kpiFor(row, columns)), [columns, filteredRows]);
+  const conclusions = useMemo(() => periodConclusions(run, period), [run, period]);
   const otherRows = useMemo(() => otherLongRows(run), [run]);
   const otherColumns = useMemo(() => longRowColumns(run, otherRows), [run, otherRows]);
   // A row without a period belongs to every period tab rather than to none.
@@ -101,6 +121,13 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
       {periods.map((item) => <Button key={item} variant={item === period ? 'default' : 'outline'} type="button" role="tab" aria-selected={item === period}
         onClick={() => setPeriod(item)}>{item}</Button>)}
     </div> : null}
+    {/* The backend's own sentences, shown as written: the frontend does no arithmetic on them. */}
+    {conclusions.length ? <section className="analysis-headline" aria-label="脚本结论">
+      {conclusions.slice(0, shownConclusions).map((conclusion, index) => <ConclusionLine key={index} conclusion={conclusion} />)}
+      {conclusions.length > shownConclusions ? <details className="analysis-details"><summary>其余 {conclusions.length - shownConclusions} 句结论</summary>
+        {conclusions.slice(shownConclusions).map((conclusion, index) => <ConclusionLine key={index} conclusion={conclusion} />)}
+      </details> : null}
+    </section> : null}
     {kpis.length ? <div className="analysis-kpi-grid" aria-label="关键指标">
       {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
         <span>{kpi.title}</span>
@@ -114,6 +141,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
           <div><dt>达成率</dt><dd>{kpi.rate}</dd></div>
         </dl>
         {kpi.budgetLabel ? <small className="analysis-kpi-source">预算：{kpi.budgetLabel}</small> : null}
+        {kpi.notes.length ? <small className="analysis-kpi-notes">{kpi.notes.join(' · ')}</small> : null}
       </article>)}
     </div> : null}
     {/* The run's own caveats stand next to the numbers they qualify, whatever words they use. */}

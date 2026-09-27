@@ -1276,6 +1276,54 @@ def test_profit_bridge_intent_keeps_scope_guards(tmp_path, scope):
     assert result['items'][0]['status'] == 'pending'
 
 
+def _east_rows_without_budget_cost():
+    return [row for row in _regional_rows() if not (row['scenario'] == 'budget' and row['management_account'] == 'cost')]
+
+
+def test_account_one_side_never_booked_does_not_close_its_requirement(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, rows=_east_rows_without_budget_cost(), title='partial-account')
+    requirement = service.analysis_requirements_save({
+        'question': '华东本期收入、成本实际对预算差异',
+        'context_id': context['id'],
+        'scope': {'ledger': 'region-ledger', 'organization': '华东', 'period': '2026-08', 'currency': 'CNY', 'unit': '万元'},
+        'bindings': {'regional': bindings['regional']},
+        'items': [
+            {'id': 'east_revenue', 'metric': 'revenue', 'label': '华东收入实际对预算差异',
+             'dimensions': {'scenario_compare': 'actual_vs_budget'}, 'requires_drilldown': True},
+            {'id': 'east_cost', 'metric': 'cost', 'label': '华东成本实际对预算差异',
+             'dimensions': {'scenario_compare': 'actual_vs_budget'}, 'requires_drilldown': True},
+        ],
+    })
+    run = _run_east_profit_bridge(service, context)
+    status = {row['metric']: row['comparison_status'] for row in run['result']['rows']}
+    assert status == {'revenue': 'complete', 'cost': 'partial', 'expense': 'complete', 'profit': 'partial'}
+    _verify_run_column(service, run, 'contribution')
+    claims = [claim for claim in _claims_for_columns(run, 'contribution')
+              if run['result']['rows'][claim['row']]['metric'] in {'revenue', 'cost'}]
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': claims})
+
+    items = {item['id']: item for item in result['items']}
+    assert result['coverage']['status'] == 'needs_attention'
+    # The cost line compares 80 with a budget that books no cost at all: 缺项, not an answer.
+    assert items['east_cost']['status'] != 'answered'
+    assert [location['evidence']['not_counted_reason'] for location in items['east_cost']['locations']] == ['comparison_partial']
+    # Revenue is booked on both sides; the missing cost does not change what its line says.
+    assert items['east_revenue']['status'] == 'answered'
+
+
+def test_profit_bridge_with_a_partial_line_does_not_close(tmp_path):
+    service, context, bindings = _regional_service(tmp_path, rows=_east_rows_without_budget_cost(), title='partial-bridge')
+    requirement = _profit_bridge_requirement(service, context, bindings)
+    run = _run_east_profit_bridge(service, context)
+    _verify_run_column(service, run, 'contribution')
+
+    result = check_requirements(service.analysis, {'requirements_id': requirement['id'], 'run_ids': [run['id']], 'claims': _claims_for_columns(run, 'contribution')})
+
+    assert result['coverage']['status'] == 'needs_attention'
+    assert result['items'][0]['status'] != 'answered'
+
+
 def test_profit_bridge_intent_does_not_trust_free_sql_method_label(tmp_path):
     service, context, bindings = _regional_service(tmp_path, title='free-sql-bridge')
     requirement = _profit_bridge_requirement(service, context, bindings)

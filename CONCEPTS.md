@@ -68,3 +68,11 @@ Which side of the books a fact sits on, read from the row's 借贷 column or its
 
 ### Incomplete Run (不完整的运行)
 A run that finished without failing but produced something nobody should build on: no rows at all, or a diagnostic the engine raised at error severity. It stays `succeeded`, because nothing failed, and is marked `incomplete` so a draft, a chart, or an explanation can tell it apart from an answer. An empty result is the common case, and it is the engine's job to say so rather than hand back a green run with an empty table.
+
+## Results
+
+### Row Declaration (行声明)
+What the backend states about each row of a script result when the run is saved: whether the row is an actual, a budget, a variance, or a ratio; which period it covers; whether it is an estimate and on what grounds (a grain declared in the run's requirements or the task's latest ones, the row's own basis columns, or its wording); and the 口径 its label names. A declaration sits beside the stored result, never inside it, so it leaves the run's output hash alone, and it records the requirements version it read. A result without declarations is paired by inference instead, and what that inference shows is marked 推断 (Inferred).
+
+### Missing Account (缺项)
+A variance row whose account has source rows on one side but none on the other, inside a group present on both sides. It is marked `partial`, never `complete`, and it does not close a requirement. It differs from a group missing a whole side, which stays incomplete unless the manager chooses to count it as zero (`assumed_zero`).

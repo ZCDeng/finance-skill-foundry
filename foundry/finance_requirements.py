@@ -1076,6 +1076,8 @@ def _prepared_evidence(analysis, runs):
                 'aggregate_output': engine == 'structured_aggregate',
                 **aggregate,
                 'member_state': member.get('state'),
+                # An explain_variance line comparing an account only one side books (缺项).
+                **({'comparison_status': 'partial'} if member.get('comparison_status') == 'partial' else {}),
                 'fact_id': fact_id,
             }
     return {'members': member_map, 'groups': group_map}
@@ -1925,6 +1927,10 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
     if member.get('member_state') == 'not_applicable':
         return 'not_applicable', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'method_not_applicable'}
+    if member.get('comparison_status') == 'partial':
+        # One side has no source rows for the account: its line, and the profit line built on it, compare
+        # against nothing. Whatever backs the cell, it is not a complete comparison.
+        return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'comparison_partial'}
     amount = _closed_metric_key(item, scenario)
     source_recipe = bool(
         recipe and recipe.get('counted') and recipe['evidence_class'] in SOURCE_EVIDENCE_BASES
@@ -1937,7 +1943,8 @@ def _location_evidence_status(item, location, member, recipe=None, *, native_tot
     if member.get('group_type') != 'calculation_row' and member.get('group_status') in {
             'missing_data', 'scope_mismatch', 'unit_mismatch', 'closure_mismatch'}:
         return 'missing_data', {**metadata, 'evidence_basis': None, 'not_counted_reason': 'evidence_incomplete'}
-    engine_closed = bool(member.get('engine_closed')) and member.get('group_status') == 'complete'
+    # A bridge whose other line is partial still closes this line: partial cells were returned above.
+    engine_closed = bool(member.get('engine_closed')) and member.get('group_status') in {'complete', 'partial'}
     estimate = bool(recipe and recipe.get('counted') and recipe['evidence_class'] == 'estimate')
     if amount is None:
         # Known non-amounts keep their current rule (script ratio values are a recorded phase-1 gap),
@@ -3496,6 +3503,8 @@ NOT_COUNTED_TEXT = {
     'comparison_same_side': ('explain_variance 的实际与基准是同一情景、同一过滤条件，只是把同一批行和自己比较，'
                              '闭合的 0 差异不计入；按要求的实际与基准情景重跑'),
     'evidence_incomplete': '证据缺项、口径或单位不一致，或复算不闭合',
+    'comparison_partial': ('差异行是缺项：该科目只有一侧有来源行（实际或预算没有这个科目），利润行随之不完整；'
+                           '补齐另一侧资料或核对科目映射后重跑'),
     'method_not_applicable': '计算方法未定义该项',
     'no_evidence_record': '该数值没有对应的证据记录',
 }

@@ -20,7 +20,7 @@
   --muted-foreground: var(--fnd-muted);
   --accent: var(--fnd-surface-strong);
   --accent-foreground: var(--fnd-ink);
-  --destructive: var(--fnd-mark-outside);
+  --destructive: var(--fnd-warning);
   --destructive-foreground: var(--fnd-on-selected);
   --border: var(--fnd-line);
   --input: var(--fnd-line);

@@ -487,6 +487,15 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
                     "closure_status": closure.get("status"),
                 }
             )
+        if group.get("status") == "partial":
+            issues.append(
+                {
+                    "code": "evidence_group_partial",
+                    "severity": "warning",
+                    "message": "计算依据组含缺项：有科目只在一侧有来源行，这一组不算完整比较。",
+                    "group_id": group.get("id"),
+                }
+            )
     merged = {**draft, **spec, "run_ids": run_ids}
     consistency_rules = merged.get("consistency_rules", [])
     consistency_sources = merged.get("consistency_sources", {})
@@ -1436,6 +1445,9 @@ def _group_payload(
     status = closure["status"] if closure["status"] != "passed" else "complete"
     if missing:
         status = "missing_data"
+    elif status == "complete" and any(m.get("comparison_status") == "partial" for m in members):
+        # The lines add up, but one of them compares an account only one side books (缺项).
+        status = "partial"
     return {
         "id": _hash(
             {
@@ -1490,6 +1502,8 @@ def _evidence_member(
             if state == "missing"
             else "当前计算方法未定义该分项"
         )
+    if row.get("comparison_status") == "partial":
+        payload["comparison_status"] = "partial"
     return payload
 
 

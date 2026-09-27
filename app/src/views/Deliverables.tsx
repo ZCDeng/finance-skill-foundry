@@ -1,21 +1,48 @@
-import { ArrowLeft, Eye, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Eye, FileOutput, FilePen, FileSpreadsheet, FileText, ExternalLink } from 'lucide-react';
 
 import { Reader } from '../components/Reader.js';
 import { Button } from '../components/ui/button.js';
 import {
+  type AnalysisDraftRow,
+  type AnalysisExportRow,
   type DeliverableRow,
+  type ExportFormat,
+  type GalleryRow,
   type TaskRow,
   bytes,
   isWorkbook,
   shortSha,
   when,
 } from '../bridge.js';
+import { draftStateText } from './analysis/presentation.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
   workpaper: '底稿',
   export: '导出件',
 };
+
+/** The names the 文稿 export menu gives each format. */
+const FORMAT_LABEL: Record<ExportFormat, string> = {
+  md: 'Markdown', xlsx: 'Excel', docx: 'Word', pdf: 'PDF', html: 'HTML',
+};
+
+const MODE_LABEL: Record<string, string> = { management: '管理版', audit: '审计版' };
+
+
+/**
+ * An export's state is its source revision's. Unless that revision is accepted
+ * and archived, the file carries the review stamp, so the list says so first.
+ */
+function ExportState({ exported }: { exported: AnalysisExportRow }) {
+  if (!exported.review_marker) return <>{draftStateText(exported)}</>;
+  return (
+    <>
+      {exported.review_marker}
+      <span className="fnd-muted">（{draftStateText(exported)}）</span>
+    </>
+  );
+}
 
 export interface OpenDeliverable {
   task: TaskRow;
@@ -25,7 +52,9 @@ export interface OpenDeliverable {
 }
 
 /**
- * Every version this machine has produced, newest first, across all tasks.
+ * Every version this machine has produced, newest first, across all tasks: the
+ * old flow's versions, the newest draft of each revision chain, and every filed
+ * export.
  *
  * The list is an index, not the thing. It used to be only the index -- time,
  * task, kind, cause, size, digest, and no way to see what any of it said --
@@ -35,11 +64,16 @@ export interface OpenDeliverable {
  *
  * `cause` is still the column that earns the screen. A file name says a
  * document changed; `query-locked:followup-3` says which question changed it.
+ *
+ * 状态 shows only the review and publication state a draft already carries;
+ * the old flow never had one, so its rows show a dash rather than a guess.
  */
 export function Deliverables({
   rows,
   open,
   onOpen,
+  onOpenDraft,
+  onOpenExport,
   onOpenWorkbook,
   onPreview,
   previewing,
@@ -47,9 +81,13 @@ export function Deliverables({
   busy,
   onBack,
 }: {
-  rows: { task: TaskRow; row: DeliverableRow }[];
+  rows: GalleryRow[];
   open: OpenDeliverable | null;
   onOpen(task: TaskRow, row: DeliverableRow): void;
+  /** Go to that task's 文稿 tab with this version selected. */
+  onOpenDraft?(task: TaskRow, draft: AnalysisDraftRow): void;
+  /** Hand the filed export to the default program. */
+  onOpenExport?(task: TaskRow, exported: AnalysisExportRow): void;
   onOpenWorkbook(): void;
   /** Look at the open workbook in this window. Absent in a build with no viewer. */
   onPreview?(task: TaskRow, row: DeliverableRow): void;
@@ -187,38 +225,99 @@ export function Deliverables({
             <th>任务</th>
             <th>期间</th>
             <th>类型</th>
+            <th>状态</th>
             <th>成因</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ task, row }) => (
-            <tr key={`${task.id}-${row.seq}`} className="fnd-table__open">
-              <td>
-                {/*
-                  * The button carries the whole row's name, so a pointer has
-                  * the row to aim at and a screen reader is told which version
-                  * it is about to open rather than hearing "打开" seven times.
-                  */}
-                <button
-                  type="button"
-                  className="fnd-linkish"
-                  onClick={() => onOpen(task, row)}
-                  aria-label={`打开 ${task.title} 的${KIND_LABEL[row.kind]} ${shortSha(row.sha256)}`}
-                >
-                  {isWorkbook(row) ? (
-                    <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
-                  ) : (
-                    <FileText size={13} strokeWidth={1.5} aria-hidden />
-                  )}
-                  {when(row.at)}
-                </button>
-              </td>
-              <td>{task.title}</td>
-              <td>{task.period ?? '—'}</td>
-              <td>{isWorkbook(row) ? '表格' : KIND_LABEL[row.kind]}</td>
-              <td>{row.cause}</td>
-            </tr>
-          ))}
+          {rows.map((entry) => {
+            const { task } = entry;
+            if (entry.type === 'draft') {
+              const { draft } = entry;
+              return (
+                <tr key={entry.key} className="fnd-table__open">
+                  <td>
+                    <button
+                      type="button"
+                      className="fnd-linkish"
+                      onClick={() => onOpenDraft?.(task, draft)}
+                      disabled={!onOpenDraft}
+                      aria-label={`打开 ${task.title} 的文稿 修订 ${draft.revision}`}
+                    >
+                      <FilePen size={13} strokeWidth={1.5} aria-hidden />
+                      {when(entry.at)}
+                    </button>
+                  </td>
+                  <td>{task.title}</td>
+                  <td>{task.period ?? '—'}</td>
+                  <td>分析文稿</td>
+                  <td>{draftStateText(draft)}</td>
+                  <td>{`${draft.title} · 修订 ${draft.revision}`}</td>
+                </tr>
+              );
+            }
+            if (entry.type === 'export') {
+              const { exported } = entry;
+              const kind = `${FORMAT_LABEL[exported.format]} 导出件`;
+              const mode = exported.content_mode ? ` · ${MODE_LABEL[exported.content_mode] ?? exported.content_mode}` : '';
+              return (
+                <tr key={entry.key} className="fnd-table__open">
+                  <td>
+                    <button
+                      type="button"
+                      className="fnd-linkish"
+                      onClick={() => onOpenExport?.(task, exported)}
+                      disabled={!onOpenExport}
+                      aria-label={`用默认程序打开 ${task.title} 的${kind}（修订 ${exported.revision}）`}
+                    >
+                      {exported.format === 'xlsx' ? (
+                        <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
+                      ) : (
+                        <FileOutput size={13} strokeWidth={1.5} aria-hidden />
+                      )}
+                      {when(entry.at)}
+                    </button>
+                  </td>
+                  <td>{task.title}</td>
+                  <td>{task.period ?? '—'}</td>
+                  <td>{kind}</td>
+                  <td><ExportState exported={exported} /></td>
+                  <td>{`${exported.title} · 修订 ${exported.revision}${mode}`}</td>
+                </tr>
+              );
+            }
+            const { row } = entry;
+            return (
+              <tr key={entry.key} className="fnd-table__open">
+                <td>
+                  {/*
+                    * The button carries the whole row's name, so a pointer has
+                    * the row to aim at and a screen reader is told which version
+                    * it is about to open rather than hearing "打开" seven times.
+                    */}
+                  <button
+                    type="button"
+                    className="fnd-linkish"
+                    onClick={() => onOpen(task, row)}
+                    aria-label={`打开 ${task.title} 的${KIND_LABEL[row.kind]} ${shortSha(row.sha256)}`}
+                  >
+                    {isWorkbook(row) ? (
+                      <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
+                    ) : (
+                      <FileText size={13} strokeWidth={1.5} aria-hidden />
+                    )}
+                    {when(row.at)}
+                  </button>
+                </td>
+                <td>{task.title}</td>
+                <td>{task.period ?? '—'}</td>
+                <td>{isWorkbook(row) ? '表格' : KIND_LABEL[row.kind]}</td>
+                {/* The old flow has no review or publication record; nothing is invented for it. */}
+                <td>—</td>
+                <td>{row.cause}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

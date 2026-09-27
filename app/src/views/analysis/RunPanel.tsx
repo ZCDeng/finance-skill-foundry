@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
-import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
+import { TriangleAlert, X } from 'lucide-react';
+import { shortSha, when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
 import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
@@ -44,6 +44,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果来自最新文稿引用的业务运行；后续探查和失败重试仍保留在活动记录中。</p>}
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{run.error}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
+      {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><summary>脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</summary>
@@ -116,6 +117,18 @@ function NotRunYet({ runs, onPick }: { runs: AnalysisRun[]; onPick(run: Analysis
   return <div className="analysis-actions"><p className="analysis-note">此版本尚未运行。{business.length
     ? `本任务另有 ${business.length} 个业务结果。` : '检查口径后即可计算。'}</p>
     {newest && <Button variant="outline" type="button" onClick={() => onPick(newest)}>查看最新结果</Button>}</div>;
+}
+
+/**
+ * Result rows that break the result-row contract. The run still succeeded, so
+ * this stays folded to one line above the table; the assistant reads the same
+ * messages from the run record.
+ */
+function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
+  return <details className="analysis-details">
+    <summary><TriangleAlert size={15} strokeWidth={1.5} aria-hidden /> {`结果行有 ${warnings.length} 处不合约定`}</summary>
+    {warnings.map((warning, index) => <p key={`${warning.code}:${index}`}>{warning.message}</p>)}
+  </details>;
 }
 
 function RunResultTable({ run }: { run: AnalysisRun }) {
@@ -340,7 +353,7 @@ function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
   const hasAmountChange = new Set(run.result?.columns.map((column) => column.name) ?? []).has('amount_change');
   const rows = (run.result?.rows ?? []).map((row) => ({
     ...Object.fromEntries(dimensions.map((column) => [financeScopeLabels[column.name] ?? column.name, row[column.name]])),
-    科目: financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric),
+    科目: `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${isPartial(row) ? '（缺项）' : ''}`,
     [copy.actualLabel]: row.actual,
     [copy.baselineLabel]: row.baseline,
     ...(hasAmountChange ? { 科目增减: row.amount_change } : {}),
@@ -380,26 +393,36 @@ function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
   if ([...groups.values()].some((rows) => rows.filter((row) => row.metric === 'profit').length > 1)) return null;
   const lines = [...groups.values()].map((rows) => {
     const profit = rows.find((row) => row.metric === 'profit');
+    // A 缺项 line compares an account only one side books; neither it nor the profit built on it is a conclusion.
+    const partial = rows.some(isPartial);
+    const missing = rows.filter((row) => isPartial(row) && row.metric !== 'profit')
+      .map((row) => financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric));
     return {
       label: dimensions.map((name) => textValue(rows[0][name])).join(' · '),
-      headline: profit ? changePhrase(profit, true) : null,
+      headline: profit && !partial ? changePhrase(profit, true) : null,
+      partial: partial ? (missing.length ? `${missing.join('、')}是缺项，只在一侧有来源行，利润差异不完整，见下表。` : '利润差异是缺项，不完整，见下表。') : null,
       drivers: ['revenue', 'cost', 'expense'].map((metric) => rows.find((row) => row.metric === metric))
-        .flatMap((row) => row ? [changePhrase(row, false)] : []).filter((phrase): phrase is string => Boolean(phrase)),
+        .flatMap((row) => row && !isPartial(row) ? [changePhrase(row, false)] : []).filter((phrase): phrase is string => Boolean(phrase)),
       assumedZero: rows.some((row) => row.comparison_status === 'assumed_zero'),
     };
-  }).filter((line) => line.headline);
+  }).filter((line) => line.headline || line.partial);
   if (!lines.length) return null;
   const shown = lines.slice(0, 3);
   const interpretation = typeof result?.interpretation === 'string' ? result.interpretation : '';
   return <section className="analysis-headline" aria-label="结论">
     {shown.map((line, index) => <div key={index} className="analysis-headline-line">
-      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}{copy.actualLabel}与{copy.baselineLabel}相比，{line.headline}</p>
+      <p className="analysis-headline-text">{line.label ? `${line.label}：` : ''}{line.headline ? `${copy.actualLabel}与${copy.baselineLabel}相比，${line.headline}` : line.partial}</p>
       {line.drivers.length > 0 && <p className="analysis-note">{line.drivers.join(' · ')}</p>}
       {line.assumedZero && <p className="analysis-note">这一组有一侧没有数据，已按 0 计入，差异等于另一侧的全额。</p>}
     </div>)}
     {groups.size > shown.length && <p className="analysis-note">共 {groups.size} 组，其余见下表。</p>}
     {interpretation && <p className="analysis-note">{interpretation}</p>}
   </section>;
+}
+
+/** A bridge line whose account has source rows on one side only (缺项), or the profit line built on one. */
+function isPartial(row: Record<string, unknown>): boolean {
+  return row.comparison_status === 'partial';
 }
 
 /**

@@ -22,6 +22,8 @@ const runScope = {
   description: "本次运行结果适用的账套、组织、期间、币种、单位等业务范围元数据；后端按对象持久化，不替代 filters/exclusions。",
 };
 const requirementsId = string("analysis_requirements_save 返回的要求版本 id；用于把运行与当前问题/范围绑定");
+// The result-row contract the backend checks when it declares a script run's rows (foundry/result_semantics.py).
+const resultRowContract = "结果行约定（写 result_file 时遵守；不合约定时运行照常成功，提示写在运行记录 row_declarations.warnings，后台任务的完成回报也在 warnings 里带回 code 和中文 message，按提示改脚本后重跑）：长表每行一个数，列为 metric_key、scenario、value、unit，另写 organization、period、metric_label、basis；同一比较的实际、预算、差异、达成率行用相同的 metric_key、organization、period 和期间后缀。metric_key 用约定指标名 revenue、operating_profit、profit、gross_profit、period_expense、expense、cost 等，或需求版本 items 里列出的 metric；差异和达成率可写成 revenue_variance、revenue_achievement_ratio。scenario 用约定情景名：实际 actual、actual_ytd、actual_month，预算 budget、budget_ytd、budget_month，估算预算 estimated_budget，差异 variance，达成率 achievement_ratio 或 achievement_pct（是小数还是百分数只看 unit 列：小数写「比率」，百分数写 %）；带期间后缀的写法 actual_1_8（1-8 月累计）、budget_2026_08（2026 年 8 月单月）、variance_1_8 表示同一比较期间；其他情景名（如 budget_bud_fy）不参与配对，确需保留时先列进需求版本的 scenarios，否则收到提示。unit 按单位表：「比率」或 ratio 为小数（0.945 即 94.5%），%、pct 或「百分比」为百分数，金额写实际单位（万元、元）；「-」表示未标单位，比率行不写单位也算未标单位；这样的行不参与金额配对并收到提示，应避免。metric_label 写这一行的口径标签（如「营业收入 1-8 月预算」），结果区按它显示指标。估算行在 basis 列写 estimate（可另写估算方法列），不要只靠文字里的估算、推算字样。";
 const relationship = {
   type: "object",
   required: ["left", "right", "left_keys", "right_keys", "cardinality"],
@@ -268,7 +270,7 @@ const SPECS = {
     kind: "execute", argv: (input) => ["analysis-run", "--analysis", input.analysis],
   },
   "analysis-script": {
-    description: "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。需要在结果区和文稿中引用数值时，指定 result_file 为脚本写出的 CSV 或 JSON 表格文件；服务校验其清单和摘要后填充 result.rows。金额以精确数字字符串写入；同一数值列只放数字或 null，单位放 unit，解释和小计说明放 note，不把“26 个项目”等文本混入数值列。附来源工作表、单元格、单位；此结果仍为脚本计算，复现与原始行取证不会自动变成已验证。",
+    description: "在已验证的隔离运行环境中执行 Python 或受限 shell 清洗、计算或生成图表。绑定快照由服务复制至只读目录（环境变量 FOUNDRY_INPUTS）：每个别名有 .json 标准化数据及原件。当前工作目录即本次输出目录（FOUNDRY_OUTPUTS），只能向此处写文件。无网络、无宿主密钥、不能读其他任务或历史记录。spec 明确 code、bindings，可附 question、language、assumptions、timeout_seconds。保存真实代码、环境、输入输出哈希与执行状态；不可用或失败时照实报告。需要在结果区和文稿中引用数值时，指定 result_file 为脚本写出的 CSV 或 JSON 表格文件；服务校验其清单和摘要后填充 result.rows。金额以精确数字字符串写入；同一数值列只放数字或 null，单位放 unit，解释和小计说明放 note，不把“26 个项目”等文本混入数值列。附来源工作表、单元格、单位；此结果仍为脚本计算，复现与原始行取证不会自动变成已验证。" + resultRowContract,
     parameters: object({ spec: {
       type: "object", required: ["code", "bindings"],
       properties: {
@@ -276,7 +278,7 @@ const SPECS = {
         language: { type: "string", enum: ["python", "shell"] },
         bindings: { type: "object", additionalProperties: { type: "string" }, description: "本次允许读取的别名到快照id映射" },
         question: string("本次脚本要回答的问题"),
-        result_file: string("可选：当前输出目录中已生成的 CSV/JSON 表格相对路径，例如 result.json；JSON为对象行数组，列名非空唯一，金额使用字符串"),
+        result_file: string("可选：当前输出目录中已生成的 CSV/JSON 表格相对路径，例如 result.json；JSON为对象行数组，列名非空唯一，金额使用字符串；行按上面的结果行约定写"),
         requirements_id: requirementsId,
         result_role: resultRole,
         scope: runScope,
@@ -287,11 +289,11 @@ const SPECS = {
     kind: "execute", argv: (input) => ["analysis-script", "--spec", json(input.spec)],
   },
   "analysis-script-start": {
-    description: "在后台执行隔离 Python/受限 shell 分析，立即返回持久 job id。spec 与 analysis-script 一致，输入快照和上下文在启动时固定。用 analysis-jobs / analysis-job-output 查看，analysis-job-cancel 取消，失败后 analysis-job-retry 创建可追溯的新尝试。后台记录不等于执行成功。",
+    description: "在后台执行隔离 Python/受限 shell 分析，立即返回持久 job id。spec 与 analysis-script 一致，输入快照和上下文在启动时固定。用 analysis-jobs / analysis-job-output 查看，analysis-job-cancel 取消，失败后 analysis-job-retry 创建可追溯的新尝试。后台记录不等于执行成功。" + resultRowContract,
     parameters: object({ spec: { type: "object", required: ["code", "bindings"], properties: {
       code: string("完整代码；通过环境变量 FOUNDRY_INPUTS 读输入，在当前工作目录写输出"), language: { type: "string", enum: ["python", "shell"] },
       bindings: { type: "object", additionalProperties: { type: "string" } }, question: string("业务问题"),
-      result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串"),
+      result_file: string("可选：本次输出的 CSV/JSON 表格相对路径，用于可引用结果行；金额用字符串；行按上面的结果行约定写"),
       requirements_id: requirementsId, result_role: resultRole, scope: runScope,
       assumptions: { type: "array", items: {} }, timeout_seconds: { type: "integer", minimum: 1, maximum: 120 },
     } } }),
@@ -307,7 +309,7 @@ const SPECS = {
     parameters: object({}), kind: "read", argv: () => ["analysis-job-list"],
   },
   "analysis-job-output": {
-    description: "读取指定后台任务的状态、执行结果和局限。任务仍在运行时继续独立工作；queued/running 不表示完成。",
+    description: "读取指定后台任务的状态、执行结果和局限。任务仍在运行时继续独立工作；queued/running 不表示完成。脚本任务完成回报的 warnings 列出结果行不合约定之处（code 与中文 message），运行仍算成功；按提示改脚本后重跑。",
     parameters: object({ job: string("当前会话的后台任务id") }), kind: "read", argv: (input) => ["analysis-job-show", "--job", input.job],
   },
   "analysis-job-cancel": {

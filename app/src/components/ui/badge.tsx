@@ -17,7 +17,7 @@ const badgeVariants = cva(
         secondary: 'border-transparent bg-secondary text-secondary-foreground',
         outline: 'border-border bg-transparent text-foreground',
         destructive:
-          'border-[var(--fnd-mark-outside-line)] bg-[var(--fnd-mark-outside-fill)] text-[var(--fnd-mark-outside)]',
+          'border-[var(--fnd-warning-line)] bg-[var(--fnd-warning-fill)] text-[var(--fnd-warning)]',
       },
     },
     defaultVariants: {

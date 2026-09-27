@@ -25,8 +25,8 @@ const buttonVariants = cva(
           'disabled:opacity-55',
         ].join(' '),
         destructive: [
-          'border border-[var(--fnd-mark-outside-line)] bg-transparent text-[var(--fnd-mark-outside)]',
-          'enabled:hover:bg-[var(--fnd-mark-outside-fill)]',
+          'border border-[var(--fnd-warning-line)] bg-transparent text-[var(--fnd-warning)]',
+          'enabled:hover:bg-[var(--fnd-warning-fill)]',
           'disabled:opacity-55',
         ].join(' '),
         ghost: [

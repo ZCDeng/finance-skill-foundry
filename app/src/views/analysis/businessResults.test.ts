@@ -411,7 +411,8 @@ describe('business result presentation', () => {
         rows: [
           { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'actual_ytd', unit: '万元', value: '33541.3320' },
           { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'estimated_budget_ytd', unit: '万元', value: '33415.2443' },
-          { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'attainment_pct', unit: '比率', value: '100.3773' },
+          // The unit, not the scenario word, says 100.3773 is already a percentage (KTD9).
+          { metric_key: 'revenue', period: '2026-01:2026-08', organization: '西部区域', scenario: 'attainment_pct', unit: '%', value: '100.3773' },
         ],
         row_count: 3,
         truncated: false,
@@ -477,6 +478,41 @@ describe('business result presentation', () => {
     }));
     expect(rows[0]).toMatchObject({ 实际: '109,742.03', 差异: '-8,072.54' });
     expect(rows[1]).toMatchObject({ 实际: '0.21', 差异: '-0.02' });
+  });
+
+  it('formats a long-form value by its declared unit alone: 比率 as a fraction, % as a percent, - as written', () => {
+    const rows = displayRows(run({
+      result: {
+        columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit'].map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [
+          { metric_key: 'revenue_achievement_pct', organization: '华东区域', period: '2026-01:2026-08', scenario: 'achievement_pct', value: '0.945', unit: '比率' },
+          { metric_key: 'profit_achievement_pct', organization: '华东区域', period: '2026-01:2026-08', scenario: 'achievement_pct', value: '94.5', unit: '%' },
+          { metric_key: 'collection_rate', organization: '华东区域', period: '2026-01:2026-08', scenario: 'achievement_ratio', value: '0.945', unit: '-' },
+          { metric_key: 'receivable_balance', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '41400', unit: '万元' },
+        ],
+        row_count: 4,
+        truncated: false,
+      },
+    }));
+    expect(rows.map((row) => row['数值'])).toEqual(['94.50%', '94.50%', '0.945（未标单位）', '41,400.00']);
+  });
+
+  it('never pairs a row whose unit is - as a budget amount', () => {
+    const current = run({
+      result: {
+        columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit'].map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [
+          { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '90', unit: '万元' },
+          { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '0.945', unit: '-' },
+          { metric_key: 'profit', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '9', unit: '万元' },
+          { metric_key: 'profit', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '10', unit: '万元' },
+        ],
+        row_count: 4,
+        truncated: false,
+      },
+    });
+    expect(businessRows(current)).toEqual([expect.objectContaining({ metric: '利润', actual: '9', same_period_budget: '10' })]);
+    expect(otherLongRows(current).map((row) => row.unit)).toEqual(['万元', '-']);
   });
 
   it('compares revisions by stable business identity rather than row position', () => {

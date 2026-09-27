@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
@@ -10,6 +10,8 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../electron/foundry.js', async (original) => ({
   ...await original<typeof import('../electron/foundry.js')>(), runFoundry: mocks.run,
+  // The reads parse JSON through their own helper; route it through the same fake exec.
+  runFoundryJson: async (...args: unknown[]) => JSON.parse(await mocks.run(...args)),
 }));
 vi.mock('../electron/harness/workspace.js', () => ({ ensureTaskWorkspace: mocks.workspace }));
 vi.mock('../electron/reports/host.js', () => ({ ReportHost: class { export = mocks.reportExport; } }));
@@ -274,6 +276,49 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.openPath).not.toHaveBeenCalled();
   });
 
+  it('opens a filed export in the default program from a digest and a format, never a renderer path', async () => {
+    registerIpc({ varRoot: '/store' });
+    const filed = '/store/tasks/a/analysis/exports/registered/draft-management.pdf';
+    mocks.run.mockResolvedValue(JSON.stringify({ path: filed }));
+    const sha = 'f'.repeat(64);
+    expect(await invoke(CHANNELS.analysisExportOpen, task, sha, 'pdf')).toEqual({ ok: true, value: { opened: filed } });
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'analysis-export-path',
+      ['--sha', sha, '--format', 'pdf'], undefined);
+    expect(mocks.openPath).toHaveBeenCalledWith(filed);
+    // A path, a padded format, an unknown format or a foreign task id never reach argv or the opener.
+    for (const [who, digest, format] of [
+      [task, '/Users/someone/secret.pdf', 'pdf'], [task, sha, '../x.pdf'], [task, sha, 'exe'], [task, sha, '.pdf'], ['../b', sha, 'pdf'],
+    ]) {
+      expect((await invoke(CHANNELS.analysisExportOpen, who, digest, format)).ok).toBe(false);
+    }
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the default program cannot open the file', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockResolvedValue(JSON.stringify({ path: '/store/x.docx' }));
+    mocks.openPath.mockResolvedValue('No application knows how to open this file');
+    const result = await invoke(CHANNELS.analysisExportOpen, task, 'c'.repeat(64), 'docx');
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('No application knows how to open this file');
+  });
+
+  it('answers 成果库 with the old flow, the newest drafts and the filed exports in one list', async () => {
+    registerIpc({ varRoot: '/store' });
+    const at = '2026-09-27T03:00:00Z';
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-list'
+      ? JSON.stringify([{ id: task, title: '八月', period: '2026-08', skill_id: null, created_at: at, windows: 1 }])
+      : command === 'deliverables'
+        ? JSON.stringify([{ seq: 1, kind: 'brief', window_id: task, sha256: '1'.repeat(64), bytes: 1, cause: 'emit-brief', session_id: null, at }])
+        : JSON.stringify({ task_id: task, drafts: [{ draft_id: '2'.repeat(32), revision: 2, versions: 2, title: '八月', created_at: at, seq: 2,
+          review_status: 'unreviewed', publication_status: 'draft' }], exports: [] }));
+    const result = await invoke(CHANNELS.gallery);
+    expect(result.ok).toBe(true);
+    expect(result.value.map((row: { key: string }) => row.key)).toEqual([`draft:${'2'.repeat(32)}`, `deliverable:${task}:1`]);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['task-list', 'deliverables', 'analysis-deliverables']);
+  });
+
   it('allows only bounded finance business commands through one IPC call', async () => {
     registerIpc({ varRoot: '/store' });
     await invoke(CHANNELS.financeCall, task, 'list-finance-context');
@@ -412,5 +457,76 @@ describe('embedded workspace IPC', () => {
     expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task,actor:'manager'},'task-rename',['--title','月度利润复盘']);
     expect((await invoke(CHANNELS.taskRename,task,'bad\nname')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledOnce();
+  });
+});
+
+describe('wait timing log', () => {
+  const tempRoots: string[] = [];
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    const { rm } = await import('node:fs/promises');
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+  async function userData() {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const dir = await mkdtemp(`${tmpdir()}/fnd-timing-`);
+    tempRoots.push(dir);
+    return dir;
+  }
+  async function lines(dir: string) {
+    const { readFile } = await import('node:fs/promises');
+    return (await readFile(`${dir}/wait-timing.jsonl`, 'utf8')).trim().split('\n');
+  }
+
+  it('appends one fixed-shape line per wait under userData, and nothing a person typed or a file held', async () => {
+    const dir = await userData();
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    const sent = { kind: 'finance.pnl', outcome: 'ok', waitMs: 1834.6, engineMs: 412,
+      amount: '900719925474099.99', file: '/chosen/预算.xlsx', task, title: '华东经营分析' };
+    expect(await invoke(CHANNELS.timingLog, sent)).toEqual({ ok: true, value: { written: true } });
+    const [line, ...rest] = await lines(dir);
+    expect(rest).toEqual([]);
+    const row = JSON.parse(line);
+    expect(Object.keys(row).sort()).toEqual(['at', 'engine_ms', 'kind', 'outcome', 'wait_ms']);
+    expect(row).toMatchObject({ kind: 'finance.pnl', outcome: 'ok', wait_ms: 1835, engine_ms: 412 });
+    expect(Number.isNaN(Date.parse(row.at))).toBe(false);
+    for (const secret of ['900719925474099', '预算', 'chosen', task, '华东']) expect(line).not.toContain(secret);
+    // A kind or a number is refused rather than written when it could carry anything else.
+    expect((await invoke(CHANNELS.timingLog, { ...sent, kind: '华东 900719925474099.99' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.timingLog, { ...sent, waitMs: '1834' })).ok).toBe(false);
+    expect((await invoke(CHANNELS.timingLog, { ...sent, outcome: '已完成' })).ok).toBe(false);
+    expect(await lines(dir)).toHaveLength(1);
+    // Never the task store: no foundry call was made.
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it('takes the time the materials dialog was open off the import wait', async () => {
+    const dir = await userData();
+    let clock = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    mocks.chooser.mockImplementation(async () => { clock += 30_000; return { canceled: false, filePaths: ['/chosen/actual.csv'] }; });
+    expect((await invoke(CHANNELS.analysisAddFiles, task)).ok).toBe(true);
+    // The renderer timed 31.2 s from its click; 30 s of that was the manager picking a file.
+    await invoke(CHANNELS.timingLog, { kind: 'materials.import', outcome: 'ok', waitMs: 31_200 });
+    // Used once: a later wait with no dialog of its own keeps all of its time.
+    await invoke(CHANNELS.timingLog, { kind: 'materials.import', outcome: 'error', waitMs: 500 });
+    expect((await lines(dir)).map((line) => JSON.parse(line).wait_ms)).toEqual([1_200, 500]);
+  });
+
+  it('takes the time the source dialog was open off the source refresh wait, cancelled or not', async () => {
+    const dir = await userData();
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    registerIpc({ varRoot: '/store' }, { userData: () => dir } as any);
+    mocks.chooser.mockImplementation(async () => { clock += 12_000; return { canceled: true, filePaths: [] }; });
+    expect(await invoke(CHANNELS.financeSourceRefresh, task, { product: 'file' })).toEqual({ ok: true, value: { cancelled: true } });
+    await invoke(CHANNELS.timingLog, { kind: 'source.refresh', outcome: 'cancelled', waitMs: 12_040 });
+    // Another kind's wait is not shortened by this dialog.
+    mocks.chooser.mockImplementation(async () => { clock += 9_000; return { canceled: false, filePaths: ['/chosen/erp.csv'] }; });
+    await invoke(CHANNELS.financeSourceRefresh, task, { product: 'file' });
+    await invoke(CHANNELS.timingLog, { kind: 'finance.pnl', outcome: 'ok', waitMs: 2_000 });
+    expect((await lines(dir)).map((line) => JSON.parse(line).wait_ms)).toEqual([40, 2_000]);
   });
 });

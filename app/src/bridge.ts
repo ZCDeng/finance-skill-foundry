@@ -72,6 +72,47 @@ export interface TaskDetail {
   deliverables: DeliverableRow[];
 }
 
+/** The newest version of one draft revision chain, with the state saved on that version. */
+export interface AnalysisDraftRow {
+  draft_id: string;
+  /** The 修订 N the 文稿 tab shows: position among all of the task's drafts. */
+  revision: number;
+  /** How many versions the chain holds. */
+  versions: number;
+  title: string;
+  created_at: string;
+  seq: number;
+  review_status: string;
+  publication_status: string;
+}
+
+export type ExportFormat = 'md' | 'xlsx' | 'docx' | 'pdf' | 'html';
+
+/** One filed export, with the state of the revision it was exported from. */
+export interface AnalysisExportRow {
+  export_id: string;
+  draft_id: string;
+  revision: number;
+  title: string;
+  format: ExportFormat;
+  content_mode: 'management' | 'audit' | null;
+  sha256: string;
+  created_at: string;
+  review_status: string;
+  publication_status: string;
+  /** 「分析草稿·待复核」 unless the source revision is accepted and archived; empty otherwise. */
+  review_marker: string;
+}
+
+/**
+ * One row of 成果库: an old-flow version, the newest draft of a revision chain,
+ * or a filed export. `key` is the kind and that kind's own id.
+ */
+export type GalleryRow =
+  | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }
+  | { type: 'draft'; key: string; at: string; task: TaskRow; draft: AnalysisDraftRow }
+  | { type: 'export'; key: string; at: string; task: TaskRow; exported: AnalysisExportRow };
+
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
 /**
@@ -111,9 +152,17 @@ export interface Bridge {
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   sourceLocatorOpen?(task: string, spec: { fact_id: string } | { run_id: string; row: number; column?: string }): Promise<Answer<SourceLocatorResult>>;
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
+  timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
   tasks(): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
-  gallery(): Promise<Answer<{ task: TaskRow; row: DeliverableRow }[]>>;
+  /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
+  gallery(): Promise<Answer<GalleryRow[]>>;
+  /**
+   * Hand one filed analysis export to the default program. The renderer names
+   * the task, the digest and the format; main resolves the file through the CLI.
+   */
+  analysisExportOpen?(task: string, sha: string, format: ExportFormat): Promise<Answer<{ opened: string }>>;
   deliverableText(task: string, sha: string): Promise<Answer<string>>;
   /**
    * Hand one archived version to whatever this machine opens it with.
@@ -203,6 +252,38 @@ export function bridge(): Bridge | null {
   return (globalThis as { foundry?: Bridge }).foundry ?? null;
 }
 
+export type WaitKind = import('../electron/ipc/contract').WaitKind;
+export type WaitOutcome = import('../electron/ipc/contract').WaitOutcome;
+/** One user wait as the timing log takes it: what, how it ended, and two durations. */
+export type WaitEntry = import('../electron/timing').WaitEntry;
+
+/**
+ * Times one user wait: from the call, made on the click, to the end of `work`,
+ * the page read back after it included. `work` says how it ended through
+ * `note`, with the run record whose engine time it carries; otherwise it is
+ * ok when `work` returns and an error when it throws. The log is best effort:
+ * a build without it, or a write that fails, changes nothing on screen.
+ */
+export async function timeWait<T>(kind: WaitKind, work: (note: (outcome: WaitOutcome, run?: unknown) => void) => Promise<T>): Promise<T> {
+  const started = performance.now();
+  let outcome: WaitOutcome | undefined;
+  let run: unknown;
+  try {
+    return await work((ended, record) => { outcome = ended; run = record; });
+  } catch (failure) {
+    outcome ??= 'error';
+    throw failure;
+  } finally {
+    const seconds = (run as { duration_seconds?: unknown } | undefined)?.duration_seconds;
+    const entry: WaitEntry = {
+      kind, outcome: outcome ?? 'ok', waitMs: Math.round(performance.now() - started),
+      engineMs: typeof seconds === 'number' && Number.isFinite(seconds) ? Math.round(seconds * 1000) : null,
+    };
+    const api = bridge();
+    if (api?.timingLog) void Promise.resolve().then(() => api.timingLog!(entry)).catch(() => {});
+  }
+}
+
 /** Short forms for a screen: a digest is an identity, not a number to read. */
 export const shortSha = (sha: string) => sha.slice(0, 12);
 
@@ -283,6 +364,8 @@ export interface AnalysisRun extends AnalysisObject {
   output_hash?: string;
   error?: string | null;
   engine?: string;
+  /** Engine seconds, beside the result so output_hash does not move with it. Absent on older and SQL runs. */
+  duration_seconds?: number | null;
   code?: string;
   stdout?: string;
   stderr?: string;
@@ -303,6 +386,91 @@ export interface AnalysisRun extends AnalysisObject {
     excluded_detail_rows?: Record<string, unknown>[];
     provenance?: { mode?: string; status?: string; plan_hash?: string; data_hash?: string; source_hash?: string } & Record<string, unknown>;
   };
+  /** Script runs saved with declarations only; a run without one is paired by inference. */
+  row_declarations?: RowDeclarations;
+  /** Caveat sentences stored with the run record; the result area does not show them. */
+  warnings?: unknown[];
+}
+/** Why a row is an estimate: its grain declared in requirements, its own basis columns, or its wording. */
+export type RowEstimateSource =
+  | { source: 'declared'; requirements_id: string; item_id: string }
+  | { source: 'row'; field: string }
+  | { source: 'text'; field: string };
+export interface RowDeclaration {
+  /** Zero-based index in the full result file (it may lie past the stored result preview). */
+  row: number;
+  /** The row's own fields the requirement matcher reads (metric_key, metric, organization, period, scenario …). */
+  fields: Record<string, unknown>;
+  role: 'actual' | 'budget' | 'variance' | 'ratio' | null;
+  /** The base metric a role compares (revenue for revenue_variance); the row's own metric without a role. */
+  metric: unknown;
+  organization: unknown;
+  period: unknown;
+  /** `${period}|${scenario period suffix}`: rows of one comparison share it; null without a role. */
+  period_key: string | null;
+  /** ytd or month when the scenario names that period class. */
+  span: 'ytd' | 'month' | null;
+  unit: string | null;
+  unit_kind: 'amount' | 'decimal' | 'percent' | 'unmarked' | null;
+  /** The row's value as written (a Decimal string), for rows with a role. */
+  value: unknown;
+  scope_label: string | null;
+  estimate: boolean;
+  estimate_sources: RowEstimateSource[];
+}
+export interface RowDeclarations {
+  rules_version: string;
+  /** The requirements version the run is pinned to, and that record's own fingerprint. */
+  requirements_id: string | null;
+  requirements_fingerprint: string | null;
+  /** Set only when read: the latest requirements whose estimates were merged in. */
+  latest_requirements_id?: string;
+  complete: boolean;
+  incomplete_reason: 'result_file_unavailable' | 'requirements_unavailable' | 'too_many_rows' | null;
+  row_count: number;
+  rows: RowDeclaration[];
+  /** Rows that break the result-row contract; the run still succeeded. Absent on declarations stored before them. */
+  warnings?: ResultContractWarning[];
+  /** The comparisons the rows pair into, each with the backend's sentence when fully declared. Absent before rules 3.x. */
+  pairs?: DeclaredPair[];
+  /** Set only when read: the task's current requirements version and its verified fingerprint. */
+  current_requirements?: { id: string; fingerprint: string | null };
+}
+/** The measures a declared pair names its member rows by (result_semantics.LONG_SCENARIO_MEASURES). */
+export type PairMeasure = 'actual' | 'budget' | 'estimated_budget' | 'variance' | 'rate' | 'rate_pct';
+/** The backend's sentence for one fully declared pair: its own words, never verified, never a draft's fact. */
+export interface ScriptConclusion {
+  text: string;
+  basis: string;
+  verified: false;
+  /** The figures the sentence states, as Decimal strings; ratio_percent only when it states a 达成率. */
+  values: Partial<Record<'actual' | 'budget' | 'variance' | 'ratio_percent', string>>;
+  variance_from: 'row' | 'computed';
+}
+/** One comparison the backend paired from the declared rows; members are row indexes in the declaration. */
+export interface DeclaredPair {
+  metric: string;
+  organization: unknown;
+  period: unknown;
+  period_key: string;
+  span: 'ytd' | 'month' | null;
+  unit: string | null;
+  members: Partial<Record<PairMeasure, number>>;
+  /** Whether the vocabulary names the pair's metric; a pair known only from its scenarios is inferred and gets no sentence. */
+  declared: boolean;
+  estimate: { estimated: boolean; measures: PairMeasure[] };
+  conclusion: ScriptConclusion | null;
+}
+/** One kind of result-row contract break, in the backend's diagnostic shape with a Chinese message. */
+export interface ResultContractWarning {
+  severity: 'warning';
+  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing' | 'variance_mismatch';
+  message: string;
+  /** Zero-based rows of the full result file, at most 20; row_count counts every row it concerns. */
+  rows: number[];
+  row_count: number;
+  /** The scenario or metric names it concerns, or the comparisons a variance_mismatch names. */
+  names?: string[];
 }
 export interface AnalysisDraft extends AnalysisObject {
   document?: import('../electron/reports/model').ReportDocument;
