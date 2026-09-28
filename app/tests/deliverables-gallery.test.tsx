@@ -190,6 +190,32 @@ describe('opening 成果库 rows in the app', () => {
     expect(picker.getAttribute('title')).toContain(secondOf(B).title);
   });
 
+  it('opens an archived task draft from 成果库 in the archived task view without starting chat', async () => {
+    const archivedB = { ...B, lifecycle_status: 'archived' as const };
+    const archivedGallery: GalleryRow[] = [{ type: 'draft', key: `draft:${secondOf(archivedB).draft_id}`, at: SECOND, task: archivedB, draft: secondOf(archivedB) }];
+    const api = {
+      tasks: vi.fn(async (view?: string) => ok(view === 'archived' ? [archivedB] : [A])),
+      task: vi.fn(async (id: string) => ok({ task: id === A.id ? A : archivedB, windows: [], sessions: [], deliverables: [] })),
+      gallery: vi.fn(async () => ok(archivedGallery)),
+      analysisState: vi.fn(async (id: string) => ok(stateOf(id === A.id ? A : archivedB))),
+      harnessStatus: vi.fn(async () => ok({ wiring: { state: 'ready' as const }, consequence: null, origin: 'http://localhost:1' })),
+      harnessOpen: vi.fn<NonNullable<Bridge['harnessOpen']>>(async (_intent, id) => ok({ sessionId: `session-${id}`, preset: 'analysis' })),
+      paneVisible: vi.fn(async (value: string) => ok({ screen: value })),
+    } satisfies Partial<Bridge>;
+    (globalThis as unknown as { foundry: Partial<Bridge> }).foundry = api;
+    render(<App />);
+    await screen.findByRole('heading', { name: A.title });
+    fireEvent.click(await screen.findByRole('button', { name: '成果库' }));
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(`${B.title} 的文稿 修订 2`) }));
+    await screen.findByRole('heading', { name: B.title });
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    expect(screen.getByRole('button', { name: '已归档' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText('任务已停用编辑')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '恢复任务' })).toBeTruthy();
+    expect(api.tasks).toHaveBeenCalledWith('archived');
+    expect(api.harnessOpen.mock.calls.map(([, id]) => id)).toEqual([A.id]);
+  });
+
   it('opens a draft of the task already open with that version, not its newest', async () => {
     const api = mount();
     await screen.findByRole('heading', { name: A.title });
@@ -202,7 +228,7 @@ describe('opening 成果库 rows in the app', () => {
     expect(picker.getAttribute('title')).toContain(secondOf(A).title);
     expect(screen.getByRole('heading', { name: A.title })).toBeTruthy();
     // Coming back to the workspace resumes A's own conversation, as any screen switch does; no other task is bound.
-    expect(api.harnessOpen.mock.calls.map(([, id]) => id)).toEqual([A.id, A.id]);
+    expect(api.harnessOpen.mock.calls.every(([, id]) => id === A.id)).toBe(true);
   });
 
   it('hands an export to the default program by task, digest and format', async () => {

@@ -19,7 +19,7 @@ from foundry.questions import record_questions
 from foundry.references import record_reference
 from foundry.sheet import workbook_bytes
 from foundry.resources import fixture_root
-from foundry.task import SESSION_ROLES, Filed, Task, TaskStore, resolve_task, session_owner
+from foundry.task import SESSION_ROLES, TASK_LIFECYCLE_STATUSES, Filed, Task, TaskStore, resolve_task, session_owner
 from foundry.window import Window, WindowStore
 
 
@@ -334,11 +334,15 @@ def main(argv: list[str] | None = None) -> int:
     p_task_new.add_argument("--period", default="", help="the period this task closes, e.g. 2026-08")
     p_task_new.add_argument("--skill", default="", help="authored skill id, when there is one")
 
-    sub.add_parser("task-list")
+    p_task_list = sub.add_parser("task-list")
+    p_task_list.add_argument("--lifecycle", choices=(*TASK_LIFECYCLE_STATUSES, "all"), default="active")
     sub.add_parser("task-show")
     p_task_rename = sub.add_parser("task-rename")
     p_task_rename.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
     p_task_rename.add_argument("--title", required=True)
+    for name in ("task-archive", "task-trash", "task-restore"):
+        p_lifecycle = sub.add_parser(name)
+        p_lifecycle.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
     sub.add_parser("deliverables")
 
     p_text = sub.add_parser("deliverable-text")
@@ -400,6 +404,14 @@ def main(argv: list[str] | None = None) -> int:
             metadata = task.rename(args.title)
             print(json.dumps({"task_id": task.id, "title": metadata["title"]}, ensure_ascii=False))
             return 0
+        if args.cmd in {"task-archive", "task-trash", "task-restore"}:
+            if not args.task:
+                raise FoundryError(f"{args.cmd} needs an explicit --task")
+            task = TaskStore(Path(args.var)).get(args.task)
+            status = {"task-archive": "archived", "task-trash": "trashed", "task-restore": "active"}[args.cmd]
+            metadata = task.set_lifecycle_status(status)
+            print(json.dumps({"task_id": task.id, "lifecycle_status": metadata["lifecycle_status"]}, ensure_ascii=False))
+            return 0
         if finance_mcp.dispatch(args) or analysis_jobs.dispatch(args) or analysis_cli.dispatch(args) or finance_cli.dispatch(args) or excel_bridge.dispatch(args):
             return 0
         store = _store(args)
@@ -417,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     [
                         {**task.meta(), "windows": len(task.windows())}
-                        for task in tasks.list()
+                        for task in tasks.list(args.lifecycle)
                     ],
                     ensure_ascii=False,
                 )

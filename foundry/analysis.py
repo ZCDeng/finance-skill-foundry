@@ -328,7 +328,7 @@ class AnalysisStore:
         _assert_id(method_id)
         for task in [
             self.task,
-            *[task for task in self.task.store.list() if task.id != self.task.id],
+            *[task for task in self.task.store.list("all") if task.id != self.task.id],
         ]:
             source = AnalysisStore(task)
             path = source._object_path("methods", method_id)
@@ -341,7 +341,7 @@ class AnalysisStore:
         # lookup never reads another task's snapshots, revisions, or run outputs.
         methods = [
             method
-            for task in self.task.store.list()
+            for task in self.task.store.list("all")
             for method in AnalysisStore(task)._list("methods")
         ]
         return sorted(

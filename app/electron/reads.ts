@@ -16,6 +16,10 @@ export interface TaskRow {
   period: string | null;
   skill_id: string | null;
   created_at: string;
+  lifecycle_status?: 'active' | 'archived' | 'trashed';
+  archived_at?: string;
+  trashed_at?: string;
+  restored_at?: string;
   windows: number;
 }
 
@@ -121,9 +125,10 @@ export const READS = {
 } as const;
 
 export type ReadName = keyof typeof READS;
+export type TaskLifecycleFilter = 'active' | 'archived' | 'trashed' | 'all';
 
-export function listTasks(binding: Binding, env?: FoundryEnv): Promise<TaskRow[]> {
-  return runFoundryJson<TaskRow[]>(binding, READS.tasks, [], env);
+export function listTasks(binding: Binding, env?: FoundryEnv, lifecycle: TaskLifecycleFilter = 'active'): Promise<TaskRow[]> {
+  return runFoundryJson<TaskRow[]>(binding, READS.tasks, lifecycle === 'active' ? [] : ['--lifecycle', lifecycle], env);
 }
 
 export function showTask(binding: Binding, env?: FoundryEnv): Promise<TaskDetail> {
@@ -230,7 +235,7 @@ export function newestFirst(a: GalleryRow, b: GalleryRow): number {
  * publication state as the store saved it; nothing here decides a status.
  */
 export async function galleryRows(binding: Omit<Binding, 'task'>, env?: FoundryEnv): Promise<GalleryRow[]> {
-  const tasks = await listTasks(binding, env);
+  const tasks = (await listTasks(binding, env, 'all')).filter((task) => (task.lifecycle_status ?? 'active') !== 'trashed');
   const rows: GalleryRow[] = (await deliverableGallery(binding, env, tasks)).map(({ task, row }) => ({
     type: 'deliverable', key: `deliverable:${task.id}:${row.seq}`, at: row.at, task, row,
   }));

@@ -12,6 +12,7 @@ import {
   type GalleryRow,
   type LaunchSpec,
   type PreviewSpec,
+  type TaskLifecycleFilter,
   type TaskDetail as Detail,
   type HarnessStatus,
   type TaskRow,
@@ -69,6 +70,7 @@ export function App() {
   const [formulator, setFormulator] = useState<LaunchSpec | null>(null);
   const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [taskLifecycleView, setTaskLifecycleView] = useState<TaskLifecycleFilter>('active');
   /** Until this is true, an empty list is "not asked yet", not "no tasks". */
   const [gallery, setGallery] = useState<GalleryRow[]>([]);
   /** The version the gallery is showing, and its text once the store answers. */
@@ -110,6 +112,11 @@ export function App() {
   currentRef.current = current;
   const explicitSelection = useRef(false);
   const selectionRevision = useRef(0);
+  const taskListSequence = useRef(0);
+  const taskLifecycleViewRef = useRef(taskLifecycleView);
+  taskLifecycleViewRef.current = taskLifecycleView;
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const conversationQueue = useRef<Promise<unknown>>(Promise.resolve());
   const layoutRevision = useRef(0);
   const inWorkspace = screen === 'analysis' || screen === 'workbench';
@@ -155,19 +162,21 @@ export function App() {
    * last doing, and a strip that says nothing is a strip they have to act on
    * before the app does anything.
    */
-  const refreshTasks = useCallback(() => {
+  const refreshTasks = useCallback((view: TaskLifecycleFilter = taskLifecycleView) => {
     if (!api) return;
-    void api.tasks().then((a) =>
+    const sequence = ++taskListSequence.current;
+    void api.tasks(view).then((a) =>
       take(a, (rows) => {
+        if (taskListSequence.current !== sequence) return;
         setTasks(rows);
-        setCurrent((held) => held ?? (explicitSelection.current ? null : rows[rows.length - 1]?.id ?? null));
+        setCurrent((held) => (held && rows.some((row) => row.id === held)) ? held : (explicitSelection.current ? null : rows[rows.length - 1]?.id ?? null));
       }),
     );
-  }, [api, take]);
+  }, [api, take, taskLifecycleView]);
 
   useEffect(() => {
-    refreshTasks();
-  }, [refreshTasks]);
+    refreshTasks(taskLifecycleView);
+  }, [refreshTasks, taskLifecycleView]);
 
   /** Every version this machine has produced, newest first, across all tasks. */
   const refreshGallery = useCallback(() => {
@@ -421,18 +430,59 @@ export function App() {
     const result = await api.taskNew(question.trim().replace(/\s+/g, ' ').slice(0, 120) || '新的财务分析', '');
     if (!result.ok) { setProblem(result.message); throw new Error(result.message); }
     if (selectionRevision.current === selection) {
+      setTaskLifecycleView('active');
       currentRef.current = result.value.id;
       explicitSelection.current = true;
       setCurrent(result.value.id);
     }
-    refreshTasks();
+    refreshTasks('active');
     return result.value.id;
   }, [api, refreshTasks]);
+
+  const changeTaskLifecycle = useCallback(async (id: string, action: 'archive' | 'trash' | 'restore') => {
+    if (!api) throw new Error('任务服务暂未连接，请重新打开应用。');
+    const call = action === 'archive' ? api.taskArchive : action === 'trash' ? api.taskTrash : api.taskRestore;
+    if (!call) throw new Error('当前安装版还没有任务归档接口，请更新后重试。');
+    const selection = selectionRevision.current;
+    const currentAtStart = currentRef.current;
+    const result = await call(id);
+    if (!result.ok) throw new Error(result.message);
+    const nextView = result.value.lifecycle_status;
+    const stillSameSelection = selectionRevision.current === selection && currentRef.current === currentAtStart;
+    setTasks((rows) => rows.filter((row) => row.id !== id));
+    if (!stillSameSelection) {
+      refreshTasks(taskLifecycleViewRef.current);
+      if (screenRef.current === 'deliverables') refreshGallery();
+      return;
+    }
+    setTaskLifecycleView(nextView);
+    if (currentRef.current === id) {
+      closePreview();
+      currentRef.current = id;
+      explicitSelection.current = true;
+      setCurrent(id);
+      if (nextView !== 'active') {
+        setConversationProblem(null);
+        setSession(null);
+      }
+    }
+    refreshTasks(nextView);
+    if (screenRef.current === 'deliverables') refreshGallery();
+  }, [api, closePreview, refreshGallery, refreshTasks]);
 
   const chatAnalysis = useCallback(async (question?: string, draftId?: string,
     options?: { submit?: boolean; requestId?: string; targetTaskId?: string }) => {
     const target = options?.targetTaskId ?? currentRef.current;
     if (!api?.harnessOpen || !target) throw new Error('请先选择任务，或等待对话服务连接。');
+    const targetRow = tasksRef.current.find((row) => row.id === target);
+    if (targetRow && (targetRow.lifecycle_status ?? 'active') !== 'active') {
+      const message = '归档或回收站任务只能查看已有成果，恢复后才能继续对话。';
+      if (currentRef.current === target) {
+        setSession(null);
+        setConversationProblem(message);
+      }
+      throw new Error(message);
+    }
     if (currentRef.current === target && (question !== undefined || draftId !== undefined)) setConversationFocus((value) => value + 1);
     const operation = conversationQueue.current.catch(() => undefined).then(async () => {
       if (question === undefined && draftId === undefined && currentRef.current !== target) return;
@@ -460,7 +510,8 @@ export function App() {
         // A background seed may have moved the one resident native view. Rebind
         // the visible task before revealing it, even if current never changed.
         const visibleTask = currentRef.current;
-        if (visibleTask && visibleTask !== target) {
+        const visibleRow = visibleTask ? tasksRef.current.find((row) => row.id === visibleTask) : undefined;
+        if (visibleTask && visibleTask !== target && (!visibleRow || (visibleRow.lifecycle_status ?? 'active') === 'active')) {
           try {
             const restored = await api.harnessOpen!('analysis', visibleTask);
             if (currentRef.current === visibleTask) {
@@ -482,9 +533,11 @@ export function App() {
 
   useEffect(() => {
     if (!inWorkspace || !ready || !current) return;
+    const row = tasks.find((task) => task.id === current);
+    if (!row || (row.lifecycle_status ?? 'active') !== 'active') return;
     // Opening without a seed restores the session's own draft and never submits it.
     void chatAnalysis(undefined, undefined, { targetTaskId: current }).catch(() => undefined);
-  }, [inWorkspace, ready, current, chatAnalysis]);
+  }, [inWorkspace, ready, current, tasks, chatAnalysis]);
 
   /** Name a task from 任务, and open it there. The workbench binds to it too. */
   const createTask = useCallback(
@@ -495,7 +548,8 @@ export function App() {
         .taskNew(title, period)
         .then((a) =>
           take(a, ({ id }) => {
-            refreshTasks();
+            setTaskLifecycleView('active');
+            refreshTasks('active');
             setCurrent(id);
             setOpen(id);
           }),
@@ -636,6 +690,8 @@ export function App() {
   }
 
   const bound = tasks.find((row) => row.id === current) ?? null;
+  const boundLifecycle = bound?.lifecycle_status ?? 'active';
+  const boundReadOnly = Boolean(bound && boundLifecycle !== 'active');
   const pickAnalysisTask = (id: string) => {
     selectionRevision.current += 1;
     explicitSelection.current = true; currentRef.current = id || null;
@@ -650,9 +706,13 @@ export function App() {
    */
   const openDraft = (task: TaskRow, draft: AnalysisDraftRow) => {
     const saved = `${task.id}:selection`;
+    const view = task.lifecycle_status ?? 'active';
     writeCopy(saved, { ...readCopy<{ analysis?: string; draft?: string }>(saved), draft: draft.draft_id });
     setSections((held) => ({ ...held, [task.id]: 'drafts' }));
     setOpened(null);
+    setTaskLifecycleView(view);
+    setTasks((rows) => rows.some((row) => row.id === task.id) ? rows : [...rows, task]);
+    refreshTasks(view);
     setDraftRequest((held) => ({ count: held.count + 1, taskId: task.id, draftId: draft.draft_id }));
     if (task.id === current) {
       setScreen('analysis');
@@ -692,7 +752,14 @@ export function App() {
     >
       {problem && !inWorkspace ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
       <div className="workspace-mount" hidden={!inWorkspace}>
-        <Workspace active={inWorkspace} focusConversationRequest={conversationFocus} task={bound} tasks={tasks} onPick={pickAnalysisTask}
+        <Workspace active={inWorkspace} focusConversationRequest={conversationFocus} task={bound} tasks={tasks}
+          lifecycleView={taskLifecycleView} onLifecycleView={(view) => {
+            if (taskLifecycleViewRef.current === view) return;
+            selectionRevision.current += 1;
+            taskListSequence.current += 1;
+            taskLifecycleViewRef.current = view;
+            setTaskLifecycleView(view);
+          }} onPick={pickAnalysisTask}
           onNew={() => pickAnalysisTask('')}
           onMethods={() => setAnalysisSection('methods')}
           onData={() => setScreen('formulator')}
@@ -702,8 +769,12 @@ export function App() {
             if (!result.ok) throw new Error(result.message);
             setTasks((rows) => rows.map((row) => row.id === id ? { ...row, title: result.value.title } : row));
           } : undefined}
+          onArchive={api.taskArchive ? (id) => changeTaskLifecycle(id, 'archive') : undefined}
+          onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
+          onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
           onLayout={onWorkspaceLayout}
-          conversation={guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>提问或添加资料，右侧查看结果和文稿。</p><Button variant="outline" onClick={() => setAsked(false)}>继续工作</Button></div>
+          conversation={boundReadOnly ? <div className="workspace-connection"><h2>任务已停用对话</h2><p>归档或回收站任务只能查看已有成果，恢复后才能继续分析。</p></div>
+            : guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>提问或添加资料，右侧查看结果和文稿。</p><Button variant="outline" onClick={() => setAsked(false)}>继续工作</Button></div>
             : conversationProblem ? <div className="workspace-connection" role="alert"><h2>对话暂时中断</h2><p>{conversationProblem}</p>
               <Button variant="outline" disabled={opening}
                 onClick={() => { setConversationProblem(null); void chatAnalysis().catch(() => undefined); }}>重新连接</Button></div>
@@ -711,21 +782,22 @@ export function App() {
             : !ready || opening ? <div className="workspace-connection"><Booting /></div>
             : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button variant="outline" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
-          <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
-            task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
-            onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
-              // The locator answer carries no origin. Where the viewer is
-              // comes from `previewStatus`, as it does for every other preview.
-              void (async () => {
-                let origin = '';
-                if (api.previewStatus) {
-                  const status = await api.previewStatus();
-                  if (status.ok) origin = status.value.running?.origin ?? '';
-                }
-                setPreview({ ...spec, origin });
-                setLocatorPreview(true);
-              })();
-            } : undefined} />
+          {boundReadOnly ? <div className="fnd-empty"><h2>任务已停用编辑</h2><p>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</p><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></div> :
+            <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
+              task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
+              onLocatorPreview={api.sourceLocatorOpen ? (spec) => {
+                // The locator answer carries no origin. Where the viewer is
+                // comes from `previewStatus`, as it does for every other preview.
+                void (async () => {
+                  let origin = '';
+                  if (api.previewStatus) {
+                    const status = await api.previewStatus();
+                    if (status.ok) origin = status.value.running?.origin ?? '';
+                  }
+                  setPreview({ ...spec, origin });
+                  setLocatorPreview(true);
+                })();
+              } : undefined} />}
         </Workspace>
       </div>
       {screen === 'tasks' && open === null ? (

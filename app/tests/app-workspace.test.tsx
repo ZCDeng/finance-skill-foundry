@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge, TaskRow } from '../src/bridge.js';
 import { App } from '../src/App.js';
+import { press } from './press.js';
 
 vi.mock('../src/views/Analysis.js', () => ({
   Analysis: ({ task, onNew, onChat }: { task: TaskRow | null;
@@ -21,6 +22,11 @@ const task = (id: string, title: string): TaskRow => ({ id, title, period: null,
 const a = task('a'.repeat(32), '华东利润');
 const b = task('b'.repeat(32), '西南回款');
 const ok = <T,>(value: T): Answer<T> => ({ ok: true, value });
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 function mount(overrides: Partial<Bridge> = {}) {
   const api = {
     tasks: vi.fn(async () => ok([a, b])),
@@ -62,6 +68,78 @@ describe('unified application session lifecycle', () => {
     expect(harnessOpen.mock.calls[1][1]).toBe(a.id);
     expect(screen.getByRole('heading', { name: a.title })).toBeTruthy();
     expect(screen.getByText('本地成果：华东利润')).toBeTruthy();
+  });
+
+  it('keeps inactive tasks read-only and does not open a native conversation', async () => {
+    const archived = { ...b, lifecycle_status: 'archived' as const };
+    const api = mount({ tasks: vi.fn(async () => ok([a, archived])) });
+    expect(await screen.findByText('任务已停用编辑')).toBeTruthy();
+    expect(screen.getByText(/恢复任务后打开文稿/)).toBeTruthy();
+    expect(screen.queryByText('本地成果：西南回款')).toBeNull();
+    expect(api.harnessOpen).not.toHaveBeenCalled();
+  });
+
+  it('does not let a slow archive result take selection back from a later pick', async () => {
+    let finishArchive!: (value: Answer<{ task_id: string; lifecycle_status: 'archived' }>) => void;
+    const api = mount({
+      taskArchive: vi.fn(() => new Promise<Answer<{ task_id: string; lifecycle_status: 'archived' }>>((resolve) => { finishArchive = resolve; })),
+      tasks: vi.fn(async (view?: string) => ok(view === 'archived' ? [{ ...b, lifecycle_status: 'archived' as const }] : [a, b])),
+    });
+    await screen.findByText('本地成果：西南回款');
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /归档任务/ }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: a.title }));
+    await act(async () => finishArchive(ok({ task_id: b.id, lifecycle_status: 'archived' })));
+    expect(screen.getByRole('heading', { name: a.title })).toBeTruthy();
+    await waitFor(() => expect(vi.mocked(api.harnessOpen).mock.calls.at(-1)?.[1]).toBe(a.id));
+  });
+
+  it('keeps the newest task list response after switching lifecycle filters', async () => {
+    const slowActive = deferred<Answer<TaskRow[]>>();
+    const archived = { ...b, lifecycle_status: 'archived' as const };
+    const tasks = vi.fn((view?: string) => view === 'archived' ? Promise.resolve(ok([archived])) : slowActive.promise);
+    mount({ tasks });
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    expect(await screen.findByRole('button', { name: b.title })).toBeTruthy();
+    await act(async () => slowActive.resolve(ok([a])));
+    expect(screen.getByRole('button', { name: b.title })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: a.title })).toBeNull();
+  });
+
+  it('keeps a later lifecycle filter when an archive finishes before that list loads', async () => {
+    const archive = deferred<Answer<{ task_id: string; lifecycle_status: 'archived' }>>();
+    const trash = deferred<Answer<TaskRow[]>>();
+    const api = mount({
+      taskArchive: vi.fn(() => archive.promise),
+      tasks: vi.fn((view?: string) => view === 'trashed' ? trash.promise
+        : Promise.resolve(ok(view === 'archived' ? [{ ...b, lifecycle_status: 'archived' as const }] : [a, b]))),
+    });
+    await screen.findByText('本地成果：西南回款');
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /归档任务/ }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '回收站' }));
+    await act(async () => archive.resolve(ok({ task_id: b.id, lifecycle_status: 'archived' })));
+    expect(screen.getByRole('button', { name: '回收站' }).getAttribute('aria-pressed')).toBe('true');
+    expect(vi.mocked(api.tasks).mock.calls.at(-1)?.[0]).toBe('trashed');
+    await act(async () => trash.resolve(ok([])));
+    expect(screen.queryByRole('button', { name: b.title })).toBeNull();
+  });
+
+  it('does not discard a loading bucket when its selected filter is clicked again', async () => {
+    const archived = deferred<Answer<TaskRow[]>>();
+    mount({ tasks: vi.fn((view?: string) => view === 'archived' ? archived.promise : Promise.resolve(ok([a, b]))) });
+    await screen.findByText('本地成果：西南回款');
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    await act(async () => archived.resolve(ok([{ ...a, lifecycle_status: 'archived' }])));
+    expect(screen.getByRole('button', { name: a.title })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: b.title })).toBeNull();
   });
 
   it('keeps local results available after a recoverable conversation failure', async () => {

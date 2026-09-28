@@ -18,6 +18,7 @@ TASK_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SESSION_ROLES = ("author", "period", "followup", "analysis")
 DELIVERABLE_KINDS = ("brief", "workpaper", "export")
 WINDOW_REASONS = ("initial", "reimport")
+TASK_LIFECYCLE_STATUSES = ("active", "archived", "trashed")
 TASK_LOCK_TIMEOUT = 10.0
 
 
@@ -112,6 +113,7 @@ class TaskStore:
                 "period": period,
                 "skill_id": skill_id,
                 "created_at": now_iso(),
+                "lifecycle_status": "active",
             },
         )
         if make_current:
@@ -126,13 +128,19 @@ class TaskStore:
             raise FoundryError(f"no such task: {task_id}")
         return task
 
-    def list(self) -> list[Task]:
+    def list(self, lifecycle: str = "active") -> list[Task]:
+        if lifecycle not in (*TASK_LIFECYCLE_STATUSES, "all"):
+            raise FoundryError(f"task lifecycle must be one of active, archived, trashed, all: {lifecycle}")
         ids = sorted(
             path.name
             for path in self.tasks_dir.iterdir()
             if path.is_dir() and TASK_ID_RE.match(path.name) and (path / "task.json").exists()
         )
-        tasks = [Task(self, task_id) for task_id in ids]
+        tasks = []
+        for task_id in ids:
+            task = Task(self, task_id)
+            if lifecycle == "all" or task.lifecycle_status() == lifecycle:
+                tasks.append(task)
         return sorted(tasks, key=lambda task: str(task.meta().get("created_at") or ""))
 
     def current(self) -> Task | None:
@@ -142,7 +150,7 @@ class TaskStore:
         if not TASK_ID_RE.match(task_id):
             return None
         task = Task(self, task_id)
-        return task if task.meta_path.exists() else None
+        return task if task.meta_path.exists() and task.lifecycle_status() == "active" else None
 
     def set_current(self, task_id: str) -> None:
         if not TASK_ID_RE.match(str(task_id)):
@@ -154,6 +162,9 @@ class TaskStore:
             tmp.replace(self.current_path)
         finally:
             tmp.unlink(missing_ok=True)
+
+    def clear_current(self) -> None:
+        self.current_path.unlink(missing_ok=True)
 
 
 @dataclass
@@ -194,6 +205,10 @@ class Task:
             raise FoundryError(f"no such task: {self.id}")
         return json.loads(self.meta_path.read_text(encoding="utf-8"))
 
+    def lifecycle_status(self) -> str:
+        status = str(self.meta().get("lifecycle_status") or "active")
+        return status if status in TASK_LIFECYCLE_STATUSES else "active"
+
     def rename(self, title: str) -> dict[str, Any]:
         """Change the display title without moving the task or rewriting history."""
         if not isinstance(title, str) or not title.strip():
@@ -203,6 +218,34 @@ class Task:
             metadata["title"] = title.strip()
             _write_json(self.meta_path, metadata)
             return metadata
+
+    def set_lifecycle_status(self, status: str) -> dict[str, Any]:
+        """Hide, recover or keep a task without moving or deleting its files."""
+        if status not in TASK_LIFECYCLE_STATUSES:
+            raise FoundryError(f"task lifecycle must be one of {TASK_LIFECYCLE_STATUSES}: {status}")
+        with exclusive(self.lock_path, timeout=TASK_LOCK_TIMEOUT):
+            metadata = self.meta()
+            previous = str(metadata.get("lifecycle_status") or "active")
+            if previous == status:
+                return metadata
+            metadata["lifecycle_status"] = status
+            field = {
+                "active": "restored_at",
+                "archived": "archived_at",
+                "trashed": "trashed_at",
+            }[status]
+            metadata[field] = now_iso()
+            _write_json(self.meta_path, metadata)
+        current = self.store.current_path.read_text(encoding="utf-8").strip() if self.store.current_path.exists() else ""
+        if status != "active" and current == self.id:
+            fallback = self.store.list("active")
+            if fallback:
+                self.store.set_current(fallback[-1].id)
+            else:
+                self.store.clear_current()
+        elif status == "active" and current == "":
+            self.store.set_current(self.id)
+        return metadata
 
     # -- windows ---------------------------------------------------------
 
@@ -566,7 +609,7 @@ def session_owner(store: TaskStore, session_id: str) -> Task | None:
     cleaned = str(session_id).strip()
     if not cleaned:
         return None
-    for task in store.list():
+    for task in store.list("all"):
         for row in task.sessions():
             if row.get("session_id") == cleaned:
                 return task

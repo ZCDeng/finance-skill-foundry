@@ -1,7 +1,7 @@
 import { type BrowserWindow, type OpenDialogOptions, ipcMain, shell, dialog } from 'electron';
 
 import type { Binding } from '../foundry.js';
-import { FoundryFailure, FoundryRefusal, runFoundry } from '../foundry.js';
+import { FoundryFailure, FoundryRefusal, REFUSED, runFoundry } from '../foundry.js';
 import type { FormulatorHost } from '../formulator.js';
 import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
 import { ensureTaskWorkspace } from '../harness/workspace.js';
@@ -19,7 +19,7 @@ import {
 } from '../reads.js';
 import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
-import { newTask } from '../writes.js';
+import { changeTaskLifecycle, newTask } from '../writes.js';
 import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
 import * as path from 'node:path';
@@ -138,7 +138,12 @@ export function registerIpc(
       dialogOpen.set(kind, performance.now() - opened);
     }
   };
-  ipcMain.handle(CHANNELS.tasks, () => answer(() => listTasks(binding)));
+  const taskLifecycle = (raw: unknown) => {
+    const value = String(raw ?? 'active');
+    if (!['active', 'archived', 'trashed', 'all'].includes(value)) throw new Error(`unknown task lifecycle: ${value}`);
+    return value as 'active' | 'archived' | 'trashed' | 'all';
+  };
+  ipcMain.handle(CHANNELS.tasks, (_event, lifecycle: unknown) => answer(() => listTasks(binding, undefined, taskLifecycle(lifecycle))));
 
   ipcMain.handle(CHANNELS.task, (_event, task: unknown) =>
     answer(() => showTask({ ...binding, task: taskId(task) })),
@@ -244,6 +249,16 @@ export function registerIpc(
     JSON.parse(await runFoundry({...binding, task: taskId(task)}, 'task-rename', ['--title', lineOf(title, 'title', 120)])),
   ));
 
+  ipcMain.handle(CHANNELS.taskArchive, (_event, task: unknown) => answer(() =>
+    changeTaskLifecycle({ ...binding, task: taskId(task) }, 'task-archive'),
+  ));
+  ipcMain.handle(CHANNELS.taskTrash, (_event, task: unknown) => answer(() =>
+    changeTaskLifecycle({ ...binding, task: taskId(task) }, 'task-trash'),
+  ));
+  ipcMain.handle(CHANNELS.taskRestore, (_event, task: unknown) => answer(() =>
+    changeTaskLifecycle({ ...binding, task: taskId(task) }, 'task-restore'),
+  ));
+
   // Every analysis operation goes through the same domain CLI as legacy work.
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
     JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
@@ -266,6 +281,8 @@ export function registerIpc(
   };
   const rootAnalysisContext = async (task: string): Promise<{ sessionId?: string; title?: string }> => {
     const known = await analysisCall(task, 'task-show');
+    const lifecycle = String(known.task?.lifecycle_status ?? 'active');
+    if (lifecycle !== 'active') throw new FoundryRefusal('归档或回收站任务只能查看已有成果，恢复后才能继续对话。', REFUSED);
     const previous = [...(known.sessions ?? [])].reverse().find(
       (row: { role: string; session_id?: string; parent_session_id?: string }) => row.role === 'analysis' && !row.parent_session_id,
     );

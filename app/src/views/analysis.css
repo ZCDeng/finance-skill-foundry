@@ -261,7 +261,7 @@
 .analysis-structure-columns th,
 .analysis-structure-columns td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 3px 6px; text-align: left; }
 .analysis-structure-preview tr.is-header td,
-.analysis-structure-preview tr.is-header th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-structure-preview tr.is-header th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-structure-preview caption { text-align: left; padding-bottom: 4px; }
 .analysis-structure-excluded { font-size: 0.84rem; }
 .analysis-structure-excluded ul { margin: 6px 0 0; padding-left: 1.1rem; display: grid; gap: 3px; }
@@ -282,7 +282,7 @@
 .analysis-readiness-table caption { text-align: left; padding-bottom: 6px; }
 .analysis-readiness-table th,
 .analysis-readiness-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 8px; text-align: left; vertical-align: top; }
-.analysis-readiness-table thead th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-readiness-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-readiness-table tbody th { font-weight: 600; overflow-wrap: anywhere; }
 
 /* Which ledger accounts count as revenue, cost and expense. */
@@ -291,6 +291,6 @@
 .analysis-account-map-table caption { text-align: left; padding-bottom: 6px; }
 .analysis-account-map-table th,
 .analysis-account-map-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 6px; text-align: left; }
-.analysis-account-map-table thead th { background: var(--fnd-accent-soft, #f3efe6); font-weight: 600; }
+.analysis-account-map-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
 .analysis-account-map select { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--fnd-line, #e5e2dc); border-radius: 6px; background: var(--fnd-surface, #fff); color: inherit; }

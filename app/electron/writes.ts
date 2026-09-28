@@ -17,6 +17,9 @@ import { type Binding, type FoundryEnv, runFoundry } from './foundry.js';
 /** The write surface. Exported so a test can assert nothing else is reachable. */
 export const WRITES = {
   taskNew: 'task-new',
+  taskArchive: 'task-archive',
+  taskTrash: 'task-trash',
+  taskRestore: 'task-restore',
 } as const;
 
 export type WriteName = keyof typeof WRITES;
@@ -44,4 +47,15 @@ export async function newTask(
   const id = (await runFoundry(binding, WRITES.taskNew, rest, env)).trim();
   if (!/^[0-9a-f]{32}$/.test(id)) throw new Error(`task-new did not print a task id: ${id.slice(0, 200)}`);
   return { id };
+}
+
+export async function changeTaskLifecycle(
+  binding: Binding,
+  command: 'task-archive' | 'task-trash' | 'task-restore',
+  env?: FoundryEnv,
+): Promise<{ task_id: string; lifecycle_status: 'active' | 'archived' | 'trashed' }> {
+  return JSON.parse(await runFoundry(binding, command, [], env)) as {
+    task_id: string;
+    lifecycle_status: 'active' | 'archived' | 'trashed';
+  };
 }

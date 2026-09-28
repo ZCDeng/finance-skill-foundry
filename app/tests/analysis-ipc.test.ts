@@ -39,6 +39,17 @@ describe('analysis IPC task and session binding', () => {
     expect((await invoke(CHANNELS.harnessOpen, 'analysis', task, { draftId: 'foreign-draft', verbatim: '继续' })).ok).toBe(false);
     expect(host.show).toHaveBeenCalledTimes(1);
   });
+  it('refuses to open the native analysis conversation for inactive tasks', async () => {
+    const host = { open: vi.fn(), show: vi.fn() };
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ task: { title: '旧任务', lifecycle_status: 'archived' }, sessions: [] }) : '{}');
+    registerIpc({ varRoot: '/store' }, { host, userData: () => '/user' } as any);
+    const result = await invoke(CHANNELS.harnessOpen, 'analysis', task);
+    expect(result).toEqual({ ok: false, refused: true, message: '归档或回收站任务只能查看已有成果，恢复后才能继续对话。' });
+    expect(host.open).not.toHaveBeenCalled();
+    expect(host.show).not.toHaveBeenCalled();
+  });
+
   it('passes explicit audit mode and rejects unsupported export modes before exporting', async () => {
     registerIpc({ varRoot: '/store' });
     mocks.reportExport.mockResolvedValue({ path: '/export/audit.pdf' });
@@ -456,6 +467,15 @@ describe('embedded workspace IPC', () => {
     await invoke(CHANNELS.taskRename,task,'  月度利润复盘  ');
     expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task,actor:'manager'},'task-rename',['--title','月度利润复盘']);
     expect((await invoke(CHANNELS.taskRename,task,'bad\nname')).ok).toBe(false);
+    expect(mocks.run).toHaveBeenCalledOnce();
+  });
+
+  it('answers task lifecycle changes through explicit task-scoped CLI commands', async () => {
+    mocks.run.mockResolvedValue(JSON.stringify({ task_id: task, lifecycle_status: 'archived' }));
+    registerIpc({varRoot:'/store'});
+    expect(await invoke(CHANNELS.taskArchive, task)).toEqual({ok:true,value:{task_id:task,lifecycle_status:'archived'}});
+    expect(mocks.run).toHaveBeenCalledWith({varRoot:'/store',task,actor:'manager'},'task-archive',[],undefined);
+    expect((await invoke(CHANNELS.taskTrash, '../bad')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledOnce();
   });
 });

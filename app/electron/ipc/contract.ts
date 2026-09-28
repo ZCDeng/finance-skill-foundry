@@ -49,6 +49,9 @@ export const CHANNELS = {
   /** The one channel that changes the store. See `writes.ts`. */
   taskNew: 'foundry:task-new',
   taskRename: 'foundry:task-rename',
+  taskArchive: 'foundry:task-archive',
+  taskTrash: 'foundry:task-trash',
+  taskRestore: 'foundry:task-restore',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
   harnessLayout: 'harness:layout',

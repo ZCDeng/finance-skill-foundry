@@ -34,7 +34,7 @@ const api = {
   financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),
   financeSourceRefresh: (task: string, spec: unknown) => ipcRenderer.invoke('finance:source-refresh', task, spec),
   timingLog: (entry: unknown) => ipcRenderer.invoke('timing:log', entry),
-  tasks: () => ipcRenderer.invoke('foundry:tasks'),
+  tasks: (lifecycle?: string) => ipcRenderer.invoke('foundry:tasks', lifecycle),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),
   gallery: () => ipcRenderer.invoke('foundry:gallery'),
   deliverableText: (task: string, sha: string) =>
@@ -46,6 +46,9 @@ const api = {
   exportWorkbook: (task: string, window: string) =>
     ipcRenderer.invoke('foundry:export-workbook', task, window),
   taskRename: (task: string, title: string) => ipcRenderer.invoke('foundry:task-rename', task, title),
+  taskArchive: (task: string) => ipcRenderer.invoke('foundry:task-archive', task),
+  taskTrash: (task: string) => ipcRenderer.invoke('foundry:task-trash', task),
+  taskRestore: (task: string) => ipcRenderer.invoke('foundry:task-restore', task),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),

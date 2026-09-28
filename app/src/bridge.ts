@@ -15,8 +15,15 @@ export interface TaskRow {
   period: string | null;
   skill_id: string | null;
   created_at: string;
+  lifecycle_status?: TaskLifecycleStatus;
+  archived_at?: string;
+  trashed_at?: string;
+  restored_at?: string;
   windows: number;
 }
+
+export type TaskLifecycleStatus = 'active' | 'archived' | 'trashed';
+export type TaskLifecycleFilter = TaskLifecycleStatus | 'all';
 
 export interface InputRow {
   role: string;
@@ -154,7 +161,7 @@ export interface Bridge {
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
   timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
-  tasks(): Promise<Answer<TaskRow[]>>;
+  tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
   gallery(): Promise<Answer<GalleryRow[]>>;
@@ -179,6 +186,9 @@ export interface Bridge {
   ): Promise<Answer<{ sha256: string; seq: number; ext: string }>>;
   /** The one call that changes the store. Always present; the reads are useless without it. */
   taskRename?(task: string, title: string): Promise<Answer<{task_id: string; title: string}>>;
+  taskArchive?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
+  taskTrash?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
+  taskRestore?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;

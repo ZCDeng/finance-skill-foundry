@@ -13,7 +13,7 @@ vi.mock('../electron/foundry.js', async (original) => ({
 }));
 
 const { runFoundry } = await import('../electron/foundry.js');
-const { newTask } = await import('../electron/writes.js');
+const { changeTaskLifecycle, newTask } = await import('../electron/writes.js');
 const called = runFoundry as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => called.mockReset());
@@ -31,7 +31,7 @@ describe('creating a task', () => {
    * cold install.
    */
   it('is a mutation the window can make, and the only one', () => {
-    expect(Object.values(WRITES)).toEqual(['task-new']);
+    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore']);
   });
 
   it('passes the title through and leaves an empty period off the argv', async () => {
@@ -59,6 +59,12 @@ describe('creating a task', () => {
   it('hands back the id the CLI printed', async () => {
     called.mockResolvedValue(`${ID}\n`);
     expect(await newTask({ varRoot: '/v' }, { title: 'x' })).toEqual({ id: ID });
+  });
+
+  it('changes lifecycle through task-scoped CLI commands', async () => {
+    called.mockResolvedValue(JSON.stringify({ task_id: ID, lifecycle_status: 'archived' }));
+    await expect(changeTaskLifecycle({ varRoot: '/v', task: ID }, 'task-archive')).resolves.toEqual({ task_id: ID, lifecycle_status: 'archived' });
+    expect(called).toHaveBeenCalledWith({ varRoot: '/v', task: ID }, 'task-archive', [], undefined);
   });
 
   it('refuses stdout that is not an id, rather than returning an empty one', async () => {

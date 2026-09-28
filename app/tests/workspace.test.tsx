@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Workspace } from '../src/components/Workspace.js';
 import type { TaskRow } from '../src/bridge.js';
@@ -10,6 +10,7 @@ const tasks: TaskRow[] = [
   { id: 'b'.repeat(32), title: '西南回款', period: null, skill_id: null, created_at: '', windows: 0 },
 ];
 const props = { active: true, task: tasks[0], tasks, onPick: vi.fn(), onNew: vi.fn(),
+  lifecycleView: 'active' as const, onLifecycleView: vi.fn(),
   onMethods: vi.fn(), onData: vi.fn(), onHistory: vi.fn(), onLayout: vi.fn(),
   conversation: <p>对话连接中</p>, children: <textarea aria-label="文稿正文" defaultValue="保留这份草稿" /> };
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -54,6 +55,15 @@ describe('one task workspace', () => {
     expect(props.onData).toHaveBeenCalledOnce();
   });
 
+  it('filters lifecycle buckets and exposes recoverable task actions', async () => {
+    render(<Workspace {...props} onArchive={vi.fn()} onTrash={vi.fn()} onRestore={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    expect(props.onLifecycleView).toHaveBeenCalledWith('archived');
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
+  });
+
   it('renders the task drawer as a titled navigation surface with a separate library footer', () => {
     render(<Workspace {...props} />);
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
@@ -61,6 +71,20 @@ describe('one task workspace', () => {
     expect(screen.getByRole('heading', { name: '任务' })).toBeTruthy();
     expect(sidebar.querySelector('.workspace-search input')).toBe(screen.getByRole('searchbox', { name: '搜索任务' }));
     expect(sidebar.querySelector('.workspace-sidebar-footer .workspace-library')).toBe(screen.getByRole('button', { name: '方法库' }));
+  });
+
+  it('shows a failed archive in the menu and lets the same task retry', async () => {
+    const onArchive = vi.fn().mockRejectedValueOnce(new Error('任务暂时被占用，请重试。')).mockResolvedValueOnce(undefined);
+    render(<Workspace {...props} onArchive={onArchive} />);
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('任务暂时被占用，请重试。');
+    expect(screen.getByText(tasks[0].title, { selector: 'h1' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档任务' }));
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: '归档任务' })).toBeNull());
+    expect(onArchive).toHaveBeenCalledTimes(2);
+    expect(onArchive).toHaveBeenLastCalledWith(tasks[0].id);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { BookOpen, Check, Columns2, Ellipsis, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react';
-import type { TaskRow } from '../bridge.js';
+import { Archive, BookOpen, Check, Columns2, Ellipsis, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import type { TaskLifecycleFilter, TaskRow } from '../bridge.js';
 import './workspace.css';
 import { Button } from './ui/button.js';
 import { Input } from './ui/input.js';
@@ -17,12 +17,17 @@ interface Props {
   focusConversationRequest?: number;
   task: TaskRow | null;
   tasks: TaskRow[];
+  lifecycleView: TaskLifecycleFilter;
+  onLifecycleView(value: TaskLifecycleFilter): void;
   onPick(id: string): void;
   onNew(): void;
   onMethods(): void;
   onData(): void;
   onHistory(): void;
   onRename?(id: string, title: string): Promise<void>;
+  onArchive?(id: string): Promise<void>;
+  onTrash?(id: string): Promise<void>;
+  onRestore?(id: string): Promise<void>;
   onLayout(rect: WorkspaceRect | null): void;
   conversation: ReactNode;
   children: ReactNode;
@@ -31,7 +36,14 @@ type Focus = 'split' | 'conversation' | 'results';
 const mediaMatches = (query: string) => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
 
 /** The native conversation gets a measured slot, independent of sidebar or zoom assumptions. */
-export function Workspace({ active, focusConversationRequest = 0, task, tasks, onPick, onNew, onMethods, onData, onHistory, onRename, onLayout, conversation, children }: Props) {
+const lifecycleLabels: Record<TaskLifecycleFilter, string> = {
+  active: '进行中',
+  archived: '已归档',
+  trashed: '回收站',
+  all: '全部',
+};
+
+export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onLayout, conversation, children }: Props) {
   const [sidebar, setSidebar] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [wide, setWide] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [narrow, setNarrow] = useState(() => mediaMatches('(max-width: 1100px)'));
@@ -47,6 +59,9 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
   const [title, setTitle] = useState('');
   const [savingTitle, setSavingTitle] = useState(false);
   const [titleError, setTitleError] = useState('');
+  const [lifecycleBusy, setLifecycleBusy] = useState('');
+  const [lifecycleError, setLifecycleError] = useState('');
+  useEffect(() => setLifecycleError(''), [task?.id]);
   const renamedTask = useRef(task?.id);
   renamedTask.current = task?.id;
   const slot = useRef<HTMLDivElement>(null);
@@ -123,6 +138,22 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
 
   const openMethods = () => { setFocus(narrow ? 'results' : 'split'); onMethods(); };
   const pick = (id: string) => { onPick(id); if (!wide) closeSidebar(); setToolsOpen(false); };
+  const lifecycleStatus = task?.lifecycle_status ?? 'active';
+  const lifecycleAction = async (action: 'archive' | 'trash' | 'restore') => {
+    if (!task || lifecycleBusy) return;
+    setLifecycleBusy(action);
+    setLifecycleError('');
+    try {
+      if (action === 'archive') await onArchive?.(task.id);
+      else if (action === 'trash') await onTrash?.(task.id);
+      else await onRestore?.(task.id);
+      if (renamedTask.current === task.id) setToolsOpen(false);
+    } catch (error) {
+      if (renamedTask.current === task.id) setLifecycleError(error instanceof Error ? error.message : '任务操作未完成，请重试。');
+    } finally {
+      setLifecycleBusy('');
+    }
+  };
   const resized = (value: number) => setChatWidth(Math.min(640, Math.max(400, value)));
   const saveTitle = async () => {
     if (!task || !onRename || savingTitle || !title.trim()) return;
@@ -144,11 +175,15 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
           {overlay ? <Button size="icon" variant="ghost" aria-label="收起任务列表" onClick={closeSidebar}><X size={18} aria-hidden /></Button> : null}
         </div>
         <Button className="workspace-new" onClick={() => { onNew(); if (!wide) closeSidebar(); }}><Plus size={16} aria-hidden />新建任务</Button>
+        <div className="workspace-lifecycle" role="group" aria-label="任务状态">
+          {(['active', 'archived', 'trashed'] as const).map((value) =>
+            <button key={value} type="button" aria-pressed={lifecycleView === value} onClick={() => onLifecycleView(value)}>{lifecycleLabels[value]}</button>)}
+        </div>
         <label className="workspace-search"><Search size={15} aria-hidden /><Input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="workspace-tasklist">
-          {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
-            onClick={() => pick(row.id)}><span>{row.title}</span>{row.period ? <small>{row.period}</small> : null}</button>)}
+          {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-label={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
+            onClick={() => pick(row.id)}><span>{row.title}</span><small>{[row.period, lifecycleLabels[row.lifecycle_status ?? 'active']].filter(Boolean).join(' · ')}</small></button>)}
           {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : '从一个问题开始第一项分析'}</p> : null}
         </div>
         <div className="workspace-sidebar-footer">
@@ -185,6 +220,10 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, o
               <DropdownMenuItem onSelect={() => openMethods()}>方法库</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onData()}>数据台</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onHistory()}>任务记录与旧版流程</DropdownMenuItem>
+              {task && lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} aria-hidden />归档任务</DropdownMenuItem> : null}
+              {task && lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} aria-hidden />恢复任务</DropdownMenuItem> : null}
+              {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} aria-hidden />移入回收站</DropdownMenuItem> : null}
+              {lifecycleError ? <p role="alert" className="max-w-72 px-2 py-1 text-sm break-words">{lifecycleError}</p> : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </header>

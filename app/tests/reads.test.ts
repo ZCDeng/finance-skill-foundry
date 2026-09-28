@@ -21,6 +21,7 @@ import {
   READS,
   analysisExportPath,
   galleryRows,
+  listTasks,
 } from '../electron/reads.js';
 import { CHANNELS } from '../electron/ipc/contract.js';
 
@@ -82,6 +83,16 @@ describe('every data path is a CLI call', () => {
     // half: drafts and filed exports live in the analysis store, not in
     // `deliverables`.
     expect(Object.values(READS)).toEqual(['task-list', 'task-show', 'deliverables', 'analysis-deliverables']);
+  });
+
+  it('filters task-list through the CLI lifecycle flag', async () => {
+    mocks.run.mockResolvedValue('[]');
+    await listTasks({ varRoot: '/store' });
+    await listTasks({ varRoot: '/store' }, undefined, 'archived');
+    expect(mocks.run.mock.calls.map((call) => [call[1], call[2]])).toEqual([
+      ['task-list', []],
+      ['task-list', ['--lifecycle', 'archived']],
+    ]);
   });
 
   it('holds the preload literals to the contract', () => {
@@ -171,6 +182,21 @@ describe('the deliverables union', () => {
     if (only.type !== 'draft') throw new Error('not a draft row');
     expect(only.task.id).toBe(A.id);
     expect([only.draft.revision, only.draft.review_status, only.draft.publication_status]).toEqual([2, 'accepted', 'archived']);
+  });
+
+  it('keeps archived task results in 成果库 and hides trashed task results', async () => {
+    const archived = { ...A, lifecycle_status: 'archived' as const };
+    const trashed = { ...B, lifecycle_status: 'trashed' as const };
+    mocks.run.mockImplementation(async (binding, command, args) => {
+      if (command === 'task-list') {
+        expect(args).toEqual(['--lifecycle', 'all']);
+        return JSON.stringify([archived, trashed]);
+      }
+      if (binding.task === trashed.id) throw new Error('trashed task should not be read');
+      if (command === 'deliverables') return JSON.stringify([brief(1)]);
+      return JSON.stringify({ task_id: archived.id, drafts: [], exports: [] });
+    });
+    expect(described(await galleryRows({ varRoot: '/store' }))).toEqual([`deliverable:${archived.id}:1`]);
   });
 
   it('keeps newer rows first and the old flow\'s own seq rule inside a tie', async () => {
