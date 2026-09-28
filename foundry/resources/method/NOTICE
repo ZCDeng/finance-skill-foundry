@@ -15,3 +15,48 @@ The close-package web app in this repository is a derivative implementation of
 those skills' workflows, formats, checklists, and materiality guidance.
 Extracted SKILL.md copies add a short attribution banner and point connector
 placeholders at CONNECTORS.md.
+
+Report visual method adaptations
+===============================
+
+Foundry's method/report-visuals.md and report visual implementation adapt
+selected layout and editorial principles from these MIT-licensed works:
+
+- diagram-design, https://github.com/cathrynlavery/diagram-design
+  Revision: cea465e7f5ea1043d8dab21a99f2dd3f7f661beb
+  References: skills/diagram-design/SKILL.md and bar, line, process type notes.
+  Adapted: relation-first type selection, density, semantic color roles,
+  self-contained SVG, direct labels and connector spacing.
+- huashu-report, https://github.com/alchaincyf/huashu-report
+  Revision: bdc08bee5077462e1300431408c5237438a22d00
+  References: SKILL.md and references/图表模式库.md.
+  Adapted: reader-oriented chart choice, direct labels, figure/takeaway/unit/
+  source organization, negative-value, missing-value and zero-baseline checks.
+
+The upstream scripts, full visual catalogues and runtime workflows are not
+bundled. Foundry uses its own renderer, theme, fonts and task-owned evidence
+model. The MIT terms below apply to each adapted upstream work; the Apache-2.0
+notice above continues to apply to the existing finance method copies.
+
+MIT License
+
+Copyright (c) 2025 Cathryn Lavery
+Copyright (c) 2026 alchaincyf
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

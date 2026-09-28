@@ -347,6 +347,18 @@ def dispatch(args) -> bool:
         _bound_draft(context, service, parent)
         _bound_evidence(context, service, spec)
         _bound_requirements(context, service, spec)
+        from foundry.report_visuals import materialize_document
+
+        visual_document = spec.get("document")
+        if visual_document is None and "body" not in spec:
+            visual_document = parent.get("document")
+        if visual_document is not None:
+            document, visual_runs, _ = materialize_document(
+                service, visual_document, authorize=lambda bindings: _bound(context, bindings))
+            run_ids = spec.get("run_ids", parent.get("run_ids", []))
+            if not isinstance(run_ids, list):
+                raise FoundryError("run_ids must be an array")
+            spec = {**spec, "document": document, "run_ids": list(dict.fromkeys([*run_ids, *visual_runs]))}
         for run_id in [
             *parent.get("run_ids", []),
             *spec.get("run_ids", parent.get("run_ids", [])),

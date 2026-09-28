@@ -12,6 +12,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import {
   Bold,
+  ChartNoAxesCombined,
   BookOpen,
   Code,
   Columns2,
@@ -36,7 +37,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import type { Answer } from "../../bridge.js";
+import type { AnalysisRun, Answer } from "../../bridge.js";
 import { bridge } from "../../bridge.js";
 import { WaitOrb } from "../../components/WaitOrb.js";
 import { Button } from "../../components/ui/button.js";
@@ -70,6 +71,9 @@ import {
 } from "../../../electron/reports/format.js";
 import "./report.css";
 import { errorText, unwrap } from './shared.js';
+import { ReportVisualComposer } from './ReportVisualComposer.js';
+import { REPORT_VISUAL_EDIT_EVENT, ReportVisualNode } from './ReportVisualNode.js';
+import { normalizeReportVisual, type ReportVisual } from '../../../electron/reports/visuals.js';
 
 type ReportMode = "read" | "edit" | "print";
 type ExportFormat = ReportFormat;
@@ -376,6 +380,7 @@ export function ReportEditor({
   limitations,
   review,
   document,
+  runs = [],
   busy,
   toolbarLabel = "文稿",
   status,
@@ -400,6 +405,7 @@ export function ReportEditor({
   limitations: string;
   review: string;
   document?: ReportDocument;
+  runs?: AnalysisRun[];
   busy: boolean;
   toolbarLabel?: string;
   status?: string;
@@ -426,6 +432,8 @@ export function ReportEditor({
     body: string;
     document: ReportDocument | undefined;
   } | null>(null);
+  const [structuredBackup, setStructuredBackup] = useState<{ body: string; document: ReportDocument | undefined } | null>(null);
+  const [visualEditor, setVisualEditor] = useState<{ taskId: string; position?: number; initial?: ReportVisual; original?: string } | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkHref, setLinkHref] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -463,6 +471,7 @@ export function ReportEditor({
     () => document ?? documentFromMarkdown(mainMarkdown),
     [document, mainMarkdown],
   );
+  const hasVisuals = workingDocument.content.some((node) => node.type === 'reportVisual');
   const isEmptyDocument =
     workingDocument.content.length === 0 ||
     documentToMarkdown(workingDocument).trim() === "";
@@ -490,9 +499,10 @@ export function ReportEditor({
       Image.configure({ inline: false, allowBase64: true }),
       ReportNote,
       ReportPageBreak,
+      ReportVisualNode,
     ],
     content: { type: "doc", content: workingDocument.content },
-    editable: !busy && mode === "edit" && !sourceMode,
+    editable: !busy && mode === "edit" && !sourceMode && !visualEditor,
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -544,9 +554,28 @@ export function ReportEditor({
     const timer = window.setTimeout(() => {
       editorReady.current = true;
     }, 0);
-    editor.setEditable(!busy && mode === "edit" && !sourceMode);
+    editor.setEditable(!busy && mode === "edit" && !sourceMode && !visualEditor);
     return () => window.clearTimeout(timer);
-  }, [busy, editor, mode, sourceMode]);
+  }, [busy, editor, mode, sourceMode, visualEditor]);
+
+  useEffect(() => {
+    setVisualEditor(null);
+    setStructuredBackup(null);
+  }, [taskId, draftId]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const editVisual = (event: Event) => {
+      const position = (event as CustomEvent<{ position: number }>).detail.position;
+      const node = editor.state.doc.nodeAt(position);
+      if (busy || sourceMode || node?.type.name !== 'reportVisual') return;
+      try { setVisualEditor({ taskId, position, initial: normalizeReportVisual(node.attrs.visual), original: JSON.stringify(node.attrs.visual) }); }
+      catch (failure) { setToolError(errorText(failure)); }
+    };
+    const element = editor.view.dom;
+    element.addEventListener(REPORT_VISUAL_EDIT_EVENT, editVisual);
+    return () => element.removeEventListener(REPORT_VISUAL_EDIT_EVENT, editVisual);
+  }, [editor, busy, sourceMode, taskId]);
 
   useEffect(() => {
     if (!editor || editor.isFocused) return;
@@ -692,15 +721,38 @@ export function ReportEditor({
   }
 
   const openSourceEditor = () => {
+    setVisualEditor(null);
     setSourceBackup({ body, document });
     setSourceText(body);
     setSourceMode(true);
   };
 
   const applySourceEditor = () => {
+    if (sourceBackup?.document) setStructuredBackup(sourceBackup);
     changeSourceBody(sourceText);
     setSourceBackup(null);
     setSourceMode(false);
+  };
+
+  const restoreStructuredDocument = () => {
+    if (!structuredBackup) return;
+    onDocument(structuredBackup.document);
+    onBody(structuredBackup.body);
+    onReview('unreviewed');
+    setStructuredBackup(null);
+    if (editor) editor.commands.setContent({ type: 'doc', content: structuredBackup.document?.content ?? documentFromMarkdown(structuredBackup.body).content }, { emitUpdate: false });
+  };
+
+  const applyVisual = (visual: ReportVisual) => {
+    if (!editor || !visualEditor || visualEditor.taskId !== taskId) return;
+    const node = { type: 'reportVisual', attrs: { visual } };
+    editorReady.current = true;
+    if (visualEditor.position != null) {
+      const selected = editor.state.doc.nodeAt(visualEditor.position);
+      if (selected?.type.name !== 'reportVisual' || JSON.stringify(selected.attrs.visual) !== visualEditor.original) { setToolError('图表内容或位置已变化，请重新选择要编辑的图表。'); setVisualEditor(null); return; }
+      editor.chain().focus().insertContentAt({ from: visualEditor.position, to: visualEditor.position + selected.nodeSize }, node).run();
+    } else editor.chain().focus().insertContent(node).run();
+    setVisualEditor(null);
   };
 
   const cancelSourceEditor = () => {
@@ -1378,6 +1430,13 @@ export function ReportEditor({
                   <FileText size={15} />
                 </IconButton>
                 <IconButton
+                  label="插入图表"
+                  disabled={sourceMode || Boolean(visualEditor)}
+                  onClick={() => setVisualEditor({ taskId })}
+                >
+                  <ChartNoAxesCombined size={15} />
+                </IconButton>
+                <IconButton
                   label="图片"
                   onClick={() => imageInput.current?.click()}
                 >
@@ -1402,6 +1461,8 @@ export function ReportEditor({
                   Markdown 源码
                 </Button>
               </div>
+              {visualEditor?.taskId === taskId && <ReportVisualComposer key={`${taskId}:${visualEditor.position ?? 'new'}`} taskId={taskId} runs={runs} initial={visualEditor.initial} onApply={applyVisual} onCancel={() => setVisualEditor(null)} />}
+              {structuredBackup && !sourceMode && <div className="report-source-recovery"><p className="analysis-note">当前显示源码转换后的内容。之前的结构版仍保留在本次编辑中；恢复会替换当前正文。</p><Button type="button" variant="outline" onClick={restoreStructuredDocument}>恢复结构版</Button></div>}
               {linkOpen && (
                 <div
                   className="report-inline-popover"
@@ -1463,7 +1524,7 @@ export function ReportEditor({
                 <div className="report-source-editor">
                   <p role="status" className="analysis-message">
                     源码编辑会生成降级预览；点击“采用源码转换”后才会用 Markdown
-                    版本替换当前 rich 结构。
+                    版本替换当前结构。图表将转换为数据表或流程文字，原结构版可恢复。
                   </p>
                   <Textarea
                     aria-label="文稿正文"
@@ -1500,7 +1561,7 @@ export function ReportEditor({
               ) : (
                 <>
                   <EditorContent editor={editor} />
-                  <label className="report-source-compat">
+                  {!hasVisuals && <label className="report-source-compat">
                     Markdown 源码快速编辑
                     <Textarea
                       aria-label="文稿正文"
@@ -1508,7 +1569,7 @@ export function ReportEditor({
                       value={body}
                       onChange={(event) => changeSourceBody(event.target.value)}
                     />
-                  </label>
+                  </label>}
                 </>
               )}
               <div className="analysis-edit-grid">

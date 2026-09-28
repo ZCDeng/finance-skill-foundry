@@ -57,7 +57,14 @@ import type { ReportImportResult, ReportProjection, ReportSource } from '../elec
 
 const task = 'a'.repeat(32), source = { id: 'b'.repeat(32), name: '报告.md', format: 'md', sha256: '' };
 let directory: string;
-beforeEach(async () => { vi.clearAllMocks(); mocks.printed = undefined; directory = await mkdtemp(path.join(tmpdir(), 'report-host-test-')); });
+beforeEach(async () => {
+  vi.clearAllMocks(); mocks.printed = undefined;
+  directory = await mkdtemp(path.join(tmpdir(), 'report-host-test-'));
+  const fontPath = path.join(directory, 'dsh/assets/fonts/NotoSansSC-variable.woff2');
+  await mkdir(path.dirname(fontPath), { recursive: true });
+  await writeFile(fontPath, 'font');
+  Object.defineProperty(process, 'resourcesPath', { value: directory, configurable: true });
+});
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
 function projection(document = createReportDocument()): ReportProjection {

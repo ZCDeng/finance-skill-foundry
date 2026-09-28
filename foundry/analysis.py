@@ -843,21 +843,23 @@ class AnalysisStore:
             maximum=1000,
         )
         document = None
+        visual_run_ids, visual_claims = [], []
         if spec.get("document") is not None:
-            from foundry.report_documents import report_document_markdown, validate_report_document
+            from foundry.report_documents import report_document_markdown
+            from foundry.report_visuals import materialize_document
 
             report_sources = self._registered_report_sources()
-            document = validate_report_document(
-                spec["document"],
-                registered_source_ids=set(report_sources),
-            )
+            document, visual_run_ids, visual_claims = materialize_document(self, spec["document"])
             if document.get("sources"):
                 document["sources"] = [report_sources[source["id"]] for source in document["sources"]]
             projected = report_document_markdown(document)
             body = _safe_text(projected, "draft body")
         elif "body" not in spec and parent.get("document") is not None:
-            document = parent["document"]
-            body = _safe_text(parent.get("body", ""), "draft body")
+            from foundry.report_documents import report_document_markdown
+            from foundry.report_visuals import materialize_document
+
+            document, visual_run_ids, visual_claims = materialize_document(self, parent["document"])
+            body = _safe_text(report_document_markdown(document), "draft body")
         else:
             body = _safe_text(spec.get("body", parent.get("body", "")), "draft body")
         body_template = spec.get("body_template")
@@ -866,6 +868,7 @@ class AnalysisStore:
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
+        run_ids = list(dict.fromkeys([*run_ids, *visual_run_ids]))
         runs = {run_id: self.get_run(run_id) for run_id in dict.fromkeys(run_ids)}
         fact_ids = spec.get("fact_ids", parent.get("fact_ids", []))
         if not isinstance(fact_ids, list):
@@ -873,6 +876,10 @@ class AnalysisStore:
         claims = json_value(spec.get("claims", parent.get("claims", [])))
         if not isinstance(claims, list):
             raise FoundryError("claims must be an array")
+        for visual_claim in visual_claims:
+            if not any(isinstance(claim, dict) and all(claim.get(key) == visual_claim[key]
+                       for key in ("basis", "run_id", "row", "column")) for claim in claims):
+                claims.append(visual_claim)
         for claim in claims:
             if not isinstance(claim, dict) or claim.get("basis") not in BASIS:
                 raise FoundryError("claim requires an explicit basis")
@@ -1047,6 +1054,13 @@ class AnalysisStore:
             "status": "needs_attention" if quality_issues else explanation_check.get("status", "pass"),
             "status_dimensions": status_dimensions,
         }
+        if document is not None:
+            from foundry.report_estimates import estimated_cells
+            from foundry.report_visuals import mark_visual_estimates
+            from foundry.report_documents import report_document_markdown
+
+            if mark_visual_estimates(document, estimated_cells({"explanation_check": explanation_check}, runs)):
+                body = report_document_markdown(document)
         record = _new(
             self.task,
             requirements_id=requirements_id,
@@ -1325,6 +1339,16 @@ class AnalysisStore:
                         f"Status: {projection['publication_status']}; review: {projection['review_status']}",
                         f"Content SHA-256: {projection['content_hash']}",
                     ]
+                    if projection.get("document"):
+                        import html
+                        from foundry.report_documents import _escape_markdown_text
+                        from foundry.report_visuals import document_visuals
+
+                        for visual in document_visuals(projection["document"]):
+                            if visual["kind"] == "flow":
+                                continue
+                            title = _escape_markdown_text(html.escape(visual["title"], quote=False)).replace("\n", " ")
+                            lines.append(f"Figure: {title}; chart_id: {visual['chart_id']}; run_id: {visual['run_id']}; snapshot_hash: {visual['snapshot_hash']}")
                     if draft["limitations"]:
                         lines += [
                             "",
@@ -1483,6 +1507,9 @@ class AnalysisStore:
                                     ])
                     # Keep text literal, including identifiers and amounts that
                     # exceed Excel precision. Safe typed amounts stay numeric.
+                    from foundry.report_visuals import add_visual_worksheets
+
+                    add_visual_worksheets(workbook, projection["document"])
                     for sheet in workbook:
                         for row in sheet:
                             for cell in row:

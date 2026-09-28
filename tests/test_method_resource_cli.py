@@ -10,17 +10,18 @@ from foundry.method_skills import method_root
 from foundry.task import TaskStore
 
 
-def test_analysis_reads_guidance_without_a_window(tmp_path, capsys):
+@pytest.mark.parametrize("resource", ["FOUNDRY.md", "report-visuals.md"])
+def test_analysis_reads_guidance_without_a_window(tmp_path, capsys, resource):
     var = tmp_path / "var"
     task = TaskStore(var).create(title="方法资源")
     task.record_session("analysis-guidance", role="analysis")
     args = ["--var", str(var), "--session", "analysis-guidance", "method-resource",
-            "--skill", "variance-analysis", "--resource", "FOUNDRY.md"]
+            "--skill", "variance-analysis", "--resource", resource]
     assert main(args) == 0
     result = json.loads(capsys.readouterr().out)
-    source = method_root() / "FOUNDRY.md"
+    source = method_root() / resource
     assert result["skill"] == "variance-analysis"
-    assert result["resource"] == "FOUNDRY.md"
+    assert result["resource"] == resource
     assert result["content"] == source.read_text(encoding="utf-8")
     assert result["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert task.windows() == []

@@ -9,6 +9,8 @@ import { type Binding, FOUNDRY_MAX_BUFFER, runFoundryJson, runFoundryJsonSized }
 import type { ReportDocument, ReportFormat, ReportImportOptions, ReportImportResult, ReportProjection, ReportProjectionMode, ReportSource } from './model.js';
 import { ocrDocument } from './ocr.js';
 import { localReportResources } from './resources.js';
+import { materializeReportVisualsForDocx } from './visual-raster.js';
+import { reportVisualEvidence } from './visual-evidence.js';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const FORMATS = new Set<ReportFormat>(['docx', 'pdf', 'html', 'md', 'xlsx']);
@@ -281,9 +283,12 @@ export class ReportHost {
         } else {
           let data: Buffer;
           const renderOptions = { marker: projection.marker, contentMode: projection.content_mode, projectionHash: projection.projection_hash, draftId: projection.draft_id, contentHash: projection.content_hash, publicationStatus: projection.publication_status, reviewStatus: projection.review_status, reproducibilityStatus: projection.reproducibility_status, sources: projection.sources ?? [] };
-          if (format === 'docx') data = Buffer.from(await conversion<Uint8Array>('docx', { document: projection.document, title: projection.title, fontData: await docxFontData(), options: renderOptions }, signal));
+          if (format === 'docx') {
+            const document = await materializeReportVisualsForDocx(projection.document, await fontData(), signal);
+            data = Buffer.from(await conversion<Uint8Array>('docx', { document, title: projection.title, fontData: await docxFontData(), options: { ...renderOptions, visualSources: reportVisualEvidence(projection.document) } }, signal));
+          }
           else {
-            const html = await conversion<string>('html', { document: projection.document, title: projection.title, options: { print: format === 'pdf', ...(format === 'pdf' ? { fontDataUrl: await fontData() } : {}), ...renderOptions } }, signal);
+            const html = await conversion<string>('html', { document: projection.document, title: projection.title, options: { print: format === 'pdf', fontDataUrl: await fontData(), ...renderOptions } }, signal);
             data = format === 'pdf' ? await printReportPdf(html, signal, projection.marker) : Buffer.from(html);
           }
           aborted(signal);

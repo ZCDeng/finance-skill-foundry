@@ -251,6 +251,45 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     expect(handlers.onBody).toHaveBeenLastCalledWith('# 降级版\n只保留源码\n');
   });
 
+  it('inserts an authored visual, edits its node, and restores structured content after source conversion', async () => {
+    (globalThis as unknown as { foundry: unknown }).foundry = { financeCall: vi.fn(async () => success({ charts: [] })) };
+    const handlers = mountStateful();
+    fireEvent.click(screen.getByRole('button', { name: '插入图表' }));
+    fireEvent.change(screen.getByLabelText('图表类型'), { target: { value: 'flow' } });
+    fireEvent.change(screen.getByLabelText('图表标题'), { target: { value: '回款闭环' } });
+    fireEvent.change(screen.getByLabelText('步骤 1'), { target: { value: '核对应收' } });
+    fireEvent.change(screen.getByLabelText('步骤 2'), { target: { value: '收款核销' } });
+    fireEvent.click(screen.getByRole('button', { name: '插入文稿' }));
+    await waitFor(() => expect(handlers.current().document?.content.some((node) => node.type === 'reportVisual')).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: '编辑图表：回款闭环' }));
+    fireEvent.change(screen.getByLabelText('图表标题'), { target: { value: '经复核的回款闭环' } });
+    fireEvent.click(screen.getByRole('button', { name: '更新图表' }));
+    await screen.findByRole('button', { name: '编辑图表：经复核的回款闭环' });
+    const structured = handlers.current().document;
+    expect(handlers.current().review).toBe('unreviewed');
+    expect(screen.queryByLabelText('文稿正文')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Markdown 源码' }));
+    expect(screen.getByRole('status').textContent).toContain('图表将转换为数据表或流程文字');
+    fireEvent.click(screen.getByRole('button', { name: '采用源码转换' }));
+    expect(handlers.current().document).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: '恢复结构版' }));
+    expect(handlers.current().document).toEqual(structured);
+    expect(screen.getByRole('button', { name: '编辑图表：经复核的回款闭环' })).toBeTruthy();
+  });
+
+  it('reopens a saved structured diagram and keeps its complete semantics on an unrelated edit', async () => {
+    const visual = { kind: 'flow', title: '归档流程', source_label: '作者分析', version: 1, steps: [{ label: '来源确认', detail: '核对期间与单位', connector: '确认后' }, { label: '归档分析', detail: '保留判断和依据', connector: '' }], takeaway: '各步骤保留复核记录' };
+    const document = documentFromMarkdown('# 管理摘要\n正文\n');
+    document.content.push({ type: 'reportVisual', attrs: { visual } });
+    const state = mountStateful({ document, body: documentToMarkdown(document) });
+    fireEvent.click(await screen.findByRole('button', { name: '编辑图表：归档流程' }));
+    fireEvent.change(screen.getByLabelText('图表标题'), { target: { value: '已归档的分析流程' } });
+    fireEvent.click(screen.getByRole('button', { name: '更新图表' }));
+    await waitFor(() => expect(state.current().document?.content.find((node) => node.type === 'reportVisual')?.attrs?.visual).toEqual({ ...visual, title: '已归档的分析流程' }));
+    const validated = validateWithPython(state.current().document!);
+    expect(validated.document.content.find((node) => node.type === 'reportVisual')?.attrs?.visual).toEqual({ ...visual, title: '已归档的分析流程' });
+  });
+
   it('edits report metadata and inserts empty management-report sections only on request', async () => {
     const handlers = mount({ body: '', document: { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [] } });
     fireEvent.click(screen.getByText('报告信息'));

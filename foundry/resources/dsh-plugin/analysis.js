@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
 import { createCompletionRuntime } from "./completion-runtime.js";
-import { FINANCE_TOOLS, NUMERIC_PRESENTATION } from "./finance-tools.js";
+import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
   .dsh.foundry.profiles.analysis;
@@ -230,10 +230,10 @@ const claim = {
 const SPECS = {
   ...FINANCE_TOOLS,
   "method-resource": {
-    description: "读取已随包技能明确引用的配套说明。skill 工具加载正文后，用此入口读取 FOUNDRY.md 的运行模式规则或 CONNECTORS.md 的连接类别说明，也可核对 NOTICE/LICENSE。只能读取四项随包技能的这些资源，不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
+    description: "读取已随包技能明确引用的配套说明。skill 工具加载正文后，用此入口读取 FOUNDRY.md 的运行模式规则、CONNECTORS.md 的连接类别说明或 report-visuals.md 的文稿图表方法，也可核对 NOTICE/LICENSE。只能读取四项随包技能的这些资源，不能传本机路径；不读取用户同名技能或账套资料。返回来源路径、内容哈希与全文。",
     parameters: object({
       skill: { type: "string", enum: ["financial-statements", "variance-analysis", "reconciliation", "journal-entry"] },
-      resource: { type: "string", enum: ["FOUNDRY.md", "CONNECTORS.md", "NOTICE", "LICENSE"] },
+      resource: { type: "string", enum: ["FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE"] },
     }),
     kind: "read", argv: (input) => ["method-resource", "--skill", input.skill, "--resource", input.resource],
   },
@@ -325,7 +325,8 @@ const SPECS = {
     parameters: object({ spec: {
       type: "object", required: ["title", "body"],
       properties: {
-        title: string("文稿标题"), body: string("可编辑 Markdown 正文，包含结论、依据和局限"),
+        title: string("文稿标题"), body: string("可编辑 Markdown 正文，包含结论、依据和局限；传 document 时由结构文稿生成正文"),
+        document: REPORT_DOCUMENT,
         run_ids: { type: "array", items: { type: "string" } },
         claims: { type: "array", items: claim, description: "数字定位与来源、用户假设、专业判断；计算引用包含 basis,run_id,row,column,value；row 使用 result.rows 的 0-based 下标" },
         limitations: { type: "array", items: { type: "string" } },

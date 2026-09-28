@@ -55,6 +55,8 @@ def snapshot_hashes_from_run(run: dict) -> dict[str, str]:
 
 def normalize_chart(spec: dict, *, run: dict) -> dict[str, Any]:
     reject_forbidden_spec(spec)
+    if run.get("execution_status") not in {"succeeded", "success"}:
+        raise FoundryError("chart requires a successful run")
     bindings = run.get("bindings") or {}
     if not isinstance(bindings, dict) or not bindings:
         raise FoundryError("chart bindings are required")

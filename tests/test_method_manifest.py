@@ -49,6 +49,10 @@ def test_read_method_resource_allows_shared_docs_and_returns_content() -> None:
     assert connectors["resource"] == "CONNECTORS.md"
     assert "SQL" in connectors["content"]
 
+    visuals = read_method_resource("financial-statements", "report-visuals.md")
+    assert visuals["resource"] == "report-visuals.md"
+    assert "reportVisual" in visuals["content"]
+
 
 def test_read_method_resource_refuses_unknown_skills_and_paths() -> None:
     with pytest.raises(FoundryError, match="unknown method skill"):

@@ -938,6 +938,17 @@ class FinanceStore:
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
+        from foundry.report_visuals import materialize_document
+
+        visual_claims = []
+        visual_document = spec.get("document")
+        if visual_document is None and "body" not in spec:
+            visual_document = parent.get("document")
+        if visual_document is not None:
+            visual_document, visual_runs, visual_claims = materialize_document(
+                self.analysis, visual_document, authorize=self._authorize)
+            run_ids = list(dict.fromkeys([*run_ids, *visual_runs]))
+            spec = {**spec, "document": visual_document, "run_ids": run_ids}
         for run_id in [*parent.get("run_ids", []), *run_ids]:
             self._authorize(self.analysis.get_run(run_id)["bindings"])
         prepared = (
@@ -980,6 +991,9 @@ class FinanceStore:
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
         auto_claims = claims_for_facts(prepared["facts"], fact_ids)
+        for visual_claim in visual_claims:
+            if not any(all(claim.get(key) == visual_claim[key] for key in ("run_id", "row", "column")) for claim in auto_claims):
+                auto_claims.append(visual_claim)
         claims = []
         for claim in _dedupe_explanation_claims(
             [*auto_claims, *spec.get("claims", parent.get("claims", []))]
@@ -1816,6 +1830,7 @@ class FinanceStore:
 
     def chart_deliverable_open(self, spec):
         from foundry.chart_deliverables import verify_snapshots
+        from foundry.report_visuals import series_for_report
 
         if not isinstance(spec, dict) or not spec.get("id"):
             raise FoundryError("chart open requires id")
@@ -1823,7 +1838,7 @@ class FinanceStore:
         if not record.get("bindings"):
             raise FoundryError("chart bindings are required")
         verify_snapshots(self, record)
-        return record
+        return {**record, "report_series": series_for_report(record["series"])}
 
     def chart_deliverable_list(self, spec):
         spec = spec or {}

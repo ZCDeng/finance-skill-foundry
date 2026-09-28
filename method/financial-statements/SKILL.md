@@ -26,6 +26,8 @@ Save the analysis requirements before calculation, including the statement quest
 
 For explanation quality, follow the analysis-mode explanation contract in `FOUNDRY.md`: prepare facts and automatic supporting tables from successful runs with `prepare_explanation`, draft with stable `fact_ids` and `{{fact:FACT_ID}}` value placeholders, then check the current text with `validate_explanation`. Use the returned `quality` and `completion` state for bounded repair: at most two targeted repair-and-check rounds, stopping on `no_progress`. Reuse only applicable scoped business context. Separate financial contributions from supported operational causes and manager judgment; preserve an editable draft when evidence is incomplete.
 
+When visuals help management compare the result, read [report-visuals.md](../report-visuals.md) through `method-resource {skill: "financial-statements", resource: "report-visuals.md"}`. Use `bar` for category or actual/budget comparisons, `line` for ordered periods, and `flow` for explicitly attributed explanatory steps. Archive a successful run using `chart_deliverable_save`, then reference its `chart_id` in a `reportVisual` block of `save_explanation_draft.spec.document`. Keep values bound to the run, preserve units and missing/negative values, and attach the figure's supported conclusion and source. A visual does not certify a financial claim; retain the existing facts, claims and checks. Use the data table when exact lookup is the purpose or the figure is too dense.
+
 ## Usage
 
 ```

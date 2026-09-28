@@ -170,6 +170,9 @@ def declare_estimates(
     估算值声明 block right after the title; and the room beyond the text and node limits those additions take.
     `runs` (by id) give a declared cell's own row where its grain leaves a field out (see _declaration_rows)."""
     declared = {**document, "content": _copied(document["content"])}
+    from foundry.report_visuals import ESTIMATE_NOTICE, mark_visual_estimates
+
+    visual_notices = mark_visual_estimates(declared, cells)
     texts = _text_nodes(declared["content"])
     offsets: dict[int, list[int]] = {}
     for index, offset in labels:
@@ -192,6 +195,9 @@ def declare_estimates(
     declared["content"] = [*content[:first], *nodes, *content[first:]]
     headroom = {"text": _text_length(nodes) + len(ESTIMATE_LABEL) * added, "nodes": _node_count(nodes),
                 "bytes": _added_bytes(nodes, added)}
+    # Notices are service-generated attrs (also projected into Markdown), not author payload.
+    headroom["text"] += visual_notices * len(json.dumps({"estimate_notice": ESTIMATE_NOTICE}, ensure_ascii=False))
+    headroom["bytes"] += visual_notices * 8 * len(json.dumps({"estimate_notice": ESTIMATE_NOTICE}, ensure_ascii=False).encode("utf8"))
     return (
         validate_report_document(declared, text_headroom=headroom["text"], node_headroom=headroom["nodes"]),
         headroom,

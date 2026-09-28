@@ -45,6 +45,7 @@ NODE_TYPES = {
     "image",
     "reportNote",
     "reportPageBreak",
+    "reportVisual",
 }
 MARK_TYPES = {"bold", "italic", "strike", "code", "link", "underline"}
 INLINE_TYPES = {"text", "hardBreak", "image"}
@@ -137,6 +138,7 @@ def validate_report_document(
     budget = {
         "nodes": 0,
         "text": 0,
+        "visuals": 0,
         "max_nodes": MAX_DOCUMENT_NODES + max(0, node_headroom),
         "max_text": MAX_DOCUMENT_TEXT + max(0, text_headroom),
     }
@@ -199,6 +201,14 @@ def _validate_node(
     if not isinstance(content, list):
         raise FoundryError("report node content must be an array")
     children = [_validate_node(child, source_ids, registered_source_ids, budget, parent=node_type) for child in content]
+    if node_type == "reportVisual":
+        budget["visuals"] += 1
+        if budget["visuals"] > 20:
+            raise FoundryError("report document can contain at most 20 visuals")
+        if children:
+            raise FoundryError("report visual cannot contain child nodes")
+        import json
+        budget["text"] += len(json.dumps(attrs["visual"], ensure_ascii=False))
     if node_type in {"paragraph", "heading"}:
         if any(child["type"] not in INLINE_TYPES for child in children):
             raise FoundryError(f"{node_type} can contain only inline report nodes")
@@ -224,6 +234,12 @@ def _validate_attrs(
     source_ids: set[str],
     registered_source_ids: set[str] | None,
 ) -> dict[str, Any]:
+    if node_type == "reportVisual":
+        from foundry.report_visuals import validate_visual
+
+        if not isinstance(attrs, dict):
+            raise FoundryError("report visual attrs must be an object")
+        return {"visual": validate_visual(attrs.get("visual"))}
     if attrs in (None, {}):
         return {}
     if not isinstance(attrs, dict):
@@ -496,6 +512,10 @@ def _flat_inline(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _render_block(node: dict[str, Any], *, ordered_depth: int) -> str:
     node_type = node["type"]
     content = node.get("content", [])
+    if node_type == "reportVisual":
+        from foundry.report_visuals import visual_markdown
+
+        return visual_markdown(node["attrs"]["visual"])
     if node_type == "heading":
         return "#" * node.get("attrs", {}).get("level", 1) + " " + _render_inline(content).strip()
     if node_type == "paragraph":
@@ -815,6 +835,8 @@ def report_document_excel_rows(
                         col_index += max(1, colspan if isinstance(colspan, int) and not isinstance(colspan, bool) else 1)
             elif node_type == "image":
                 sections.append([len(sections), "image", "", str(attrs.get("alt") or attrs.get("title") or ""), *_node_source_columns(node)])
+            elif node_type == "reportVisual":
+                sections.append([len(sections), "reportVisual", "", _render_block(node, ordered_depth=0), *_node_source_columns(node)])
             if node_type not in {"table"}:
                 walk([child for child in node.get("content", []) if isinstance(child, dict) and child.get("type") not in INLINE_TYPES])
 

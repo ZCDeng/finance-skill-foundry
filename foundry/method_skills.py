@@ -14,7 +14,7 @@ BUNDLED_IDS = (
 )
 BUNDLED_PACKS = ("setup", "close", "bva", "cash")
 
-METHOD_RESOURCE_NAMES = ("FOUNDRY.md", "CONNECTORS.md", "NOTICE", "LICENSE")
+METHOD_RESOURCE_NAMES = ("FOUNDRY.md", "CONNECTORS.md", "report-visuals.md", "NOTICE", "LICENSE")
 
 
 def method_root() -> Path:

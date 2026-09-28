@@ -1,11 +1,13 @@
 import type { ReportDocument, ReportMark, ReportNode } from './model.js';
+import { renderReportVisualSvg, reportVisualMarkdown } from './visuals.js';
+import { reportVisualEvidence } from './visual-evidence.js';
 
 const EMPTY_METADATA = { ledger: '', organization: '', company: '', period: '', currency: '', unit: '' };
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
 
-type RenderOptions = { fontDataUrl?: string; print?: boolean; marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[] };
+type RenderOptions = { fontDataUrl?: string; print?: boolean; marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[]; visualSources?: string[] };
 
 const blockTypes = new Set([
   'paragraph',
@@ -17,6 +19,7 @@ const blockTypes = new Set([
   'horizontalRule',
   'table',
   'image',
+  'reportVisual',
   'reportNote',
   'reportPageBreak',
 ]);
@@ -140,7 +143,7 @@ export function renderReportHtml(doc: ReportDocument, title: string, options: Re
   const noteIds = collectNoteIds(doc.content);
   const blocks = exportBlocks(doc.content, title);
   const managementMode = isManagementMode(options);
-  const receipt = renderReceipt(options);
+  const receipt = renderReceipt({ ...options, visualSources: reportVisualEvidence(doc) });
   const toc = managementMode ? '' : blocks
     .filter((node) => node.type === 'heading' && Number(node.attrs?.level ?? 1) <= 2)
     .map((node, index) => {
@@ -201,10 +204,12 @@ function renderReceipt(options: RenderOptions): string {
     ['可复现状态', options.reproducibilityStatus],
   ].filter((row): row is [string, string] => Boolean(row[1]));
   const sources = (options.sources ?? []).filter(Boolean).slice(0, 12);
-  if (!rows.length && !sources.length) return '';
+  const visuals = options.visualSources ?? [];
+  if (!rows.length && !sources.length && !visuals.length) return '';
   const items = rows.map(([label, value]) => `<li><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</li>`).join('');
   const sourceItems = sources.length ? `<li><strong>授权来源：</strong><ul>${sources.map((source) => `<li>${escapeHtml(source)}</li>`).join('')}</ul></li>` : '';
-  return `<section class="report-receipt" aria-label="导出身份"><ul>${items}${sourceItems}</ul></section>`;
+  const visualItems = visuals.length ? `<li><strong>图表依据：</strong><ul>${visuals.map((source) => `<li>${escapeHtml(source)}</li>`).join('')}</ul></li>` : '';
+  return `<section class="report-receipt" aria-label="导出身份"><ul>${items}${sourceItems}${visualItems}</ul></section>`;
 }
 
 function exportBlocks(content: ReportNode[], title: string): ReportNode[] {
@@ -376,6 +381,8 @@ function nodeToMarkdown(node: ReportNode): string {
       return tableToMarkdown(node);
     case 'image':
       return imageToMarkdown(node);
+    case 'reportVisual':
+      return reportVisualMarkdown(node.attrs?.visual);
     case 'reportNote':
       return `[^${String(node.attrs?.id ?? '')}]: ${inlineToMarkdown(flatInline(node.content ?? []))}`;
     case 'reportPageBreak':
@@ -455,6 +462,11 @@ function nodeToHtml(node: ReportNode, sectionIndex: number, noteIds: Set<string>
       return tableToHtml(node, attrs, noteIds);
     case 'image':
       return imageToHtml(node, attrs);
+    case 'reportVisual': {
+      const fallback = documentFromMarkdown(reportVisualMarkdown(node.attrs?.visual));
+      const data = fallback.content.map((child) => nodeToHtml(child, sectionIndex, noteIds)).join('');
+      return `<figure class="report-visual"${attrs}>${renderReportVisualSvg(node.attrs?.visual)}<details class="report-visual-data"><summary>查看图表数据与说明</summary>${data}</details></figure>`;
+    }
     case 'reportNote':
       return reportNoteToHtml(node, attrs, sectionIndex, noteIds);
     case 'reportPageBreak':
@@ -701,7 +713,7 @@ body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:va
 .report-cover,.report-toc,.report-body{max-width:42em;margin:0 auto}
 .report-cover{padding:12px 0 28px;border-bottom:1px solid var(--report-line)}
 .report-review-marker{display:inline-block;margin:0 0 12px;padding:2px 8px;border:1px solid #b78a38;border-radius:4px;background:#fff6d8;color:#7a4d00;font-size:13px;line-height:22px}
-.report-receipt{margin:16px 0 0;padding:10px 12px;border:1px solid var(--report-line);border-radius:6px;background:#faf9f5;color:var(--report-muted);font-size:12px;line-height:20px}
+.report-receipt{margin:16px 0 0;padding:10px 12px;border:1px solid var(--report-line);border-radius:6px;background:var(--report-paper);color:var(--report-muted);font-size:12px;line-height:20px;overflow-wrap:anywhere}
 .report-receipt ul{margin:0;padding-left:18px}.report-receipt li+li{margin-top:2px}.report-receipt strong{color:var(--report-ink)}
 .report-kicker,.table-meta,figcaption{margin:0;color:var(--report-muted);font-size:13px;line-height:22px}
 h1{margin:8px 0 0;font-size:28px;line-height:40px;font-weight:750;letter-spacing:0}
@@ -726,6 +738,10 @@ th,td{padding:8px 10px;border:0;border-bottom:1px solid var(--report-line);verti
 th{font-weight:700;text-align:left;border-top:1px solid var(--report-line);background:color-mix(in srgb,var(--report-paper),var(--report-line) 12%)}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .report-image img{max-width:100%;height:auto;display:block}
+.report-image,.report-visual{break-inside:avoid;page-break-inside:avoid}
+.report-visual>svg{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--report-line);border-radius:6px}
+.report-visual-data{margin-top:8px;font-size:13px;line-height:22px;overflow-wrap:anywhere}.report-visual-data summary{cursor:pointer;color:var(--report-muted)}
+@media print{.report-visual-data{display:none}.report-visual>svg{max-height:230mm}}
 .report-note{padding-top:10px;border-top:1px solid var(--report-line);color:var(--report-muted);font-size:14px;line-height:24px}
 .report-note-ref{font-size:.75em;line-height:0;vertical-align:super;margin:0 1px}.report-note-ref a{text-decoration:none;color:var(--report-accent)}
 .report-page-break{break-after:page;height:0}

@@ -113,3 +113,23 @@ def test_dsh_bundle_declares_method_skills() -> None:
     declared = data["dsh"]["foundry"]["methodSkills"]
     assert declared["dir"] == "../method"
     assert declared["ids"] == list(BUNDLED_IDS)
+
+
+def test_report_visual_guidance_and_attribution_ship_with_the_runtime() -> None:
+    for relative in ("report-visuals.md", "FOUNDRY.md", "NOTICE", "financial-statements/SKILL.md"):
+        assert (ROOT / "method" / relative).read_bytes() == (
+            ROOT / "foundry" / "resources" / "method" / relative
+        ).read_bytes()
+    guidance = (method_root() / "report-visuals.md").read_text(encoding="utf-8")
+    notice = (method_root() / "NOTICE").read_text(encoding="utf-8")
+    for revision in (
+        "cea465e7f5ea1043d8dab21a99f2dd3f7f661beb",
+        "bdc08bee5077462e1300431408c5237438a22d00",
+    ):
+        assert revision in guidance and revision in notice
+    assert "Copyright (c) 2025 Cathryn Lavery" in notice
+    assert "Copyright (c) 2026 alchaincyf" in notice
+    assert 'THE SOFTWARE IS PROVIDED "AS IS"' in notice
+    assert "chart_deliverable_save" in guidance and "reportVisual" in guidance
+    assert "null" in guidance and "负值" in guidance
+    assert "不声称支持上游完整图型集" in guidance

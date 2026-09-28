@@ -175,6 +175,86 @@ process.stdout.write(JSON.stringify(claims.map(claim => ({
     assert "clientVerification" not in result[0]
 
 
+def test_report_visual_tool_schema_accepts_bound_charts_and_refuses_free_data(tmp_path: Path):
+    ajv = ROOT / "app" / "extra" / "dsh" / "node_modules" / "ajv" / "dist" / "ajv.js"
+    if not ajv.is_file():
+        pytest.skip("staged DSH schema validator is unavailable")
+    result = _node(tmp_path, f"""
+const {{default: Ajv}} = await import({ajv.as_uri()!r});
+const tools = Object.fromEntries(definitions().map(d => [d.name, d]));
+const bar = {{version: 1, kind: 'bar', title: '同期间收入对比', chart_id: 'a'.repeat(32), category: 'organization', value_columns: ['actual', 'budget'], unit: '万元'}};
+const flow = {{version: 1, kind: 'flow', title: '口径处理', source_label: '作者分析', steps: [{{label: '核对', detail: '核对资料范围', connector: '通过后'}}, {{label: '计算', connector: ''}}]}};
+function input(visual) {{
+  return {{spec: {{title: '经营分析', body: '图表正文', document: {{
+    schema_version: 1, template_version: 'annual-v1', metadata: {{currency: 'CNY'}},
+    content: [{{type: 'paragraph', content: [{{type: 'text', text: '收入 {{{{fact:known-id}}}}'}}]}}, {{type: 'reportVisual', attrs: {{visual}}}}],
+  }}}}}};
+}}
+const invalid = [
+  {{...bar, series: {{columns: ['actual'], rows: [{{actual: '999'}}]}}}},
+  {{...bar, rows: [{{actual: '999'}}]}},
+  {{...bar, run_id: 'foreign-run'}}, {{...bar, snapshot_hash: 'forged'}},
+  {{...bar, source_label: 'verified by manager'}}, {{...bar, chart_id: '../foreign-chart'}}, {{...bar, svg: '<svg/>'}},
+  {{...bar, path: '/etc/passwd'}}, {{...bar, url: 'https://example.org/data.json'}},
+  {{...bar, kind: 'waterfall'}}, {{...bar, value_columns: ['actual', 'actual']}},
+  {{...bar, value_columns: ['a', 'b', 'c', 'd']}}, {{...bar, unit: ''}},
+  {{...bar, title: '标题'.repeat(81)}}, {{...flow, steps: [{{label: '单步'}}]}},
+  {{...flow, steps: Array.from({{length: 7}}, () => ({{label: '步骤'}}))}},
+  {{...flow, chart_id: 'chart-1'}},
+];
+const results = ['analysis-draft', 'save_explanation_draft'].map(name => {{
+  const validate = new Ajv({{strict: false}}).compile(tools[name].parameters);
+  const valid = [bar, {{...bar, kind: 'line'}}, flow].map(value => validate(input(value)));
+  const rejected = invalid.map(value => !validate(input(value)));
+  const injected = input(bar);
+  injected.spec.document.content[1].attrs.html = '<script>alert(1)</script>';
+  const rejectsHtml = !validate(injected);
+  const imageInput = input(flow);
+  imageInput.spec.document.sources = [{{id: 'a'.repeat(32), name: '来源', sha256: 'b'.repeat(64), format: 'docx'}}];
+  imageInput.spec.document.content.push({{type: 'bulletList', content: [{{type: 'listItem', content: [
+    {{type: 'paragraph', content: [{{type: 'text', text: '范围'}}]}},
+    {{type: 'orderedList', content: [{{type: 'listItem', content: [{{type: 'paragraph', content: [{{type: 'text', text: '子项'}}]}}]}}]}},
+  ]}}]}});
+  imageInput.spec.document.content.push({{type: 'image', attrs: {{source_id: 'a'.repeat(32), src: 'data:image/png;base64,aA==', alt: '已有图片'}}}});
+  const acceptsExistingImage = validate(imageInput);
+  imageInput.spec.document.content.at(-1).attrs.src = 'https://example.org/image.svg';
+  const rejectsExternalImage = !validate(imageInput);
+  return {{valid, rejected, rejectsHtml, acceptsExistingImage, rejectsExternalImage}};
+}});
+process.stdout.write(JSON.stringify(results));
+""")
+    assert result[0] == result[1]
+    assert all(result[0]["valid"])
+    assert all(result[0]["rejected"])
+    assert result[0]["rejectsHtml"]
+    assert result[0]["acceptsExistingImage"]
+    assert result[0]["rejectsExternalImage"]
+
+
+def test_draft_tools_forward_structured_document_without_rewriting_it(tmp_path: Path):
+    result = _node(tmp_path, """
+const calls = [];
+const tools = Object.fromEntries(definitions(undefined, async (argv, exec) => {
+  calls.push({argv, session: exec.agent.id}); return '{}';
+}).map(d => [d.name, d]));
+const spec = {title: '计算与解释', body: '正文', document: {
+  schema_version: 1, template_version: 'annual-v1', content: [
+    {type: 'paragraph', content: [{type: 'text', text: '收入 {{fact:known-id}}'}]},
+    {type: 'reportVisual', attrs: {visual: {version: 1, kind: 'bar', title: '收入对比', chart_id: 'chart-owned', category: 'organization', value_columns: ['amount'], unit: '元'}}},
+  ],
+}};
+for (const name of ['analysis-draft', 'save_explanation_draft']) {
+  await tools[name].execute({spec}, {agent: {id: 'registered-session'}});
+}
+process.stdout.write(JSON.stringify({spec, calls}));
+""")
+    assert [call["argv"][0] for call in result["calls"]] == ["analysis-draft", "save-explanation-draft"]
+    for call in result["calls"]:
+        assert call["session"] == "registered-session"
+        assert call["argv"][1] == "--spec"
+        assert json.loads(call["argv"][2]) == result["spec"]
+
+
 def test_analysis_evidence_recipe_schema_matches_validated_contract(tmp_path: Path):
     result = _node(tmp_path, """
 const tools = Object.fromEntries(definitions().map((d) => [d.name, d]));

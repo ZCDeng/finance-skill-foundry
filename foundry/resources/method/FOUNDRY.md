@@ -35,6 +35,12 @@ Write for management reading, not for tool logs. Start with one or two short con
 
 Call `validate_explanation` on the current draft, and use the `quality` plus `completion` returned by `save_explanation_draft` as the bounded finishing state. The finance quality status checks facts, numbers, provenance, requirements, and claims; separate readability suggestions help improve paragraphing, formulas, and notes but do not change financial pass/fail status or block ordinary draft saving. If `completion.repair_allowed` is true, repair only the affected text, citations, source check, or calculation, reusing successful runs; allow at most two repair-and-check rounds. If `completion.stop_reason` is `no_progress`, data is missing, or issues remain, preserve the editable draft and name the concrete gap. Checks do not certify business judgment or imply manager approval. A manager edit must be checked as current text; an old passed result must not carry over to changed text.
 
+## Analysis-mode report visuals
+
+When a chart clarifies the comparison, load [report-visuals.md](report-visuals.md) with `method-resource` using the current skill ID. This adapts selected diagram-design and huashu-report methods to Foundry; only comparison bars, trend lines, and explanatory flows are supported. Use tables for exact lookup or dense data, and prose for a single number.
+
+For numeric visuals, first archive a successful task-owned run through `chart_deliverable_save`, then pass a structured `document` to `save_explanation_draft` with a `reportVisual` block referencing the returned `chart_id`. Select existing columns and a declared common unit; the service freezes the original values, run and snapshot identity. Never pass hand-filled series, arbitrary SVG, HTML, file paths or external data URLs. Preserve negative values, zero and missing values distinctly, and do not silently truncate categories or mix incomparable units. Keep the figure, supported takeaway, unit and source together. Flows describe author analysis, not calculation evidence or proven causality; they do not replace claims or source checks. Normal document text keeps fact placeholders and current-draft validation.
+
 ## Exit codes
 
 Every foundry entry point (`foundry`, `python -m foundry.probe`) uses the same three.

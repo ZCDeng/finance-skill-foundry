@@ -23,6 +23,7 @@ import {
 } from 'docx';
 import type { ReportDocument, ReportFormat, ReportImportResult, ReportNode, ReportSource } from './model.js';
 import { createReportDocument, documentFromMarkdown, documentToMarkdown, renderReportHtml, safeHref, safeImageSrc, textContent } from './format.js';
+import { reportVisualEvidence } from './visual-evidence.js';
 
 type ImportResources = Record<string, string>;
 type ImportContext = { source: ReportSource; resources: ImportResources; warnings: string[] };
@@ -61,13 +62,13 @@ export async function importReport(data: Buffer, format: ReportFormat, source: R
   }
 }
 
-type ExportOptions = { marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[] };
+type ExportOptions = { marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[]; visualSources?: string[] };
 
 export async function exportDocx(doc: ReportDocument, title: string, fontData?: Uint8Array, options: ExportOptions = {}): Promise<Buffer> {
   const metadata = [doc.metadata.company, doc.metadata.period, doc.metadata.currency, doc.metadata.unit].filter(Boolean).join(' / ');
   const content = exportNodes(doc.content, title);
   const managementMode = isManagementMode(options);
-  const receipt = docxReceipt(options);
+  const receipt = docxReceipt({ ...options, visualSources: options.visualSources ?? reportVisualEvidence(doc) });
   const body = nodesToDocx(content, collectNoteIds(content));
   const frontMatter = [
     ...(options.marker ? [new Paragraph({ keepNext: true, spacing: { after: 120 }, children: [new TextRun({ text: options.marker, size: 18, color: '7A4D00', bold: true })] })] : []),
@@ -148,6 +149,9 @@ function docxReceipt(options: ExportOptions): Paragraph[] {
   const paragraphs = rows.map(([label, value]) => new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `${label}：`, bold: true, size: 18, color: '696760' }), new TextRun({ text: value, size: 18, color: '696760' })] }));
   if (sources.length) {
     paragraphs.push(new Paragraph({ spacing: { before: 60, after: 40 }, children: [new TextRun({ text: '授权来源：' + sources.join('；'), size: 18, color: '696760' })] }));
+  }
+  for (const source of options.visualSources ?? []) {
+    paragraphs.push(new Paragraph({ spacing: { before: 60, after: 40 }, children: [new TextRun({ text: '图表依据：' + source, size: 18, color: '696760' })] }));
   }
   if (paragraphs.length) paragraphs.push(new Paragraph({ spacing: { after: 240 } }));
   return paragraphs;
@@ -305,6 +309,14 @@ function elementToNode(node: any, context: ImportContext): ReportNode | ReportNo
   if (node.nodeType !== 1) return undefined;
   const tag = String(node.localName ?? node.tagName ?? '').toLowerCase();
   if (tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'iframe' || tag === 'object') return undefined;
+  if (tag === 'figure' && hasClass(node, 'report-visual')) {
+    context.warnings.push('导入的图表已保留为精确数据与说明；如需可编辑图形，请在本任务内重新绑定计算后插入。');
+    const data = node.querySelector('.report-visual-data');
+    if (!data) return undefined;
+    data.querySelector('summary')?.remove();
+    return childrenToNodes(data, context);
+  }
+  if (tag === 'svg') return undefined;
   if (tag === 'figure' && hasClass(node, 'financial-table')) {
     const table = node.querySelector('table');
     return table ? tableFromElement(table, context, tableAttrsFromFigure(node, source)) : undefined;
@@ -564,6 +576,8 @@ function nodeToDocx(node: ReportNode, noteIds: Set<string>): Array<Paragraph | T
       return tableBlockToDocx(node, noteIds);
     case 'image':
       return imageToDocx(node);
+    case 'reportVisual':
+      throw new Error('图表尚未完成导出渲染，请通过文稿导出入口生成 Word。');
     case 'reportNote':
       return [new Paragraph({ style: 'Normal', children: [new TextRun({ text: `[${String(node.attrs?.id ?? '')}] `, superScript: true, size: 18 }), ...inlineToDocxRuns(flatInline(node.content ?? []), { size: 18 }, noteIds)] })];
     case 'reportPageBreak':
@@ -652,9 +666,44 @@ function imageToDocx(node: ReportNode): Paragraph[] {
   if (!match) return [];
   const data = Buffer.from(match[2], 'base64');
   const type = match[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+  const { width, height } = imageDimensions(data, type);
+  const scale = Math.min(1, 624 / width, 800 / height);
+  const title = String(node.attrs?.title ?? '');
+  const alt = String(node.attrs?.alt ?? title);
   return [new Paragraph({
-    children: [new ImageRun({ data, transformation: { width: 480, height: 270 }, type } as any)],
-  })];
+    keepNext: Boolean(title),
+    children: [new ImageRun({ data, transformation: { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }, type,
+      altText: { name: alt, title, description: alt } })],
+  }), ...title.split('\n').filter(Boolean).map((text, index, lines) => new Paragraph({
+    keepNext: index < lines.length - 1, spacing: { after: index < lines.length - 1 ? 40 : 180 },
+    children: [new TextRun({ text, size: 18, color: '696760' })],
+  }))];
+}
+
+/** Read only bounded image headers; dimensions never come from editable report attrs. */
+function imageDimensions(data: Buffer, type: 'png' | 'jpg'): { width: number; height: number } {
+  let width = 0, height = 0;
+  if (type === 'png' && data.length >= 24 && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    width = data.readUInt32BE(16); height = data.readUInt32BE(20);
+  } else if (type === 'jpg' && data[0] === 0xff && data[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 4 <= data.length) {
+      if (data[offset++] !== 0xff) break;
+      while (data[offset] === 0xff) offset += 1;
+      const marker = data[offset++];
+      if (marker === 0xd9 || marker === 0xda) break;
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (offset + 2 > data.length) break;
+      const size = data.readUInt16BE(offset);
+      if (size < 2 || offset + size > data.length) break;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker) && size >= 7) {
+        height = data.readUInt16BE(offset + 3); width = data.readUInt16BE(offset + 5); break;
+      }
+      offset += size;
+    }
+  }
+  if (!(width > 0 && height > 0 && width <= 100_000 && height <= 100_000)) throw new Error('图片尺寸无效，无法导出 Word。');
+  return { width, height };
 }
 
 function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?: boolean } = {}, noteIds: Set<string> = new Set()): Array<TextRun | ExternalHyperlink> {

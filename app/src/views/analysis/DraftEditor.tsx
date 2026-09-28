@@ -352,7 +352,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
-      limitations={limitations} review={review} document={document} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
+      limitations={limitations} review={review} document={document} runs={runs} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
       onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format, mode) => onExport(format, changed ? spec('draft') : undefined, mode)}
       onAppliedDraft={onAppliedDraft} />
     {draft && parentDraft && draftRuns[0] && <RevisionDiff current={draftRuns[0]} previous={previousRun} comparison={comparison}
