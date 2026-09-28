@@ -156,6 +156,18 @@ function round(value) { return Math.round(value * 1000) / 1000; }
     const image = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].capturePage()).toPNG().toString('base64'));
     fs.writeFileSync(path.join(output, `${name}.png`), Buffer.from(image, 'base64'));
   };
+  const galleryVisibleRows = async () => page.evaluate(() => {
+    const screen = document.querySelector('.fnd-shell[data-screen="deliverables"]');
+    if (!screen) return [];
+    return [...screen.querySelectorAll('tbody tr, .fnd-table__open')]
+      .filter((row) => {
+        const rect = row.getBoundingClientRect();
+        const style = getComputedStyle(row);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      })
+      .map((row) => row.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+      .filter(Boolean);
+  });
   const openGallery = async () => {
     await page.getByRole('button', { name: '成果库' }).click();
     await page.locator('.fnd-shell[data-screen="deliverables"]').waitFor({ timeout: 30000 });
@@ -163,17 +175,34 @@ function round(value) { return Math.round(value * 1000) / 1000; }
   const assertGalleryContains = async (title, expected, checkName) => {
     await openGallery();
     if (expected) {
-      await page.waitForFunction((needle) => (document.body.innerText || '').includes(needle), title, { timeout: 30000 });
+      await page.waitForFunction((needle) => {
+        const screen = document.querySelector('.fnd-shell[data-screen="deliverables"]');
+        return Boolean(screen && (screen.innerText || '').includes(needle));
+      }, title, { timeout: 30000 });
     } else {
       await page.waitForFunction(async (needle) => {
         const result = await window.foundry.gallery();
         if (!result.ok) return false;
         return !result.value.some((entry) => entry.task?.title === needle);
       }, title, { timeout: 30000 });
+      await page.waitForFunction((needle) => {
+        const screen = document.querySelector('.fnd-shell[data-screen="deliverables"]');
+        if (!screen) return false;
+        const rows = [...screen.querySelectorAll('tbody tr, .fnd-table__open')].filter((row) => {
+          const rect = row.getBoundingClientRect();
+          const style = getComputedStyle(row);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        });
+        return rows.every((row) => !(row.textContent || '').includes(needle));
+      }, title, { timeout: 30000 });
     }
-    const contains = await visibleText(title);
-    if (contains === expected) pass(checkName, { title, expected });
-    else fail(checkName, `gallery ${expected ? 'does not show' : 'still shows'} ${title}`, { title, expected, contains });
+    const rows = await galleryVisibleRows();
+    const contains = rows.some((row) => row.includes(title));
+    if (contains === expected) pass(checkName, { title, expected, rows: rows.slice(0, 8) });
+    else {
+      await captureWindow(`${checkName}-failure`).catch(() => {});
+      fail(checkName, `gallery ${expected ? 'does not show' : 'still shows'} visible row for ${title}`, { title, expected, contains, rows: rows.slice(0, 8) });
+    }
   };
   const assertSourceHashStable = (taskId, datasetId, expectedHash) => {
     const state = cli('analysis-state', [], taskId);

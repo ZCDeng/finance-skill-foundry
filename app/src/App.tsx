@@ -113,6 +113,7 @@ export function App() {
   const explicitSelection = useRef(false);
   const selectionRevision = useRef(0);
   const taskListSequence = useRef(0);
+  const gallerySequence = useRef(0);
   const taskLifecycleViewRef = useRef(taskLifecycleView);
   taskLifecycleViewRef.current = taskLifecycleView;
   const tasksRef = useRef(tasks);
@@ -181,7 +182,10 @@ export function App() {
   /** Every version this machine has produced, newest first, across all tasks. */
   const refreshGallery = useCallback(() => {
     if (!api) return;
-    void api.gallery().then((a) => take(a, setGallery));
+    const sequence = ++gallerySequence.current;
+    void api.gallery().then((answer) => {
+      if (gallerySequence.current === sequence) take(answer, setGallery);
+    });
   }, [api, take]);
 
   useEffect(() => {
@@ -448,6 +452,12 @@ export function App() {
     const result = await call(id);
     if (!result.ok) throw new Error(result.message);
     const nextView = result.value.lifecycle_status;
+    // Invalidate reads started before this mutation and update the retained list
+    // before the user can reopen it while the next gallery read is still loading.
+    gallerySequence.current += 1;
+    setGallery((rows) => nextView === 'trashed'
+      ? rows.filter((row) => row.task.id !== id)
+      : rows.map((row) => row.task.id === id ? { ...row, task: { ...row.task, lifecycle_status: nextView } } : row));
     const stillSameSelection = selectionRevision.current === selection && currentRef.current === currentAtStart;
     setTasks((rows) => rows.filter((row) => row.id !== id));
     if (!stillSameSelection) {

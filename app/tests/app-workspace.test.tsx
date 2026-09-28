@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Answer, Bridge, TaskRow } from '../src/bridge.js';
+import type { Answer, Bridge, GalleryRow, TaskRow } from '../src/bridge.js';
 import { App } from '../src/App.js';
 import { press } from './press.js';
 
@@ -21,6 +21,9 @@ vi.mock('../src/views/Analysis.js', () => ({
 const task = (id: string, title: string): TaskRow => ({ id, title, period: null, skill_id: null, created_at: '', windows: 0 });
 const a = task('a'.repeat(32), '华东利润');
 const b = task('b'.repeat(32), '西南回款');
+const galleryRow: GalleryRow = { type: 'deliverable', key: 'b:1', at: '', task: b,
+  row: { seq: 1, kind: 'brief', window_id: 'w'.repeat(32), sha256: '1'.repeat(64), bytes: 10,
+    cause: 'emit-brief', session_id: null, at: '' } };
 const ok = <T,>(value: T): Answer<T> => ({ ok: true, value });
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -44,6 +47,37 @@ function mount(overrides: Partial<Bridge> = {}) {
 afterEach(() => { cleanup(); delete (globalThis as unknown as { foundry?: Bridge }).foundry; vi.clearAllMocks(); });
 
 describe('unified application session lifecycle', () => {
+  it('removes trashed task results from the cached gallery before its next read finishes', async () => {
+    const nextGallery = deferred<Answer<GalleryRow[]>>();
+    const gallery = vi.fn().mockResolvedValueOnce(ok([galleryRow])).mockReturnValue(nextGallery.promise);
+    mount({ gallery, taskTrash: vi.fn(async () => ok({ task_id: b.id, lifecycle_status: 'trashed' as const })),
+      tasks: vi.fn(async (view?: string) => ok(view === 'trashed' ? [{ ...b, lifecycle_status: 'trashed' as const }] : [a, b])),
+    });
+    await screen.findByText('本地成果：西南回款');
+    fireEvent.click(screen.getByRole('button', { name: '成果库' }));
+    await screen.findByRole('button', { name: /结论稿/ });
+    fireEvent.click(screen.getByRole('button', { name: '工作区' }));
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /移入回收站/ }));
+    await screen.findByText('任务已停用编辑');
+    fireEvent.click(screen.getByRole('button', { name: '成果库' }));
+    expect(screen.queryByRole('button', { name: /结论稿/ })).toBeNull();
+    await act(async () => nextGallery.resolve(ok([])));
+  });
+
+  it('ignores an older gallery response after a newer read has completed', async () => {
+    const oldGallery = deferred<Answer<GalleryRow[]>>();
+    const gallery = vi.fn().mockReturnValueOnce(oldGallery.promise).mockResolvedValue(ok([]));
+    mount({ gallery });
+    await screen.findByText('本地成果：西南回款');
+    fireEvent.click(screen.getByRole('button', { name: '成果库' }));
+    fireEvent.click(screen.getByRole('button', { name: '工作区' }));
+    fireEvent.click(screen.getByRole('button', { name: '成果库' }));
+    await waitFor(() => expect(gallery).toHaveBeenCalledTimes(2));
+    await act(async () => oldGallery.resolve(ok([galleryRow])));
+    expect(screen.queryByRole('button', { name: /结论稿/ })).toBeNull();
+  });
+
   it('restores a selected task without manufacturing a user submission', async () => {
     const api = mount();
     await waitFor(() => expect(api.harnessOpen).toHaveBeenCalledOnce());
