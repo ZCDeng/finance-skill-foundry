@@ -28,9 +28,16 @@ describe('document heading scale', () => {
     expect(exported('h4,h5,h6')).toEqual([token('fnd-doc-sub'), token('fnd-doc-sub-leading'), token('fnd-doc-heading-weight')]);
   });
 
+  it('styles every heading level the editor allows', () => {
+    const css = read('../src/views/analysis/report.css');
+    for (const view of ['report-prosemirror', 'report-reading']) {
+      expect(css).toContain(`.${view} :is(h4, h5, h6) { font-size: var(--fnd-doc-sub);`);
+    }
+  });
+
   it('leaves no literal heading size in the in-app document views', () => {
     const css = read('../src/views/analysis/report.css') + read('../src/views/analysis.css');
-    const literal = css.split('\n').filter((line) => /\.(report-prosemirror|report-reading|analysis-draft-reading|analysis-draft-body) h[1-6][^{]*\{[^}]*font-size:\s*\d/.test(line));
+    const literal = css.split('\n').filter((line) => /\.(report-prosemirror|report-reading|analysis-draft-reading|analysis-draft-body)\b[^{]*\bh[1-6]\b[^{]*\{[^}]*font(-size)?:\s*\d/.test(line));
     expect(literal).toEqual([]);
   });
 });

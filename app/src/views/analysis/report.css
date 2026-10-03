@@ -27,11 +27,11 @@
 .report-prosemirror { min-height: 460px; width: 100%; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-bg); color: var(--fnd-ink); font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); outline: none; overflow-wrap: anywhere; }
 .report-prosemirror:focus-visible { border-color: var(--fnd-focus); box-shadow: 0 0 0 1px var(--fnd-focus); }
 .report-prosemirror > * + * { margin-top: 18px; }
-.report-prosemirror h1, .report-prosemirror h2, .report-prosemirror h3, .report-prosemirror h4 { color: var(--fnd-ink); }
+.report-prosemirror :is(h1, h2, h3, h4, h5, h6) { color: var(--fnd-ink); }
 .report-prosemirror h1 { font-size: var(--fnd-doc-title); line-height: var(--fnd-doc-title-leading); font-weight: var(--fnd-doc-title-weight); margin: 0 0 24px; }
 .report-prosemirror h2 { font-size: var(--fnd-doc-chapter); line-height: var(--fnd-doc-chapter-leading); font-weight: var(--fnd-doc-chapter-weight); margin: 32px 0 12px; }
 .report-prosemirror h3 { font-size: var(--fnd-doc-section); line-height: var(--fnd-doc-section-leading); font-weight: var(--fnd-doc-heading-weight); margin: 28px 0 10px; }
-.report-prosemirror h4 { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
+.report-prosemirror :is(h4, h5, h6) { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
 .report-prosemirror p { margin: 0; white-space: pre-wrap; }
 .report-prosemirror > p + p { margin-top: 16px; }
 .report-prosemirror li p + p, .report-prosemirror td p + p, .report-prosemirror th p + p { margin-top: 8px; }
@@ -88,7 +88,7 @@
 /* The reading view renders the document title as its first h2; it takes the title scale, as h1 does in the export. */
 .report-reading > h2:first-child { font-size: var(--fnd-doc-title); line-height: var(--fnd-doc-title-leading); font-weight: var(--fnd-doc-title-weight); margin: 0 0 24px; padding-top: 0; }
 .report-reading h3 { font-size: var(--fnd-doc-section); line-height: var(--fnd-doc-section-leading); font-weight: var(--fnd-doc-heading-weight); margin: 28px 0 10px; }
-.report-reading h4 { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
+.report-reading :is(h4, h5, h6) { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
 .report-reading p { margin: 0 0 18px; white-space: pre-wrap; }
 .report-reading td p, .report-reading th p { margin: 0; }
 .report-reading td p + p, .report-reading th p + p, .report-reading li p + p { margin-top: 8px; }
