@@ -14,7 +14,7 @@ export function openGuide(article?: string) {
 
 /** A small 「?」 that opens the article explaining the block beside it. */
 export function HelpLink({ article, label }: { article: string; label: string }) {
-  return <Button variant="ghost" size="icon" type="button" className="fnd-help-link" aria-label={`使用指南：${label}`} title={`使用指南：${label}`}
+  return <Button variant="ghost" size="icon" type="button" className="fnd-help-link size-[22px]" aria-label={`使用指南：${label}`} title={`使用指南：${label}`}
     onClick={() => openGuide(article)}><CircleHelp size={14} strokeWidth={1.5} aria-hidden /></Button>;
 }
 

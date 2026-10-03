@@ -13,22 +13,29 @@ function sheets(dir: string): string[] {
   });
 }
 
-/** Top-level statements that open a style rule outside any @layer block. :root token blocks only define custom properties. */
+/** Conditional group rules can hold style rules of their own; @layer, @font-face, @keyframes and the like cannot leak them. */
+const GROUP = /^@(media|supports|container|scope|starting-style|document)\b/;
+/** A bare :root (optionally with attribute or :not([…]) conditions) only defines custom properties; `:root .card` is a style rule. */
+const TOKENS = /^:root(\[[^\]]*\]|:not\(\[[^\]]*\]\))*$/;
+
+/** Style rules that sit outside any @layer block, including inside top-level @media/@supports/@container. */
 function unlayeredRules(css: string): string[] {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ' '));
   const found: string[] = [];
-  let depth = 0;
+  // Each open block: whether rules directly inside it are unlayered.
+  const stack: boolean[] = [];
   let statement = '';
   for (const char of text) {
     if (char === '{') {
-      const head = statement.trim();
-      if (depth === 0 && !head.startsWith('@') && !head.startsWith(':root')) found.push(head);
-      depth += 1;
+      const head = statement.trim().replace(/\s+/g, ' ');
+      const exposed = stack.length === 0 || stack[stack.length - 1];
+      if (exposed && !head.startsWith('@') && !TOKENS.test(head)) found.push(head);
+      stack.push(exposed && GROUP.test(head));
       statement = '';
     } else if (char === '}') {
-      depth -= 1;
+      stack.pop();
       statement = '';
-    } else if (char === ';' && depth === 0) {
+    } else if (char === ';') {
       statement = '';
     } else {
       statement += char;
@@ -41,6 +48,11 @@ describe('stylesheet cascade', () => {
   // Unlayered rules beat every layer, so they silently override control states and utilities (DESIGN.md 样式级联).
   it.each(sheets(SRC).map((path) => [path.slice(SRC.length + 1), path]))('%s keeps every rule inside a cascade layer', (_name, path) => {
     expect(unlayeredRules(readFileSync(path, 'utf8'))).toEqual([]);
+  });
+
+  it('finds rules hidden in top-level conditional blocks and :root descendants', () => {
+    const probe = ':root { --a: 1; }\n:root[data-theme="dark"] { --a: 2; }\n:root .y { color: red; }\n@media (min-width: 1px) { .x { color: red; } }\n@supports (display: grid) { @media print { .z { color: red; } } }\n@layer layout { @media print { .ok { color: red; } } }\n@font-face { font-family: x; }';
+    expect(unlayeredRules(probe)).toEqual([':root .y', '.x', '.z']);
   });
 
   it('sizes text from the type scale, not fractional rem values', () => {

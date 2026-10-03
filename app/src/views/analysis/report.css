@@ -141,9 +141,9 @@
 .report-info-fields summary { cursor: pointer; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); border-radius: 6px; width: fit-content; max-width: 100%; padding: 4px 6px; }
 .report-info-fields > div { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
 .report-info-fields label, .report-source-compat { display: flex; flex-direction: column; gap: 8px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-}
 @container report-workspace (max-width: 900px) { .report-info-fields > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container report-workspace (max-width: 560px) { .report-info-fields > div { grid-template-columns: minmax(0, 1fr); } }
+}
 @layer layout {
 .report-prosemirror .report-note::before { content: attr(data-note-id); display: inline-flex; margin-right: 8px; color: var(--fnd-accent); font-size: 11px; line-height: 1; vertical-align: super; font-weight: var(--fnd-weight-strong); }
 }
