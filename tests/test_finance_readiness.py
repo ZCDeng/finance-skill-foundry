@@ -447,3 +447,95 @@ def test_a_file_that_names_one_organization_still_reports_it(tmp_path):
     analysis.add_dataset(_write_csv(tmp_path / "one.csv", rows), name="单组织")
     report = store.finance_readiness({})
     assert report["proposed_scope"]["organization"] == "集团合并"
+
+
+def _report_pack(path: Path, subtitles: dict[str, str]) -> Path:
+    """A month-end pack laid out the way real ones are: a title, a subtitle naming the period, then a table."""
+    book = Workbook()
+    book.remove(book.active)
+    for sheet, subtitle in subtitles.items():
+        page = book.create_sheet(sheet)
+        page.append([sheet])
+        page.append([f"华宸物业  |  {subtitle}  |  单位：万元"])
+        page.append([])
+        page.append(["项目", "金额"])
+        page.append(["营业收入", 100])
+    book.save(path)
+    return path
+
+
+def test_period_title_reads_a_year_to_date_span_as_its_closing_month() -> None:
+    from foundry.finance_readiness import _period_match
+
+    assert _period_match("2026年1-8月") == ("2026-08", "2026年1-8月")
+    assert _period_match("预算执行分析（1-8 月） 华宸物业 | 2026年1-8月")[0] == "2026-08"
+    assert _period_match("2026年1月至8月")[0] == "2026-08"
+    assert _period_match("2025年12月-2026年3月")[0] == "2026-03"
+    assert _period_match("2026-08-01至2026-08-31")[0] == "2026-08"
+    assert _period_match("2026年1月1日至2026年8月31日")[0] == "2026-08"
+
+
+def test_period_title_still_reads_single_months_and_dates() -> None:
+    from foundry.finance_readiness import _period_match
+
+    assert _period_match("2026年08月 月结") == ("2026-08", "2026年08月")
+    assert _period_match("2026年01月 月结")[0] == "2026-01"
+    assert _period_match("2026年8月31日")[0] == "2026-08"
+    assert _period_match("台账基准日 2026-08-31")[0] == "2026-08"
+    assert _period_match("2026.1")[0] == "2026-01"
+    # The first declaration still wins: a comparison span later in the title is not the period.
+    assert _period_match("2026年08月 对比 2025年1-12月")[0] == "2026-08"
+
+
+def test_period_title_reads_no_period_where_none_is_declared() -> None:
+    from foundry.finance_readiness import _period_match
+
+    assert _period_match("2026 年度") == ("", "")
+    assert _period_match("BUD-2026 → LE（8月底滚动预测）") == ("", "")
+    assert _period_match("2026年13月") == ("", "")
+    assert _period_match("共 2026年08月 - 2 张")[0] == "2026-08"
+
+
+def test_month_and_year_to_date_sheets_of_one_pack_agree_on_the_month(tmp_path):
+    """The 2026-08 pack proposed no period: its 1-8 月 sheets were read as 2026-01."""
+    path = _report_pack(tmp_path / "华宸物业_2026年08月_月结.xlsx", {
+        "00·封面": "2026年08月",
+        "05·资产负债表": "2026年8月31日",
+        "08·收缴率": "2026年1-8月",
+    })
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name=path.stem)
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["period"] == "2026-08"
+    (row,) = report["datasets"]
+    assert row["scope"]["period"] == "2026-08"
+    assert row["scope_sources"]["period"] == {
+        "origin": "title", "sheet": "00·封面", "text": "2026年08月", "sheet_count": 3,
+    }
+    assert row["name_scope"] == {"period": "2026-08", "text": "2026年08月"}
+
+
+def test_a_pack_whose_sheets_name_different_months_still_proposes_none(tmp_path):
+    path = _report_pack(tmp_path / "mixed.xlsx", {
+        "本月": "2026年08月",
+        "上月": "2026年07月",
+    })
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name="mixed")
+    report = store.finance_readiness({})
+    assert report["proposed_scope"]["period"] == ""
+    (row,) = report["datasets"]
+    assert row["scope"]["period"] == ""
+    assert row["scope_sources"] == {}
+    assert row["name_scope"] == {}
+
+
+def test_a_file_name_period_is_offered_but_never_fills_the_scope(tmp_path):
+    path = _report_pack(tmp_path / "华宸_2026年08月.xlsx", {"说明": "年度汇总"})
+    _task_obj, analysis, store = _task(tmp_path)
+    analysis.add_dataset(path, name=path.stem)
+    report = store.finance_readiness({})
+    (row,) = report["datasets"]
+    assert row["scope"]["period"] == ""
+    assert "period" in row["missing_fields"]
+    assert row["name_scope"]["period"] == "2026-08"

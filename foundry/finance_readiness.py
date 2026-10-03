@@ -29,6 +29,16 @@ ERP_HEADER_MARKERS = frozenset(
 )
 ERP_TITLE_MARKERS = ("金蝶", "用友", "KIS", "U8")
 _PERIOD_IN_TITLE = re.compile(r"(20\d{2})[-./年](\d{1,2})")
+# 「2026年1-8月」「2026年1月至8月」: a year-to-date span closes in its last month.
+# Read as a single date it said 2026-01, every 1-8 月 sheet then disagreed with
+# the 8 月 sheets beside it, and the file proposed no period at all.
+_MONTH_SPAN_IN_TITLE = re.compile(r"(20\d{2})\s*年\s*(\d{1,2})\s*月?\s*[-–—~～至到]\s*(\d{1,2})\s*月")
+# 「2025年12月-2026年3月」「2026-08-01至2026-08-31」: a span between two dated ends.
+_DATED_SPAN_IN_TITLE = re.compile(
+    r"(20\d{2})\s*[-./年]\s*(\d{1,2})\s*月?(?:\s*[-./]?\s*\d{1,2}\s*日?)?"
+    r"\s*[-–—~～至到]\s*"
+    r"(20\d{2})\s*[-./年]\s*(\d{1,2})\s*月?(?:\s*[-./]?\s*\d{1,2}\s*日?)?"
+)
 _CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
 _UNIT_IN_TITLE = re.compile(r"(?:金额)?单位[:：\s]*([万亿]?元)")
 # Diagnostics are fixed finance_model codes and text; this only guards against a
@@ -162,10 +172,13 @@ def _dataset_readiness(probes: list[dict[str, Any]], code_map: dict[str, str]) -
     if _aging_ready(probes) and not missing:
         can_run.append("receivables_aging")
 
+    name = str(probes[0].get("dataset_name") or "") if probes else ""
     return {
         "dataset_id": str(probes[0].get("dataset_id") or "") if probes else "",
-        "name": str(probes[0].get("dataset_name") or "") if probes else "",
+        "name": name,
         "scope": scope,
+        "scope_sources": _scope_sources(probes, scope),
+        "name_scope": _name_scope(name),
         "missing_fields": missing,
         "can_run": [name for name in CAPABILITY_ORDER if name in can_run],
         "blocked": blocked,
@@ -412,11 +425,17 @@ def _probe(
     # What the manager confirmed about the title area outranks anything guessed
     # back out of the derived rows, which no longer contain the title at all.
     hints = {key: str(value or "").strip() for key, value in (hints or {}).items()}
-    period = (
-        _unanimous(_declared_values(rows, fmap, "period"))
-        or hints.get("period", "")
-        or _period_from_title(title)
-    )
+    column_period = _unanimous(_declared_values(rows, fmap, "period"))
+    title_period, title_words = _period_match(title)
+    period = column_period or hints.get("period", "") or title_period
+    if column_period:
+        period_source = {"origin": "column", "sheet": sheet}
+    elif hints.get("period"):
+        period_source = {"origin": "confirmed", "sheet": sheet}
+    elif title_period:
+        period_source = {"origin": "title", "sheet": sheet, "text": title_words}
+    else:
+        period_source = {}
     currency = (
         _unanimous(_declared_values(rows, fmap, "currency"))
         or hints.get("currency", "")
@@ -429,6 +448,7 @@ def _probe(
         "headers": headers,
         "rows": rows,
         "period": period,
+        "period_source": period_source,
         "currency": currency,
         "ledger": _unanimous(_declared_values(rows, fmap, "ledger")),
         "organization": _unanimous(_declared_values(rows, fmap, "organization")),
@@ -466,11 +486,53 @@ def _title_blob(headers: list[str], rows: list[dict]) -> str:
     return " ".join(parts)
 
 
+def _scope_sources(probes: list[dict[str, Any]], scope: dict[str, str]) -> dict[str, Any]:
+    """Where the agreed period was read: the first sheet that says it, and how many agree.
+
+    A candidate the manager is asked to adopt has to say where it came from, or
+    adopting it is taking the software's word for the month.
+    """
+    period = scope.get("period") or ""
+    agreeing = [probe for probe in probes if period and probe.get("period") == period]
+    if not agreeing:
+        return {}
+    return {"period": {**(agreeing[0].get("period_source") or {}), "sheet_count": len(agreeing)}}
+
+
+def _name_scope(name: str) -> dict[str, str]:
+    """The period a file's own name carries, offered beside what its sheets say, never in place of it."""
+    period, words = _period_match(name)
+    return {"period": period, "text": words} if period else {}
+
+
 def _period_from_title(title: str) -> str:
-    match = _PERIOD_IN_TITLE.search(title)
-    if not match:
-        return ""
-    return f"{match.group(1)}-{int(match.group(2)):02d}"
+    return _period_match(title)[0]
+
+
+def _period_match(text: str) -> tuple[str, str]:
+    """The period a title or file name declares, and the words it was read from.
+
+    The earliest declaration wins, as before; where a span starts at the same
+    place as a single date, the span is the declaration and its last month is
+    the period. A month outside 1-12 is not a period.
+    """
+    found: list[tuple[int, int, str, str]] = []
+    for match in _DATED_SPAN_IN_TITLE.finditer(text):
+        found.append((match.start(), -len(match.group(0)), _period_text(match.group(3), match.group(4)), match.group(0)))
+    for match in _MONTH_SPAN_IN_TITLE.finditer(text):
+        found.append((match.start(), -len(match.group(0)), _period_text(match.group(1), match.group(3)), match.group(0)))
+    for match in _PERIOD_IN_TITLE.finditer(text):
+        words = match.group(0) + ("月" if text[match.end():match.end() + 1] == "月" else "")
+        found.append((match.start(), -len(match.group(0)), _period_text(match.group(1), match.group(2)), words))
+    for _start, _length, period, words in sorted(found):
+        if period:
+            return period, words.strip()
+    return "", ""
+
+
+def _period_text(year: str, month: str) -> str:
+    number = int(month)
+    return f"{year}-{number:02d}" if 1 <= number <= 12 else ""
 
 
 def _unit_from_title(title: str) -> str:

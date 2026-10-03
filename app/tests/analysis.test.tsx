@@ -1175,6 +1175,24 @@ ${canonicalAppendix} 已改写`;
     expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('holds the calculations while the files name a month the task has not confirmed', async () => {
+    const blank = { ledger: '', organization: '', period: '', currency: '', unit: '' };
+    const financeCall = vi.fn(async (_taskId: string, command: string) => {
+      if (command === 'list-finance-context') return success({ task_id: task.id, datasets: [source], contexts: [], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] });
+      if (command === 'analysis-requirements-list') return success({ current: null });
+      if (command === 'finance-readiness') return success({ proposed_scope: { ...blank, period: '2026-08' }, datasets: [{ dataset_id: source.id, name: '月结', scope: { ...blank, period: '2026-08' }, missing_fields: [], can_run: [], blocked: [],
+        scope_sources: { period: { origin: 'title', sheet: '00·封面', text: '2026年08月', sheet_count: 1 } } }], can_run: [], blocked: [], diagnostics: [] });
+      return success({});
+    });
+    mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
+    render(<Analysis {...props} embedded section="results" />);
+    await waitForSettingsEntryOrDialog();
+    expect((await screen.findAllByText(/资料写的期间是 2026-08，但任务期间还没确认/)).length).toBeGreaterThan(0);
+    expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole('button', { name: '采用资料里的期间 2026-08' })[0]);
+    await waitFor(() => expect((screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it('folds finance setup by default when an ordinary SQL result already succeeded', async () => {
     const sqlRun: AnalysisRun = { ...run, engine: 'sql' };
     mountBridge({ analysisState: async () => success({ ...initial, runs: [sqlRun] }),

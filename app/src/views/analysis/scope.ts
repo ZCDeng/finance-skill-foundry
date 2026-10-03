@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { bridge, type Answer, type DatasetSnapshot, type ReadinessReport } from '../../bridge.js';
+import { bridge, type Answer, type DatasetSnapshot, type ReadinessReport, type ReadinessScopeSource } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { errorText, unwrap } from './shared.js';
 
@@ -96,7 +96,40 @@ export function inferScopeCandidates(datasets: DatasetSnapshot[], report?: Readi
   if (report) {
     const proposed = (report.proposed_scope ?? {}) as Record<string, unknown>;
     for (const key of SCOPE_KEYS) addCandidate(found, key, proposed[key]);
-    for (const row of report.datasets ?? []) for (const key of SCOPE_KEYS) addCandidate(found, key, (row.scope as Record<string, unknown> | undefined)?.[key]);
+    for (const row of report.datasets ?? []) {
+      for (const key of SCOPE_KEYS) addCandidate(found, key, (row.scope as Record<string, unknown> | undefined)?.[key]);
+      addCandidate(found, 'period', row.name_scope?.period);
+    }
+  }
+  return found;
+}
+
+/** Candidate value → where it was read, in words. */
+export type ScopeCandidateSources = Partial<Record<ScopeKey, Record<string, string>>>;
+
+function sourceWords(source: ReadinessScopeSource): string {
+  const more = (source.sheet_count ?? 0) > 1 ? ` 等 ${source.sheet_count} 张表` : '';
+  if (source.origin === 'title' && source.sheet) return `${source.sheet}${more}的标题「${source.text ?? ''}」`;
+  if (source.origin === 'column') return `${source.sheet || '资料'}${more}的期间列`;
+  if (source.origin === 'confirmed') return `已确认的表结构`;
+  return '';
+}
+
+function addSource(into: ScopeCandidateSources, key: ScopeKey, value: string | undefined, words: string) {
+  if (!value || !words) return;
+  const map = into[key] ?? (into[key] = {});
+  const list = map[value] ? map[value].split('；') : [];
+  if (!list.includes(words)) list.push(words);
+  map[value] = list.join('；');
+}
+
+/** Where each period candidate came from, so adopting one is not taking the software's word for the month. */
+export function inferCandidateSources(report?: ReadinessReport | null): ScopeCandidateSources {
+  const found: ScopeCandidateSources = {};
+  for (const row of report?.datasets ?? []) {
+    const period = row.scope_sources?.period;
+    if (period) addSource(found, 'period', row.scope?.period, sourceWords(period));
+    if (row.name_scope?.period) addSource(found, 'period', row.name_scope.period, `文件名「${row.name_scope.text ?? row.name}」`);
   }
   return found;
 }
@@ -106,6 +139,8 @@ export type AnalysisScope = {
   current: ScopeRecord | null;
   scope: ScopeValues;
   candidates: ScopeCandidates;
+  /** Where each candidate was read; absent where nothing says. */
+  candidateSources?: ScopeCandidateSources;
   conflicts: ScopeConflict[];
   loading: boolean;
   saving: boolean;
@@ -272,6 +307,7 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
   return {
     current, scope, conflicts: scopeConflicts(current?.items, scope), loading, saving, message, error,
     candidates: inferScopeCandidates(datasets, report),
+    candidateSources: inferCandidateSources(report),
     setField, setFields, applyRecord, save,
   };
 }

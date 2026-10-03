@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
 import { FinanceChartPanel } from './FinanceChartPanel.js';
-import { ScopeFields } from './ScopePanel.js';
+import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
 import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
 import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
@@ -334,6 +334,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   function toggleSetup() { if (setupOpen) closeSetup(); else openSetup(); }
   const locked = busy || Boolean(running) || analysisScope.loading || analysisScope.saving || analysisScope.conflicts.length > 0 || Boolean(analysisScope.error);
   const disabled = locked || !actual;
+  // A file that names its month must not be calculated across every month it holds.
+  const calculateDisabled = disabled || pendingPeriods(analysisScope).length > 0;
   const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
@@ -357,17 +359,18 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       {finance?.contexts.length ? <SearchableSelect label="已保存的范围" value={contextId} options={contextOptions(finance)}
         onChange={setContextId} placeholder="搜索范围名称或期间" /> : null}
     </div>
-    <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} disabled={locked} onField={analysisScope.setField} />
+    <PeriodPending scope={analysisScope} />
+    <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
     {budget && <div className="analysis-edit-grid"><AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
       shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
       help="留空时预算与实际取同一期间；填写后预算按这个期间取数。" /></div>}
     <details className="analysis-details"><summary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</summary>
-      <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} disabled={locked} onField={analysisScope.setField} />
+      <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
     </details></fieldset>
     <div className="analysis-actions">
       <Button variant="outline" type="button" disabled={disabled} onClick={() => void saveContext()}>保存范围</Button>
-      <Button type="button" disabled={disabled} onClick={() => void saveContext('pnl')}>计算损益表</Button>
-      <Button variant="outline" type="button" disabled={disabled || !budget} onClick={() => void saveContext('bridge')}>计算预算差异</Button>
+      <Button type="button" disabled={calculateDisabled} onClick={() => void saveContext('pnl')}>计算损益表</Button>
+      <Button variant="outline" type="button" disabled={calculateDisabled || !budget} onClick={() => void saveContext('bridge')}>计算预算差异</Button>
       {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('pnl')}>按已保存范围重算损益表</Button>}
       {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('bridge')}>按已保存范围计算预算差异</Button>}
     </div>
