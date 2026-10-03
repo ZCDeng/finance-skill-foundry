@@ -10,6 +10,7 @@ import { ScopePanel } from './analysis/ScopePanel.js';
 import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
+import { ControlsPanel } from './analysis/ControlsPanel.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { SearchableSelect } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
@@ -390,6 +391,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
+          {view.datasets.length > 0 && <ControlsPanel taskId={task.id} refreshKey={view.datasets} busy={busy} />}
           <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
