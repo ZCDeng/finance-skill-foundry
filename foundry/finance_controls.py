@@ -69,7 +69,7 @@ def clean_control(spec: Any) -> dict[str, Any]:
     kind = spec.get("kind") or "tie_out"
     if kind not in KINDS:
         raise FoundryError("control kind must be subtotal or tie_out")
-    label = _text(spec.get("label"), "control label", maximum=200)
+    label = _one_line(_text(spec.get("label"), "control label", maximum=200))
     left = _side(spec.get("left"), "left")
     right = _side(spec.get("right"), "right")
     if kind == "subtotal" and (left["dataset_id"], left["sheet"]) != (right["dataset_id"], right["sheet"]):
@@ -469,10 +469,10 @@ def clean_disposition(spec: Any) -> dict[str, Any]:
     decision = spec.get("decision")
     if decision not in DECISIONS:
         raise FoundryError("disposition decision must be corrected, waived or pending_external")
-    reason = _text(spec.get("reason") or "", "disposition reason", required=False, maximum=4000)
+    reason = _one_line(_text(spec.get("reason") or "", "disposition reason", required=False, maximum=4000))
     if decision in {WAIVED, PENDING_EXTERNAL} and not reason:
         raise FoundryError("accepting a difference or sending it out for confirmation requires a reason")
-    counterparty = _text(spec.get("counterparty") or "", "disposition counterparty", required=False, maximum=200)
+    counterparty = _one_line(_text(spec.get("counterparty") or "", "disposition counterparty", required=False, maximum=200))
     if decision == PENDING_EXTERNAL and not counterparty:
         raise FoundryError("a difference sent out for confirmation must name who confirms it")
     return {
@@ -495,6 +495,10 @@ def applies_to(disposition: dict[str, Any], result: dict[str, Any] | None) -> bo
     )
 
 
+def same_person(left: str, right: str) -> bool:
+    return bool(left.strip()) and left.strip().casefold() == right.strip().casefold()
+
+
 def control_issue(row: dict[str, Any], disposition: dict[str, Any] | None, *, require_second_review: bool) -> dict[str, Any] | None:
     """What a confirmed control's latest result asks of the manager, and whether it holds the close.
 
@@ -510,14 +514,16 @@ def control_issue(row: dict[str, Any], disposition: dict[str, Any] | None, *, re
     if status == PASS:
         return None
     if status == STALE:
-        return {"state": "stale", "blocking": True}
+        # Retire it, or confirm controls on the newer snapshot: a decision about old bytes says nothing about new ones.
+        return {"state": "stale", "blocking": True, **({"disposition": disposition} if disposition else {})}
     if disposition is None:
         return {"state": "open", "blocking": True}
     if not applies_to(disposition, result):
         return {"state": "open", "blocking": True, "outdated_disposition": disposition}
     decision = disposition["decision"]
     if decision == WAIVED:
-        if require_second_review and not disposition.get("reviewed_at"):
+        # Review once required stays required: switching the setting off later does not clear a waiting acceptance.
+        if (require_second_review or disposition.get("review_required")) and not disposition.get("reviewed_at"):
             return {"state": "awaiting_review", "blocking": True, "disposition": disposition}
         return {"state": "waived", "blocking": False, "disposition": disposition}
     if decision == PENDING_EXTERNAL:
@@ -535,13 +541,16 @@ def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dic
     for index, row in enumerate(rows, start=1):
         result = row.get("result") or {}
         left, right = result.get("left") or {}, result.get("right") or {}
-        where = lambda side: f"{names.get(side.get('dataset_id', ''), '资料')} · {side.get('sheet', '')}!{side.get('range', '')}"
+        where = lambda side: _one_line(f"{names.get(side.get('dataset_id', ''), '资料')} · {side.get('sheet', '')}!{side.get('range', '')}")
         issue = row.get("issue") or {}
-        note = (issue.get("disposition") or {}).get("reason") or ""
+        note = _one_line((issue.get("disposition") or {}).get("reason") or "")
+        label = _one_line(row["control"]["label"])
+        if result.get("status") == ERROR:
+            note = _one_line(f"读不出：{result.get('reason') or ''}" + (f"；{note}" if note else ""))
         state = {"open": "待处理", "pending_external": "待外部确认", "awaiting_reimport": "待重新导入",
                  "awaiting_review": "待复核", "stale": "资料已更新"}.get(issue.get("state", ""), issue.get("state", ""))
         lines += [
-            f"## {index}. {row['control']['label']}",
+            f"## {index}. {label}",
             "",
             f"- 左侧：{where(left)}，合计 {left.get('value', '—')}",
             f"- 右侧：{where(right)}，合计 {right.get('value', '—')}",
@@ -549,7 +558,18 @@ def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dic
             f"- 状态：{state}" + (f"；{note}" if note else ""),
             "",
         ]
-        table.append([str(index), row["control"]["label"], where(left), left.get("value", ""), where(right),
-                      right.get("value", ""), result.get("difference", ""), state, note])
-    tsv = "\n".join("\t".join(str(cell).replace("\t", " ").replace("\n", " ") for cell in line) for line in table)
+        table.append([str(index), _cell(label), _cell(where(left)), left.get("value", ""), _cell(where(right)),
+                      right.get("value", ""), result.get("difference", ""), _cell(state), _cell(note)])
+    tsv = "\n".join("\t".join(str(cell).replace("\t", " ") for cell in line) for line in table)
     return {"markdown": "\n".join(lines).rstrip() + "\n", "tsv": tsv + "\n"}
+
+
+def _one_line(text: str) -> str:
+    """Text a manager or a workbook supplied, on one line: a newline must not start a fake item."""
+    return re.sub(r"[\r\n\u2028\u2029]+", " ", str(text)).strip()
+
+
+def _cell(text: str) -> str:
+    """A text cell pasted into Excel: one that starts like a formula is kept as text."""
+    text = _one_line(text)
+    return "'" + text if text[:1] in {"=", "+", "-", "@"} else text

@@ -87,7 +87,7 @@ export function ControlsPanel({ taskId, refreshKey, busy }: { taskId: string; re
 
   const toggleReview = (on: boolean) => act('正在保存设置…', async () => {
     await call('finance-control-settings-save', { require_second_review: on });
-    return on ? '接受差异后需要第二人复核。' : '接受差异由一人确认即可。';
+    return on ? '接受差异后需要第二人复核。' : '之后接受差异由一人确认即可；已在等复核的仍需复核。';
   });
 
   if (!bridge()?.financeCall) return null;
@@ -137,14 +137,15 @@ export function ControlsPanel({ taskId, refreshKey, busy }: { taskId: string; re
       </fieldset> : null}
 
       {issues.length > 0 ? <div className="analysis-controls-issues">
-        <div className="analysis-section-heading"><h5>要处理的差异 · {issues.filter((row) => row.issue?.blocking).length} 项挡住月结</h5>
+        <div className="analysis-section-heading"><h5>差异与处置 · {issues.filter((row) => row.issue?.blocking).length} 项挡住月结</h5>
           <div className="analysis-actions">
             <Button variant="outline" size="sm" type="button" disabled={locked} onClick={() => void copySheet()}><ClipboardCopy size={14} strokeWidth={1.5} aria-hidden />复制确认单</Button>
             <Button variant="outline" size="sm" type="button" disabled={locked} onClick={() => void copyTable()}>复制为表格</Button>
           </div></div>
         <ul className="analysis-controls-list">
-          {issues.map((row) => <IssueRow key={row.id} row={row} locked={locked} requireReview={Boolean(list?.settings?.require_second_review)}
+          {issues.map((row) => <IssueRow key={`${row.id}:${row.issue?.disposition?.id ?? ''}:${row.issue?.state}`} row={row} locked={locked} requireReview={Boolean(list?.settings?.require_second_review)}
             onDecide={(spec) => act('正在保存处置…', async () => { await call('finance-control-disposition-save', { control_id: row.id, ...spec }); return '已保存处置。'; })}
+            onRetire={(reason) => act('正在停用…', async () => { await call('finance-controls-retire', { id: row.id, reason }); return '已停用这条控制。'; })}
             onReview={(id, reviewer) => act('正在保存复核…', async () => { await call('finance-control-disposition-review', { id, reviewer }); return '已复核。'; })} />)}
         </ul>
       </div> : null}
@@ -157,11 +158,14 @@ export function ControlsPanel({ taskId, refreshKey, busy }: { taskId: string; re
   );
 }
 
-function IssueRow({ row, locked, requireReview, onDecide, onReview }: {
+function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire }: {
   row: ControlRow; locked: boolean; requireReview: boolean;
   onDecide(spec: { decision: Decision; reason: string; counterparty?: string; decided_by_name?: string }): void;
   onReview(id: string, reviewer: string): void;
+  onRetire(reason: string): void;
 }) {
+  const [changing, setChanging] = useState(false);
+  const [retireReason, setRetireReason] = useState('');
   const [decision, setDecision] = useState<Decision | ''>('');
   const [reason, setReason] = useState('');
   const [counterparty, setCounterparty] = useState('');
@@ -170,8 +174,12 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview }: {
   const issue = row.issue!;
   const result = row.result;
   const decidable = result && (result.status === 'break' || result.status === 'error') && issue.state !== 'stale';
+  // A range that cannot be read is fixed in the file, never accepted.
+  const choices: Decision[] = result?.status === 'error' ? ['corrected'] : ['waived', 'pending_external', 'corrected'];
+  const settled = issue.state === 'waived' || issue.state === 'awaiting_review';
   const needsReason = decision === 'waived' || decision === 'pending_external';
-  const ready = decision && (!needsReason || reason.trim()) && (decision !== 'pending_external' || counterparty.trim());
+  const needsName = decision === 'waived' && requireReview;
+  const ready = decision && (!needsReason || reason.trim()) && (decision !== 'pending_external' || counterparty.trim()) && (!needsName || name.trim());
   return <li className="analysis-controls-issue">
     <div className="analysis-controls-issue-head">
       <strong>{row.control.label}</strong>
@@ -182,7 +190,12 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview }: {
       {result.difference ? `；差额 ${result.difference}` : ''}{result.within_rounding ? '（可能是显示舍入）' : ''}
     </p> : null}
     {result?.reason ? <p className="analysis-note">{result.reason}</p> : null}
-    {issue.state === 'stale' ? <p className="analysis-note">这条控制读的资料已有更新版本。请在新版本上重新找建议控制并确认。</p> : null}
+    {issue.state === 'stale' ? <div className="analysis-controls-decide">
+      <p className="analysis-note">这条控制读的资料已有更新版本。在新版本上找建议控制并确认后，停用这一条。</p>
+      <div className="analysis-actions">
+        <Input aria-label="停用原因" placeholder="停用原因，例如：已换用修正后的资料" value={retireReason} disabled={locked} onChange={(event) => setRetireReason(event.target.value)} />
+        <Button type="button" size="sm" variant="outline" disabled={locked || !retireReason.trim()} onClick={() => onRetire(retireReason.trim())}>停用这条控制</Button>
+      </div></div> : null}
     {issue.disposition ? <p className="analysis-note">处置：{DECISION_LABELS[issue.disposition.decision]}
       {issue.disposition.counterparty ? ` · ${issue.disposition.counterparty}` : ''}{issue.disposition.reason ? ` · ${issue.disposition.reason}` : ''}
       {issue.disposition.reviewer ? ` · 复核人 ${issue.disposition.reviewer}` : ''}</p> : null}
@@ -191,17 +204,19 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview }: {
       <Input aria-label="复核人" placeholder="复核人姓名" value={reviewer} disabled={locked} onChange={(event) => setReviewer(event.target.value)} />
       <Button type="button" size="sm" disabled={locked || !reviewer.trim()} onClick={() => onReview(issue.disposition!.id, reviewer.trim())}>复核通过</Button>
     </div> : null}
-    {decidable && issue.state !== 'waived' && issue.state !== 'awaiting_review' ? <fieldset className="analysis-fieldset analysis-controls-decide" disabled={locked}>
+    {decidable && settled && !changing ? <div className="analysis-actions">
+      <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => setChanging(true)}>{issue.state === 'awaiting_review' ? '不同意，改处置' : '改处置'}</Button></div> : null}
+    {decidable && (!settled || changing) ? <fieldset className="analysis-fieldset analysis-controls-decide" disabled={locked}>
       <legend className="sr-only">处置这项差异</legend>
       <div className="analysis-actions" role="radiogroup" aria-label="处置方式">
-        {(['waived', 'pending_external', 'corrected'] as Decision[]).map((item) => <label key={item}>
+        {choices.map((item) => <label key={item}>
           <input type="radio" name={`decision-${row.id}`} checked={decision === item} onChange={() => setDecision(item)} />{DECISION_LABELS[item]}
         </label>)}
       </div>
       {decision ? <>
         {decision === 'pending_external' ? <Input aria-label="由谁确认" placeholder="由谁确认，例如：账套编制方" value={counterparty} onChange={(event) => setCounterparty(event.target.value)} /> : null}
         <Textarea aria-label="说明" placeholder={needsReason ? '必填：为什么接受这笔差异，或请对方确认什么' : '可选：修正了什么'} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} />
-        {decision === 'waived' && requireReview ? <Input aria-label="你的姓名" placeholder="你的姓名（复核人需是另一个人）" value={name} onChange={(event) => setName(event.target.value)} /> : null}
+        {needsName ? <Input aria-label="你的姓名" placeholder="必填：你的姓名（复核人需是另一个人）" value={name} onChange={(event) => setName(event.target.value)} /> : null}
         <div className="analysis-actions"><Button type="button" size="sm" disabled={!ready}
           onClick={() => onDecide({ decision: decision as Decision, reason: reason.trim(), ...(counterparty.trim() ? { counterparty: counterparty.trim() } : {}), ...(name.trim() ? { decided_by_name: name.trim() } : {}) })}>保存处置</Button></div>
       </> : null}

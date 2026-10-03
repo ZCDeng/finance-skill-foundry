@@ -122,3 +122,88 @@ def test_the_confirmation_sheet_lists_where_each_difference_was_read(tmp_path):
     assert "差额：11655" in sheet["markdown"] and "待外部确认；请确认分项计提比例" in sheet["markdown"]
     header, row = sheet["tsv"].strip().split("\n")
     assert header.split("\t")[0] == "序号" and row.split("\t")[6] == "11655"
+
+
+def test_a_named_decider_cannot_review_their_own_acceptance_in_any_spelling(tmp_path):
+    _task_obj, _analysis, assistant, manager, _close, control = _broken(tmp_path)
+    manager.finance_control_settings_save({"require_second_review": True})
+    with pytest.raises(FoundryError, match="must name who accepts"):
+        manager.finance_control_disposition_save({"control_id": control["id"], "decision": "waived", "reason": "已知"})
+    decided = manager.finance_control_disposition_save({"control_id": control["id"], "decision": "waived", "reason": "已知", "decided_by_name": "Zhang"})
+    for same in ("Zhang ", " zhang", "ZHANG"):
+        with pytest.raises(FoundryError, match="someone other"):
+            manager.finance_control_disposition_review({"id": decided["id"], "reviewer": same})
+    with pytest.raises(FoundryError, match="name the reviewer"):
+        manager.finance_control_disposition_review({"id": decided["id"], "reviewer": "   "})
+
+
+def test_an_acceptance_made_before_review_was_required_must_be_decided_again_with_a_name(tmp_path):
+    _task_obj, _analysis, assistant, manager, _close, control = _broken(tmp_path)
+    decided = manager.finance_control_disposition_save({"control_id": control["id"], "decision": "waived", "reason": "已知"})
+    manager.finance_control_settings_save({"require_second_review": True})
+    assert _issue(assistant, control["id"])["state"] == "awaiting_review"
+    with pytest.raises(FoundryError, match="names no one"):
+        manager.finance_control_disposition_review({"id": decided["id"], "reviewer": "李经理"})
+
+
+def test_switching_review_off_does_not_clear_an_acceptance_waiting_on_it(tmp_path):
+    _task_obj, _analysis, assistant, manager, _close, control = _broken(tmp_path)
+    manager.finance_control_settings_save({"require_second_review": True})
+    manager.finance_control_disposition_save({"control_id": control["id"], "decision": "waived", "reason": "已知", "decided_by_name": "张会计"})
+    manager.finance_control_settings_save({"require_second_review": False})
+    assert _issue(assistant, control["id"])["state"] == "awaiting_review"
+
+
+def test_a_range_that_cannot_be_read_is_corrected_never_accepted_and_goes_on_the_sheet(tmp_path):
+    from openpyxl import Workbook
+
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    path = tmp_path / "text.xlsx"
+    book = Workbook()
+    book.active.title = "S"
+    for row in (["项目", "金额"], ["甲", 100], ["乙", "1,200"], ["丙", 50], ["合计", 150]):
+        book.active.append(row)
+    book.save(path)
+    dataset = analysis.add_dataset(path, name="文字数字")
+    control = manager.finance_controls_save({"confirm": True, "control": {"kind": "subtotal", "label": "x", "left": _side(dataset, "S", "B2:B4"), "right": _side(dataset, "S", "B5")}})["controls"][0]
+    assistant.finance_controls_run({})
+    for decision in ("waived", "pending_external"):
+        with pytest.raises(FoundryError, match="can only be corrected"):
+            manager.finance_control_disposition_save({"control_id": control["id"], "decision": decision, "reason": "无所谓", "counterparty": "编制方"})
+    sheet = assistant.finance_control_confirmation_sheet({})
+    assert sheet["count"] == 1 and "读不出" in sheet["markdown"]
+
+
+def test_the_sheet_leaves_out_accepted_and_passing_controls(tmp_path):
+    _task_obj, _analysis, assistant, manager, _close, control = _broken(tmp_path)
+    manager.finance_control_disposition_save({"control_id": control["id"], "decision": "waived", "reason": "内部已知"})
+    assert assistant.finance_control_confirmation_sheet({})["count"] == 0
+
+
+def test_a_corrected_file_lets_the_old_control_be_retired_and_the_close_clear(tmp_path):
+    _task_obj, analysis, assistant, manager, _close, control = _broken(tmp_path)
+    manager.finance_control_disposition_save({"control_id": control["id"], "decision": "corrected", "reason": "编制方已改"})
+    analysis.add_dataset(_ar_pack(tmp_path / "v2.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    assert _issue(assistant, control["id"])["state"] == "stale"
+    fresh = [row["control"] for row in assistant.finance_controls_propose({})["suggestions"]]
+    manager.finance_controls_save({"confirm": True, "origin": "suggested", "controls": fresh})
+    assistant.finance_controls_run({})
+    assert assistant.finance_controls_list({})["summary"]["blocking"] == 1
+    manager.finance_controls_retire({"id": control["id"], "reason": "已换用修正后的资料"})
+    assert assistant.finance_controls_list({})["summary"]["blocking"] == 0
+
+
+def test_pasted_text_cannot_become_a_formula_or_a_fake_item(tmp_path):
+    from foundry.finance_controls import confirmation_sheet
+
+    row = {
+        "control": {"label": '=HYPERLINK("http://x","点我")'},
+        "result": {"status": "break", "difference": "-5", "left": {"dataset_id": "d", "sheet": "S", "range": "A1", "value": "1"},
+                   "right": {"dataset_id": "d", "sheet": "S", "range": "A2", "value": "6"}},
+        "issue": {"state": "open", "disposition": {"reason": "第一行\r第二行\n## 3. 伪造条目"}},
+    }
+    sheet = confirmation_sheet([row], {"d": "月结"})
+    cells = sheet["tsv"].strip().split("\n")[1].split("\t")
+    assert cells[1].startswith("'=HYPERLINK")
+    assert cells[6] == "-5"  # an amount stays a number
+    assert "\r" not in sheet["tsv"] and "\n## 3." not in sheet["markdown"]

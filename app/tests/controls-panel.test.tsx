@@ -88,3 +88,36 @@ it('asks for a reviewer when an accepted difference waits on a second person', a
   await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-disposition-review', { id: 'p1', reviewer: '李经理' }));
   expect(screen.queryByRole('button', { name: '保存处置' })).toBeNull();
 });
+
+it('offers only correction for a range that cannot be read', async () => {
+  const unreadable: ControlRow = { ...broken, result: { status: 'error', reason: '08·AR!D25:D30 里有 1 个文字单元格，不能当作空白跳过' }, issue: { state: 'open', blocking: true } };
+  mount(() => listOf([unreadable]));
+  render(<ControlsPanel taskId="t" />);
+  expect(await screen.findByLabelText('修正资料后重新导入')).toBeTruthy();
+  expect(screen.queryByLabelText('接受差异并说明')).toBeNull();
+});
+
+it('lets an accepted difference be changed, and a stale control be retired with a reason', async () => {
+  const waived: ControlRow = { ...broken, issue: { state: 'waived', blocking: false, disposition: { id: 'p1', decision: 'waived', reason: '已知' } } };
+  const stale: ControlRow = { ...broken, id: 'c2', result: { status: 'stale', reason: '资料已有更新的版本' }, issue: { state: 'stale', blocking: true } };
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([waived, stale]) : {});
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByRole('button', { name: '改处置' }));
+  expect(screen.getByLabelText('待外部确认')).toBeTruthy();
+  const retire = screen.getByRole('button', { name: '停用这条控制' }) as HTMLButtonElement;
+  expect(retire.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('停用原因'), { target: { value: '已换用修正后的资料' } });
+  fireEvent.click(retire);
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-controls-retire', { id: 'c2', reason: '已换用修正后的资料' }));
+});
+
+it('asks for the name of whoever accepts when a second review is required', async () => {
+  mount(() => listOf([broken], true));
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByLabelText('接受差异并说明'));
+  fireEvent.change(screen.getByLabelText('说明'), { target: { value: '已知' } });
+  const save = screen.getByRole('button', { name: '保存处置' }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('你的姓名'), { target: { value: '张会计' } });
+  expect(save.disabled).toBe(false);
+});

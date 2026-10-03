@@ -1578,6 +1578,12 @@ class FinanceStore:
         if result.get("status") not in {"break", "error"}:
             raise FoundryError("this control has no difference to decide; run it first")
         fields = clean_disposition(spec)
+        if result.get("status") == "error" and fields["decision"] != "corrected":
+            # A range that cannot be read is not a difference anyone can accept; the file has to be fixed.
+            raise FoundryError("a control that could not be read can only be corrected and re-imported")
+        review_required = self._control_settings()["require_second_review"]
+        if fields["decision"] == "waived" and review_required and not fields["decided_by_name"]:
+            raise FoundryError("with second review on, accepting a difference must name who accepts it")
         previous = self._latest_dispositions().get(row["id"])
         return self._write(
             "control_dispositions",
@@ -1588,6 +1594,7 @@ class FinanceStore:
             source_hashes=result.get("source_hashes"),
             bindings=row["bindings"],
             decided_by=self.actor,
+            review_required=fields["decision"] == "waived" and review_required,
             **fields,
             **({"parent_id": previous["id"]} if previous else {}),
         )
@@ -1597,7 +1604,7 @@ class FinanceStore:
         self._manager_only("review a control decision")
         if not isinstance(spec, dict) or not spec.get("id"):
             raise FoundryError("review requires the disposition id")
-        reviewer = _safe_text(spec.get("reviewer") or "", "reviewer", maximum=80)
+        reviewer = _safe_text(spec.get("reviewer") or "", "reviewer", maximum=80).strip()
         if not reviewer:
             raise FoundryError("a review must name the reviewer")
         current = self._latest_dispositions()
@@ -1608,7 +1615,11 @@ class FinanceStore:
             raise FoundryError("only an accepted difference is reviewed")
         if disposition.get("reviewed_at"):
             return disposition
-        if disposition.get("decided_by_name") and disposition["decided_by_name"] == reviewer:
+        from foundry.finance_controls import same_person
+
+        if not (disposition.get("decided_by_name") or "").strip():
+            raise FoundryError("this acceptance names no one; decide it again with a name before it can be reviewed")
+        if same_person(disposition["decided_by_name"], reviewer):
             raise FoundryError("the reviewer must be someone other than the person who accepted the difference")
         from foundry.analysis import now_iso
 
@@ -1623,8 +1634,10 @@ class FinanceStore:
         wanted = spec.get("control_ids")
         rows = [
             row for row in self.finance_controls_list({})["controls"]
-            if (row.get("issue") or {}).get("state") in {"open", "pending_external", "awaiting_reimport", "awaiting_review"}
-            and (row.get("result") or {}).get("status") == "break"
+            # What the preparer has to answer: open and out-for-confirmation differences, and ranges
+            # that cannot be read. An acceptance waiting on internal review stays inside.
+            if (row.get("issue") or {}).get("state") in {"open", "pending_external", "awaiting_reimport"}
+            and (row.get("result") or {}).get("status") in {"break", "error"}
             and (wanted is None or row["id"] in wanted)
         ]
         names = {row["id"]: row.get("name") or "资料" for row in self.analysis.state()["datasets"]}
