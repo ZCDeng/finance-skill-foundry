@@ -223,3 +223,23 @@ describe('unified application session lifecycle', () => {
   });
 
 });
+
+describe('first run', () => {
+  it('opens the guide at 第一次使用 on a store that has never held a task', async () => {
+    mount({ tasks: vi.fn(async () => ok([])) });
+    expect(await screen.findByRole('heading', { name: '第一次使用' })).toBeTruthy();
+  });
+
+  it('stays closed when the store only holds archived tasks', async () => {
+    const tasks = vi.fn(async (view?: string) => ok(view === 'all' ? [{ ...a, lifecycle_status: 'archived' as const }] : []));
+    mount({ tasks });
+    await waitFor(() => expect(tasks).toHaveBeenCalledWith('all'));
+    expect(screen.queryByRole('heading', { name: '第一次使用' })).toBeNull();
+  });
+
+  it('stays closed for a store with tasks, whatever view is opened later', async () => {
+    mount();
+    await screen.findByText('本地成果：西南回款');
+    expect(screen.queryByRole('heading', { name: '第一次使用' })).toBeNull();
+  });
+});

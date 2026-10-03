@@ -30,6 +30,8 @@ interface Props {
   onRestore?(id: string): Promise<void>;
   onLayout(rect: WorkspaceRect | null): void;
   conversation: ReactNode;
+  /** The guide is open in the conversation column: show the column even with no task or with results in focus. */
+  guiding?: boolean;
   children: ReactNode;
 }
 type Focus = 'split' | 'conversation' | 'results';
@@ -43,7 +45,7 @@ const lifecycleLabels: Record<TaskLifecycleFilter, string> = {
   all: '全部',
 };
 
-export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onLayout, conversation, children }: Props) {
+export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onLayout, conversation, guiding = false, children }: Props) {
   const [sidebar, setSidebar] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [wide, setWide] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [narrow, setNarrow] = useState(() => mediaMatches('(max-width: 1100px)'));
@@ -228,7 +230,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
           </DropdownMenu>
         </header>
         <div className="workspace-panes">
-          <section className="workspace-conversation" aria-label="持续对话" hidden={!task || effective === 'results'}>
+          <section className="workspace-conversation" aria-label={guiding ? '使用指南' : '持续对话'} hidden={!guiding && (!task || effective === 'results')}>
             <div className="workspace-native" ref={slot}>{conversation}</div>
           </section>
           <div className="workspace-divider" role="separator" aria-label="调整对话宽度" aria-orientation="vertical"

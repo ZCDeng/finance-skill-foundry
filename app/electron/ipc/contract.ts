@@ -52,6 +52,7 @@ export const CHANNELS = {
   taskArchive: 'foundry:task-archive',
   taskTrash: 'foundry:task-trash',
   taskRestore: 'foundry:task-restore',
+  taskSample: 'foundry:task-sample',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',
   harnessLayout: 'harness:layout',

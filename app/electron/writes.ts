@@ -20,6 +20,8 @@ export const WRITES = {
   taskArchive: 'task-archive',
   taskTrash: 'task-trash',
   taskRestore: 'task-restore',
+  /** The synthetic practice task: its own task, its own generated workbook, never another task's data. */
+  taskSample: 'task-sample',
 } as const;
 
 export type WriteName = keyof typeof WRITES;
@@ -47,6 +49,16 @@ export async function newTask(
   const id = (await runFoundry(binding, WRITES.taskNew, rest, env)).trim();
   if (!/^[0-9a-f]{32}$/.test(id)) throw new Error(`task-new did not print a task id: ${id.slice(0, 200)}`);
   return { id };
+}
+
+/** Create or reuse the practice task (foundry/sample_task.py) and hand back its id. */
+export async function sampleTask(
+  binding: Omit<Binding, 'task' | 'session'>,
+  env?: FoundryEnv,
+): Promise<{ id: string; created: boolean }> {
+  const value = JSON.parse(await runFoundry(binding, WRITES.taskSample, [], env)) as { id?: unknown; created?: unknown };
+  if (typeof value.id !== 'string' || !/^[0-9a-f]{32}$/.test(value.id)) throw new Error('task-sample did not print a task id');
+  return { id: value.id, created: value.created === true };
 }
 
 export async function changeTaskLifecycle(

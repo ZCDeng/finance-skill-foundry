@@ -13,7 +13,7 @@ vi.mock('../electron/foundry.js', async (original) => ({
 }));
 
 const { runFoundry } = await import('../electron/foundry.js');
-const { changeTaskLifecycle, newTask } = await import('../electron/writes.js');
+const { changeTaskLifecycle, newTask, sampleTask } = await import('../electron/writes.js');
 const called = runFoundry as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => called.mockReset());
@@ -31,7 +31,7 @@ describe('creating a task', () => {
    * cold install.
    */
   it('is a mutation the window can make, and the only one', () => {
-    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore']);
+    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-sample']);
   });
 
   it('passes the title through and leaves an empty period off the argv', async () => {
@@ -113,5 +113,18 @@ describe('what a typed line may contain', () => {
     expect(() => lineOf('a\u007fb', 'title', 120)).toThrow(/control character/);
     // Punctuation is not a control character and must survive: a title is prose.
     expect(lineOf('a; rm -rf / b', 'title', 120)).toBe('a; rm -rf / b');
+  });
+});
+
+describe('the practice task', () => {
+  it('names no arguments and hands back the id the CLI printed', async () => {
+    called.mockResolvedValue(JSON.stringify({ id: ID, created: true }));
+    expect(await sampleTask({ varRoot: '/v' })).toEqual({ id: ID, created: true });
+    expect(called).toHaveBeenCalledWith({ varRoot: '/v' }, 'task-sample', [], undefined);
+  });
+
+  it('refuses an answer without a task id', async () => {
+    called.mockResolvedValue(JSON.stringify({ id: '../x' }));
+    await expect(sampleTask({ varRoot: '/v' })).rejects.toThrow(/task id/);
   });
 });

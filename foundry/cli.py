@@ -334,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     p_task_new.add_argument("--period", default="", help="the period this task closes, e.g. 2026-08")
     p_task_new.add_argument("--skill", default="", help="authored skill id, when there is one")
 
+    sub.add_parser("task-sample", help="create or reuse the synthetic practice task")
+
     p_task_list = sub.add_parser("task-list")
     p_task_list.add_argument("--lifecycle", choices=(*TASK_LIFECYCLE_STATUSES, "all"), default="active")
     sub.add_parser("task-show")
@@ -423,6 +425,11 @@ def main(argv: list[str] | None = None) -> int:
                 skill_id=args.skill or None,
             )
             print(task.id)
+            return 0
+        if args.cmd == "task-sample":
+            from foundry.sample_task import create_sample_task
+
+            print(json.dumps(create_sample_task(Path(args.var)), ensure_ascii=False))
             return 0
         if args.cmd == "task-list":
             print(

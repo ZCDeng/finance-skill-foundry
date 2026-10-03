@@ -11,6 +11,10 @@ export type GuideBlock =
   | { kind: 'steps'; items: string[] }
   | { kind: 'list'; items: string[] }
   | { kind: 'legend' }
+  /** The six quick-start steps, read from the open task's own state. */
+  | { kind: 'checklist' }
+  /** First run: practise on the synthetic task, or start with your own files. */
+  | { kind: 'start' }
   | { kind: 'open'; target: GuideTarget; label: string };
 
 export type GuideArticle = {
@@ -28,10 +32,21 @@ export const GUIDE_SECTIONS = ['快速开始', '月结工作流', '读懂状态'
 
 export const GUIDE_ARTICLES: GuideArticle[] = [
   {
+    id: 'first-run', section: '快速开始', title: '第一次使用', appliesTo: '工作区',
+    keywords: ['第一次', '示例', '练习', '示例任务', '合成数据', '入门'],
+    body: [
+      { kind: 'p', text: '可以先用示例任务练一遍，再用自己的资料。示例任务是单独的一个任务，里面是一套虚构的 2026 年 6 月月结套表，不会碰到你的任何资料。' },
+      { kind: 'p', text: '示例套表的应收账龄表里，坏账准备分项故意比合计多 50 万元，用来练习勾稽控制和差异处置。' },
+      { kind: 'start' },
+      { kind: 'p', text: '系统为资料保存只读快照，原文件不会被改写。随时可以从顶栏的「使用指南」回到这里。' },
+    ],
+  },
+  {
     id: 'quick-start', section: '快速开始', title: '5 分钟快速开始', appliesTo: '工作区',
     keywords: ['开始', '新建任务', '添加资料', '入门', '第一次', '怎么用'],
     body: [
       { kind: 'p', text: '一个任务对应一件要弄清楚的事，比如「华东区 8 月回款」。左边和助手讨论，右边看资料、结果和文稿。' },
+      { kind: 'checklist' },
       { kind: 'steps', items: [
         '新建任务，用一句话写清要回答的问题。',
         '在「资料」页添加 Excel 或 CSV。系统保存只读快照，原文件不会被改写。',
@@ -185,5 +200,7 @@ function blockText(block: GuideBlock): string[] {
   if (block.kind === 'p') return [block.text];
   if (block.kind === 'steps' || block.kind === 'list') return block.items;
   if (block.kind === 'open') return [block.label];
+  if (block.kind === 'checklist') return ['添加资料', '确认表结构', '确认分析范围', '运行计算', '核对来源与异常', '保存文稿并复核'];
+  if (block.kind === 'start') return ['用示例任务练习', '使用自己的资料'];
   return ['计算成功', '引用值一致', '源数据核验通过', '已专业复核'];
 }

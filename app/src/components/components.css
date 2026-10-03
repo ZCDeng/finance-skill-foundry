@@ -879,3 +879,10 @@ textarea.fnd-field {
 .fnd-with-help { display: inline-flex; align-items: center; gap: 4px; }
 .fnd-with-help > h3, .fnd-with-help > h4 { margin: 0; }
 .fnd-guide-hub__open { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fnd-guide-hub__start { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fnd-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; }
+.fnd-checklist__step { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 0.86rem; }
+.fnd-checklist__label { min-width: 7.5em; font-weight: 500; }
+.fnd-checklist__state { color: var(--fnd-muted); }
+.fnd-checklist__step--todo .fnd-checklist__state { color: var(--fnd-warning); }
+.fnd-checklist__step--done .fnd-checklist__state { color: var(--fnd-selected); }
