@@ -301,8 +301,17 @@ function axisTick(normalized: number, magnitude: number): string {
   let exponent = Number(power) + shift;
   coefficient = Number(coefficient.toPrecision(3));
   if (Math.abs(coefficient) >= 10) { coefficient /= 10; exponent += 1; }
-  if (exponent >= 6 || exponent < -3) return `${coefficient}e${exponent}`;
-  return Number(`${coefficient}e${exponent}`).toString();
+  // Money in 元 runs to hundreds of millions: write it the way a finance table does (418,000,000),
+  // up to 15 characters, which is what fits left of the plot. Only beyond that, or for tiny values, use e-notation.
+  if (exponent >= 11 || exponent < -3) return `${coefficient}e${exponent}`;
+  return groupThousands(Number(`${coefficient}e${exponent}`).toString());
+}
+
+/** 1234567.5 → 1,234,567.5; the digits themselves are left untouched. */
+function groupThousands(value: string): string {
+  const [whole, fraction] = value.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return fraction === undefined ? grouped : `${grouped}.${fraction}`;
 }
 
 function renderBars(visual: ReportDataVisual, top: number): { svg: string; bottom: number } {

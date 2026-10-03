@@ -161,6 +161,10 @@ describe('static report visual rendering', () => {
     { values: ['-300', '600'], expected: ['-300', '0', '300', '600'] },
     { values: ['1e308', '-1e308'], expected: ['-1e308', '-3.33e307', '0', '3.33e307', '1e308'] },
     { values: ['5e-324', '0'], expected: ['0', '1.65e-324', '3.29e-324', '4.94e-324'] },
+    { values: ['395000000', '418400000'], expected: ['0', '139,000,000', '279,000,000', '418,000,000'] },
+    { values: ['-12500', '96000'], expected: ['-12,500', '0', '23,700', '59,800', '96,000'] },
+    { values: ['0', '-99900000000'], expected: ['-99,900,000,000', '-66,600,000,000', '-33,300,000,000', '0'] },
+    { values: ['0', '420000000000'], expected: ['0', '1.4e11', '2.8e11', '4.2e11'] },
   ])('labels the zero baseline and compact numeric scale for $values', ({ values, expected }) => {
     const raw = chart({ kind: 'line' });
     raw.series.rows = values.map((value, index) => ({ 区域: String(index + 1), 利润: value }));
@@ -169,7 +173,8 @@ describe('static report visual rendering', () => {
     expect(ticks).toEqual(expected);
     expect(ticks.length).toBeGreaterThanOrEqual(3); expect(ticks.length).toBeLessThanOrEqual(5);
     expect(ticks.filter((tick) => tick === '0')).toHaveLength(1);
-    expect(ticks.every((tick) => tick!.length <= 10)).toBe(true);
+    // 15 characters is what fits right-aligned left of the plot at 14px.
+    expect(ticks.every((tick) => tick!.length <= 15)).toBe(true);
   });
 
   it('expands scientific labels without rounding Decimal precision away', () => {
