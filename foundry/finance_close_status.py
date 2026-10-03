@@ -83,7 +83,7 @@ def close_status(
     # 可计算 says the inputs are settled, not that the books agree: a manager reading only the
     # top line must still learn that differences stand between this close and sign-off.
     if state == CALCULABLE and conflicts:
-        headline["detail"] = f"{conflicts} 项差异待处置，处置前不能提交复核"
+        headline["detail"] = f"{conflicts} 项差异仍挡住月结，处理完才能提交复核"
     return {
         "schema_version": 1,
         "headline": headline,
