@@ -269,19 +269,19 @@ describe('the shell', () => {
   });
 
   /*
-   * An icon with no visible text, so the accessible name is the only name it
-   * has. Dropping the label and the `aria-label` together would leave a
-   * control announced as "button".
+   * The entry used to be an icon named 怎么用; a manager scanning the header did
+   * not find it. It now says 使用指南 in words and carries its shortcut.
    */
-  it('keeps a name on the help control after it lost its label', async () => {
+  it('names the guide in words on the control itself, with its shortcut', async () => {
     const { Shell } = await import('../src/components/Shell.js');
     render(
       <Shell screen="workbench" onScreen={() => {}} onGuide={() => {}}>
         <p>x</p>
       </Shell>,
     );
-    const help = screen.getByRole('button', { name: '怎么用' });
-    expect(help.textContent).toBe('');
+    const help = screen.getByRole('button', { name: '使用指南' });
+    expect(help.textContent).toBe('使用指南');
+    expect(help.getAttribute('aria-keyshortcuts')).toContain('Shift+Slash');
   });
 
   it('offers the guide back only where it can be drawn', async () => {
@@ -346,7 +346,7 @@ describe('the shell', () => {
         <p>x</p>
       </Shell>,
     );
-    const classes = screen.getByRole('button', { name: '怎么用' }).className.split(/\s+/);
+    const classes = screen.getByRole('button', { name: '使用指南' }).className.split(/\s+/);
     expect(classes).toEqual(
       expect.arrayContaining([
         'text-[var(--fnd-muted)]',
