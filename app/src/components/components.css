@@ -858,20 +858,19 @@ textarea.fnd-field {
 .workspace-mount { flex: 1; min-height: 0; height: 100%; }
 .fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }
 
-}
 .fnd-help-link { width: 22px; height: 22px; color: var(--fnd-muted); }
 .fnd-guide-hub { display: grid; grid-template-rows: auto auto 1fr; gap: 12px; height: 100%; min-height: 0; padding: 16px; overflow: hidden; }
 .fnd-guide-hub__head { display: flex; align-items: center; justify-content: space-between; }
-.fnd-guide-hub__head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1.05rem; }
+.fnd-guide-hub__head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__search { display: flex; align-items: center; gap: 8px; color: var(--fnd-muted); }
 .fnd-guide-hub__body { display: grid; grid-template-columns: minmax(140px, 32%) 1fr; gap: 16px; min-height: 0; }
 .fnd-guide-hub__toc { overflow: auto; min-height: 0; }
 .fnd-guide-hub__toc h3 { margin: 12px 0 4px; font-size: var(--fnd-size-small); color: var(--fnd-muted); font-weight: 500; }
 .fnd-guide-hub__toc ul { margin: 0; padding: 0; list-style: none; }
-.fnd-guide-hub__toc-item { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: 0.88rem; background: none; border: 0; color: inherit; cursor: pointer; }
+.fnd-guide-hub__toc-item { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
 .fnd-guide-hub__toc-item[aria-current='page'] { background: var(--fnd-surface-strong, rgba(0,0,0,.05)); color: var(--fnd-selected); }
-.fnd-guide-hub__article { overflow: auto; min-height: 0; display: grid; gap: 10px; align-content: start; font-size: 0.9rem; line-height: 1.7; }
-.fnd-guide-hub__article h3 { margin: 0; font-size: 1rem; }
+.fnd-guide-hub__article { overflow: auto; min-height: 0; display: grid; gap: 10px; align-content: start; font-size: var(--fnd-size-body); line-height: 1.7; }
+.fnd-guide-hub__article h3 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__article ol, .fnd-guide-hub__article ul { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
 .fnd-guide-legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-weight: 500; }
 .fnd-guide-legend__ne { margin-right: 6px; color: var(--fnd-muted); }
@@ -881,8 +880,9 @@ textarea.fnd-field {
 .fnd-guide-hub__open { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fnd-guide-hub__start { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .fnd-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; }
-.fnd-checklist__step { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 0.86rem; }
+.fnd-checklist__step { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--fnd-size-body); }
 .fnd-checklist__label { min-width: 7.5em; font-weight: 500; }
 .fnd-checklist__state { color: var(--fnd-muted); }
 .fnd-checklist__step--todo .fnd-checklist__state { color: var(--fnd-warning); }
 .fnd-checklist__step--done .fnd-checklist__state { color: var(--fnd-selected); }
+}
