@@ -10,6 +10,9 @@ typography:
   small: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 13px}
   label: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 12px}
   document: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 16px, lineHeight: 28px}
+  document-title: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 28px, fontWeight: 750, lineHeight: 40px}
+  document-chapter: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 22px, fontWeight: 720, lineHeight: 32px}
+  document-section: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 18px, fontWeight: 700, lineHeight: 28px}
   composer: {fontFamily: '''Noto Sans SC'', sans-serif', fontSize: 16px, lineHeight: 28px}
   brand: {fontFamily: '''Asap Sharp'', ''Noto Sans SC'', sans-serif', fontSize: 22px, fontWeight: 700, lineHeight: 1}
 rounded: {control: 8px, container: 12px, chip: 30px, mark: 6px, menu: 10px}
@@ -55,7 +58,7 @@ components:
 
 Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳和原生客户端离线打包，真实变量字重 100–900，关闭合成字重；不依赖 localhost 或远程字体。Asap Sharp 仅用于品牌字。见[字体来源与许可](app/src/assets/fonts/noto-sans-sc/README.md)。
 
-任务标题 20px，窄窗为 18px；结果与文稿标题 24px，文稿章节 20px。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。文稿最大宽度 42em，段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
+任务标题 20px，窄窗为 18px；结果标题 24px。文稿标题 28px/40px（字重 750）、章 22px/32px（720）、节 18px/28px、小节 16px/26px（700），编辑器、阅读视图与导出 HTML 共用 `--fnd-doc-*` token（h4 至 h6 同用小节字号；旧草稿阅读样式一并对齐），由 `document-headings.test.ts` 保持一致。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。文稿最大宽度 42em，段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
 
 **The Real Weight Rule.** 中文强调使用已打包的真实字重；数据保留原有精度、负号、零和缺值，不借排版制造业务含义。
 
