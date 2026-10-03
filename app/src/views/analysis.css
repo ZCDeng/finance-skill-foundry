@@ -317,3 +317,4 @@
 .analysis-close-block ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 0.86rem; }
 .analysis-close-block li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
 .analysis-close-item--blocking { color: var(--fnd-warning); }
+.analysis-scope-candidate-source { margin: 0 12px 0 6px; }
