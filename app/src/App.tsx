@@ -88,19 +88,35 @@ export function App() {
   const [problem, setProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
   const [guideArticle, setGuideArticle] = useState('');
-  // A 「?」 anywhere in the workspace opens the guide at the article for that block;
-  // ⌘/Ctrl + ? opens or closes it from anywhere.
+  // Where focus was when the guide opened, so closing it puts the reader back there.
+  const guideOpener = useRef<HTMLElement | null>(null);
+  const askedRef = useRef(false);
+  askedRef.current = asked;
+  const openGuideAt = useCallback((article: string) => {
+    if (!askedRef.current) guideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setGuideArticle(article);
+    setAsked(true);
+  }, []);
+  const closeGuide = useCallback(() => {
+    setAsked(false);
+    const back = guideOpener.current;
+    guideOpener.current = null;
+    requestAnimationFrame(() => (back?.isConnected ? back : document.querySelector<HTMLElement>('.fnd-head__help'))?.focus());
+  }, []);
+  // A 「?」 in the workspace opens the guide at its block's article; ⌘/Ctrl + ? opens or
+  // closes it, on the screens where it can be drawn and nowhere else.
   useEffect(() => {
-    const open = (event: Event) => { setGuideArticle(String((event as CustomEvent).detail ?? '')); setAsked(true); };
+    const open = (event: Event) => openGuideAt(String((event as CustomEvent).detail ?? ''));
     const key = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || !(event.key === '?' || (event.shiftKey && event.key === '/'))) return;
+      if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key !== '?') return;
+      if (screenRef.current !== 'analysis' && screenRef.current !== 'workbench') return;
       event.preventDefault();
-      setAsked((value) => !value);
+      if (askedRef.current) closeGuide(); else openGuideAt('');
     };
     window.addEventListener(GUIDE_EVENT, open);
     window.addEventListener('keydown', key);
     return () => { window.removeEventListener(GUIDE_EVENT, open); window.removeEventListener('keydown', key); };
-  }, []);
+  }, [openGuideAt, closeGuide]);
   const [conversationFocus, setConversationFocus] = useState(0);
   const [conversationProblem, setConversationProblem] = useState<string | null>(null);
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
@@ -532,7 +548,8 @@ export function App() {
         if (currentRef.current === target) {
           setSession({ ...result.value, intent: 'analysis', taskId: target });
           setConversationProblem(null);
-          setAsked(false);
+          // Sending something takes the column back for the conversation; a background reconnect leaves the guide open.
+          if (question !== undefined || draftId !== undefined) setAsked(false);
         }
         if (options?.submit && result.value.submitted !== true) {
           throw new Error(result.value.blockedReason || '问题尚未发送，请检查对话中的模型设置后重试。');
@@ -762,7 +779,7 @@ export function App() {
         if (next !== 'deliverables') setOpened(null);
         setScreen(next);
       }}
-      onGuide={inWorkspace ? () => { setGuideArticle(''); setAsked(true); } : undefined}
+      onGuide={inWorkspace ? () => openGuideAt('') : undefined}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={
         screen === 'formulator' ? (
@@ -807,8 +824,8 @@ export function App() {
           onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
           onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
           onLayout={onWorkspaceLayout}
-          conversation={guide ? <GuideHub article={guideArticle}
-              onClose={() => { setAsked(false); requestAnimationFrame(() => document.querySelector<HTMLElement>('.fnd-head__help')?.focus()); }}
+          conversation={guide ? <GuideHub article={guideArticle} canOpen={Boolean(bound) && !boundReadOnly}
+              onClose={closeGuide}
               onOpen={(target: GuideTarget) => {
                 setAnalysisSection(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : target === 'close' ? 'close' : 'materials');
                 const anchor = { scope: '.analysis-scope-card', structure: '.analysis-structure-panel', datasets: '.analysis-source-list' }[target as 'scope' | 'structure' | 'datasets'];

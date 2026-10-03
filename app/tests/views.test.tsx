@@ -281,7 +281,7 @@ describe('the shell', () => {
     );
     const help = screen.getByRole('button', { name: '使用指南' });
     expect(help.textContent).toBe('使用指南');
-    expect(help.getAttribute('aria-keyshortcuts')).toContain('Shift+Slash');
+    expect(help.getAttribute('aria-keyshortcuts')).toBe('Meta+? Control+?');
   });
 
   it('offers the guide back only where it can be drawn', async () => {

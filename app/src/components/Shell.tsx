@@ -34,7 +34,7 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
           {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. */}
           {onGuide ? <Button type="button" variant="ghost" size="sm"
             className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)]"
-            onClick={onGuide} title="使用指南（⌘/Ctrl + ?）" aria-keyshortcuts="Meta+Shift+Slash Control+Shift+Slash">
+            onClick={onGuide} title="使用指南（⌘/Ctrl + ?）" aria-keyshortcuts="Meta+? Control+?">
             <BookOpen size={16} strokeWidth={1.5} aria-hidden />使用指南
           </Button> : null}
         </span>

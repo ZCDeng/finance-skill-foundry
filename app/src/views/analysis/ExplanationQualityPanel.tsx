@@ -61,7 +61,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
   const accepted = qualityChecks.filter(([key]) => quality?.checks?.[key]?.status === 'pass_with_accepted_estimates').map(([, label]) => label);
   const itemCount = (quality?.checks ? qualityChecks.length : 0) + 4;
   return <section className="analysis-quality" aria-label="文稿质量检查">
-    <div className="analysis-section-heading"><div><h4>文稿质量检查 <HelpLink article="statuses" label="状态互不替代" /></h4><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
+    <div className="analysis-section-heading"><div><span className="fnd-with-help"><h4>文稿质量检查</h4><HelpLink article="statuses" label="状态互不替代" /></span><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
     {/* Never one merged "all passed": with nothing open, the four verification states are named one by one. */}
     {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : dimensionStates(quality?.status_dimensions).join(' · ')}</p>}

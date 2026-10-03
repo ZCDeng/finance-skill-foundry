@@ -33,6 +33,8 @@ it('opens at the article a 「?」 asked for and shows where it applies', () => 
 
 it('says plainly when a search finds nothing', () => {
   render(<GuideHub onOpen={vi.fn()} onClose={vi.fn()} />);
+  // The live region is there before anything is typed, so the change is announced.
+  expect(screen.getByRole('status').textContent).toBe('');
   fireEvent.change(screen.getByLabelText('搜索使用指南'), { target: { value: '收缴率' } });
   expect(screen.getByRole('status').textContent).toBe('没有找到「收缴率」相关的说明。');
 });
@@ -51,11 +53,6 @@ it('closes on Escape', () => {
   expect(onClose).toHaveBeenCalled();
 });
 
-it('shows that the statuses do not stand in for one another', () => {
-  render(<GuideHub article="statuses" onOpen={vi.fn()} onClose={vi.fn()} />);
-  expect(screen.getByLabelText('执行成功不等于数值已引用不等于来源已核验不等于经理已复核不等于可发布')).toBeTruthy();
-});
-
 it('a 「?」 asks the window for its article', () => {
   const heard = vi.fn();
   window.addEventListener(GUIDE_EVENT, (event) => heard((event as CustomEvent).detail));
@@ -69,4 +66,21 @@ it('every article names where it applies and every link goes somewhere the works
     expect(article.appliesTo).toBeTruthy();
     for (const block of article.body) if (block.kind === 'open') expect(['datasets', 'scope', 'structure', 'results', 'drafts', 'close']).toContain(block.target);
   }
+});
+
+it('moves focus to the article when it opens', () => {
+  render(<GuideHub article="scope" onOpen={vi.fn()} onClose={vi.fn()} />);
+  expect(document.activeElement?.textContent).toBe('分析范围与期间');
+});
+
+it('says why it cannot take you anywhere with no editable task open', () => {
+  render(<GuideHub article="month-close" canOpen={false} onOpen={vi.fn()} onClose={vi.fn()} />);
+  expect((screen.getByRole('button', { name: /打开月结页/ }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('先打开一个可编辑的任务，才能跳到这里。')).toBeTruthy();
+});
+
+it('uses the quality words the 文稿质量检查 panel shows', () => {
+  render(<GuideHub article="statuses" onOpen={vi.fn()} onClose={vi.fn()} />);
+  const legend = document.querySelector('.fnd-guide-legend')!;
+  expect(legend.textContent).toBe('计算成功≠不等于引用值一致≠不等于源数据核验通过≠不等于已专业复核');
 });

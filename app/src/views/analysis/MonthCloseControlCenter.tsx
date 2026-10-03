@@ -57,7 +57,8 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
       {/* Only the headline is announced; the button and the loading line are not news. */}
       <span className="sr-only" role="status">{status?.headline.text ?? ''}</span>
       <div className={`analysis-close-headline analysis-close-headline--${status?.headline.state ?? 'loading'}`}>
-        <h3>{status ? status.headline.text : loading ? '正在检查月结状态…' : '还没读到月结状态'} <HelpLink article="month-close" label="月结怎么走一遍" /></h3>
+        <span className="fnd-with-help"><h3>{status ? status.headline.text : loading ? '正在检查月结状态…' : '还没读到月结状态'}</h3>
+          <HelpLink article="month-close" label="月结怎么走一遍" /></span>
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>
