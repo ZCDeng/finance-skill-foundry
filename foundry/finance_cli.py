@@ -67,6 +67,7 @@ LIST_COMMANDS = {
     "finance-source-list",
     "finance-completion-recoveries",
     "finance-readiness",
+    "finance-close-status",
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file"}
@@ -177,6 +178,8 @@ def dispatch(args):
         result = service.list_finance_context()
     elif args.cmd == "finance-readiness":
         result = service.finance_readiness({})
+    elif args.cmd == "finance-close-status":
+        result = service.finance_close_status({})
     elif args.cmd == "finance-source-list":
         batches = SourceRefreshService(context.task).batches()
         if context.session_id:

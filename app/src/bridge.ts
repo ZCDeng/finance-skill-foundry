@@ -562,6 +562,7 @@ export type FinanceCommand =
   | 'finance-controls-retire'
   | 'finance-controls-run'
   | 'finance-controls-list'
+  | 'finance-close-status'
   | 'finance-control-settings-save'
   | 'finance-control-disposition-save'
   | 'finance-control-disposition-review'
