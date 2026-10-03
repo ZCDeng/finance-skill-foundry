@@ -441,7 +441,7 @@ def test_background_dates_and_external_references_are_validated(service):
     assert saved["external_reference"]["source_date"] == "2026-09-01"
 
 
-def test_background_list_defaults_to_current_period_and_handles_null_source_parent(service):
+def test_background_list_needs_a_period_and_handles_null_source_parent(service):
     store, _context = service
     current = store.finance_background_save(
         {
@@ -470,10 +470,17 @@ def test_background_list_defaults_to_current_period_and_handles_null_source_pare
         }
     )
 
-    listed = store.finance_background_list(
+    undated = store.finance_background_list(
         {"scope": {"ledger": "L1", "organization": "O1"}}
     )
+    assert undated["business_contexts"] == []
+    assert undated["needs_period"] is True
+
+    listed = store.finance_background_list(
+        {"scope": {"ledger": "L1", "organization": "O1", "period": "2026-09"}}
+    )
     assert [row["id"] for row in listed["business_contexts"]] == [current["id"]]
+    assert "needs_period" not in listed
 
     child = store.finance_background_save(
         {

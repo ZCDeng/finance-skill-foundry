@@ -30,6 +30,13 @@ describe('friendlyError', () => {
     expect(withoutIdentifiers(`sha256:${'b'.repeat(64)}`)).toBe('（摘要已省略）');
   });
 
+  it('explains a damaged workbook in words instead of the parser message', () => {
+    const text = friendlyError('cannot parse .xlsx source: File is not a zip file');
+    expect(text.startsWith('这份 Excel 文件读不出来')).toBe(true);
+    expect(text).toContain('（系统提示：cannot parse .xlsx source: File is not a zip file）');
+    expect(friendlyError('cannot parse .csv source: line contains NUL')).toContain('这份 CSV 文件读不出来');
+  });
+
   it('reads Error and non-Error failures alike', () => {
     expect(errorText(new Error('workbook output already exists'))).toContain('已经存在');
     expect(errorText('')).toContain('请重试一次');

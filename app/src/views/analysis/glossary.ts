@@ -110,6 +110,10 @@ const RULES: Rule[] = [
   [/adjustment_ids apply only to run_metric\(kind=management_pnl\)/i, '考核调整只作用于损益表，请先计算损益表。'],
   [/adjustment bindings (must match the finance context|are required)/i, '考核调整引用的资料与当前范围不一致，请在当前范围下重新登记调整。'],
   // Data files.
+  [/cannot parse \.?(xlsx|xlsm|xls|csv|json|xml)\b[^:]* source/i, (match) => {
+    const kind = /^xls/i.test(match[1]) ? 'Excel 文件' : `${match[1].toUpperCase()} 文件`;
+    return `这份 ${kind}读不出来，可能已损坏、被加密或扩展名与实际格式不符。请在原软件里打开确认后另存一份，再重新添加。`;
+  }],
   [/dataset source workbook integrity check failed/i, '这份 Excel 与登记时的内容不一致，请重新添加这份资料。'],
   [/integrity check failed/i, '资料内容与登记时不一致，请重新添加这份资料后再计算。'],
   [/outside (this session context|run bindings|the run)|is outside/i, '引用的资料不属于当前任务或这次计算，请重新选择资料。'],
