@@ -14,10 +14,16 @@ permissions:
   contents: read
 
 jobs:
-  python:
-    name: Python tests
+  test:
+    # One job on purpose: pytest drives vitest and both tsc projects through
+    # tests/test_app.py, and parity tests such as test_report_visuals need
+    # Python and app/node_modules on the same machine.
+    name: Tests (pytest, vitest, typecheck, build)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      # Nothing here launches Electron itself.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -26,41 +32,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        run: uv sync --all-extras
-      # The vitest and tsc wrappers in tests/test_app.py skip without
-      # app/node_modules; the app job runs those suites directly.
-      - name: pytest
-        run: uv run pytest -q
-
-  app:
-    name: Desktop app (typecheck, vitest, build)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: app
-    env:
-      # Tests and the renderer build never launch Electron itself.
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
-      - name: Install
+
+      - name: Install Python dependencies
+        run: uv sync --all-extras
+      - name: Install app dependencies
+        working-directory: app
         run: npm ci
-      # The client adapter and embedded-client suites read the pinned runtime
-      # staged into extra/dsh, which is not in version control.
+
+      # The pinned runtime (extra/dsh) is not in version control; the client
+      # adapter and embedded-client suites read it. Its npm install needs more
+      # than node's default 2 GB heap, so it is cached on the pins.
+      - name: Restore staged harness
+        id: harness-cache
+        uses: actions/cache@v4
+        with:
+          path: app/extra/dsh
+          key: harness-${{ runner.os }}-${{ hashFiles('dsh-plugin/package.json') }}
       - name: Stage pinned harness
+        if: steps.harness-cache.outputs.cache-hit != 'true'
+        working-directory: app
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm run harness
-      - name: Typecheck
-        run: |
-          npx tsc -p tsconfig.json --noEmit
-          npx tsc -p tsconfig.electron.json --noEmit
-      - name: vitest
-        run: npx vitest run --maxWorkers=2
+      - name: Refresh staged bundle from this checkout
+        if: steps.harness-cache.outputs.cache-hit == 'true'
+        working-directory: app
+        run: node scripts/fetch-harness.mjs --refresh-local
+
+      - name: pytest (includes vitest and typecheck)
+        run: uv run pytest -q
       - name: Build renderer
+        working-directory: app
         run: npx vite build
