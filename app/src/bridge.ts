@@ -190,6 +190,8 @@ export interface Bridge {
   taskTrash?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
   taskRestore?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
+  /** The synthetic practice task, created once and reused. */
+  taskSample?(): Promise<Answer<{ id: string; created: boolean }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

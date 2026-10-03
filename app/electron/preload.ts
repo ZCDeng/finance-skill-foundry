@@ -49,6 +49,7 @@ const api = {
   taskArchive: (task: string) => ipcRenderer.invoke('foundry:task-archive', task),
   taskTrash: (task: string) => ipcRenderer.invoke('foundry:task-trash', task),
   taskRestore: (task: string) => ipcRenderer.invoke('foundry:task-restore', task),
+  taskSample: () => ipcRenderer.invoke('foundry:task-sample'),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),
   harnessStatus: () => ipcRenderer.invoke('harness:status'),
