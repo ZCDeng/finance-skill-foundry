@@ -117,8 +117,10 @@ def test_only_the_manager_confirms_or_retires_and_a_repeat_save_returns_the_live
     close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[3525, 5355, 6930, 7020, 5400, 5550], total=22125), name="月结")
     control = {"kind": "subtotal", "label": "坏账分项", "left": _side(close, "08·AR", "D5:D10"), "right": _side(close, "08·AR", "D11")}
     first = assistant.finance_controls_save({"control": control})["controls"][0]
-    again = assistant.finance_controls_save({"control": {**control, "label": "换个名字"}})["controls"][0]
-    assert again["id"] == first["id"]
+    assert assistant.finance_controls_save({"control": control})["controls"][0]["id"] == first["id"]
+    renamed = assistant.finance_controls_save({"control": {**control, "label": "坏账分项合计"}})["controls"][0]
+    assert renamed["parent_id"] == first["id"]
+    first = renamed
     with pytest.raises(FoundryError, match="only the manager"):
         assistant.finance_controls_confirm({"id": first["id"]})
     with pytest.raises(FoundryError, match="only the manager"):
@@ -188,3 +190,100 @@ def test_a_session_narrowed_to_one_snapshot_cannot_declare_a_control_on_another(
     with pytest.raises(FoundryError, match="outside this session"):
         narrowed.finance_controls_save({"control": {"label": "x", "left": _side(close, "08·AR", "B11"), "right": _side(ledger, "11·合同台账", "B7")}})
     assert all(row["control"]["left"]["dataset_id"] == close["id"] for row in narrowed.finance_controls_propose({})["suggestions"])
+
+
+def test_a_large_gap_over_many_whole_numbers_is_a_break_and_never_rounding(tmp_path):
+    """Review: the rounding allowance grew with the row count and swallowed a 300 万 gap over 600 integer rows."""
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    ledger = analysis.add_dataset(_ledger(tmp_path / "ledger.xlsx", [10000.0] * 600), name="台账")
+    close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    # 600 × 10,000 元 = 600 万元 against 150,000 万元 at B11: an enormous break, scaled 元 → 万元.
+    saved = manager.finance_controls_save({"confirm": True, "control": {
+        "label": "元换万元", "left": _side(ledger, "11·合同台账", "B5:B604", scale="0.0001"), "right": _side(close, "08·AR", "B11")}})["controls"][0]
+    run = assistant.finance_controls_run({"ids": [saved["id"]]})
+    (result,) = run["results"]
+    assert result["status"] == "break" and result["within_rounding"] is False
+    assert run["summary"]["break"] == 1
+
+
+def test_a_gap_display_rounding_could_explain_is_still_counted_as_a_break(tmp_path):
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    ledger = analysis.add_dataset(_ledger(tmp_path / "ledger.xlsx", [0.3333, 0.3333, 0.3333]), name="台账")
+    path = tmp_path / "total.xlsx"
+    book = Workbook(); book.active.title = "S"; book.active.append(["合计"]); book.active.append([1.0]); book.save(path)
+    total = analysis.add_dataset(path, name="合计")
+    saved = manager.finance_controls_save({"confirm": True, "control": {
+        "label": "三分之一", "left": _side(ledger, "11·合同台账", "B5:B7"), "right": _side(total, "S", "A2")}})["controls"][0]
+    run = assistant.finance_controls_run({"ids": [saved["id"]]})
+    assert run["results"][0]["within_rounding"] is True
+    assert run["summary"]["break"] == 1 and run["summary"]["break_within_rounding"] == 1
+
+
+def test_a_number_typed_as_text_inside_a_range_is_an_error_not_a_skipped_blank(tmp_path):
+    _task_obj, analysis, assistant, _manager = _task(tmp_path)
+    path = tmp_path / "text.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "S"
+    for row in (["项目", "金额"], ["甲", 100], ["乙", "1,200"], ["丙", 50], ["合计", 150]):
+        sheet.append(row)
+    book.save(path)
+    dataset = analysis.add_dataset(path, name="文字数字")
+    saved = assistant.finance_controls_save({"control": {"kind": "subtotal", "label": "x", "left": _side(dataset, "S", "B2:B4"), "right": _side(dataset, "S", "B5")}})["controls"][0]
+    (result,) = assistant.finance_controls_run({"ids": [saved["id"]]})["results"]
+    assert result["status"] == "error" and "文字" in result["reason"]
+    assert result["left"]["text_cells"] == 1
+
+
+def test_uploading_a_corrected_pack_again_makes_controls_on_the_old_one_stale(tmp_path):
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    old = analysis.add_dataset(_ar_pack(tmp_path / "v1.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    suggestions = [row["control"] for row in assistant.finance_controls_propose({})["suggestions"]]
+    manager.finance_controls_save({"confirm": True, "origin": "suggested", "controls": suggestions})
+    assert assistant.finance_controls_run({})["summary"]["stale"] == 0
+    new = analysis.add_dataset(_ar_pack(tmp_path / "v2.xlsx", provisions=[3525, 5355, 6930, 7020, 5400, 5550], total=22125), name="月结")
+    summary = assistant.finance_controls_run({})["summary"]
+    assert summary["pass"] == 0 and summary["stale"] == len(suggestions)
+    assert {row["control"]["left"]["dataset_id"] for row in assistant.finance_controls_propose({})["suggestions"]} == {new["id"]}
+    assert old["id"] != new["id"]
+
+
+def test_a_retired_check_saved_again_revives_its_own_lineage_and_never_runs_twice(tmp_path):
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[3525, 5355, 6930, 7020, 5400, 5550], total=22125), name="月结")
+    control = {"kind": "subtotal", "label": "坏账分项", "left": _side(close, "08·AR", "D5:D10"), "right": _side(close, "08·AR", "D11")}
+    confirmed = manager.finance_controls_save({"control": control, "confirm": True})["controls"][0]
+    retired = manager.finance_controls_retire({"id": confirmed["id"], "reason": "暂不检查"})
+    revived = assistant.finance_controls_save({"control": {**control, "tolerance": "1000000"}})["controls"][0]
+    assert revived["parent_id"] == retired["id"] and revived["state"] == "proposed"
+    manager.finance_controls_confirm({"id": revived["id"]})
+    assert len(assistant.finance_controls_list({})["controls"]) == 1
+
+
+def test_the_assistant_cannot_quietly_change_a_confirmed_control(tmp_path):
+    _task_obj, analysis, assistant, manager = _task(tmp_path)
+    close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[3525, 5355, 6930, 7020, 5400, 5550], total=22125), name="月结")
+    control = {"kind": "subtotal", "label": "坏账分项", "left": _side(close, "08·AR", "D5:D10"), "right": _side(close, "08·AR", "D11")}
+    manager.finance_controls_save({"control": control, "confirm": True})
+    with pytest.raises(FoundryError, match="only be changed by the manager"):
+        assistant.finance_controls_save({"control": {**control, "tolerance": "1000000"}})
+    widened = manager.finance_controls_save({"control": {**control, "tolerance": "10"}})["controls"][0]
+    assert widened["state"] == "confirmed" and widened["control"]["tolerance"] == "10"
+
+
+def test_breakdown_rows_and_provision_notes_do_not_become_totals(tmp_path):
+    _task_obj, analysis, assistant, _manager = _task(tmp_path)
+    path = tmp_path / "breakdown.xlsx"
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "S"
+    for row in (["项目", "金额"], ["营业收入", 100], ["其中：物业费", 80], ["其中：增值服务", 20], ["营业成本", 60], ["合计", 160],
+                [], ["项目", "金额"], ["甲", 1], ["乙", 2], ["按组合计提", 3], ["丙", 4], ["合计", 10]):
+        sheet.append(row)
+    book.save(path)
+    analysis.add_dataset(path, name="分解")
+    suggestions = assistant.finance_controls_propose({})["suggestions"]
+    ranges = {row["control"]["left"]["range"] for row in suggestions}
+    assert "B2:B5" not in ranges  # 其中 rows would count 营业收入 twice
+    assert ranges == {"B9:B12"}
+    assert all(row["preview"]["status"] == "pass" for row in suggestions)

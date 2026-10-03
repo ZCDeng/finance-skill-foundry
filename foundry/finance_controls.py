@@ -113,22 +113,35 @@ def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | No
         except FoundryError as exc:
             return _result(control, ERROR, reason=str(exc))
     left, right = sides["left"], sides["right"]
+    for name, side in sides.items():
+        if side["text_cells"]:
+            return _result(control, ERROR, reason=f"{side['sheet']}!{side['range']} 里有 {side['text_cells']} 个文字单元格，不能当作空白跳过",
+                           left=_public_side(left), right=_public_side(right))
     difference = left["value"] - right["value"]
     tolerance = Decimal(control["tolerance"])
-    status = PASS if abs(difference) <= tolerance else BREAK
-    places = max(left["places"], right["places"])
-    # Each displayed cell can be off by half its last digit; a gap inside that is rounding, not a break in the books.
-    rounding = Decimal(5) * Decimal(10) ** (-places - 1) * (left["cells"] + right["cells"])
-    # A stored double carries noise past its 15th significant digit.
-    rounding = max(rounding, Decimal("1e-12") * max(abs(left["value"]), abs(right["value"])))
+    # A stored double carries noise past its 15th significant digit; that is not a difference at all.
+    noise = Decimal("1e-12") * max(abs(left["value"]), abs(right["value"]))
+    status = PASS if abs(difference) <= max(tolerance, noise) else BREAK
     return _result(
         control,
         status,
         left=_public_side(left),
         right=_public_side(right),
         difference=_format(difference),
-        within_rounding=status == BREAK and abs(difference) <= rounding,
+        # A hint for the reader, never a pass: shown figures rounded to their last digit could
+        # account for a gap this small. Whole numbers carry no such rounding.
+        within_rounding=status == BREAK and abs(difference) <= _display_rounding(left) + _display_rounding(right),
     )
+
+
+def _display_rounding(side: dict[str, Any]) -> Decimal:
+    if side["places"] <= 0:
+        return Decimal(0)
+    half_unit = Decimal(5) * Decimal(10) ** (-side["places"] - 1) * Decimal(side["scale"])
+    # A few cells can all round the same way; across many, independent roundings grow with
+    # the square root of the count (three standard deviations), not with the count.
+    cells = Decimal(side["cells"])
+    return half_unit * min(cells, max(Decimal(1), 3 * cells.sqrt()))
 
 
 def suggest_controls(analysis: Any, dataset: dict[str, Any], data: bytes) -> list[dict[str, Any]]:
@@ -169,6 +182,9 @@ def _sheet_suggestions(dataset: dict[str, Any], sheet: str, rows: list[list[Any]
         details = rows[start:index]
         if len(details) < 2:
             continue
+        # 「其中：」 rows break a parent down; summing them with it counts the parent twice.
+        if any(_leading_text(item).startswith(("其中", "含：", "包括")) for item in details):
+            continue
         header = rows[start - 1] if start - 1 >= 0 else []
         for col, total in enumerate(row):
             if not _is_number(total):
@@ -199,15 +215,18 @@ class _Stale(FoundryError):
 
 
 def _sum_side(analysis: Any, side: dict[str, Any], cache: dict) -> dict[str, Any]:
-    values = _numerics(analysis, side, cache)
+    values, texts = _numerics(analysis, side, cache)
     min_col, min_row, max_col, max_row = range_boundaries(side["range"])
     total = Decimal(0)
     numeric = 0
+    text_cells = 0
     places = 0
     for row in range(min_row, max_row + 1):
         for col in range(min_col, max_col + 1):
-            value = values.get(f"{get_column_letter(col)}{row}")
+            coordinate = f"{get_column_letter(col)}{row}"
+            value = values.get(coordinate)
             if value is None:
+                text_cells += coordinate in texts
                 continue
             total += value
             numeric += 1
@@ -216,19 +235,21 @@ def _sum_side(analysis: Any, side: dict[str, Any], cache: dict) -> dict[str, Any
     if not numeric:
         raise FoundryError(f"{side['sheet']}!{side['range']} 没有数值单元格")
     scale = Decimal(side["scale"])
-    return {**side, "value": total * scale, "raw": total, "cells": numeric, "blank_cells": cells - numeric, "places": places}
+    return {**side, "value": total * scale, "raw": total, "cells": numeric, "text_cells": text_cells,
+            "blank_cells": cells - numeric - text_cells, "places": places}
 
 
 def _numerics(analysis: Any, side: dict[str, Any], cache: dict) -> dict[str, Decimal]:
     if "__published" not in cache:
-        cache["__published"] = {row["id"] for row in analysis.state().get("datasets") or []}
-        cache["__superseded"] = superseded_snapshots(analysis.task)
+        rows = analysis.state().get("datasets") or []
+        cache["__published"] = {row["id"] for row in rows}
+        cache["__superseded"] = superseded_snapshots(analysis.task, rows)
         cache["__datasets"] = {}
     dataset_id = side["dataset_id"]
     if dataset_id not in cache["__published"]:
         raise _Stale("资料已不在任务里")
     if dataset_id in cache["__superseded"]:
-        raise _Stale("资料已刷新为新快照")
+        raise _Stale("资料已有更新的版本")
     if dataset_id not in cache["__datasets"]:
         try:
             cache["__datasets"][dataset_id] = analysis.read_dataset(dataset_id)
@@ -242,25 +263,74 @@ def _numerics(analysis: Any, side: dict[str, Any], cache: dict) -> dict[str, Dec
         return cache[key]
     if not str(dataset.get("source_file") or "").endswith(".xlsx"):
         raise FoundryError("勾稽控制只读 Excel 工作簿资料")
-    folder = analysis._inside(analysis.root / "datasets" / dataset_id)
-    data = analysis._inside(folder / dataset["source_file"]).read_bytes()
+    data = snapshot_bytes(analysis, dataset)
     try:
         values = read_exact_numerics(data, side["sheet"], archived_numeric_parser(dataset, data))
+        texts = _text_cells(data, side["sheet"])
     except (FoundryError, KeyError, ValueError, zipfile.BadZipFile) as exc:
         raise FoundryError(f"读不到工作表 {side['sheet']}") from exc
-    cache[key] = values
-    return values
+    cache[key] = (values, texts)
+    return values, texts
 
 
-def superseded_snapshots(task: Any) -> set[str]:
-    """Snapshots a source refresh has since replaced with a newer one."""
+def snapshot_bytes(analysis: Any, dataset: dict[str, Any]) -> bytes:
+    """The archived bytes, checked against the hash they were filed under at the moment they are used."""
+    from foundry.analysis import _hash_bytes
+
+    folder = analysis._inside(analysis.root / "datasets" / dataset["id"])
+    data = analysis._inside(folder / dataset["source_file"]).read_bytes()
+    if _hash_bytes(data) != dataset["source_hash"]:
+        raise _Stale("资料快照完整性校验失败")
+    return data
+
+
+def _text_cells(data: bytes, sheet: str) -> set[str]:
+    """Coordinates that hold text. A 「1,200」 typed as text is not a blank; skipping it would pass a short total."""
+    book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        if sheet not in book.sheetnames:
+            raise FoundryError(f"no worksheet: {sheet}")
+        found = set()
+        for row in book[sheet].iter_rows():
+            for cell in row:
+                value = getattr(cell, "value", None)
+                if isinstance(value, str) and value.strip() and getattr(cell, "coordinate", None):
+                    found.add(cell.coordinate)
+        return found
+    finally:
+        book.close()
+
+
+def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None) -> set[str]:
+    """Snapshots a newer one has replaced: by a published source refresh, or by a later upload under the same name.
+
+    A month pack is updated by adding the corrected file again. The old snapshot stays in
+    the task for runs that read it, but a control on it no longer speaks for the pack.
+    """
+    from foundry.analysis import AnalysisStore
     from foundry.source_refresh import SourceRefreshService
 
-    return {
+    replaced = {
         row["prior_snapshot_id"]
         for row in SourceRefreshService(task).batches()
-        if row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]
+        if row.get("publication_status") == "published"
+        and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]
     }
+    rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        held = latest.get(name)
+        if held is not None and (held.get("seq", 0), held["created_at"]) < (row.get("seq", 0), row["created_at"]):
+            replaced.add(held["id"])
+            latest[name] = row
+        elif held is not None:
+            replaced.add(row["id"])
+        else:
+            latest[name] = row
+    return replaced
 
 
 def _result(control: dict[str, Any], status: str, **fields: Any) -> dict[str, Any]:
@@ -280,6 +350,7 @@ def _public_side(side: dict[str, Any]) -> dict[str, Any]:
         "scale": side["scale"],
         "value": _format(side["value"]),
         "cells": side["cells"],
+        "text_cells": side["text_cells"],
         "blank_cells": side["blank_cells"],
     }
 
@@ -324,6 +395,8 @@ def _leading_text(row: list[Any]) -> str:
 def _is_total(label: str) -> bool:
     if not label or len(label) > 24 or "校验" in label or label.startswith(("注", "说明", "备注")):
         return False
+    if "计提" in label and not label.startswith(TOTAL_LABELS):
+        return False  # 「按组合计提」 is not a total
     return label.startswith(TOTAL_LABELS) or "合计" in label or "总计" in label
 
 

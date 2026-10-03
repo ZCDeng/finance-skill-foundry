@@ -308,6 +308,8 @@ window.__ModuleLoader__.load({
       'run-metric': 'calc',
       'explain-variance': 'calc',
       'finance-scenario-run': 'calc',
+      'finance-controls-run': 'calc',
+      'finance_controls_run': 'calc',
       'run_metric': 'calc',
       'explain_variance': 'calc',
       'finance_scenario_run': 'calc',

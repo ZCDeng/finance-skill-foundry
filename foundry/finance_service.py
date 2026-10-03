@@ -63,10 +63,9 @@ COLLECTIONS = {
 
 def _control_summary(results, total=None):
     confirmed = [row for row in results if row.get("state") == "confirmed"]
-    counts = {status: sum(1 for row in confirmed if row.get("status") == status) for status in ("pass", "stale", "error")}
-    # A gap inside display rounding is reported apart from a break in the books.
-    counts["break"] = sum(1 for row in confirmed if row.get("status") == "break" and not row.get("within_rounding"))
-    counts["rounding"] = sum(1 for row in confirmed if row.get("status") == "break" and row.get("within_rounding"))
+    counts = {status: sum(1 for row in confirmed if row.get("status") == status) for status in ("pass", "break", "stale", "error")}
+    # Breaks a display rounding could explain are still breaks; this only says how many of them there are.
+    counts["break_within_rounding"] = sum(1 for row in confirmed if row.get("status") == "break" and row.get("within_rounding"))
     return {
         "controls": len(results) if total is None else total,
         "confirmed": len(confirmed),
@@ -1361,10 +1360,15 @@ class FinanceStore:
 
     def _workbook_datasets(self, dataset_ids=None):
         """One snapshot per workbook: a table derived from a sheet shares its workbook's bytes, so it adds nothing."""
+        from foundry.finance_controls import superseded_snapshots
         from foundry.finance_readiness import _is_workbook_shell
 
+        rows = self.analysis.state()["datasets"]
+        replaced = superseded_snapshots(self.task, rows)
         by_bytes = {}
-        for dataset in self.analysis.state()["datasets"]:
+        for dataset in rows:
+            if dataset["id"] in replaced:
+                continue
             if dataset_ids is not None and dataset["id"] not in dataset_ids:
                 continue
             if self.allowed is not None and dataset["id"] not in self.allowed:
@@ -1378,7 +1382,7 @@ class FinanceStore:
 
     def finance_controls_propose(self, spec):
         """Suggested subtotal controls with a preview result each. Nothing is saved."""
-        from foundry.finance_controls import clean_control, control_key, evaluate_control, suggest_controls
+        from foundry.finance_controls import clean_control, control_key, evaluate_control, snapshot_bytes, suggest_controls
 
         spec = spec if isinstance(spec, dict) else {}
         wanted = spec.get("dataset_ids")
@@ -1388,7 +1392,7 @@ class FinanceStore:
         cache: dict = {}
         suggestions = []
         for dataset in self._workbook_datasets(set(wanted) if wanted is not None else None):
-            data = (self.analysis._inside(self.analysis.root / "datasets" / dataset["id"]) / dataset["source_file"]).read_bytes()
+            data = snapshot_bytes(self.analysis, dataset)
             for raw in suggest_controls(self.analysis, dataset, data):
                 control = clean_control(raw)
                 suggestions.append({
@@ -1413,7 +1417,9 @@ class FinanceStore:
         confirm = spec.get("confirm") is True
         if confirm:
             self._manager_only("confirm a control")
-        live = {control_key(row["control"]): row for row in self._control_heads()}
+        # Every lineage, retired ones too: a check the manager retired is revived in its own
+        # lineage, never started again beside it.
+        lineages = {control_key(row["control"]): row for row in self._control_heads(include_retired=True)}
         published = {row["id"] for row in self.analysis.state()["datasets"]}
         saved = []
         for item in items:
@@ -1423,20 +1429,28 @@ class FinanceStore:
             for dataset_id in ids:
                 if dataset_id not in published:
                     raise FoundryError("control refers to a snapshot that is not in this task")
-            existing = live.get(control_key(control))
-            if existing and not (confirm and existing.get("state") != "confirmed"):
+            existing = lineages.get(control_key(control))
+            state = "confirmed" if confirm else "proposed"
+            if existing and existing.get("state") != "retired" and existing["control"] == control and (
+                not confirm or existing.get("state") == "confirmed"
+            ):
                 saved.append(existing)
                 continue
+            if existing and existing.get("state") == "confirmed" and not confirm:
+                # Re-saving a confirmed check would take it out of the close until someone noticed.
+                if self.actor != MANAGER:
+                    raise FoundryError("a confirmed control can only be changed by the manager")
+                state = "confirmed"
             record = self._write(
                 "controls",
                 control=control,
-                origin=origin,
-                state="confirmed" if confirm else "proposed",
+                origin=origin if not existing else existing.get("origin", origin),
+                state=state,
                 bindings={f"source{index}": dataset_id for index, dataset_id in enumerate(ids)},
                 saved_by=self.actor,
                 **({"parent_id": existing["id"]} if existing else {}),
             )
-            live[control_key(control)] = record
+            lineages[control_key(control)] = record
             saved.append(record)
         return {"schema_version": 1, "controls": saved}
 
