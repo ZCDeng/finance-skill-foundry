@@ -19,7 +19,7 @@ type Decision = Disposition['decision'];
  * the manager accepts it with a reason, or it stops being a difference. Waiting on whoever
  * compiled the books, or on a corrected file, still holds it.
  */
-export function ControlsPanel({ taskId, refreshKey, busy }: { taskId: string; refreshKey?: unknown; busy?: boolean }) {
+export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId: string; refreshKey?: unknown; busy?: boolean; onChanged?(): void }) {
   const [list, setList] = useState<ControlList | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
   const [picked, setPicked] = useState<Record<number, boolean>>({});
@@ -44,6 +44,7 @@ export function ControlsPanel({ taskId, refreshKey, busy }: { taskId: string; re
       const done = await work();
       if (done) setMessage(done);
       await load();
+      onChanged?.();
     } catch (failure) {
       setError(errorText(failure));
     } finally {

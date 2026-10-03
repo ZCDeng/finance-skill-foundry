@@ -1626,6 +1626,45 @@ class FinanceStore:
         fields = {key: value for key, value in disposition.items() if key not in {"id", "task_id", "schema_version", "created_at", "seq", "domain", "parent_id"} and not key.startswith("_")}
         return self._write("control_dispositions", **{**fields, "parent_id": disposition["id"], "reviewer": reviewer, "reviewed_at": now_iso()})
 
+    def finance_close_status(self, spec=None):
+        """The month-close control center's six blocks and its one headline (finance_close_status)."""
+        from foundry.finance_close_status import close_status
+        from foundry.finance_controls import superseded_snapshots
+        from foundry.finance_requirements import latest_requirements
+        from foundry.structure_records import PENDING_ACKNOWLEDGEMENT, PENDING_CONFIRMATION
+
+        state = self.analysis.state()
+        rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
+        replaced = superseded_snapshots(self.task, state["datasets"])
+        current = [row for row in rows if row["id"] not in replaced]
+        from foundry.finance_readiness import _is_workbook_shell
+        from foundry.structure_records import NO_TABLE, WITHDRAWN
+
+        pending = []
+        for row in current:
+            structure = self.dataset_structure_state(row["id"])
+            # The readiness report's rules: a workbook nothing was derived from, or a withdrawn table, is not confirmed.
+            if structure in {PENDING_CONFIRMATION, PENDING_ACKNOWLEDGEMENT, WITHDRAWN} or (structure == NO_TABLE and _is_workbook_shell(row)):
+                pending.append(row.get("name") or "资料")
+        requirements = latest_requirements(self.analysis)
+        drafts = [row for row in state.get("drafts") or [] if row.get("publication_status") != "archived"]
+        runs = [row for row in state.get("runs") or [] if self.allowed is None or set((row.get("bindings") or {}).values()) <= self.allowed]
+        readiness = self.finance_readiness({})
+        organizations = [row for row in readiness.get("datasets") or [] if (row.get("scope") or {}).get("organization")]
+        return close_status(
+            archived=self.task.lifecycle_status() in {"archived", "trashed"},
+            replaced=replaced,
+            organization_required=bool(organizations),
+            scope=(requirements or {}).get("scope"),
+            scope_seq=(requirements or {}).get("seq"),
+            datasets=current,
+            superseded=len(rows) - len(current),
+            pending_structures=pending,
+            controls=self.finance_controls_list({})["controls"],
+            runs=runs,
+            draft=max(drafts, key=lambda row: row.get("seq", 0)) if drafts else None,
+        )
+
     def finance_control_confirmation_sheet(self, spec):
         """The open and out-for-confirmation differences as a sheet to send."""
         from foundry.finance_controls import confirmation_sheet

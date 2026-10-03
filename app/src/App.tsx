@@ -88,10 +88,10 @@ export function App() {
   const [conversationFocus, setConversationFocus] = useState(0);
   const [conversationProblem, setConversationProblem] = useState<string | null>(null);
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
-  const [sections, setSections] = useState<Record<string, 'materials' | 'results' | 'drafts' | 'methods'>>({});
+  const [sections, setSections] = useState<Record<string, 'materials' | 'results' | 'drafts' | 'close' | 'methods'>>({});
   const analysisSection = sections[current ?? ''] ?? 'results';
   const [draftRequest, setDraftRequest] = useState({ count: 0, taskId: '', draftId: '' });
-  const setAnalysisSection = useCallback((value: 'materials' | 'results' | 'drafts' | 'methods') => {
+  const setAnalysisSection = useCallback((value: 'materials' | 'results' | 'drafts' | 'close' | 'methods') => {
     setSections((held) => ({ ...held, [current ?? '']: value }));
   }, [current]);
   const openRef = useRef(open);

@@ -10,7 +10,7 @@ import { ScopePanel } from './analysis/ScopePanel.js';
 import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
-import { ControlsPanel } from './analysis/ControlsPanel.js';
+import { MonthCloseControlCenter, type CloseTarget } from './analysis/MonthCloseControlCenter.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { SearchableSelect } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
@@ -26,9 +26,9 @@ import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
 import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
 
-type Tab = 'datasets' | 'results' | 'drafts' | 'methods';
+type Tab = 'datasets' | 'results' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
-export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'methods';
+export type AnalysisSection = 'materials' | 'results' | 'drafts' | 'close' | 'methods';
 export type AnalysisChatOptions = { submit?: boolean; requestId?: string; targetTaskId?: string };
 type Props = {
   task: TaskRow | null;
@@ -44,7 +44,7 @@ type Props = {
   /** 成果库 asks for one draft version of a task; a new count is a new request. */
   draftRequest?: { count: number; taskId: string; draftId: string };
 };
-const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['methods', '方法']];
+const TABS: [Tab, string][] = [['datasets', '资料'], ['results', '分析结果'], ['drafts', '文稿'], ['close', '月结'], ['methods', '方法']];
 const EXAMPLES = ['本月利润为什么没有达到预算？', '哪些客户需要优先跟进回款？', '回款晚两周，现金余额会怎样？'];
 
 /** All figures are rendered as received. In particular, Decimal strings never pass through Number. */
@@ -314,7 +314,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       onRefresh={() => refresh(task.id)}>{(close) => analysisDefinition(close)}</FinanceWorkbench>
     : null;
   const counts: Record<Tab, number> = { datasets: view?.datasets.length ?? 0, results: view?.runs.filter((run) => runPresentationRole(run) === 'business').length ?? 0,
-    drafts: view?.drafts.length ?? 0, methods: view?.methods.length ?? 0 };
+    drafts: view?.drafts.length ?? 0, close: 0, methods: view?.methods.length ?? 0 };
   async function saveDraft(taskId: string, spec: Record<string, unknown>): Promise<AnalysisDraft> {
     const api = bridge();
     const recoveryRef = spec.recovery_ref as { operation_id: string; revision: number } | undefined;
@@ -376,7 +376,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
                 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
               chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
-            }}>{title}<span>{counts[id]}</span></TabsTrigger>
+            }}>{title}{id === 'close' ? null : <span>{counts[id]}</span>}</TabsTrigger>
         ))}
       </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => void perform((taskId) => refresh(taskId, { scope: true }))}>
         <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
@@ -391,7 +391,6 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
-          {view.datasets.length > 0 && <ControlsPanel taskId={task.id} refreshKey={view.datasets} busy={busy} />}
           <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
@@ -454,6 +453,13 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           </>}
           {analysis && financeWorkbench}
         </>}
+        {view && tab === 'close' && <MonthCloseControlCenter taskId={task.id} refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}`} busy={busy}
+          onOpen={(target: CloseTarget) => {
+            chooseTab(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : 'datasets');
+            // The scope card and the structure panel sit on the 资料 tab; bring the one asked for into view.
+            const anchor = { scope: '.analysis-scope-card', structure: '.analysis-structure-panel', datasets: '.analysis-source-list' }[target as 'scope' | 'structure' | 'datasets'];
+            if (anchor) requestAnimationFrame(() => document.querySelector(anchor)?.scrollIntoView?.({ block: 'start' }));
+          }} />}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}
             analysisScope={analysisScope}
