@@ -111,6 +111,8 @@
 .analysis-result .analysis-section-heading { align-items: flex-start; }
 /* Conclusion first: the question that was asked reads as the result's label, the answer below it is the largest line. */
 .analysis-result .analysis-section-heading h3 { font-size: var(--fnd-size-h3); line-height: 24px; max-width: 42em; }
+/* With no conclusion to lead, the question stays the result's heading. */
+.analysis-result:not(:has(.analysis-headline)) .analysis-section-heading h3 { font-size: 20px; line-height: 28px; }
 .analysis-result .analysis-section-heading .analysis-note { margin-top: 6px; }
 .analysis-output-list { display: flex; flex-direction: column; gap: 10px; }
 .analysis-result-area[data-evidence-open='true'] > .analysis-result { margin-right: min(360px, 48%); }
