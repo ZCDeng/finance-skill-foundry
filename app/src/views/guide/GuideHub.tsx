@@ -32,8 +32,10 @@ export function StatusLegend() {
  * It sits where the conversation sits, so the workspace it explains stays visible beside
  * it. Opening a place from an article moves the workspace there and never runs anything.
  */
-export function GuideHub({ article: requested, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData }: {
+export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData }: {
   article?: string;
+  /** Bumped on every request, so asking for the article already shown still moves back to it. */
+  request?: number;
   /** False with no task open, or a task that can only be read: the workspace has nowhere to go. */
   canOpen?: boolean;
   /** The open task, whose own state the quick-start checklist reads. */
@@ -49,9 +51,9 @@ export function GuideHub({ article: requested, canOpen = true, taskId, onOpen, o
   const [query, setQuery] = useState('');
   const [current, setCurrent] = useState(() => GUIDE_ARTICLES.find((row) => row.id === requested)?.id ?? GUIDE_ARTICLES[0].id);
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { if (requested && GUIDE_ARTICLES.some((row) => row.id === requested)) setCurrent(requested); }, [requested]);
+  useEffect(() => { if (requested && GUIDE_ARTICLES.some((row) => row.id === requested)) setCurrent(requested); }, [requested, request]);
   // Opening the guide moves focus into it, so a keyboard or screen-reader user knows the column changed.
-  useEffect(() => { heading.current?.focus(); }, [requested]);
+  useEffect(() => { heading.current?.focus(); }, [requested, request]);
   const found = useMemo(() => searchArticles(query), [query]);
   const article = GUIDE_ARTICLES.find((row) => row.id === current) ?? GUIDE_ARTICLES[0];
   const pick = (id: string) => { setCurrent(id); requestAnimationFrame(() => heading.current?.focus()); };

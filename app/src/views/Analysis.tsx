@@ -108,6 +108,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     if (active.current && currentTask.current === taskId && request === readVersion.current) {
       setState(value);
       if (options?.scope) setScopeRefresh((version) => version + 1);
+      window.dispatchEvent(new Event('fnd:task-changed'));
     }
   }, []);
   useEffect(() => {

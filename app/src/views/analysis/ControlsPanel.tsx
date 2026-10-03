@@ -46,6 +46,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
       if (done) setMessage(done);
       await load();
       onChanged?.();
+      window.dispatchEvent(new Event('fnd:task-changed'));
     } catch (failure) {
       setError(errorText(failure));
     } finally {

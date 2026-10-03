@@ -70,3 +70,30 @@ it('says so when the sample task cannot be made', async () => {
   fireEvent.click(screen.getByRole('button', { name: '用示例任务练习（推荐）' }));
   expect((await screen.findByRole('alert')).textContent).toBe('这个版本还不能创建示例任务。');
 });
+
+it('does not call a calculation done once the scope or data changed after it', () => {
+  const steps = stepsFrom(status({ review: block('review', 'blocked', [{ text: '范围在上次计算之后改过，请重新计算', blocking: true, target: 'results' }]) }));
+  expect(steps[3]).toMatchObject({ state: 'todo', detail: '范围在上次计算之后改过，请重新计算', target: 'results' });
+  expect(steps[5].state).toBe('done');
+});
+
+it('sends a draft problem to drafts and an undecided difference to the close tab', () => {
+  const steps = stepsFrom(status({
+    controls: block('controls', 'done'),
+    exceptions: block('exceptions', 'blocked', [{ text: '坏账分项：差异待处理', blocking: true, target: 'controls' }]),
+    review: block('review', 'blocked', [{ text: '还没有文稿', blocking: true, target: 'drafts' }]),
+  }));
+  expect(steps[4]).toMatchObject({ state: 'todo', target: 'close' });
+  expect(steps[5]).toMatchObject({ state: 'todo', target: 'drafts', detail: '还没有文稿' });
+});
+
+it('reads the task again when something changed it', async () => {
+  let answer = status();
+  const financeCall = vi.fn(async () => ({ ok: true, value: answer }));
+  (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall: financeCall as unknown as Bridge['financeCall'] };
+  render(<QuickStartChecklist taskId="t" canOpen onOpen={vi.fn()} />);
+  expect(await screen.findByText(/待处理 · 期间未确认/)).toBeTruthy();
+  answer = status({ scope: block('scope', 'done', [{ text: '2026-06 · 人民币', blocking: false, target: 'scope' }]) });
+  window.dispatchEvent(new Event('fnd:task-changed'));
+  await waitFor(() => expect(screen.queryByText(/期间未确认/)).toBeNull());
+});

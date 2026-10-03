@@ -72,8 +72,13 @@ export function App() {
   const [formulator, setFormulator] = useState<LaunchSpec | null>(null);
   const [busyData, setBusyData] = useState(false);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
-  /** True once the store has answered for the active list: before that, empty means "not asked yet". */
-  const [tasksLoaded, setTasksLoaded] = useState(false);
+  /**
+   * Decided once per launch from the store's first answer: true only when it holds no task at
+   * all, in any lifecycle. An empty 已归档 view, or a store whose tasks are all archived, is not
+   * a first run.
+   */
+  const [firstRun, setFirstRun] = useState(false);
+  const firstRunDecided = useRef(false);
   const [taskLifecycleView, setTaskLifecycleView] = useState<TaskLifecycleFilter>('active');
   /** Until this is true, an empty list is "not asked yet", not "no tasks". */
   const [gallery, setGallery] = useState<GalleryRow[]>([]);
@@ -90,6 +95,8 @@ export function App() {
   const [problem, setProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
   const [guideArticle, setGuideArticle] = useState('');
+  /** Bumped on every request, so asking again for the article on screen still goes back to it. */
+  const [guideRequest, setGuideRequest] = useState(0);
   // Where focus was when the guide opened, so closing it puts the reader back there.
   const guideOpener = useRef<HTMLElement | null>(null);
   const askedRef = useRef(false);
@@ -97,6 +104,7 @@ export function App() {
   const openGuideAt = useCallback((article: string) => {
     if (!askedRef.current) guideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setGuideArticle(article);
+    setGuideRequest((value) => value + 1);
     setAsked(true);
   }, []);
   const closeGuide = useCallback(() => {
@@ -109,10 +117,10 @@ export function App() {
   // remembered on disk; "has this store ever had a task" answers the same question better.
   const firstRunShown = useRef(false);
   useEffect(() => {
-    if (firstRunShown.current || !tasksLoaded || tasks.length || !inWorkspaceRef.current) return;
+    if (firstRunShown.current || !firstRun || !inWorkspaceRef.current) return;
     firstRunShown.current = true;
     openGuideAt('first-run');
-  }, [tasksLoaded, tasks.length, screen, openGuideAt]);
+  }, [firstRun, screen, openGuideAt]);
   // A 「?」 in the workspace opens the guide at its block's article; ⌘/Ctrl + ? opens or
   // closes it, on the screens where it can be drawn and nowhere else.
   useEffect(() => {
@@ -214,7 +222,10 @@ export function App() {
       take(a, (rows) => {
         if (taskListSequence.current !== sequence) return;
         setTasks(rows);
-        if (view === 'active') setTasksLoaded(true);
+        if (view === 'active' && !firstRunDecided.current) {
+          firstRunDecided.current = true;
+          if (!rows.length) void api.tasks('all').then((all) => take(all, (every) => { if (!every.length) setFirstRun(true); }));
+        }
         setCurrent((held) => (held && rows.some((row) => row.id === held)) ? held : (explicitSelection.current ? null : rows[rows.length - 1]?.id ?? null));
       }),
     );
@@ -508,6 +519,7 @@ export function App() {
     refreshTasks('active');
     setSections((held) => ({ ...held, [result.value.id]: 'materials' }));
     setGuideArticle('quick-start');
+    setGuideRequest((value) => value + 1);
   }, [api, refreshTasks]);
 
   const changeTaskLifecycle = useCallback(async (id: string, action: 'archive' | 'trash' | 'restore') => {
@@ -851,7 +863,7 @@ export function App() {
           onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
           onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
           onLayout={onWorkspaceLayout}
-          conversation={guide ? <GuideHub article={guideArticle} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
+          conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}
               onSample={api.taskSample ? openSampleTask : undefined}
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}

@@ -295,6 +295,7 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
       if (saveRequest.current !== seq) return null;
       applyRecord(record);
       setMessage('已保存分析范围，旧版本仍保留。');
+      window.dispatchEvent(new Event('fnd:task-changed'));
       return record;
     } catch (reason) {
       if (saveRequest.current === seq) setError(errorText(reason));

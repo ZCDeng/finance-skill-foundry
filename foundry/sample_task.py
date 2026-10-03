@@ -10,12 +10,15 @@ here reads or writes any other task.
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
 from openpyxl import Workbook
 
 from foundry.analysis import AnalysisStore
+from foundry.finance_service import FinanceStore
+from foundry.locking import exclusive
 from foundry.task import TaskStore
 
 SAMPLE_TITLE = "示例：月结练习（合成数据）"
@@ -55,14 +58,27 @@ def build_sample_workbook(path: Path) -> Path:
 
 
 def create_sample_task(var: Path) -> dict:
-    """The practice task, created once and reused after; returns its id and whether it was new."""
+    """The practice task, created once and reused after; returns its id and whether it was new.
+
+    The task is recognised by a marker file it carries, never by its title, so a real task that
+    happens to share the title is never reused. The check and the creation hold one store lock,
+    so two quick clicks make one task; a failed creation leaves no marked, half-made task behind.
+    """
     tasks = TaskStore(var)
-    for task in tasks.list("active"):
-        if task.meta().get("title") == SAMPLE_TITLE:
-            names = {row.get("name") for row in AnalysisStore(task).state()["datasets"]}
-            if SAMPLE_DATASET in names:
+    var.mkdir(parents=True, exist_ok=True)
+    with exclusive(var / "sample-task.lock"):
+        for task in tasks.list("active"):
+            if _marker(task).exists():
                 return {"id": task.id, "created": False}
-    task = tasks.create(title=SAMPLE_TITLE, period=SAMPLE_PERIOD)
-    with tempfile.TemporaryDirectory() as folder:
-        AnalysisStore(task).add_dataset(build_sample_workbook(Path(folder) / f"{SAMPLE_DATASET}.xlsx"), name=SAMPLE_DATASET)
+        task = tasks.create(title=SAMPLE_TITLE, period=SAMPLE_PERIOD)
+        with tempfile.TemporaryDirectory() as folder:
+            dataset = AnalysisStore(task).add_dataset(build_sample_workbook(Path(folder) / f"{SAMPLE_DATASET}.xlsx"), name=SAMPLE_DATASET)
+        # The same reading a real import gets, so the practice run asks for the structure too.
+        service = FinanceStore(task)
+        service.structure_propose(dataset["id"], source=service.actor)
+        _marker(task).write_text(json.dumps({"sample": True, "dataset": SAMPLE_DATASET}, ensure_ascii=False), encoding="utf-8")
     return {"id": task.id, "created": True}
+
+
+def _marker(task) -> Path:
+    return task.meta_path.parent / "sample-task.json"
