@@ -91,6 +91,11 @@ type Rule = [RegExp, string | ((match: RegExpMatchArray) => string)];
  * as written, so a new engine sentence is never hidden.
  */
 const RULES: Rule[] = [
+  // Tie-out controls the manager declares (添加两处取数对比).
+  [/control (left|right) range must be a bounded A1 reference/i, '单元格或区域要写成 T605 或 B5:B604 这样的格式，不能是整列或整行。'],
+  [/control (left|right) range is too large/i, '区域太大，请缩小到 2 万个单元格以内，或改选合计所在的单元格。'],
+  [/control refers to a snapshot a newer upload has replaced/i, '这本工作簿已被新上传的版本取代，请在新版本上选择。'],
+  [/control refers to a snapshot that is not in this task/i, '这本工作簿不在当前任务里，请重新打开表单选择。'],
   // The scope record (analysis requirements).
   [/requirements update must reference the latest version/i, '范围在别处已经更新过，请刷新后再保存。'],
   [/requirements parent does not exist/i, '这个范围版本已不存在，请刷新后重新保存。'],

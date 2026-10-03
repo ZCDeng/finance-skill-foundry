@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardCopy, ListChecks, Play, Scale, SearchCheck } from 'lucide-react';
+import { ClipboardCopy, GitCompareArrows, ListChecks, Play, Scale, SearchCheck } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
@@ -10,6 +10,7 @@ import {
   type ControlList, type ControlRow, type Disposition, type Suggestion,
 } from './controls.js';
 import { errorText, unwrap } from './shared.js';
+import { TieOutForm } from './TieOutForm.js';
 
 type Decision = Disposition['decision'];
 
@@ -27,6 +28,8 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
   const [working, setWorking] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [declaring, setDeclaring] = useState(false);
+  const [declaringBusy, setDeclaringBusy] = useState(false);
 
   const call = useCallback(async <T,>(command: string, spec?: unknown): Promise<T> => {
     const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持勾稽控制。');
@@ -97,7 +100,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
   const rows = list?.controls ?? [];
   const issues = rows.filter((row) => row.issue);
   const summary = list?.summary;
-  const locked = Boolean(busy || working);
+  const locked = Boolean(busy || working || declaringBusy);
 
   return (
     <section className="fnd-card analysis-controls-card" aria-label="勾稽控制">
@@ -108,6 +111,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
         </div>
         <div className="analysis-actions">
           <Button variant="outline" type="button" disabled={locked} onClick={() => void propose()}><SearchCheck size={15} strokeWidth={1.5} aria-hidden />找建议控制</Button>
+          <Button variant="outline" type="button" disabled={locked || declaring} onClick={() => { setDeclaring(true); setMessage(''); }}><GitCompareArrows size={15} strokeWidth={1.5} aria-hidden />添加两处取数对比</Button>
           <Button variant="outline" type="button" disabled={locked || !summary?.confirmed} onClick={() => void run()}><Play size={15} strokeWidth={1.5} aria-hidden />重新运行</Button>
         </div>
       </div>
@@ -120,6 +124,11 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
       {working ? <p className="analysis-note" role="status">{working}</p> : null}
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {message ? <p className="analysis-message">{message}</p> : null}
+
+      {declaring ? <TieOutForm call={call} locked={Boolean(busy || working)} refreshKey={refreshKey} onBusy={setDeclaringBusy} onCancel={() => { setDeclaring(false); setDeclaringBusy(false); }} onSaved={async (done) => {
+        setDeclaring(false); setMessage(done);
+        await load(); onChanged?.(); window.dispatchEvent(new Event('fnd:task-changed'));
+      }} /> : null}
 
       {suggestions && suggestions.length > 0 ? <fieldset className="analysis-fieldset analysis-controls-suggestions" disabled={locked}>
         <legend>建议的控制（勾选要确认的）</legend>

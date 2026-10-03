@@ -121,3 +121,88 @@ it('asks for the name of whoever accepts when a second review is required', asyn
   fireEvent.change(screen.getByLabelText('你的姓名'), { target: { value: '张会计' } });
   expect(save.disabled).toBe(false);
 });
+
+it('lets the manager compare two places across workbooks, preview the gap, then confirm it', async () => {
+  const sources = [
+    { dataset_id: 'ledger', source_hash: 'h1', name: '合同台账.xlsx', sheets: ['11·物业服务合同台账'] },
+    { dataset_id: 'close', source_hash: 'h2', name: '月结套表.xlsx', sheets: ['08·AR收缴率与欠费'] },
+  ];
+  const calls = mount((command, spec) => {
+    if (command === 'finance-controls-list') return listOf([]);
+    if (command === 'finance-controls-sources') return { sources };
+    if (command === 'finance-controls-preview') {
+      const drafted = (spec as { control: { left: object; right: object } }).control;
+      return { control: drafted, preview: { status: 'break', difference: '-2793.2794',
+        left: { ...drafted.left, value: '245726.6057' }, right: { ...drafted.right, value: '248519.8851' } } };
+    }
+    return {};
+  });
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByRole('button', { name: '添加两处取数对比' }));
+  const check = await screen.findByRole('button', { name: '加总两处，看差额' }) as HTMLButtonElement;
+  expect(check.disabled).toBe(true);
+  fireEvent.change(await screen.findByLabelText('第一处工作簿'), { target: { value: 'ledger' } });
+  fireEvent.change(screen.getByLabelText('第一处工作表'), { target: { value: '11·物业服务合同台账' } });
+  fireEvent.change(screen.getByLabelText('第一处单元格'), { target: { value: 't605' } });
+  fireEvent.change(screen.getByLabelText('第二处工作簿'), { target: { value: 'close' } });
+  fireEvent.change(screen.getByLabelText('第二处工作表'), { target: { value: '08·AR收缴率与欠费' } });
+  fireEvent.change(screen.getByLabelText('第二处单元格'), { target: { value: 'C11' } });
+  expect(check.disabled).toBe(false);
+  fireEvent.click(check);
+  expect(await screen.findByText('差额 -2793.2794 万元')).toBeTruthy();
+  const control = {
+    kind: 'tie_out', tolerance: '0', unit: '万元', label: '11·物业服务合同台账!T605 对 08·AR收缴率与欠费!C11',
+    left: { dataset_id: 'ledger', source_hash: 'h1', sheet: '11·物业服务合同台账', range: 'T605', scale: '1' },
+    right: { dataset_id: 'close', source_hash: 'h2', sheet: '08·AR收缴率与欠费', range: 'C11', scale: '1' },
+  };
+  expect(calls).toHaveBeenCalledWith('t', 'finance-controls-preview', { control });
+  expect(calls.mock.calls.some(([, command]) => command === 'finance-controls-save')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '确认并保存这条对比' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-controls-save', { controls: [control], origin: 'declared', confirm: true }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull());
+});
+
+it('scales the side in the larger unit to the smaller one, never by a coefficient', async () => {
+  const calls = mount((command, spec) => command === 'finance-controls-sources'
+    ? { sources: [{ dataset_id: 'a', source_hash: 'h', name: 'a.xlsx', sheets: ['S'] }] }
+    : command === 'finance-controls-preview' ? { control: (spec as { control: unknown }).control, preview: { status: 'pass', difference: '0' } } : listOf([]));
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByRole('button', { name: '添加两处取数对比' }));
+  for (const [title, unit, cell] of [['第一处', '万元', 'B2'], ['第二处', '元', 'C9']]) {
+    fireEvent.change(await screen.findByLabelText(`${title}工作簿`), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText(`${title}工作表`), { target: { value: 'S' } });
+    fireEvent.change(screen.getByLabelText(`${title}单元格`), { target: { value: cell } });
+    fireEvent.change(screen.getByLabelText(`${title}单位`), { target: { value: unit } });
+  }
+  fireEvent.click(screen.getByRole('button', { name: '加总两处，看差额' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-controls-preview', { control: expect.objectContaining({
+    unit: '元', left: expect.objectContaining({ scale: '10000' }), right: expect.objectContaining({ scale: '1' }) }) }));
+});
+
+it('reads a full-width range, refuses to keep a comparison it could not read, and reports a failed run after a save', async () => {
+  let status = 'stale';
+  let runFails = false;
+  const calls = mount((command, spec) => {
+    if (command === 'finance-controls-sources') return { sources: [{ dataset_id: 'a', source_hash: 'h', name: 'a.xlsx', sheets: ['S'] }] };
+    if (command === 'finance-controls-preview') return { control: (spec as { control: unknown }).control, preview: { status, difference: '5', reason: '资料已有更新的版本' } };
+    if (command === 'finance-controls-run' && runFails) throw new Error('run failed');
+    return listOf([]);
+  });
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByRole('button', { name: '添加两处取数对比' }));
+  for (const [title, cell] of [['第一处', 'ｂ5：b6'], ['第二处', 'C9']]) {
+    fireEvent.change(await screen.findByLabelText(`${title}工作簿`), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText(`${title}工作表`), { target: { value: 'S' } });
+    fireEvent.change(screen.getByLabelText(`${title}单元格`), { target: { value: cell } });
+  }
+  fireEvent.click(screen.getByRole('button', { name: '加总两处，看差额' }));
+  expect(await screen.findByText('这两处读不出可比较的合计，改选单元格后再加总。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull();
+  expect(calls).toHaveBeenCalledWith('t', 'finance-controls-preview', { control: expect.objectContaining({ left: expect.objectContaining({ range: 'B5:B6' }) }) });
+  status = 'break'; runFails = true;
+  fireEvent.change(screen.getByLabelText('第二处单元格'), { target: { value: 'C10' } });
+  fireEvent.click(screen.getByRole('button', { name: '加总两处，看差额' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认并保存这条对比' }));
+  expect(await screen.findByText(/运行没有完成，请点「重新运行」/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull();
+});

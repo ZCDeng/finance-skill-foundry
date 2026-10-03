@@ -284,6 +284,15 @@ def snapshot_bytes(analysis: Any, dataset: dict[str, Any]) -> bytes:
     return data
 
 
+def workbook_sheets(data: bytes) -> list[str]:
+    """Sheet names in workbook order."""
+    book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        return list(book.sheetnames)
+    finally:
+        book.close()
+
+
 def _text_cells(data: bytes, sheet: str) -> set[str]:
     """Coordinates that hold text. A 「1,200」 typed as text is not a blank; skipping it would pass a short total."""
     book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -367,6 +376,9 @@ def _side(value: Any, name: str) -> dict[str, str]:
         raise FoundryError(f"control {name} range must be a bounded A1 reference")
     if (max_row - min_row + 1) * (max_col - min_col + 1) > MAX_CELLS:
         raise FoundryError(f"control {name} range is too large")
+    if ":" in range_ref and min_row == max_row and min_col == max_col:
+        # T605:T605 and T605 are the same check; one spelling keeps them one control.
+        range_ref = range_ref.split(":", 1)[0]
     scale = _decimal(value.get("scale", "1"), f"control {name} scale")
     if scale not in UNIT_SCALES:
         raise FoundryError(f"control {name} scale must be a unit conversion (a power of ten)")

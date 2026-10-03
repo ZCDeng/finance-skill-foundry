@@ -290,7 +290,7 @@ function scaleFor(visual: ReportDataVisual): { position: (value: number) => numb
 }
 
 /** Axis ticks are approximate scale guides; the attached data retain exact values. */
-function axisTick(normalized: number, magnitude: number): string {
+function axisTick(normalized: number, magnitude: number, scientific: boolean): string {
   if (normalized === 0) return '0';
   // Work on mantissa/exponent separately: even a tick below Number.MIN_VALUE
   // must not be labelled zero, and finite opposite extremes must not overflow.
@@ -301,8 +301,17 @@ function axisTick(normalized: number, magnitude: number): string {
   let exponent = Number(power) + shift;
   coefficient = Number(coefficient.toPrecision(3));
   if (Math.abs(coefficient) >= 10) { coefficient /= 10; exponent += 1; }
-  if (exponent >= 6 || exponent < -3) return `${coefficient}e${exponent}`;
-  return Number(`${coefficient}e${exponent}`).toString();
+  // Money in 元 runs to hundreds of millions: write it the way a finance table does (418,000,000),
+  // up to 15 characters, which is what fits left of the plot. Only beyond that, or for tiny values, use e-notation.
+  if (scientific || exponent < -3) return `${coefficient}e${exponent}`;
+  return groupThousands(Number(`${coefficient}e${exponent}`).toString());
+}
+
+/** 1234567.5 → 1,234,567.5; the digits themselves are left untouched. */
+function groupThousands(value: string): string {
+  const [whole, fraction] = value.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return fraction === undefined ? grouped : `${grouped}.${fraction}`;
 }
 
 function renderBars(visual: ReportDataVisual, top: number): { svg: string; bottom: number } {
@@ -350,10 +359,12 @@ function renderLines(visual: ReportDataVisual, top: number): { svg: string; bott
   const x = (index: number) => rows.length === 1 ? (chartLeft + chartRight) / 2 : chartLeft + index * (chartRight - chartLeft) / (rows.length - 1);
   const y = (value: number) => chartBottom - scale.position(value) * chartHeight;
   const ticks = [0, 1 / 3, 2 / 3, 1].filter((tick) => Math.abs(tick - scale.zero) * chartHeight >= 24);
+  // One style per axis: past 1e11 the grouped figure no longer fits, so every tick switches together.
+  const scientific = scale.magnitude >= 9.995e10; // what rounds to 1.00e11 at three digits
   ticks.push(scale.zero); ticks.sort((a, b) => a - b);
   const shapes = ticks.flatMap((tick) => {
     const tickY = chartBottom - tick * chartHeight;
-    const text = tick === scale.zero ? '0' : axisTick(scale.normalizedAt(tick), scale.magnitude);
+    const text = tick === scale.zero ? '0' : axisTick(scale.normalizedAt(tick), scale.magnitude, scientific);
     return [line(chartLeft, tickY, chartRight, tickY, '#efeeea'), `<g data-report-axis-tick="true">${label([text], chartLeft - 12, tickY + 5, 14, MUTED, 400, 'end')}</g>`];
   });
   shapes.push(line(chartLeft, y(0), chartRight, y(0), '#aaa49a', 1.5));
