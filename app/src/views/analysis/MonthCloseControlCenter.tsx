@@ -11,7 +11,7 @@ type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
 type CloseItem = { text: string; blocking: boolean; attention?: boolean; target?: CloseTarget };
 type CloseBlock = { key: string; label: string; state: BlockState; items: CloseItem[] };
 export type CloseStatus = {
-  headline: { state: 'not_ready' | 'calculable' | 'needs_review' | 'ready_for_review' | 'archived'; text: string };
+  headline: { state: 'not_ready' | 'calculable' | 'needs_review' | 'ready_for_review' | 'archived'; text: string; detail?: string };
   blocks: CloseBlock[];
   blocking: string[];
 };
@@ -55,10 +55,13 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   return (
     <div className="analysis-close" aria-busy={loading}>
       {/* Only the headline is announced; the button and the loading line are not news. */}
-      <span className="sr-only" role="status">{status?.headline.text ?? ''}</span>
+      <span className="sr-only" role="status">{status ? [status.headline.text, status.headline.detail].filter(Boolean).join('。') : ''}</span>
       <div className={`analysis-close-headline analysis-close-headline--${status?.headline.state ?? 'loading'}`}>
-        <span className="fnd-with-help"><h3>{status ? status.headline.text : loading ? '正在检查月结状态…' : '还没读到月结状态'}</h3>
-          <HelpLink article="month-close" label="月结怎么走一遍" /></span>
+        <div className="analysis-close-headline-text">
+          <span className="fnd-with-help"><h3>{status ? status.headline.text : loading ? '正在检查月结状态…' : '还没读到月结状态'}</h3>
+            <HelpLink article="month-close" label="月结怎么走一遍" /></span>
+          {status?.headline.detail ? <p className="analysis-close-detail"><CircleAlert size={16} strokeWidth={1.5} aria-hidden />{status.headline.detail}</p> : null}
+        </div>
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>

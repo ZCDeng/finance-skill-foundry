@@ -5,7 +5,8 @@ returns and nothing else, so no panel can call a close finished on its own
 terms. The top line is one of five, never a bare 完成 or 通过:
 
     尚未准备   something in 范围 / 来源 / 结构 still has to be confirmed
-    可计算     those are confirmed and nothing has been calculated yet
+    可计算     those are confirmed and nothing has been calculated yet; open differences
+               add a detail line, since they will hold the close after calculation
     需要复核   calculated, but a control, a difference or the draft still needs work
     可提交经理复核  everything the system can check is clear; a person signs it off
     已归档     the task is archived with what it held then
@@ -78,9 +79,14 @@ def close_status(
         state, text = NEEDS_REVIEW, f"需要复核：计算完成，但{detail}"
     else:
         state, text = READY_FOR_REVIEW, "可提交经理复核"
+    headline: dict[str, Any] = {"state": state, "text": text}
+    # 可计算 says the inputs are settled, not that the books agree: a manager reading only the
+    # top line must still learn that differences stand between this close and sign-off.
+    if state == CALCULABLE and conflicts:
+        headline["detail"] = f"{conflicts} 项差异待处置，处置前不能提交复核"
     return {
         "schema_version": 1,
-        "headline": {"state": state, "text": text},
+        "headline": headline,
         "blocks": blocks,
         "blocking": [*must, *later],
     }

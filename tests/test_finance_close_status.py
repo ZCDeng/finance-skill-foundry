@@ -48,6 +48,13 @@ def test_ready_to_calculate_before_anything_has_run():
     assert _status(runs=[{"execution_status": "failed", "seq": 3}], draft=None)["headline"]["state"] == "calculable"
 
 
+def test_ready_to_calculate_still_names_the_differences_that_will_hold_the_close():
+    result = _status(runs=[], draft=None, controls=[_break("open"), _break("pending_external"), _break("waived", blocking=False)])
+    assert result["headline"] == {"state": "calculable", "text": "可计算：范围和结构已确认",
+                                  "detail": "2 项差异待处置，处置前不能提交复核"}
+    assert "detail" not in _status(runs=[], draft=None)["headline"]
+
+
 def test_differences_still_open_say_how_many_source_conflicts_remain():
     result = _status(controls=[_break("open"), _break("pending_external")])
     assert result["headline"] == {"state": "needs_review", "text": "需要复核：计算完成，但有 2 项来源冲突"}

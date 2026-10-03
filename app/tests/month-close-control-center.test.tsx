@@ -33,6 +33,17 @@ it('leads with the server headline and the next thing to do', async () => {
   expect(screen.getAllByRole('status')[0].textContent).toBe('尚未准备：还有 1 项必须确认');
 });
 
+it('puts the differences that will hold the close under a 可计算 headline', async () => {
+  const financeCall = vi.fn(async (_task: string, command: string) => ({ ok: true, value: command === 'finance-close-status'
+    ? { ...status, headline: { state: 'calculable', text: '可计算：范围和结构已确认', detail: '3 项差异待处置，处置前不能提交复核' } }
+    : { controls: [], summary: { controls: 0, confirmed: 0, pass: 0, break: 0, stale: 0, error: 0 } } }));
+  (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall: financeCall as unknown as Bridge['financeCall'] };
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  expect(await screen.findByRole('heading', { name: '可计算：范围和结构已确认' })).toBeTruthy();
+  expect(screen.getByText('3 项差异待处置，处置前不能提交复核')).toBeTruthy();
+  expect(screen.getAllByRole('status')[0].textContent).toBe('可计算：范围和结构已确认。3 项差异待处置，处置前不能提交复核');
+});
+
 it('says each block state in words, not colour alone', async () => {
   mount();
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
