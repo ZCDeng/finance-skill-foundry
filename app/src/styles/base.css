@@ -105,6 +105,20 @@
     caret-color: var(--fnd-accent-text);
   }
 
+  /* Native checkboxes and radios follow the neutral primary contrast, not the OS blue. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--fnd-accent);
+  }
+
+  /*
+   * Lucide draws at stroke-width 2 unless told otherwise; the product line is 1.5.
+   * CSS outranks the SVG attribute, and an explicit thinner stroke stays as written.
+   */
+  svg.lucide[stroke-width='2'] {
+    stroke-width: 1.5;
+  }
+
   ::placeholder {
     color: var(--fnd-muted);
     opacity: 1;
