@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: uv sync --all-extras
+      # The vitest and tsc wrappers in tests/test_app.py skip without
+      # app/node_modules; the app job runs those suites directly.
+      - name: pytest
+        run: uv run pytest -q
+
+  app:
+    name: Desktop app (typecheck, vitest, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    env:
+      # Tests and the renderer build never launch Electron itself.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        run: npm ci
+      # The client adapter and embedded-client suites read the pinned runtime
+      # staged into extra/dsh, which is not in version control.
+      - name: Stage pinned harness
+        run: npm run harness
+      - name: Typecheck
+        run: |
+          npx tsc -p tsconfig.json --noEmit
+          npx tsc -p tsconfig.electron.json --noEmit
+      - name: vitest
+        run: npx vitest run --maxWorkers=2
+      - name: Build renderer
+        run: npx vite build
