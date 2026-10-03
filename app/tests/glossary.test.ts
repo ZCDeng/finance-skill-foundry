@@ -20,6 +20,7 @@ describe('friendlyError', () => {
     expect(text).toContain('（系统提示：cannot parse .xlsx source: File is not a zip file）');
     expect(friendlyError('cannot parse .csv source: line contains NUL')).toContain('无法读取这份 CSV');
     expect(friendlyError('cannot parse .json source: Expecting value')).toContain('无法读取这份文件');
+    expect(friendlyError('CSV row has more fields than its header')).toContain('分隔符或引号');
   });
 
   it('does not translate a sentence twice', () => {

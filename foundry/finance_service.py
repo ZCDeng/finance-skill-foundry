@@ -1194,10 +1194,10 @@ class FinanceStore:
             scope = self._primary_scope(context.get("scopes", {})) or scope
         if not isinstance(scope, dict):
             raise FoundryError("background scope must be an object")
-        if not scope:
-            return {"schema_version": 1, "business_contexts": []}
-        self._background_scope_bindings(scope)
         as_of = spec.get("as_of") or scope.get("period")
+        if not scope:
+            return {"schema_version": 1, "business_contexts": [], **({} if as_of else {"missing": ["as_of"]})}
+        self._background_scope_bindings(scope)
         if not as_of:
             return {"schema_version": 1, "business_contexts": [], "missing": ["as_of"]}
         all_rows = self._list("backgrounds")

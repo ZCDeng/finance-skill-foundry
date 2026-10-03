@@ -361,7 +361,8 @@ def test_background_versions_match_scope_and_effective_period(service, tmp_path)
         }
     )
     assert october["business_contexts"] == []
-    assert store.finance_background_list({})["business_contexts"] == []
+    assert store.finance_background_list({}) == {"schema_version": 1, "business_contexts": [], "missing": ["as_of"]}
+    assert "missing" not in store.finance_background_list({"as_of": "2026-09"})
 
 
 def test_background_source_fact_requires_authorized_matching_paragraph(service, tmp_path):
