@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import hashlib
-from datetime import date, datetime, timezone
+from datetime import date
 from calendar import monthrange
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from typing import Any
@@ -640,17 +640,16 @@ def background_applies(record: dict, *, scope: dict, as_of: str | None = None) -
             continue
         if scope.get(key) != value:
             return False
-    as_of = _date_key(as_of, "as_of") if as_of else current_period()
-    if as_of:
-        if str(record.get("effective_from", "")) > _date_end_key(as_of):
-            return False
-        if record.get("effective_to") and _date_end_key(str(record["effective_to"])) < as_of:
-            return False
+    # Without the task's own period, applicability cannot be judged; the machine
+    # clock is never a substitute (an August close must not pick up October notes).
+    if not as_of:
+        return False
+    as_of = _date_key(as_of, "as_of")
+    if str(record.get("effective_from", "")) > _date_end_key(as_of):
+        return False
+    if record.get("effective_to") and _date_end_key(str(record["effective_to"])) < as_of:
+        return False
     return True
-
-
-def current_period() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
 def _date_key(value: Any, label: str) -> str:
