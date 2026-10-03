@@ -66,3 +66,14 @@ it('shows the source beside the candidate button in the scope card', () => {
   expect(screen.getByRole('button', { name: '采用资料里的期间 2026-08' })).toBeTruthy();
   expect(screen.getByText(/来自 00·封面与编制说明 等 13 张表的标题「2026年08月」/)).toBeTruthy();
 });
+
+it('names the file title when a derived table has no sheet name', () => {
+  const derived = report([{ dataset_id: 'd', name: 'd', scope: { ...blank, period: '2026-08' }, missing_fields: [], can_run: [], blocked: [],
+    scope_sources: { period: { origin: 'title', sheet: '', text: '2026年08月', sheet_count: 1 } } }]);
+  expect(inferCandidateSources(derived).period?.['2026-08']).toBe('资料的标题「2026年08月」');
+});
+
+it('announces the pending period from one place only', () => {
+  render(<><PeriodPending scope={scopeOf('', ['2026-08'])} /><PeriodPending scope={scopeOf('', ['2026-08'])} announce={false} /></>);
+  expect(screen.getAllByRole('status')).toHaveLength(1);
+});

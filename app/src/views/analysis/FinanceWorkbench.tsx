@@ -359,7 +359,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       {finance?.contexts.length ? <SearchableSelect label="已保存的范围" value={contextId} options={contextOptions(finance)}
         onChange={setContextId} placeholder="搜索范围名称或期间" /> : null}
     </div>
-    <PeriodPending scope={analysisScope} />
+    <PeriodPending scope={analysisScope} announce={false} />
     <ScopeFields fields={PRIMARY_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
     {budget && <div className="analysis-edit-grid"><AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
       shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"

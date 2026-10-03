@@ -109,7 +109,7 @@ export type ScopeCandidateSources = Partial<Record<ScopeKey, Record<string, stri
 
 function sourceWords(source: ReadinessScopeSource): string {
   const more = (source.sheet_count ?? 0) > 1 ? ` 等 ${source.sheet_count} 张表` : '';
-  if (source.origin === 'title' && source.sheet) return `${source.sheet}${more}的标题「${source.text ?? ''}」`;
+  if (source.origin === 'title') return `${source.sheet || '资料'}${more}的标题「${source.text ?? ''}」`;
   if (source.origin === 'column') return `${source.sheet || '资料'}${more}的期间列`;
   if (source.origin === 'confirmed') return `已确认的表结构`;
   return '';

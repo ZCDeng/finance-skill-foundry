@@ -464,15 +464,25 @@ def _report_pack(path: Path, subtitles: dict[str, str]) -> Path:
     return path
 
 
-def test_period_title_reads_a_year_to_date_span_as_its_closing_month() -> None:
+def test_a_period_span_in_a_title_declares_no_month() -> None:
+    """「2026年1-8月」 used to read as 2026-01; it is a span, and a span is not a period."""
     from foundry.finance_readiness import _period_match
 
-    assert _period_match("2026年1-8月") == ("2026-08", "2026年1-8月")
-    assert _period_match("预算执行分析（1-8 月） 华宸物业 | 2026年1-8月")[0] == "2026-08"
-    assert _period_match("2026年1月至8月")[0] == "2026-08"
-    assert _period_match("2025年12月-2026年3月")[0] == "2026-03"
-    assert _period_match("2026-08-01至2026-08-31")[0] == "2026-08"
-    assert _period_match("2026年1月1日至2026年8月31日")[0] == "2026-08"
+    for title in (
+        "2026年1-8月",
+        "预算执行分析（1-8 月） 华宸物业 | 2026年1-8月",
+        "2026年1月至8月",
+        "2026年1－8月",  # full-width dash, as Excel files carry it
+        "2026年1〜8月",
+        "2026年1−8月",
+        "2026-1-8月",
+        "2026.1-8月",
+        "2025年12月-2026年3月",
+        "2026-08-01至2026-08-31",
+        "2026年1月1日至2026年8月31日",
+        "2026年8-12月预测",
+    ):
+        assert _period_match(title) == ("", ""), title
 
 
 def test_period_title_still_reads_single_months_and_dates() -> None:
@@ -485,6 +495,17 @@ def test_period_title_still_reads_single_months_and_dates() -> None:
     assert _period_match("2026.1")[0] == "2026-01"
     # The first declaration still wins: a comparison span later in the title is not the period.
     assert _period_match("2026年08月 对比 2025年1-12月")[0] == "2026-08"
+    # Days inside one month are not a span of months.
+    assert _period_match("2026年8月1日-31日")[0] == "2026-08"
+    assert _period_match("2026年08月第1-2周")[0] == "2026-08"
+
+
+def test_a_dash_cell_between_two_dates_does_not_make_a_span(tmp_path):
+    """A 「-」 placeholder cell sat between two date cells and read as 2026-08-15 至 2026-09-14."""
+    from foundry.finance_readiness import _title_period
+
+    assert _title_period(["开票日期", "金额", "到期日", "2026-08-15", "-", "2026-09-14"]) == ("2026-08", "2026-08")
+    assert _title_period(["2026年1-8月", "2026年08月"]) == ("", "")
 
 
 def test_period_title_reads_no_period_where_none_is_declared() -> None:
@@ -497,7 +518,10 @@ def test_period_title_reads_no_period_where_none_is_declared() -> None:
 
 
 def test_month_and_year_to_date_sheets_of_one_pack_agree_on_the_month(tmp_path):
-    """The 2026-08 pack proposed no period: its 1-8 月 sheets were read as 2026-01."""
+    """The 2026-08 pack proposed no period: its 1-8 月 sheets were read as 2026-01.
+
+    They now declare nothing, and the two sheets that name the month decide.
+    """
     path = _report_pack(tmp_path / "华宸物业_2026年08月_月结.xlsx", {
         "00·封面": "2026年08月",
         "05·资产负债表": "2026年8月31日",
@@ -510,7 +534,7 @@ def test_month_and_year_to_date_sheets_of_one_pack_agree_on_the_month(tmp_path):
     (row,) = report["datasets"]
     assert row["scope"]["period"] == "2026-08"
     assert row["scope_sources"]["period"] == {
-        "origin": "title", "sheet": "00·封面", "text": "2026年08月", "sheet_count": 3,
+        "origin": "title", "sheet": "00·封面", "text": "2026年08月", "sheet_count": 2,
     }
     assert row["name_scope"] == {"period": "2026-08", "text": "2026年08月"}
 

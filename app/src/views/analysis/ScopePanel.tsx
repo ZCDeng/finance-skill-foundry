@@ -72,10 +72,11 @@ export function pendingPeriods(scope: Pick<AnalysisScope, 'scope' | 'candidates'
 }
 
 /** Says why the period-bound actions are closed, in the words of the files themselves. */
-export function PeriodPending({ scope }: { scope: Pick<AnalysisScope, 'scope' | 'candidates'> }) {
+export function PeriodPending({ scope, announce = true }: { scope: Pick<AnalysisScope, 'scope' | 'candidates'>; announce?: boolean }) {
   const periods = pendingPeriods(scope);
   if (!periods.length) return null;
-  return <p role="status" className="analysis-message">资料写的期间是 {periods.join('、')}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;
+  // The scope card announces it; a second copy in the settings dialog would read it twice.
+  return <p role={announce ? 'status' : undefined} className="analysis-message">资料写的期间是 {periods.join('、')}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;
 }
 
 const PRIMARY_FIELDS: readonly ScopeKey[] = ['period', 'organization', 'unit', 'currency', 'scenario'];

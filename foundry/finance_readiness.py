@@ -29,15 +29,20 @@ ERP_HEADER_MARKERS = frozenset(
 )
 ERP_TITLE_MARKERS = ("金蝶", "用友", "KIS", "U8")
 _PERIOD_IN_TITLE = re.compile(r"(20\d{2})[-./年](\d{1,2})")
-# 「2026年1-8月」「2026年1月至8月」: a year-to-date span closes in its last month.
-# Read as a single date it said 2026-01, every 1-8 月 sheet then disagreed with
-# the 8 月 sheets beside it, and the file proposed no period at all.
-_MONTH_SPAN_IN_TITLE = re.compile(r"(20\d{2})\s*年\s*(\d{1,2})\s*月?\s*[-–—~～至到]\s*(\d{1,2})\s*月")
+# A span is not a period. 「2026年1-8月」 was read as 2026-01, so every 1-8 月
+# sheet of an August pack disagreed with the 8 月 sheets beside it and the file
+# proposed no period at all. Declaring 2026-08 for it instead would invent
+# scope (a year-to-date sheet is not August's books); structure_proposal's
+# scope hints made the same call. A span declares nothing, and the sheets that
+# name a month decide. Dashes include the full-width and typographic ones Excel
+# files carry.
+_SPAN_DASH = "-–—―‐−－~～〜至到"
+_MONTH_SPAN_IN_TITLE = re.compile(rf"20\d{{2}}\s*[-./年]\s*\d{{1,2}}\s*月?\s*[{_SPAN_DASH}]\s*\d{{1,2}}\s*月")
 # 「2025年12月-2026年3月」「2026-08-01至2026-08-31」: a span between two dated ends.
 _DATED_SPAN_IN_TITLE = re.compile(
-    r"(20\d{2})\s*[-./年]\s*(\d{1,2})\s*月?(?:\s*[-./]?\s*\d{1,2}\s*日?)?"
-    r"\s*[-–—~～至到]\s*"
-    r"(20\d{2})\s*[-./年]\s*(\d{1,2})\s*月?(?:\s*[-./]?\s*\d{1,2}\s*日?)?"
+    r"20\d{2}\s*[-./年]\s*\d{1,2}\s*月?(?:\s*[-./]?\s*\d{1,2}\s*日?)?"
+    rf"\s*[{_SPAN_DASH}]\s*"
+    r"20\d{2}\s*[-./年]\s*\d{1,2}"
 )
 _CURRENCY_IN_TITLE = re.compile(r"(?:币种|原币)[:：\s]*([A-Za-z]{3}|人民币)")
 _UNIT_IN_TITLE = re.compile(r"(?:金额)?单位[:：\s]*([万亿]?元)")
@@ -426,7 +431,7 @@ def _probe(
     # back out of the derived rows, which no longer contain the title at all.
     hints = {key: str(value or "").strip() for key, value in (hints or {}).items()}
     column_period = _unanimous(_declared_values(rows, fmap, "period"))
-    title_period, title_words = _period_match(title)
+    title_period, title_words = _title_period(_title_parts(headers, rows))
     period = column_period or hints.get("period", "") or title_period
     if column_period:
         period_source = {"origin": "column", "sheet": sheet}
@@ -480,10 +485,14 @@ def _identity_attempted(headers: list[str], title: str) -> bool:
 
 
 def _title_blob(headers: list[str], rows: list[dict]) -> str:
+    return " ".join(_title_parts(headers, rows))
+
+
+def _title_parts(headers: list[str], rows: list[dict]) -> list[str]:
     parts = list(headers)
     if rows:
         parts.extend(str(value) for value in rows[0].values() if value is not None)
-    return " ".join(parts)
+    return parts
 
 
 def _scope_sources(probes: list[dict[str, Any]], scope: dict[str, str]) -> dict[str, Any]:
@@ -505,29 +514,36 @@ def _name_scope(name: str) -> dict[str, str]:
     return {"period": period, "text": words} if period else {}
 
 
-def _period_from_title(title: str) -> str:
-    return _period_match(title)[0]
-
-
 def _period_match(text: str) -> tuple[str, str]:
-    """The period a title or file name declares, and the words it was read from.
+    """The month a title declares, and the words it was read from.
 
-    The earliest declaration wins, as before; where a span starts at the same
-    place as a single date, the span is the declaration and its last month is
-    the period. A month outside 1-12 is not a period.
+    The earliest declaration wins, as before. A span (「2026年1-8月」) at that
+    place declares no month; a month outside 1-12 is not a period either.
     """
     found: list[tuple[int, int, str, str]] = []
-    for match in _DATED_SPAN_IN_TITLE.finditer(text):
-        found.append((match.start(), -len(match.group(0)), _period_text(match.group(3), match.group(4)), match.group(0)))
-    for match in _MONTH_SPAN_IN_TITLE.finditer(text):
-        found.append((match.start(), -len(match.group(0)), _period_text(match.group(1), match.group(3)), match.group(0)))
+    for pattern in (_DATED_SPAN_IN_TITLE, _MONTH_SPAN_IN_TITLE):
+        for match in pattern.finditer(text):
+            found.append((match.start(), -len(match.group(0)), "", match.group(0)))
     for match in _PERIOD_IN_TITLE.finditer(text):
         words = match.group(0) + ("月" if text[match.end():match.end() + 1] == "月" else "")
         found.append((match.start(), -len(match.group(0)), _period_text(match.group(1), match.group(2)), words))
-    for _start, _length, period, words in sorted(found):
-        if period:
-            return period, words.strip()
+    if not found:
+        return "", ""
+    _start, _length, period, words = min(found)
+    return (period, words.strip()) if period else ("", "")
+
+
+def _title_period(parts: list[str]) -> tuple[str, str]:
+    """The first cell that declares something decides; a dash in a neighbouring cell never joins two dates."""
+    for part in parts:
+        period, words = _period_match(part)
+        if period or _declares_span(part):
+            return period, words
     return "", ""
+
+
+def _declares_span(text: str) -> bool:
+    return bool(_DATED_SPAN_IN_TITLE.search(text) or _MONTH_SPAN_IN_TITLE.search(text))
 
 
 def _period_text(year: str, month: str) -> str:
