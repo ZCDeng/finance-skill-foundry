@@ -272,6 +272,10 @@ void app.whenReady().then(() => {
       formulatorBin: process.env.FOUNDRY_FORMULATOR_BIN,
       bundledSkillDir: bundledSkillDir ?? undefined,
       companionEnv: companionEnv(here),
+      onExit: () => {
+        console.warn('[harness] runtime exited unexpectedly');
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(CHANNELS.harnessExited);
+      },
     });
     harness = host;
     /*

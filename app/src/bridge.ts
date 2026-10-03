@@ -206,6 +206,7 @@ export interface Bridge {
    * answer with `Answer<T>`: nothing asked for it. Returns its unsubscribe.
    */
   onHarnessRefused?(cb: (reason: string) => void): () => void;
+  onHarnessExited?(cb: () => void): () => void;
   /** Absent when this build has no harness to embed Formulator beside. */
   formulatorLaunch?(): Promise<Answer<LaunchSpec>>;
   formulatorStop?(): Promise<Answer<{ stopped: boolean }>>;

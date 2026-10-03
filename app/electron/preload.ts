@@ -67,7 +67,7 @@ const api = {
   harnessLayout: (layout: unknown) => ipcRenderer.invoke('harness:layout', layout),
   paneVisible: (screen: string) => ipcRenderer.invoke('pane:visible', screen),
   /**
-   * The one channel main pushes on. Returns its own unsubscribe, because a
+   * A channel main pushes on (see `PUSHED` in reads.test.ts). Returns its own unsubscribe, because a
    * renderer that re-subscribed on every effect run would stack listeners and
    * report one refusal several times.
    */
@@ -76,6 +76,13 @@ const api = {
     ipcRenderer.on('harness:refused', relay);
     return () => {
       ipcRenderer.off('harness:refused', relay);
+    };
+  },
+  onHarnessExited: (cb: () => void) => {
+    const relay = () => cb();
+    ipcRenderer.on('harness:exited', relay);
+    return () => {
+      ipcRenderer.off('harness:exited', relay);
     };
   },
 };

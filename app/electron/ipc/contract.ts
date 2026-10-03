@@ -89,6 +89,12 @@ export const CHANNELS = {
    * about tasks.
    */
   harnessRefused: 'harness:refused',
+  /**
+   * The runtime behind the conversation exited on its own. The pane keeps the
+   * dead page, so without this the window kept a session that answered nothing
+   * and offered no way back short of switching tasks.
+   */
+  harnessExited: 'harness:exited',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

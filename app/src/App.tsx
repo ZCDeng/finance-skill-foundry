@@ -259,6 +259,14 @@ export function App() {
     });
   }, [api]);
 
+  // A runtime that dies keeps its last page in the pane; say so and offer 重新连接, which starts a new one.
+  useEffect(() => {
+    if (!api?.onHarnessExited) return;
+    return api.onHarnessExited(() => {
+      setConversationProblem('对话服务意外停止。资料和已保存的成果不受影响，点「重新连接」会重新启动对话并回到这项任务。');
+    });
+  }, [api]);
+
   useEffect(() => {
     if (!api?.formulatorStatus || screen !== 'formulator') return;
     void api.formulatorStatus().then((a) => take(a, (value) => setFormulator(value.running)));

@@ -54,7 +54,7 @@ describe('every data path is a CLI call', () => {
    * Named here rather than inferred, so adding a second push channel has to be
    * a decision someone writes down instead of a handler quietly going missing.
    */
-  const PUSHED = new Set(['harnessRefused']);
+  const PUSHED = new Set(['harnessRefused', 'harnessExited']);
 
   it('gives every declared channel a handler', () => {
     // By key rather than by transforming the wire name: `harness:status` and

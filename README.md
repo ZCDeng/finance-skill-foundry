@@ -94,6 +94,6 @@ FOUNDRY_DSH_BIN="$PWD/app/extra/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" .v
 .venv/bin/python tools/verify_analysis_workbench.py --foundry app/extra/foundry/foundry
 ```
 
-桌面真实交互脚本为 `tools/verify_desktop_workbench.cjs` 和 `tools/verify_desktop_sessions.cjs`，使用已有 Playwright（`PLAYWRIGHT_MODULE` 指定其模块路径），无需添加项目依赖。会话脚本测试打包应用时另设 `QA_APP` 为应用可执行路径，`QA_FOUNDRY` 为包内 CLI；默认使用开发应用。
+桌面真实交互脚本为 `tools/verify_desktop_workbench.cjs` 和 `tools/verify_desktop_sessions.cjs`，使用已有 Playwright（`PLAYWRIGHT_MODULE` 指定其模块路径），无需添加项目依赖。会话脚本测试打包应用时另设 `QA_APP` 为应用可执行路径，`QA_FOUNDRY` 为包内 CLI；默认使用开发应用，此时先在 `app/` 下 `npm run build`，再运行 `npx vite --port 5273 --strictPort`。
 
 最后一条请使用实际冻包中的可执行路径。详细结果、桌面交互证据及尚未验证的边界见[实施记录](docs/plans/2026-09-05-execution-log.md)。

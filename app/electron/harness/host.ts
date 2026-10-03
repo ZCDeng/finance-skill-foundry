@@ -37,6 +37,11 @@ export interface HostOptions {
   bundledSkillDir?: string;
   /** Switches a bundled companion is not allowed to run without. See `resources.ts`. */
   companionEnv?: Record<string, string>;
+  /**
+   * A runtime that had come up has gone away on its own. Not called for `stop()`
+   * or for a start that never printed its URL; those already reach a caller.
+   */
+  onExit?: () => void;
 }
 
 export interface OpenedSession {
@@ -104,10 +109,13 @@ export class HarnessHost {
       child.stderr?.on('data', (chunk: Buffer) => process.stderr.write(chunk));
       child.on('exit', (code) => {
         clearTimeout(timer);
+        // `stop()` has already let go of this child; only an unannounced exit of a live runtime is news.
+        const lost = this.child === child && this.base !== null;
         this.child = null;
         this.base = null;
         this.starting = null;
         reject(new Error(`the harness exited with ${code}`));
+        if (lost) this.opts.onExit?.();
       });
     });
     return this.starting;
