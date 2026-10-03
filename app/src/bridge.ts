@@ -598,10 +598,21 @@ export interface FinanceContextState {
 }
 
 /** What one file can answer for on its own, and what it is still missing. */
+/** Where a file's agreed period was read; the manager sees this beside the candidate. */
+export interface ReadinessScopeSource {
+  origin?: 'title' | 'column' | 'confirmed';
+  sheet?: string;
+  text?: string;
+  sheet_count?: number;
+}
+
 export interface ReadinessDataset {
   dataset_id: string;
   name: string;
   scope: { ledger: string; organization: string; period: string; currency: string; unit: string };
+  scope_sources?: { period?: ReadinessScopeSource };
+  /** A period the file's own name carries; offered, never filled in. */
+  name_scope?: { period?: string; text?: string };
   missing_fields: string[];
   can_run: string[];
   blocked: { capability: string; missing_fields: string[]; reason: string }[];
