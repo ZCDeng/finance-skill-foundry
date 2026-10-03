@@ -13,6 +13,16 @@ describe('friendlyError', () => {
     expect(friendlyError('requirement periods conflict with scope.period')).toContain('共同期间与逐项期间冲突');
   });
 
+  it('explains an unreadable workbook in words and keeps the parser sentence as a hint', () => {
+    const text = friendlyError('cannot parse .xlsx source: File is not a zip file');
+    expect(text.startsWith('无法读取这份 Excel')).toBe(true);
+    expect(text).toContain('已有资料不受影响');
+    expect(text).toContain('（系统提示：cannot parse .xlsx source: File is not a zip file）');
+    expect(friendlyError('cannot parse .csv source: line contains NUL')).toContain('无法读取这份 CSV');
+    expect(friendlyError('cannot parse .json source: Expecting value')).toContain('无法读取这份文件');
+    expect(friendlyError('CSV row has more fields than its header')).toContain('分隔符或引号');
+  });
+
   it('does not translate a sentence twice', () => {
     const once = friendlyError('dataset integrity check failed');
     expect(friendlyError(once)).toBe(once);

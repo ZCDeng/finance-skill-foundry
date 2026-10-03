@@ -110,6 +110,10 @@ const RULES: Rule[] = [
   [/adjustment_ids apply only to run_metric\(kind=management_pnl\)/i, '考核调整只作用于损益表，请先计算损益表。'],
   [/adjustment bindings (must match the finance context|are required)/i, '考核调整引用的资料与当前范围不一致，请在当前范围下重新登记调整。'],
   // Data files.
+  [/cannot parse \.xls[xm] source/i, '无法读取这份 Excel：文件可能已损坏，或扩展名与实际格式不符。这次读取没有生成任何数据，已有资料不受影响。请在 Excel 中另存为 .xlsx 后重试。'],
+  [/CSV row has more fields than its header/i, '无法读取这份 CSV：有的行比表头多出字段，通常是分隔符或引号用错了。这次读取没有生成任何数据，已有资料不受影响。请检查分隔符和引号，另存为 UTF-8 编码的 CSV 后重试。'],
+  [/cannot parse \.csv source/i, '无法读取这份 CSV：编码或分隔格式有误。这次读取没有生成任何数据，已有资料不受影响。请另存为 UTF-8 编码的 CSV 后重试。'],
+  [/cannot parse \.\w+ source/i, '无法读取这份文件：内容与扩展名标示的格式不符。这次读取没有生成任何数据，已有资料不受影响。请检查文件后重试。'],
   [/dataset source workbook integrity check failed/i, '这份 Excel 与登记时的内容不一致，请重新添加这份资料。'],
   [/integrity check failed/i, '资料内容与登记时不一致，请重新添加这份资料后再计算。'],
   [/outside (this session context|run bindings|the run)|is outside/i, '引用的资料不属于当前任务或这次计算，请重新选择资料。'],
