@@ -28,6 +28,8 @@ import { Analysis } from './views/Analysis.js';
 import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 import { Button } from './components/ui/button.js';
+import { GUIDE_EVENT, GuideHub } from './views/guide/GuideHub.js';
+import type { GuideTarget } from './views/guide/articles.js';
 
 /**
  * A refusal is a sentence the store wrote. Show it, do not translate it.
@@ -85,6 +87,36 @@ export function App() {
   const [reading, setReading] = useState<{ sha: string; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
+  const [guideArticle, setGuideArticle] = useState('');
+  // Where focus was when the guide opened, so closing it puts the reader back there.
+  const guideOpener = useRef<HTMLElement | null>(null);
+  const askedRef = useRef(false);
+  askedRef.current = asked;
+  const openGuideAt = useCallback((article: string) => {
+    if (!askedRef.current) guideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setGuideArticle(article);
+    setAsked(true);
+  }, []);
+  const closeGuide = useCallback(() => {
+    setAsked(false);
+    const back = guideOpener.current;
+    guideOpener.current = null;
+    requestAnimationFrame(() => (back?.isConnected ? back : document.querySelector<HTMLElement>('.fnd-head__help'))?.focus());
+  }, []);
+  // A 「?」 in the workspace opens the guide at its block's article; ⌘/Ctrl + ? opens or
+  // closes it, on the screens where it can be drawn and nowhere else.
+  useEffect(() => {
+    const open = (event: Event) => openGuideAt(String((event as CustomEvent).detail ?? ''));
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !(event.metaKey || event.ctrlKey) || event.key !== '?') return;
+      if (screenRef.current !== 'analysis' && screenRef.current !== 'workbench') return;
+      event.preventDefault();
+      if (askedRef.current) closeGuide(); else openGuideAt('');
+    };
+    window.addEventListener(GUIDE_EVENT, open);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener(GUIDE_EVENT, open); window.removeEventListener('keydown', key); };
+  }, [openGuideAt, closeGuide]);
   const [conversationFocus, setConversationFocus] = useState(0);
   const [conversationProblem, setConversationProblem] = useState<string | null>(null);
   const [nativeRect, setNativeRect] = useState<WorkspaceRect | null>(null);
@@ -516,7 +548,8 @@ export function App() {
         if (currentRef.current === target) {
           setSession({ ...result.value, intent: 'analysis', taskId: target });
           setConversationProblem(null);
-          setAsked(false);
+          // Sending something takes the column back for the conversation; a background reconnect leaves the guide open.
+          if (question !== undefined || draftId !== undefined) setAsked(false);
         }
         if (options?.submit && result.value.submitted !== true) {
           throw new Error(result.value.blockedReason || '问题尚未发送，请检查对话中的模型设置后重试。');
@@ -746,7 +779,7 @@ export function App() {
         if (next !== 'deliverables') setOpened(null);
         setScreen(next);
       }}
-      onGuide={inWorkspace && bound ? () => setAsked(true) : undefined}
+      onGuide={inWorkspace ? () => openGuideAt('') : undefined}
       covered={preview !== null && (screen === 'deliverables' || screen === 'tasks' || locatorPreview)}
       strip={
         screen === 'formulator' ? (
@@ -791,8 +824,14 @@ export function App() {
           onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
           onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
           onLayout={onWorkspaceLayout}
-          conversation={boundReadOnly ? <div className="workspace-connection"><h2>任务已停用对话</h2><p>归档或回收站任务只能查看已有成果，恢复后才能继续分析。</p></div>
-            : guide ? <div className="workspace-connection"><h2>边讨论，边看结果</h2><p>提问或添加资料，右侧查看结果和文稿。</p><Button variant="outline" onClick={() => setAsked(false)}>继续工作</Button></div>
+          conversation={guide ? <GuideHub article={guideArticle} canOpen={Boolean(bound) && !boundReadOnly}
+              onClose={closeGuide}
+              onOpen={(target: GuideTarget) => {
+                setAnalysisSection(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : target === 'close' ? 'close' : 'materials');
+                const anchor = { scope: '.analysis-scope-card', structure: '.analysis-structure-panel', datasets: '.analysis-source-list' }[target as 'scope' | 'structure' | 'datasets'];
+                if (anchor) setTimeout(() => document.querySelector(anchor)?.scrollIntoView?.({ block: 'start' }), 60);
+              }} />
+            : boundReadOnly ? <div className="workspace-connection"><h2>任务已停用对话</h2><p>归档或回收站任务只能查看已有成果，恢复后才能继续分析。</p></div>
             : conversationProblem ? <div className="workspace-connection" role="alert"><h2>对话暂时中断</h2><p>{conversationProblem}</p>
               <Button variant="outline" disabled={opening}
                 onClick={() => { setConversationProblem(null); void chatAnalysis().catch(() => undefined); }}>重新连接</Button></div>

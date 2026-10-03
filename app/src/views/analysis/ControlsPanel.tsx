@@ -4,6 +4,7 @@ import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
+import { HelpLink } from '../guide/GuideHub.js';
 import {
   DECISION_LABELS, ISSUE_LABELS, STATUS_LABELS, where,
   type ControlList, type ControlRow, type Disposition, type Suggestion,
@@ -101,7 +102,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
     <section className="fnd-card analysis-controls-card" aria-label="勾稽控制">
       <div className="analysis-section-heading">
         <div>
-          <h4><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h4>
+          <span className="fnd-with-help"><h4><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h4><HelpLink article="controls" label="勾稽控制与差异处置" /></span>
           <p className="analysis-note">合计是否等于分项、两处取数是否一致。系统只指出差异，不替你选口径。</p>
         </div>
         <div className="analysis-actions">

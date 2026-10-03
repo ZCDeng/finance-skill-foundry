@@ -32,10 +32,10 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
         </nav>
         <span className="fnd-head__end">
           {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. */}
-          {onGuide ? <Button type="button" variant="ghost" size="icon"
+          {onGuide ? <Button type="button" variant="ghost" size="sm"
             className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)]"
-            onClick={onGuide} aria-label="怎么用" title="怎么用">
-            <BookOpen size={16} strokeWidth={1.5} aria-hidden />
+            onClick={onGuide} title="使用指南（⌘/Ctrl + ?）" aria-keyshortcuts="Meta+? Control+?">
+            <BookOpen size={16} strokeWidth={1.5} aria-hidden />使用指南
           </Button> : null}
         </span>
       </header>

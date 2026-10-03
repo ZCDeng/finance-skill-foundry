@@ -11,6 +11,7 @@ import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { MonthCloseControlCenter, type CloseTarget } from './analysis/MonthCloseControlCenter.js';
+import { HelpLink } from './guide/GuideHub.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { SearchableSelect } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
@@ -408,6 +409,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
+          <HelpLink article="data-safety" label="资料快照与原文件" />
           <details className="analysis-details"><summary>写回 Excel</summary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
           </details>
