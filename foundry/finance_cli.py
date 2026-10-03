@@ -49,6 +49,8 @@ OPERATIONS = {
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
     "finance-controls-propose": "finance_controls_propose",
+    "finance-controls-sources": "finance_controls_sources",
+    "finance-controls-preview": "finance_controls_preview",
     "finance-controls-save": "finance_controls_save",
     "finance-controls-confirm": "finance_controls_confirm",
     "finance-controls-retire": "finance_controls_retire",
