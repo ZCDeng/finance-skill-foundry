@@ -40,6 +40,18 @@
   --fnd-weight-heavy: 700;
   --fnd-leading-body: 22px;
   --fnd-leading-reading: 28px;
+  /* Document headings: one scale for the editor, both reading views and the exported HTML (electron/reports/format.ts). */
+  --fnd-doc-title: 28px;
+  --fnd-doc-title-leading: 40px;
+  --fnd-doc-title-weight: 750;
+  --fnd-doc-chapter: 22px;
+  --fnd-doc-chapter-leading: 32px;
+  --fnd-doc-chapter-weight: 720;
+  --fnd-doc-section: 18px;
+  --fnd-doc-section-leading: 28px;
+  --fnd-doc-sub: 16px;
+  --fnd-doc-sub-leading: 26px;
+  --fnd-doc-heading-weight: 700;
   --fnd-space-control: 8px;
   --fnd-space-related: 12px;
   --fnd-space-content: 20px;

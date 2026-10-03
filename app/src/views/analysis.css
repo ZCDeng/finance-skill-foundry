@@ -147,13 +147,14 @@
 .analysis-definition { padding-top: 0; }
 .analysis-definition-fold > summary { font-weight: 600; color: var(--fnd-ink); }
 .analysis-draft-reading { width: min(100%, 42em); max-width: 42em; padding: 16px 0 32px; font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); overflow-wrap: anywhere; }
-.analysis-draft-reading h2 { font-size: 24px; line-height: 32px; margin: 0 0 24px; }
-.analysis-draft-reading h3 { font-size: 20px; line-height: 28px; margin: 32px 0 12px; }
+.analysis-draft-reading h2 { font-size: var(--fnd-doc-title); line-height: var(--fnd-doc-title-leading); font-weight: var(--fnd-doc-title-weight); margin: 0 0 24px; }
+.analysis-draft-reading h3 { font-size: var(--fnd-doc-chapter); line-height: var(--fnd-doc-chapter-leading); font-weight: var(--fnd-doc-chapter-weight); margin: 32px 0 12px; }
 .analysis-draft-reading h3 + * { margin-top: 0; }
 .analysis-draft-body p { white-space: pre-wrap; margin: 0 0 18px; }
 .analysis-draft-reading ul, .analysis-draft-reading ol { margin: 0 0 20px; padding-left: 24px; }
 .analysis-draft-reading li + li { margin-top: 6px; }
-.analysis-draft-body h4, .analysis-draft-body h5, .analysis-draft-body h6 { font-size: 16px; line-height: 28px; margin: 28px 0 10px; }
+.analysis-draft-body h4 { font-size: var(--fnd-doc-section); line-height: var(--fnd-doc-section-leading); font-weight: var(--fnd-doc-heading-weight); margin: 28px 0 10px; }
+.analysis-draft-body h5, .analysis-draft-body h6 { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
 .analysis-draft-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--fnd-bg); border-radius: 4px; padding: 1px 4px; overflow-wrap: anywhere; }
 .analysis-draft-body pre { overflow: auto; padding: 14px; margin: 16px 0; border: 1px solid var(--fnd-line); border-radius: 8px; }
 .analysis-draft-body pre code { background: transparent; padding: 0; }
