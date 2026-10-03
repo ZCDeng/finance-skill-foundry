@@ -69,7 +69,7 @@ def clean_control(spec: Any) -> dict[str, Any]:
     kind = spec.get("kind") or "tie_out"
     if kind not in KINDS:
         raise FoundryError("control kind must be subtotal or tie_out")
-    label = _text(spec.get("label"), "control label", maximum=200)
+    label = _one_line(_text(spec.get("label"), "control label", maximum=200))
     left = _side(spec.get("left"), "left")
     right = _side(spec.get("right"), "right")
     if kind == "subtotal" and (left["dataset_id"], left["sheet"]) != (right["dataset_id"], right["sheet"]):
@@ -452,3 +452,124 @@ def _decimal(value: Any, label: str) -> Decimal:
 def _format(value: Decimal) -> str:
     text = format(value.normalize(), "f")
     return "0" if text in {"-0", ""} else text
+
+
+# ---- Dispositions: what the manager decided about a difference (PR C) ---------------------
+
+CORRECTED = "corrected"
+WAIVED = "waived"
+PENDING_EXTERNAL = "pending_external"
+DECISIONS = frozenset({CORRECTED, WAIVED, PENDING_EXTERNAL})
+DECISION_LABELS = {CORRECTED: "修正资料后重新导入", WAIVED: "接受差异并说明", PENDING_EXTERNAL: "待外部确认"}
+
+
+def clean_disposition(spec: Any) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        raise FoundryError("disposition must be an object")
+    decision = spec.get("decision")
+    if decision not in DECISIONS:
+        raise FoundryError("disposition decision must be corrected, waived or pending_external")
+    reason = _one_line(_text(spec.get("reason") or "", "disposition reason", required=False, maximum=4000))
+    if decision in {WAIVED, PENDING_EXTERNAL} and not reason:
+        raise FoundryError("accepting a difference or sending it out for confirmation requires a reason")
+    counterparty = _one_line(_text(spec.get("counterparty") or "", "disposition counterparty", required=False, maximum=200))
+    if decision == PENDING_EXTERNAL and not counterparty:
+        raise FoundryError("a difference sent out for confirmation must name who confirms it")
+    return {
+        "decision": decision,
+        "reason": reason,
+        "counterparty": counterparty,
+        "evidence": _text(spec.get("evidence") or "", "disposition evidence", required=False, maximum=2000),
+        "decided_by_name": _text(spec.get("decided_by_name") or "", "decided_by_name", required=False, maximum=80),
+    }
+
+
+def applies_to(disposition: dict[str, Any], result: dict[str, Any] | None) -> bool:
+    """A decision is about one difference read from particular bytes. Another difference is a new question."""
+    if not result or result.get("status") not in {BREAK, ERROR}:
+        return False
+    return (
+        disposition.get("status") == result.get("status")
+        and disposition.get("difference") == result.get("difference")
+        and disposition.get("source_hashes") == result.get("source_hashes")
+    )
+
+
+def same_person(left: str, right: str) -> bool:
+    return bool(left.strip()) and left.strip().casefold() == right.strip().casefold()
+
+
+def control_issue(row: dict[str, Any], disposition: dict[str, Any] | None, *, require_second_review: bool) -> dict[str, Any] | None:
+    """What a confirmed control's latest result asks of the manager, and whether it holds the close.
+
+    Only a reviewed (where review is required) acceptance clears a difference. A difference
+    that changed since it was decided is open again; the old decision is shown, not applied.
+    """
+    if row.get("state") != CONFIRMED:
+        return None
+    result = row.get("result")
+    if result is None:
+        return {"state": "not_run", "blocking": True}
+    status = result.get("status")
+    if status == PASS:
+        return None
+    if status == STALE:
+        # Retire it, or confirm controls on the newer snapshot: a decision about old bytes says nothing about new ones.
+        return {"state": "stale", "blocking": True, **({"disposition": disposition} if disposition else {})}
+    if disposition is None:
+        return {"state": "open", "blocking": True}
+    if not applies_to(disposition, result):
+        return {"state": "open", "blocking": True, "outdated_disposition": disposition}
+    decision = disposition["decision"]
+    if decision == WAIVED:
+        # Review once required stays required: switching the setting off later does not clear a waiting acceptance.
+        if (require_second_review or disposition.get("review_required")) and not disposition.get("reviewed_at"):
+            return {"state": "awaiting_review", "blocking": True, "disposition": disposition}
+        return {"state": "waived", "blocking": False, "disposition": disposition}
+    if decision == PENDING_EXTERNAL:
+        return {"state": "pending_external", "blocking": True, "disposition": disposition}
+    return {"state": "awaiting_reimport", "blocking": True, "disposition": disposition}
+
+
+def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dict[str, str]:
+    """A one-page list of differences for whoever compiled the books: where, what we read, what we ask.
+
+    Markdown to send, and tab-separated rows that paste into Excel as a table.
+    """
+    lines = ["# 勾稽差异确认", "", "以下差异由系统按原始资料逐格复算得出，请确认采用口径或说明原因。", ""]
+    table = [["序号", "控制", "左侧取数", "左侧金额", "右侧取数", "右侧金额", "差额", "状态", "说明"]]
+    for index, row in enumerate(rows, start=1):
+        result = row.get("result") or {}
+        left, right = result.get("left") or {}, result.get("right") or {}
+        where = lambda side: _one_line(f"{names.get(side.get('dataset_id', ''), '资料')} · {side.get('sheet', '')}!{side.get('range', '')}")
+        issue = row.get("issue") or {}
+        note = _one_line((issue.get("disposition") or {}).get("reason") or "")
+        label = _one_line(row["control"]["label"])
+        if result.get("status") == ERROR:
+            note = _one_line(f"读不出：{result.get('reason') or ''}" + (f"；{note}" if note else ""))
+        state = {"open": "待处理", "pending_external": "待外部确认", "awaiting_reimport": "待重新导入",
+                 "awaiting_review": "待复核", "stale": "资料已更新"}.get(issue.get("state", ""), issue.get("state", ""))
+        lines += [
+            f"## {index}. {label}",
+            "",
+            f"- 左侧：{where(left)}，合计 {left.get('value', '—')}",
+            f"- 右侧：{where(right)}，合计 {right.get('value', '—')}",
+            f"- 差额：{result.get('difference', '—')}{'（显示舍入可能造成）' if result.get('within_rounding') else ''}",
+            f"- 状态：{state}" + (f"；{note}" if note else ""),
+            "",
+        ]
+        table.append([str(index), _cell(label), _cell(where(left)), left.get("value", ""), _cell(where(right)),
+                      right.get("value", ""), result.get("difference", ""), _cell(state), _cell(note)])
+    tsv = "\n".join("\t".join(str(cell).replace("\t", " ") for cell in line) for line in table)
+    return {"markdown": "\n".join(lines).rstrip() + "\n", "tsv": tsv + "\n"}
+
+
+def _one_line(text: str) -> str:
+    """Text a manager or a workbook supplied, on one line: a newline must not start a fake item."""
+    return re.sub(r"[\r\n\u2028\u2029]+", " ", str(text)).strip()
+
+
+def _cell(text: str) -> str:
+    """A text cell pasted into Excel: one that starts like a formula is kept as text."""
+    text = _one_line(text)
+    return "'" + text if text[:1] in {"=", "+", "-", "@"} else text

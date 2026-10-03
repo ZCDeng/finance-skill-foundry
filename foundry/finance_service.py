@@ -58,6 +58,8 @@ COLLECTIONS = {
     "structure_confirmations",
     "controls",
     "control_runs",
+    "control_dispositions",
+    "control_settings",
 }
 
 
@@ -1531,8 +1533,115 @@ class FinanceStore:
             if result and any(current.get(dataset_id) != digest or dataset_id in replaced for dataset_id, digest in hashes.items()):
                 result = {**result, "status": "stale", "reason": "资料快照在这次运行之后已变化"}
             rows.append({**head, "result": result})
+        from foundry.finance_controls import control_issue
+
+        settings = self._control_settings()
+        decided = self._latest_dispositions()
+        for row in rows:
+            row["issue"] = control_issue(row, decided.get(row["id"]), require_second_review=settings["require_second_review"])
         results = [row["result"] | {"state": row.get("state")} for row in rows if row.get("result")]
-        return {"schema_version": 1, "controls": rows, "summary": _control_summary(results, total=len(rows))}
+        summary = _control_summary(results, total=len(rows))
+        summary["blocking"] = sum(1 for row in rows if (row.get("issue") or {}).get("blocking"))
+        return {"schema_version": 1, "controls": rows, "summary": summary, "settings": settings}
+
+    def _control_settings(self):
+        rows = self._list("control_settings")
+        latest = rows[-1] if rows else {}
+        return {"require_second_review": latest.get("require_second_review") is True}
+
+    def _latest_dispositions(self):
+        latest = {}
+        for row in self._list("control_dispositions"):
+            latest[row["control_id"]] = row
+        return latest
+
+    def finance_control_settings_save(self, spec):
+        self._manager_only("change control settings")
+        if not isinstance(spec, dict) or not isinstance(spec.get("require_second_review"), bool):
+            raise FoundryError("require_second_review must be true or false")
+        return self._write("control_settings", require_second_review=spec["require_second_review"], bindings={}, saved_by=self.actor)
+
+    def finance_control_disposition_save(self, spec):
+        """The manager's decision on one difference, bound to the exact result it was made about."""
+        from foundry.finance_controls import clean_disposition
+
+        self._manager_only("decide on a control difference")
+        if not isinstance(spec, dict) or not spec.get("control_id"):
+            raise FoundryError("disposition requires control_id")
+        listed = {row["id"]: row for row in self.finance_controls_list({})["controls"]}
+        row = listed.get(spec["control_id"])
+        if row is None:
+            raise FoundryError("control is not the latest version or does not exist")
+        if row.get("state") != "confirmed":
+            raise FoundryError("only a confirmed control's difference can be decided")
+        result = row.get("result") or {}
+        if result.get("status") not in {"break", "error"}:
+            raise FoundryError("this control has no difference to decide; run it first")
+        fields = clean_disposition(spec)
+        if result.get("status") == "error" and fields["decision"] != "corrected":
+            # A range that cannot be read is not a difference anyone can accept; the file has to be fixed.
+            raise FoundryError("a control that could not be read can only be corrected and re-imported")
+        review_required = self._control_settings()["require_second_review"]
+        if fields["decision"] == "waived" and review_required and not fields["decided_by_name"]:
+            raise FoundryError("with second review on, accepting a difference must name who accepts it")
+        previous = self._latest_dispositions().get(row["id"])
+        return self._write(
+            "control_dispositions",
+            control_id=row["id"],
+            run_id=result.get("run_id"),
+            status=result.get("status"),
+            difference=result.get("difference"),
+            source_hashes=result.get("source_hashes"),
+            bindings=row["bindings"],
+            decided_by=self.actor,
+            review_required=fields["decision"] == "waived" and review_required,
+            **fields,
+            **({"parent_id": previous["id"]} if previous else {}),
+        )
+
+    def finance_control_disposition_review(self, spec):
+        """A second person's sign-off on an accepted difference, where the task requires one."""
+        self._manager_only("review a control decision")
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError("review requires the disposition id")
+        reviewer = _safe_text(spec.get("reviewer") or "", "reviewer", maximum=80).strip()
+        if not reviewer:
+            raise FoundryError("a review must name the reviewer")
+        current = self._latest_dispositions()
+        disposition = next((row for row in current.values() if row["id"] == spec["id"]), None)
+        if disposition is None:
+            raise FoundryError("disposition is not the latest decision for its control")
+        if disposition["decision"] != "waived":
+            raise FoundryError("only an accepted difference is reviewed")
+        if disposition.get("reviewed_at"):
+            return disposition
+        from foundry.finance_controls import same_person
+
+        if not (disposition.get("decided_by_name") or "").strip():
+            raise FoundryError("this acceptance names no one; decide it again with a name before it can be reviewed")
+        if same_person(disposition["decided_by_name"], reviewer):
+            raise FoundryError("the reviewer must be someone other than the person who accepted the difference")
+        from foundry.analysis import now_iso
+
+        fields = {key: value for key, value in disposition.items() if key not in {"id", "task_id", "schema_version", "created_at", "seq", "domain", "parent_id"} and not key.startswith("_")}
+        return self._write("control_dispositions", **{**fields, "parent_id": disposition["id"], "reviewer": reviewer, "reviewed_at": now_iso()})
+
+    def finance_control_confirmation_sheet(self, spec):
+        """The open and out-for-confirmation differences as a sheet to send."""
+        from foundry.finance_controls import confirmation_sheet
+
+        spec = spec if isinstance(spec, dict) else {}
+        wanted = spec.get("control_ids")
+        rows = [
+            row for row in self.finance_controls_list({})["controls"]
+            # What the preparer has to answer: open and out-for-confirmation differences, and ranges
+            # that cannot be read. An acceptance waiting on internal review stays inside.
+            if (row.get("issue") or {}).get("state") in {"open", "pending_external", "awaiting_reimport"}
+            and (row.get("result") or {}).get("status") in {"break", "error"}
+            and (wanted is None or row["id"] in wanted)
+        ]
+        names = {row["id"]: row.get("name") or "资料" for row in self.analysis.state()["datasets"]}
+        return {"schema_version": 1, "count": len(rows), **confirmation_sheet(rows, names)}
 
     def _structure_proposals(self, dataset_id):
         return [
