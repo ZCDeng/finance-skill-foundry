@@ -2,7 +2,7 @@ import { Save } from 'lucide-react';
 import { AccountingPeriodInput, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { CURRENCY_OPTIONS, SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
-import { SCOPE_LABELS, type AnalysisScope, type ScopeCandidates, type ScopeKey, type ScopeValues } from './scope.js';
+import { SCOPE_LABELS, type AnalysisScope, type ScopeCandidateSources, type ScopeCandidates, type ScopeKey, type ScopeValues } from './scope.js';
 
 const validPeriod = (value: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 
@@ -15,26 +15,27 @@ function choices(fixed: SelectOption[], inferred: string[] | undefined, saved: s
 }
 
 /** The values the files declare for one field, offered as one click each. */
-function Candidates({ field, values, current, disabled, onPick }: {
-  field: ScopeKey; values: string[] | undefined; current: string; disabled?: boolean; onPick(value: string): void;
+function Candidates({ field, values, sources, current, disabled, onPick }: {
+  field: ScopeKey; values: string[] | undefined; sources?: Record<string, string>; current: string; disabled?: boolean; onPick(value: string): void;
 }) {
   const offered = (values ?? []).filter((value) => value !== current);
   if (!offered.length) return null;
   const visible = (value: string) => field === 'scenario' ? scenarioLabel(value) : value;
-  return <p className="analysis-note analysis-scope-candidates">资料里读到：{offered.map((value) =>
-    <Button key={value} variant="outline" type="button" size="sm" disabled={disabled} aria-label={`采用资料里的${SCOPE_LABELS[field]} ${value}`}
-      onClick={() => onPick(value)}>{visible(value)}</Button>)}</p>;
+  return <p className="analysis-note analysis-scope-candidates">资料里读到：{offered.map((value) => <span key={value}>
+    <Button variant="outline" type="button" size="sm" disabled={disabled} aria-label={`采用资料里的${SCOPE_LABELS[field]} ${value}`}
+      onClick={() => onPick(value)}>{visible(value)}</Button>
+    {sources?.[value] ? <span className="analysis-scope-candidate-source">来自 {sources[value]}</span> : null}</span>)}</p>;
 }
 
-export function ScopeField({ field, scope, candidates, disabled, onField, ariaLabel, help }: {
-  field: ScopeKey; scope: ScopeValues; candidates: ScopeCandidates; disabled?: boolean; ariaLabel?: string; help?: string;
+export function ScopeField({ field, scope, candidates, sources, disabled, onField, ariaLabel, help }: {
+  field: ScopeKey; scope: ScopeValues; candidates: ScopeCandidates; sources?: ScopeCandidateSources; disabled?: boolean; ariaLabel?: string; help?: string;
   onField(key: ScopeKey, value: string): void;
 }) {
   const label = SCOPE_LABELS[field];
   const value = scope[field];
   const pick = (next: string) => onField(field, next);
   const inferred = candidates[field];
-  const suggestions = <Candidates field={field} values={inferred} current={value} disabled={disabled} onPick={pick} />;
+  const suggestions = <Candidates field={field} values={inferred} sources={sources?.[field]} current={value} disabled={disabled} onPick={pick} />;
   switch (field) {
     case 'period':
       return <div>{value && !validPeriod(value)
@@ -56,13 +57,26 @@ export function ScopeField({ field, scope, candidates, disabled, onField, ariaLa
 }
 
 /** The scope fields in a grid; the same fields wherever the scope is edited. */
-export function ScopeFields({ fields, scope, candidates, disabled, onField, ariaPrefix }: {
-  fields: readonly ScopeKey[]; scope: ScopeValues; candidates: ScopeCandidates; disabled?: boolean; ariaPrefix?: string;
+export function ScopeFields({ fields, scope, candidates, sources, disabled, onField, ariaPrefix }: {
+  fields: readonly ScopeKey[]; scope: ScopeValues; candidates: ScopeCandidates; sources?: ScopeCandidateSources; disabled?: boolean; ariaPrefix?: string;
   onField(key: ScopeKey, value: string): void;
 }) {
   return <div className="analysis-edit-grid">{fields.map((field) =>
-    <ScopeField key={field} field={field} scope={scope} candidates={candidates} disabled={disabled} onField={onField}
+    <ScopeField key={field} field={field} scope={scope} candidates={candidates} sources={sources} disabled={disabled} onField={onField}
       ariaLabel={ariaPrefix ? `${ariaPrefix}${SCOPE_LABELS[field]}` : undefined} />)}</div>;
+}
+
+/** The months the files declare while the task has none: the calculations stay closed until one is chosen. */
+export function pendingPeriods(scope: Pick<AnalysisScope, 'scope' | 'candidates'>): string[] {
+  return scope.scope.period.trim() ? [] : scope.candidates.period ?? [];
+}
+
+/** Says why the period-bound actions are closed, in the words of the files themselves. */
+export function PeriodPending({ scope, announce = true }: { scope: Pick<AnalysisScope, 'scope' | 'candidates'>; announce?: boolean }) {
+  const periods = pendingPeriods(scope);
+  if (!periods.length) return null;
+  // The scope card announces it; a second copy in the settings dialog would read it twice.
+  return <p role={announce ? 'status' : undefined} className="analysis-message">资料写的期间是 {periods.join('、')}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;
 }
 
 const PRIMARY_FIELDS: readonly ScopeKey[] = ['period', 'organization', 'unit', 'currency', 'scenario'];
@@ -82,9 +96,10 @@ export function ScopePanel({ scope: state, datasetCount, disabled, onSaved }: {
       <p className="analysis-note">资料里读到的值列在字段下方，点一下即可采用；确认后保存，之后的计算和文稿都按这个范围。</p></div>
       <span className="analysis-note" title={state.current?.id}>{state.current ? '已保存' : '未保存'} · 资料 {datasetCount} 份</span></div>
     {state.loading ? <p role="status" className="analysis-note">正在读取已保存范围…</p> : null}
-    <ScopeFields fields={PRIMARY_FIELDS} scope={state.scope} candidates={state.candidates} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
+    <PeriodPending scope={state} />
+    <ScopeFields fields={PRIMARY_FIELDS} scope={state.scope} candidates={state.candidates} sources={state.candidateSources} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
     <details className="analysis-details"><summary>更多范围{more ? ` · ${more}` : ''}</summary>
-      <ScopeFields fields={MORE_FIELDS} scope={state.scope} candidates={state.candidates} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
+      <ScopeFields fields={MORE_FIELDS} scope={state.scope} candidates={state.candidates} sources={state.candidateSources} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
     </details>
     {state.conflicts.map(({ field, label }) => <p key={field} role="alert" className="analysis-message analysis-message--error">
       共同{label}与指标里逐项列出的{label}不一致。<Button type="button" variant="outline" disabled={blocked}

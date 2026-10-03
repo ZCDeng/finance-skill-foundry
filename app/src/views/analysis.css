@@ -303,3 +303,4 @@
 .analysis-controls-issue-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .analysis-controls-decide { display: grid; gap: 8px; }
 .analysis-controls-decide label, .analysis-controls-setting { display: inline-flex; gap: 6px; align-items: center; font-size: 0.88rem; }
+.analysis-scope-candidate-source { margin: 0 12px 0 6px; }
