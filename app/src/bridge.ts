@@ -559,6 +559,8 @@ export type FinanceCommand =
   | 'finance-adjustment-list'
   | 'finance-adjustment-confirm'
   | 'finance-controls-propose'
+  | 'finance-controls-sources'
+  | 'finance-controls-preview'
   | 'finance-controls-save'
   | 'finance-controls-confirm'
   | 'finance-controls-retire'

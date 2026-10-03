@@ -1404,6 +1404,35 @@ class FinanceStore:
                 })
         return {"schema_version": 1, "suggestions": suggestions}
 
+    def finance_controls_sources(self, spec):
+        """The workbooks a control can read, with their sheet names, for choosing two places to compare."""
+        from foundry.finance_controls import snapshot_bytes, workbook_sheets
+
+        del spec
+        sources = []
+        for dataset in self._workbook_datasets():
+            sources.append({
+                "dataset_id": dataset["id"],
+                "source_hash": dataset["source_hash"],
+                "name": dataset.get("name") or dataset["id"],
+                "sheets": workbook_sheets(snapshot_bytes(self.analysis, dataset)),
+            })
+        return {"schema_version": 1, "sources": sources}
+
+    def finance_controls_preview(self, spec):
+        """Sum both sides of one control the manager is drafting and say the difference. Nothing is saved."""
+        from foundry.finance_controls import clean_control, dataset_ids, evaluate_control
+
+        if not isinstance(spec, dict):
+            raise FoundryError("control preview spec must be an object")
+        control = clean_control(spec.get("control", spec))
+        ids = dataset_ids(control)
+        self._authorize({f"source{index}": dataset_id for index, dataset_id in enumerate(ids)})
+        published = {row["id"] for row in self.analysis.state()["datasets"]}
+        if any(dataset_id not in published for dataset_id in ids):
+            raise FoundryError("control refers to a snapshot that is not in this task")
+        return {"schema_version": 1, "control": control, "preview": evaluate_control(self.analysis, control)}
+
     def finance_controls_save(self, spec):
         """Save controls as proposed; the manager may confirm in the same call. A repeat of a live control returns it."""
         from foundry.finance_controls import clean_control, control_key, dataset_ids

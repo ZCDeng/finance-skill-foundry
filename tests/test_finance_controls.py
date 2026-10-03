@@ -287,3 +287,21 @@ def test_breakdown_rows_and_provision_notes_do_not_become_totals(tmp_path):
     assert "B2:B5" not in ranges  # 其中 rows would count 营业收入 twice
     assert ranges == {"B9:B12"}
     assert all(row["preview"]["status"] == "pass" for row in suggestions)
+
+
+def test_a_drafted_two_place_comparison_previews_its_gap_without_saving(tmp_path):
+    task, analysis, assistant, _manager = _task(tmp_path)
+    ledger = analysis.add_dataset(_ledger(tmp_path / "ledger.xlsx", [409.5] * 600), name="台账")
+    close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    sources = {row["name"]: row for row in assistant.finance_controls_sources({})["sources"]}
+    assert sources["台账"]["sheets"] == ["11·合同台账"] and sources["月结"]["sheets"] == ["08·AR"]
+    assert sources["台账"]["source_hash"] == ledger["source_hash"]
+    drafted = {"kind": "tie_out", "label": "台账实收 对 月结区域账单",
+               "left": _side(ledger, "11·合同台账", "B605"), "right": _side(close, "08·AR", "B11")}
+    preview = assistant.finance_controls_preview({"control": drafted})
+    assert preview["preview"]["status"] == "break" and preview["preview"]["difference"] == "95700"
+    assert assistant.finance_controls_list({})["controls"] == []
+    narrowed = FinanceStore(task, snapshot_ids=[close["id"]])
+    with pytest.raises(FoundryError, match="outside this session"):
+        narrowed.finance_controls_preview({"control": drafted})
+    assert [row["name"] for row in narrowed.finance_controls_sources({})["sources"]] == ["月结"]

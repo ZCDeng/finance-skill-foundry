@@ -284,6 +284,15 @@ def snapshot_bytes(analysis: Any, dataset: dict[str, Any]) -> bytes:
     return data
 
 
+def workbook_sheets(data: bytes) -> list[str]:
+    """Sheet names in workbook order."""
+    book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        return list(book.sheetnames)
+    finally:
+        book.close()
+
+
 def _text_cells(data: bytes, sheet: str) -> set[str]:
     """Coordinates that hold text. A 「1,200」 typed as text is not a blank; skipping it would pass a short total."""
     book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
