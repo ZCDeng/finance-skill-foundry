@@ -718,7 +718,7 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "finance_background_list",
             "title": "List finance business background",
-            "description": "List only granted and period-applicable business context notes for an explanation run or finance context.",
+            "description": "List only granted and period-applicable business context notes for an explanation run or finance context. Requires as_of or scope.period; without one it returns no notes and missing: [\"as_of\"] rather than assuming the current date.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

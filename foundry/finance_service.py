@@ -1197,8 +1197,11 @@ class FinanceStore:
         if not scope:
             return {"schema_version": 1, "business_contexts": []}
         self._background_scope_bindings(scope)
+        as_of = spec.get("as_of") or scope.get("period")
+        if not as_of:
+            return {"schema_version": 1, "business_contexts": [], "missing": ["as_of"]}
         all_rows = self._list("backgrounds")
-        rows = [row for row in all_rows if background_applies(row, scope=scope, as_of=spec.get("as_of") or scope.get("period"))]
+        rows = [row for row in all_rows if background_applies(row, scope=scope, as_of=as_of)]
         by_id = {row["id"]: row for row in all_rows}
         superseded = set()
         for row in rows:

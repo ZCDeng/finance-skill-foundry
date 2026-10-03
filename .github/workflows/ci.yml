@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # One job on purpose: pytest drives vitest and both tsc projects through
+    # tests/test_app.py, and parity tests such as test_report_visuals need
+    # Python and app/node_modules on the same machine.
+    name: Tests (pytest, vitest, typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Nothing here launches Electron itself.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Python dependencies
+        run: uv sync --all-extras
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      # The pinned runtime (extra/dsh) is not in version control; the client
+      # adapter and embedded-client suites read it. Its npm install needs more
+      # than node's default 2 GB heap, so it is cached on the pins.
+      - name: Restore staged harness
+        id: harness-cache
+        uses: actions/cache@v4
+        with:
+          path: app/extra/dsh
+          key: harness-${{ runner.os }}-${{ hashFiles('dsh-plugin/package.json') }}
+      - name: Stage pinned harness
+        if: steps.harness-cache.outputs.cache-hit != 'true'
+        working-directory: app
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run harness
+      - name: Refresh staged bundle from this checkout
+        if: steps.harness-cache.outputs.cache-hit == 'true'
+        working-directory: app
+        run: node scripts/fetch-harness.mjs --refresh-local
+
+      - name: pytest (includes vitest and typecheck)
+        run: uv run pytest -q
+      - name: Build renderer
+        working-directory: app
+        run: npx vite build
