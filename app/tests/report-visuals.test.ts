@@ -165,6 +165,8 @@ describe('static report visual rendering', () => {
     { values: ['-12500', '96000'], expected: ['-12,500', '0', '23,700', '59,800', '96,000'] },
     { values: ['0', '-99900000000'], expected: ['-99,900,000,000', '-66,600,000,000', '-33,300,000,000', '0'] },
     { values: ['0', '420000000000'], expected: ['0', '1.4e11', '2.8e11', '4.2e11'] },
+    // One style per axis: an axis that reaches 1e11 never mixes 40,000,000,000 with 1.2e11.
+    { values: ['0', '120000000000'], expected: ['0', '4e10', '8e10', '1.2e11'] },
   ])('labels the zero baseline and compact numeric scale for $values', ({ values, expected }) => {
     const raw = chart({ kind: 'line' });
     raw.series.rows = values.map((value, index) => ({ 区域: String(index + 1), 利润: value }));
