@@ -178,3 +178,31 @@ it('scales the side in the larger unit to the smaller one, never by a coefficien
   await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-controls-preview', { control: expect.objectContaining({
     unit: '元', left: expect.objectContaining({ scale: '10000' }), right: expect.objectContaining({ scale: '1' }) }) }));
 });
+
+it('reads a full-width range, refuses to keep a comparison it could not read, and reports a failed run after a save', async () => {
+  let status = 'stale';
+  let runFails = false;
+  const calls = mount((command, spec) => {
+    if (command === 'finance-controls-sources') return { sources: [{ dataset_id: 'a', source_hash: 'h', name: 'a.xlsx', sheets: ['S'] }] };
+    if (command === 'finance-controls-preview') return { control: (spec as { control: unknown }).control, preview: { status, difference: '5', reason: '资料已有更新的版本' } };
+    if (command === 'finance-controls-run' && runFails) throw new Error('run failed');
+    return listOf([]);
+  });
+  render(<ControlsPanel taskId="t" />);
+  fireEvent.click(await screen.findByRole('button', { name: '添加两处取数对比' }));
+  for (const [title, cell] of [['第一处', 'ｂ5：b6'], ['第二处', 'C9']]) {
+    fireEvent.change(await screen.findByLabelText(`${title}工作簿`), { target: { value: 'a' } });
+    fireEvent.change(screen.getByLabelText(`${title}工作表`), { target: { value: 'S' } });
+    fireEvent.change(screen.getByLabelText(`${title}单元格`), { target: { value: cell } });
+  }
+  fireEvent.click(screen.getByRole('button', { name: '加总两处，看差额' }));
+  expect(await screen.findByText('这两处读不出可比较的合计，改选单元格后再加总。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull();
+  expect(calls).toHaveBeenCalledWith('t', 'finance-controls-preview', { control: expect.objectContaining({ left: expect.objectContaining({ range: 'B5:B6' }) }) });
+  status = 'break'; runFails = true;
+  fireEvent.change(screen.getByLabelText('第二处单元格'), { target: { value: 'C10' } });
+  fireEvent.click(screen.getByRole('button', { name: '加总两处，看差额' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认并保存这条对比' }));
+  expect(await screen.findByText(/运行没有完成，请点「重新运行」/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull();
+});

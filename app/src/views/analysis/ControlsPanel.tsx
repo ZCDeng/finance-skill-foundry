@@ -29,6 +29,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [declaring, setDeclaring] = useState(false);
+  const [declaringBusy, setDeclaringBusy] = useState(false);
 
   const call = useCallback(async <T,>(command: string, spec?: unknown): Promise<T> => {
     const api = bridge(); if (!api?.financeCall) throw new Error('此版本暂不支持勾稽控制。');
@@ -99,7 +100,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
   const rows = list?.controls ?? [];
   const issues = rows.filter((row) => row.issue);
   const summary = list?.summary;
-  const locked = Boolean(busy || working);
+  const locked = Boolean(busy || working || declaringBusy);
 
   return (
     <section className="fnd-card analysis-controls-card" aria-label="勾稽控制">
@@ -124,7 +125,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {message ? <p className="analysis-message">{message}</p> : null}
 
-      {declaring ? <TieOutForm call={call} locked={locked} onCancel={() => setDeclaring(false)} onSaved={async (done) => {
+      {declaring ? <TieOutForm call={call} locked={Boolean(busy || working)} refreshKey={refreshKey} onBusy={setDeclaringBusy} onCancel={() => { setDeclaring(false); setDeclaringBusy(false); }} onSaved={async (done) => {
         setDeclaring(false); setMessage(done);
         await load(); onChanged?.(); window.dispatchEvent(new Event('fnd:task-changed'));
       }} /> : null}

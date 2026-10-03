@@ -1428,10 +1428,19 @@ class FinanceStore:
         control = clean_control(spec.get("control", spec))
         ids = dataset_ids(control)
         self._authorize({f"source{index}": dataset_id for index, dataset_id in enumerate(ids)})
-        published = {row["id"] for row in self.analysis.state()["datasets"]}
+        self._assert_current_snapshots(ids)
+        return {"schema_version": 1, "control": control, "preview": evaluate_control(self.analysis, control)}
+
+    def _assert_current_snapshots(self, ids):
+        """A control is declared on the task's current files: one on a replaced snapshot would be stale from birth."""
+        from foundry.finance_controls import superseded_snapshots
+
+        rows = self.analysis.state()["datasets"]
+        published = {row["id"] for row in rows}
         if any(dataset_id not in published for dataset_id in ids):
             raise FoundryError("control refers to a snapshot that is not in this task")
-        return {"schema_version": 1, "control": control, "preview": evaluate_control(self.analysis, control)}
+        if set(ids) & superseded_snapshots(self.task, rows):
+            raise FoundryError("control refers to a snapshot a newer upload has replaced")
 
     def finance_controls_save(self, spec):
         """Save controls as proposed; the manager may confirm in the same call. A repeat of a live control returns it."""
@@ -1460,6 +1469,8 @@ class FinanceStore:
             for dataset_id in ids:
                 if dataset_id not in published:
                     raise FoundryError("control refers to a snapshot that is not in this task")
+            if confirm:
+                self._assert_current_snapshots(ids)
             existing = lineages.get(control_key(control))
             state = "confirmed" if confirm else "proposed"
             if existing and existing.get("state") != "retired" and existing["control"] == control and (

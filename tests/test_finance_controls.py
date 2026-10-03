@@ -305,3 +305,22 @@ def test_a_drafted_two_place_comparison_previews_its_gap_without_saving(tmp_path
     with pytest.raises(FoundryError, match="outside this session"):
         narrowed.finance_controls_preview({"control": drafted})
     assert [row["name"] for row in narrowed.finance_controls_sources({})["sources"]] == ["月结"]
+
+
+def test_a_single_cell_written_as_a_range_is_the_same_control(tmp_path):
+    _task_obj, analysis, _assistant, manager = _task(tmp_path)
+    close = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    first = manager.finance_controls_save({"control": {"label": "x", "left": _side(close, "08·AR", "B11"), "right": _side(close, "08·AR", "B16")}})["controls"][0]
+    again = manager.finance_controls_save({"control": {"label": "x", "left": _side(close, "08·AR", "b11:B11"), "right": _side(close, "08·AR", "B16")}})["controls"][0]
+    assert again["id"] == first["id"] and again["control"]["left"]["range"] == "B11"
+
+
+def test_a_comparison_on_a_replaced_upload_cannot_be_previewed_or_confirmed(tmp_path):
+    _task_obj, analysis, _assistant, manager = _task(tmp_path)
+    old = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=[3525, 5355, 6930, 7020, 5400, 5550], total=22125), name="月结")
+    analysis.add_dataset(_ar_pack(tmp_path / "ar2.xlsx", provisions=[2069, 3144, 4069, 4122, 3171, 5550], total=22125), name="月结")
+    drafted = {"label": "x", "left": _side(old, "08·AR", "B11"), "right": _side(old, "08·AR", "B16")}
+    with pytest.raises(FoundryError, match="newer upload has replaced"):
+        manager.finance_controls_preview({"control": drafted})
+    with pytest.raises(FoundryError, match="newer upload has replaced"):
+        manager.finance_controls_save({"control": drafted, "confirm": True})

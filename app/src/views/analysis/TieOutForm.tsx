@@ -12,15 +12,20 @@ type Place = { dataset_id: string; sheet: string; range: string; unit: string };
 const UNITS: [string, number][] = [['元', 1], ['千元', 1e3], ['万元', 1e4], ['百万元', 1e6], ['亿元', 1e8]];
 const factor = (unit: string) => UNITS.find(([name]) => name === unit)?.[1] ?? 1;
 const blank = (): Place => ({ dataset_id: '', sheet: '', range: '', unit: '万元' });
+/** What a Chinese keyboard types for a range (B5：B6, B5－B6, ＄B＄5) in the A1 form the engine reads. */
+const cellRange = (raw: string) => raw.normalize('NFKC').replace(/\s+/g, '').replace(/[-–—~～]/g, ':').toUpperCase();
 
 /**
  * 添加两处取数对比: the manager names two places (sheet and cells, in the same or another workbook),
  * sees both sums and the difference, and only then confirms it as a control. A difference found
  * here is handled like any other: the system never picks the side that is right.
  */
-export function TieOutForm({ call, locked, onSaved, onCancel }: {
+export function TieOutForm({ call, locked, refreshKey, onBusy, onSaved, onCancel }: {
   call<T>(command: string, spec?: unknown): Promise<T>;
   locked: boolean;
+  /** Changes when the task's files may have changed; the workbook list is read again. */
+  refreshKey?: unknown;
+  onBusy?(busy: boolean): void;
   onSaved(message: string): Promise<void> | void;
   onCancel(): void;
 }) {
@@ -38,13 +43,13 @@ export function TieOutForm({ call, locked, onSaved, onCancel }: {
       .then((answer) => { if (live) setSources(answer.sources); })
       .catch((failure) => { if (live) setError(errorText(failure)); });
     return () => { live = false; };
-  }, [call]);
+  }, [call, refreshKey]);
 
   const control = useMemo((): ControlSpec | null => {
     const side = (place: Place) => {
       const source = sources?.find((row) => row.dataset_id === place.dataset_id);
       return source && place.sheet && place.range.trim()
-        ? { dataset_id: source.dataset_id, source_hash: source.source_hash, sheet: place.sheet, range: place.range.trim().toUpperCase() }
+        ? { dataset_id: source.dataset_id, source_hash: source.source_hash, sheet: place.sheet, range: cellRange(place.range) }
         : null;
     };
     const l = side(left); const r = side(right);
@@ -63,8 +68,8 @@ export function TieOutForm({ call, locked, onSaved, onCancel }: {
   useEffect(() => { setPreview(null); }, [control]);
 
   async function work(text: string, task: () => Promise<void>) {
-    setWorking(text); setError('');
-    try { await task(); } catch (failure) { setError(errorText(failure)); } finally { setWorking(''); }
+    setWorking(text); setError(''); onBusy?.(true);
+    try { await task(); } catch (failure) { setError(errorText(failure)); } finally { setWorking(''); onBusy?.(false); }
   }
   const check = () => work('正在加总两处…', async () => {
     if (control) setPreview(await call('finance-controls-preview', { control }));
@@ -72,13 +77,17 @@ export function TieOutForm({ call, locked, onSaved, onCancel }: {
   const save = () => work('正在保存…', async () => {
     if (!preview) return;
     await call('finance-controls-save', { controls: [preview.control], origin: 'declared', confirm: true });
-    await call('finance-controls-run', {});
-    await onSaved(`已确认这条对比：${preview.control.label}`);
+    // Saved is saved: a run that fails afterwards is reported, never mistaken for a failed save.
+    let ran = true;
+    try { await call('finance-controls-run', {}); } catch { ran = false; }
+    await onSaved(ran ? `已确认这条对比：${preview.control.label}` : `已确认这条对比：${preview.control.label}。运行没有完成，请点「重新运行」。`);
   });
 
   const busy = locked || Boolean(working);
   const result = preview?.preview;
-  return <fieldset className="analysis-fieldset analysis-tieout" disabled={busy} aria-label="添加两处取数对比">
+  // Only a comparison both sides of which could be read is worth keeping as a control.
+  const savable = result?.status === 'pass' || result?.status === 'break';
+  return <section className="analysis-tieout" aria-label="添加两处取数对比"><fieldset className="analysis-fieldset analysis-tieout-fields" disabled={busy}>
     <legend><Scale size={15} strokeWidth={1.5} aria-hidden /> 添加两处取数对比</legend>
     <p className="analysis-note">选两处应当相等的数字，可以跨表、跨工作簿。系统加总两处并给出差额，不替你判断哪一处对。</p>
     {sources === null && !error ? <p className="analysis-note" role="status">正在读取工作簿…</p> : null}
@@ -96,22 +105,25 @@ export function TieOutForm({ call, locked, onSaved, onCancel }: {
       <p><span className={`analysis-controls-status analysis-controls-status--${result.status}`}>{STATUS_LABELS[result.status]}</span></p>
       {result.left ? <p>{where(result.left)} 合计 {result.left.value ?? '—'}</p> : null}
       {result.right ? <p>{where(result.right)} 合计 {result.right.value ?? '—'}</p> : null}
-      {result.difference ? <p className="analysis-tieout-difference">差额 {result.difference}{preview?.control.unit ? ` ${preview.control.unit}` : ''}</p> : null}
+      {result.difference ? <p className="analysis-tieout-difference">差额 {result.difference}{preview?.control.unit ? ` ${preview.control.unit}` : ''}{result.within_rounding ? '（可能是显示舍入，仍算不相符）' : ''}</p> : null}
       {result.reason ? <p className="analysis-note">{result.reason}</p> : null}
     </div> : null}
+    {result && !savable ? <p className="analysis-note">这两处读不出可比较的合计，改选单元格后再加总。</p> : null}
     <div className="analysis-actions">
-      {preview
+      {preview && savable
         ? <Button type="button" onClick={() => void save()}><Check size={15} strokeWidth={1.5} aria-hidden />确认并保存这条对比</Button>
-        : <Button type="button" disabled={!control} onClick={() => void check()}>加总两处，看差额</Button>}
-      <Button type="button" variant="outline" onClick={onCancel}>取消</Button>
+        : <Button type="button" disabled={!control || Boolean(preview)} onClick={() => void check()}>加总两处，看差额</Button>}
     </div>
-  </fieldset>;
+  </fieldset>
+    {/* Outside the fieldset: a slow save can still be left. */}
+    <div className="analysis-actions"><Button type="button" variant="outline" onClick={onCancel}>取消</Button></div>
+  </section>;
 }
 
 function PlaceFields({ title, place, sources, onChange }: { title: string; place: Place; sources: ControlSource[]; onChange(next: Place): void }) {
   const sheets = sources.find((row) => row.dataset_id === place.dataset_id)?.sheets ?? [];
   return <div className="analysis-tieout-place" role="group" aria-label={title}>
-    <h6>{title}</h6>
+    <h5>{title}</h5>
     <label>工作簿
       <select className="fnd-field" aria-label={`${title}工作簿`} value={place.dataset_id} onChange={(event) => onChange({ ...place, dataset_id: event.target.value, sheet: '' })}>
         <option value="">选择工作簿</option>

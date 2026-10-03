@@ -376,6 +376,9 @@ def _side(value: Any, name: str) -> dict[str, str]:
         raise FoundryError(f"control {name} range must be a bounded A1 reference")
     if (max_row - min_row + 1) * (max_col - min_col + 1) > MAX_CELLS:
         raise FoundryError(f"control {name} range is too large")
+    if ":" in range_ref and min_row == max_row and min_col == max_col:
+        # T605:T605 and T605 are the same check; one spelling keeps them one control.
+        range_ref = range_ref.split(":", 1)[0]
     scale = _decimal(value.get("scale", "1"), f"control {name} scale")
     if scale not in UNIT_SCALES:
         raise FoundryError(f"control {name} scale must be a unit conversion (a power of ten)")
