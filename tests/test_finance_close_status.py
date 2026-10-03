@@ -118,3 +118,53 @@ def test_the_store_answers_for_a_task_with_nothing_in_it(tmp_path):
     status = FinanceStore(task).finance_close_status({})
     assert status["headline"]["state"] == "not_ready"
     assert "还没有资料" in status["blocking"]
+
+
+def test_a_control_that_cannot_be_read_holds_the_close_after_correction_is_chosen():
+    row = {"state": "confirmed", "control": {"label": "坏账分项"}, "result": {"status": "error"},
+           "issue": {"state": "awaiting_reimport", "blocking": True}}
+    result = _status(controls=[row])
+    assert result["headline"]["state"] == "needs_review"
+    assert "坏账分项：读不出，待重新导入修正后的资料" in result["blocking"]
+    # A read failure is not a source conflict.
+    assert "来源冲突" not in result["headline"]["text"]
+
+
+def test_a_file_added_after_the_calculation_asks_for_a_rerun():
+    result = _status(datasets=[*DATASETS, {"id": "d2", "name": "新资料", "source_hash": "b" * 64, "seq": 30}])
+    assert "上次计算之后又加了资料，请重新计算" in result["blocking"]
+
+
+def test_a_calculation_on_a_replaced_snapshot_asks_for_a_rerun():
+    result = _status(runs=[{**RUN, "id": "r1", "bindings": {"actual": "old"}}], replaced={"old"},
+                     draft={**CLEAN_DRAFT, "run_ids": ["r1"]})
+    assert result["headline"]["state"] == "needs_review"
+    assert "最近一次计算读的是已被更新的旧资料，请重新计算" in result["blocking"]
+
+
+def test_a_draft_citing_an_older_run_of_the_same_calculation_holds_it():
+    runs = [{"id": "r0", "analysis_id": "a", "execution_status": "succeeded", "seq": 4},
+            {"id": "r1", "analysis_id": "a", "execution_status": "succeeded", "seq": 10}]
+    assert _status(runs=runs, draft={**CLEAN_DRAFT, "run_ids": ["r0"]})["headline"]["state"] == "needs_review"
+    assert _status(runs=runs, draft={**CLEAN_DRAFT, "run_ids": ["r1"]})["headline"]["state"] == "ready_for_review"
+
+
+def test_the_conflict_count_counts_only_differences():
+    result = _status(controls=[_break("open")], draft=None)
+    assert result["headline"]["text"] == "需要复核：计算完成，但还有 2 项待处理"
+
+
+@pytest.mark.parametrize("value", [["", " "], "   ", [], {}, None])
+def test_a_scope_field_that_names_nothing_is_not_confirmed(value):
+    assert _status(scope={**SCOPE, "organization": value})["headline"]["state"] == "not_ready"
+
+
+def test_organization_is_not_asked_of_files_that_name_none():
+    assert _status(scope={**SCOPE, "organization": ""}, organization_required=False)["headline"]["state"] == "ready_for_review"
+    assert _status(scope={**SCOPE, "organization": ["华东", ""]})["headline"]["state"] == "ready_for_review"
+
+
+def test_a_failed_run_after_the_last_success_is_flagged():
+    result = _status(runs=[RUN, {"execution_status": "failed", "seq": 11}], draft={**CLEAN_DRAFT, "seq": 12})
+    review = result["blocks"][-1]
+    assert any(item["text"] == "最近一次计算没有成功" for item in review["items"])

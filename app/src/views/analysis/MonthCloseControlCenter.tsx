@@ -53,13 +53,15 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   if (!bridge()?.financeCall) return <p className="analysis-note">此版本暂不支持月结控制中心。</p>;
   return (
     <div className="analysis-close" aria-busy={loading}>
-      <div className={`analysis-close-headline analysis-close-headline--${status?.headline.state ?? 'loading'}`} role="status">
+      {/* Only the headline is announced; the button and the loading line are not news. */}
+      <span className="sr-only" role="status">{status?.headline.text ?? ''}</span>
+      <div className={`analysis-close-headline analysis-close-headline--${status?.headline.state ?? 'loading'}`}>
         <h3>{status ? status.headline.text : loading ? '正在检查月结状态…' : '还没读到月结状态'}</h3>
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
-      {status?.headline.state !== 'ready_for_review' && status?.blocking.length
+      {status && !['ready_for_review', 'archived'].includes(status.headline.state) && status.blocking.length
         ? <p className="analysis-note">下一步：{status.blocking[0]}</p> : null}
       {status ? <ol className="analysis-close-blocks">
         {status.blocks.map((block, index) => {

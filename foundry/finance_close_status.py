@@ -51,20 +51,22 @@ def close_status(
     controls: list[dict[str, Any]],
     runs: list[dict[str, Any]],
     draft: dict[str, Any] | None,
+    replaced: set[str] | frozenset[str] = frozenset(),
+    organization_required: bool = True,
 ) -> dict[str, Any]:
     blocks = [
-        _scope_block(scope),
+        _scope_block(scope, organization_required=organization_required),
         _source_block(datasets, superseded),
         _structure_block(datasets, pending_structures),
         _controls_block(controls),
         _exceptions_block(controls),
-        _review_block(runs, draft, scope_seq),
+        _review_block(runs, draft, scope_seq, datasets=datasets, replaced=replaced),
     ]
     must = [item["text"] for block in blocks[:3] for item in block["items"] if item["blocking"]]
     later = [item["text"] for block in blocks[3:] for item in block["items"] if item["blocking"]]
     succeeded = [run for run in runs if run.get("execution_status") == "succeeded"]
-    conflicts = sum(1 for row in controls if (row.get("issue") or {}).get("blocking") and row.get("state") == "confirmed"
-                    and (row.get("issue") or {}).get("state") in {"open", "pending_external", "awaiting_reimport", "awaiting_review"})
+    # Only differences between two readings of the books are source conflicts.
+    conflicts = sum(1 for item in blocks[4]["items"] if item["blocking"])
     if archived:
         state, text = ARCHIVED, "已归档：保留当时快照与版本"
     elif must:
@@ -98,15 +100,24 @@ def _item(text: str, *, blocking: bool = False, attention: bool = False, target:
     return {"text": text, "blocking": blocking, "attention": attention, **({"target": target} if target else {})}
 
 
-def _scope_block(scope: dict[str, Any] | None) -> dict[str, Any]:
+def _scope_value(value: Any) -> str:
+    """A confirmed scope value in words, or blank. A list counts only for what it actually names."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        named = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return "、".join(named)
+    return ""
+
+
+def _scope_block(scope: dict[str, Any] | None, *, organization_required: bool = True) -> dict[str, Any]:
     scope = scope or {}
-    items = [
-        _item(f"{label}未确认", blocking=True, target="scope")
-        for key, label in SCOPE_REQUIRED
-        if not str(scope.get(key) or "").strip()
-    ]
+    # A single-entity pack whose files name no organization has none to confirm; typing one in
+    # would only make its rows stop matching.
+    required = [(key, label) for key, label in SCOPE_REQUIRED if key != "organization" or organization_required]
+    items = [_item(f"{label}未确认", blocking=True, target="scope") for key, label in required if not _scope_value(scope.get(key))]
     if not items:
-        items.append(_item(" · ".join(str(scope[key]) for key, _ in SCOPE_REQUIRED), target="scope"))
+        items.append(_item(" · ".join(_scope_value(scope.get(key)) for key, _ in required), target="scope"))
     return _block("scope", "范围", items)
 
 
@@ -135,10 +146,14 @@ def _controls_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
     for row in confirmed:
         issue = row.get("issue") or {}
         state = issue.get("state")
-        if state in {"stale", "not_run"}:
-            items.append(_item(f"{row['control']['label']}：{ISSUE_TEXT[state]}", blocking=True, target="controls"))
-        elif (row.get("result") or {}).get("status") == "error" and state == "open":
-            items.append(_item(f"{row['control']['label']}：读不出", blocking=True, target="controls"))
+        # Whatever holds the close here is the issue's own word; a difference goes under 异常.
+        if not issue.get("blocking") or (row.get("result") or {}).get("status") == "break":
+            continue
+        if (row.get("result") or {}).get("status") == "error":
+            words = "读不出" + ("，" + ISSUE_TEXT[state] if state in ISSUE_TEXT and state != "open" else "")
+        else:
+            words = ISSUE_TEXT.get(state, "待处理")
+        items.append(_item(f"{row['control']['label']}：{words}", blocking=True, target="controls"))
     passed = sum(1 for row in confirmed if (row.get("result") or {}).get("status") == "pass")
     items.append(_item(f"已确认 {len(confirmed)} 条，相符 {passed} 条", target="controls"))
     return _block("controls", "控制", items)
@@ -160,7 +175,13 @@ def _exceptions_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
     return _block("exceptions", "异常", items or [_item("没有未处置的差异")])
 
 
-def _review_block(runs: list[dict[str, Any]], draft: dict[str, Any] | None, scope_seq: int | None) -> dict[str, Any]:
+def _run_key(run: dict[str, Any]) -> str:
+    """Runs of the same calculation: one definition, or one finance scope."""
+    return str(run.get("analysis_id") or run.get("finance_context_id") or run.get("id"))
+
+
+def _review_block(runs: list[dict[str, Any]], draft: dict[str, Any] | None, scope_seq: int | None, *,
+                  datasets: list[dict[str, Any]] = (), replaced: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
     succeeded = [run for run in runs if run.get("execution_status") == "succeeded"]
     if not succeeded:
         return _block("review", "复核", [_item("还没有计算结果", target="results")], empty_state=NOT_STARTED)
@@ -168,11 +189,29 @@ def _review_block(runs: list[dict[str, Any]], draft: dict[str, Any] | None, scop
     last_run = max(run.get("seq", 0) for run in succeeded)
     if scope_seq is not None and scope_seq > last_run:
         items.append(_item("范围在上次计算之后改过，请重新计算", blocking=True, target="results"))
+    if any(row.get("seq", 0) > last_run for row in datasets):
+        items.append(_item("上次计算之后又加了资料，请重新计算", blocking=True, target="results"))
+    newest = max(succeeded, key=lambda run: run.get("seq", 0))
+    if set((newest.get("bindings") or {}).values()) & set(replaced):
+        items.append(_item("最近一次计算读的是已被更新的旧资料，请重新计算", blocking=True, target="results"))
+    if any(run.get("seq", 0) > last_run for run in runs):
+        items.append(_item("最近一次计算没有成功", attention=True, target="results"))
     if draft is None:
         items.append(_item("还没有文稿", blocking=True, target="drafts"))
         return _block("review", "复核", items)
     if draft.get("seq", 0) < last_run:
         items.append(_item("文稿早于最新一次计算，请按新结果更新", blocking=True, target="drafts"))
+    else:
+        latest = {}
+        for run in succeeded:
+            if latest.get(_run_key(run), {}).get("seq", -1) < run.get("seq", 0):
+                latest[_run_key(run)] = run
+        by_id = {run.get("id"): run for run in runs}
+        cited = [by_id[run_id] for run_id in draft.get("run_ids") or [] if run_id in by_id]
+        if any(latest.get(_run_key(run), run).get("id") != run.get("id") for run in cited):
+            items.append(_item("文稿引用的是旧一版计算结果，请按新结果更新", blocking=True, target="drafts"))
+        if any(set((run.get("bindings") or {}).values()) & set(replaced) for run in cited):
+            items.append(_item("文稿引用的计算读的是已被更新的旧资料", blocking=True, target="drafts"))
     dimensions = ((draft.get("explanation_check") or {}).get("status_dimensions") or {})
     # Executed is not cited, cited is not sourced: each has to pass on its own. A dimension the
     # draft never set up (not_configured) is unverified, not clear.

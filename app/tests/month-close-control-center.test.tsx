@@ -30,6 +30,7 @@ it('leads with the server headline and the next thing to do', async () => {
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
   expect(await screen.findByRole('heading', { name: '尚未准备：还有 1 项必须确认' })).toBeTruthy();
   expect(screen.getByText('下一步：期间未确认')).toBeTruthy();
+  expect(screen.getAllByRole('status')[0].textContent).toBe('尚未准备：还有 1 项必须确认');
 });
 
 it('says each block state in words, not colour alone', async () => {
