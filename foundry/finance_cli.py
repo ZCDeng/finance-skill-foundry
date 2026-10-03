@@ -48,6 +48,12 @@ OPERATIONS = {
     "structure-template-disable": "structure_template_disable",
     "finance-scenario-save": "save_scenario",
     "finance-scenario-run": "run_scenario",
+    "finance-controls-propose": "finance_controls_propose",
+    "finance-controls-save": "finance_controls_save",
+    "finance-controls-confirm": "finance_controls_confirm",
+    "finance-controls-retire": "finance_controls_retire",
+    "finance-controls-run": "finance_controls_run",
+    "finance-controls-list": "finance_controls_list",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
 FILE_OPERATIONS["workbook-range-preview"] = "range_preview"

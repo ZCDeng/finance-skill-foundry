@@ -56,7 +56,22 @@ COLLECTIONS = {
     "charts",
     "structure_proposals",
     "structure_confirmations",
+    "controls",
+    "control_runs",
 }
+
+
+def _control_summary(results, total=None):
+    confirmed = [row for row in results if row.get("state") == "confirmed"]
+    counts = {status: sum(1 for row in confirmed if row.get("status") == status) for status in ("pass", "break", "stale", "error")}
+    # Breaks a display rounding could explain are still breaks; this only says how many of them there are.
+    counts["break_within_rounding"] = sum(1 for row in confirmed if row.get("status") == "break" and row.get("within_rounding"))
+    return {
+        "controls": len(results) if total is None else total,
+        "confirmed": len(confirmed),
+        "proposed_results": sum(1 for row in results if row.get("state") == "proposed"),
+        **counts,
+    }
 
 
 def _render_fact_template_in_document(document: dict, facts: list[dict]) -> tuple[dict, list[str]]:
@@ -1333,6 +1348,191 @@ class FinanceStore:
         return {}
 
     # ----- table structure: propose, confirm, acknowledge, reject, withdraw -----
+
+    # ---- Tie-out controls (finance_controls) -------------------------------------------------
+
+    def _control_heads(self, *, include_retired=False):
+        """The latest version of each control; a version some later one names as parent is history."""
+        rows = self._list("controls")
+        replaced = {row.get("parent_id") for row in rows if row.get("parent_id")}
+        heads = [row for row in rows if row["id"] not in replaced]
+        return heads if include_retired else [row for row in heads if row.get("state") != "retired"]
+
+    def _workbook_datasets(self, dataset_ids=None):
+        """One snapshot per workbook: a table derived from a sheet shares its workbook's bytes, so it adds nothing."""
+        from foundry.finance_controls import superseded_snapshots
+        from foundry.finance_readiness import _is_workbook_shell
+
+        rows = self.analysis.state()["datasets"]
+        replaced = superseded_snapshots(self.task, rows)
+        by_bytes = {}
+        for dataset in rows:
+            if dataset["id"] in replaced:
+                continue
+            if dataset_ids is not None and dataset["id"] not in dataset_ids:
+                continue
+            if self.allowed is not None and dataset["id"] not in self.allowed:
+                continue
+            if dataset.get("source_file") != "source.xlsx":
+                continue
+            held = by_bytes.get(dataset["source_hash"])
+            if held is None or (_is_workbook_shell(dataset) and not _is_workbook_shell(held)):
+                by_bytes[dataset["source_hash"]] = dataset
+        return list(by_bytes.values())
+
+    def finance_controls_propose(self, spec):
+        """Suggested subtotal controls with a preview result each. Nothing is saved."""
+        from foundry.finance_controls import clean_control, control_key, evaluate_control, snapshot_bytes, suggest_controls
+
+        spec = spec if isinstance(spec, dict) else {}
+        wanted = spec.get("dataset_ids")
+        if wanted is not None and (not isinstance(wanted, list) or not all(isinstance(item, str) for item in wanted)):
+            raise FoundryError("dataset_ids must be an array of snapshot ids")
+        saved = {control_key(row["control"]): row["id"] for row in self._control_heads()}
+        cache: dict = {}
+        suggestions = []
+        for dataset in self._workbook_datasets(set(wanted) if wanted is not None else None):
+            data = snapshot_bytes(self.analysis, dataset)
+            for raw in suggest_controls(self.analysis, dataset, data):
+                control = clean_control(raw)
+                suggestions.append({
+                    "control": control,
+                    "preview": evaluate_control(self.analysis, control, cache=cache),
+                    **({"saved_id": saved[control_key(control)]} if control_key(control) in saved else {}),
+                })
+        return {"schema_version": 1, "suggestions": suggestions}
+
+    def finance_controls_save(self, spec):
+        """Save controls as proposed; the manager may confirm in the same call. A repeat of a live control returns it."""
+        from foundry.finance_controls import clean_control, control_key, dataset_ids
+
+        if not isinstance(spec, dict):
+            raise FoundryError("control save spec must be an object")
+        items = spec.get("controls") if "controls" in spec else [spec.get("control", spec)]
+        if not isinstance(items, list) or not items or len(items) > 400:
+            raise FoundryError("controls must be a non-empty array of at most 400")
+        origin = spec.get("origin") or "declared"
+        if origin not in {"suggested", "declared"}:
+            raise FoundryError("control origin must be suggested or declared")
+        confirm = spec.get("confirm") is True
+        if confirm:
+            self._manager_only("confirm a control")
+        # Every lineage, retired ones too: a check the manager retired is revived in its own
+        # lineage, never started again beside it.
+        lineages = {control_key(row["control"]): row for row in self._control_heads(include_retired=True)}
+        published = {row["id"] for row in self.analysis.state()["datasets"]}
+        saved = []
+        for item in items:
+            control = clean_control(item)
+            ids = dataset_ids(control)
+            self._authorize({f"source{index}": dataset_id for index, dataset_id in enumerate(ids)})
+            for dataset_id in ids:
+                if dataset_id not in published:
+                    raise FoundryError("control refers to a snapshot that is not in this task")
+            existing = lineages.get(control_key(control))
+            state = "confirmed" if confirm else "proposed"
+            if existing and existing.get("state") != "retired" and existing["control"] == control and (
+                not confirm or existing.get("state") == "confirmed"
+            ):
+                saved.append(existing)
+                continue
+            if existing and existing.get("state") == "confirmed" and not confirm:
+                # Re-saving a confirmed check would take it out of the close until someone noticed.
+                if self.actor != MANAGER:
+                    raise FoundryError("a confirmed control can only be changed by the manager")
+                state = "confirmed"
+            record = self._write(
+                "controls",
+                control=control,
+                origin=origin if not existing else existing.get("origin", origin),
+                state=state,
+                bindings={f"source{index}": dataset_id for index, dataset_id in enumerate(ids)},
+                saved_by=self.actor,
+                **({"parent_id": existing["id"]} if existing else {}),
+            )
+            lineages[control_key(control)] = record
+            saved.append(record)
+        return {"schema_version": 1, "controls": saved}
+
+    def _control_successor(self, spec, state, action):
+        self._manager_only(action)
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise FoundryError("control id is required")
+        head = next((row for row in self._control_heads(include_retired=True) if row["id"] == spec["id"]), None)
+        if head is None:
+            raise FoundryError("control is not the latest version or does not exist")
+        if head.get("state") == state:
+            return head
+        reason = _safe_text(spec.get("reason") or "", "control reason", maximum=2000)
+        if state == "retired" and not reason:
+            raise FoundryError("retiring a control requires a reason")
+        return self._write(
+            "controls",
+            control=head["control"],
+            origin=head.get("origin", "declared"),
+            state=state,
+            bindings=head["bindings"],
+            saved_by=self.actor,
+            parent_id=head["id"],
+            **({"reason": reason} if reason else {}),
+        )
+
+    def finance_controls_confirm(self, spec):
+        return self._control_successor(spec, "confirmed", "confirm a control")
+
+    def finance_controls_retire(self, spec):
+        return self._control_successor(spec, "retired", "retire a control")
+
+    def finance_controls_run(self, spec):
+        """Evaluate the live controls (or the named ones) and keep the run as a record."""
+        from foundry.finance_controls import evaluate_control
+
+        spec = spec if isinstance(spec, dict) else {}
+        heads = self._control_heads()
+        wanted = spec.get("ids")
+        if wanted is not None:
+            if not isinstance(wanted, list):
+                raise FoundryError("ids must be an array of control ids")
+            known = {row["id"] for row in heads}
+            missing = [item for item in wanted if item not in known]
+            if missing:
+                raise FoundryError("control is not the latest version or does not exist")
+            heads = [row for row in heads if row["id"] in set(wanted)]
+        cache: dict = {}
+        results = [
+            {
+                "control_id": row["id"],
+                "label": row["control"]["label"],
+                "state": row.get("state"),
+                **evaluate_control(self.analysis, row["control"], cache=cache),
+            }
+            for row in heads
+        ]
+        read = dict.fromkeys(dataset_id for row in heads for dataset_id in row["bindings"].values())
+        bindings = {f"source{index}": dataset_id for index, dataset_id in enumerate(read)}
+        return self._write("control_runs", results=results, summary=_control_summary(results), bindings=bindings, run_by=self.actor)
+
+    def finance_controls_list(self, spec):
+        """Live controls, each with its latest result; a result read from a snapshot that changed since is stale."""
+        spec = spec if isinstance(spec, dict) else {}
+        heads = self._control_heads(include_retired=spec.get("include_retired") is True)
+        latest = {}
+        for run in self._list("control_runs"):
+            for result in run.get("results") or []:
+                latest[result["control_id"]] = {**result, "run_id": run["id"], "run_at": run["created_at"]}
+        from foundry.finance_controls import superseded_snapshots
+
+        current = {row["id"]: row.get("source_hash") for row in self.analysis.state()["datasets"]}
+        replaced = superseded_snapshots(self.task)
+        rows = []
+        for head in heads:
+            result = latest.get(head["id"])
+            hashes = (result or {}).get("source_hashes") or {}
+            if result and any(current.get(dataset_id) != digest or dataset_id in replaced for dataset_id, digest in hashes.items()):
+                result = {**result, "status": "stale", "reason": "资料快照在这次运行之后已变化"}
+            rows.append({**head, "result": result})
+        results = [row["result"] | {"state": row.get("state")} for row in rows if row.get("result")]
+        return {"schema_version": 1, "controls": rows, "summary": _control_summary(results, total=len(rows))}
 
     def _structure_proposals(self, dataset_id):
         return [

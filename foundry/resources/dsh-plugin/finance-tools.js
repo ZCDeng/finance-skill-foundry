@@ -110,7 +110,7 @@ const specTool = (command, description, properties, required = []) => ({
   description,
   parameters: { type: "object", required: ["spec"], additionalProperties: false,
     properties: { spec: { type: "object", required, properties, additionalProperties: true } } },
-  kind: ["drilldown-fact", "open-source-locator", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run"].includes(command) ? "execute" : "edit",
+  kind: ["drilldown-fact", "open-source-locator", "finance-controls-propose", "finance-controls-list", "workbook-inspect", "workbook-read", "prepare-explanation", "validate-explanation", "finance-background-list", "analysis-requirements-list", "finance-adjustment-list", "report-template-list", "structure-proposal-list", "structure-template-list"].includes(command) ? "read" : ["run-metric", "explain-variance", "finance-scenario-run", "finance-controls-run"].includes(command) ? "execute" : "edit",
   argv: ({ spec }) => [command, "--spec", JSON.stringify(spec)],
 });
 const contextId = text("list_finance_context 或 finance_context_save 返回的当前任务口径版本 id");
@@ -334,6 +334,19 @@ export const FINANCE_TOOLS = {
   finance_adjustment_list: specTool("finance-adjustment-list", "列出当前口径下的考核调整项：待确认与已确认纳入。只读。窄会话不得列出其他会话的调整。确认纳入仍由经理在界面完成。", {
     context_id: contextId,
   }, ["context_id"]),
+  finance_controls_propose: specTool("finance-controls-propose", "按工作簿自己的合计行建议勾稽控制（分项加总 = 合计），每条附预览结果。只读，不保存；比率、占比、天数类列不建议。", {
+    dataset_ids: { type: "array", items: { type: "string" }, description: "只看这些工作簿资料；省略则看全部" },
+  }),
+  finance_controls_save: specTool("finance-controls-save", "保存勾稽控制为待确认（proposed）：subtotal 比较同一张表的分项与合计，tie_out 比较两处取数（可跨表、跨工作簿）。只能保存，确认、停用由经理在界面完成；同一检查重复保存返回已有记录。差异由系统发现，不由你择一。", {
+    controls: { type: "array", items: { type: "object", required: ["label", "left", "right"], properties: { kind: { type: "string", enum: ["subtotal", "tie_out"] }, label: text("控制名称"), left: { type: "object", required: ["dataset_id", "source_hash", "sheet", "range"], properties: { dataset_id: text("analysis-state 里的资料 id"), source_hash: text("该资料的 source_hash"), sheet: text("工作表名"), range: text("A1 区域，如 T5:T604 或 C11"), scale: text("单位换算，只能是 10 的整数次幂，如 0.0001 表示元→万元") } }, right: { type: "object", required: ["dataset_id", "source_hash", "sheet", "range"], properties: { dataset_id: text("analysis-state 里的资料 id"), source_hash: text("该资料的 source_hash"), sheet: text("工作表名"), range: text("A1 区域，如 T5:T604 或 C11"), scale: text("单位换算，只能是 10 的整数次幂，如 0.0001 表示元→万元") } }, tolerance: text("允许差额，默认 0"), unit: text("单位标签"), note: text("说明") } } },
+    origin: { type: "string", enum: ["suggested", "declared"] },
+  }, ["controls"]),
+  finance_controls_run: specTool("finance-controls-run", "运行当前有效的勾稽控制并留存记录：每条给出两侧取数、差额、是否只是显示舍入；资料快照变化后为 stale。只有经理确认过的控制计入月结。", {
+    ids: { type: "array", items: { type: "string" }, description: "只运行这些控制；省略则全部" },
+  }),
+  finance_controls_list: specTool("finance-controls-list", "列出勾稽控制（含待确认与已确认）及各自最近一次结果。只读。", {
+    include_retired: { type: "boolean" },
+  }),
   structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。blocked_reason 非空的表不能确认，unreadable_columns 表示它确实是张表但一列都没识别出来——复述给经理，不要放进确认清单。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
     dataset_id: text("analysis-state 里的工作簿资料 id"),
   }),
