@@ -109,7 +109,10 @@
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 .analysis-result-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; position: relative; container-type: inline-size; isolation: isolate; }
 .analysis-result .analysis-section-heading { align-items: flex-start; }
-.analysis-result .analysis-section-heading h3 { font-size: 24px; line-height: 1.35; max-width: 42em; }
+/* Conclusion first: the question that was asked reads as the result's label, the answer below it is the largest line. */
+.analysis-result .analysis-section-heading h3 { font-size: var(--fnd-size-h3); line-height: 24px; max-width: 42em; }
+/* With no conclusion to lead, the question stays the result's heading. */
+.analysis-result:not(:has(.analysis-headline)) .analysis-section-heading h3 { font-size: 20px; line-height: 28px; }
 .analysis-result .analysis-section-heading .analysis-note { margin-top: 6px; }
 .analysis-output-list { display: flex; flex-direction: column; gap: 10px; }
 .analysis-result-area[data-evidence-open='true'] > .analysis-result { margin-right: min(360px, 48%); }
@@ -216,7 +219,9 @@
 .analysis-kpi-card .analysis-kpi-source { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 1.5; }
 .analysis-headline { display: grid; gap: 10px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); }
 .analysis-headline-line { display: grid; gap: 2px; }
-.analysis-headline-text { margin: 0; font-size: 18px; line-height: 1.5; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-headline-text { margin: 0; font-size: 22px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* The first conclusion leads; the ones after it stay above body text but no longer compete with it. */
+.analysis-headline-line + .analysis-headline-line .analysis-headline-text, .analysis-headline details .analysis-headline-text { font-size: 18px; line-height: 28px; }
 .analysis-business-table .fnd-tablewrap { max-width: 100%; }
 .analysis-business-table .analysis-table { table-layout: auto; }
 .analysis-business-table .analysis-table th:first-child,
