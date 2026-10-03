@@ -67,8 +67,11 @@ jobs:
       - run: python -m pip install -e "..[dev]"
       - run: npm ci --no-audit --no-fund
       # Stages the pinned DSH runtime into extra/dsh; the client-adapter and
-      # embedded-client tests read its stock sources.
+      # embedded-client tests read its stock sources. Its nested npm install ran
+      # out of the default Node heap on the hosted runner.
       - run: npm run harness
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: npx vitest run
       # Type-checks renderer and main process, then bundles.
       - run: npm run build
