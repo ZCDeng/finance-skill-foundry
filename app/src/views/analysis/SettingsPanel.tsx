@@ -3,9 +3,11 @@ import { Button } from '../../components/ui/button.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../components/ui/collapsible.js';
 
 /**
- * Open state for 设置与高级. `setOpen` changes it quietly (a run closing the
- * settings, the first visit opening them); `openWithFocus` is a person asking
- * for them, so focus moves in and returns to where it came from on close.
+ * Open state for 设置与高级. `setOpen` opens or closes without taking focus
+ * (the first visit opening them, a run closing them); `openWithFocus` is a
+ * person asking for them, so focus moves in. Once a person has opened the
+ * panel, any close hands focus back to where they were, so a run closing it
+ * never leaves focus on the page body.
  */
 export function useSettingsPanel(initialOpen = false) {
   const [open, setOpen] = useState(initialOpen);

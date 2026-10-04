@@ -33,3 +33,22 @@ it('can start open without stealing focus', () => {
   fireEvent.click(screen.getByRole('button', { name: '关闭设置与高级' }));
   expect(screen.getByRole('button', { name: '打开设置与高级' })).toBeTruthy();
 });
+
+function RunHarness() {
+  const settings = useSettingsPanel();
+  return <SettingsPanel state={settings} summary="入口说明" note="打开后的说明">
+    <button type="button" onClick={() => settings.setOpen(false)}>计算</button>
+  </SettingsPanel>;
+}
+
+it('hands focus back to the entry when a run closes the panel a person opened', () => {
+  render(<RunHarness />);
+  const entry = screen.getByRole('button', { name: '打开设置与高级' });
+  entry.focus();
+  fireEvent.click(entry);
+  const run = screen.getByRole('button', { name: '计算' });
+  run.focus();
+  fireEvent.click(run);
+  expect(screen.queryByRole('dialog', { name: '设置与高级' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '打开设置与高级' }));
+});
