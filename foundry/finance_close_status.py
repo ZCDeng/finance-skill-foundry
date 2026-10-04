@@ -65,7 +65,7 @@ def close_status(
     draft: dict[str, Any] | None,
     replaced: set[str] | frozenset[str] = frozenset(),
     organization_required: bool = True,
-    templates: set[str] | frozenset[str] = frozenset(),
+    other_months: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     blocks = [
         _scope_block(scope, organization_required=organization_required),
@@ -101,7 +101,7 @@ def close_status(
         "headline": headline,
         "blocks": blocks,
         "blocking": [*must, *later],
-        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced, templates),
+        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced, other_months),
     }
 
 
@@ -196,13 +196,14 @@ def _exceptions_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], inputs: list[dict[str, Any]],
                 pending_structures: list[str], replaced: set[str] | frozenset[str],
-                templates: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+                other_months: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
     """可用结论: can these books be used as they stand, for the whole pack and for each workbook.
 
     Only confirmed controls and the manager's dispositions decide the level. A finding type only
     names the kind of problem in a reason; with or without one, a difference weighs the same.
-    `templates` are the source hashes of last month's workbooks a roll-forward copy was made from:
-    the copy is this month's book, its template is not.
+    `other_months` are workbooks a roll-forward places in another month (last month's template a
+    copy was made from, or a copy made for another month): one no confirmed control reads is not a
+    book this pack waits on; one a control reads stays listed, so its result shows under its name.
     """
     confirmed = [row for row in controls if row.get("state") == "confirmed"]
     held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
@@ -211,9 +212,11 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     names = {row["id"]: row.get("name") or "资料" for row in datasets}
     book_of = {row["id"]: row.get("source_hash") or row["id"] for row in datasets}
     workbooks, unread = [], []
-    for book in _workbooks(datasets, replaced, templates):
+    for book in _workbooks(datasets, replaced):
         digest = book.get("source_hash") or book["id"]
         touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
+        if digest in other_months and not touching:
+            continue
         own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
         waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
         level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
@@ -288,19 +291,15 @@ def _sides(row: dict[str, Any]) -> set[str]:
     return {str(side.get("dataset_id")) for side in (control.get("left") or {}, control.get("right") or {}) if side.get("dataset_id")}
 
 
-def _workbooks(datasets: list[dict[str, Any]], replaced: set[str] | frozenset[str] = frozenset(),
-               templates: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+def _workbooks(datasets: list[dict[str, Any]], replaced: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     """One per Excel file: a table derived from a sheet carries its workbook's bytes and is not another file.
 
     A table read from a workbook a newer upload replaced is left out: it is named after its sheet,
     so a sheet the new version renamed or dropped would otherwise stand in for the old file.
-    So is last month's workbook a roll-forward copy was made from (`templates`), with its tables.
     """
     books: dict[str, dict[str, Any]] = {}
     for row in datasets:
         if row.get("source_file") != "source.xlsx":
-            continue
-        if (row.get("source_hash") or row["id"]) in templates:
             continue
         if (row.get("metadata") or {}).get("derived_from") in replaced:
             continue

@@ -647,7 +647,9 @@ def output_name(name: str, period: str) -> str:
     A file added from disk is named after its file name, so the copy saved in Excel under
     the suggested name and added again replaces the copy as a newer version of it.
     """
-    stem = re.sub(r"\.xlsx$", "", str(name or "").strip(), flags=re.I) or "工作簿"
+    stem = re.sub(r"\.xlsx$", "", str(name or "").strip(), flags=re.I)
+    # The characters the export dialog cannot put in a file name, replaced as it replaces them.
+    stem = re.sub(r'[\\/:*?"<>|]', "_", stem) or "工作簿"
     return f"{stem[:160]}（{period} 滚动）.xlsx"
 
 
