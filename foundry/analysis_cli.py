@@ -29,6 +29,7 @@ COMMANDS = {
     "report-source-add",
     "report-source-read",
     "report-xlsx-read",
+    "report-pptx-read",
     "report-export-register",
     "analysis-deliverables",
     "analysis-export-path",
@@ -75,6 +76,8 @@ def add_parsers(sub):
     p.add_argument("--source", required=True)
     p.add_argument("--sheet")
     p.add_argument("--range")
+    p = sub.add_parser("report-pptx-read", help="a PPTX source's slide text and tables, for review; never an export")
+    p.add_argument("--source", required=True)
     p = sub.add_parser("report-export-register")
     p.add_argument("--draft", required=True)
     p.add_argument("--format", choices=["md", "xlsx", "docx", "pdf", "html"], required=True)
@@ -382,6 +385,8 @@ def dispatch(args) -> bool:
         result = service.read_report_source(args.source)
     elif args.cmd == "report-xlsx-read":
         result = service.read_report_xlsx(args.source, sheet=args.sheet, range_ref=getattr(args, "range"))
+    elif args.cmd == "report-pptx-read":
+        result = service.read_report_pptx(args.source)
     elif args.cmd == "report-export-register":
         _bound_draft(context, service, service.get_draft(args.draft))
         result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path),

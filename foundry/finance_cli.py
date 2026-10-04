@@ -60,6 +60,7 @@ OPERATIONS = {
     "finance-control-disposition-save": "finance_control_disposition_save",
     "finance-control-disposition-review": "finance_control_disposition_review",
     "finance-control-confirmation-sheet": "finance_control_confirmation_sheet",
+    "report-review": "report_review",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
 FILE_OPERATIONS["workbook-range-preview"] = "range_preview"
@@ -73,6 +74,8 @@ LIST_COMMANDS = {
 }
 COMPLETION_COMMANDS = {"finance-completion-begin", "finance-completion-status", "finance-completion-stop"}
 COMMANDS = {*LIST_COMMANDS, *OPERATIONS, *FILE_OPERATIONS, *COMPLETION_COMMANDS, "finance-source-refresh", "source-locator-preview-file"}
+# A whole report document can outgrow an argv; these also read --spec-file.
+SPEC_FILE_COMMANDS = {"save-explanation-draft", "report-review"}
 
 
 def add_parsers(sub):
@@ -80,7 +83,7 @@ def add_parsers(sub):
         sub.add_parser(command)
     for command in sorted(COMMANDS - LIST_COMMANDS):
         parser = sub.add_parser(command)
-        if command == "save-explanation-draft":
+        if command in SPEC_FILE_COMMANDS:
             from foundry.analysis_cli import _spec_arg
 
             _spec_arg(parser)
@@ -200,7 +203,7 @@ def dispatch(args):
         result = getattr(files, FILE_OPERATIONS[args.cmd])(_json(args.spec, "workbook spec"))
     else:
         result = getattr(service, OPERATIONS[args.cmd])(
-            _json_spec(args, "finance spec") if args.cmd == "save-explanation-draft" else _json(args.spec, "finance spec")
+            _json_spec(args, "finance spec") if args.cmd in SPEC_FILE_COMMANDS else _json(args.spec, "finance spec")
         )
     print(json.dumps(json_value(result), ensure_ascii=False, allow_nan=False))
     return True
