@@ -1,6 +1,6 @@
 # Foundry fence for bundled method skills
 
-These four close methods ship with the foundry kit. They are not the authored portable skill and they are not this-window questions.
+Eight skills ship with the foundry kit: four close methods and four routing packs (`setup`, `close`, `bva`, `cash`, registered in `packs.json`). They are not the authored portable skill and they are not this-window questions.
 
 - The trusted preset or session selects the runtime fence. User wording alone must not switch a session into analysis, period, F3, or any wider tool set.
 - Analysis preset: does not require a locked Window. Start from the current task's registered datasets, use multi-table SQL/Python when the evidence needs it, record dataset versions and run IDs, and write editable drafts through the analysis draft tools. A finance manager may revise materiality, currency, accounting policy, assumptions, and narrative judgment; ordinary reads, calculations, reruns, and drafts do not require per-tool approval.
@@ -70,9 +70,15 @@ The first three are the lock's own words, and only the locked catalog may wear t
 
 ## Bundled skills
 
+The four close methods carry the workflow. The four packs only route a question onto those methods and the finance tools; none of them is a gate for `run_metric`, and none adds posting, payment, or an ERP connection.
+
 | Skill | Use when |
 | --- | --- |
-| `financial-statements` | Build P&L / balance sheet / cash flow commentary from locked named tables |
-| `reconciliation` | Tick GL to bank, subledger, or intercompany using locked tables |
-| `variance-analysis` | Decompose a locked total or analysis-node cut |
+| `financial-statements` | Build P&L / balance sheet / cash flow commentary from task datasets or locked named tables |
+| `reconciliation` | Tick GL to bank, subledger, or intercompany from task datasets or locked tables |
+| `variance-analysis` | Decompose a total or analysis-node cut against budget or another period |
 | `journal-entry` | Draft a balanced entry for review; do not post |
+| `setup` | Pack: route a new session; suggest `finance_readiness` and report what can run and what is blocked |
+| `close` | Pack: route period close onto the four methods; management P&L, tie-outs, and journal drafts, not a live ledger close |
+| `bva` | Pack: route budget variance onto `variance-analysis` and `explain_variance` |
+| `cash` | Pack: route receivables aging and 13-week cash onto `finance_scenario_save` / `finance_scenario_run`; no payment tool |

@@ -1,6 +1,6 @@
 # Bundled method skills
 
-Four extracted Anthropic `/finance` close methods (Apache-2.0). They travel with this kit.
+Eight bundled skills travel with this kit: four close methods extracted from Anthropic's `finance` plugin and modified for FA Foundry (Apache-2.0), and four Foundry routing packs (`setup`, `close`, `bva`, `cash`) registered in `packs.json`.
 
 They are not `authoring/SKILL.md` and they are not copied into `var/skills/`. That path stays hers.
 
