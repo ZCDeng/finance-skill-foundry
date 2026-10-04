@@ -13,6 +13,7 @@ import posixpath
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree as ET
+from xml.parsers import expat
 
 from foundry.errors import FoundryError
 from foundry.report_documents import (
@@ -43,12 +44,29 @@ def _xml(archive: ZipFile, member: str) -> ET.Element:
         data = archive.read(member)
     except KeyError as exc:
         raise FoundryError(f"PPTX part is missing: {member}") from exc
-    # A deck never needs a DTD; refusing one keeps entity expansion out of the parser.
-    if b"<!DOCTYPE" in data:
-        raise FoundryError("PPTX part declares a DTD")
+    _refuse_dtd(data, member)
     try:
         return ET.fromstring(data)
     except ET.ParseError as exc:
+        raise FoundryError(f"invalid PPTX part: {member}") from exc
+
+
+def _refuse_dtd(data: bytes, member: str) -> None:
+    """A deck never needs a DTD; refusing one keeps entity expansion out of the parser.
+
+    Expat reads the part in whatever encoding it declares (UTF-16 included), so a byte search
+    for "<!DOCTYPE" is not enough: the declaration is caught as the parser meets it.
+    """
+
+    def refuse(*_args: Any) -> None:
+        raise FoundryError("PPTX part declares a DTD")
+
+    parser = expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = refuse
+    parser.EntityDeclHandler = refuse
+    try:
+        parser.Parse(data, True)
+    except expat.ExpatError as exc:
         raise FoundryError(f"invalid PPTX part: {member}") from exc
 
 

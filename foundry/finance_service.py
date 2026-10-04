@@ -2240,7 +2240,11 @@ class FinanceStore:
             # The PDF converter numbers pages; the document contract keeps every location as text.
             document = _text_pages(document)
             origin = {"origin": "import"}
-        clean = validate_report_document(document, registered_source_ids=self.analysis._registered_report_source_ids())
+        registry = self.analysis._registered_report_sources()
+        clean = validate_report_document(document, registered_source_ids=set(registry))
+        # A source's name, format and hash come from the registry, never from the caller (as save_draft does).
+        if clean.get("sources"):
+            clean["sources"] = [registry[source["id"]] for source in clean["sources"]]
         candidates, notes = gather_candidates(self)
         result = review_report(clean, candidates, notes)
         cited = sorted({candidate["dataset_id"] for item in result["items"] for candidate in item["candidates"]

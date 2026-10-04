@@ -15,14 +15,14 @@ import bisect
 import io
 import re
 from datetime import date, datetime, time
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter, range_boundaries
 
 from foundry.errors import FoundryError
 from foundry.finance_explanations import METRIC_LABELS, _body_numbers
-from foundry.financial_evidence import UNIT_SCALE_EXPONENTS, _decimal_rounding
+from foundry.financial_evidence import UNIT_SCALE_EXPONENTS
 from foundry.report_documents import _markdown_numeric_like, validate_report_document
 
 MAX_NUMBERS = 3000
@@ -296,15 +296,9 @@ def _read_number(normalized: str, original: str, found: dict[str, Any], kind: st
     whole_integer = re.fullmatch(r"\d+", digits) is not None
     before = normalized[:start].rstrip(_SPACES)
     after = normalized[end:]
-    if whole_integer and len(digits) == 4 and 1990 <= int(digits) <= 2100 and (
-        kind == "heading" or (table and table["header"]) or before.endswith(("FY", "财年", "年度"))
-        or re.match(r"[ \u00a0\u3000]*(?:年|财年|年度|FY)", after)
-    ):
-        return None
     value = _decimal_text(token.rstrip("%"))
     if value is None:
         return None
-    # （1,234.56）, (1,234.56) and （1,234.56 万元） are negatives; 「（3）收入」 is an enumeration.
     opening = re.search(r"[(（][ \u00a0\u3000¥￥$]*$", normalized[:start])
     inner_close = re.match(r"[ \u00a0\u3000]*[)）]", after) if opening else None
     unit_from = end + inner_close.end() if inner_close else end
@@ -324,6 +318,14 @@ def _read_number(normalized: str, original: str, found: dict[str, Any], kind: st
     elif match := _COUNT_UNIT.match(normalized[unit_from:]):
         unit = match.group(1)
         unit_end = unit_from + match.end()
+    amount_unit = unit in MONEY_EXPONENTS or unit == PERCENT
+    # 「2026 年度」「FY2026」 name a year; so does a lone 2026 in a heading or header row, unless an
+    # amount unit follows it (「8 月营收 2030 万元」 on a slide title is an amount).
+    if whole_integer and len(digits) == 4 and 1990 <= int(digits) <= 2100 and (
+        before.endswith(("FY", "财年", "年度")) or re.match(r"[ \u00a0\u3000]*(?:年|财年|年度|FY)", after)
+        or (not amount_unit and (kind == "heading" or (table and table["header"])))
+    ):
+        return None
     # 第 3 页、表 2、图 1、注 4：the number names a place, not an amount (「利润表 500 万元」 still is one).
     if unit is None and whole_integer and len(digits) <= 3 and (
         before.endswith(_REFERENCE_BEFORE) or _REFERENCE_AFTER.match(after)
@@ -332,13 +334,22 @@ def _read_number(normalized: str, original: str, found: dict[str, Any], kind: st
     span_start, span_end = start, unit_end
     outer_close = re.match(r"[ \u00a0\u3000]*[)）]", normalized[unit_end:]) if opening and not inner_close else None
     if opening and (inner_close or outer_close):
-        whole_cell = kind == "table_cell" and not re.sub(r"[\s(（)）¥￥$,.\d%万亿千百元]", "", original)
-        if "," in digits or "." in digits or whole_cell:
+        whole_cell = kind == "table_cell" and not re.sub(r"[\s(（)）¥￥$,.\d%万亿千百元]", "", normalized)
+        # 「（120.5 万元）」「（5.25%）」 in a sentence state an amount in passing: the unit sits inside.
+        unit_inside = outer_close is not None or token.endswith("%")
+        # （1,234.56）, (1,234.56), （790）万元 and a whole table cell (790 万元) are negatives; an explicit
+        # plus sign never is.
+        negative = not token.startswith("+") and (
+            whole_cell or (not unit_inside and (amount_unit or "," in digits or "." in digits)))
+        if negative:
             value = -abs(value)
+        elif not unit_inside and not token.startswith("+"):
+            return None  # 「（3）收入」「（1）（2）」: an enumeration
+        if unit_inside and not negative:
+            span_end = end if inner_close else unit_end
+        else:
             span_start = opening.start()
             span_end = unit_end if inner_close else unit_end + outer_close.end()
-        else:
-            return None
     if token.startswith("-") and value > 0:
         value = -value
     return {
@@ -414,6 +425,10 @@ def _exponent(unit: str | None) -> int | None:
     return None
 
 
+def _is_rate(label: str, header: str) -> bool:
+    return any(word in label + header for word in _RATE_WORDS)
+
+
 def _candidate(kind: str, value: Decimal, unit: str | None, *, order: tuple, label: str = "", header: str = "",
                **fields: Any) -> dict[str, Any]:
     exponent = _exponent(unit)
@@ -422,6 +437,8 @@ def _candidate(kind: str, value: Decimal, unit: str | None, *, order: tuple, lab
         "raw": value,
         "unit": unit,
         "exponent": exponent,
+        # A unitless figure on a rate's row or column (毛利率 0.352) is a ratio a report shows as 35.2%.
+        "rate": unit is None and _is_rate(label, header),
         # A count or a day figure has a unit of its own: it is compared only with a number that names none.
         "other_unit": unit not in (None, "") and exponent is None,
         "base": _scale(value, exponent) if exponent is not None else None,
@@ -486,7 +503,7 @@ def table_candidates(dataset: dict[str, Any], scope_unit: str | None, scenario: 
             if sheet and name in header_columns and index < len(row_numbers):
                 cell = f"{header_columns[name]}{row_numbers[index]}"
             unit = _unit_in_label(name)
-            if unit is None and not any(word in label + name for word in _RATE_WORDS):
+            if unit is None and not _is_rate(label, name):
                 unit = scope_unit
             # The context's scenario (实际/预算) tells two same-named lines of two snapshots apart.
             header = " ".join(part for part in (SCENARIO_WORDS.get(scenario or "", ""), SCENARIO_WORDS.get(name, name)) if part)
@@ -524,7 +541,10 @@ def workbook_candidates(dataset: dict[str, Any], data: bytes, notes: list[str]) 
             except FoundryError:
                 notes.append(f"{name} 的工作表「{sheet}」有公式没有缓存值或有错误值，未纳入比对；在 Excel 中重新计算并保存后再导入。")
                 continue
-            rows = [list(row) for row in page.iter_rows(values_only=True)]
+            rows, formats = [], []
+            for row in page.iter_rows():
+                rows.append([cell.value for cell in row])
+                formats.append([getattr(cell, "number_format", None) for cell in row])
             sheet_unit = None
             for row in rows[:10]:
                 for value in row:
@@ -550,9 +570,14 @@ def workbook_candidates(dataset: dict[str, Any], data: bytes, notes: list[str]) 
                         break
                 if _CODE_HEADER.search(header):
                     continue
-                unit = _unit_in_label(label) or _unit_in_label(header)
-                if unit is None and not any(word in label + header for word in _RATE_WORDS):
-                    unit = sheet_unit
+                shown_as = formats[row_number - 1] if row_number - 1 < len(formats) else []
+                if _percent_format(shown_as[column - 1] if column - 1 < len(shown_as) else None):
+                    # Excel shows 0.352 formatted as 0.0% as 35.2%: that is the figure a report quotes.
+                    value, unit = _scale(value, 2), PERCENT
+                else:
+                    unit = _unit_in_label(label) or _unit_in_label(header)
+                    if unit is None and not _is_rate(label, header):
+                        unit = sheet_unit
                 found.append(_candidate(
                     "workbook", value, unit, order=(1, dataset["id"], sheet, row_number, column),
                     label=label, header=header, dataset_id=dataset["id"], source_hash=dataset.get("source_hash"),
@@ -561,6 +586,13 @@ def workbook_candidates(dataset: dict[str, Any], data: bytes, notes: list[str]) 
     finally:
         book.close()
     return found
+
+
+def _percent_format(number_format: Any) -> bool:
+    """Whether an Excel number format shows the value ×100 with a % sign (a quoted or escaped % does not)."""
+    if not isinstance(number_format, str):
+        return False
+    return "%" in re.sub(r'"[^"]*"|\\.', "", number_format)
 
 
 def gather_candidates(store: Any) -> tuple[list[dict[str, Any]], list[str]]:
@@ -686,12 +718,15 @@ class _Index:
                 if text.startswith(label, offset):
                     hits.add(label)
         row_label = _norm_label(context["row_label"])
-        if len(row_label) >= 2:
+        # A row named exactly like a source line is that line: 「收入」 is not 「其他收入」.
+        exact_row = len(row_label) >= 2 and row_label in self.by_label
+        if len(row_label) >= 2 and not exact_row:
             for label in self.label_bigrams.get(row_label[:2], ()):
                 if row_label in label:
                     hits.add(label)
         # 「营业收入」 names a line; 「收入」 inside it is not a second, competing name.
-        return {label for label in hits if not any(label != other and label in other for other in hits)}
+        return {label for label in hits
+                if (exact_row and label == row_label) or not any(label != other and label in other for other in hits)}
 
 
 def _words(text: str, vocabulary) -> set[str]:
@@ -717,7 +752,8 @@ def _score(number: dict[str, Any], candidate: dict[str, Any], labels: set[str]) 
     change_conflict = bool(_words(context["period_text"], CHANGE_WORDS)) != bool(_words(theirs_text, CHANGE_WORDS))
     if change_conflict:
         score -= 1
-    strong = (label_hit or bool(metrics and shared)) and not period_conflict and not change_conflict
+    # A shared metric word (收入) stands in for a line name only when the number's words name no line.
+    strong = (label_hit or bool(metrics and shared and not labels)) and not period_conflict and not change_conflict
     return score, strong
 
 
@@ -740,10 +776,47 @@ def _views(number: dict[str, Any]) -> list[tuple[str, int, str]]:
     return views
 
 
-def _hits(number: dict[str, Any], index: _Index) -> list[dict[str, Any]]:
+def _rounds_to(shown: Decimal, raw: Decimal) -> bool:
+    """Whether the source value, rounded half up (away from zero, as Excel shows it) to the number's places, is the number."""
+    exponent = raw.as_tuple().exponent
+    if not isinstance(exponent, int) or shown.as_tuple().exponent >= exponent:
+        return False
+    try:
+        return shown.quantize(Decimal((0, (1,), exponent)), rounding=ROUND_HALF_UP) == raw
+    except InvalidOperation:
+        return False
+
+
+def _in_group(candidate: dict[str, Any], group: str) -> bool:
+    if group == "base":
+        return candidate["base"] is not None
+    if group == "raw_unknown":
+        return candidate["exponent"] is None and not candidate["other_unit"]
+    return True
+
+
+def _hits(number: dict[str, Any], index: _Index, named: list[dict[str, Any]] = ()) -> list[dict[str, Any]]:
+    """Candidates whose value is the number's: from the value index, and among `named` (the lines its words
+    name), which are tested one by one so a crowd of equal values cannot push them out of the capped hits."""
     raw, places = number["raw"], number["places"]
     half = Decimal((0, (5,), -places - 1))
     hits: dict[int, dict[str, Any]] = {}
+
+    def test(candidate: dict[str, Any], group: str, exponent: int, shift: int, assumption: str) -> None:
+        shown = _scale(candidate["base"] if group == "base" else candidate["raw"], shift - exponent)
+        if shown == raw:
+            how = "exact"
+        elif _rounds_to(shown, raw):
+            how = "rounded"
+        else:
+            return
+        kind = "scaled" if shift else how
+        previous = hits.get(id(candidate))
+        rank = ("exact", "rounded", "scaled").index(kind)
+        if previous is None or rank < previous["rank"]:
+            hits[id(candidate)] = {"candidate": candidate, "how": kind, "rounded": how == "rounded",
+                                   "shift": shift, "assumption": assumption, "rank": rank}
+
     with localcontext() as context:
         context.prec = CONTEXT_PRECISION
         for group, exponent, assumption in _views(number):
@@ -753,30 +826,28 @@ def _hits(number: dict[str, Any], index: _Index) -> list[dict[str, Any]]:
                 if low > high:
                     low, high = high, low
                 for candidate in index.between(group, low, high):
-                    shown = _scale(candidate["base"] if group == "base" else candidate["raw"], shift - exponent)
-                    if shown == raw:
-                        how = "exact"
-                    elif _decimal_rounding(shown, raw):
-                        how = "rounded"
-                    else:
-                        continue
-                    kind = "scaled" if shift else how
-                    previous = hits.get(id(candidate))
-                    rank = ("exact", "rounded", "scaled").index(kind)
-                    if previous is None or rank < previous["rank"]:
-                        hits[id(candidate)] = {"candidate": candidate, "how": kind, "rounded": how == "rounded",
-                                               "shift": shift, "assumption": assumption, "rank": rank}
+                    test(candidate, group, exponent, shift, assumption)
+                for candidate in named:
+                    if _in_group(candidate, group):
+                        test(candidate, group, exponent, shift, assumption)
     return list(hits.values())
 
 
-def _in_number_unit(number: dict[str, Any], candidate: dict[str, Any]) -> tuple[Decimal, bool]:
-    """The candidate's value in the unit the number is written in; False when that needed an assumption."""
+def _in_number_unit(number: dict[str, Any], candidate: dict[str, Any]) -> tuple[Decimal, str | None]:
+    """The candidate's value in the unit the number is written in, and how it got there.
+
+    "same" or "unit" (converted between known units), "ratio" (a fraction on a rate's row, ×100 for a
+    percentage), or None when the units cannot be tied together: then the value is the source's own.
+    """
     mine, theirs = _exponent(number["unit"]), candidate["exponent"]
     if mine is not None and theirs is not None:
         with localcontext() as context:
             context.prec = CONTEXT_PRECISION
-            return _scale(candidate["base"], -mine), True
-    return candidate["raw"], False
+            return _scale(candidate["base"], -mine), "same" if mine == theirs else "unit"
+    # 0.352 on a 毛利率 row is 35.2%; a 35.2 there may already be the percentage, so it stays unknown.
+    if number["unit"] == PERCENT and candidate["unit"] is None and candidate.get("rate") and abs(candidate["raw"]) <= 1:
+        return _scale(candidate["raw"], 2), "ratio"
+    return candidate["raw"], None
 
 
 def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -818,6 +889,24 @@ def _value_words(value: Decimal, unit: str | None) -> str:
     return f"{sign}{grouped}{dot}{fraction}" + (f" {unit}" if unit and unit != PERCENT else unit or "")
 
 
+def _gap_words(difference: Decimal, unit: str | None) -> str:
+    """「文稿比来源多 20 万元」; for a percentage the gap is in 个百分点, not a relative change."""
+    more = difference > 0
+    if unit == PERCENT:
+        return f"文稿比来源{'高' if more else '低'} {_value_words(abs(difference), None)} 个百分点"
+    return f"文稿比来源{'多' if more else '少'} {_value_words(abs(difference), unit)}"
+
+
+def _compared_words(outcome: dict[str, Any], unit: str | None) -> str:
+    source = outcome["counterpart"]
+    shown = _value_words(outcome["compared"], unit)
+    if outcome["basis"] == "ratio":
+        return f"{_value_words(source['raw'], None)}（比例值，即 {shown}）"
+    if outcome["basis"] == "unit":
+        return f"{_value_words(source['raw'], source['unit'])}（折成文稿单位是 {shown}）"
+    return shown
+
+
 ASSUMPTION_NOTES = {
     "source_no_unit": "来源没有写明单位，按数字相同判断。",
     "source_ratio": "来源以比例值保存，已按百分比折算。",
@@ -831,9 +920,6 @@ def _classify(number: dict[str, Any], index: _Index) -> dict[str, Any]:
         result["note"] = f"单位是「{number['unit']}」，不是金额或比例，没有比对。"
         return result
     labels = index.labels_in(number["context"])
-    hits = [hit for hit in _hits(number, index) if _comparable(number, hit["candidate"])]
-    for hit in hits:
-        hit["score"], hit["strong"] = _score(number, hit["candidate"], labels)
     labelled = [candidate for label in sorted(labels) for candidate in index.by_label.get(label, [])
                 if _comparable(number, candidate)]
     strong_labelled = []
@@ -841,6 +927,10 @@ def _classify(number: dict[str, Any], index: _Index) -> dict[str, Any]:
         score, strong = _score(number, candidate, labels)
         if strong:
             strong_labelled.append((score, candidate))
+    hits = [hit for hit in _hits(number, index, [candidate for _, candidate in strong_labelled])
+            if _comparable(number, hit["candidate"])]
+    for hit in hits:
+        hit["score"], hit["strong"] = _score(number, hit["candidate"], labels)
     weak = len(number["raw"].as_tuple().digits) <= 2
 
     def ranked(rows):
@@ -884,22 +974,29 @@ def _classify(number: dict[str, Any], index: _Index) -> dict[str, Any]:
         tops = [candidate for score, candidate in sorted(strong_labelled, key=lambda row: (-row[0], row[1]["order"])) if score == top]
         converted = {format(_in_number_unit(number, candidate)[0], "f") for candidate in tops}
         result["candidates"] = tops[:MAX_CANDIDATES_PER_ITEM]
-        if len(converted) == 1:
-            counterpart = tops[0]
-            value, known = _in_number_unit(number, counterpart)
-            mine = _words(number["context"]["period_text"], PERIOD_WORDS)
-            theirs = _words(counterpart["label"] + counterpart["header"], PERIOD_WORDS)
-            if not known and bool(mine) != bool(theirs):
-                # Neither the unit nor the period ties the two together: a difference here is not a finding.
-                result["note"] = "来源里有同名项目，数值不同，但单位和期间都无法确认是同一口径，请人工核对。"
-                return result
-            with localcontext() as context:
-                context.prec = CONTEXT_PRECISION
-                difference = number["raw"] - value
-            result.update(status="mismatch", counterpart=counterpart, compared=value, difference=difference)
-            result["note"] = "" if known else "有一方没有写明单位，按数字直接比较。"
+        if len(converted) > 1:
+            result["note"] = "有多个同名项目，数值各不相同，需要人工确认对应哪一项。"
             return result
-        result["note"] = "有多个同名项目，数值各不相同，需要人工确认对应哪一项。"
+        counterpart = tops[0]
+        value, basis = _in_number_unit(number, counterpart)
+        mine = _words(number["context"]["period_text"], PERIOD_WORDS)
+        theirs = _words(counterpart["label"] + counterpart["header"], PERIOD_WORDS)
+        # 不一致 is a finding only when the unit and the period tie the two together; otherwise the
+        # difference could be a unit or a scope, and guessing either is not this check's to do.
+        doubts = []
+        if basis is None:
+            doubts.append("来源没有标明是比例值还是百分数" if number["unit"] == PERCENT and counterpart["unit"] is None
+                          else "有一方没有写明单位，无法换算到同一单位")
+        if not mine & theirs:
+            doubts.append("无法确认是同一期间（如本月、累计、预算）")
+        if doubts:
+            result["note"] = f"来源里有同名项目，数值不同；但{'，也'.join(doubts)}，请人工核对。"
+            return result
+        with localcontext() as context:
+            context.prec = CONTEXT_PRECISION
+            difference = number["raw"] - value
+        result.update(status="mismatch", counterpart=counterpart, compared=value, difference=difference, basis=basis)
+        result["note"] = ASSUMPTION_NOTES["source_ratio"] if basis == "ratio" else ""
         return result
     result["note"] = "没有在当前资料和计算结果中找到这个数字。"
     if labelled:
@@ -936,6 +1033,7 @@ def review_numbers(numbers: list[dict[str, Any]], candidates: list[dict[str, Any
         }
         if outcome["status"] == "mismatch":
             item["compared_value"] = format(outcome["compared"], "f")
+            item["compared_basis"] = outcome["basis"]
             item["difference"] = format(outcome["difference"], "f")
         items.append(item)
         issue = _issue(item, number, outcome)
@@ -947,7 +1045,8 @@ def review_numbers(numbers: list[dict[str, Any]], candidates: list[dict[str, Any
     counts = {status: sum(1 for item in items if item["status"] == status) for status in STATUSES}
     attention = counts["mismatch"] + counts["match_scaled"] + counts["needs_review"]
     summary = {
-        "status": "pass" if items and not attention else "needs_attention",
+        # Numbers past the cap were never checked: a cut-off review cannot pass.
+        "status": "pass" if items and not attention and not truncated else "needs_attention",
         "total": len(items),
         **counts,
         "needs_review_not_amount": sum(1 for item in items if item["status"] == "needs_review" and not item["amount_like"]),
@@ -972,8 +1071,8 @@ def _issue(item: dict[str, Any], number: dict[str, Any], outcome: dict[str, Any]
     best = outcome.get("counterpart") or (outcome["candidates"][0] if outcome["candidates"] else None)
     if status == "mismatch":
         code, severity = "report_review_mismatch", "error"
-        message = (f"{place}写 {item['text']}，{_source_words(best)} 为 {_value_words(outcome['compared'], number['unit'])}，"
-                   f"相差 {_value_words(outcome['difference'], number['unit'])}。")
+        message = (f"{place}写 {item['text']}，{_source_words(best)} 为 {_compared_words(outcome, number['unit'])}，"
+                   f"{_gap_words(outcome['difference'], number['unit'])}。")
     elif status == "match_scaled":
         code, severity = "report_review_scaled", "warning"
         message = f"{place}写 {item['text']}，{_source_words(best)} 为 {_value_words(best['raw'], best['unit'])}。{item['note']}"

@@ -15,7 +15,8 @@ from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.report_documents import MAX_SOURCE_BYTES, REPORT_FORMATS, check_report_source_bytes
 from foundry.report_pptx import PPTX_WARNING, report_document_from_pptx
-from foundry.report_review import CLOSING_NOTE, extract_report_numbers
+from foundry import report_review
+from foundry.report_review import CLOSING_NOTE, _rounds_to, extract_report_numbers
 from foundry.task import TaskStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -157,6 +158,12 @@ def test_pptx_guards_archive_size_structure_and_dtd() -> None:
     entity = '<?xml version="1.0"?><!DOCTYPE p:sld [<!ENTITY x "x">]><p:sld/>'
     with pytest.raises(FoundryError, match="DTD"):
         report_document_from_pptx(_deck({"ppt/slides/s.xml": entity}, [("rId1", "slides/s.xml")]), SOURCE)
+    # The same declaration in UTF-16 has no "<!DOCTYPE" bytes to find; the parser still refuses it.
+    wide = (f'<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE p:sld [<!ENTITY x "营业收入 999 万元">]>'
+            f'<p:sld {NS}><p:cSld><p:spTree>{_shape("&x;")}</p:spTree></p:cSld></p:sld>').encode("utf-16")
+    assert b"<!DOCTYPE" not in wide
+    with pytest.raises(FoundryError, match="DTD"):
+        report_document_from_pptx(_deck({"ppt/slides/s.xml": wide}, [("rId1", "slides/s.xml")]), SOURCE)
     with pytest.raises(FoundryError, match="PPTX part is missing"):
         report_document_from_pptx(_deck({}, [("rId1", "slides/gone.xml")]), SOURCE)
 
@@ -265,6 +272,36 @@ def test_extraction_reads_signs_widths_units_and_skips_places() -> None:
     assert "营业收入 1,234.50 万元" in numbers["1,234.50 万元"]["excerpt"]
 
 
+def test_extraction_keeps_bracketed_amounts_signs_and_amounts_that_look_like_years() -> None:
+    document = _report(
+        _heading("8 月营收 2030 万元，超预算 5%"),
+        _heading("2026 经营回顾", 2),
+        _paragraph("营业成本（790 万元）；毛利（35）万元；费用 (120) 万元；净亏损（500）万元。"),
+        _paragraph("营业收入差异（120.5 万元），毛利率差异（+5.25%），毛利率（35.2%），较上月（+120）万元。"),
+        _paragraph("员工（120 人）。（1）收入（2）成本"),
+    )
+    numbers = [(number["text"], number["raw"], number["unit"]) for number in extract_report_numbers(document)]
+    assert numbers == [
+        ("2030 万元", Decimal("2030"), "万元"), ("5%", Decimal("5"), "%"),
+        # A unit inside the brackets is an aside: the amount reads as written, never silently dropped.
+        ("790 万元", Decimal("790"), "万元"),
+        # Brackets around the bare number, unit outside: a negative, integers included.
+        ("（35）万元", Decimal("-35"), "万元"), ("(120) 万元", Decimal("-120"), "万元"), ("（500）万元", Decimal("-500"), "万元"),
+        ("120.5 万元", Decimal("120.5"), "万元"), ("+5.25%", Decimal("5.25"), "%"), ("35.2%", Decimal("35.2"), "%"),
+        ("（+120）万元", Decimal("120"), "万元"),
+        ("120 人", Decimal("120"), "人"),
+    ]
+
+
+def test_rounding_is_half_up_as_excel_shows_it() -> None:
+    assert _rounds_to(Decimal("1320.5"), Decimal("1321"))
+    assert not _rounds_to(Decimal("1320.5"), Decimal("1320"))  # half-even would accept this one
+    assert _rounds_to(Decimal("-1320.5"), Decimal("-1321"))
+    assert not _rounds_to(Decimal("-1320.5"), Decimal("-1320"))
+    assert _rounds_to(Decimal("1234.5678"), Decimal("1234.57"))
+    assert not _rounds_to(Decimal("1234.5"), Decimal("1234.5"))  # equal is exact, not rounded
+
+
 # --------------------------------------------------------------------------- review against the task
 
 def _month_pack(path: Path, cost: float = 800) -> Path:
@@ -338,7 +375,8 @@ def test_review_classifies_each_status_against_the_workbook(pack) -> None:
     assert issues["820 万元"]["code"] == "report_review_mismatch"
     assert issues["820 万元"]["location"] == {"dataset_id": dataset["id"], "sheet": "利润表", "range": "B5",
                                               "source_hash": dataset["source_hash"]}
-    assert "相差 20 万元" in issues["820 万元"]["message"]
+    assert issues["820 万元"]["message"].endswith("为 800 万元，文稿比来源多 20 万元。")
+    assert mismatch["compared_basis"] == "same"
     assert issues["790 元"]["code"] == "report_review_scaled"
     assert issues["77 万元"]["code"] == "report_review_unmatched" and "location" not in issues["77 万元"]
     assert all(issue["excerpt"] and issue["business_key"] for issue in issues.values())
@@ -523,3 +561,162 @@ def test_report_review_is_not_an_assistant_tool() -> None:
     for name in ("client.js", "finance-tools.js"):
         text = (ROOT / "dsh-plugin" / name).read_text(encoding="utf-8")
         assert "report-review" not in text and "report-pptx-read" not in text
+
+
+def test_review_flags_a_bracketed_amount_instead_of_dropping_it(pack) -> None:
+    task, _, _ = pack
+    store = FinanceStore(task, actor="manager")
+    review = store.report_review({"document": _report(
+        _paragraph("本月营业收入 1,234.57 万元，营业成本本月实际（790 万元）。"))})
+    items = _by_text(review)
+    # 790 is the budget line's value, not 本月实际's 800: listed for review, and the review does not pass.
+    assert items["790 万元"]["status"] == "needs_review"
+    assert [candidate["range"] for candidate in items["790 万元"]["candidates"]] == ["B5", "D5"]
+    assert review["summary"]["status"] == "needs_attention"
+
+    other = store.report_review({"document": _report(_paragraph("营业成本本月实际（780 万元）。"))})
+    item = other["items"][0]
+    assert (item["text"], item["status"], item["compared_value"], item["difference"]) == ("780 万元", "mismatch", "800", "-20")
+    assert other["issues"][0]["message"].endswith("为 800 万元，文稿比来源少 20 万元。")
+
+
+def test_a_percentage_is_compared_with_a_ratio_cell_in_percentage_points(pack) -> None:
+    task, _, _ = pack
+    review = FinanceStore(task, actor="manager").report_review(
+        {"document": _report(_paragraph("本月实际毛利率 35.7%。"))})
+    item = review["items"][0]
+    assert item["status"] == "mismatch"
+    assert item["candidates"][0]["range"] == "B6"
+    assert (item["compared_value"], item["compared_basis"], item["difference"]) == ("35.2", "ratio", "0.5")
+    assert item["note"] == "来源以比例值保存，已按百分比折算。"
+    assert review["issues"][0]["message"] == (
+        "正文写 35.7%，套表 利润表!B6 「毛利率 · 本月实际」 为 0.352（比例值，即 35.2%），文稿比来源高 0.5 个百分点。")
+
+
+def _sheet(path: Path, rows: list[list], formats: dict[str, str] | None = None) -> Path:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "利润表"
+    for row in rows:
+        sheet.append(row)
+    for cell, number_format in (formats or {}).items():
+        sheet[cell].number_format = number_format
+    workbook.save(path)
+    return path
+
+
+def _store_with(tmp_path: Path, rows: list[list], formats: dict[str, str] | None = None) -> FinanceStore:
+    task = TaskStore(tmp_path / "var").create(title="复核口径")
+    AnalysisStore(task).add_dataset(_sheet(tmp_path / "pack.xlsx", rows, formats), name="pack.xlsx")
+    return FinanceStore(task, actor="manager")
+
+
+def test_a_percent_formatted_cell_is_the_percentage_excel_shows_and_an_unmarked_rate_is_not_guessed(tmp_path: Path) -> None:
+    store = _store_with(tmp_path, [
+        ["单位：万元"], ["项目", "本月实际", "本年累计"], ["毛利率", 0.352, 35.2], ["净利率", 0.0525, None],
+    ], {"B3": "0.0%"})
+    items = _by_text(store.report_review({"document": _report(_paragraph(
+        "本月实际毛利率 35.2%，本年累计毛利率 35.7%，本月实际净利率 5.30%。"))}))
+    shown = items["35.2%"]
+    assert shown["status"] == "match" and shown["candidates"][0]["range"] == "B3"
+    assert (shown["candidates"][0]["value"], shown["candidates"][0]["unit"]) == ("35.2", "%")
+    # 35.2 on a rate row with no % format may already be the percentage: no 不一致 is guessed from it.
+    unmarked = items["35.7%"]
+    assert unmarked["status"] == "needs_review" and "compared_value" not in unmarked
+    assert "来源没有标明是比例值还是百分数" in unmarked["note"]
+    assert unmarked["candidates"][0]["range"] == "C3"
+    ratio = items["5.30%"]
+    assert (ratio["status"], ratio["compared_value"], ratio["difference"]) == ("mismatch", "5.25", "0.05")
+
+
+def test_a_source_without_a_unit_is_never_relabelled_in_the_reports_unit(tmp_path: Path) -> None:
+    store = _store_with(tmp_path, [["项目", "本月实际"], ["营业收入", 12000000]])
+    review = store.report_review({"document": _report(_paragraph("本月实际营业收入 1,250 万元。"))})
+    item = review["items"][0]
+    assert item["status"] == "needs_review"
+    assert "compared_value" not in item and "difference" not in item
+    assert "有一方没有写明单位" in item["note"]
+    assert (item["candidates"][0]["range"], item["candidates"][0]["value"], item["candidates"][0]["unit"]) == (
+        "B2", "12000000", None)
+    assert review["issues"][0]["code"] == "report_review_unmatched"
+    assert "12,000,000 万元" not in review["issues"][0]["message"]
+
+
+def test_a_mismatch_needs_a_shared_period(tmp_path: Path) -> None:
+    store = _store_with(tmp_path, [["单位：万元"], ["项目", "本月预算"], ["营业收入", 1200]])
+    review = store.report_review({"document": _report(_heading("八月经营情况"), _paragraph("营业收入 1,250 万元。"))})
+    item = review["items"][0]
+    assert item["status"] == "needs_review"
+    assert "无法确认是同一期间" in item["note"]
+    assert item["candidates"][0]["range"] == "B3"
+    budget = store.report_review({"document": _report(_paragraph("营业收入本月预算 1,250 万元。"))})["items"][0]
+    assert (budget["status"], budget["difference"]) == ("mismatch", "50")
+
+
+def _sibling_pack(tmp_path: Path) -> FinanceStore:
+    rows = [["单位：万元"], ["项目", "本月实际"], ["收入", 1320.5], ["其他收入", 15], ["营业收入", 1320.5]]
+    # Many equal values before the line the report names: more than one value query returns.
+    rows += [[f"明细{index}", 0] for index in range(70)]
+    rows.append(["营业外支出", 0])
+    return _store_with(tmp_path, rows)
+
+
+def _table_report(*rows: tuple[str, str]) -> dict:
+    return _report({"type": "table", "attrs": {"unit": "万元"},
+                    "content": [_row("项目", "本月实际", header=True), *[_row(*row) for row in rows]]})
+
+
+def test_a_table_row_is_matched_to_the_line_of_the_same_name_not_a_longer_one(tmp_path: Path) -> None:
+    store = _sibling_pack(tmp_path)
+    wrong = store.report_review({"document": _table_report(("收入", "1,400.0"))})
+    item = wrong["items"][0]
+    assert item["status"] == "mismatch"
+    assert (item["candidates"][0]["range"], item["candidates"][0]["label"]) == ("B3", "收入 · 本月实际")
+    assert (item["compared_value"], item["difference"]) == ("1320.5", "79.5")
+
+    # 15 is 其他收入's value, not 收入's: never a pass.
+    other = store.report_review({"document": _table_report(("收入", "15.0"))})
+    assert other["items"][0]["status"] != "match"
+    assert other["summary"]["status"] == "needs_attention"
+    assert other["items"][0]["candidates"][0]["range"] == "B3"
+
+    sibling = store.report_review({"document": _table_report(("其他收入", "15.0"))})
+    assert sibling["items"][0]["status"] == "match" and sibling["items"][0]["candidates"][0]["range"] == "B4"
+    assert sibling["summary"]["status"] == "pass"
+
+
+def test_rounding_ties_go_half_up_and_the_named_line_is_found_past_the_hit_cap(tmp_path: Path) -> None:
+    store = _sibling_pack(tmp_path)
+    items = _by_text(store.report_review({"document": _report(_paragraph(
+        "本月实际营业收入 1,321 万元；本月实际营业收入 1,320 万元；本月实际营业外支出 0.00 万元。"))}))
+    assert items["1,321 万元"]["status"] == "match_rounded"
+    tie = items["1,320 万元"]
+    assert (tie["status"], tie["compared_value"], tie["difference"]) == ("mismatch", "1320.5", "-0.5")
+    zero = items["0.00 万元"]
+    assert zero["status"] == "match", zero["note"]
+    assert (zero["candidates"][0]["range"], zero["candidates"][0]["label"]) == ("B76", "营业外支出")
+
+
+def test_a_cut_off_review_never_passes(pack, monkeypatch) -> None:
+    task, _, _ = pack
+    monkeypatch.setattr(report_review, "MAX_NUMBERS", 1)
+    review = FinanceStore(task, actor="manager").report_review(
+        {"document": _report(_paragraph("本年累计营业收入 9,876.54 万元，营业成本 999 万元。"))})
+    assert review["summary"]["truncated"] is True and review["summary"]["total"] == 1
+    assert review["items"][0]["status"] == "match"
+    assert review["summary"]["status"] == "needs_attention"
+    assert "文稿里的数字超过 1 个，只复核了前 1 个。" in review["notes"]
+
+
+def test_an_import_review_records_the_registered_source_not_the_callers(pack, tmp_path: Path) -> None:
+    task, analysis, _ = pack
+    html = tmp_path / "八月月报.html"
+    html.write_text("<p>营业收入 9,876.54 万元</p>", encoding="utf-8")
+    source = analysis.add_report_source(html)["source"]
+    forged = {**source, "name": "审计报告.pdf", "format": "pdf", "sha256": "0" * 64}
+    review = FinanceStore(task, actor="manager").report_review({"document": _report(
+        _paragraph("本年累计营业收入 9,876.54 万元。", source_id=source["id"]), sources=[forged])})
+    assert review["sources"] == [{"id": source["id"], "name": "八月月报.html", "format": "html", "sha256": source["sha256"]}]
+    # A page-less paragraph of an HTML file is not OCR text, whatever format the caller claimed.
+    assert review["items"][0]["status"] == "match"
+    assert review["items"][0]["location"]["source_format"] == "html"
