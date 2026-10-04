@@ -45,6 +45,11 @@ def _book(formulas: dict[str, object], *, title: str = "汇总") -> Workbook:
     return book
 
 
+def _flagged(result: dict, code: str) -> list[tuple[str, str | None]]:
+    issue = _issue(result, code)
+    return [(sample["cell"], sample.get("detail")) for sample in issue["samples"]] if issue else []
+
+
 def _rewrite(data: bytes, edits: dict[str, object] | None = None, extra: dict[str, bytes] | None = None) -> bytes:
     """Rewrite package members the way a non-openpyxl writer (Excel) would have written them."""
     source = zipfile.ZipFile(io.BytesIO(data))
@@ -133,6 +138,23 @@ def test_error_literals_in_formulas_but_not_quoted_text() -> None:
     assert issue["samples"][0]["detail"] == "#REF!"
 
 
+def test_a_deliberate_error_literal_is_not_a_broken_link() -> None:
+    # Only #REF! is what Excel leaves behind; #N/A here leaves a chart gap on purpose.
+    deliberate = {f"B{row}": f'=IF(A{row}="",#N/A,A{row})' for row in range(1, 6)}
+    deliberate["C1"] = "=IFERROR(A1/A2,#DIV/0!)"
+    deliberate["C2"] = "=IF(A2>0,#REF!,A2)"
+    result = check_workbook(_bytes(_book(deliberate)))
+    assert _flagged(result, "error_in_formula") == [("C2", "#REF!")]
+
+
+def test_a_percentage_is_judged_by_its_value() -> None:
+    rates = {"B1": "=A1*10%", "B2": "=A1*1%", "B3": "=A1*2%", "B4": "=A1*12 %", "B5": "=A1*13%",
+             "C1": "=A1*100%", "C2": "=A1*1000%", "C3": "=A1*0%", "C4": "=A1*12", "C5": "=A1*(1+10)"}
+    result = check_workbook(_bytes(_book(rates)))
+    assert _issue(result, "hardcoded_number")["count"] == 5
+    assert _flagged(result, "hardcoded_number") == [("B1", "10%"), ("B2", "1%"), ("B3", "2%"), ("B4", "12%"), ("B5", "13%")]
+
+
 def test_volatile_functions_ignore_the_xlfn_prefix() -> None:
     data = _bytes(_book({"B2": "=OFFSET(A1,0,0)+TODAY()", "B3": '=INDIRECT("A1")', "B4": "=_xlfn.RANDBETWEEN(1,6)",
                          "B5": "=SUM(A1:A9)"}))
@@ -154,6 +176,31 @@ def test_external_references_keep_the_book_name_but_never_its_directory() -> Non
     assert [sample["cell"] for sample in issue["samples"]] == ["B2", "B3", "B4"]
     assert issue["samples"][1]["formula"] == "='[预算.xlsx]Sheet 1'!A1*2"
     assert "Users" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_sample_formulas_never_carry_a_path() -> None:
+    data = _bytes(_book({
+        "B1": '=HYPERLINK("/Volumes/财务共享/2026/应付明细.xlsx","底稿")&TODAY()',
+        "B2": '=HYPERLINK("D:/财务/2026/预算.xlsx","预算")*1.13',
+        "B3": '=HYPERLINK("~/Documents/预算.xlsx","预算")*1.13',
+        "B4": '=HYPERLINK("\\\\fs01\\财务\\预算.xlsx","预算")*1.13',
+        "B5": '=HYPERLINK("财务共享/2026/凭证-0930.pdf","凭证")*1.13',
+        "B6": "='D:/财务/2026/[预算.xlsx]Sheet1'!A1*1.13",
+        # Any text with a slash is held back, even a harmless date format.
+        "B7": '=TEXT(TODAY(),"yyyy/mm")&"/"&A8',
+    }))
+    result = check_workbook(data)
+    shown = {sample["cell"]: sample.get("formula") for issue in result["issues"] for sample in issue["samples"]}
+    assert shown["B1"] == '=HYPERLINK("…","底稿")&TODAY()'
+    assert shown["B2"] == '=HYPERLINK("…","预算")*1.13'
+    assert shown["B5"] == '=HYPERLINK("…","凭证")*1.13'
+    assert shown["B6"] == "='[预算.xlsx]Sheet1'!A1*1.13"
+    assert shown["B7"] == '=TEXT(TODAY(),"…")&"…"&A8'
+    text = json.dumps(result, ensure_ascii=False)
+    for fragment in ("Volumes", "D:/", "~/", "fs01", "财务共享", "Documents"):
+        assert fragment not in text
+    for pattern in ("/Volumes/x", "D:/x", "d:\\x", "~/x", "/private/var/x", "/mnt/c/x", "smb://fs01/x"):
+        assert workbook_health._PATH_LIKE.search(pattern), pattern
 
 
 def test_external_link_parts_report_count_and_file_names_only() -> None:
@@ -251,6 +298,102 @@ def test_inconsistent_column_formula_keeps_absolute_parts_and_spares_the_total()
     assert _issue(result, "inconsistent_row_formula") is None
 
 
+def test_the_cell_right_after_a_copied_run_is_checked_too() -> None:
+    from openpyxl.utils import get_column_letter as letter
+
+    # September was added to the right of a copied run and still reads August.
+    rolled = {f"{letter(column)}10": f"={letter(column)}8-{letter(column)}9" for column in range(2, 13)}
+    rolled["M10"] = "=L8-L9"
+    rolled["N10"] = "=SUM(B10:M10)"
+    assert _flagged(check_workbook(_bytes(_book(rolled))), "inconsistent_row_formula") == [("M10", "L10")]
+    # Once September reads its own month, the year total after it reads the run and is not a broken copy.
+    rolled["M10"] = "=M8-M9"
+    assert _issue(check_workbook(_bytes(_book(rolled))), "inconsistent_row_formula") is None
+    # A row appended at the bottom of a copied column that still reads the row above.
+    appended = {f"D{row}": f"=B{row}*C{row}" for row in range(2, 10)}
+    appended["D10"] = "=B9*C9"
+    assert _flagged(check_workbook(_bytes(_book(appended))), "inconsistent_column_formula") == [("D10", "D9")]
+    # An opening balance before the run is where it belongs.
+    opening = {"B10": "=期初!B10", **{f"{letter(column)}10": f"={letter(column - 1)}10+{letter(column)}9" for column in range(3, 9)}}
+    assert _issue(check_workbook(_bytes(_book(opening))), "inconsistent_row_formula") is None
+
+
+def test_subtotals_of_the_run_are_spared_but_not_in_a_running_balance() -> None:
+    from openpyxl.utils import get_column_letter as letter
+
+    # 1-3月, 一季度, 4-6月, 二季度 ...: each quarter adds up the months before it on its own row.
+    quarters = {}
+    for row in range(2, 8):
+        for quarter in (5, 9, 13, 17):
+            for column in range(quarter - 3, quarter):
+                quarters[f"{letter(column)}{row}"] = f"=明细!{letter(column)}{row}"
+            quarters[f"{letter(quarter)}{row}"] = f"=SUM({letter(quarter - 3)}{row}:{letter(quarter - 1)}{row})"
+    quarters["G3"] = "=明细!F3"
+    result = check_workbook(_bytes(_book(quarters)))
+    assert _flagged(result, "inconsistent_row_formula") == [("G3", "F3")]
+    # A running balance reads the row above, so a balance that skips a row is still a broken copy.
+    balance = {f"D{row}": f"=D{row - 1}+B{row}-C{row}" for row in range(3, 11)}
+    balance["D7"] = "=D5+B7-C7"
+    assert _flagged(check_workbook(_bytes(_book(balance))), "inconsistent_column_formula") == [("D7", "D6")]
+
+
+def test_whole_column_and_row_references_are_compared_relative_to_their_cell() -> None:
+    from openpyxl.utils import get_column_letter as letter
+
+    # SUMIF over whole columns, copied across the months; E6 still reads D:D.
+    lookups = {f"{letter(column)}{row}": f"=SUMIF(明细!$A:$A,$A{row},明细!{letter(column)}:{letter(column)})"
+               for row in range(5, 9) for column in range(3, 9)}
+    lookups["E6"] = "=SUMIF(明细!$A:$A,$A6,明细!D:D)"
+    result = check_workbook(_bytes(_book(lookups)))
+    assert _flagged(result, "inconsistent_row_formula") == [("E6", "D6")]
+    assert _flagged(result, "inconsistent_column_formula") == [("E6", "E5")]
+    totals = {f"{letter(column)}10": f"=SUM({letter(column)}:{letter(column)})" for column in range(2, 8)}
+    totals["D10"] = "=SUM(C:C)"
+    assert _flagged(check_workbook(_bytes(_book(totals))), "inconsistent_row_formula") == [("D10", "C10")]
+    rows = {f"F{row}": f"=SUM({row - 1}:{row - 1})" for row in range(2, 10)}
+    rows["F6"] = "=SUM(4:4)"
+    assert _flagged(check_workbook(_bytes(_book(rows))), "inconsistent_column_formula") == [("F6", "F5")]
+
+    # A correct copy stays quiet, whatever another sheet happens to hold first.
+    book = _book({}, title="明细")
+    book.active["C10"] = "=SUM(C:C)"
+    summary = book.create_sheet("汇总")
+    for column in range(3, 9):
+        summary[f"{letter(column)}10"] = f"=SUM({letter(column - 1)}:{letter(column - 1)})"
+    assert _issue(check_workbook(_bytes(book)), "inconsistent_row_formula") is None
+
+
+def test_a_shared_shape_always_means_a_shared_signature() -> None:
+    cases = [
+        ("SUM(C:C)", 10, 4), ("SUM(C:C)", 10, 5), ("SUM($C:$C)", 10, 6), ("SUM($C:$C)", 10, 7), ("$A:B", 1, 3),
+        ("SUM(4:4)", 5, 2), ("SUM(4:4)", 6, 2), ("SUM($4:$4)", 7, 2), ("1:$3", 2, 2), ("2:$3", 3, 2),
+        ("SUMIF(明细!$A:$A,$A5,明细!C:C)", 5, 3), ("SUMIF(明细!$A:$A,$A6,明细!C:C)", 6, 3),
+        ("[1]Sheet1!A1", 1, 2), ("[1]Sheet1!A2", 2, 2), ("[1]Sheet1!A2", 3, 2), ("[2]!Rate*B5", 5, 3),
+        ("'C:\\d\\[b.xlsx]S 1'!B5*2", 5, 3), ("'C:\\d\\[b.xlsx]S 1'!B6*2", 6, 3),
+        ("B5*C5", 5, 4), ("B6*C6", 6, 4), ("A$1:$B2", 3, 3), ("A$1:$B3", 4, 3), ("a1+b2", 3, 3), ("A2+B3", 4, 3),
+        ("Table1[Amount]*B5", 5, 3), ("Table1[Amount]*B6", 6, 3), ("'Q1 2026'!B5+$A$1", 5, 3), ("'Q1 2026'!B6+$A$1", 6, 3),
+        ("SUM(A1:INDEX(B:B,5))", 5, 3), ("SUM(A2:INDEX(B:B,5))", 6, 3), ("Sheet1!#REF!+A5", 5, 2), ("Sheet1!#REF!+A6", 6, 2),
+    ]
+    cache = workbook_health._FormulaCache()
+    for text, row, column in cases:
+        formula, signature, (origin_row, origin_column) = cache.at(text, row, column)
+        rendered = {number: key for key, number in cache.signatures.items()}[signature]
+        template = workbook_health._analyse(text).template
+        expected = tuple(piece if isinstance(piece, str) else workbook_health._render_reference(piece, row, column)
+                         for piece in template)
+        assert rendered == expected, (text, row, column)
+        # The shared analysis, moved from the cell it was read at, is this cell's own reading.
+        shift = {"R": row - origin_row, "C": column - origin_column}
+        moved = tuple(
+            piece if isinstance(piece, str) else tuple(
+                part if isinstance(part, str) else (part[0], part[1], part[2] if part[1] else part[2] + shift[part[0]])
+                for part in piece
+            )
+            for piece in formula.template
+        )
+        assert moved == template, (text, row, column)
+
+
 def test_no_pattern_without_a_dominant_signature() -> None:
     # Two of three agree: below the three-cell floor. Copies with a moving absolute anchor differ by design.
     data = _bytes(_book({"B10": "=SUM(B2:B9)", "C10": "=SUM(C2:C9)", "D10": "=SUM(D2:D8)",
@@ -318,6 +461,19 @@ def test_scan_stops_at_the_formula_cap_and_says_so(monkeypatch) -> None:
     assert _issue(result, "formula_without_cache")["count"] == 5
     monkeypatch.setattr(workbook_health, "MAX_FORMULA_CELLS", 9)
     assert check_workbook(_bytes(book))["truncated"] is False
+
+
+def test_distinct_formulas_stop_at_a_work_budget_and_copies_do_not_count(monkeypatch) -> None:
+    # openpyxl stores "=1*2" as the text 1*2.
+    monkeypatch.setattr(workbook_health, "MAX_ANALYSED_CHARACTERS", 3 * (len("1*2") + workbook_health.ANALYSIS_OVERHEAD))
+    # Hand-typed amounts: every formula is read afresh.
+    typed = check_workbook(_bytes(_book({f"B{row}": f"={row}*2" for row in range(1, 9)})))
+    assert typed["truncated"] is True
+    assert typed["checked_formula_cells"] == 3
+    # One formula copied down: read once, however many copies.
+    copied = check_workbook(_bytes(_book({f"B{row}": f"=A{row}*2" for row in range(1, 11)})))
+    assert copied["truncated"] is False
+    assert copied["checked_formula_cells"] == 10
 
 
 def test_unreadable_input_is_unavailable_and_never_raises(monkeypatch) -> None:

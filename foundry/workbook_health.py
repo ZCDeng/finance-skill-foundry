@@ -22,9 +22,11 @@ What it reports (code -> severity):
   RANDBETWEEN, CELL or INFO (an ``_xlfn.`` prefix is ignored).
 - ``hardcoded_number`` (warning): a number typed into a formula; see the
   policy below.
-- ``error_in_formula`` (warning): an error literal in the formula itself
-  (``#REF!``, or a ``Sheet1!#REF!`` reference). Quoted text such as
-  ``"#REF!"`` is text, not an error, and is not reported.
+- ``error_in_formula`` (warning): a ``#REF!`` written into the formula itself
+  (``=#REF!+1``, or a ``Sheet1!#REF!`` reference), which Excel leaves behind
+  when a referenced row, column or sheet is deleted. Other error literals
+  (``IF(A1="",#N/A,A1)`` leaves a chart gap on purpose) are typed by someone
+  and are not reported; quoted text such as ``"#REF!"`` is text, not an error.
 - ``cached_error`` (warning): a cell whose saved value is an error
   (``t="e"``), formula or not.
 - ``formula_without_cache`` (info): a formula with no saved result. A cell is
@@ -33,15 +35,21 @@ What it reports (code -> severity):
   Such a sheet cannot be read as a table until the file is saved in Excel.
 - ``inconsistent_row_formula`` / ``inconsistent_column_formula`` (warning):
   a formula that breaks the pattern its row (column) was copied with. Each
-  A1 reference is rewritten relative to its own cell (``R[dr]C[dc]``, with
-  ``$``-absolute parts kept absolute; external references are kept as
-  written), so copies of one formula share a signature. When at least
+  A1 reference (a cell, whole columns or whole rows, on this sheet, another
+  sheet or another workbook) is rewritten relative to its own cell
+  (``R[dr]C[dc]``, with ``$``-absolute parts kept absolute), so copies of one
+  formula share a signature, as they do when Excel stores them as one shared
+  formula. When at least
   ``MIN_PATTERN_CELLS`` formulas of the row share one signature and they are
   at least ``PATTERN_SHARE_PERCENT`` percent of the row's formulas, a formula
-  that differs is reported if a pattern cell sits on both sides of it. A cell
-  at either end of the run is not reported: that is where a total, a ratio
-  or an opening balance normally sits, and the hint is about a copy that was
-  overwritten in the middle.
+  that differs is reported if it sits between the first and last pattern
+  cells, or directly after the last one (the month added when the workbook
+  was rolled forward, the row appended at the bottom). A differing cell
+  before the run is not reported: that is where an opening balance sits. A
+  differing cell that reads cells of the run on its own line is a subtotal,
+  total or ratio of the run and is not reported either, unless the pattern
+  itself reads its own run (a running balance), where such a read says
+  nothing.
 - ``sheet_too_large`` (info): a sheet beyond ``MAX_ROWS``/``MAX_COLUMNS`` was
   skipped rather than scanned.
 
@@ -49,7 +57,9 @@ Hard-coded number policy. A NUMBER operand is reported unless it is
 
 - a common constant: 0, 1, 2, 10, 12, 100, 1000, 10000, 365 or 366, or any
   power of ten (1E+n), which is how amounts are converted between 元, 万元
-  and 亿元; a leading minus sign is an operator, so -1 counts as 1;
+  and 亿元; a leading minus sign is an operator, so -1 counts as 1; a
+  percentage is judged by its value, so ``10%`` is 0.1 and is reported while
+  ``100%`` is 1 and is not;
 - inside an array constant (``{1,2;3,4}``);
 - directly in a structural argument position, where it says where or how to
   read rather than how much: the digits of ROUND/ROUNDUP/ROUNDDOWN/TRUNC,
@@ -69,9 +79,12 @@ assumption that belongs in an input cell with its source written down.
 ``issue_count`` is the number of codes with at least one occurrence. At most
 ``MAX_SAMPLES`` samples are kept per code, each naming a sheet and a cell and,
 for a cell, a bounded ``range`` around it that a read-only preview can open.
-At most ``MAX_FORMULA_CELLS`` formula cells are scanned; beyond that the
-result says ``truncated: true``. The output holds ints, booleans and strings
-only, in a fixed order.
+At most ``MAX_FORMULA_CELLS`` formula cells are scanned, and the scan also
+stops once the formulas it had to read afresh (copies of one formula are read
+once) add up to ``MAX_ANALYSED_CHARACTERS``, counting ``ANALYSIS_OVERHEAD``
+extra per formula; either way the result says ``truncated: true``. Both
+limits count work, not time, so a file gives the same result on every
+machine. The output holds ints, booleans and strings only, in a fixed order.
 """
 
 from __future__ import annotations
@@ -95,6 +108,9 @@ from foundry.errors import FoundryError
 
 SCHEMA_VERSION = 1
 MAX_FORMULA_CELLS = 200_000
+# Roughly two seconds of tokenising for a workbook of distinct hand-typed formulas; copies cost nothing here.
+MAX_ANALYSED_CHARACTERS = 3_000_000
+ANALYSIS_OVERHEAD = 40
 MAX_SAMPLES = 5
 MAX_SHEET_NAMES = 50
 MAX_LINK_TARGETS = 20
@@ -149,7 +165,12 @@ _AXIS = re.compile(r"(\$?)([A-Za-z]{1,3})?(\$?)(\d+)?")
 _CELL = re.compile(r"^([A-Z]{1,3})(\d+)$")
 # A directory in front of an external book: '<dir>\[book.xlsx]Sheet'!A1.
 _BOOK_DIRECTORY = re.compile(r"'[^'\[]*[\\/]\[")
-_PATH_LIKE = re.compile(r"(?i)(/Users/|/home/|/tmp/|[A-Z]:\\|\\\\|file:/|https?://|wss?://)")
+_PATH_LIKE = re.compile(
+    r"(?i)([A-Z]:[\\/]|\\\\|~[\\/]|/(?:Users|home|tmp|Volumes|private|mnt|var|media|Network)/"
+    r"|file:/|https?://|wss?://|smb://|afp://)"
+)
+# Quoted parts of a formula: sheet names in single quotes, text in double quotes.
+_QUOTED = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
 
 _PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _TRANSITIONAL = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -314,14 +335,16 @@ class _Report:
 class _Formula:
     """What one formula text says, independent of the cell it sits in."""
 
-    __slots__ = ("volatile", "external", "numbers", "errors", "template")
+    __slots__ = ("volatile", "external", "numbers", "errors", "template", "shared_by_shape")
 
-    def __init__(self, volatile=(), external=False, numbers=(), errors=(), template=None):
+    def __init__(self, volatile=(), external=False, numbers=(), errors=(), template=None, shared_by_shape=True):
         self.volatile: tuple[str, ...] = volatile
         self.external: bool = external
         self.numbers: tuple[str, ...] = numbers
         self.errors: tuple[str, ...] = errors
         self.template: tuple | None = template
+        # False when the template keeps a reference as written that the shape made relative.
+        self.shared_by_shape: bool = shared_by_shape
 
 
 class _FormulaCache:
@@ -330,22 +353,44 @@ class _FormulaCache:
     A formula copied down a column has a different text in every cell
     (``=B5*C5``, ``=B6*C6``) but one shape relative to its own cell. The cache
     key is that shape, found with a cheap pass over the text that rewrites
-    each A1 cell reference outside quotes and brackets relative to the cell.
-    Two cells with the same key read the same once tokenised, so they share
-    one analysis and one signature, and the tokenizer runs once per shape.
+    each A1 reference outside quotes and brackets (cells, whole columns and
+    whole rows) relative to the cell, exactly the references the signature
+    makes relative. Two cells with the same key then read the same once
+    tokenised, so they share one analysis and one signature, and the
+    tokenizer runs once per shape. Should the tokenizer keep as written a
+    reference the shape made relative, that formula is read by its own text
+    instead, so a shared key never hides a difference.
     """
 
     def __init__(self) -> None:
-        self.shapes: dict[str, tuple[_Formula, int | None]] = {}
+        self.shapes: dict[str, tuple[_Formula, int | None, tuple[int, int]]] = {}
+        self.texts: dict[str, _Formula] = {}
         self.signatures: dict[tuple, int] = {}
+        self.analysed_characters = 0
 
-    def at(self, text: str, row: int, column: int) -> tuple[_Formula, int | None]:
+    def at(self, text: str, row: int, column: int) -> tuple[_Formula, int | None, tuple[int, int]]:
+        """The analysis, the signature here, and the cell whose text the analysis read.
+
+        The template's relative references are as written at that origin; at
+        this cell they are shifted by the distance between the two.
+        """
         key = _shape(text, row, column)
         found = self.shapes.get(key)
         if found is None:
-            formula = _analyse(text)
-            found = self.shapes[key] = (formula, self.signature(formula, row, column))
+            formula = self._analyse(text)
+            if not formula.shared_by_shape:
+                self.texts[text] = formula
+            found = self.shapes[key] = (formula, self.signature(formula, row, column), (row, column))
+        elif not found[0].shared_by_shape:
+            formula = self.texts.get(text)
+            if formula is None:
+                formula = self.texts[text] = self._analyse(text)
+            found = (formula, self.signature(formula, row, column), (row, column))
         return found
+
+    def _analyse(self, text: str) -> _Formula:
+        self.analysed_characters += len(text) + ANALYSIS_OVERHEAD
+        return _analyse(text)
 
     def signature(self, formula: _Formula, row: int, column: int) -> int | None:
         if formula.template is None:
@@ -358,26 +403,36 @@ class _FormulaCache:
 
 
 # Quoted text, quoted sheet names and bracketed parts are kept as written; any
-# other A1 cell reference becomes relative to its cell. Function names such as
-# LOG10( and number exponents such as 1E3 are not references.
+# other A1 reference (a cell, whole columns C:C, whole rows 5:5) becomes
+# relative to its cell. Function names such as LOG10( and number exponents
+# such as 1E3 are not references.
 _SHAPE_PARTS = re.compile(
     r'"(?:[^"]|"")*"?'
     r"|'(?:[^']|'')*'?"
     r"|\[[^\]]*\]?"
+    r"|(?<![A-Za-z0-9_.$])(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})(?![A-Za-z0-9_(.!])"
+    r"|(?<![A-Za-z0-9_.$])(\$?)(\d+):(\$?)(\d+)(?![A-Za-z0-9_(.!])"
     r"|(?<![A-Za-z0-9_.])(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![A-Za-z0-9_(.])"
 )
 
 
 def _shape(text: str, row: int, column: int) -> str:
-    def relative(match: re.Match) -> str:
-        if match.group(2) is None:
-            return match.group(0)
-        column_absolute, letters, row_absolute, digits = match.groups()
+    def relative_column(absolute: str, letters: str) -> str:
         index = _column_index(letters.upper())
-        return (
-            (f"R{digits}" if row_absolute else f"R[{int(digits) - row}]")
-            + (f"C{index}" if column_absolute else f"C[{index - column}]")
-        )
+        return f"C{index}" if absolute else f"C[{index - column}]"
+
+    def relative_row(absolute: str, digits: str) -> str:
+        return f"R{digits}" if absolute else f"R[{int(digits) - row}]"
+
+    def relative(match: re.Match) -> str:
+        groups = match.groups()
+        if groups[1] is not None:
+            return relative_column(groups[0], groups[1]) + ":" + relative_column(groups[2], groups[3])
+        if groups[5] is not None:
+            return relative_row(groups[4], groups[5]) + ":" + relative_row(groups[6], groups[7])
+        if groups[9] is not None:
+            return relative_row(groups[10], groups[11]) + relative_column(groups[8], groups[9])
+        return match.group(0)
 
     return _SHAPE_PARTS.sub(relative, text)
 
@@ -391,6 +446,7 @@ def _analyse(text: str) -> _Formula:
     numbers: list[str] = []
     errors: list[str] = []
     external = False
+    shared_by_shape = True
     template: list[Any] = []
     # One frame per open function, parenthesis or array constant: [function name or None or "{", argument index].
     frames: list[list[Any]] = []
@@ -403,6 +459,8 @@ def _analyse(text: str) -> _Formula:
                 name = _function_name(value)
                 if name in VOLATILE and name not in volatile:
                     volatile.append(name)
+                if ":" in name and _shape(name + "(", 1, 1) != name + "(":
+                    shared_by_shape = False  # A1:INDEX( arrives as one token, its A1 kept as written
                 frames.append([name, 0])
                 template.append(name + "(")
             else:
@@ -424,21 +482,24 @@ def _analyse(text: str) -> _Formula:
             continue
         if subtype == Token.NUMBER:
             template.append(value)
-            if not _in_array(frames) and not _structural(frames) and not _common(value):
-                following = _next_token(items, index)
-                percent = following is not None and following.type == Token.OP_POST and following.value == "%"
-                numbers.append(value + ("%" if percent else ""))
+            if not _in_array(frames) and not _structural(frames):
+                percent = _percent_follows(items, index)
+                if not _common(value, percent=percent):
+                    numbers.append(value + ("%" if percent else ""))
         elif subtype == Token.ERROR:
             template.append(value.upper())
-            errors.append(value.upper())
+            # Only #REF! is left behind by Excel; #N/A and the rest are typed on purpose.
+            if value.upper() == "#REF!":
+                errors.append("#REF!")
         elif subtype == Token.RANGE:
             if _EXTERNAL.match(value):
                 external = True
-                template.append(value)
-                continue
             if "#REF!" in value.upper():
                 errors.append("#REF!")
-            template.append(_reference_template(value))
+            reference = _reference_template(value)
+            if reference.__class__ is str and _shape(reference, 1, 1) != reference:
+                shared_by_shape = False
+            template.append(reference)
         else:
             template.append(value)
     return _Formula(
@@ -447,6 +508,7 @@ def _analyse(text: str) -> _Formula:
         numbers=tuple(dict.fromkeys(numbers)),
         errors=tuple(dict.fromkeys(errors)),
         template=tuple(template),
+        shared_by_shape=shared_by_shape,
     )
 
 
@@ -458,11 +520,12 @@ def _function_name(value: str) -> str:
     return name.upper()
 
 
-def _next_token(items, index: int):
-    for token in items[index + 1:]:
+def _percent_follows(items, index: int) -> bool:
+    for position in range(index + 1, len(items)):
+        token = items[position]
         if token.type != Token.WSPACE:
-            return token
-    return None
+            return token.type == Token.OP_POST and token.value == "%"
+    return False
 
 
 def _in_array(frames) -> bool:
@@ -479,13 +542,15 @@ def _structural(frames) -> bool:
     return False
 
 
-def _common(value: str) -> bool:
+def _common(value: str, *, percent: bool = False) -> bool:
     try:
         number = Decimal(value)
     except InvalidOperation:
         return False
     if not number.is_finite():
         return False
+    if percent:
+        number = number.scaleb(-2)  # 10% is the rate 0.1, not the constant 10
     if number in COMMON_NUMBERS:
         return True
     # 1E+n: 元 to 万元 to 亿元 and back.
@@ -548,8 +613,8 @@ class _SheetScan:
         self.max_column = 0
         self.counts: Counter[str] = Counter()
         self.samples: dict[str, list[tuple[int, int, Any, str | None]]] = {}
-        # (row, column, signature, formula text or shared master) per scanned formula.
-        self.patterns: list[tuple[int, int, int, Any]] = []
+        # (row, column, signature, formula text or shared master, analysis, its origin) per scanned formula.
+        self.patterns: list[tuple[int, int, int, Any, _Formula, tuple[int, int]]] = []
 
     def add(self, code: str, row: int, column: int, text: Any, detail: str | None) -> None:
         self.counts[code] += 1
@@ -606,7 +671,8 @@ def _scan_sheet(archive, part: str, name: str, ns: str, formulas: _FormulaCache,
                 value = cell.find(value_tag)
                 text: Any = None
                 if formula_element is not None:
-                    if report.checked_formula_cells + scan.formula_cells >= MAX_FORMULA_CELLS:
+                    if (report.checked_formula_cells + scan.formula_cells >= MAX_FORMULA_CELLS
+                            or formulas.analysed_characters >= MAX_ANALYSED_CHARACTERS):
                         report.truncated = True
                         _finish(scan, report)
                         return
@@ -628,16 +694,17 @@ def _scan_formula(scan: _SheetScan, formulas: _FormulaCache, shared, element, ro
     body = element.text or ""
     formula: _Formula | None = None
     signature: int | None = None
+    origin = (row, column)
     text: Any = None
     if kind == "shared" and element.get("si") in shared:
         # Excel stores a copied formula once; every copy reads the same, shifted.
-        formula, signature, text = shared[element.get("si")]
+        formula, signature, origin, text = shared[element.get("si")]
     elif kind != "dataTable" and body:
-        formula, signature = formulas.at(body, row, column)
+        formula, signature, origin = formulas.at(body, row, column)
         text = body
         if kind == "shared" and element.get("si") is not None:
-            shared[element.get("si")] = (formula, signature, (body, row, column))
             text = (body, row, column)
+            shared[element.get("si")] = (formula, signature, origin, text)
     if not cached:
         scan.add("formula_without_cache", row, column, text, None)
     if formula is None:
@@ -651,7 +718,7 @@ def _scan_formula(scan: _SheetScan, formulas: _FormulaCache, shared, element, ro
     if formula.errors:
         scan.add("error_in_formula", row, column, text, _detail(formula.errors))
     if signature is not None:
-        scan.patterns.append((row, column, signature, text))
+        scan.patterns.append((row, column, signature, text, formula, origin))
     return text
 
 
@@ -670,8 +737,8 @@ def _beyond_limits(reference: str) -> bool:
 def _finish(scan: _SheetScan, report: _Report) -> None:
     report.checked_formula_cells += scan.formula_cells
     for code, flagged in (
-        ("inconsistent_row_formula", _breaks(scan.patterns, along_rows=True)),
-        ("inconsistent_column_formula", _breaks(scan.patterns, along_rows=False)),
+        ("inconsistent_row_formula", _breaks(scan.patterns, scan.name, along_rows=True)),
+        ("inconsistent_column_formula", _breaks(scan.patterns, scan.name, along_rows=False)),
     ):
         for row, column, text, example in flagged:
             scan.add(code, row, column, text, example)
@@ -694,12 +761,12 @@ def _finish(scan: _SheetScan, report: _Report) -> None:
             samples.append(sample)
 
 
-def _breaks(patterns, *, along_rows: bool) -> list[tuple[int, int, Any, str]]:
-    """Formulas inside a copied run of their row (or column) that read differently."""
-    lines: dict[int, list[tuple[int, int, int, int, Any]]] = {}
-    for row, column, signature, text in patterns:
+def _breaks(patterns, sheet: str, *, along_rows: bool) -> list[tuple[int, int, Any, str]]:
+    """Formulas inside a copied run of their row (or column), or right after it, that read differently."""
+    lines: dict[int, list[tuple[int, int, int, int, Any, _Formula, tuple[int, int]]]] = {}
+    for row, column, signature, text, formula, origin in patterns:
         key, position = (row, column) if along_rows else (column, row)
-        lines.setdefault(key, []).append((position, signature, row, column, text))
+        lines.setdefault(key, []).append((position, signature, row, column, text, formula, origin))
     flagged = []
     for members in lines.values():
         if len(members) < MIN_PATTERN_CELLS:
@@ -708,14 +775,58 @@ def _breaks(patterns, *, along_rows: bool) -> list[tuple[int, int, Any, str]]:
         if share == len(members) or share < MIN_PATTERN_CELLS or share * 100 < PATTERN_SHARE_PERCENT * len(members):
             continue
         anchors = sorted(member[0] for member in members if member[1] == signature)
-        for position, other, row, column, text in members:
-            if other == signature or not anchors[0] < position < anchors[-1]:
-                continue
+        first, last = anchors[0], anchors[-1]
+        candidates = [member for member in members
+                      if member[1] != signature and (first < member[0] < last or member[0] == last + 1)]
+        if not candidates:
+            continue
+        # A running balance reads its own run, so there a read of the run marks nothing.
+        pattern_reads_run = any(
+            _reads_run(formula, origin, sheet, row, column, along_rows=along_rows, low=first, high=last)
+            for position, other, row, column, _, formula, origin in members
+            if other == signature and position in (first, last)
+        )
+        for position, other, row, column, text, formula, origin in candidates:
+            if not pattern_reads_run and _reads_run(formula, origin, sheet, row, column,
+                                                    along_rows=along_rows, low=first, high=last):
+                continue  # a subtotal, total or ratio of the run, not a broken copy
             nearest = min(anchors, key=lambda anchor: (abs(anchor - position), anchor))
             # The detail names the closest cell that follows the pattern.
             example = f"{get_column_letter(nearest)}{row}" if along_rows else f"{get_column_letter(column)}{nearest}"
             flagged.append((row, column, text, example))
     return sorted(flagged, key=lambda item: (item[0], item[1]))
+
+
+def _reads_run(formula: _Formula, origin: tuple[int, int], sheet: str, row: int, column: int, *,
+               along_rows: bool, low: int, high: int) -> bool:
+    """Whether the formula reads a cell of its own row (column) between positions low and high, on this sheet."""
+    shift = {"R": row - origin[0], "C": column - origin[1]}
+    own = row if along_rows else column
+    for piece in formula.template or ():
+        if piece.__class__ is str or not _same_sheet(piece[0], sheet):
+            continue
+        # The template holds the references as written at its origin; move the relative ones here.
+        ends = [(axis, number if absolute else number + shift[axis])
+                for axis, absolute, number in (part for part in piece[1:] if part.__class__ is tuple)]
+        rows = [number for axis, number in ends if axis == "R"]
+        columns = [number for axis, number in ends if axis == "C"]
+        line, across = (rows, columns) if along_rows else (columns, rows)
+        # A missing axis is a whole column or row, which spans every position.
+        if line and not min(line) <= own <= max(line):
+            continue
+        if across and (max(across) < low or min(across) > high):
+            continue
+        return True
+    return False
+
+
+def _same_sheet(prefix: str, sheet: str) -> bool:
+    if not prefix:
+        return True
+    name = prefix[:-1]
+    if len(name) > 1 and name.startswith("'") and name.endswith("'"):
+        name = name[1:-1].replace("''", "'")
+    return name == sheet
 
 
 def _window(row: int, column: int, max_row: int, max_column: int) -> str:
@@ -725,23 +836,38 @@ def _window(row: int, column: int, max_row: int, max_column: int) -> str:
     return f"{get_column_letter(left)}{top}:{get_column_letter(right)}{bottom}"
 
 
-def _formula_text(text: Any, row: int, column: int) -> str | None:
+def _cell_formula(text: Any, row: int, column: int) -> str | None:
+    """The formula as written in this cell; a shared formula is shifted from its master cell."""
     if text is None:
         return None
     if isinstance(text, tuple):
         body, origin_row, origin_column = text
         if (origin_row, origin_column) == (row, column):
-            formula = "=" + body
-        else:
-            try:
-                formula = Translator("=" + body, origin=f"{get_column_letter(origin_column)}{origin_row}").translate_formula(
-                    f"{get_column_letter(column)}{row}"
-                )
-            except Exception:  # noqa: BLE001 - the sample then names the cell without its text
-                return None
-    else:
-        formula = text if text.startswith("=") else "=" + text
+            return "=" + body
+        try:
+            return Translator("=" + body, origin=f"{get_column_letter(origin_column)}{origin_row}").translate_formula(
+                f"{get_column_letter(column)}{row}"
+            )
+        except Exception:  # noqa: BLE001 - the sample then names the cell without its text
+            return None
+    return text if text.startswith("=") else "=" + text
+
+
+def _formula_text(text: Any, row: int, column: int) -> str | None:
+    """The formula a sample shows: never a path, whether to a book, a share or a document."""
+    formula = _cell_formula(text, row, column)
+    if formula is None:
+        return None
     formula = _BOOK_DIRECTORY.sub("'[", formula)
+    formula = _QUOTED.sub(_without_path, formula)
     if _PATH_LIKE.search(formula):
         return None
     return formula if len(formula) <= MAX_FORMULA_TEXT else formula[: MAX_FORMULA_TEXT - 1] + "…"
+
+
+def _without_path(match: re.Match) -> str:
+    """Text holding a path separator (HYPERLINK("D:/财务/预算.xlsx")) is shown as "…"."""
+    quoted = match.group(0)
+    if quoted.startswith('"') and ("/" in quoted or "\\" in quoted):
+        return '"…"'
+    return quoted
