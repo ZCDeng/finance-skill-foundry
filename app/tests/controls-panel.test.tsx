@@ -249,3 +249,24 @@ it('says a type decided about another difference no longer applies', async () =>
   expect(await screen.findByText('之前定的问题类型针对的是另一笔差额，已不适用。')).toBeTruthy();
   expect(document.querySelector('[data-slot="badge"]')).toBeNull();
 });
+
+it('lets the manager turn down a suggestion and keep the type she decided', async () => {
+  const both: ControlRow = { ...broken, finding: {
+    set_by_manager: true, type: 'formula_control', type_label: '公式或控制缺陷', note: '合计公式漏了 D9',
+    suggested_type: 'basis_difference', suggested_type_label: '口径不同', suggested_note: '台账含税',
+  } };
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([both]) : {});
+  render(<ControlsPanel taskId="t" />);
+  expect(await screen.findByText('助手建议：口径不同（台账含税）')).toBeTruthy();
+  // Nothing in her own fields changed, so the only way to answer the suggestion is to say she keeps hers.
+  expect((screen.getByRole('button', { name: '保存问题类型' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '保留我的类型' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-finding-save', { control_id: 'c1', finding_type: 'formula_control', note: '合计公式漏了 D9' }));
+});
+
+it('offers keeping a type only when the manager has decided one', async () => {
+  mount(() => listOf([{ ...broken, finding: { set_by_manager: false, suggested_type: 'not_updated', suggested_type_label: '未更新' } }]));
+  render(<ControlsPanel taskId="t" />);
+  expect(await screen.findByRole('button', { name: '采用建议' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '保留我的类型' })).toBeNull();
+});

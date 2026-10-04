@@ -257,12 +257,16 @@ function FindingField({ finding, locked, onSave }: { finding: ControlFinding; lo
   const [kind, setKind] = useState<FindingType | ''>(finding.type ?? '');
   const [note, setNote] = useState(finding.note ?? '');
   const suggested = finding.suggested_type && FINDING_TYPES[finding.suggested_type] ? finding.suggested_type : undefined;
+  const decided = finding.set_by_manager && finding.type && FINDING_TYPES[finding.type] ? finding.type : undefined;
   const changed = Boolean(kind) && (kind !== (finding.type ?? '') || note.trim() !== (finding.note ?? ''));
   return <div className="analysis-controls-finding">
     {suggested ? <div className="analysis-controls-finding-suggestion">
       <p className="analysis-note">助手建议：{FINDING_TYPES[suggested].label}{finding.suggested_note ? `（${finding.suggested_note}）` : ''}</p>
       <Button type="button" size="sm" variant="outline" disabled={locked}
         onClick={() => onSave({ finding_type: suggested, ...(finding.suggested_note ? { note: finding.suggested_note } : {}) })}>采用建议</Button>
+      {/* Saving her own type again answers the suggestion, which is then no longer offered. */}
+      {decided ? <Button type="button" size="sm" variant="outline" disabled={locked}
+        onClick={() => onSave({ finding_type: decided, ...(finding.note ? { note: finding.note } : {}) })}>保留我的类型</Button> : null}
     </div> : null}
     {finding.outdated ? <p className="analysis-note">之前定的问题类型针对的是另一笔差额，已不适用。</p> : null}
     <div className="analysis-controls-finding-fields">
