@@ -410,6 +410,28 @@ def test_review_ignores_superseded_snapshots(pack, tmp_path: Path) -> None:
     assert any("已被新版本取代" in note for note in review["notes"])
 
 
+def test_review_skips_a_sheet_with_uncached_formulas_and_says_so(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="公式未缓存")
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "汇总"
+    summary.append(["项目", "金额"])
+    summary.append(["收入", 100])
+    summary.append(["合计", "=B2*2"])  # openpyxl stores no cached value
+    detail = workbook.create_sheet("明细")
+    detail.append(["项目", "金额"])
+    detail.append(["成本", 55.5])
+    workbook.save(tmp_path / "pack.xlsx")
+    AnalysisStore(task).add_dataset(tmp_path / "pack.xlsx", name="pack.xlsx")
+
+    review = FinanceStore(task, actor="manager").report_review(
+        {"document": _report(_paragraph("成本 55.5 元，收入 100 元。"))})
+    items = _by_text(review)
+    assert items["55.5 元"]["status"] == "match"
+    assert items["100 元"]["status"] == "needs_review"
+    assert review["notes"] == ["pack.xlsx 的工作表「汇总」有公式没有缓存值或有错误值，未纳入比对；在 Excel 中重新计算并保存后再导入。"]
+
+
 def test_review_reads_only_snapshots_the_session_may_see(tmp_path: Path) -> None:
     task, analysis, store, bindings, run = _variance_task(tmp_path)
     document = _report(_paragraph("收入实际 120 万元。"))
