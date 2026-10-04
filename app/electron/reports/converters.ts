@@ -57,6 +57,8 @@ export async function importReport(data: Buffer, format: ReportFormat, source: R
       return importPdf(data, source);
     case 'xlsx':
       return { warnings: ['Excel 文稿导入由 Foundry 工作表接口按 sheet/range 处理；转换层未直接展开工作簿。'], source, sheets: [], needsReview: true };
+    case 'pptx':
+      return { warnings: ['PPT 文稿导入由 Foundry 读取文字和表格；转换层未直接展开演示文稿。'], source, needsReview: true };
     default:
       return { warnings: [`暂不支持的文稿格式：${String(format)}`], source, needsReview: true };
   }

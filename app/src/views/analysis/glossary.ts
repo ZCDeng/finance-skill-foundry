@@ -114,6 +114,14 @@ const RULES: Rule[] = [
   [/profit bridge already groups accounts as metric rows/i, '预算差异分析已经按科目分行，维度里不要再放科目；请改用组织或期间。'],
   [/adjustment_ids apply only to run_metric\(kind=management_pnl\)/i, '考核调整只作用于损益表，请先计算损益表。'],
   [/adjustment bindings (must match the finance context|are required)/i, '考核调整引用的资料与当前范围不一致，请在当前范围下重新登记调整。'],
+  // Imported reports (PPT) and their number review.
+  [/invalid PPTX (source archive|part)|PPTX part (is missing|declares a DTD)|PPTX slide target is outside the deck/i, '这份 PPT 无法读取：文件可能已损坏，或不是 .pptx 格式。这次导入没有生成任何内容。请在 PowerPoint 中另存为 .pptx 后重试。'],
+  [/PPTX has no slides/i, '这份 PPT 里没有幻灯片，没有可导入的内容。'],
+  [/PPTX has more than (\d+) slides/i, (match) => `这份 PPT 超过 ${match[1]} 页，请拆分后分别导入。`],
+  [/report pptx read requires a PPTX source/i, '这份文件不是 PPT，请按原来的格式重新导入。'],
+  [/report source expands beyond the source limit/i, '这份文件解压后过大，无法导入，请拆分后重试。'],
+  [/report review requires either a draft_id or a document/i, '请先导入一份报告，或打开已保存的文稿，再复核数字。'],
+  [/report review requires a draft saved with a structured document/i, '这份文稿没有保存结构化内容，无法逐项复核数字；请重新导入原报告后再复核。'],
   // Data files.
   [/cannot parse \.xls[xm] source/i, '无法读取这份 Excel：文件可能已损坏，或扩展名与实际格式不符。这次读取没有生成任何数据，已有资料不受影响。请在 Excel 中另存为 .xlsx 后重试。'],
   [/CSV row has more fields than its header/i, '无法读取这份 CSV：有的行比表头多出字段，通常是分隔符或引号用错了。这次读取没有生成任何数据，已有资料不受影响。请检查分隔符和引号，另存为 UTF-8 编码的 CSV 后重试。'],

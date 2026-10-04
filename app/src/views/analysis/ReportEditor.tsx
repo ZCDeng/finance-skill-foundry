@@ -52,7 +52,7 @@ import {
 } from "../../components/ui/dropdown-menu.js";
 import type {
   ReportDocument,
-  ReportFormat,
+  ReportExportFormat,
   ReportImportResult,
   ReportNode,
   ReportProjectionMode,
@@ -72,11 +72,12 @@ import {
 import "./report.css";
 import { errorText, unwrap } from './shared.js';
 import { ReportVisualComposer } from './ReportVisualComposer.js';
+import { ReportReviewAction } from './ReportReviewPanel.js';
 import { REPORT_VISUAL_EDIT_EVENT, ReportVisualNode } from './ReportVisualNode.js';
 import { normalizeReportVisual, type ReportVisual } from '../../../electron/reports/visuals.js';
 
 type ReportMode = "read" | "edit" | "print";
-type ExportFormat = ReportFormat;
+type ExportFormat = ReportExportFormat;
 type ReportBridge = ReturnType<typeof bridge> & {
   reportImport?(
     task: string,
@@ -1626,6 +1627,7 @@ export function ReportEditor({
       </div>
       {importPreview && (
         <ImportPreview
+          taskId={taskId}
           result={importPreview}
           sheet={importSheet}
           range={importRange}
@@ -1753,6 +1755,7 @@ function ReportReading({
 }
 
 function ImportPreview({
+  taskId,
   result,
   sheet,
   range,
@@ -1765,6 +1768,7 @@ function ImportPreview({
   onCancel,
   onApply,
 }: {
+  taskId: string;
   result: ReportImportResult;
   sheet: string;
   range: string;
@@ -1843,6 +1847,23 @@ function ImportPreview({
               重新读取区域
             </Button>
           </div>
+        ) : null}
+        {result.document ? (
+          <ReportReviewAction
+            taskId={taskId}
+            spec={{ document: result.document }}
+            label="复核数字"
+            intro="采用前可以先把文稿里的数字和当前任务的套表、资料表、计算结果逐项比对；复核不改动这份文稿。"
+            disabled={importing}
+            pdf={
+              pdfSource && result.source
+                ? {
+                    load: async (id) => (id === result.source?.id ? pdfSource : undefined),
+                    render: (dataUrl, page) => <PdfComparison dataUrl={dataUrl} page={page} />,
+                  }
+                : undefined
+            }
+          />
         ) : null}
         {pdfSource ? <PdfComparison dataUrl={pdfSource} /> : null}
         {result.source?.format === "pdf" && result.needsReview ? (

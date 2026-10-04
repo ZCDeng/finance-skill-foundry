@@ -282,6 +282,8 @@ describe('analysis IPC task and session binding', () => {
       expect(mocks.reportExport).toHaveBeenLastCalledWith(task, 'draft-a', format, 'management');
     }
     expect((await invoke(CHANNELS.analysisExport, task, 'draft-a', 'exe')).ok).toBe(false);
+    // A deck can be imported but never written.
+    expect((await invoke(CHANNELS.analysisExport, task, 'draft-a', 'pptx')).ok).toBe(false);
     expect((await invoke(CHANNELS.analysisExport, task, '../escape', 'xlsx')).ok).toBe(false);
     expect(mocks.reportExport).toHaveBeenCalledTimes(5);
     expect(mocks.openPath).not.toHaveBeenCalled();
@@ -402,6 +404,28 @@ describe('analysis IPC task and session binding', () => {
     expect(backgroundListSpec.scope).toEqual({ ledger: '总账' });
     expect((await invoke(CHANNELS.financeCall, task, 'run-metric', ['not an object'])).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledTimes(19);
+  });
+
+  it('sends report-review through the draft spec transport, as a private file once it is large', async () => {
+    registerIpc({ varRoot: '/store' });
+    const { readFile } = await import('node:fs/promises');
+    let filed = '';
+    mocks.run.mockImplementation(async (_binding: unknown, _command: string, args: string[]) => {
+      if (args[0] === '--spec-file') filed = await readFile(args[1], 'utf8');
+      return JSON.stringify({ summary: { status: 'pass' } });
+    });
+    const small = { draft_id: 'd'.repeat(32) };
+    expect((await invoke(CHANNELS.financeCall, task, 'report-review', small)).ok).toBe(true);
+    expect(mocks.run).toHaveBeenLastCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'report-review',
+      ['--spec', JSON.stringify(small)]);
+    const document = { content: [{ type: 'paragraph', content: [{ type: 'text', text: '营业收入 1,234.56 万元。'.repeat(4000) }] }] };
+    expect((await invoke(CHANNELS.financeCall, task, 'report-review', { document })).ok).toBe(true);
+    const [, command, args] = mocks.run.mock.calls.at(-1)!;
+    expect(command).toBe('report-review');
+    expect(args).toEqual(['--spec-file', expect.stringContaining('draft.json')]);
+    expect(JSON.parse(filed)).toEqual({ document });
+    expect((await invoke(CHANNELS.financeCall, task, 'report-review', ['not an object'])).ok).toBe(false);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
   });
 
   it('does not reach open-source-locator through the generic finance channel', async () => {

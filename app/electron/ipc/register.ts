@@ -346,6 +346,7 @@ export function registerIpc(
     'finance-control-disposition-save',
     'finance-control-disposition-review',
     'finance-control-confirmation-sheet',
+    'report-review',
     'report-template-list',
     'report-template-apply',
     'chart-deliverable-save',
@@ -375,7 +376,8 @@ export function registerIpc(
         if (spec !== undefined && spec !== null) throw new Error('finance command does not take a spec');
         return analysisCall(task, name);
       }
-      if (name === 'save-explanation-draft') return draftCall(task, name, spec);
+      // A whole report document rides in these specs: past the argv room it goes through a private file.
+      if (name === 'save-explanation-draft' || name === 'report-review') return draftCall(task, name, spec);
       return analysisCall(task, name, ['--spec', objectJson(spec)]).then(async (result) => {
         // A confirmed structure makes a table the conversation should be able to
         // reach, the same way adding a file does.

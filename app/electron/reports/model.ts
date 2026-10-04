@@ -1,5 +1,7 @@
 /** Versioned interchange shared by converters, renderer and the Foundry validator. */
-export type ReportFormat = 'docx' | 'pdf' | 'html' | 'md' | 'xlsx';
+/** Formats a draft can be exported to; PPTX decks are read, never written. */
+export type ReportExportFormat = 'docx' | 'pdf' | 'html' | 'md' | 'xlsx';
+export type ReportFormat = ReportExportFormat | 'pptx';
 export interface ReportSource { id: string; name: string; sha256: string; format: ReportFormat }
 export interface ReportMark { type: string; attrs?: Record<string, unknown> }
 export interface ReportNode {

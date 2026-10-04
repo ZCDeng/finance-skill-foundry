@@ -391,6 +391,39 @@ ${documentToMarkdown(documentFromMarkdown(appendix)).trim()}`;
     expect(within(preview).getByRole('heading', { level: 3, name: '04·合并利润表 A1:F12' })).toBeTruthy();
   });
 
+  it('reviews the numbers of an imported deck before adoption and leaves the document as imported', async () => {
+    const document = documentFromMarkdown('## 第 1 页\n营业成本本月实际 820 万元。\n');
+    const deck: ReportSource = { ...source, format: 'pptx', name: '八月月报.pptx' };
+    const reportImport = vi.fn(async () => success<ReportImportResult>({
+      source: deck, title: '八月月报.pptx', document, needsReview: true,
+      warnings: ['PPT 导入只取文字和表格，图表、图片和版式不导入；数字需复核。'],
+    }));
+    const financeCall = vi.fn(async () => success<Record<string, unknown>>({
+      id: 'f'.repeat(32),
+      summary: { status: 'needs_attention', total: 1, match: 0, match_rounded: 0, match_scaled: 0, mismatch: 1, needs_review: 0 },
+      items: [{ id: 'n1', text: '820 万元', value: '820', unit: '万元', status: 'mismatch', excerpt: '营业成本本月实际 820 万元。',
+        location: { source_id: deck.id, page: '1', kind: 'paragraph' }, compared_value: '800', difference: '20',
+        candidates: [{ kind: 'workbook', dataset_id: 'd'.repeat(32), sheet: '利润表', range: 'B5', label: '营业成本 · 本月实际', value: '800', unit: '万元' }] }],
+      closing_note: '复核只比对数字，不判断表述是否恰当，也不代表报告可以对外发送。',
+    }));
+    (globalThis as unknown as { foundry: unknown }).foundry = { reportImport, financeCall };
+    const handlers = mount();
+
+    fireEvent.click(screen.getByRole('button', { name: '导入' }));
+    const preview = await screen.findByRole('region', { name: '导入预览' });
+    expect(within(preview).getByText(/PPT 导入只取文字和表格/)).toBeTruthy();
+    fireEvent.click(within(preview).getByRole('button', { name: '复核数字' }));
+    const result = await within(preview).findByRole('region', { name: '报告数字复核结果' });
+    expect(financeCall).toHaveBeenCalledWith(taskId, 'report-review', { document });
+    expect(within(result).getByText('来源：套表 利润表!B5 「营业成本 · 本月实际」 = 800 万元')).toBeTruthy();
+    expect(within(result).getByText('第 1 页')).toBeTruthy();
+    expect(handlers.onDocument).not.toHaveBeenCalled();
+    expect(handlers.onReview).not.toHaveBeenCalled();
+
+    fireEvent.click(within(preview).getByRole('button', { name: '采用此版本' }));
+    expect(handlers.onDocument).toHaveBeenCalledWith(document);
+  });
+
   it('previews, cancels, adopts, undoes and redoes deterministic paragraph reflow', async () => {
     const longParagraph = '管理层摘要显示，本期收入为1,234.50万元；预算为1,000.00万元，差异为234.50万元。现金流判断继续引用银行流水与应收明细，保持事实占位符 FACT-AR-001 和附注引用 [^1] 的原始顺序，不把未确认回款自动视为已收，也不补造管理层行动。后续说明只保留原始证据顺序，币种、期间、负号和单位都不改变。财务负责人补充说明，本段只做结构整理，不新增原因、行动或结论。';
     const original: ReportDocument = {

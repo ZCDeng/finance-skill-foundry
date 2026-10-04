@@ -6,18 +6,20 @@ import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { type Binding, FOUNDRY_MAX_BUFFER, runFoundryJson, runFoundryJsonSized } from '../foundry.js';
-import type { ReportDocument, ReportFormat, ReportImportOptions, ReportImportResult, ReportProjection, ReportProjectionMode, ReportSource } from './model.js';
+import type { ReportDocument, ReportExportFormat, ReportFormat, ReportImportOptions, ReportImportResult, ReportProjection, ReportProjectionMode, ReportSource } from './model.js';
 import { ocrDocument } from './ocr.js';
 import { localReportResources } from './resources.js';
 import { materializeReportVisualsForDocx } from './visual-raster.js';
 import { reportVisualEvidence } from './visual-evidence.js';
 
 const MAX_BYTES = 32 * 1024 * 1024;
-const FORMATS = new Set<ReportFormat>(['docx', 'pdf', 'html', 'md', 'xlsx']);
+const EXPORT_FORMATS = new Set<ReportExportFormat>(['docx', 'pdf', 'html', 'md', 'xlsx']);
+// Import reads one more format than export writes: a PPT deck comes in as text and tables only.
+const IMPORT_FORMATS = new Set<ReportFormat>([...EXPORT_FORMATS, 'pptx']);
 const MODES = new Set<ReportProjectionMode>(['management', 'audit']);
-export function reportFormat(value: unknown): ReportFormat {
-  if (!FORMATS.has(value as ReportFormat)) throw new Error('不支持的文稿格式。');
-  return value as ReportFormat;
+export function reportFormat(value: unknown): ReportExportFormat {
+  if (!EXPORT_FORMATS.has(value as ReportExportFormat)) throw new Error('不支持的文稿格式。');
+  return value as ReportExportFormat;
 }
 function reportMode(value: unknown): ReportProjectionMode {
   if (!MODES.has(value as ReportProjectionMode)) throw new Error('不支持的文稿模式。');
@@ -214,7 +216,7 @@ export class ReportHost {
       let selectedPath: string | undefined;
       if (options.sourceId) snapshot = await this.call(task, 'report-source-read', ['--source', sourceId(options.sourceId)], signal);
       else {
-        const selected = await dialog.showOpenDialog({ title: '导入财务文稿', properties: ['openFile'], filters: [{ name: '财务文稿', extensions: [...FORMATS] }] });
+        const selected = await dialog.showOpenDialog({ title: '导入财务文稿', properties: ['openFile'], filters: [{ name: '财务文稿', extensions: [...IMPORT_FORMATS] }] });
         if (selected.canceled || !selected.filePaths[0]) return { cancelled: true, warnings: [] };
         selectedPath = selected.filePaths[0];
         aborted(signal); this.progress(task, '保存原始文件');
@@ -229,6 +231,7 @@ export class ReportHost {
         }
         return this.call<ReportImportResult>(task, 'report-xlsx-read', args, signal);
       }
+      if (snapshot.source.format === 'pptx') return this.call<ReportImportResult>(task, 'report-pptx-read', ['--source', snapshot.source.id], signal);
       const data = await readFile(snapshot.path);
       if (data.length > MAX_BYTES || createHash('sha256').update(data).digest('hex') !== snapshot.source.sha256) throw new Error('原始文件校验失败。');
       let resources: Record<string, string> = {};
