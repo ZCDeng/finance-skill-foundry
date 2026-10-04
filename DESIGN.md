@@ -94,6 +94,17 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 **验证边界。** 已核对最终整窗图与[流程](build/ui-workspace-review/final/verification.json)、[比较补拍](build/ui-workspace-review/final/comparison-recapture.json)、[原生检查](build/verification/native-workspace-final.json)、[产物记录](build/verification/ui-final-artifacts.json)：26 项原生检查和 6 项界面流程通过，资料为合成 fixture，真实 provider 调用为 0。真实模型接收/流式响应、物理 macOS 中文候选窗、完整屏幕阅读器流程未验收。[最终 ship](docs/reviews/2026-09-06-ui-finish-review.md)仅覆盖 F1–F4 修复评分；详细实现与限制见 [UI 实施记录](docs/plans/2026-09-06-ui-execution-log.md)。
 
+### shadcn 原语（2026-10-04）
+
+底座保持 Radix（`radix-ui` 统一包），不迁到 Base UI；组件从 shadcn 结构出发，视觉只读 `--fnd-*` token，不跑 `shadcn apply` 覆盖。
+
+- **字段结构。** `FieldShell` 使用 Field 结构（`field`、`field-label`、`field-description`、`field-error` 四个 data-slot），错误时字段带 `data-invalid`、控件带 `aria-invalid`，类名仍为 `fnd-control*`。
+- **选择框。** 一律用 NativeSelect：仍是原生 `select`，菜单由系统绘制，能盖在原生视图之上；外层只加 16px 下拉箭头，字段状态与输入框相同（高 36px、`fnd-field`）。任务栏的选择框沿用 `fnd-picker` 尺寸。页面样式不再单独给 `select` 写边框和内边距。
+- **勾选与开关。** 多选和逐项纳入用 Checkbox（16px，选中为主色底）；保存即生效的设置用 Switch（如「接受差异后需要第二人复核」）。两者均为 `role="checkbox"`/`role="switch"` 按钮，标签包住控件即可点击文字切换。
+- **空状态。** 整屏或整块的空状态用 Empty（`empty`、`empty-header`、`empty-title`、`empty-description`、`empty-content`）：左对齐、弱色说明、不加卡片和插图；标题用 `asChild` 保留所在页面的标题层级，操作按钮放在 `empty-content`。面板里一句话的「还没有……」仍用普通说明文字。不引入 Toast（内联提示更符合结论优先）、`cn` 独立包和 Rhea 紧凑风格（与 36px 控件高度冲突）。
+- **日期与搜索选择。** 浮层统一用 Popover（Radix 定位，贴边自动翻转，挂到 body，宽度跟随触发控件）。日期选择用 Calendar（react-day-picker）：周一开头、标题「2026 年 8 月」、星期单字，打开后焦点落在已选日（没有则今天），方向键、PageUp/PageDown、Enter 由日历处理。会计期间仍为 YYYY-MM 月份网格（shadcn 没有月份视图），放在同一种 Popover 里。搜索选择与多选用 Combobox（Popover + Command）：筛选和排序仍按名称、编码、说明的顺序且最多显示 80 项，Command 只负责高亮项、方向键与 Enter；输入法组字时 Enter 不选中。选中或 Escape 后焦点回到触发控件，点外面关闭时焦点留在点击处。
+- **设置与高级。** 分析页和财务工作台共用一个 `SettingsPanel`（shadcn Collapsible）：在页面内原位展开、打开时替换入口，不做浮层，因为面板里有自带弹出层的搜索选择，计算结果也要留在下方可读。用户打开时焦点进入面板；之后无论 Escape、「关闭」还是计算成功自动收起，焦点都回到打开前的位置（已不在页面时回到入口），不会落到页面顶端。首次进入时默认展开的面板不抢焦点。
+
 ## Do's and Don'ts
 
 - **Do** 沿用现有 FA 标识、离线字体、系统主题、真实任务归属与可见焦点。

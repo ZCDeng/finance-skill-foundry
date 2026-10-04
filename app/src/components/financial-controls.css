@@ -189,6 +189,18 @@
   white-space: nowrap;
 }
 
+/* The chevron sits in the reserved right padding, so a clear button beside it never covers it. */
+.fnd-combobox:not(.fnd-combobox--compact) .fnd-combobox__button > svg {
+  position: absolute;
+  right: 10px;
+  color: var(--fnd-muted);
+  pointer-events: none;
+}
+
+.fnd-combobox:has(> .fnd-combobox__clear):not(.fnd-combobox--compact) .fnd-combobox__button {
+  padding-right: 52px;
+}
+
 .fnd-control:has(> .fnd-combobox--compact) { width: fit-content; max-width: 100%; }
 .fnd-combobox--compact .fnd-combobox__button {
   height: 32px; padding: 0 8px; border-color: transparent; background: transparent;
@@ -220,18 +232,15 @@
   background: var(--fnd-selection-surface);
 }
 
+/* Placed by the Radix popover; sized from its trigger, 220–420px. */
 .fnd-combobox__popover {
-  position: fixed;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 20;
-  width: min(420px, max(100%, calc(100vw - 48px)));
-  max-width: calc(100vw - 48px);
+  width: max(220px, var(--radix-popover-trigger-width));
+  max-width: min(420px, calc(100vw - 24px));
   padding: 8px;
-  border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-menu);
-  background: var(--fnd-surface);
-  box-shadow: var(--fnd-shadow-menu);
+}
+
+.fnd-combobox__popover--compact {
+  width: max(360px, var(--radix-popover-trigger-width));
 }
 
 .fnd-combobox__search {
@@ -260,15 +269,17 @@
 }
 
 .fnd-combobox__list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   max-height: 260px;
   margin: 8px 0 0;
   padding: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.fnd-combobox__list [cmdk-list-sizer] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .fnd-combobox__list [role='option'] {
@@ -281,7 +292,13 @@
   cursor: pointer;
 }
 
-.fnd-combobox__list [role='option'][data-active='true'] {
+.fnd-combobox__list [role='option'] > svg {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--fnd-ink);
+}
+
+.fnd-combobox__list [role='option'][data-selected='true'] {
   background: var(--fnd-selection-surface);
 }
 
@@ -351,17 +368,9 @@
 }
 
 .fnd-date-picker__popover {
-  position: fixed;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 22;
-  width: min(320px, max(100%, calc(100vw - 48px)));
-  max-width: calc(100vw - 48px);
+  width: max(280px, min(320px, var(--radix-popover-trigger-width)));
+  max-width: calc(100vw - 24px);
   padding: 10px;
-  border: 1px solid var(--fnd-line);
-  border-radius: var(--fnd-radius-menu);
-  background: var(--fnd-surface);
-  box-shadow: var(--fnd-shadow-menu);
 }
 
 .fnd-date-picker__head {
@@ -374,7 +383,8 @@
 
 .fnd-date-picker__head button,
 .fnd-month-grid button,
-.fnd-day-grid button,
+.fnd-calendar__nav-button,
+.fnd-calendar__day-button,
 .fnd-date-field__toggle {
   border: 1px solid transparent;
   border-radius: var(--fnd-radius-menu-item);
@@ -384,18 +394,22 @@
   cursor: pointer;
 }
 
-.fnd-date-picker__head button {
+.fnd-date-picker__head button,
+.fnd-calendar__nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 30px;
   height: 30px;
-  font-size: 20px;
-  line-height: 1;
+  color: var(--fnd-muted);
 }
 
 .fnd-date-picker__head button:hover,
+.fnd-calendar__nav-button:hover,
 .fnd-month-grid button:hover,
-.fnd-day-grid button:hover,
+.fnd-calendar__day-button:hover,
 .fnd-month-grid button[aria-pressed='true'],
-.fnd-day-grid button[aria-pressed='true'] {
+.fnd-calendar__day--selected .fnd-calendar__day-button {
   border-color: var(--fnd-line-hover);
   background: var(--fnd-selection-surface);
 }
@@ -410,23 +424,79 @@
   min-height: 34px;
 }
 
-.fnd-week-grid,
-.fnd-day-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
+/* shadcn Calendar (react-day-picker): caption between the two arrows, 7 equal columns. */
+.fnd-calendar__months {
+  position: relative;
 }
 
-.fnd-week-grid {
-  margin-bottom: 4px;
+.fnd-calendar__nav {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.fnd-calendar__nav-button {
+  pointer-events: auto;
+}
+
+.fnd-calendar__nav-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.fnd-calendar__caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  margin-bottom: 8px;
+  color: var(--fnd-ink);
+  font-weight: var(--fnd-weight-strong);
+}
+
+.fnd-calendar__grid {
+  border-collapse: separate;
+  border-spacing: 4px;
+  margin: -4px;
+  width: calc(100% + 8px);
+  table-layout: fixed;
+}
+
+.fnd-calendar__weekday {
   color: var(--fnd-muted);
   font-size: var(--fnd-size-label);
+  font-weight: inherit;
   text-align: center;
 }
 
-.fnd-day-grid button,
-.fnd-day-grid span {
+.fnd-calendar__day {
+  padding: 0;
+  text-align: center;
+}
+
+.fnd-calendar__day-button {
+  width: 100%;
   min-height: 30px;
+}
+
+.fnd-calendar__day--today .fnd-calendar__day-button {
+  color: var(--fnd-accent-text);
+  font-weight: var(--fnd-weight-strong);
+}
+
+.fnd-calendar__day--disabled .fnd-calendar__day-button {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.fnd-calendar__day-button:focus-visible {
+  outline: 1px solid var(--fnd-focus);
+  outline-offset: -1px;
 }
 
 .fnd-date-field .fnd-field {
@@ -465,22 +535,9 @@
   outline: none;
 }
 
-.fnd-month-grid button[data-active='true'],
-.fnd-day-grid button[data-active='true'] {
+.fnd-month-grid button[data-active='true'] {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
-}
-
-
-
-.fnd-combobox__popover[data-placement='top'],
-.fnd-date-picker__popover[data-placement='top'] {
-  transform-origin: bottom left;
-}
-
-.fnd-combobox__popover[data-align='end'],
-.fnd-date-picker__popover[data-align='end'] {
-  transform-origin: top right;
 }
 
 }

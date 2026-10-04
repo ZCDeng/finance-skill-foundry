@@ -3,6 +3,7 @@ import { bridge, type Answer } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
+import { Checkbox } from '../../components/ui/checkbox.js';
 
 type FinanceAdjustment = {
   id: string;
@@ -80,8 +81,8 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
     </li>)}</ul> : <p className="analysis-note">没有待确认的调整。</p>}
     {confirmed.length ? <div className="analysis-fieldset analysis-adjustment-rerun" aria-label="重算">
       <p className="analysis-note">重算</p>
-      {confirmed.map((row) => <label key={row.id}><input type="checkbox" checked={selected[row.id] !== false}
-        onChange={(event) => setSelected((value) => ({ ...value, [row.id]: event.target.checked }))} />{row.label || row.id}</label>)}
+      {confirmed.map((row) => <label key={row.id}><Checkbox checked={selected[row.id] !== false}
+        onCheckedChange={(state) => setSelected((value) => ({ ...value, [row.id]: state === true }))} />{row.label || row.id}</label>)}
       <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? <><WaitOrb state="solving" />重算中…</> : '重算'}</Button>
     </div> : null}
   </details>
