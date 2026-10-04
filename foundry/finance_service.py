@@ -1758,6 +1758,8 @@ class FinanceStore:
         rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
         replaced = superseded_snapshots(self.task, state["datasets"])
         current = [row for row in rows if row["id"] not in replaced]
+        # Last month's workbook a roll-forward copy was made from, even once the copy itself was replaced.
+        templates = {((row.get("metadata") or {}).get("rollforward") or {}).get("source_hash") for row in rows} - {None}
         from foundry.finance_readiness import _is_workbook_shell
         from foundry.structure_records import NO_TABLE, WITHDRAWN
 
@@ -1775,6 +1777,7 @@ class FinanceStore:
         return close_status(
             archived=self.task.lifecycle_status() in {"archived", "trashed"},
             replaced=replaced,
+            templates=templates,
             organization_required=bool(organizations),
             scope=(requirements or {}).get("scope"),
             scope_seq=(requirements or {}).get("seq"),
@@ -2279,7 +2282,8 @@ class FinanceStore:
                 },
                 registered_source_ids={source["id"]},
             )
-        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
+        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document},
+                                         _allowed=self.allowed)
         return {
             "draft": draft,
             "template_id": template_id,

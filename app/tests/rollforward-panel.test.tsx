@@ -53,7 +53,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
       change_log: { tsv: 'preview-tsv', markdown: 'preview-md' },
     };
     if (command === 'workbook-rollforward-apply') return {
-      run_id: 'plan-1', output_name: '八月套表（2026-09 滚动）', counts: { write: 3, blocked: 0, unchanged: 0 }, formula_cache_cleared: true,
+      run_id: 'plan-1', output_name: '八月套表（2026-09 滚动）.xlsx', counts: { write: 3, blocked: 0, unchanged: 0 }, formula_cache_cleared: true,
       change_log: { tsv: '单元格\t原值\t新值\t来源\t状态/原因\n', markdown: '# 下月套表变更记录\n' },
     };
     if (command === 'workbook-rollforward-template-save') return { id: 'tpl-1', name: '华东月度套表', mapping_count: 3, mappings: [] };
@@ -108,7 +108,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
 
   fireEvent.click(screen.getByRole('button', { name: '生成下月副本' }));
   await waitFor(() => expect(financeCall).toHaveBeenCalledWith('t', 'workbook-rollforward-apply', { plan_id: 'plan-1' }));
-  expect(await screen.findByText('已生成「八月套表（2026-09 滚动）」，在资料列表里。原工作簿未改动；公式会在 Excel 打开时重算：请「导出下月副本」，在 Excel 里打开并保存，再重新添加，本应用才能读到公式结果。')).toBeTruthy();
+  expect(await screen.findByText('已生成「八月套表（2026-09 滚动）.xlsx」，在资料列表里。原工作簿未改动；公式会在 Excel 打开时重算：请「导出下月副本」，在 Excel 里打开并保存，再重新添加，本应用才能读到公式结果。')).toBeTruthy();
   expect(onApplied).toHaveBeenCalled();
   expect((screen.getByRole('button', { name: '生成下月副本' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -117,7 +117,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
 
   // The copy goes where she saves it; the filed one stays as it was made.
   fireEvent.click(screen.getByRole('button', { name: '导出下月副本' }));
-  await waitFor(() => expect(rollforwardExport).toHaveBeenCalledWith('t', 'plan-1', '八月套表（2026-09 滚动）'));
+  await waitFor(() => expect(rollforwardExport).toHaveBeenCalledWith('t', 'plan-1', '八月套表（2026-09 滚动）.xlsx'));
   expect(await screen.findByText(/已导出「八月套表（2026-09 滚动）.xlsx」。在 Excel 里打开、检查并保存后，再到资料页重新添加/)).toBeTruthy();
 
   type('模板名称', '华东月度套表');

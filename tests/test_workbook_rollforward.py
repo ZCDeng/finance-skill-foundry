@@ -237,7 +237,7 @@ def test_the_original_snapshot_is_untouched_and_the_copy_is_a_new_snapshot(pack)
     run = files.rollforward_apply({"plan_id": plan["plan_id"]})
     assert sha256_bytes(_archived(analysis, august).read_bytes()) == before == august["source_hash"]
     output = analysis.read_dataset(run["output_dataset_id"])
-    assert output["name"] == "八月套表（2026-09 滚动）"
+    assert output["name"] == "八月套表（2026-09 滚动）.xlsx"
     assert output["kind"] == "workbook"
     assert output["source_name"] == "八月套表（2026-09 滚动）.xlsx"
     assert output["metadata"] == {
@@ -685,6 +685,28 @@ def test_an_apply_that_fails_after_filing_the_copy_is_finished_by_the_next_one(p
     assert [row["id"] for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("rollforward")] == [rolled[0]["id"]]
     with pytest.raises(FoundryError, match="already applied"):
         FinanceFiles(task, actor="manager").rollforward_apply({"plan_id": plan["plan_id"]})
+
+
+def test_the_copy_saved_in_excel_and_added_again_replaces_it_and_last_month_stays_out_of_the_pack(pack, tmp_path: Path) -> None:
+    from foundry.finance_controls import superseded_snapshots
+    from foundry.finance_service import FinanceStore
+    from foundry.workbook_rollforward import output_name
+
+    task, analysis, august, balances, _ = pack
+    run = FinanceFiles(task, actor="manager").rollforward_apply(
+        {"plan_id": _preview(FinanceFiles(task, actor="manager"), august, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
+    copy = analysis.read_dataset(run["output_dataset_id"])
+    # A file added from disk is named after its file name; the copy's name is that file name, which its export suggests.
+    assert copy["name"] == output_name("八月套表.xlsx", "2026-09") == "八月套表（2026-09 滚动）.xlsx"
+    saved = load_workbook(_archived(analysis, copy))
+    saved.properties.title = "Excel 保存过"  # stands for Excel recalculating and saving it
+    saved.save(tmp_path / copy["name"])
+    readded = analysis.add_dataset(tmp_path / copy["name"], name=copy["name"], metadata={"mode": "workbook"})
+    assert run["output_dataset_id"] in superseded_snapshots(task)
+    # 八月套表 is the template the copy was made from: last month's book, not one this month's pack waits on.
+    books = FinanceStore(task, actor="manager").finance_close_status()["conclusion"]["workbooks"]
+    assert august["id"] not in {book["dataset_id"] for book in books}
+    assert {readded["id"], balances["id"]} <= {book["dataset_id"] for book in books}
 
 
 def test_apply_refuses_when_the_source_of_a_blocked_row_changed(pack) -> None:

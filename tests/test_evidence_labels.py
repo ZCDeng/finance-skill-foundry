@@ -556,6 +556,22 @@ def test_a_session_judges_freshness_only_by_the_files_it_may_read(tmp_path):
     assert dataset_currency(analysis, [older["id"]], task_period="2026-08")[older["id"]]["freshness"]["state"] == "source_stale"
 
 
+def test_the_assistant_draft_tool_judges_freshness_only_by_the_files_its_session_may_read(tmp_path, capsys):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    task.record_session("sess", role="analysis")
+    analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    spec = {"title": "八月说明", "body": "收入 100。",
+            "claims": [{"basis": "source_fact", "dataset_id": older["id"], "text": "收入 100"}]}
+    assert main(["--var", str(tmp_path / "var"), "--session", "sess", "analysis-draft",
+                 "--spec", json.dumps(spec, ensure_ascii=False)]) == 0
+    check = json.loads(capsys.readouterr().out)["explanation_check"]
+    # The newer upload is outside the session: it neither makes the cited file stale nor shows up.
+    assert check["dataset_freshness"][older["id"]]["freshness"] == {"state": "current", "reasons": []}
+    assert _one(check["evidence_labels"], "claim")["label"] == "fact_source_reported"
+
+
 def test_a_refresh_outside_the_session_does_not_make_its_prior_snapshot_stale(tmp_path):
     task, analysis, store = _readiness_task(tmp_path)
     first = _refresh(task, tmp_path)
