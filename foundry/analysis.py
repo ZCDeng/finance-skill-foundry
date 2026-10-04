@@ -69,6 +69,17 @@ def _hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _export_reader(mode: str | None, allowed: set[str] | None) -> str:
+    """What keeps a session's audit export apart from other readers' in the archive.
+
+    An audit projection carries the evidence labels, which each reader reads by the files it may read
+    (AnalysisStore.draft_in_view). Were a session's audit export filed under the manager's name whenever the
+    two agree, getting the manager's file back would tell the session whether a newer file it may not read
+    exists. A management projection reads the same for everyone.
+    """
+    return "" if allowed is None or mode != "audit" else f"-{_hash(sorted(allowed))[:12]}"
+
+
 
 
 
@@ -822,6 +833,51 @@ class AnalysisStore:
     def get_draft(self, draft_id: str) -> dict:
         return self._get("drafts", draft_id)
 
+    def draft_in_view(self, draft: dict, allowed: set[str] | None) -> dict:
+        """A stored draft as a reader whose snapshot ceiling is ``allowed`` reads it; None is the full view.
+
+        Whoever saved the draft read its evidence over the files and runs they could read. Every reader reads
+        the labels, posture and freshness as it would have saved them (evidence_labels.evidence_in_view): a
+        newer file outside a session decides nothing the session reads, and the manager reads a session's
+        draft with the newer files the session could not read. The basis the labels were read from names
+        every such file, so it never reaches a session; the integrity hash covers the stored record, so it
+        does not go with a view that differs from it. A draft saved before drafts kept a basis cannot tell
+        what its labels rested on: a session reads it without labels, posture or freshness, the full view as
+        saved.
+        """
+        from foundry.evidence_labels import EVIDENCE_FIELDS, evidence_in_view
+
+        views: dict[str, dict] = {}
+        loaded: dict[str, dict] = {}
+
+        def runs() -> dict[str, dict]:
+            if not loaded:
+                loaded.update({run_id: self.get_run(run_id) for run_id in dict.fromkeys(draft.get("run_ids") or [])})
+            return loaded
+
+        for key in ("explanation_check", "quality"):
+            check = draft.get(key)
+            if not isinstance(check, dict) or not any(field in check for field in EVIDENCE_FIELDS):
+                continue
+            if not isinstance(draft.get("evidence_basis"), dict):
+                if allowed is not None:
+                    views[key] = {name: value for name, value in check.items() if name not in EVIDENCE_FIELDS}
+                continue
+            try:
+                fields = evidence_in_view(draft, check, None if allowed is None else set(allowed), runs=runs)
+            except FoundryError:
+                # A run it cites no longer reads, so they cannot be read again: a session reads the draft without
+                # them, the full view as saved.
+                if allowed is not None:
+                    views[key] = {name: value for name, value in check.items() if name not in EVIDENCE_FIELDS}
+                continue
+            if fields is not None:
+                views[key] = {**check, **fields}
+        if allowed is None and not views:
+            return draft
+        hidden = {"_integrity_hash"} if allowed is None else {"evidence_basis", "_integrity_hash"}
+        return {**{key: value for key, value in draft.items() if key not in hidden}, **views}
+
     def _registered_report_source_ids(self) -> set[str]:
         return set(self._registered_report_sources())
 
@@ -1065,14 +1121,15 @@ class AnalysisStore:
             "status": "needs_attention" if quality_issues else explanation_check.get("status", "pass"),
             "status_dimensions": status_dimensions,
         }
-        from foundry.evidence_labels import draft_evidence
+        from foundry.evidence_labels import draft_evidence_basis
 
         # Beside the status, never in it: labels and posture classify the evidence and add no issue.
-        explanation_check = {**explanation_check, **draft_evidence(
+        evidence, evidence_basis = draft_evidence_basis(
             self, explanation_check, claims=claims, fact_ids=fact_ids, runs=runs,
             evidence_report=evidence_report, consistency_report=consistency_report,
             source_read_failures=source_read_failures, allowed=_allowed,
-        )}
+        )
+        explanation_check = {**explanation_check, **evidence}
         if document is not None:
             from foundry.report_estimates import estimated_cells
             from foundry.report_visuals import mark_visual_estimates
@@ -1105,6 +1162,8 @@ class AnalysisStore:
             revision_comparison=revision_comparison,
             explanation_check=explanation_check,
             quality=explanation_check,
+            # What the labels were read from, so every reader reads them by the files it may read (draft_in_view).
+            evidence_basis=evidence_basis,
             # The completion policy this check was computed under; a replay never reuses an older one.
             check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
@@ -1207,6 +1266,7 @@ class AnalysisStore:
         *,
         content_mode: str | None = None,
         projection_hash: str | None = None,
+        allowed: set[str] | None = None,
     ) -> dict:
         if format not in REPORT_EXPORT_FORMATS:
             raise FoundryError("report export format must be md, xlsx, docx, pdf or html")
@@ -1226,14 +1286,14 @@ class AnalysisStore:
         if len(data) > limit and projection_hash is not None:
             # The estimate declaration and labels bring their own room (issue #32): a file that fits the limit
             # without them still registers.
-            projection = self.projection_for_draft(draft_id, content_mode)
+            projection = self.projection_for_draft(draft_id, content_mode, allowed=allowed)
             if projection["projection_hash"] == projection_hash:
                 limit += int((projection.get("estimate_headroom") or {}).get("bytes") or 0)
         if len(data) > limit:
             raise FoundryError("report export exceeds 32 MiB limit")
         digest = _hash_bytes(data)
         filename = (
-            f"{draft_id}-{content_mode}-{projection_hash[:12]}.{format}"
+            f"{draft_id}-{content_mode}-{projection_hash[:12]}{_export_reader(content_mode, allowed)}.{format}"
             if content_mode and projection_hash
             else f"{draft_id}.{format}"
         )
@@ -1285,11 +1345,12 @@ class AnalysisStore:
             "publication_status": draft["publication_status"],
         }
 
-    def projection_for_draft(self, draft_id: str, mode: str = "management") -> dict:
+    def projection_for_draft(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None) -> dict:
+        """The draft as a report projects it, for a reader whose snapshot ceiling is ``allowed`` (draft_in_view)."""
         from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
         from foundry.report_projection import build_report_projection
 
-        draft = self.get_draft(draft_id)
+        draft = self.draft_in_view(self.get_draft(draft_id), allowed)
         dataset_ids: set[str] = set()
         runs: dict[str, dict] = {}
         for run_id in draft.get("run_ids", []) or []:
@@ -1331,16 +1392,18 @@ class AnalysisStore:
             })
         return build_report_projection(draft, mode=mode, resolved_datasets=resolved, runs=runs)
 
-    def report_projection(self, draft_id: str, mode: str = "management") -> dict:
-        return self.projection_for_draft(draft_id, mode)
+    def report_projection(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None) -> dict:
+        return self.projection_for_draft(draft_id, mode, allowed=allowed)
 
-    def export_draft(self, draft_id: str, format: str = "md", *, mode: str = "management") -> dict:
-        draft = self.get_draft(draft_id)
+    def export_draft(self, draft_id: str, format: str = "md", *, mode: str = "management",
+                     allowed: set[str] | None = None) -> dict:
+        draft = self.draft_in_view(self.get_draft(draft_id), allowed)
         if format not in {"md", "xlsx"}:
             raise FoundryError("draft export format must be md or xlsx")
-        projection = self.report_projection(draft_id, mode=mode)
+        projection = self.report_projection(draft_id, mode=mode, allowed=allowed)
         runs = [self.get_run(run_id) for run_id in draft["run_ids"]]
-        path = self._inside(self.root / "exports" / f"{draft_id}-{mode}-{projection['projection_hash'][:12]}.{format}")
+        path = self._inside(self.root / "exports" / (
+            f"{draft_id}-{mode}-{projection['projection_hash'][:12]}{_export_reader(mode, allowed)}.{format}"))
         with exclusive(self.task.lock_path, timeout=10):
             self._inside(path)
             manifest_path = self._inside(path.with_suffix(path.suffix + ".meta.json"))

@@ -61,7 +61,7 @@ import calendar
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 
 RULES_VERSION = "1"
 
@@ -717,6 +717,9 @@ def evidence_posture(labels: list[dict[str, Any]], checks: dict[str, Any] | None
 # --- the draft entry point -----------------------------------------------------------------------------------
 
 
+EVIDENCE_FIELDS = ("evidence_labels", "evidence_posture", "dataset_freshness")
+
+
 def draft_evidence(
     analysis,
     check: dict[str, Any],
@@ -732,18 +735,46 @@ def draft_evidence(
     """Labels, posture and cited-dataset freshness for one assembled explanation check.
 
     The draft save path and the preview path both call this with the same records, so a preview and the
-    draft it saves agree. This is the only function here that reads the store: the run history (for older
-    runs of the same calculation), the latest requirements scope (the task period), dataset freshness and
-    row declarations. Everything it decides is decided by the pure functions above.
+    draft it saves agree.
+    """
+    return draft_evidence_basis(
+        analysis, check, claims=claims, fact_ids=fact_ids, runs=runs, evidence_report=evidence_report,
+        consistency_report=consistency_report, source_read_failures=source_read_failures, allowed=allowed,
+        basis=False,
+    )[0]
+
+
+def draft_evidence_basis(
+    analysis,
+    check: dict[str, Any],
+    *,
+    claims: list[Any],
+    fact_ids: list[Any],
+    runs: dict[str, dict],
+    evidence_report: dict[str, Any],
+    consistency_report: dict[str, Any],
+    source_read_failures: Any = (),
+    allowed: set[str] | None = None,
+    basis: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """draft_evidence's fields, and the basis a draft keeps so a reader with another snapshot ceiling can read
+    them (evidence_in_view); without ``basis`` (a preview) the basis is empty and no file outside ``allowed``
+    is read.
+
+    This is the only function here that reads the store: the run history (for newer runs of the same
+    calculation), the latest requirements scope (the task period), dataset freshness and row declarations.
+    Everything it decides is decided by the pure functions above, from what the basis holds and the draft's
+    own records.
     """
     from foundry.finance_close_status import _run_key
-    from foundry.finance_readiness import dataset_currency
+    from foundry.finance_readiness import dataset_currency, dataset_replacements
     from foundry.finance_requirements import latest_requirements
     from foundry.result_semantics import declared_run
 
     latest = latest_requirements(analysis)
     task_period = ((latest or {}).get("scope") or {}).get("period")
-    newest: dict[str, dict] = {}
+    newest: dict[str, tuple] = {}
+    every: dict[str, list[tuple]] = {}
 
     def order(run: dict) -> tuple:
         return run.get("seq", 0), str(run.get("created_at") or ""), str(run.get("id") or "")
@@ -755,16 +786,24 @@ def draft_evidence(
             return f"finance:{run['code_hash']}"
         return _run_key(run)
 
+    # Only the order, id and files of each run are kept: a task's runs together can be large.
     root = analysis._inside(analysis.root / "runs")
     for path in sorted(root.glob("*.json")) if root.exists() else []:
         run = analysis._read(path)
-        if allowed is not None and not set((run.get("bindings") or {}).values()) <= allowed:
+        if run.get("execution_status") != "succeeded":
             continue
-        held = newest.get(calculation(run))
-        if run.get("execution_status") == "succeeded" and (held is None or order(held) < order(run)):
-            newest[calculation(run)] = run
+        key = calculation(run)
+        every.setdefault(key, []).append((order(run), tuple(sorted({str(value) for value in (run.get("bindings") or {}).values()}))))
+        if (allowed is None or set((run.get("bindings") or {}).values()) <= allowed) and (
+                key not in newest or order(run) > newest[key][0]):
+            newest[key] = (order(run), run.get("id"))
     older = {run_id for run_id, run in runs.items()
-             if run.get("execution_status") == "succeeded" and newest.get(calculation(run), run).get("id") != run_id}
+             if run.get("execution_status") == "succeeded" and newest.get(calculation(run), (None, run_id))[1] != run_id}
+    # For each cited run, the files each newer run of its calculation reads, whoever may read them.
+    newer_runs = {
+        run_id: sorted({files for at, files in every.get(calculation(run), []) if at > order(run)})
+        for run_id, run in sorted(runs.items()) if run.get("execution_status") == "succeeded"
+    }
 
     recipe_results = [result for result in (evidence_report or {}).get("results") or [] if isinstance(result, dict)]
     dataset_ids = {dataset_id for run in runs.values() for dataset_id in (run.get("bindings") or {}).values()}
@@ -777,7 +816,8 @@ def draft_evidence(
         reference = source.get("reference") if isinstance(source, dict) else None
         if isinstance(reference, dict) and isinstance(reference.get("dataset_id"), str):
             dataset_ids.add(reference["dataset_id"])
-    datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period, allowed=allowed)
+    periods: dict[str, str] = {}
+    datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period, allowed=allowed, periods=periods)
 
     row_estimates: dict[tuple[str, int], list[dict]] = {}
     for run_id, run in runs.items():
@@ -786,6 +826,35 @@ def draft_evidence(
             if isinstance(row, dict) and row.get("estimate") and isinstance(row.get("row"), int):
                 row_estimates[(run_id, row["row"])] = list(row.get("estimate_sources") or [])
 
+    fields = _evidence_fields(check, claims=claims, fact_ids=fact_ids, runs=runs, recipe_results=recipe_results,
+                              consistency_results=consistency_results, older=older, row_estimates=row_estimates,
+                              datasets=datasets, source_read_failures=source_read_failures)
+    if not basis:
+        return fields, {}
+    # Whoever may read them: the basis is for every reader. An unreadable file is unknown whatever replaced it.
+    replaced_by = dataset_replacements(analysis, [dataset_id for dataset_id, info in datasets.items()
+                                                  if not _has_reason(info, "dataset_unreadable")], periods=periods)
+    kept = {
+        "schema_version": 1,
+        "task_period": task_period.strip() if isinstance(task_period, str) else "",
+        "row_estimates": [[run_id, row, sources] for (run_id, row), sources in sorted(row_estimates.items())],
+        "datasets": datasets,
+        # Every newer file and run there was, whoever may read them, and which of them this save counted.
+        "replaced_by": replaced_by,
+        "superseded": sorted(dataset_id for dataset_id in replaced_by if _has_reason(datasets[dataset_id], "superseded")),
+        "newer_runs": newer_runs,
+        "older_runs": sorted(older),
+    }
+    return fields, kept
+
+
+def _has_reason(info: dict[str, Any], code: str) -> bool:
+    return any(isinstance(reason, dict) and reason.get("code") == code
+               for reason in (info.get("freshness") or {}).get("reasons") or [])
+
+
+def _evidence_fields(check: dict[str, Any], *, claims, fact_ids, runs, recipe_results, consistency_results, older,
+                     row_estimates, datasets, source_read_failures) -> dict[str, Any]:
     labels = label_evidence(
         claims=list(claims or []), fact_ids=list(fact_ids or []), facts=list(check.get("facts") or []),
         evidence_groups=list(check.get("evidence_groups") or []), issues=list(check.get("issues") or []),
@@ -805,3 +874,48 @@ def draft_evidence(
             for dataset_id, info in datasets.items()
         },
     }
+
+
+def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[str] | None, *,
+                     runs: Callable[[], dict[str, dict]]) -> dict[str, Any] | None:
+    """A stored draft's labels, posture and freshness as a reader whose snapshot ceiling is ``allowed`` (None:
+    every file) reads them, or None when they stand as saved.
+
+    A cited file is stale when a newer file replaces it, and a cited run older when a newer run of the same
+    calculation succeeded; whoever saved the draft counted the newer files and runs they could read. A reader
+    counts the ones it may read: the draft reads as that reader would have saved it at the time, so a newer
+    file outside a session decides nothing it reads, and one the saver could not read but the reader can
+    still counts. Whether a newer file replaces an older one, or a newer run reruns an older one, depends on
+    the two alone, which is why counting by ceiling is enough. Everything else stands as saved (the task
+    period, estimates, the check itself). ``draft`` must carry ``evidence_basis``; ``runs`` loads the draft's
+    runs, only when the fields are read again.
+    """
+    from foundry.finance_readiness import currency_freshness
+
+    def readable(files) -> bool:
+        return allowed is None or set(files) <= allowed
+
+    basis = draft["evidence_basis"]
+    superseded = {dataset_id for dataset_id, newer in (basis.get("replaced_by") or {}).items()
+                  if any(readable([file]) for file in newer)}
+    older = {run_id for run_id, readings in (basis.get("newer_runs") or {}).items()
+             if any(readable(files) for files in readings)}
+    saved = set(basis.get("superseded") or [])
+    if superseded == saved and older == set(basis.get("older_runs") or []):
+        return None
+    datasets = {
+        dataset_id: ({**info, "freshness": currency_freshness(info, task_period=basis.get("task_period") or "",
+                                                              superseded=dataset_id in superseded)}
+                     if (dataset_id in superseded) != (dataset_id in saved) else info)
+        for dataset_id, info in (basis.get("datasets") or {}).items()
+    }
+    return _evidence_fields(
+        check, claims=draft.get("claims") or [], fact_ids=draft.get("fact_ids") or [], runs=runs(),
+        recipe_results=[result for result in (draft.get("evidence_report") or {}).get("results") or []
+                        if isinstance(result, dict)],
+        consistency_results=[result for result in (draft.get("consistency_report") or {}).get("results") or []
+                             if isinstance(result, dict)],
+        older=older,
+        row_estimates={(run_id, row): list(sources) for run_id, row, sources in basis.get("row_estimates") or []},
+        datasets=datasets, source_read_failures=draft.get("source_read_failures") or [],
+    )

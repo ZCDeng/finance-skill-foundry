@@ -852,7 +852,7 @@ class FinanceStore:
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous, previous["explanation_check"]))
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
-                return {**previous, "completion": receipt, "completion_operation": operation,
+                return {**self._readable_draft(previous), "completion": receipt, "completion_operation": operation,
                         "replayed": True, "validation_basis": "saved_draft_version"}
 
             def check_deadline():
@@ -950,7 +950,7 @@ class FinanceStore:
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
                 settled = operations.settle(operation["id"], revision, previous_by_revision, receipt)
-                return {**previous_by_revision, "completion": receipt, "completion_operation": settled,
+                return {**self._readable_draft(previous_by_revision), "completion": receipt, "completion_operation": settled,
                         "replayed": True, "validation_basis": "saved_draft_version"}
             if int(operation.get("current_revision", 0)) != revision:
                 raise FoundryError("newer completion revision exists")
@@ -1003,7 +1003,7 @@ class FinanceStore:
                     if claim.get("dataset_id"):
                         self._authorize({"source": claim["dataset_id"]})
                 receipt = record_completion(self.analysis, previous, previous["explanation_check"])
-                return {**previous, "completion": receipt, "replayed": True,
+                return {**self._readable_draft(previous), "completion": receipt, "replayed": True,
                         "validation_basis": "saved_draft_version"}
             return self._save_explanation_draft({**spec, "completion_request_key": key})
 
@@ -1167,7 +1167,11 @@ class FinanceStore:
         from foundry.finance_completion import record_completion
 
         completion = record_completion(self.analysis, draft, draft["explanation_check"])
-        return {**draft, "completion": completion}
+        return {**self._readable_draft(draft), "completion": completion}
+
+    def _readable_draft(self, draft):
+        """A stored draft as this store's session reads it (AnalysisStore.draft_in_view)."""
+        return self.analysis.draft_in_view(draft, self.allowed)
 
     def prepare_explanation(self, spec):
         if not isinstance(spec, dict):
@@ -2333,7 +2337,7 @@ class FinanceStore:
         draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document},
                                          _allowed=self.allowed)
         return {
-            "draft": draft,
+            "draft": self._readable_draft(draft),
             "template_id": template_id,
             "kind": record.get("kind"),
             "filled_named_ranges": filled,
