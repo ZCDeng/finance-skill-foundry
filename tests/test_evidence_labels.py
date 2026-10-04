@@ -444,6 +444,7 @@ def test_a_source_backed_draft_is_decision_grade_and_the_posture_is_not_a_status
     freshness = check["dataset_freshness"]
     assert {row["name"] for row in freshness.values()} == {"actual", "budget"}
     assert {row["freshness"]["state"] for row in freshness.values()} == {"current"}
+    assert {row["state"] for row in freshness.values()} == {"current"}
     assert all(row["period"] == "2026-09" for row in freshness.values())
 
 

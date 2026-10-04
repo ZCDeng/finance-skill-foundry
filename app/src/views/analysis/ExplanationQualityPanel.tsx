@@ -23,7 +23,7 @@ export interface ExplanationQuality {
   evidence_labels?: EvidenceLabelEntry[];
   /** How much the cited evidence can bear. A classification beside the checks, never one of them. */
   evidence_posture?: EvidencePosture;
-  dataset_freshness?: Record<string, { name?: string; as_of?: string | null; period?: string; freshness?: DatasetFreshness }>;
+  dataset_freshness?: Record<string, { name?: string; as_of?: string | null; period?: string; state?: string; freshness?: DatasetFreshness }>;
 }
 
 function qualityLabel(state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'): string {

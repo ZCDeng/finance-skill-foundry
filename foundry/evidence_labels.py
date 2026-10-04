@@ -732,7 +732,10 @@ def draft_evidence(
         "evidence_labels": labels,
         "evidence_posture": evidence_posture(labels, check.get("checks") or {}),
         "dataset_freshness": {
-            dataset_id: {key: info.get(key) for key in ("name", "as_of", "as_of_source", "period", "period_kind", "freshness")}
+            dataset_id: {
+                **{key: info.get(key) for key in ("name", "as_of", "as_of_source", "period", "period_kind", "freshness")},
+                "state": (info.get("freshness") or {}).get("state") or "unknown",
+            }
             for dataset_id, info in datasets.items()
         },
     }
