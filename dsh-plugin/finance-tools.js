@@ -347,6 +347,11 @@ export const FINANCE_TOOLS = {
   finance_controls_list: specTool("finance-controls-list", "列出勾稽控制（含待确认与已确认）及各自最近一次结果。只读。", {
     include_retired: { type: "boolean" },
   }),
+  finance_control_finding_save: specTool("finance-control-finding-save", "给一项差异（运行后结果为不相符或读不出的勾稽控制）记一个问题类型建议，附一句理由。只记录建议：问题类型由经理在界面确认或改选，你的建议不改变差异状态、处置或套表可用结论，不要说类型已定。五类：formula_control 公式或控制缺陷（公式、取数范围或控制本身错了）；source_conflict 来源矛盾（两份来源对不上，又没有说得通的解释）；unsupported_assumption 无依据假设（数字靠估计或倒挤，没有依据）；not_updated 未更新（一边还没更新到本期或最新版本）；basis_difference 口径不同（两边量的不是同一件事，例如含税与不含税、期间或范围不同，需要列调节而不是改数）。", {
+    control_id: text("finance_controls_list 返回的控制 id"),
+    finding_type: { type: "string", enum: ["formula_control", "source_conflict", "unsupported_assumption", "not_updated", "basis_difference"] },
+    note: text("一句理由，最多 500 字"),
+  }, ["control_id", "finding_type"]),
   structure_proposal_list: specTool("structure-proposal-list", "读取已加载工作簿的表结构提议：每张表判为可作数据表或排除、表头行、列角色、借贷列配对与方向、要排除的分节小计行、需向下填充的列、标题里读到的期间单位币种。blocked_reason 非空的表不能确认，unreadable_columns 表示它确实是张表但一列都没识别出来——复述给经理，不要放进确认清单。只读。不传 dataset_id 时列出本任务所有待确认文件。", {
     dataset_id: text("analysis-state 里的工作簿资料 id"),
   }),

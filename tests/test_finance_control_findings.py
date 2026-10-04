@@ -184,3 +184,21 @@ def test_the_cli_records_a_suggestion_unstamped_and_a_decision_as_the_manager(tm
     assert code == 0 and status["conclusion"]["level"] == "not_usable"
     assert status["conclusion"]["reasons"] == [{"text": "坏账分项：差额 11655，口径不同，差异待处理", "target": "controls"}]
     assert [(book["name"], book["text"]) for book in status["conclusion"]["workbooks"]] == [("月结", "不可用")]
+
+
+def test_the_assistant_gets_only_the_suggestion_tool_and_its_words_say_so():
+    root = Path(__file__).resolve().parents[1]
+    profile = json.loads((root / "dsh-plugin/package.json").read_text())["dsh"]["foundry"]["profiles"]["analysis"]
+    tools = profile["tools"]
+    assert tools[tools.index("finance_controls_list") + 1] == "finance_control_finding_save"
+    # Deciding, accepting and reviewing stay with the manager; a delegated sub-agent does not write suggestions.
+    assert not set(tools) & {"finance_controls_confirm", "finance_controls_retire", "finance_control_settings_save",
+                             "finance_control_disposition_save", "finance_control_disposition_review"}
+    assert "finance_control_finding_save" not in profile["childTools"]
+    source = (root / "dsh-plugin/finance-tools.js").read_text(encoding="utf-8")
+    assert "finance-control-finding-save" not in source.split('? "read"')[0]
+    assert "只记录建议：问题类型由经理在界面确认或改选" in source
+    persona = (root / "dsh-plugin/presets/analysis/agent.cordis.yml").read_text(encoding="utf-8")
+    assert "finance_control_finding_save" in persona and "不要说类型已定" in persona
+    for relative in ("finance-tools.js", "package.json", "client.js", "presets/analysis/agent.cordis.yml"):
+        assert (root / "dsh-plugin" / relative).read_bytes() == (root / "foundry/resources/dsh-plugin" / relative).read_bytes(), relative
