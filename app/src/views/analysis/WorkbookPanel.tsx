@@ -7,6 +7,7 @@ import { FieldShell, SearchableSelect, TextField } from '../../components/Financ
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { datasetOptions, runOptions, unwrap, errorText } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
@@ -138,16 +139,16 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="工作簿资料" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="搜索工作簿名或快照" />
       <TextField label="绑定编号" value={bindingId} onChange={setBindingId} placeholder="读取、预览或应用已有绑定" />
-      <FieldShell label="区域类型"><select aria-label="区域类型" className="fnd-field" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
-        <option value="table">表格</option><option value="named_range">命名区域</option><option value="range">工作表范围</option></select></FieldShell>
+      <FieldShell label="区域类型"><NativeSelect aria-label="区域类型" value={sourceKind} onChange={(event) => setSourceKind(event.target.value as typeof sourceKind)}>
+        <option value="table">表格</option><option value="named_range">命名区域</option><option value="range">工作表范围</option></NativeSelect></FieldShell>
       {sourceKind === 'range' ? <><SearchableSelect label="工作表" value={sheet} options={sheetNames.map((name) => ({ value: name, label: name }))}
           onChange={setSheet} placeholder={sheetNames.length ? '搜索工作表' : '先检查结构'} allowEmptyLabel="暂不选择"
           loading={inspecting} loadError={inspectionError} unconfigured={!inspection && !inspectionError && !inspecting}
           unconfiguredLabel="请先点击“检查结构”，读取工作表后再选择。" />
         <TextField label="范围" value={range} placeholder="A1:D20" onChange={setRange} /></>
         : <TextField label={sourceKind === 'table' ? '表格名称' : '命名区域'} value={sourceName} onChange={setSourceName} />}
-      <FieldShell label="用途"><select aria-label="用途" className="fnd-field" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
-        <option value="input">读取输入</option><option value="output">写回输出</option></select></FieldShell>
+      <FieldShell label="用途"><NativeSelect aria-label="用途" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+        <option value="input">读取输入</option><option value="output">写回输出</option></NativeSelect></FieldShell>
       <SearchableSelect label="校验计算（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
         placeholder="搜索计算时间" allowEmptyLabel="经理直接写入" />
     </div>
@@ -177,9 +178,9 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       {conflictCells.map((cell) => {
         const cellId = String(cell.cell);
         return <label key={cellId}>{cellId} · 原值 {textValue(cell.old_value)} → 新值 {textValue(cell.new_value)}
-          <select className="fnd-field" value={resolutions[cellId] ?? 'keep'} onChange={(event) => setResolutions((value) => ({ ...value, [cellId]: event.target.value as 'keep' | 'apply' }))}>
+          <NativeSelect value={resolutions[cellId] ?? 'keep'} onChange={(event) => setResolutions((value) => ({ ...value, [cellId]: event.target.value as 'keep' | 'apply' }))}>
             <option value="keep">保留原单元格</option><option value="apply">应用新结果</option>
-          </select></label>;
+          </NativeSelect></label>;
       })}
     </div>}
     {message && <p role="status" className="analysis-message">{message}</p>}

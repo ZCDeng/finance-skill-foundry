@@ -19,7 +19,7 @@ function ScopeCard({ task = taskId, question, datasets, onSaved }: { task?: stri
 
 const choose = async (label: string, option: RegExp) => {
   fireEvent.click(screen.getByRole('button', { name: label }));
-  fireEvent.mouseDown(await screen.findByRole('option', { name: option }));
+  fireEvent.click(await screen.findByRole('option', { name: option }));
 };
 
 function run(rows: Record<string, unknown>[]): AnalysisRun {
