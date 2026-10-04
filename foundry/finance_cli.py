@@ -68,6 +68,8 @@ FILE_OPERATIONS.update({
     "workbook-rollforward-apply": "rollforward_apply",
     "workbook-rollforward-templates": "rollforward_templates",
     "workbook-rollforward-template-save": "rollforward_template_save",
+    # Desktop only: main adds the save dialog's destination; not on finance:call.
+    "workbook-rollforward-export": "rollforward_export",
 })
 OPERATIONS["finance-completion-recover"] = "recover_completion_draft"
 LIST_COMMANDS = {

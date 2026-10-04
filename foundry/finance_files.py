@@ -342,14 +342,19 @@ class FinanceFiles:
             "rows": plan["rows"],
             "counts": plan["counts"],
             "title_hints": plan["title_hints"],
-            "change_log": change_log(plan["rows"], period=plan["period"], workbook=plan["dataset_name"]),
+            "change_log": change_log(
+                plan["rows"], period=plan["period"], workbook=plan["dataset_name"], workbook_supported=plan["workbook_supported"]
+            ),
         }
 
     def rollforward_preview(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Classify every mapping against last month's workbook and file the plan; nothing is written."""
+        import warnings
+
         from foundry.workbook_bindings import _unsupported_features, open_workbook_bytes
         from foundry.workbook_rollforward import (
             counts,
+            extension_losses,
             normalize_mappings,
             period_of,
             plan_rows,
@@ -367,8 +372,12 @@ class FinanceFiles:
         data = source.read_bytes()
         if sha256_bytes(data) != dataset["source_hash"]:
             raise FoundryError("dataset source workbook integrity check failed")
-        features = _unsupported_features(source)
-        book = open_workbook_bytes(data, data_only=False)
+        # openpyxl says what it is about to drop only as a warning while loading.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            book = open_workbook_bytes(data, data_only=False)
+        warned = tuple(str(item.message) for item in caught)
+        features = sorted({*_unsupported_features(source), *extension_losses(data, warned)})
         sources = _MappingSources(self)
         try:
             rows = plan_rows(book, data, archived_numeric_parser(dataset, data), mappings, sources)
@@ -395,21 +404,25 @@ class FinanceFiles:
         )
         return self._public_plan(plan)
 
-    def _reverify_sources(self, plan: dict[str, Any], rows: list[dict[str, Any]]) -> None:
-        """Every figure about to be written still reads the same from where it came."""
+    def _reverify_sources(self, plan: dict[str, Any]) -> None:
+        """Every source still reads as it did in the preview.
+
+        Not only the cells about to be written: a blocked row's figure goes into
+        the change log as what to type by hand, so it must not be stale either.
+        """
         from foundry.workbook_rollforward import SourceUnreadable, rendered
 
         sources = _MappingSources(self)
         try:
-            for row in rows:
+            for row in plan["rows"]:
                 source = plan["mappings"][row["index"]]["source"]
                 if source["kind"] == "value":
                     continue
                 try:
-                    value, _ = sources(source)
+                    now = rendered(sources(source)[0])[0]
                 except SourceUnreadable:
-                    raise FoundryError("rollforward source changed since preview; preview again") from None
-                if rendered(value)[0] != row["new_value"]:
+                    now = None
+                if now != row["new_value"]:
                     raise FoundryError("rollforward source changed since preview; preview again")
         finally:
             sources.close()
@@ -452,12 +465,15 @@ class FinanceFiles:
         data = source.read_bytes()
         if dataset["source_hash"] != plan["source_hash"] or sha256_bytes(data) != plan["source_hash"]:
             raise FoundryError("rollforward workbook changed since preview; preview again")
-        self._reverify_sources(plan, writes)
+        self._reverify_sources(plan)
         staging = self.analysis._inside(self.analysis.root / ".rollforward-staging" / plan["id"])
         try:
             staging.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
             raise FoundryError("rollforward plan is already being applied") from None
+        # The staging folder is the claim on this plan. It is held until the run
+        # record is filed, so a second apply cannot slip in between the copy
+        # being registered and the record that says it was.
         try:
             path = self.analysis._inside(staging / output_filename(dataset["source_name"], plan["period"]))
             written = write_copy(data, path, plan["rows"])
@@ -478,35 +494,35 @@ class FinanceFiles:
                 },
                 allow_duplicate=True,
             )
+            if output["source_hash"] != digest:
+                raise FoundryError("rollforward copy changed before it was filed")
+            self._widen_session([output["id"]])
+            record = _new(
+                self.task,
+                domain="foundry.finance_files.rollforward_runs.v1",
+                id=plan["id"],
+                plan_id=plan["id"],
+                dataset_id=dataset["id"],
+                source_dataset_id=dataset["id"],
+                source_hash=dataset["source_hash"],
+                output_dataset_id=output["id"],
+                output_name=output["name"],
+                output_sha256=digest,
+                period=plan["period"],
+                written=writes,
+                blocked=[row for row in plan["rows"] if row["status"] == BLOCKED],
+                unchanged=[row for row in plan["rows"] if row["status"] == UNCHANGED],
+                counts=plan["counts"],
+                formula_cache_cleared=written["formula_cache_cleared"],
+                applied_by=MANAGER,
+            )
+            record = self.analysis._write(record_path, record)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
             try:
                 staging.parent.rmdir()
             except OSError:
                 pass  # another apply is still staging its copy
-        if output["source_hash"] != digest:
-            raise FoundryError("rollforward copy changed before it was filed")
-        self._widen_session([output["id"]])
-        record = _new(
-            self.task,
-            domain="foundry.finance_files.rollforward_runs.v1",
-            id=plan["id"],
-            plan_id=plan["id"],
-            dataset_id=dataset["id"],
-            source_dataset_id=dataset["id"],
-            source_hash=dataset["source_hash"],
-            output_dataset_id=output["id"],
-            output_name=output["name"],
-            output_sha256=digest,
-            period=plan["period"],
-            written=writes,
-            blocked=[row for row in plan["rows"] if row["status"] == BLOCKED],
-            unchanged=[row for row in plan["rows"] if row["status"] == UNCHANGED],
-            counts=plan["counts"],
-            formula_cache_cleared=written["formula_cache_cleared"],
-            applied_by=MANAGER,
-        )
-        record = self.analysis._write(record_path, record)
         return {
             **record,
             "run_id": record["id"],
@@ -515,21 +531,82 @@ class FinanceFiles:
             ),
         }
 
+    def rollforward_export(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Save the filed copy where the manager chose, so she can open it in Excel. Manager only.
+
+        The archived copy itself is never handed to Excel: saving it there would
+        change a snapshot this task has hashed. The destination comes from the
+        desktop's save dialog, never from a session, and the bytes written are
+        the ones just checked against the run record.
+        """
+        import os
+
+        self._manager_only("export a roll-forward copy")
+        if self.session_id:
+            raise FoundryError("rollforward export requires the task editor")
+        if not isinstance(spec, dict):
+            raise FoundryError("rollforward spec must be an object")
+        run = self._read("rollforward_runs", str(spec.get("run_id") or ""))
+        destination = spec.get("destination")
+        if not isinstance(destination, str) or not destination.strip():
+            raise FoundryError("rollforward export needs a destination chosen in the save dialog")
+        target = Path(destination)
+        if not target.is_absolute() or target.suffix.lower() != ".xlsx":
+            raise FoundryError("rollforward export destination must be an absolute .xlsx path")
+        if target.resolve().is_relative_to(Path(self.task.store.var_root).resolve()):
+            raise FoundryError("rollforward export destination cannot be inside the store")
+        if not target.parent.is_dir():
+            raise FoundryError("rollforward export destination folder does not exist")
+        if target.is_dir():
+            raise FoundryError("rollforward export destination is a folder")
+        dataset, source = self._source_path(run["output_dataset_id"])
+        data = source.read_bytes()
+        if dataset["source_hash"] != run["output_sha256"] or sha256_bytes(data) != run["output_sha256"]:
+            raise FoundryError("rollforward copy integrity check failed")
+        partial = target.with_name(f".{target.name}.{uuid.uuid4().hex}.part")
+        try:
+            with open(partial, "xb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(partial, target)
+        except OSError:
+            # Most often the file of that name is open in Excel. The path stays out of the message.
+            raise FoundryError("rollforward export could not save the file") from None
+        finally:
+            partial.unlink(missing_ok=True)
+        return {
+            "schema_version": 1,
+            "run_id": run["id"],
+            "output_dataset_id": dataset["id"],
+            "filename": target.name,
+            "sha256": run["output_sha256"],
+        }
+
     def rollforward_templates(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Saved mappings, only those whose sheets match the chosen workbook when one is named."""
         from foundry.finance_controls import workbook_sheets
-        from foundry.workbook_rollforward import RollforwardTemplates, public_template, sheet_pattern
+        from foundry.workbook_rollforward import RollforwardTemplates, matching_sheet, public_template, sheet_pattern
 
         spec = spec if isinstance(spec, dict) else {}
-        pattern = None
+        pattern, current = None, None
         if spec.get("dataset_id"):
             _, source = self._source_path(str(spec["dataset_id"]))
-            pattern = sheet_pattern(workbook_sheets(source.read_bytes()))
-        templates = [
-            public_template(record)
-            for record in RollforwardTemplates(self.task.store.var_root).list()
-            if pattern is None or record.get("sheet_pattern") == pattern
-        ]
+            current = workbook_sheets(source.read_bytes())
+            pattern = sheet_pattern(current)
+        templates = []
+        for record in RollforwardTemplates(self.task.store.var_root).list():
+            if pattern is not None and record.get("sheet_pattern") != pattern:
+                continue
+            template = public_template(record)
+            if current is not None:
+                # Offered because the names match with digits masked; fill in this
+                # month's names, or every target would point at last month's sheet.
+                template["mappings"] = [
+                    {**mapping, "target": {**mapping["target"], "sheet": matching_sheet(mapping["target"]["sheet"], record.get("sheet_names"), current)}}
+                    for mapping in template["mappings"]
+                ]
+            templates.append(template)
         return {"schema_version": 1, "sheet_pattern": pattern, "templates": templates}
 
     def rollforward_template_save(self, spec: dict[str, Any]) -> dict[str, Any]:
@@ -547,6 +624,8 @@ class FinanceFiles:
             name=name.strip(),
             sheet_pattern=plan["sheet_pattern"],
             sheet_count=len(plan["sheet_names"]),
+            # Only to find each target's sheet by position next month.
+            sheet_names=plan["sheet_names"],
             mappings=template_mappings(plan["rows"], plan["mappings"]),
         )
         return public_template(record)
@@ -595,7 +674,13 @@ class _MappingSources:
 
     def _dataset(self, source: dict[str, Any], described: dict[str, Any]) -> Any:
         from foundry.analysis import ID
-        from foundry.workbook_rollforward import SourceUnreadable, range_bounds, read_workbook_source, sheet_cells
+        from foundry.workbook_rollforward import (
+            SourceUnreadable,
+            missing_source_sheet,
+            range_bounds,
+            read_workbook_source,
+            sheet_cells,
+        )
 
         dataset_id = source["dataset_id"]
         if not dataset_id:
@@ -617,7 +702,9 @@ class _MappingSources:
             raise SourceUnreadable("来源区域要写成「工作表!B5」或「工作表!B5:B20」")
         dataset, value_book, parser, data = self._workbook(dataset_id)
         if source["sheet"] not in value_book.sheetnames:
-            raise SourceUnreadable(f"来源工作簿里没有工作表「{source['sheet']}」")
+            raise SourceUnreadable(missing_source_sheet(source["sheet"], source["range"], list(value_book.sheetnames)))
+        if source["sheet"] not in {worksheet.title for worksheet in value_book.worksheets}:
+            raise SourceUnreadable(f"来源工作簿里的「{source['sheet']}」是图表工作表，没有单元格可读")
         key = (dataset_id, source["sheet"])
         if key not in self.sheets:
             self.sheets[key] = sheet_cells(data, source["sheet"], parser)

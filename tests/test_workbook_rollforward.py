@@ -195,7 +195,7 @@ def test_a_long_decimal_is_written_as_its_exact_digits_and_formula_like_text_sta
     plan = _preview(files, august, [
         _map("利润表", "B5", {"kind": "value", "value": "123456789012345678.12"}),
         _map("利润表", "G5", {"kind": "value", "value": "=HYPERLINK(\"http://x\")", "note": "备注"}),
-        _map("利润表", "H5", _cell(balances, "B7")),
+        _map("利润表", "I5", _cell(balances, "B7")),
         _map("利润表", "B6", {"kind": "value", "value": "-25.5"}),
     ])
     rows = _by_target(plan)
@@ -211,7 +211,7 @@ def test_a_long_decimal_is_written_as_its_exact_digits_and_formula_like_text_sta
         assert report["B5"].value == "123456789012345678.12" and report["B5"].data_type == "s"
         assert report["B5"].number_format == "#,##0.00;[Red]-#,##0.00"
         assert report["G5"].value == "=HYPERLINK(\"http://x\")" and report["G5"].data_type == "s"
-        assert report["H5"].value == "-抵消后" and report["H5"].data_type == "s"
+        assert report["I5"].value == "-抵消后" and report["I5"].data_type == "s"
         assert report["B6"].value == -25.5
     finally:
         copy.close()
@@ -220,6 +220,8 @@ def test_a_long_decimal_is_written_as_its_exact_digits_and_formula_like_text_sta
     assert tsv[0] == "单元格\t原值\t新值\t来源\t状态/原因"
     assert any(line.startswith("利润表!G5\t上月备注\t'=HYPERLINK") for line in tsv)
     assert any(line.startswith("利润表!B6\t600\t-25.5\t") for line in tsv)
+    # A figure Excel would round pastes as text, so the record shows what was written.
+    assert any(line.startswith("利润表!B5\t1000\t'123456789012345678.12\t") for line in tsv)
     assert "| 利润表!B5 | 1000 | 123456789012345678.12 | 手填 | 已写入 |" in run["change_log"]["markdown"]
 
 
@@ -347,7 +349,10 @@ def test_a_workbook_with_parts_a_copy_would_lose_gets_only_the_list(tmp_path: Pa
     assert plan["workbook_supported"] is False
     assert "charts" in plan["unsupported_features"]
     assert plan["rows"][0]["status"] == "write"
-    assert "将写入" in plan["change_log"]["tsv"]
+    # No copy will be made, so nothing is "about to be written": it is hers to fill in.
+    assert "需手工填写" in plan["change_log"]["tsv"] and "将写入" not in plan["change_log"]["tsv"]
+    assert "不生成副本" in plan["change_log"]["markdown"]
+    assert "需手工填写 1 格" in plan["change_log"]["markdown"]
     with pytest.raises(FoundryError, match="no copy was made"):
         files.rollforward_apply({"plan_id": plan["plan_id"]})
     assert [row["id"] for row in analysis.state()["datasets"]] == [august["id"]]
@@ -435,6 +440,8 @@ def test_a_template_keeps_the_mapping_without_this_months_snapshots(pack, tmp_pa
         _map("利润表", "B5", _cell(balances, "B1:B2")),
         _map("利润表", "B6", {"kind": "run", "run_id": "a" * 32, "row": 0, "column": "amount"}),
         _map("利润表", "A1", {"kind": "value", "value": "华东公司利润表 2026年09月", "note": "标题"}),
+        _map("利润表", "H5", {"kind": "value", "value": "98765.43", "note": "调整"}),
+        _map("利润表", "G5", {"kind": "value", "value": "1,234.50"}),
     ])
     saved = files.rollforward_template_save({"plan_id": plan["plan_id"], "name": "华东月度套表"})
     assert saved["sheet_pattern"] == "利润表|锁定表"
@@ -442,9 +449,12 @@ def test_a_template_keeps_the_mapping_without_this_months_snapshots(pack, tmp_pa
         {"target": {"sheet": "利润表", "cell": "B5"}, "source": {"kind": "dataset", "sheet": "科目余额", "range": "B1:B2", "hint": "九月余额"}},
         {"target": {"sheet": "利润表", "cell": "B6"}, "source": {"kind": "run", "row": 0, "column": "amount"}},
         {"target": {"sheet": "利润表", "cell": "A1"}, "source": {"kind": "value", "note": "标题", "last_value": "华东公司利润表 2026年09月"}},
+        # This month's typed amounts are not carried to other months' tasks.
+        {"target": {"sheet": "利润表", "cell": "H5"}, "source": {"kind": "value", "note": "调整"}},
+        {"target": {"sheet": "利润表", "cell": "G5"}, "source": {"kind": "value", "note": ""}},
     ]
     text = json.dumps(saved, ensure_ascii=False)
-    for month_specific in (balances["id"], balances["source_hash"], "a" * 32, august["id"]):
+    for month_specific in (balances["id"], balances["source_hash"], "a" * 32, august["id"], "98765.43", "1,234.50"):
         assert month_specific not in text
     with pytest.raises(FoundryError, match="template name"):
         files.rollforward_template_save({"plan_id": plan["plan_id"], "name": "  "})
@@ -457,7 +467,7 @@ def test_a_template_keeps_the_mapping_without_this_months_snapshots(pack, tmp_pa
     later = FinanceFiles(october, actor="manager")
     listed = later.rollforward_templates({"dataset_id": rolled["id"]})
     assert [row["name"] for row in listed["templates"]] == ["华东月度套表"]
-    assert listed["templates"][0]["mapping_count"] == 3
+    assert listed["templates"][0]["mapping_count"] == 5
     assert later.rollforward_templates({"dataset_id": other["id"]})["templates"] == []
     assert len(later.rollforward_templates({})["templates"]) == 1
     registry = Path(task.store.var_root) / "rollforward_templates"
@@ -503,3 +513,281 @@ def test_the_assistant_is_not_offered_the_roll_forward() -> None:
     from foundry.finance_mcp import TOOL_METHODS
 
     assert not [name for name in TOOL_METHODS if "rollforward" in name]
+
+
+def _kinds_book(path: Path) -> Path:
+    """Cells whose kind a write could change: amounts with a format, a date, a blank amount cell."""
+    from datetime import date
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "利润表"
+    sheet["B5"], sheet["B6"], sheet["B7"] = 1000, 600, "=SUM(B5:B6)"
+    sheet["B5"].number_format = "#,##0.00"
+    sheet["C5"] = date(2026, 8, 31)
+    sheet["C5"].number_format = "yyyy-mm-dd"
+    sheet["D5"].number_format = "#,##0.00"  # a blank input cell set up for an amount
+    sheet["E5"] = "备注"
+    book.save(path)
+    book.close()
+    return path
+
+
+def test_text_never_turns_a_number_cell_into_text_that_a_total_would_skip(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="九月")
+    analysis = AnalysisStore(task)
+    pack = analysis.add_dataset(_kinds_book(tmp_path / "套表.xlsx"), name="套表", metadata={"mode": "workbook"})
+    export = Workbook()
+    export.active.title = "TB"
+    export.active["A1"] = "1,234.50"  # an ERP export that stores the amount as text
+    export.save(tmp_path / "erp.xlsx")
+    erp = analysis.add_dataset(tmp_path / "erp.xlsx", name="ERP", metadata={"mode": "workbook"})
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, pack, [
+        _map("利润表", "B5", {"kind": "value", "value": "1,200"}),
+        _map("利润表", "B6", _cell(erp, "A1", sheet="TB")),
+        _map("利润表", "D5", {"kind": "value", "value": "不适用"}),
+        _map("利润表", "C5", {"kind": "value", "value": "1500"}),
+        _map("利润表", "C6", {"kind": "value", "value": "2026-09-30"}),
+        _map("利润表", "E5", {"kind": "value", "value": "已结账"}),
+        _map("利润表", "F5", {"kind": "value", "value": "(25.00)"}),
+        _map("利润表", "D6", {"kind": "value", "value": "123456789012345678.12"}),
+    ])
+    rows = _by_target(plan)
+    assert rows["利润表!B5"]["reason_code"] == "text_into_number_cell"
+    assert "合计" in rows["利润表!B5"]["reason"] and "不带千分位" in rows["利润表!B5"]["reason"]
+    assert rows["利润表!B6"]["reason_code"] == "text_into_number_cell"
+    assert "按文字存的" in rows["利润表!B6"]["reason"]
+    assert rows["利润表!D5"]["reason_code"] == "text_into_number_cell"
+    assert "手工改" in rows["利润表!D5"]["reason"]
+    assert rows["利润表!C5"]["reason_code"] == "number_into_date_cell"
+    assert rows["利润表!C5"]["old_value"] == "2026-08-31T00:00:00"
+    # A blank General cell, a text cell and a figure too long for Excel are still written.
+    assert rows["利润表!C6"]["status"] == "write"
+    assert rows["利润表!E5"]["status"] == "write"
+    assert rows["利润表!F5"]["status"] == "write" and rows["利润表!F5"]["cell_type"] == "text"
+    assert rows["利润表!D6"]["status"] == "write" and rows["利润表!D6"]["notes"] == ["decimal_written_as_text"]
+    run = files.rollforward_apply({"plan_id": plan["plan_id"]})
+    copy = load_workbook(_archived(analysis, {"id": run["output_dataset_id"]}))
+    try:
+        sheet = copy["利润表"]
+        assert (sheet["B5"].value, sheet["B5"].data_type) == (1000, "n")
+        assert (sheet["B6"].value, sheet["B6"].data_type) == (600, "n")
+        assert sheet["C5"].is_date
+    finally:
+        copy.close()
+    assert "未写入：目标原来是数字" in run["change_log"]["tsv"]
+
+
+def _with_sparkline(path: Path) -> Path:
+    """The x14 worksheet extension Excel writes for a sparkline; openpyxl reads past it and drops it."""
+    import zipfile
+
+    extension = (
+        b'<extLst><ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}" '
+        b'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+        b'<x14:sparklineGroups xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:sparklineGroup>'
+        b'<x14:colorSeries rgb="FF376092"/><x14:sparklines><x14:sparkline><xm:f>\xe5\x88\xa9\xe6\xb6\xa6\xe8\xa1\xa8!B5:B6</xm:f>'
+        b'<xm:sqref>I5</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>'
+    )
+    parts = {}
+    with zipfile.ZipFile(path) as archive:
+        for item in archive.infolist():
+            parts[item.filename] = archive.read(item.filename)
+    parts["xl/worksheets/sheet1.xml"] = parts["xl/worksheets/sheet1.xml"].replace(b"</worksheet>", extension + b"</worksheet>")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data)
+    return path
+
+
+def test_a_workbook_with_sparklines_or_x14_extensions_gets_only_the_list(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="九月")
+    analysis = AnalysisStore(task)
+    august = analysis.add_dataset(_with_sparkline(_august(tmp_path / "迷你图.xlsx")), name="迷你图", metadata={"mode": "workbook"})
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, august, [_map("利润表", "B5", {"kind": "value", "value": "1"})])
+    assert plan["workbook_supported"] is False
+    assert plan["unsupported_features"] == ["extensions"]
+    with pytest.raises(FoundryError, match="no copy was made"):
+        files.rollforward_apply({"plan_id": plan["plan_id"]})
+    assert [row["id"] for row in analysis.state()["datasets"]] == [august["id"]]
+
+
+def test_a_chartsheet_is_neither_a_target_nor_a_source(tmp_path: Path) -> None:
+    task = TaskStore(tmp_path / "var").create(title="九月")
+    analysis = AnalysisStore(task)
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "数据"
+    sheet["A1"], sheet["A2"] = 1, 2
+    chartsheet = book.create_chartsheet("图表")
+    figure = BarChart()
+    figure.add_data(Reference(sheet, min_col=1, min_row=1, max_row=2))
+    chartsheet.add_chart(figure)
+    book.save(tmp_path / "图表.xlsx")
+    charted = analysis.add_dataset(tmp_path / "图表.xlsx", name="图表", metadata={"mode": "workbook"})
+    plan = _preview(FinanceFiles(task), charted, [
+        _map("图表", "A1", {"kind": "value", "value": "1"}),
+        _map("数据", "A1", _cell(charted, "A1", sheet="图表")),
+    ])
+    rows = _by_target(plan)
+    assert rows["图表!A1"]["reason_code"] == "chart_sheet"
+    assert rows["数据!A1"]["reason_code"] == "source_unreadable" and "图表工作表" in rows["数据!A1"]["reason"]
+
+
+def test_a_second_apply_cannot_slip_in_before_the_first_is_recorded(pack) -> None:
+    task, analysis, august, balances, _ = pack
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])
+    widen, refused = files._widen_session, []
+
+    def meanwhile(snapshot_ids: list[str]) -> None:
+        # The copy is registered and its record not yet filed: another window applies the same plan.
+        try:
+            FinanceFiles(task, actor="manager").rollforward_apply({"plan_id": plan["plan_id"]})
+        except FoundryError as exc:
+            refused.append(str(exc))
+        widen(snapshot_ids)
+
+    files._widen_session = meanwhile
+    run = files.rollforward_apply({"plan_id": plan["plan_id"]})
+    assert refused == ["rollforward plan is already being applied"]
+    rolled = [row for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("rollforward")]
+    assert [row["id"] for row in rolled] == [run["output_dataset_id"]]
+    assert not (analysis.root / ".rollforward-staging").exists()
+
+
+def test_apply_refuses_when_the_source_of_a_blocked_row_changed(pack) -> None:
+    task, analysis, august, balances, tmp_path = pack
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, august, [
+        _map("利润表", "B7", _cell(balances, "B1")),  # a formula: listed with the figure to type by hand
+        _map("利润表", "B5", {"kind": "value", "value": "1"}),
+    ])
+    assert [row["status"] for row in plan["rows"]] == ["blocked", "write"]
+    analysis.add_dataset(_september(tmp_path / "九月余额-更正.xlsx"), name="九月余额", metadata={"mode": "workbook"}, allow_duplicate=True)
+    with pytest.raises(FoundryError, match="source changed since preview"):
+        files.rollforward_apply({"plan_id": plan["plan_id"]})
+
+
+def _monthly(path: Path, month: int) -> Path:
+    book = Workbook()
+    report = book.active
+    report.title = f"{month}月利润表"
+    report["B5"] = 1000
+    balance = book.create_sheet(f"{month}月资产负债表")
+    balance["C9"] = 5
+    book.save(path)
+    book.close()
+    return path
+
+
+def test_a_template_fills_in_this_months_sheet_names(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "var")
+    august_task = store.create(title="八月月结", period="2026-08")
+    august_store = AnalysisStore(august_task)
+    august = august_store.add_dataset(_monthly(tmp_path / "7月套表.xlsx", 7), name="七月套表", metadata={"mode": "workbook"})
+    balances = august_store.add_dataset(_monthly(tmp_path / "8月余额.xlsx", 8), name="八月余额", metadata={"mode": "workbook"})
+    files = FinanceFiles(august_task, actor="manager")
+    plan = _preview(files, august, [
+        _map("7月利润表", "B5", _cell(balances, "C9", sheet="8月资产负债表")),
+        _map("7月资产负债表", "C9", {"kind": "value", "value": "6"}),
+    ], period="2026-08")
+    assert plan["counts"]["write"] == 2
+    files.rollforward_template_save({"plan_id": plan["plan_id"], "name": "月度套表"})
+
+    september_task = store.create(title="九月月结", period="2026-09")
+    september_store = AnalysisStore(september_task)
+    rolled = september_store.add_dataset(_monthly(tmp_path / "8月套表.xlsx", 8), name="八月套表", metadata={"mode": "workbook"})
+    later = FinanceFiles(september_task, actor="manager")
+    template = later.rollforward_templates({"dataset_id": rolled["id"]})["templates"][0]
+    assert [mapping["target"] for mapping in template["mappings"]] == [
+        {"sheet": "8月利润表", "cell": "B5"}, {"sheet": "8月资产负债表", "cell": "C9"},
+    ]
+    # Listed without a workbook, the template shows the names it was saved with.
+    assert later.rollforward_templates({})["templates"][0]["mappings"][0]["target"]["sheet"] == "7月利润表"
+    # A source sheet still named for last month says which of this month's sheets it means.
+    september = september_store.add_dataset(_monthly(tmp_path / "9月余额.xlsx", 9), name="九月余额", metadata={"mode": "workbook"})
+    source = {**template["mappings"][0]["source"], "dataset_id": september["id"], "source_hash": september["source_hash"]}
+    source.pop("hint")
+    rerun = _preview(later, rolled, [
+        {"target": template["mappings"][0]["target"], "source": source},
+        {"target": template["mappings"][1]["target"], "source": {"kind": "value", "value": "7"}},
+    ])
+    rows = rerun["rows"]
+    assert rows[0]["reason_code"] == "source_unreadable"
+    assert "「9月资产负债表」" in rows[0]["reason"] and "9月资产负债表!C9" in rows[0]["reason"]
+    assert rows[1]["status"] == "write"
+
+
+def test_the_manager_exports_the_copy_to_open_it_in_excel(pack, capsys) -> None:
+    task, analysis, august, balances, tmp_path = pack
+    root = task.store.var_root
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])
+    run = files.rollforward_apply({"plan_id": plan["plan_id"]})
+    archived = _archived(analysis, {"id": run["output_dataset_id"]})
+    outside = tmp_path / "导出"
+    outside.mkdir()
+    destination = outside / "八月套表（2026-09 滚动）.xlsx"
+
+    def call(*args: str) -> tuple[int, str, str]:
+        code = main(["--var", str(root), "--task", task.id, *args])
+        captured = capsys.readouterr()
+        return code, captured.out, captured.err
+
+    spec = json.dumps({"run_id": run["run_id"], "destination": str(destination)})
+    code, _, err = call("workbook-rollforward-export", "--spec", spec)
+    assert code == 3 and "only the manager" in err and not destination.exists()
+    code, out, _ = call("--actor", "manager", "workbook-rollforward-export", "--spec", spec)
+    assert code == 0
+    answer = json.loads(out)
+    assert answer["filename"] == destination.name and answer["sha256"] == run["output_sha256"]
+    assert str(outside) not in out
+    assert destination.read_bytes() == archived.read_bytes()
+    assert [path.name for path in outside.iterdir()] == [destination.name]
+    # Saving it in Excel changes the export, never the filed copy.
+    destination.write_bytes(b"changed in Excel")
+    assert sha256_bytes(archived.read_bytes()) == run["output_sha256"]
+
+    for bad, message in (
+        ("relative.xlsx", "absolute .xlsx path"),
+        (str(outside / "copy.csv"), "absolute .xlsx path"),
+        (str(Path(root) / "copy.xlsx"), "inside the store"),
+        (str(outside / "missing" / "copy.xlsx"), "folder does not exist"),
+    ):
+        with pytest.raises(FoundryError, match=message):
+            files.rollforward_export({"run_id": run["run_id"], "destination": bad})
+    task.record_session("manager-session", role="analysis")
+    with pytest.raises(FoundryError, match="requires the task editor"):
+        FinanceFiles(task, session_id="manager-session", actor="manager").rollforward_export(
+            {"run_id": run["run_id"], "destination": str(outside / "again.xlsx")}
+        )
+    (outside / "已存在.xlsx").mkdir()
+    with pytest.raises(FoundryError, match="destination is a folder"):
+        files.rollforward_export({"run_id": run["run_id"], "destination": str(outside / "已存在.xlsx")})
+    archived.write_bytes(archived.read_bytes() + b"\0")
+    with pytest.raises(FoundryError, match="integrity check failed"):
+        files.rollforward_export({"run_id": run["run_id"], "destination": str(outside / "again.xlsx")})
+    assert not (outside / "again.xlsx").exists()
+    assert sorted(path.name for path in outside.iterdir()) == sorted([destination.name, "已存在.xlsx"])
+
+
+def test_an_export_that_cannot_be_saved_says_so_without_the_path(pack, monkeypatch) -> None:
+    import os
+
+    task, _, august, balances, tmp_path = pack
+    files = FinanceFiles(task, actor="manager")
+    run = files.rollforward_apply({"plan_id": _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
+    outside = tmp_path / "导出"
+    outside.mkdir()
+
+    def locked(*_args, **_kwargs):
+        raise PermissionError(13, "file is open", str(outside / "副本.xlsx"))
+
+    monkeypatch.setattr(os, "replace", locked)
+    with pytest.raises(FoundryError) as refused:
+        files.rollforward_export({"run_id": run["run_id"], "destination": str(outside / "副本.xlsx")})
+    assert str(refused.value) == "rollforward export could not save the file"
+    assert list(outside.iterdir()) == []

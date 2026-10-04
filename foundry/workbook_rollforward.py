@@ -6,19 +6,24 @@ a value she types. Every target is read before anything is written, and only
 plain input cells of a copy are written. A formula, the hidden part of a merged
 cell, a member of an array formula, a locked cell on a protected sheet and an
 error value are listed instead, with the figure they should have held, so she
-updates them in Excel herself. The archived snapshot is never opened for writing.
+updates them in Excel herself. So is a cell whose kind would change underneath
+a formula: text into a cell that holds or is formatted for a number (Excel's
+SUM skips text, so the total above it would come out short), and a number into
+a date-formatted cell. The archived snapshot is never opened for writing.
 
 openpyxl keeps formulas when it saves but drops their cached results, and it
 cannot calculate. The copy asks Excel to recalculate when it is opened; until it
 has been opened and saved there once, nothing here can read a formula result in
 it. A workbook with parts openpyxl would drop (charts, pictures, external links,
-macros) gets no copy at all, only the list.
+macros, and the Excel 2010+ worksheet extensions behind sparklines, some
+drop-down lists and data bars) gets no copy at all, only the list.
 """
 
 from __future__ import annotations
 
 import io
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -28,6 +33,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE, MergedCell
+from openpyxl.styles.numbers import is_date_format
 from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
 
@@ -58,14 +64,24 @@ EXCEL_MAX_ROW, EXCEL_MAX_COLUMN = 1_048_576, 16_384
 REASONS = {
     "bad_address": "目标要写成「工作表!单元格」，例如 利润表!B5，而且只能是一个单元格",
     "missing_sheet": "工作簿里没有这张工作表",
+    "chart_sheet": "这是图表工作表，没有单元格可写",
     "duplicate_target": "同一个单元格映射了不止一次，这几行都不写",
     "merged_non_anchor": "目标在合并单元格里，但不是左上角那一格；只能写左上角",
     "array_formula_member": "目标在数组公式的区域里，不能单独改",
     "formula_cell": "目标是公式单元格，公式不会被覆盖",
     "protected_cell": "工作表受保护，这一格是锁定的",
     "error_cell": "目标单元格是错误值（例如 #N/A），请先在 Excel 里处理",
+    "text_into_number_cell": "目标原来是数字（或设成了数字、日期格式），这个值会按文字写入，Excel 的合计和公式会漏掉它",
+    "number_into_date_cell": "目标是日期或时间格式，写入数字会显示成一个日期；日期请在 Excel 里手工改",
     "source_unreadable": "来源读不出",
 }
+
+
+# The Excel 2010+ worksheet extensions (sparklines, cross-sheet drop-down lists,
+# data bars and icon sets): openpyxl reads past them and saves without them.
+WORKSHEET_PART = re.compile(r"^xl/worksheets/[^/]+\.xml$")
+EXTENSION_LIST = re.compile(rb"<(?:[A-Za-z_][\w.-]*:)?extLst[\s>/]")
+DROPPED_EXTENSION = re.compile(r"extension is not supported and will be removed")
 
 
 class SourceUnreadable(Exception):
@@ -311,6 +327,19 @@ def read_manager_value(text: str) -> SourceValue:
     return SourceValue(text=_cell_text(text, "手填值"))
 
 
+def looks_like_number(text: str) -> bool:
+    """Whether text reads as an amount once grouping, brackets and symbols are set aside.
+
+    Only to say why a row was not written; nothing typed or read is converted on
+    this guess.
+    """
+    plain = unicodedata.normalize("NFKC", str(text or "")).strip()
+    plain = re.sub(r"[\s,¥$€£]", "", plain).removesuffix("%").removeprefix("+")
+    if plain.startswith("(") and plain.endswith(")"):
+        plain = "-" + plain[1:-1]
+    return bool(re.fullmatch(r"-?(?:\d+(?:\.\d*)?|\.\d+)", plain))
+
+
 def _cell_text(text: str, what: str) -> str:
     if len(text) > 32767:
         raise SourceUnreadable(f"{what}超过 Excel 单元格能放下的 32767 个字符")
@@ -380,6 +409,37 @@ def _blocked_target(worksheet: Any, cell: Any, members: list[tuple[str, tuple[in
     return None
 
 
+def _numeric_format(number_format: Any) -> bool:
+    return str(number_format or "General") not in {"General", "@"}
+
+
+def _kind_change(cell: Any, numbers: dict[str, Decimal], cell_type: str, notes: list[str]) -> str | None:
+    """A write that would change what kind of value a cell holds under the formulas that read it."""
+    value = cell.value
+    if isinstance(value, str):
+        return None  # A text cell takes text or a number without harm.
+    dated = _is_date(value) or (value is None and is_date_format(cell.number_format))
+    if cell_type == "number":
+        return "number_into_date_cell" if dated else None
+    if "decimal_written_as_text" in notes:
+        return None  # Listed with its own note: the exact digits Excel cannot hold.
+    holds_number = cell.coordinate in numbers or (isinstance(value, (int, float, Decimal)) and not isinstance(value, bool))
+    if dated or holds_number or (value is None and _numeric_format(cell.number_format)):
+        return "text_into_number_cell"
+    return None
+
+
+def _kind_change_reason(new_value: str, source: dict[str, Any]) -> str:
+    reason = REASONS["text_into_number_cell"]
+    if not looks_like_number(new_value):
+        return reason + "；如果确实要写文字，请在 Excel 里手工改"
+    if source.get("kind") == "value":
+        return reason + "；金额请写成不带千分位、括号和货币符号的数字，例如 -1200.50"
+    if source.get("kind") == "run":
+        return reason + "；计算结果这一列是文字类型，请改用手填值，或把这一列算成数字"
+    return reason + "；来源里这个数是按文字存的，请改用手填值，或在来源里改成数字后重新添加"
+
+
 def _unchanged(cell: Any, numbers: dict[str, Decimal], new_value: str, cell_type: str) -> bool:
     if cell_type == "number":
         return cell.data_type == "n" and numbers.get(cell.coordinate) == Decimal(new_value)
@@ -404,9 +464,11 @@ def plan_rows(
         target = mapping["target"]
         coordinate = cell_address(target["cell"]) if target["sheet"] else None
         parsed.append((target["sheet"], coordinate))
+    # A chartsheet is listed among the sheet names but has no cells.
+    worksheets = {worksheet.title for worksheet in book.worksheets}
     seen: dict[tuple[str, str], int] = {}
     for sheet, coordinate in parsed:
-        if coordinate and sheet in book.sheetnames:
+        if coordinate and sheet in worksheets:
             key = (sheet.casefold(), coordinate)
             seen[key] = seen.get(key, 0) + 1
     numbers_by_sheet: dict[str, dict[str, Decimal]] = {}
@@ -439,6 +501,8 @@ def plan_rows(
             code = "bad_address"
         elif sheet not in book.sheetnames:
             code = "missing_sheet"
+        elif sheet not in worksheets:
+            code = "chart_sheet"
         elif seen.get((sheet.casefold(), coordinate), 0) > 1:
             code = "duplicate_target"
         cell = None
@@ -453,9 +517,16 @@ def plan_rows(
             code = code or _blocked_target(worksheet, cell, members_by_sheet[sheet])
         if code is None and unreadable:
             code = "source_unreadable"
+        if code is None:
+            code = _kind_change(cell, numbers_by_sheet[sheet], row["cell_type"], row["notes"])
         if code is not None:
             row["reason_code"] = code
-            row["reason"] = unreadable if code == "source_unreadable" else REASONS[code]
+            if code == "source_unreadable":
+                row["reason"] = unreadable
+            elif code == "text_into_number_cell":
+                row["reason"] = _kind_change_reason(row["new_value"], row["source"])
+            else:
+                row["reason"] = REASONS[code]
         elif _unchanged(cell, numbers_by_sheet[sheet], row["new_value"], row["cell_type"]):
             row["status"] = UNCHANGED
         else:
@@ -501,6 +572,22 @@ def title_hints(book: Any, rows: list[dict[str, Any]], period: str) -> list[dict
                 if len(hints) >= MAX_TITLE_HINTS:
                     return hints
     return hints
+
+
+def extension_losses(data: bytes, warned: tuple[str, ...] = ()) -> list[str]:
+    """``["extensions"]`` when a copy saved by openpyxl would come out without part of a sheet.
+
+    The archive check in ``_unsupported_features`` sees parts by name; these
+    live inside the sheet XML. openpyxl announces each one it drops while
+    loading, so both what it said and what the XML holds are read.
+    """
+    if any(DROPPED_EXTENSION.search(message) for message in warned):
+        return ["extensions"]
+    with _open_xlsx_archive(data) as archive:
+        for name in archive.namelist():
+            if WORKSHEET_PART.match(name) and EXTENSION_LIST.search(archive.read(name)):
+                return ["extensions"]
+    return []
 
 
 # ------------------------------------------------------------------ writing
@@ -563,10 +650,14 @@ def _one_line(text: Any) -> str:
 
 
 def _tsv_cell(value: Any) -> str:
-    """A pasted cell that starts like a formula stays text; a plain number stays a number."""
+    """A pasted cell that starts like a formula stays text; a plain number stays a number.
+
+    A number Excel would round (more than 15 significant digits) pastes as text
+    too, so the record shows the figure that was written, not a rounded one.
+    """
     text = _one_line(value)
     if PLAIN_DECIMAL.fullmatch(text):
-        return text
+        return text if survives_a_cell(Decimal(text)) else "'" + text
     return "'" + text if text[:1] in {"=", "+", "-", "@"} else text
 
 
@@ -586,8 +677,10 @@ def source_label(source: dict[str, Any]) -> str:
     return "手填" + (f"：{note}" if note else "")
 
 
-def _state(row: dict[str, Any], applied: bool) -> str:
+def _state(row: dict[str, Any], applied: bool, copied: bool = True) -> str:
     if row["status"] == WRITE:
+        if not copied:
+            return "需手工填写"
         return "已写入" if applied else "将写入"
     if row["status"] == UNCHANGED:
         return "无变化"
@@ -600,19 +693,29 @@ def change_log(
     period: str,
     workbook: str,
     copy: str | None = None,
+    workbook_supported: bool = True,
 ) -> dict[str, str]:
-    """Every mapped cell with its old and new value, to paste into Excel or a mail."""
+    """Every mapped cell with its old and new value, to paste into Excel or a mail.
+
+    For a workbook no copy can be made of, nothing is going to be written: the
+    cells that would have been are the ones to fill in by hand.
+    """
     applied = copy is not None
     tally = counts(rows)
     header = ["单元格", "原值", "新值", "来源", "状态/原因"]
-    table = [[row["target"], row.get("old_value"), row.get("new_value"), source_label(row.get("source") or {}), _state(row, applied)] for row in rows]
+    table = [
+        [row["target"], row.get("old_value"), row.get("new_value"), source_label(row.get("source") or {}), _state(row, applied, workbook_supported)]
+        for row in rows
+    ]
+    written = "写入" if applied else "将写入" if workbook_supported else "需手工填写"
     lines = [
         "# 下月套表变更记录" if applied else "# 下月套表滚动清单",
         "",
         f"- 新月份：{period}",
         f"- 上月套表：{_one_line(workbook)}（原工作簿未改动）",
         *( [f"- 下月副本：{_one_line(copy)}"] if applied else [] ),
-        f"- {'写入' if applied else '将写入'} {tally[WRITE]} 格 · 未写入 {tally[BLOCKED]} 格 · 无变化 {tally[UNCHANGED]} 格",
+        *( [] if workbook_supported else ["- 这本工作簿复制后会丢失部分内容，不生成副本；请按下表在 Excel 里手工更新"] ),
+        f"- {written} {tally[WRITE]} 格 · 未写入 {tally[BLOCKED]} 格 · 无变化 {tally[UNCHANGED]} 格",
         "",
         "| " + " | ".join(header) + " |",
         "|" + "---|" * len(header),
@@ -633,11 +736,13 @@ def sheet_pattern(sheet_names: list[str]) -> str:
 
 
 def template_mappings(rows: list[dict[str, Any]], mappings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The mapping without what belongs to one month: no snapshot, hash, run or typed value.
+    """The mapping without what belongs to one month: no snapshot, hash, run or amount.
 
     A dataset source keeps where to read and the file's name with its digits
-    masked, so next month the manager picks that month's file herself. A typed
-    value keeps last month's text only as a reminder of what to type.
+    masked, so next month the manager picks that month's file herself. Typed
+    text, such as a title, is kept only as a reminder of what to type; a typed
+    amount is not kept at all, since it is this month's figure and the shelf is
+    read from every later task.
     """
     from foundry.structure_templates import sheet_pattern as masked
 
@@ -650,9 +755,41 @@ def template_mappings(rows: list[dict[str, Any]], mappings: list[dict[str, Any]]
         elif source["kind"] == "run":
             stripped = {"kind": "run", "row": source["row"], "column": source["column"]}
         else:
-            stripped = {"kind": "value", "note": source["note"], "last_value": source["manager_value"][:200]}
+            stripped = {"kind": "value", "note": source["note"]}
+            if not looks_like_number(source["manager_value"]):
+                stripped["last_value"] = source["manager_value"][:200]
         kept.append({"target": dict(mapping["target"]), "source": stripped})
     return kept
+
+
+def matching_sheet(name: str, saved: list[str] | None, current: list[str]) -> str:
+    """This month's name for a sheet a template saved under last month's name.
+
+    A template is offered when the sheet names match with their digits masked
+    and in the same order, so 「8月利润表」 is the sheet in 「8月利润表」's place,
+    「9月利润表」. A name not found that way is kept, and its rows are blocked.
+    """
+    from foundry.structure_templates import sheet_pattern as masked
+
+    if saved and len(saved) == len(current) and name in saved:
+        candidate = current[saved.index(name)]
+        if masked(candidate) == masked(name):
+            return candidate
+    if name in current:
+        return name
+    alike = [sheet for sheet in current if masked(sheet) == masked(name)]
+    return alike[0] if len(alike) == 1 else name
+
+
+def missing_source_sheet(sheet: str, cell_range: str, current: list[str]) -> str:
+    """Why a source sheet is not found, naming this month's sheet in its place when there is exactly one."""
+    from foundry.structure_templates import sheet_pattern as masked
+
+    text = f"来源工作簿里没有工作表「{sheet}」"
+    alike = [name for name in current if masked(name) == masked(sheet)]
+    if len(alike) == 1:
+        text += f"；这份资料里对应的是「{alike[0]}」，如果是它，请把区域改成 {alike[0]}!{cell_range}"
+    return text
 
 
 TEMPLATE_DIRNAME = "rollforward_templates"
