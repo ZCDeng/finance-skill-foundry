@@ -102,6 +102,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 - **选择框。** 一律用 NativeSelect：仍是原生 `select`，菜单由系统绘制，能盖在原生视图之上；外层只加 16px 下拉箭头，字段状态与输入框相同（高 36px、`fnd-field`）。任务栏的选择框沿用 `fnd-picker` 尺寸。页面样式不再单独给 `select` 写边框和内边距。
 - **勾选与开关。** 多选和逐项纳入用 Checkbox（16px，选中为主色底）；保存即生效的设置用 Switch（如「接受差异后需要第二人复核」）。两者均为 `role="checkbox"`/`role="switch"` 按钮，标签包住控件即可点击文字切换。
 - **空状态。** 整屏或整块的空状态用 Empty（`empty`、`empty-header`、`empty-title`、`empty-description`、`empty-content`）：左对齐、弱色说明、不加卡片和插图；标题用 `asChild` 保留所在页面的标题层级，操作按钮放在 `empty-content`。面板里一句话的「还没有……」仍用普通说明文字。不引入 Toast（内联提示更符合结论优先）、`cn` 独立包和 Rhea 紧凑风格（与 36px 控件高度冲突）。
+- **日期与搜索选择。** 浮层统一用 Popover（Radix 定位，贴边自动翻转，挂到 body，宽度跟随触发控件）。日期选择用 Calendar（react-day-picker）：周一开头、标题「2026 年 8 月」、星期单字，打开后焦点落在已选日（没有则今天），方向键、PageUp/PageDown、Enter 由日历处理。会计期间仍为 YYYY-MM 月份网格（shadcn 没有月份视图），放在同一种 Popover 里。搜索选择与多选用 Combobox（Popover + Command）：筛选和排序仍按名称、编码、说明的顺序且最多显示 80 项，Command 只负责高亮项、方向键与 Enter；输入法组字时 Enter 不选中。选中或 Escape 后焦点回到触发控件，点外面关闭时焦点留在点击处。
 
 ## Do's and Don'ts
 

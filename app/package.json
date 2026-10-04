@@ -58,10 +58,12 @@
     "@tiptap/pm": "3.31.3",
     "@tiptap/react": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",
+    "cmdk": "^1.1.1",
     "docx": "9.7.1",
     "linkedom": "0.18.13",
     "mammoth": "1.12.2",
     "pdfjs-dist": "6.3.289",
-    "radix-ui": "^1.6.7"
+    "radix-ui": "^1.6.7",
+    "react-day-picker": "^10.0.2"
   }
 }
