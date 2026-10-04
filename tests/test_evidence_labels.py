@@ -442,6 +442,11 @@ def _ledger(path: Path, period: str) -> Path:
     return path
 
 
+def _corrected(path: Path) -> Path:
+    path.write_text("period,account_code,management_account,amount,currency\n2026-08,6001,revenue,101,CNY\n", encoding="utf-8")
+    return path
+
+
 def _period(store: FinanceStore, dataset_id: str, period: str = "2026-08") -> None:
     store.analysis_requirements_save({"question": "八月月结", "scope": {"period": period},
                                       "bindings": {"ledger": dataset_id}, "items": []})
@@ -484,15 +489,16 @@ def test_readiness_marks_a_superseded_upload_as_stale(tmp_path):
     assert by_id[new["id"]]["freshness"]["state"] == "current"
 
 
-def _refresh(task, tmp_path: Path, *, period: str = "2026-08", cutoff: str = "2026-09-05T00:00:00Z", name: str = "ERP 总账"):
+def _refresh(task, tmp_path: Path, *, period: str = "2026-08", cutoff: str = "2026-09-05T00:00:00Z", name: str = "ERP 总账",
+             amount: int = 20):
     from openpyxl import Workbook
 
     book = Workbook()
     sheet = book.active
     sheet.append(["document_id", "line_id", "account_code", "amount"])
     sheet.append(["JV-1", "1", "6001", 100])
-    sheet.append(["JV-1", "2", "6001", 20])
-    path = tmp_path / f"erp-{period}.xlsx"
+    sheet.append(["JV-1", "2", "6001", amount])
+    path = tmp_path / f"erp-{period}-{amount}.xlsx"
     book.save(path)
     scope = SourceScope(source_id="erp", tenant_id="t", ledger_id="l", organization_id="o", period=period,
                         currency="CNY", cutoff_at=cutoff)
@@ -533,6 +539,31 @@ def test_a_same_named_file_of_another_period_is_a_period_mismatch_not_superseded
     found = dataset_currency(analysis, [august["id"], september["id"]], task_period="2026-09")
     assert found[august["id"]]["freshness"]["state"] == "source_stale"
     assert found[september["id"]]["freshness"]["state"] == "current"
+
+
+def test_a_session_judges_freshness_only_by_the_files_it_may_read(tmp_path):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    _period(store, older["id"])
+    every = {row["dataset_id"]: row for row in store.finance_readiness({})["datasets"]}
+    assert every[older["id"]]["freshness"]["state"] == "source_stale"
+    # Granted only the first upload, the session neither opens the newer one nor learns it exists.
+    session = FinanceStore(task, snapshot_ids=[older["id"]])
+    row = {row["dataset_id"]: row for row in session.finance_readiness({})["datasets"]}[older["id"]]
+    assert row["freshness"] == {"state": "current", "reasons": []}
+    assert dataset_currency(analysis, [older["id"]], task_period="2026-08", allowed={older["id"]})[older["id"]]["freshness"]["state"] == "current"
+    assert dataset_currency(analysis, [older["id"]], task_period="2026-08")[older["id"]]["freshness"]["state"] == "source_stale"
+
+
+def test_a_refresh_outside_the_session_does_not_make_its_prior_snapshot_stale(tmp_path):
+    task, analysis, store = _readiness_task(tmp_path)
+    first = _refresh(task, tmp_path)
+    second = _refresh(task, tmp_path, cutoff="2026-09-06T00:00:00Z", amount=21)
+    assert second["dataset_id"] not in {None, first["dataset_id"]}
+    assert dataset_currency(analysis, [first["dataset_id"]], task_period="2026-08")[first["dataset_id"]]["freshness"]["state"] == "source_stale"
+    alone = dataset_currency(analysis, [first["dataset_id"]], task_period="2026-08", allowed={first["dataset_id"]})
+    assert alone[first["dataset_id"]]["freshness"]["state"] != "source_stale"
 
 
 def test_the_readiness_cli_carries_freshness(tmp_path, capsys):
@@ -636,6 +667,40 @@ def test_a_draft_citing_an_older_run_of_the_same_calculation_is_stale(finance):
     assert all(entry["base_label"] == "fact_provider_standardized" for entry in facts)
     assert draft["explanation_check"]["evidence_posture"]["level"] == "preliminary"
     assert {"code": "stale_source", "text": f"过期来源 {len(facts)} 项"} in draft["explanation_check"]["evidence_posture"]["drivers"]
+
+
+def test_rerunning_the_same_public_finance_call_makes_the_earlier_run_stale(finance):
+    store, context, _tmp = finance
+    first = store.explain_variance({"context_id": context["id"]})
+    again = store.explain_variance({"context_id": context["id"]})
+    # Each public call files its own revision; the calculation is the same.
+    assert first["analysis_id"] != again["analysis_id"] and first["code_hash"] == again["code_hash"]
+    stale = store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [first["id"]]})
+    assert {entry["label"] for entry in stale["explanation_check"]["evidence_labels"] if entry["key"]["kind"] == "fact"} == {"stale_source"}
+    current = store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [again["id"]]})
+    assert "stale_source" not in {entry["label"] for entry in current["explanation_check"]["evidence_labels"]}
+    # A different calculation on the same context is not a rerun of this one.
+    metric = store.run_metric({"context_id": context["id"], "metric": {"kind": "gross_profit"}})
+    assert metric["code_hash"] != again["code_hash"]
+    assert "stale_source" not in {entry["label"] for entry in
+                                  store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [again["id"]]})["explanation_check"]["evidence_labels"]}
+
+
+def test_a_sourced_assertion_on_a_replaced_file_is_a_stale_source(tmp_path):
+    from foundry.evidence_labels import draft_evidence
+
+    _task, analysis, _store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="经营说明")
+    analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="经营说明")
+    result = {"rule_id": "r1", "label": "均超阈值", "status": "pass",
+              "assertion_source": {"kind": "text", "reference": {"dataset_id": older["id"], "paragraph": 1}}}
+    found = draft_evidence(analysis, {"facts": [], "checks": {}}, claims=[], fact_ids=[], runs={},
+                           evidence_report={}, consistency_report={"results": [result]})
+    assertion = _one(found["evidence_labels"], "assertion", rule_id="r1")
+    assert assertion["label"] == "stale_source" and assertion["base_label"] == "management_claim"
+    assert older["id"] in found["dataset_freshness"]
+    assert _one(_labels(consistency_results=[result], datasets={older["id"]: {"name": "经营说明", "freshness": {"state": "current"}}}),
+                "assertion", rule_id="r1")["label"] == "management_claim"
 
 
 def test_a_draft_on_a_run_that_read_a_superseded_snapshot_is_stale(finance):

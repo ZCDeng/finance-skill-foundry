@@ -1093,7 +1093,7 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed)
 
         from foundry.finance_completion import record_completion
 
@@ -1183,7 +1183,7 @@ class FinanceStore:
             self.analysis, checked, claims=json_value(merged.get("claims", [])), fact_ids=merged.get("fact_ids", []),
             runs={run_id: self.analysis.get_run(run_id) for run_id in dict.fromkeys(run_ids)},
             evidence_report=quality["evidence_report"], consistency_report=quality["consistency_report"],
-            source_read_failures=merged.get("source_read_failures", []),
+            source_read_failures=merged.get("source_read_failures", []), allowed=self.allowed,
         )}
 
     def finance_background_save(self, spec):

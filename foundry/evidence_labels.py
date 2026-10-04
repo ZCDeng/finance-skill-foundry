@@ -554,8 +554,10 @@ class _Labeler:
         entry = _Entry({"kind": "assertion", "rule_id": result.get("rule_id")})
         source = result.get("assertion_source") if isinstance(result.get("assertion_source"), dict) else None
         if source:
-            entry.refs.append(source.get("reference") or {})
+            reference = source.get("reference") if isinstance(source.get("reference"), dict) else {}
+            entry.refs.append(reference)
             entry.set_base("management_claim", _reason("assertion_source", "资料原文里的说法，已按数字核对"))
+            self._dataset_freshness(entry, reference.get("dataset_id"))
         else:
             entry.set_base("analyst_interpretation", _reason("assertion_written", "文稿自己的说法，没有原文出处"))
         label = result.get("label") or result.get("rule_id") or "一致性说法"
@@ -725,6 +727,7 @@ def draft_evidence(
     evidence_report: dict[str, Any],
     consistency_report: dict[str, Any],
     source_read_failures: Any = (),
+    allowed: set[str] | None = None,
 ) -> dict[str, Any]:
     """Labels, posture and cited-dataset freshness for one assembled explanation check.
 
@@ -745,21 +748,36 @@ def draft_evidence(
     def order(run: dict) -> tuple:
         return run.get("seq", 0), str(run.get("created_at") or ""), str(run.get("id") or "")
 
+    def calculation(run: dict) -> str:
+        # A public metric or variance call files a new revision each time, so for the finance engine the
+        # same operation, spec and context is the same calculation whichever revision carried it.
+        if run.get("engine") == "finance" and run.get("code_hash"):
+            return f"finance:{run['code_hash']}"
+        return _run_key(run)
+
     root = analysis._inside(analysis.root / "runs")
     for path in sorted(root.glob("*.json")) if root.exists() else []:
         run = analysis._read(path)
-        held = newest.get(_run_key(run))
+        if allowed is not None and not set((run.get("bindings") or {}).values()) <= allowed:
+            continue
+        held = newest.get(calculation(run))
         if run.get("execution_status") == "succeeded" and (held is None or order(held) < order(run)):
-            newest[_run_key(run)] = run
+            newest[calculation(run)] = run
     older = {run_id for run_id, run in runs.items()
-             if run.get("execution_status") == "succeeded" and newest.get(_run_key(run), run).get("id") != run_id}
+             if run.get("execution_status") == "succeeded" and newest.get(calculation(run), run).get("id") != run_id}
 
     recipe_results = [result for result in (evidence_report or {}).get("results") or [] if isinstance(result, dict)]
     dataset_ids = {dataset_id for run in runs.values() for dataset_id in (run.get("bindings") or {}).values()}
     dataset_ids |= {claim["dataset_id"] for claim in claims if isinstance(claim, dict) and isinstance(claim.get("dataset_id"), str)}
     dataset_ids |= {ref["dataset_id"] for result in recipe_results for ref in result.get("source_refs") or []
                     if isinstance(ref, dict) and isinstance(ref.get("dataset_id"), str)}
-    datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period)
+    consistency_results = [result for result in (consistency_report or {}).get("results") or [] if isinstance(result, dict)]
+    for result in consistency_results:
+        source = result.get("assertion_source")
+        reference = source.get("reference") if isinstance(source, dict) else None
+        if isinstance(reference, dict) and isinstance(reference.get("dataset_id"), str):
+            dataset_ids.add(reference["dataset_id"])
+    datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period, allowed=allowed)
 
     row_estimates: dict[tuple[str, int], list[dict]] = {}
     for run_id, run in runs.items():
@@ -772,7 +790,7 @@ def draft_evidence(
         claims=list(claims or []), fact_ids=list(fact_ids or []), facts=list(check.get("facts") or []),
         evidence_groups=list(check.get("evidence_groups") or []), issues=list(check.get("issues") or []),
         requirements=check.get("requirements") or {}, recipe_results=recipe_results,
-        consistency_results=[result for result in (consistency_report or {}).get("results") or [] if isinstance(result, dict)],
+        consistency_results=consistency_results,
         runs=runs, older_runs=older, row_estimates=row_estimates, datasets=datasets,
         source_read_failures=source_read_failures,
     )

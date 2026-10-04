@@ -108,6 +108,7 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     superseded = _superseded_for_freshness(
         store.analysis, every_dataset,
         {entry["dataset_id"]: entry["scope"]["period"] for entry in per_dataset if entry["scope"].get("period")},
+        store.allowed,
     )
     by_id = {str(dataset.get("id") or ""): dataset for dataset in datasets}
     per_dataset = [
@@ -426,18 +427,25 @@ def _same_period(left: str, right: str) -> bool:
     return left.strip() == right.strip()
 
 
-def _superseded_for_freshness(analysis, datasets: list[dict], known_periods: dict[str, str]) -> set[str]:
+def _superseded_for_freshness(analysis, datasets: list[dict], known_periods: dict[str, str],
+                              allowed: set[str] | None = None) -> set[str]:
     """Snapshots a newer one has replaced, for freshness.
 
     A published refresh replaces the prior snapshot of the same scope, period included. A newer upload of
     the same name replaces an older one unless the two declare different periods: monthly packs share sheet
     and file names, and last month's file is another period's file (a period mismatch), not an old version
     of this month's. Controls keep their own rule (finance_controls.superseded_snapshots).
-    """
-    from foundry.finance_controls import superseded_snapshots
 
-    # With no datasets passed, only the published-refresh replacements are returned.
-    replaced = set(superseded_snapshots(analysis.task, []))
+    In a session only the snapshots it may read count, as replacements and as files to compare: a newer
+    file outside the session is neither opened nor allowed to make one inside it look stale.
+    """
+    from foundry.finance_controls import refreshed_snapshots
+
+    def visible(dataset_id: Any) -> bool:
+        return allowed is None or dataset_id in allowed
+
+    replaced = {prior for prior, newer in refreshed_snapshots(analysis.task).items() if visible(newer)}
+    datasets = [record for record in datasets if visible(record.get("id"))]
     periods = dict(known_periods)
 
     def period_of(record: dict) -> str:
@@ -472,14 +480,16 @@ def _snapshot_period(dataset: dict) -> str:
     return period or (refresh.strip() if isinstance(refresh, str) else "")
 
 
-def dataset_currency(analysis, dataset_ids: list[str], *, task_period: Any = None) -> dict[str, dict[str, Any]]:
+def dataset_currency(analysis, dataset_ids: list[str], *, task_period: Any = None,
+                     allowed: set[str] | None = None) -> dict[str, dict[str, Any]]:
     """The readiness report's as-of, period and freshness for the datasets a draft cites, by id.
 
     A file's period is read as the readiness report reads it (column, then confirmed title hint, then
     title words). A workbook's own sheets are not re-read here: the tables confirmed from it carry its period.
+    ``allowed`` is the session's snapshot ceiling, as for the readiness report.
     """
     period_text = task_period.strip() if isinstance(task_period, str) else ""
-    superseded = _superseded_for_freshness(analysis, analysis.published_datasets(), {})
+    superseded = _superseded_for_freshness(analysis, analysis.published_datasets(), {}, allowed)
     found: dict[str, dict[str, Any]] = {}
     for dataset_id in dataset_ids:
         try:
