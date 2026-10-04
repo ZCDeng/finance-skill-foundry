@@ -411,10 +411,10 @@ describe('requirements panel', () => {
     const profit = await screen.findByLabelText('必答指标 1');
     expect(within(profit).getByText('累计实际 ×')).toBeTruthy();
     fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
-    fireEvent.mouseDown(await screen.findByRole('option', { name: /^累计预算/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /^累计预算/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加结果情景 1' }));
-    fireEvent.mouseDown(await screen.findByRole('option', { name: /^达成率/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /^达成率/ }));
     fireEvent.click(within(profit).getByRole('button', { name: '添加情景' }));
     fireEvent.click(screen.getByRole('button', { name: /保存要求新版/ }));
 
@@ -615,7 +615,7 @@ describe('requirements panel', () => {
     const profit = await screen.findByLabelText('必答指标 1');
     expect(within(profit).getByText(/请补充预算资料。/)).toBeTruthy();
     fireEvent.click(within(profit).getByRole('button', { name: '指标 1' }));
-    fireEvent.mouseDown(screen.getByRole('option', { name: /收入/ }));
+    fireEvent.click(screen.getByRole('option', { name: /收入/ }));
 
     expect(within(profit).queryByText(/请补充预算资料。/)).toBeNull();
     expect(within(profit).getByText(/条件已修改，保存后重新检查资料匹配。/)).toBeTruthy();

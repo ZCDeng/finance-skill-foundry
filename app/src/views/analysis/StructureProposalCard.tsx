@@ -6,6 +6,8 @@ import { WaitOrb } from '../../components/WaitOrb.js';
 import { Input } from '../../components/ui/input.js';
 import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
+import { Checkbox } from '../../components/ui/checkbox.js';
 
 /** One column of a sheet, as the engine read it. */
 export interface ProposedColumn {
@@ -253,9 +255,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
       {tables.map((sheet) => (
         <div key={sheet.sheet} className="analysis-structure-sheet">
           <label className="analysis-structure-sheet-name">
-            <input type="checkbox" checked={chosen[sheet.sheet] ?? false} disabled={locked}
+            <Checkbox checked={chosen[sheet.sheet] ?? false} disabled={locked}
               aria-label={`采用 ${sheet.sheet}`}
-              onChange={(event) => setChosen((current) => ({ ...current, [sheet.sheet]: event.target.checked }))} />
+              onCheckedChange={(state) => setChosen((current) => ({ ...current, [sheet.sheet]: state === true }))} />
             <span className="fnd-title">{sheet.sheet}</span>
           </label>
 
@@ -270,7 +272,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
           {sheet.table_blocks && sheet.table_blocks.length > 0 && (
             <div className="analysis-structure-field">
               <label htmlFor={`block-${sheet.sheet}`}>表块</label>
-              <select id={`block-${sheet.sheet}`} disabled={locked}
+              <NativeSelect id={`block-${sheet.sheet}`} disabled={locked}
                 value={sheet.selected_block_id ?? ''}
                 onChange={(event) => edit(sheet.sheet, (current) => applyBlock(current, event.target.value))}>
                 {sheet.table_blocks.map((block, index) => (
@@ -278,7 +280,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
                     {blockLabel(block, index)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
           <div className="analysis-structure-field">
@@ -337,18 +339,18 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
               {sheet.columns.map((column) => (
                 <tr key={column.letter}>
                   <td>
-                    <input type="checkbox" checked={column.include !== false} disabled={locked}
+                    <Checkbox checked={column.include !== false} disabled={locked}
                       aria-label={`${sheet.sheet} ${column.letter} 列纳入`}
-                      onChange={(event) => edit(sheet.sheet, (current) => ({
+                      onCheckedChange={(state) => edit(sheet.sheet, (current) => ({
                         ...markRepairable(current),
                         columns: current.columns.map((item) => (item.letter === column.letter
-                          ? { ...item, include: event.target.checked } : item)),
+                          ? { ...item, include: state === true } : item)),
                       }))} />
                   </td>
                   <th scope="row">{column.letter}{column.numeric ? ' · 数值' : ''}</th>
                   <td>{column.display}</td>
                   <td>
-                    <select aria-label={`${sheet.sheet} ${column.letter} 列含义`} disabled={locked}
+                    <NativeSelect aria-label={`${sheet.sheet} ${column.letter} 列含义`} disabled={locked}
                       value={column.role}
                       onChange={(event) => edit(sheet.sheet, (current) => ({
                         ...markRepairable(current),
@@ -356,7 +358,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
                           ? { ...item, role: event.target.value } : item)),
                       }))}>
                       {ROLE_CHOICES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role] ?? role}</option>)}
-                    </select>
+                    </NativeSelect>
                   </td>
                   <td>
                     <Input aria-label={`${sheet.sheet} ${column.letter} 列排除原因`} disabled={locked || column.include !== false}
@@ -377,7 +379,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
               <label htmlFor={`dir-${sheet.sheet}-${pair.id}`}>
                 {pair.label || '借贷'} 哪一侧是金额{pair.primary ? '（主）' : ''}
               </label>
-              <select id={`dir-${sheet.sheet}-${pair.id}`} disabled={locked}
+              <NativeSelect id={`dir-${sheet.sheet}-${pair.id}`} disabled={locked}
                 value={pair.direction.kind === 'fixed' ? `fixed:${pair.direction.side}` : pair.direction.kind}
                 onChange={(event) => edit(sheet.sheet, (current) => ({
                   ...current,
@@ -390,7 +392,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
                 <option value="by_populated_side">按有值的一侧</option>
                 <option value="fixed:debit">一律借方</option>
                 <option value="fixed:credit">一律贷方</option>
-              </select>
+              </NativeSelect>
             </div>
           ))}
 
@@ -401,9 +403,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
                 {sheet.excluded_rows.map((row) => (
                   <li key={row.row}>
                     <label>
-                      <input type="checkbox" checked disabled={locked}
+                      <Checkbox checked disabled={locked}
                         aria-label={`第 ${row.row} 行不计入`}
-                        onChange={() => edit(sheet.sheet, (current) => ({
+                        onCheckedChange={() => edit(sheet.sheet, (current) => ({
                           ...current,
                           excluded_rows: current.excluded_rows.filter((item) => item.row !== row.row),
                         }))} />
