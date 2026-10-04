@@ -242,7 +242,8 @@ def _level(confirmed: list[dict[str, Any]], held: list[dict[str, Any]], *, missi
     if unknown:
         return _verdict(NOT_ASSESSABLE, unknown)
     breaks = [row for row in confirmed if (row.get("result") or {}).get("status") == "break"]
-    blocking = [row for row in breaks if (row.get("issue") or {}).get("blocking")]
+    # Only an acceptance that no longer holds the close clears a difference; anything else still counts against it.
+    blocking = [row for row in breaks if (row.get("issue") or {}).get("state") != "waived" or (row.get("issue") or {}).get("blocking")]
     if blocking:
         return _verdict(NOT_USABLE, [
             _reason(f"{_difference(row)}，{ISSUE_TEXT.get((row.get('issue') or {}).get('state'), '待处理')}", "controls")

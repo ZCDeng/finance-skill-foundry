@@ -246,6 +246,11 @@ def test_an_assistant_suggestion_names_no_type_and_moves_no_level():
     assert _status(controls=[_typed(_break("waived", blocking=False))])["conclusion"]["level"] == "usable_with_caveats"
 
 
+def test_a_break_nobody_has_cleared_counts_against_the_books_whatever_its_issue_says():
+    untold = {"state": "confirmed", "control": {"label": "坏账分项"}, "result": {"status": "break", "difference": "1"}, "issue": None}
+    assert _status(controls=[untold])["conclusion"]["level"] == "not_usable"
+
+
 def test_an_accepted_difference_leaves_the_books_usable_with_caveats_named():
     waived = _typed(_break("waived", blocking=False), "basis_difference", "口径不同")
     conclusion = _status(controls=[PASSING, waived, _break("waived", blocking=False)])["conclusion"]
