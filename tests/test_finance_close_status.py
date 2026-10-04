@@ -202,16 +202,16 @@ def test_every_confirmed_control_passing_is_usable_and_the_headline_is_unchanged
     result = _status()
     assert result["headline"] == {"state": "ready_for_review", "text": "可提交经理复核"}
     assert result["conclusion"] == {
-        "level": "usable", "text": "可用", "reasons": [{"text": "经理确认的 1 条控制全部相符", "target": "controls"}],
+        "level": "usable", "text": "可用", "reasons": [{"text": "你确认的 1 条控制相符", "target": "controls"}],
         "basis": {"confirmed": 1, "passed": 1, "waived": 0, "open": 0}, "workbooks": [],
     }
 
 
 @pytest.mark.parametrize("controls,why", [
-    ([], "还没有经理确认的勾稽控制"),
-    ([{**PASSING, "state": "proposed"}], "还没有经理确认的勾稽控制"),
+    ([], "还没有你确认的勾稽控制"),
+    ([{**PASSING, "state": "proposed"}], "还没有你确认的勾稽控制"),
     ([PASSING, {"state": "confirmed", "control": {"label": "台账"}, "result": None, "issue": {"state": "not_run", "blocking": True}}], "1 条控制已确认但还没运行"),
-    ([{"state": "confirmed", "control": {"label": "台账"}, "result": {"status": "stale"}, "issue": {"state": "stale", "blocking": True}}], "1 条控制读的资料已有新版本，要在新版本上重新确认"),
+    ([{"state": "confirmed", "control": {"label": "台账"}, "result": {"status": "stale"}, "issue": {"state": "stale", "blocking": True}}], "1 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用"),
     ([_break("awaiting_reimport", status="error")], "坏账分项 读不出数"),
 ])
 def test_without_a_confirmed_current_reading_the_answer_is_not_assessable(controls, why):
@@ -275,7 +275,7 @@ def test_each_workbook_is_judged_by_the_controls_that_read_it():
         assert books[name]["level"] == "not_usable"
         assert books[name]["reasons"] == [{"text": "坏账分项：差额 11655，来源矛盾，差异待处理", "target": "controls"}]
     assert books["银行流水.xlsx"] == {"dataset_id": "b3", "name": "银行流水.xlsx", "level": "not_assessable", "text": "无法判断",
-                                    "reasons": [{"text": "还没有经理确认的勾稽控制涉及这本工作簿", "target": "controls"}]}
+                                    "reasons": [{"text": "还没有你确认的勾稽控制读到这本工作簿", "target": "controls"}]}
     # Once accepted, the pack and both workbooks it reads are usable with that caveat; the other passes on its own.
     accepted = _on(_break("waived", blocking=False), "b2", "b1")
     books = {book["name"]: book for book in _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b1", "b1"), accepted])["conclusion"]["workbooks"]}
@@ -283,6 +283,33 @@ def test_each_workbook_is_judged_by_the_controls_that_read_it():
     only_ledger = _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b2", "b2"), _on(_break("open"), "b1", "b1")])["conclusion"]
     assert {book["name"]: book["text"] for book in only_ledger["workbooks"]} == {"月结套表.xlsx": "不可用", "合同台账.xlsx": "可用"}
     assert only_ledger["text"] == "不可用"
+
+
+def test_several_passing_controls_read_as_all_agreeing():
+    reasons = _status(controls=[PASSING, PASSING])["conclusion"]["reasons"]
+    assert reasons == [{"text": "你确认的 2 条控制都相符", "target": "controls"}]
+
+
+def test_a_table_left_from_a_replaced_workbook_is_not_listed_as_a_workbook():
+    # v1 was replaced by a new upload under the same name; its 区域收入 table, named after the sheet,
+    # is still current because v2 renamed that sheet, but it is not a workbook of its own.
+    new = {**BOOK, "id": "b9", "source_hash": "f" * 64}
+    orphan = {**BOOK, "id": "t1", "name": "01·区域收入", "metadata": {"derived_from": "b1"}, "transformation": {"structure": {}}}
+    result = _status(datasets=[orphan, new], replaced={"b1"}, controls=[_on(PASSING, "b9", "b9")])
+    assert [(book["dataset_id"], book["name"], book["text"]) for book in result["conclusion"]["workbooks"]] == [("b9", "月结套表.xlsx", "可用")]
+    # While its workbook is current, the same table still stands for it when it is all the session holds.
+    assert [book["dataset_id"] for book in _status(datasets=[orphan], controls=[_on(PASSING, "t1", "t1")])["conclusion"]["workbooks"]] == ["t1"]
+
+
+def test_a_control_left_on_a_replaced_workbook_says_both_steps_while_the_new_one_passes():
+    new = {**BOOK, "id": "b9", "source_hash": "f" * 64}
+    stale = _on({"state": "confirmed", "control": {"label": "坏账分项"}, "result": {"status": "stale"},
+                 "issue": {"state": "stale", "blocking": True}}, "b1", "b1")
+    conclusion = _status(datasets=[new], replaced={"b1"}, controls=[stale, _on(PASSING, "b9", "b9")])["conclusion"]
+    # Re-confirming on the new file is done; what still holds the pack is the old control nobody retired.
+    assert conclusion["level"] == "not_assessable"
+    assert conclusion["reasons"] == [{"text": "1 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用", "target": "controls"}]
+    assert [(book["name"], book["text"]) for book in conclusion["workbooks"]] == [("月结套表.xlsx", "可用")]
 
 
 def test_a_scope_gap_holds_every_workbook_and_a_structure_only_its_own():

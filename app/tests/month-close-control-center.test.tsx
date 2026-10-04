@@ -76,7 +76,7 @@ it('states the 可用结论 under the headline, apart from it, with reasons and 
       basis: { confirmed: 7, passed: 2, waived: 0, open: 5 },
       workbooks: [
         { dataset_id: 'b1', name: '月结套表.xlsx', level: 'not_usable', text: '不可用', reasons: [{ text: reasons[0] }] },
-        { dataset_id: 'b3', name: '银行流水.xlsx', level: 'not_assessable', text: '无法判断', reasons: [{ text: '还没有经理确认的勾稽控制涉及这本工作簿' }] },
+        { dataset_id: 'b3', name: '银行流水.xlsx', level: 'not_assessable', text: '无法判断', reasons: [{ text: '还没有你确认的勾稽控制读到这本工作簿' }] },
       ],
     },
   };

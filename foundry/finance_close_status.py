@@ -100,7 +100,7 @@ def close_status(
         "headline": headline,
         "blocks": blocks,
         "blocking": [*must, *later],
-        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures),
+        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced),
     }
 
 
@@ -194,7 +194,7 @@ def _exceptions_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], inputs: list[dict[str, Any]],
-                pending_structures: list[str]) -> dict[str, Any]:
+                pending_structures: list[str], replaced: set[str] | frozenset[str]) -> dict[str, Any]:
     """可用结论: can these books be used as they stand, for the whole pack and for each workbook.
 
     Only confirmed controls and the manager's dispositions decide the level. A finding type only
@@ -202,7 +202,7 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     """
     confirmed = [row for row in controls if row.get("state") == "confirmed"]
     held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
-    overall = _level(confirmed, held, missing="还没有经理确认的勾稽控制")
+    overall = _level(confirmed, held, missing="还没有你确认的勾稽控制")
     issues = [row.get("issue") or {} for row in confirmed]
     overall["basis"] = {
         "confirmed": len(confirmed),
@@ -215,12 +215,12 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     names = {row["id"]: row.get("name") or "资料" for row in datasets}
     book_of = {row["id"]: row.get("source_hash") or row["id"] for row in datasets}
     workbooks = []
-    for book in _workbooks(datasets):
+    for book in _workbooks(datasets, replaced):
         digest = book.get("source_hash") or book["id"]
         touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
         own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
         waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
-        level = _level(touching, [*scope_held, *waiting], missing="还没有经理确认的勾稽控制涉及这本工作簿")
+        level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
         workbooks.append({"dataset_id": book["id"], "name": book.get("name") or "资料", **level})
     return {**overall, "workbooks": workbooks}
 
@@ -235,7 +235,8 @@ def _level(confirmed: list[dict[str, Any]], held: list[dict[str, Any]], *, missi
     if not_run:
         unknown.append(_reason(f"{not_run} 条控制已确认但还没运行", "controls"))
     if stale:
-        unknown.append(_reason(f"{stale} 条控制读的资料已有新版本，要在新版本上重新确认", "controls"))
+        # Confirming the check again on the new file is not enough: the old one holds until it is retired.
+        unknown.append(_reason(f"{stale} 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用", "controls"))
     for row in confirmed:
         if (row.get("result") or {}).get("status") == "error":
             unknown.append(_reason(f"{row['control']['label']} 读不出数", "controls"))
@@ -254,7 +255,8 @@ def _level(confirmed: list[dict[str, Any]], held: list[dict[str, Any]], *, missi
             _reason(f"{_difference(row)}，已接受差异（{((row.get('issue') or {}).get('disposition') or {}).get('reason') or ''}）", "controls")
             for row in breaks
         ])
-    return _verdict(USABLE, [_reason(f"经理确认的 {len(confirmed)} 条控制全部相符", "controls")])
+    agree = "你确认的 1 条控制相符" if len(confirmed) == 1 else f"你确认的 {len(confirmed)} 条控制都相符"
+    return _verdict(USABLE, [_reason(agree, "controls")])
 
 
 def _verdict(level: str, reasons: list[dict[str, Any]]) -> dict[str, Any]:
@@ -277,11 +279,17 @@ def _sides(row: dict[str, Any]) -> set[str]:
     return {str(side.get("dataset_id")) for side in (control.get("left") or {}, control.get("right") or {}) if side.get("dataset_id")}
 
 
-def _workbooks(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One per Excel file: a table derived from a sheet carries its workbook's bytes and is not another file."""
+def _workbooks(datasets: list[dict[str, Any]], replaced: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    """One per Excel file: a table derived from a sheet carries its workbook's bytes and is not another file.
+
+    A table read from a workbook a newer upload replaced is left out: it is named after its sheet,
+    so a sheet the new version renamed or dropped would otherwise stand in for the old file.
+    """
     books: dict[str, dict[str, Any]] = {}
     for row in datasets:
         if row.get("source_file") != "source.xlsx":
+            continue
+        if (row.get("metadata") or {}).get("derived_from") in replaced:
             continue
         digest = row.get("source_hash") or row["id"]
         held = books.get(digest)

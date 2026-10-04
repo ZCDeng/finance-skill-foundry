@@ -130,6 +130,49 @@ def test_only_a_current_difference_takes_one_of_the_five_types(tmp_path):
         manager.finance_control_finding_save({"control_id": control["id"], "finding_type": "not_updated"})
 
 
+def test_a_control_left_on_the_replaced_file_holds_the_conclusion_until_it_is_retired(tmp_path):
+    from foundry.finance_requirements import save_requirements
+
+    task, analysis, assistant, manager, close, old = _broken(tmp_path)
+    save_requirements(analysis, {"question": "八月月结", "scope": {"period": "2026-08", "unit": "万元", "currency": "CNY"}, "items": []})
+    corrected = analysis.add_dataset(_ar_pack(tmp_path / "v2.xlsx", provisions=BALANCED, total=22125), name="月结")
+    manager.finance_controls_save({"confirm": True, "control": _control(corrected)})
+    manager.finance_controls_run({})
+    conclusion = manager.finance_close_status({})["conclusion"]
+    # She has already confirmed the check on the new file; the reason names the step still left.
+    assert conclusion["level"] == "not_assessable"
+    assert conclusion["reasons"] == [{"text": "1 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用", "target": "controls"}]
+    assert [(book["dataset_id"], book["text"]) for book in conclusion["workbooks"]] == [(corrected["id"], "可用")]
+    manager.finance_controls_retire({"id": old["id"], "reason": "已换用修正后的资料"})
+    conclusion = manager.finance_close_status({})["conclusion"]
+    assert (conclusion["text"], conclusion["reasons"]) == ("可用", [{"text": "你确认的 1 条控制相符", "target": "controls"}])
+
+
+def test_tables_read_from_a_replaced_workbook_are_not_listed_as_workbooks(tmp_path):
+    from openpyxl import load_workbook
+
+    from foundry.analysis import AnalysisStore
+    from foundry.finance_service import FinanceStore
+    from foundry.sample_task import SAMPLE_DATASET, build_sample_workbook, create_sample_task
+    from foundry.task import TaskStore
+
+    task = TaskStore(tmp_path / "var").get(create_sample_task(tmp_path / "var")["id"])
+    analysis, manager = AnalysisStore(task), FinanceStore(task, actor="manager")
+    first = analysis.state()["datasets"][0]["id"]
+    proposal = manager.structure_proposal_list({"dataset_id": first})["proposals"][0]
+    manager.structure_proposal_confirm({"dataset_id": first, "revision": proposal["revision"]})
+    # The new version renames a sheet, so the table read from the old one is not replaced by name.
+    path = build_sample_workbook(tmp_path / "v2.xlsx")
+    book = load_workbook(path)
+    book["01·区域收入"].title = "01·区域收入（修订）"
+    book.save(path)
+    latest = analysis.add_dataset(path, name=SAMPLE_DATASET)
+    names = {row["name"] for row in analysis.state()["datasets"]}
+    assert "01·区域收入" in names
+    books = manager.finance_close_status({})["conclusion"]["workbooks"]
+    assert [(row["dataset_id"], row["name"]) for row in books] == [(latest["id"], SAMPLE_DATASET)]
+
+
 def test_the_confirmation_sheet_says_the_type_or_that_it_is_only_suggested(tmp_path):
     _task_obj, _analysis, assistant, manager, _close, control = _broken(tmp_path)
     assistant.finance_control_finding_save({"control_id": control["id"], "finding_type": "source_conflict"})
