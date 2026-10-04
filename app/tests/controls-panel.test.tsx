@@ -232,7 +232,7 @@ it('lets the manager choose one of the five types, shows the decided one, and ne
     expect.stringMatching(/^公式或控制缺陷/), expect.stringMatching(/^来源矛盾/), expect.stringMatching(/^无依据假设/),
     expect.stringMatching(/^未更新/), expect.stringMatching(/^口径不同.*要列调节而不是改数/),
   ]);
-  fireEvent.mouseDown(screen.getByRole('option', { name: /^口径不同/ }));
+  fireEvent.click(screen.getByRole('option', { name: /^口径不同/ }));
   fireEvent.change(screen.getByLabelText('类型说明（可选）'), { target: { value: '台账含税，月结不含税' } });
   fireEvent.click(save);
   await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-finding-save', { control_id: 'c1', finding_type: 'basis_difference', note: '台账含税，月结不含税' }));
