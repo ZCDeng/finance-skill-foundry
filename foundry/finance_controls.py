@@ -19,6 +19,7 @@ has left the task or changed is ``stale``, never an old green.
 from __future__ import annotations
 
 import io
+import json
 import re
 import zipfile
 from decimal import Decimal, InvalidOperation
@@ -29,6 +30,7 @@ from openpyxl.utils import get_column_letter, range_boundaries
 
 from foundry.analysis_data import archived_numeric_parser, read_exact_numerics
 from foundry.errors import FoundryError
+from foundry.structure_records import MANAGER
 
 KINDS = frozenset({"subtotal", "tie_out"})
 PROPOSED = "proposed"
@@ -543,13 +545,83 @@ def control_issue(row: dict[str, Any], disposition: dict[str, Any] | None, *, re
     return {"state": "awaiting_reimport", "blocking": True, "disposition": disposition}
 
 
+# ---- Finding types: what kind of problem a difference is (问题类型) -------------------------
+
+FINDING_TYPE_LABELS = {
+    "formula_control": "公式或控制缺陷",
+    "source_conflict": "来源矛盾",
+    "unsupported_assumption": "无依据假设",
+    "not_updated": "未更新",
+    "basis_difference": "口径不同",
+}
+FINDING_TYPES = tuple(FINDING_TYPE_LABELS)
+
+
+def clean_finding(spec: Any) -> dict[str, str]:
+    if not isinstance(spec, dict):
+        raise FoundryError("finding must be an object")
+    finding_type = spec.get("finding_type")
+    if not isinstance(finding_type, str) or finding_type not in FINDING_TYPE_LABELS:
+        raise FoundryError("finding type must be one of " + ", ".join(FINDING_TYPES))
+    return {
+        "finding_type": finding_type,
+        "note": _one_line(_text(spec.get("note") or "", "finding note", required=False, maximum=500)),
+    }
+
+
+def lineage(control: dict[str, Any]) -> str:
+    """control_key as text a record can keep: the same check reads the same, whatever its version id."""
+    return json.dumps([list(side) for side in control_key(control)], ensure_ascii=False, separators=(",", ":"))
+
+
+def control_finding(row: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The 问题类型 of a control's current difference, from the findings kept for its lineage (oldest first).
+
+    The manager's latest record is the type; the assistant's latest is only a suggestion, offered
+    until the manager answers it. A record made about another difference is not current.
+    """
+    result = row.get("result")
+    if row.get("state") == RETIRED or not result or result.get("status") not in {BREAK, ERROR}:
+        return None
+    decided = next((record for record in reversed(records) if record.get("set_by") == MANAGER), None)
+    suggested = next((record for record in reversed(records) if record.get("set_by") != MANAGER), None)
+    finding: dict[str, Any] = {"set_by_manager": False}
+    current = decided if decided and applies_to(decided, result) else None
+    if current:
+        finding.update(type=current["finding_type"], type_label=FINDING_TYPE_LABELS[current["finding_type"]], set_by_manager=True)
+        if current.get("note"):
+            finding["note"] = current["note"]
+    elif decided:
+        finding["outdated"] = True
+    if (
+        suggested and applies_to(suggested, result)
+        # Adopted, or answered with another type: the manager has already seen it.
+        and (current is None or suggested.get("seq", 0) > current.get("seq", 0))
+        and suggested["finding_type"] != finding.get("type")
+    ):
+        finding.update(suggested_type=suggested["finding_type"], suggested_type_label=FINDING_TYPE_LABELS[suggested["finding_type"]])
+        if suggested.get("note"):
+            finding["suggested_note"] = suggested["note"]
+    return finding
+
+
+def finding_words(finding: dict[str, Any] | None) -> str:
+    """The manager's type; else the assistant's, marked as its suggestion; blank when neither."""
+    finding = finding or {}
+    if finding.get("set_by_manager") and finding.get("type") in FINDING_TYPE_LABELS:
+        return FINDING_TYPE_LABELS[finding["type"]]
+    if finding.get("suggested_type") in FINDING_TYPE_LABELS:
+        return f"助手建议：{FINDING_TYPE_LABELS[finding['suggested_type']]}"
+    return ""
+
+
 def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dict[str, str]:
     """A one-page list of differences for whoever compiled the books: where, what we read, what we ask.
 
     Markdown to send, and tab-separated rows that paste into Excel as a table.
     """
     lines = ["# 勾稽差异确认", "", "以下差异由系统按原始资料逐格复算得出，请确认采用口径或说明原因。", ""]
-    table = [["序号", "控制", "左侧取数", "左侧金额", "右侧取数", "右侧金额", "差额", "状态", "说明"]]
+    table = [["序号", "控制", "左侧取数", "左侧金额", "右侧取数", "右侧金额", "差额", "状态", "问题类型", "说明"]]
     for index, row in enumerate(rows, start=1):
         result = row.get("result") or {}
         left, right = result.get("left") or {}, result.get("right") or {}
@@ -561,17 +633,19 @@ def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dic
             note = _one_line(f"读不出：{result.get('reason') or ''}" + (f"；{note}" if note else ""))
         state = {"open": "待处理", "pending_external": "待外部确认", "awaiting_reimport": "待重新导入",
                  "awaiting_review": "待复核", "stale": "资料已更新"}.get(issue.get("state", ""), issue.get("state", ""))
+        kind = finding_words(row.get("finding"))
         lines += [
             f"## {index}. {label}",
             "",
             f"- 左侧：{where(left)}，合计 {left.get('value', '—')}",
             f"- 右侧：{where(right)}，合计 {right.get('value', '—')}",
             f"- 差额：{result.get('difference', '—')}{'（显示舍入可能造成）' if result.get('within_rounding') else ''}",
+            *([f"- 问题类型：{kind}"] if kind else []),
             f"- 状态：{state}" + (f"；{note}" if note else ""),
             "",
         ]
         table.append([str(index), _cell(label), _cell(where(left)), left.get("value", ""), _cell(where(right)),
-                      right.get("value", ""), result.get("difference", ""), _cell(state), _cell(note)])
+                      right.get("value", ""), result.get("difference", ""), _cell(state), _cell(kind), _cell(note)])
     tsv = "\n".join("\t".join(str(cell).replace("\t", " ") for cell in line) for line in table)
     return {"markdown": "\n".join(lines).rstrip() + "\n", "tsv": tsv + "\n"}
 

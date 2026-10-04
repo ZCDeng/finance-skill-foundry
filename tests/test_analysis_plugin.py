@@ -414,6 +414,7 @@ const inputs = {
  'finance_controls_save': {spec: {controls: [{label: '分项合计', left: {dataset_id: 'snapshot-1', source_hash: 'h', sheet: 'S', range: 'B2:B5'}, right: {dataset_id: 'snapshot-1', source_hash: 'h', sheet: 'S', range: 'B6'}}]}},
  'finance_controls_run': {spec: {}},
  'finance_controls_list': {spec: {}},
+ 'finance_control_finding_save': {spec: {control_id: 'control-1', finding_type: 'source_conflict', note: '台账与月结实收对不上'}},
  'structure_proposal_list': {spec: {dataset_id: 'snapshot-1'}},
  'structure_proposal_confirm': {spec: {dataset_id: 'snapshot-1', revision: 1}},
  'structure_template_list': {spec: {}},
