@@ -84,6 +84,11 @@ CONNECTION_CLAIM = re.compile(
     re.IGNORECASE,
 )
 NEGATION = re.compile(r"\b(?:not|no|never)\b|不|未|没有", re.IGNORECASE)
+# A negation only counts inside the clause that makes the claim, so "has a
+# connected ERP, but does not pay" is still a claim.
+CLAUSE_BREAK = re.compile(
+    r"[,;:|，；：、]|\b(?:but|while|whereas|although|though)\b|但|而", re.IGNORECASE
+)
 LIVE_MARKET_DATA = re.compile(
     r"\b(?:Bloomberg|FactSet|Refinitiv|Capital\s+IQ|PitchBook)\b"
     r"|real(?:-|\s+)time\s+(?:quotes?|prices?|market)"
@@ -103,6 +108,21 @@ PAYMENT = re.compile(r"\b(?:payments?|pay)\b", re.IGNORECASE)
 PAYMENT_GUARD = re.compile(
     r"\b(?:does not|do not|never)\b[^.\n]{0,60}\b(?:pay|payments?)\b"
     r"|\bno\b[^.\n]{0,20}\bpayments?\b",
+    re.IGNORECASE,
+)
+# An instruction to post, book or pay. Each one needs its own guard: a
+# disclaimer elsewhere in the file does not cover a later instruction.
+LIST_LEAD = r"^(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*[^*]+\*\*\s*)?"
+POSTING_ACTION = re.compile(
+    LIST_LEAD + r"(?:post|book)\b"
+    r"|\b(?:post|book)\w*\b[^.\n]{0,40}\b(?:to|into)\s+(?:the\s+|an\s+|your\s+)?"
+    r"(?:ERP|ledger|GL|general\s+ledger|books)\b",
+    re.IGNORECASE,
+)
+PAYMENT_ACTION = re.compile(
+    LIST_LEAD + r"pay\b"
+    r"|\b(?:initiate|release|send|make|execute|submit|schedule|approve|run)\b"
+    r"[^.\n]{0,30}\bpayments?\b",
     re.IGNORECASE,
 )
 # A hard-wrapped line continues its sentence. Sentence punctuation, a blank line
@@ -162,12 +182,32 @@ def _sentences(text: str) -> list[str]:
     return [part for part in SENTENCE_BREAK.split(text) if part.strip()]
 
 
+def _claim_clause(sentence: str, match: re.Match[str]) -> str:
+    breaks = [found.end() for found in CLAUSE_BREAK.finditer(sentence, 0, match.start())]
+    return sentence[(breaks[-1] if breaks else 0) : match.end()]
+
+
 def _unnegated_claims(text: str) -> list[str]:
-    return [
-        " ".join(sentence.split())
-        for sentence in _sentences(text)
-        if CONNECTION_CLAIM.search(sentence) and not NEGATION.search(sentence)
-    ]
+    claims = []
+    for sentence in _sentences(text):
+        flat = " ".join(sentence.split())
+        if any(
+            not NEGATION.search(_claim_clause(flat, match))
+            for match in CONNECTION_CLAIM.finditer(flat)
+        ):
+            claims.append(flat)
+    return claims
+
+
+def _unguarded_actions(text: str) -> list[str]:
+    actions = []
+    for sentence in _sentences(text):
+        flat = " ".join(sentence.split())
+        if (POSTING_ACTION.search(flat) and not POSTING_GUARD.search(flat)) or (
+            PAYMENT_ACTION.search(flat) and not PAYMENT_GUARD.search(flat)
+        ):
+            actions.append(flat)
+    return actions
 
 
 def _method_resource_errors(tree: Path, relative: Path, text: str) -> list[str]:
@@ -253,6 +293,19 @@ def test_contract_patterns_find_invented_names_and_market_data() -> None:
     ],
 )
 def test_connection_claims_are_found_across_wrapped_lines(text: str) -> None:
+    assert _unnegated_claims(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Foundry has a connected ERP, but does not initiate payments.",
+        "Foundry never pays vendors while it is connected to NetSuite.",
+        "| no | is connected to NetSuite |",
+        "本产品不付款，但已接通金蝶账套。",
+    ],
+)
+def test_a_negation_in_another_clause_does_not_cover_the_claim(text: str) -> None:
     assert _unnegated_claims(text)
 
 
@@ -409,6 +462,34 @@ def test_posting_and_payment_wording_carries_a_guard(tree: Path, skill_id: str) 
         assert POSTING_GUARD.search(text), f"{skill_id} mentions posting without a guard"
     if PAYMENT.search(text):
         assert PAYMENT_GUARD.search(text), f"{skill_id} mentions payments without a guard"
+    assert _unguarded_actions(text) == [], f"{skill_id} tells the reader to post or pay"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Foundry does not post entries. Post the journal directly to the ERP.",
+        "Drafts only.\n\n3. **Depreciation:** Book periodic depreciation from the schedules",
+        "Foundry does not pay vendors.\n- Initiate the vendor payment run",
+        "- Pay the supplier invoices due this week",
+    ],
+)
+def test_each_posting_or_payment_instruction_needs_its_own_guard(text: str) -> None:
+    assert _unguarded_actions(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Do not post the journal to the ERP.",
+        "Foundry never initiates the payment run; the treasurer does.",
+        "- Timing differences in batch posting",
+        "- Manual journal entries posted to the control account",
+        "Disputed amounts or unapplied payments",
+    ],
+)
+def test_guarded_or_descriptive_posting_wording_passes(text: str) -> None:
+    assert _unguarded_actions(text) == []
 
 
 def test_posting_and_payment_patterns_still_find_the_ledger_skills() -> None:

@@ -336,7 +336,7 @@ In Foundry this list is reference material. Foundry does not post entries or mak
 
 1. **Accruals:** Record expenses incurred but not yet paid (AP accruals, payroll accruals, interest accruals)
 2. **Deferrals:** Adjust prepaid expenses, deferred revenue, and deferred costs for the period
-3. **Depreciation and amortization:** Book periodic depreciation/amortization from fixed asset and intangible schedules
+3. **Depreciation and amortization:** Draft periodic depreciation/amortization entries from fixed asset and intangible schedules
 4. **Bad debt provision:** Adjust allowance for credit losses based on aging analysis and historical loss rates
 5. **Inventory adjustments:** Record write-downs for obsolete, slow-moving, or impaired inventory
 6. **FX revaluation:** Revalue foreign-currency-denominated monetary assets and liabilities at period-end rates
