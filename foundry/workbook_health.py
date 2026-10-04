@@ -118,7 +118,6 @@ CODES: tuple[tuple[str, str], ...] = (
     ("inconsistent_column_formula", "warning"),
     ("sheet_too_large", "info"),
 )
-SEVERITY = dict(CODES)
 
 VOLATILE = frozenset({"OFFSET", "INDIRECT", "NOW", "TODAY", "RAND", "RANDBETWEEN", "CELL", "INFO"})
 COMMON_NUMBERS = frozenset(Decimal(text) for text in ("0", "1", "2", "10", "12", "100", "1000", "10000", "365", "366"))
