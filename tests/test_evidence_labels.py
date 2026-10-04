@@ -20,8 +20,9 @@ from foundry.evidence_labels import (
     label_counts,
     label_evidence,
 )
-from foundry.finance_readiness import _currency
+from foundry.finance_readiness import _currency, dataset_currency
 from foundry.finance_service import FinanceStore
+from foundry.source_refresh import SourceRefreshService, SourceScope
 from foundry.task import TaskStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +127,56 @@ def test_judgment_and_assumption_claims_keep_what_the_writer_said_they_are():
     assert [entry["label"] for entry in labels] == ["analyst_interpretation", "assumption_user_provided"]
 
 
+@pytest.mark.parametrize(("basis", "label"), [("user_assumption", "assumption_user_provided"),
+                                              ("professional_judgment", "analyst_interpretation")])
+def test_an_assumption_or_judgment_that_cites_a_fact_stays_what_the_writer_said(basis, label):
+    """Review: a user_assumption claim carrying a fact's run/row/column/value took the fact's 标准化数据 label."""
+    claim = {"basis": basis, "fact_id": "1" * 64, "run_id": RUN, "row": 0, "column": "actual", "value": "120",
+             "reason": "按合同节点假设回款"}
+    labels = _labels(claims=[claim])
+    assert labels[0]["label"] == label and labels[0]["base_label"] == label
+    assert labels[0]["key"]["fact_id"] == "1" * 64
+    assert _one(labels, "fact", fact_id="1" * 64)["label"] == "fact_provider_standardized"
+    # The claim is an item of its own, so the assumption is counted rather than folded into the fact.
+    assert label_counts(labels) == {"fact_provider_standardized": 1, label: 1}
+    # A problem with the cell it cites still shows, over the writer's basis.
+    stale = _labels(claims=[claim], older_runs={RUN})[0]
+    assert stale["label"] == "stale_source" and stale["base_label"] == label
+
+
+def test_script_output_or_a_coefficient_recipe_is_unknown_until_a_source_recipe_backs_it():
+    """Review: an unverified python run and a coefficient-only recipe were labelled 派生计算 and reached 可决策."""
+    script = {**RUNS[SQL_RUN], "id": SQL_RUN, "engine": "python", "reproducibility_status": "unverified"}
+    runs = {**RUNS, SQL_RUN: script}
+    claim = {"basis": "calculation", "fact_id": "3" * 64, "run_id": SQL_RUN, "row": 0, "column": "total", "value": "5"}
+    labels = _labels(claims=[claim], runs=runs)
+    assert [labels[0]["label"], _one(labels, "fact", fact_id="3" * 64)["label"]] == ["unknown", "unknown"]
+    assert _codes(labels[0]) == ["run_script"]
+    assert evidence_posture(labels, PASSED)["level"] == "preliminary"
+    # A refreshed, standardized input does not make a script's output traced either.
+    refreshed = {**script, "bindings": {"ledger": REFRESH}}
+    assert _one(_labels(fact_ids=["3" * 64], runs={**RUNS, SQL_RUN: refreshed}), "fact", fact_id="3" * 64)["label"] == "unknown"
+
+    def recipe(evidence_class):
+        return {"status": "pass", "evidence_class": evidence_class, "claim": {"run_id": SQL_RUN, "row": 0, "column": "total"},
+                "source_refs": []}
+
+    backed = _one(_labels(fact_ids=["3" * 64], runs=runs, recipe_results=[recipe("source_calculation")]), "fact", fact_id="3" * 64)
+    assert backed["label"] == "derived_calculation" and _codes(backed)[0] == "recipe_source_calculation"
+    # A recipe that only proves a free coefficient traces nothing, on a script or on SQL,
+    coefficient = _one(_labels(fact_ids=["3" * 64], recipe_results=[recipe("coefficient_unbound")]), "fact", fact_id="3" * 64)
+    assert coefficient["label"] == "unknown" and _codes(coefficient) == ["recipe_coefficient"]
+    # unless a stronger basis applies,
+    either = _labels(fact_ids=["3" * 64], recipe_results=[recipe("coefficient_unbound"), recipe("source_value")])
+    assert _one(either, "fact", fact_id="3" * 64)["label"] == "fact_source_reported"
+    engine = {"status": "pass", "evidence_class": "coefficient_unbound", "claim": {"run_id": RUN, "row": 0, "column": "actual"},
+              "source_refs": []}
+    assert _one(_labels(fact_ids=["1" * 64], recipe_results=[engine]), "fact", fact_id="1" * 64)["label"] == "fact_provider_standardized"
+    # and the decision-grade wording claims no recomputation.
+    sql = evidence_posture(_labels(fact_ids=["3" * 64]), PASSED)
+    assert sql["level"] == "decision_grade" and "可复算" not in sql["drivers"][0]["text"]
+
+
 def test_a_row_reading_as_an_estimate_is_inferred_unless_the_requirements_declare_it():
     inferred = _labels(fact_ids=["3" * 64], row_estimates={(SQL_RUN, 0): [{"source": "text", "field": "说明"}]})
     entry = _one(inferred, "fact", fact_id="3" * 64)
@@ -178,6 +229,27 @@ def test_contradictions_are_labelled_and_never_averaged_away():
     revision = {"code": "revision_numeric_regression", "new_run_id": RUN, "column": "actual", "old_value": "120", "new_value": "125",
                 "business_key": "revenue"}
     assert _one(_labels(issues=[revision]), "revision")["label"] == "contradicted_source"
+
+
+def test_each_calculation_claim_is_checked_against_the_run_cell_on_its_own():
+    """Review: one mismatching claim on a cell marked every claim on that cell 矛盾来源."""
+    runs = {**RUNS, SQL_RUN: {**RUNS[SQL_RUN], "result": {"rows": [{"total": "5.00"}]}}}
+    claims = [{"basis": "calculation", "run_id": SQL_RUN, "row": 0, "column": "total", "value": "5"},
+              {"basis": "calculation", "run_id": SQL_RUN, "row": 0, "column": "total", "value": "6"}]
+    issues = [{"code": "claim_value_mismatch", "run_id": SQL_RUN, "row": 0, "column": "total", "expected": "6", "actual": "5.00"}]
+    right, wrong = _labels(claims=claims, issues=issues, runs=runs, facts=[])[:2]
+    assert right["label"] == "unknown" and "claim_value_mismatch" not in _codes(right)
+    assert wrong["label"] == "contradicted_source" and "claim_value_mismatch" in _codes(wrong)
+
+
+def test_malformed_source_read_failures_are_read_as_the_requirements_check_reads_them():
+    """Review: a non-list value or a non-string item id raised TypeError in the preview and the save."""
+    items = [{"id": "rev", "label": "收入", "status": "answered", "provenance_status": "verified", "locations": []}]
+    for failures in (5, "rev", [{"requirement_item_id": ["rev"]}], [7, None]):
+        assert not [entry for entry in _labels(requirements={"items": items}, source_read_failures=failures)
+                    if entry["key"]["kind"] == "requirement"], failures
+    failed = _one(_labels(requirements={"items": items}, source_read_failures=[{"item_id": "rev"}]), "requirement")
+    assert _codes(failed) == ["requirement_source_failed"]
 
 
 def test_missing_required_sources_name_what_is_missing():
@@ -297,6 +369,15 @@ def test_a_claim_and_the_fact_it_cites_count_once_by_the_worse_label():
     ({"period": "八月", "task_period": "2026-08"}, "unknown", ["period_unreadable"]),
     ({"period": "2026年8月", "task_period": "2026-08"}, "current", []),
     ({"period": "2026-03", "task_period": "2026-01:2026-08"}, "period_mismatch", ["period_differs"]),
+    # Last month's complete file, dated at or after its own close, is another period, never stale.
+    ({"period": "2026-08", "as_of": "2026-08-31", "task_period": "2026-09"}, "period_mismatch", ["period_differs"]),
+    ({"period": "2026-08", "as_of": "2026-09-03", "task_period": "2026-09"}, "period_mismatch", ["period_differs"]),
+    # Cut before its own close: still a mismatch, with the incompleteness said beside it.
+    ({"period": "2026-08", "as_of": "2026-08-20", "task_period": "2026-09"}, "period_mismatch",
+     ["period_differs", "as_of_before_own_period_end"]),
+    # A year-to-date file covers the task month: as of before the month closes, it is stale.
+    ({"period": "2026", "as_of": "2026-08-31", "task_period": "2026-09"}, "source_stale", ["as_of_before_period_end"]),
+    ({"period": "2026", "as_of": "2026-10-02", "task_period": "2026-09"}, "current", []),
 ])
 def test_dataset_freshness_states(kwargs, state, codes):
     found = dataset_freshness(**{"period": None, "as_of": None, "period_kind": None, "superseded": False, **kwargs})
@@ -332,6 +413,16 @@ def test_as_of_comes_from_the_confirmed_title_or_a_refresh_cutoff_and_nothing_el
     found = _currency(refreshed, "2026-08", task_period="2026-08", superseded=set())
     assert (found["as_of"], found["as_of_source"], found["period_kind"]) == ("2026-08-25", "source_refresh", "month")
     assert found["freshness"]["state"] == "source_stale"
+    # Rows without a period column: the refresh is for its scope's period, and the cutoff completes that period.
+    no_column = {"id": "r", "metadata": {"source_refresh": {"scope": {"period": "2026-08", "cutoff_at": "2026-09-05T00:00:00Z"}}}}
+    found = _currency(no_column, "", task_period="2026-08", superseded=set())
+    assert (found["period"], found["as_of"], found["period_kind"]) == ("2026-08", "2026-09-05", "month")
+    assert found["freshness"] == {"state": "current", "reasons": []}
+    later = _currency(no_column, "", task_period="2026-09", superseded=set())["freshness"]
+    assert later["state"] == "period_mismatch" and [reason["code"] for reason in later["reasons"]] == ["period_differs"]
+    no_period = {"id": "s", "metadata": {"source_refresh": {"scope": {"cutoff_at": "2026-09-05T00:00:00Z"}}}}
+    found = _currency(no_period, "", task_period="2026-08", superseded=set())
+    assert found["period_kind"] is None and found["freshness"]["state"] == "unknown"
     bare = _currency({"id": "z", "created_at": "2026-08-01T00:00:00Z"}, "", task_period="2026-08", superseded=set())
     assert (bare["as_of"], bare["as_of_source"], bare["period_kind"]) == (None, None, None)
     assert bare["freshness"]["state"] == "unknown"
@@ -391,6 +482,57 @@ def test_readiness_marks_a_superseded_upload_as_stale(tmp_path):
     assert by_id[old["id"]]["freshness"]["state"] == "source_stale"
     assert [reason["code"] for reason in by_id[old["id"]]["freshness"]["reasons"]] == ["superseded"]
     assert by_id[new["id"]]["freshness"]["state"] == "current"
+
+
+def _refresh(task, tmp_path: Path, *, period: str = "2026-08", cutoff: str = "2026-09-05T00:00:00Z", name: str = "ERP 总账"):
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["document_id", "line_id", "account_code", "amount"])
+    sheet.append(["JV-1", "1", "6001", 100])
+    sheet.append(["JV-1", "2", "6001", 20])
+    path = tmp_path / f"erp-{period}.xlsx"
+    book.save(path)
+    scope = SourceScope(source_id="erp", tenant_id="t", ledger_id="l", organization_id="o", period=period,
+                        currency="CNY", cutoff_at=cutoff)
+    return SourceRefreshService(task).refresh_file(path, scope=scope, name=name)
+
+
+@pytest.mark.parametrize(("task_period", "state"), [("2026-08", "current"), ("2026-09", "period_mismatch")])
+def test_a_source_refresh_without_a_period_column_is_judged_by_its_scope_period(tmp_path, task_period, state):
+    """Review: the refresh for the task month read as 期间不符 and last month's as 资料过期."""
+    task, _analysis, store = _readiness_task(tmp_path)
+    refreshed = _refresh(task, tmp_path)
+    _period(store, refreshed["dataset_id"], task_period)
+    (row,) = store.finance_readiness({})["datasets"]
+    assert (row["period"], row["as_of"], row["as_of_source"], row["period_kind"]) == ("2026-08", "2026-09-05", "source_refresh", "month")
+    assert row["freshness"]["state"] == state
+    assert "as_of_before_period_end" not in [reason["code"] for reason in row["freshness"]["reasons"]]
+
+
+def test_a_same_named_file_of_another_period_is_a_period_mismatch_not_superseded(tmp_path):
+    """Review: monthly packs share sheet and file names; last month's 利润表 read as replaced by this month's."""
+    _task_obj, analysis, store = _readiness_task(tmp_path)
+    august = analysis.add_dataset(_ledger(tmp_path / "aug.csv", "2026-08"), name="利润表")
+    september = analysis.add_dataset(_ledger(tmp_path / "sep.csv", "2026-09"), name="利润表")
+    _period(store, september["id"], "2026-09")
+    by_id = {row["dataset_id"]: row for row in store.finance_readiness({})["datasets"]}
+    assert by_id[september["id"]]["freshness"] == {"state": "current", "reasons": []}
+    assert by_id[august["id"]]["freshness"]["state"] == "period_mismatch"
+    assert [reason["code"] for reason in by_id[august["id"]]["freshness"]["reasons"]] == ["period_differs"]
+    # A corrected August upload still replaces the first August file, and nothing else.
+    path = tmp_path / "aug-v2.csv"
+    path.write_text("period,account_code,management_account,amount,currency\n2026-08,6001,revenue,101,CNY\n", encoding="utf-8")
+    corrected = analysis.add_dataset(path, name="利润表")
+    by_id = {row["dataset_id"]: row for row in store.finance_readiness({})["datasets"]}
+    assert [reason["code"] for reason in by_id[august["id"]]["freshness"]["reasons"]] == ["superseded", "period_differs"]
+    assert by_id[september["id"]]["freshness"]["state"] == "current"
+    assert by_id[corrected["id"]]["freshness"]["state"] == "period_mismatch"
+    # The draft side reads the same rule.
+    found = dataset_currency(analysis, [august["id"], september["id"]], task_period="2026-09")
+    assert found[august["id"]]["freshness"]["state"] == "source_stale"
+    assert found[september["id"]]["freshness"]["state"] == "current"
 
 
 def test_the_readiness_cli_carries_freshness(tmp_path, capsys):
@@ -507,6 +649,44 @@ def test_a_draft_on_a_run_that_read_a_superseded_snapshot_is_stale(finance):
     assert draft["explanation_check"]["dataset_freshness"][actual_id]["freshness"]["state"] == "source_stale"
     fact = next(entry for entry in draft["explanation_check"]["evidence_labels"] if entry["key"]["kind"] == "fact")
     assert fact["label"] == "stale_source" and "actual" in fact["reasons"][0]["text"]
+
+
+def test_a_draft_on_last_months_refresh_is_a_period_mismatch_not_a_stale_source(tmp_path):
+    task, analysis, store = _readiness_task(tmp_path)
+    refreshed = _refresh(task, tmp_path)
+    saved = analysis.save_analysis({"question": "合计", "sql": "SELECT SUM(CAST(amount AS DECIMAL(18,2))) AS total FROM ledger",
+                                    "bindings": {"ledger": refreshed["dataset_id"]}})
+    run = analysis.run_analysis(saved["id"])
+    _period(store, refreshed["dataset_id"], "2026-09")
+    draft = store.save_explanation_draft({"body": "合计见计算依据。", "run_ids": [run["id"]], "claims": [
+        {"basis": "calculation", "run_id": run["id"], "row": 0, "column": "total", "value": run["result"]["rows"][0]["total"]}]})
+    check = draft["explanation_check"]
+    assert check["dataset_freshness"][refreshed["dataset_id"]]["state"] == "period_mismatch"
+    assert check["dataset_freshness"][refreshed["dataset_id"]]["period"] == "2026-08"
+    assert not [entry for entry in check["evidence_labels"] if entry["label"] == "stale_source"]
+    assert {entry["label"] for entry in check["evidence_labels"]} == {"derived_calculation"}
+
+
+def test_an_assumption_claim_on_a_fact_keeps_the_draft_from_decision_grade(finance):
+    store, context, _tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    fact = store.prepare_explanation({"run_ids": [run["id"]]})["facts"][0]
+    claim = {"basis": "user_assumption", "reason": "按合同节点假设回款", "fact_id": fact["id"],
+             **{key: fact[key] for key in ("run_id", "row", "column", "value")}}
+    draft = store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [run["id"]], "claims": [claim]})
+    posture = draft["explanation_check"]["evidence_posture"]
+    assert posture["level"] == "research_grade" and posture["counts"]["assumption_user_provided"] == 1
+    assert store.validate_explanation({"draft_id": draft["id"]})["evidence_posture"] == posture
+
+
+def test_malformed_source_read_failures_do_not_break_the_preview_or_the_cli(finance, capsys):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    draft = store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [run["id"]]})
+    assert store.validate_explanation({"draft_id": draft["id"], "source_read_failures": [{"requirement_item_id": ["x"]}]})["evidence_posture"]
+    assert main(["--var", str(tmp / "var"), "--task", store.task.id, "validate-explanation", "--spec",
+                 json.dumps({"draft_id": draft["id"], "source_read_failures": 5})]) == 0
+    assert json.loads(capsys.readouterr().out)["evidence_posture"]["level"]
 
 
 def test_assistant_and_manager_read_the_same_labels(finance, capsys):

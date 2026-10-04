@@ -7,10 +7,12 @@ dataset freshness). Prose is never read for them, and labels or a posture a call
     fact_source_reported        来源原文     a source fact or a cell a recipe matched to the original sheet
     fact_provider_standardized  标准化数据   the finance engine's mapped totals, a verified snapshot aggregate,
                                              or a system source refresh
-    derived_calculation         派生计算     a recorded calculation (SQL, script) the cited value matches
+    derived_calculation         派生计算     a recorded SQL or server calculation the cited value matches (a script's
+                                             output only when a passing source recipe backs it)
     management_claim            管理层说法   a statement a source text makes (a consistency assertion with a text source)
     analyst_interpretation      分析判断     professional judgment, or an assertion with no source text
-    assumption_user_provided    用户假设     written in as an assumption
+    assumption_user_provided    用户假设     written in as an assumption (also when it cites a fact: the writer's
+                                             basis is kept, and the claim counts as an item of its own)
     assumption_inferred         推断假设     a result row read as an estimate from its own fields or words,
                                              with no requirement declaring it
     estimate                    估算         declared an estimate by the requirements, or a factor recipe
@@ -20,13 +22,15 @@ dataset freshness). Prose is never read for them, and labels or a posture a call
                                              that does not close, a consistency mismatch, a revision regression
     missing_required_source     缺必需来源   a required fact not cited, a cited fact that no longer exists, an
                                              unanswered requirement, a source check not done or not readable
-    unknown                     未知         a number in the text bound to nothing, or a claim naming no basis or source
+    unknown                     未知         a number in the text bound to nothing, a claim naming no basis or source,
+                                             script output no source recipe backs, or a recipe that only proves
+                                             a free coefficient
 
 The label shown is contradicted_source, else missing_required_source, else stale_source, else the base label;
 ``base_label`` always keeps what the evidence is, so a stale or contradicted label never erases provenance.
 
 Evidence posture (rules_version 1). Counted over the labelled items; a claim and the fact it cites are one item,
-labelled by the worse of the two:
+labelled by the worse of the two, except an assumption or judgment claim, which is an item of its own:
 
     无法支持 unsupported      any contradicted_source or missing_required_source
     假设主导 assumption_led   else, user assumptions, inferred assumptions and estimates are at least half the items
@@ -42,10 +46,11 @@ source-backed, not that the manager approved anything.
 Dataset freshness compares only declared periods and dates (never the machine clock) with the task period,
 the period of the latest requirements scope:
 
-    source_stale     资料过期   superseded by a newer upload of the same name or a published refresh, or the
-                                file is as of a date inside the period but before it closes
-    period_mismatch  期间不符   the declared period is not the task period, or an as-of-only file is dated
-                                before or after it
+    source_stale     资料过期   superseded by a published refresh or a newer upload of the same name (unless the
+                                two declare different periods), or the file covers the task period but is as of a
+                                date before the period closes
+    period_mismatch  期间不符   the declared period is not the task period (a dated file of another period is a
+                                mismatch, not stale), or an as-of-only file is dated before or after it
     unknown          未声明     no task period, or the file declares neither period nor as-of date
     current          当前       otherwise
 """
@@ -55,6 +60,7 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 RULES_VERSION = "1"
@@ -93,6 +99,11 @@ PROBLEMS = (CONTRADICTED, MISSING, STALE)
 ASSUMED = ("assumption_user_provided", "assumption_inferred", "estimate")
 JUDGED = (*ASSUMED, "analyst_interpretation", "management_claim")
 PASSED_CHECKS = {"pass", "pass_with_accepted_estimates"}
+# A claim that says the number is assumed or judged keeps that basis even when it cites a fact.
+OWN_BASIS = {
+    "user_assumption": ("assumption_user_provided", "claim_assumption", "按假设写入，没有来源可核对"),
+    "professional_judgment": ("analyst_interpretation", "claim_judgment", "专业判断，需要复核"),
+}
 
 _PERIOD = re.compile(r"(\d{4})\s*[-./年]\s*(\d{1,2})\s*月?")
 _COMPACT_PERIOD = re.compile(r"(\d{4})(\d{2})")
@@ -172,12 +183,17 @@ def dataset_freshness(
         unknown.append(_reason("no_dataset_period", "资料没有声明期间或截至日"))
     else:
         start, end, _kind = task
-        if own and not (own[0] <= start and end <= own[1]):
+        covers = bool(own) and own[0] <= start and end <= own[1]
+        if own and not covers:
             mismatch.append(_reason("period_differs", f"资料期间 {period} 与分析期间 {task_period} 不同"))
         if as_of and own:
-            # A dated extract of the right period that stops before the period closes is incomplete.
-            if as_of < end:
+            # A dated extract of the right period that stops before the period closes is incomplete. A file of
+            # another period (last month's baseline) is a period mismatch, never stale for that alone; that it
+            # stops before its own period closes is said beside the mismatch.
+            if covers and as_of < end:
                 stale.append(_reason("as_of_before_period_end", f"截至日 {as_of} 早于期末 {end}"))
+            elif not covers and as_of < own[1]:
+                mismatch.append(_reason("as_of_before_own_period_end", f"截至日 {as_of} 早于该资料期末 {own[1]}，资料本身可能不完整"))
         elif as_of:
             # An as-of-only file (a balance at a date) names a point: before the period is another period,
             # inside it before the close is incomplete, after it is a later point.
@@ -206,6 +222,23 @@ def _cell(value: Any) -> tuple[str, int, str] | None:
     if not isinstance(run_id, str) or isinstance(row, bool) or not isinstance(row, int) or not isinstance(column, str):
         return None
     return run_id, row, column
+
+
+def _same_number(left: Any, right: Any) -> bool:
+    if left == right:
+        return True
+    try:
+        return Decimal(str(left)) == Decimal(str(right))
+    except InvalidOperation:
+        return False
+
+
+def _run_value(run: dict | None, row: int, column: str) -> tuple[bool, Any]:
+    """The cell a calculation claim names, as the run stored it; (False, None) when it is not there."""
+    rows = ((run or {}).get("result") or {}).get("rows")
+    if isinstance(rows, list) and 0 <= row < len(rows) and isinstance(rows[row], dict) and column in rows[row]:
+        return True, rows[row][column]
+    return False, None
 
 
 def _where(location: Any) -> str:
@@ -315,12 +348,6 @@ class _Labeler:
             for member in group.get("members") or []:
                 if found and isinstance(member, dict) and isinstance(member.get("fact_id"), str):
                     self.group_problems.setdefault(member["fact_id"], []).extend(found)
-        self.claim_errors = {}
-        for issue in self.issues:
-            if issue.get("code") in {"claim_value_mismatch", "invalid_claim_location"}:
-                cell = _cell(issue)
-                if cell:
-                    self.claim_errors[cell] = issue["code"]
         self.cells: dict[tuple, _Entry] = {}
 
     # Cells: one entry per cited or located cell, shared by the claims that cite it.
@@ -334,9 +361,9 @@ class _Labeler:
         entry = _Entry({**key, "run_id": run_id, "row": row, "column": column})
         run = self.runs.get(run_id)
         self._locations(entry, cell)
-        self._recipes(entry, cell)
+        coefficient_only = self._recipes(entry, cell)
         self._row_estimate(entry, cell)
-        self._engine(entry, run, fact)
+        self._engine(entry, run, fact, coefficient_only=coefficient_only)
         if fact:
             for label, reason in self.group_problems.get(fact["id"], []):
                 entry.problem(label, reason)
@@ -363,7 +390,10 @@ class _Labeler:
                          "evidence_incomplete": "证据缺项、口径或单位不一致，或复算不闭合"}.get(reason, "计算依据不完整")
                 entry.problem(MISSING, _reason("requirement_evidence_incomplete", words))
 
-    def _recipes(self, entry: _Entry, cell: tuple) -> None:
+    def _recipes(self, entry: _Entry, cell: tuple) -> bool:
+        """Sets the base a passing source or estimate recipe proves; True when a passing recipe only
+        proved a free coefficient, which traces nothing to the source."""
+        coefficient_only = False
         for result in self.recipes.get(cell, []):
             where = _where(result.get("location"))
             entry.refs.extend(result.get("source_refs") or [])
@@ -381,7 +411,8 @@ class _Labeler:
             elif evidence_class == "source_calculation":
                 entry.set_base("derived_calculation", _reason("recipe_source_calculation", f"来源复算：按原表{where or '单元格'}计算一致"))
             elif evidence_class == "coefficient_unbound":
-                entry.base_reasons.append(_reason("recipe_coefficient", "来源复算用了自定义系数，只证明了乘法关系"))
+                coefficient_only = True
+        return coefficient_only
 
     def _row_estimate(self, entry: _Entry, cell: tuple) -> None:
         sources = self.row_estimates.get((cell[0], cell[1])) or []
@@ -393,7 +424,7 @@ class _Labeler:
             entry.set_base("assumption_inferred", _reason(
                 "row_reads_as_estimate", f"结果行自己的字段或文字表明是估算（{'、'.join(dict.fromkeys(fields))}），没有要求声明"))
 
-    def _engine(self, entry: _Entry, run: dict | None, fact: dict | None) -> None:
+    def _engine(self, entry: _Entry, run: dict | None, fact: dict | None, *, coefficient_only: bool = False) -> None:
         if not run or run.get("execution_status") != "succeeded":
             entry.set_base("unknown", _reason("run_unavailable", "引用的计算不在本稿内或没有成功"))
             return
@@ -409,10 +440,14 @@ class _Labeler:
             entry.set_base("fact_provider_standardized", _reason("engine_finance", "财务引擎按科目映射汇总的结果"))
         elif engine == "structured_aggregate" and ((run.get("result") or {}).get("provenance") or {}).get("status") == "verified":
             entry.set_base("fact_provider_standardized", _reason("engine_aggregate", "服务端按快照分组汇总，来源行已核对"))
+        elif coefficient_only:
+            entry.set_base("unknown", _reason("recipe_coefficient", "来源复算用了自定义系数，只证明了乘法关系，没有追到原表"))
+        elif engine in {"python", "shell"}:
+            # A script's output is not re-executed or traced on the server; only a passing source recipe
+            # (handled above) says where its number comes from.
+            entry.set_base("unknown", _reason("run_script", "只有脚本输出，没有通过的来源复算，没有追到原表"))
         elif any((self.datasets.get(dataset_id) or {}).get("standardized") for dataset_id in bindings.values()):
             entry.set_base("derived_calculation", _reason("run_on_refresh", "由一次计算从系统刷新的标准化资料得出，引用值与结果一致"))
-        elif engine in {"python", "shell"}:
-            entry.set_base("derived_calculation", _reason("run_script", "由脚本计算得出，引用值与结果一致；未逐格追到原表"))
         else:
             entry.set_base("derived_calculation", _reason("run_calculation", "由一次计算得出，引用值与结果一致"))
 
@@ -451,13 +486,21 @@ class _Labeler:
         if cell:
             shared = self.cell(cell)
             entry = _Entry({**key, **{k: v for k, v in shared.key.items() if k != "kind"}})
-            entry.base, entry.base_reasons = shared.base, list(shared.base_reasons)
+            if basis in OWN_BASIS:
+                # The writer said this number is assumed or judged: that is what it is, whatever the cell is.
+                label, code, words = OWN_BASIS[basis]
+                entry.set_base(label, _reason(code, words))
+            else:
+                entry.base, entry.base_reasons = shared.base, list(shared.base_reasons)
             entry.problems = {code: list(reasons) for code, reasons in shared.problems.items()}
             entry.refs, entry.as_of, entry.period = list(shared.refs), shared.as_of, shared.period
             if fact and any(claim.get(name) != fact.get(name) for name in ("run_id", "row", "column", "value")):
                 entry.problem(CONTRADICTED, _reason("fact_claim_mismatch", "引用的数和事实记录不一致"))
-            if not fact and self.claim_errors.get(cell) == "claim_value_mismatch":
-                entry.problem(CONTRADICTED, _reason("claim_value_mismatch", "引用的数与计算结果不一致"))
+            if not fact:
+                # This claim's own value against the run's cell, as validate_explanation compares it.
+                found, actual = _run_value(self.runs.get(cell[0]), cell[1], cell[2])
+                if found and not _same_number(actual, claim.get("value")):
+                    entry.problem(CONTRADICTED, _reason("claim_value_mismatch", "引用的数与计算结果不一致"))
             return entry.output()
         entry = _Entry(key)
         dataset_id = claim.get("dataset_id") if isinstance(claim.get("dataset_id"), str) else None
@@ -482,10 +525,9 @@ class _Labeler:
             entry.set_base("unknown", _reason("claim_no_source", "说是来源事实，但没有指明出自哪份资料"))
         elif basis == "external_reference":
             entry.set_base("unknown", _reason("claim_external", "外部资料没有存进任务，无法核对原文"))
-        elif basis == "user_assumption":
-            entry.set_base("assumption_user_provided", _reason("claim_assumption", "按假设写入，没有来源可核对"))
-        elif basis == "professional_judgment":
-            entry.set_base("analyst_interpretation", _reason("claim_judgment", "专业判断，需要复核"))
+        elif basis in OWN_BASIS:
+            label, code, words = OWN_BASIS[basis]
+            entry.set_base(label, _reason(code, words))
         else:
             entry.set_base("unknown", _reason("claim_no_basis", "引用没有写明依据类型"))
         return entry.output()
@@ -551,7 +593,7 @@ def label_evidence(
     older_runs: set[str] | frozenset[str],
     row_estimates: dict[tuple[str, int], list[dict]],
     datasets: dict[str, dict],
-    source_read_failures: list[Any] = (),
+    source_read_failures: Any = (),
 ) -> list[dict[str, Any]]:
     """The labels in a fixed order: claims by index, facts by fact_id, located cells, then requirement items,
     consistency assertions, revision regressions and uncited numbers in the order their records hold them."""
@@ -588,7 +630,10 @@ def label_evidence(
         if cell not in labeler.by_cell:
             labels.append(labeler.cell(cell).output())
 
-    failures = {failure.get("requirement_item_id") for failure in source_read_failures if isinstance(failure, dict)}
+    from foundry.finance_requirements import _source_read_failures
+
+    # Read as the requirements check reads them: a list of objects naming an item; anything else is nothing.
+    failures = set(_source_read_failures(source_read_failures))
     for item in (requirements or {}).get("items") or []:
         if isinstance(item, dict):
             entry = labeler.requirement(item, failures)
@@ -604,8 +649,11 @@ def label_evidence(
 
 
 def _identity(entry: dict[str, Any], position: int) -> tuple:
-    """A claim and the fact or cell it cites are one item."""
+    """A claim and the fact or cell it cites are one item, unless the claim says its number is assumed or
+    judged: then it is an item of its own, so the assumption is never folded into the fact."""
     key = entry.get("key") or {}
+    if key.get("kind") == "claim" and key.get("basis") in OWN_BASIS:
+        return ("entry", position)
     if key.get("fact_id"):
         return ("fact", key["fact_id"])
     if key.get("kind") in {"claim", "location"} and key.get("run_id") is not None and key.get("column") is not None:
@@ -660,7 +708,7 @@ def evidence_posture(labels: list[dict[str, Any]], checks: dict[str, Any] | None
             level, drivers = "research_grade", lines(JUDGED)
         else:
             level = "decision_grade"
-            drivers = [_reason("source_backed", "引用的数字都有来源原文、标准化数据或可复算的计算，问题覆盖和来源追溯已核对")]
+            drivers = [_reason("source_backed", "引用的数字都出自来源原文、标准化数据或系统记录的计算，问题覆盖和来源追溯已核对")]
     return {"level": level, "text": POSTURES[level], "counts": counts, "drivers": drivers, "rules_version": RULES_VERSION}
 
 
@@ -676,7 +724,7 @@ def draft_evidence(
     runs: dict[str, dict],
     evidence_report: dict[str, Any],
     consistency_report: dict[str, Any],
-    source_read_failures: list[Any] = (),
+    source_read_failures: Any = (),
 ) -> dict[str, Any]:
     """Labels, posture and cited-dataset freshness for one assembled explanation check.
 
@@ -726,7 +774,7 @@ def draft_evidence(
         requirements=check.get("requirements") or {}, recipe_results=recipe_results,
         consistency_results=[result for result in (consistency_report or {}).get("results") or [] if isinstance(result, dict)],
         runs=runs, older_runs=older, row_estimates=row_estimates, datasets=datasets,
-        source_read_failures=list(source_read_failures or []),
+        source_read_failures=source_read_failures,
     )
     return {
         "evidence_labels": labels,
