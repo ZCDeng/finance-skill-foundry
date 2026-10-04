@@ -142,6 +142,12 @@ def test_a_file_added_after_the_calculation_asks_for_a_rerun():
     assert "上次计算之后又加了资料，请重新计算" in result["blocking"]
 
 
+def test_a_file_a_roll_forward_places_in_another_month_asks_for_no_rerun():
+    copy = {"id": "d2", "name": "月结（2026-10 滚动）.xlsx", "source_hash": "b" * 64, "seq": 30}
+    result = _status(datasets=[*DATASETS, copy], other_months={copy["source_hash"]})
+    assert "上次计算之后又加了资料，请重新计算" not in result["blocking"]
+
+
 def test_a_calculation_on_a_replaced_snapshot_asks_for_a_rerun():
     result = _status(runs=[{**RUN, "id": "r1", "bindings": {"actual": "old"}}], replaced={"old"},
                      draft={**CLEAN_DRAFT, "run_ids": ["r1"]})

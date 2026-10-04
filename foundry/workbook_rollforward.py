@@ -648,8 +648,9 @@ def output_name(name: str, period: str) -> str:
     the suggested name and added again replaces the copy as a newer version of it.
     """
     stem = re.sub(r"\.xlsx$", "", str(name or "").strip(), flags=re.I)
-    # The characters the export dialog cannot put in a file name, replaced as it replaces them.
-    stem = re.sub(r'[\\/:*?"<>|]', "_", stem) or "工作簿"
+    # The characters the export dialog cannot put in a file name, replaced as it replaces them;
+    # control characters it refuses outright, so they are dropped as the staged file drops them.
+    stem = re.sub(r'[\\/:*?"<>|]', "_", re.sub(r"[\x00-\x1f\x7f]", "", stem)).strip() or "工作簿"
     return f"{stem[:160]}（{period} 滚动）.xlsx"
 
 

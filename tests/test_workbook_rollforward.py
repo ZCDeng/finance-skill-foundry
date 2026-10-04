@@ -738,6 +738,8 @@ def test_a_name_the_export_dialog_cannot_use_is_replaced_in_the_copy_name_as_wel
     copy = analysis.read_dataset(run["output_dataset_id"])
     # The dialog suggests the copy's name with \\ / : * ? " < > | as _, so the name in the list matches it.
     assert copy["name"] == output_name("华东:华南套表.xlsx", "2026-09") == "华东_华南套表（2026-09 滚动）.xlsx"
+    # The dialog refuses a name with a control character, so the copy's name leaves it out.
+    assert output_name("八月\t套表.xlsx", "2026-09") == "八月套表（2026-09 滚动）.xlsx"
     analysis.add_dataset(_saved_in_excel(analysis, copy, tmp_path), name=copy["name"], metadata={"mode": "workbook"})
     assert run["output_dataset_id"] in superseded_snapshots(task)
 
@@ -760,6 +762,39 @@ def test_a_copy_made_for_next_month_is_that_months_book_not_this_ones(pack, tmp_
     status = store.finance_close_status()
     assert readded["id"] not in {book["dataset_id"] for book in status["conclusion"]["workbooks"]}
     assert not [text for text in _close_texts(status) if copy["name"] in text]
+
+
+@pytest.mark.parametrize("period", ["2026年9月", "2026-01至2026-09", "2026-01:2026-09", ["2026-09"]])
+def test_a_scope_period_written_another_way_still_closes_the_copys_month(pack, period) -> None:
+    from foundry.finance_service import FinanceStore
+
+    task, analysis, august, balances, _ = pack
+    store = FinanceStore(task, actor="manager")
+    store.analysis_requirements_save({"question": "九月月结", "scope": {"period": period},
+                                      "bindings": {"ledger": balances["id"]}, "items": []})
+    store.structure_propose(august["id"])
+    files = FinanceFiles(task, actor="manager")
+    run = files.rollforward_apply({"plan_id": _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
+    status = store.finance_close_status()
+    books = {book["dataset_id"] for book in status["conclusion"]["workbooks"]}
+    assert run["output_dataset_id"] in books and august["id"] not in books
+    assert not [text for text in _close_texts(status) if text.startswith("八月套表")]
+
+
+def test_a_book_two_roll_forwards_back_is_not_this_months_either(pack) -> None:
+    from foundry.finance_service import FinanceStore
+
+    task, analysis, july, balances, _ = pack  # the fixture's workbook stands in for July's book here
+    store = FinanceStore(task, actor="manager")
+    store.analysis_requirements_save({"question": "九月月结", "scope": {"period": "2026-09"},
+                                      "bindings": {"ledger": balances["id"]}, "items": []})
+    files = FinanceFiles(task, actor="manager")
+    run = files.rollforward_apply({"plan_id": _preview(files, july, [_map("利润表", "B5", _cell(balances, "B1"))],
+                                                       period="2026-08")["plan_id"]})
+    august = analysis.read_dataset(run["output_dataset_id"])
+    run = files.rollforward_apply({"plan_id": _preview(files, august, [_map("利润表", "B5", _cell(balances, "B2"))])["plan_id"]})
+    books = {book["dataset_id"] for book in store.finance_close_status()["conclusion"]["workbooks"]}
+    assert run["output_dataset_id"] in books and not {july["id"], august["id"]} & books
 
 
 def test_apply_refuses_when_the_source_of_a_blocked_row_changed(pack) -> None:
