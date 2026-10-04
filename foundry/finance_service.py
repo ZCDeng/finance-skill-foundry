@@ -1613,7 +1613,7 @@ class FinanceStore:
         """
         from foundry.finance_controls import applies_to, clean_finding, lineage
 
-        if not isinstance(spec, dict) or not spec.get("control_id"):
+        if not isinstance(spec, dict) or not isinstance(spec.get("control_id"), str) or not spec["control_id"]:
             raise FoundryError("finding requires control_id")
         fields = clean_finding(spec)
         listed = {row["id"]: row for row in self.finance_controls_list({})["controls"]}
@@ -1622,7 +1622,7 @@ class FinanceStore:
             raise FoundryError("control is not the latest version or does not exist")
         result = row.get("result") or {}
         if result.get("status") not in {"break", "error"}:
-            raise FoundryError("only a current difference can be given a finding type; run the control first")
+            raise FoundryError("only a current difference can be given a finding type; this control passes, reads a replaced snapshot, or has not run")
         key = lineage(row["control"])
         kept = self._findings_by_lineage().get(key, [])
         last = kept[-1] if kept else None

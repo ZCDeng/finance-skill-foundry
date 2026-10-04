@@ -98,7 +98,7 @@ const RULES: Rule[] = [
   [/control refers to a snapshot that is not in this task/i, '这本工作簿不在当前任务里，请重新打开表单选择。'],
   // 问题类型 on a difference.
   [/finding type must be one of/i, '问题类型只能从五类里选：公式或控制缺陷、来源矛盾、无依据假设、未更新、口径不同。'],
-  [/only a current difference can be given a finding type/i, '这条控制现在没有差异（已相符、资料已更新或还没运行），不能定问题类型。请先重新运行控制。'],
+  [/only a current difference can be given a finding type/i, '这条控制现在没有可定类型的差异：可能已经相符、读的资料已有新版本，或还没运行。点「重新运行」看最新结果；仍不相符或读不出的差异才能定问题类型。'],
   [/finding note is too long/i, '类型说明最多 500 字，请精简后再保存。'],
   [/finding requires control_id/i, '没有指明是哪项差异，请刷新后重新选择。'],
   // The scope record (analysis requirements).

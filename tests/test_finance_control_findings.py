@@ -109,8 +109,10 @@ def test_only_a_current_difference_takes_one_of_the_five_types(tmp_path):
             store.finance_control_finding_save({"control_id": control["id"], "finding_type": "rounding"})
         with pytest.raises(FoundryError, match="finding type must be one of"):
             store.finance_control_finding_save({"control_id": control["id"]})
-        with pytest.raises(FoundryError, match="finding requires control_id"):
-            store.finance_control_finding_save({"finding_type": "not_updated"})
+        for missing in ({"finding_type": "not_updated"}, {"control_id": ["x"], "finding_type": "not_updated"},
+                        {"control_id": {"id": control["id"]}, "finding_type": "not_updated"}, {"control_id": 7, "finding_type": "not_updated"}):
+            with pytest.raises(FoundryError, match="finding requires control_id"):
+                store.finance_control_finding_save(missing)
         with pytest.raises(FoundryError, match="finding note is too long"):
             store.finance_control_finding_save({"control_id": control["id"], "finding_type": "not_updated", "note": "长" * 501})
     good = analysis.add_dataset(_ar_pack(tmp_path / "ok.xlsx", provisions=BALANCED, total=22125), name="另一套")
