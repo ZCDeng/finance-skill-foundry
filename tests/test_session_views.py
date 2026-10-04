@@ -191,7 +191,36 @@ def test_a_context_grant_answers_a_hidden_parent_as_an_unknown_one(revision):
                                                 {"context_id": granted, "parent_id": revision.child["id"]})
 
 
-def test_a_session_reads_a_revision_s_statuses_as_saved_with_no_parent(tmp_path, capsys):
+def test_a_revision_that_kept_its_parent_s_generated_appendix_rests_on_the_parent(revision, capsys):
+    manager = FinanceStore(revision.task)
+    hidden = {}
+    for scenario, amounts in (("actual", [987654, 70, 20]), ("budget", [100, 60, 15])):
+        hidden[scenario] = revision.analysis.add_dataset(_ledger(revision.var.parent / f"{scenario}.json", [
+            {"account_code": code, "management_account": account, "amount": amount}
+            for code, account, amount in zip(("6001", "6401", "6601"), ("revenue", "cost", "expense"), amounts)]),
+            name=scenario)["id"]
+    context = manager.save_context({"bindings": hidden, "scopes": {alias: {
+        "ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "万元", "scenario": alias}
+        for alias in hidden}})
+    run = manager.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    parent = manager.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
+    assert "987,654" in parent["evidence_appendix"]
+    # Edited in the desktop with a new body and runs: the generated appendix stays the parent's.
+    spec = {"parent_id": parent["id"], "title": "C", "body": "收入说明（修订）。", "run_ids": [revision.ra["id"]], "claims": []}
+    code, child = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False),
+                       session=None, task=revision.task.id)
+    assert code == 0 and child["evidence_appendix"] == parent["evidence_appendix"]
+    code, state = _cli(capsys, revision.var, "analysis-state")
+    assert child["id"] not in [draft["id"] for draft in state["drafts"]] and "987,654" not in json.dumps(state, ensure_ascii=False)
+    assert _cli(capsys, revision.var, "report-draft-read", "--draft", child["id"])[0] != 0
+    # A revision with text of its own reads with no parent.
+    code, own = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(
+        {**spec, "evidence_appendix": "", "evidence_appendix_meta": {}}, ensure_ascii=False), session=None, task=revision.task.id)
+    code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", own["id"])
+    assert code == 0 and read["parent_id"] is None and "987,654" not in json.dumps(read, ensure_ascii=False)
+
+
+def test_a_session_never_reads_a_revision_as_more_reviewed_than_it_was_saved(tmp_path, capsys):
     var = tmp_path / "var"
     task = TaskStore(var).create(title="复核状态")
     analysis = AnalysisStore(task)
@@ -210,21 +239,24 @@ def test_a_session_reads_a_revision_s_statuses_as_saved_with_no_parent(tmp_path,
     def claim(run):
         return {"basis": "calculation", "run_id": run["id"], "row": 0, "column": "amount", "value": run["result"]["rows"][0]["amount"]}
 
-    parent = analysis.save_draft({"title": "P", "body": f"收入 {SECRET} 元。", "run_ids": [rh["id"]], "claims": [claim(rh)]})
-    spec = {"title": "C", "body": "收入 100 元。", "run_ids": [ra["id"]], "claims": [claim(ra)], "review_status": "reviewed"}
-    child = analysis.save_draft({**spec, "parent_id": parent["id"]})
-    alone = analysis.save_draft(spec)
+    parent = analysis.save_draft({"title": "P", "body": f"收入 {SECRET} 元。", "run_ids": [rh["id"]], "claims": [claim(rh)],
+                                  "review_status": "accepted"})
+    # The editor sends the review it showed; the changed body was never reviewed, so the save resets it.
+    child = analysis.save_draft({"title": "C", "parent_id": parent["id"], "body": "收入 100 元。", "run_ids": [ra["id"]],
+                                 "claims": [claim(ra)], "review_status": "accepted"})
     assert (child["review_status"], child["reproducibility_status"]) == ("unreviewed", "unverified")
-    assert (alone["review_status"], alone["reproducibility_status"]) == ("reviewed", "reproducible")
-    read = {draft_id: _cli(capsys, var, "report-draft-read", "--draft", draft_id)[1] for draft_id in (child["id"], alone["id"])}
-    shown, expected = read[child["id"]], read[alone["id"]]
+    code, shown = _cli(capsys, var, "report-draft-read", "--draft", child["id"])
+    assert code == 0 and shown["parent_id"] is None
     assert _shows(shown, [parent["id"], rh["id"], h["id"], SECRET]) == []
-    assert "requested_review_status" not in shown
-    for key in ("review_status", "reproducibility_status", "explanation_check", "quality"):
-        assert shown[key] == expected[key]
-    # The manager, and a session that may read the parent, read the statuses the change from the parent reset.
-    code, managed = _cli(capsys, var, "report-draft-read", "--draft", child["id"], session=None, task=task.id)
-    assert (managed["review_status"], managed["reproducibility_status"]) == ("unreviewed", "unverified")
+    for key in ("review_status", "reproducibility_status"):
+        assert shown[key] == child[key]
+    for key in ("explanation_check", "quality"):
+        assert shown[key]["status_dimensions"]["professional_review"]["status"] == "unreviewed"
+    # A management projection, which an export is rendered from, reads the same review for the session as for the manager.
+    command = ("report-projection-read", "--draft", child["id"], "--mode", "management")
+    projections = [_cli(capsys, var, *command)[1], _cli(capsys, var, *command, session=None, task=task.id)[1]]
+    assert projections[0]["review_status"] == projections[1]["review_status"] == "unreviewed"
+    assert projections[0]["projection_hash"] == projections[1]["projection_hash"]
 
 
 # --- completion receipts -------------------------------------------------------------------------------------------
@@ -306,6 +338,53 @@ def test_a_session_reads_a_repair_budget_spent_only_by_drafts_it_may_read(tmp_pa
     for receipts in read:
         assert [(receipt["repair_attempts"], receipt["status"], receipt["stop_reason"], receipt["repair_allowed"])
                 for receipt in receipts] == [(0, "repair_available", None, True)] * 2
+
+
+def test_a_session_s_completion_operation_goes_on_by_the_budget_its_own_drafts_spent(tmp_path, capsys):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    settled = []
+    for hidden in (0, 2):
+        sess, wide, _run = _chain(tmp_path, hidden)
+        operations = CompletionOperationStore(sess.task, "sess", sess.allowed)
+        operation = operations.begin(f"request-{hidden}", policy={"max_repairs": 2})
+        saved = sess.save_completion_draft(operation["id"], "call-1", {"body": "请查看计算依据。"})
+        # Recovered by the manager after the session stopped: the operation settles on the session's reading too.
+        stopped = operations.begin(f"stopped-{hidden}", policy={"max_repairs": 2})
+        operations.reserve(stopped["id"], payload={"body": "恢复稿。"}, call_id="call-1")
+        operations.stop(stopped["id"], "timeout")
+        recovered = FinanceStore(sess.task).recover_completion_draft({"operation_id": stopped["id"], "revision": 1,
+                                                                       "draft": {"body": "恢复稿。"}})
+        for record in (saved["completion_operation"], operations.get(saved["completion_operation"]["id"]),
+                       recovered["completion_operation"]):
+            [revision] = record["revisions"]
+            settled.append((hidden, revision["completion_status"], revision["completion_stop_reason"], revision["repair_allowed"]))
+        # The receipt keeps what every earlier draft spent, as the manager and a reader of all of them read it.
+        stored = sess.analysis._get("completions", saved["completion"]["id"])
+        assert stored["repair_attempts"] == hidden
+        code, state = _cli(capsys, tmp_path / f"var{hidden}", "analysis-state", session=None, task=sess.task.id)
+        assert [receipt for receipt in state["completions"] if receipt["id"] == stored["id"]] == [stored]
+        assert wide._readable_receipt(stored)["repair_attempts"] == hidden
+        assert sess._readable_receipt(stored)["repair_attempts"] == 0
+    assert [row[1:] for row in settled if row[0] == 2] == [row[1:] for row in settled if row[0] == 0]
+
+
+@pytest.mark.parametrize("hidden", [0, 2])
+def test_a_session_counts_its_repairs_over_the_drafts_it_may_read(tmp_path, capsys, hidden):
+    sess, _wide, _run = _chain(tmp_path / "own", hidden)
+    own = [sess.save_explanation_draft({"body": f"第{index}稿。"})["completion"] for index in range(3)]
+    code, state = _cli(capsys, tmp_path / "own" / f"var{hidden}", "analysis-state")
+    listed = {receipt["id"]: receipt for receipt in state["completions"]}
+    expected = [(0, "repair_available", None, True), (1, "repair_available", None, True),
+                (2, "needs_review", "repair_budget_exhausted", False)]
+    for receipts in (own, [listed[receipt["id"]] for receipt in own]):
+        assert [(receipt["repair_attempts"], receipt["status"], receipt["stop_reason"], receipt["repair_allowed"])
+                for receipt in receipts] == expected
+    # The same issues twice: the session stops for no progress, on its own receipts alone.
+    sess, _wide, _run = _chain(tmp_path / "stall", hidden)
+    stalled = [sess.save_explanation_draft({"body": body})["completion"] for body in ("收入说明甲。", "收入说明乙。")]
+    assert [(receipt["repair_attempts"], receipt["status"], receipt["stop_reason"], receipt["repair_allowed"])
+            for receipt in stalled] == [(0, "repair_available", None, True), (1, "needs_review", "no_progress", False)]
 
 
 def test_a_session_lists_only_the_requirements_and_evidence_checks_it_may_read(tmp_path, capsys):
@@ -509,20 +588,51 @@ def test_a_session_reads_the_verdict_of_a_receipt_whose_draft_checked_a_run_it_m
     assert receipt["status"] == saved["completion"]["status"]
 
 
-def test_a_session_cites_no_run_it_may_not_read_through_an_evidence_recipe(revision, capsys):
-    recipe = {"id": "direct", "kind": "direct", "dataset_id": revision.a["id"], "source_hash": revision.a["source_hash"],
-              "sheet": "Sheet1", "range": "D2", "claim": {"run_id": revision.rh["id"], "row": 0, "column": "amount"}}
-    spec = {"body": "收入 100。", "run_ids": [revision.ra["id"]], "evidence_recipes": [recipe]}
-    session = FinanceStore(revision.task, snapshot_ids=[revision.a["id"]], session_id="sess")
-    before = len(revision.analysis._list("drafts"))
+def test_a_session_cites_no_run_it_may_not_read_through_an_evidence_recipe(tmp_path, capsys):
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="配方")
+    analysis = AnalysisStore(task)
+    pack = analysis.add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=BROKEN, total=33780), name="月结")
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_csv(tmp_path / "h.csv", [("revenue", "2026-08", "集团", SECRET, "CNY", "元")]), name="薪酬")
+    rh = analysis.run_analysis(analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": h["id"]}})["id"])
+    recipe = {"id": "direct", "kind": "direct", "dataset_id": pack["id"], "source_hash": pack["source_hash"],
+              "sheet": "08·AR", "range": "D11", "claim": {"run_id": rh["id"], "row": 0, "column": "amount"}}
+    spec = {"body": "坏账合计。", "evidence_recipes": [recipe]}
+    hidden = [h["id"], rh["id"], SECRET]
+    # The recipe's result shows the cited run's value.
+    assert SECRET in json.dumps(FinanceStore(task).validate_explanation(spec)["evidence_report"], ensure_ascii=False)
+    session = FinanceStore(task, snapshot_ids=[pack["id"]], session_id="sess")
+    before = len(analysis._list("drafts"))
     for call in (session.validate_explanation, session.save_explanation_draft,
-                 lambda spec: session.prepare_explanation({**spec, "run_ids": [revision.ra["id"]]})):
+                 lambda spec: session.prepare_explanation({**spec, "run_ids": [rh["id"]]})):
         with pytest.raises(FoundryError) as refused:
             call(spec)
-        assert _shows(str(refused.value), revision.hidden) == []
-    code, error = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))
-    assert code != 0 and _shows(error, revision.hidden) == []
-    assert len(revision.analysis._list("drafts")) == before
+        assert _shows(str(refused.value), hidden) == []
+    code, error = _cli(capsys, var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))
+    assert code != 0 and _shows(error, hidden) == []
+    assert len(analysis._list("drafts")) == before
+
+
+def test_the_manager_reads_a_recipe_citing_a_run_that_does_not_read_as_an_issue(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="配方")
+    pack = AnalysisStore(task).add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=BROKEN, total=33780), name="月结")
+    task.record_session("sess", role="analysis")
+    recipe = {"id": "direct", "kind": "direct", "dataset_id": pack["id"], "source_hash": pack["source_hash"],
+              "sheet": "08·AR", "range": "D11", "claim": {"run_id": "0" * 32, "row": 0, "column": "amount"}}
+    spec = {"body": "坏账合计。", "evidence_recipes": [recipe]}
+    manager = FinanceStore(task)
+    assert manager.validate_explanation(spec)["evidence_report"]["summary"]["status"] == "needs_attention"
+    saved = manager.save_explanation_draft(spec)
+    assert saved["evidence_report"]["summary"]["status"] == "needs_attention"
+    # The manager still checks and revises that draft, keeping the recipe or dropping it.
+    assert manager.validate_explanation({"draft_id": saved["id"]})["evidence_report"]["summary"]["status"] == "needs_attention"
+    for recipes in ([recipe], []):
+        assert manager.save_explanation_draft({"parent_id": saved["id"], "body": "坏账合计（修订）。",
+                                               "evidence_recipes": recipes})["parent_id"] == saved["id"]
+    # A session cites only a run it may read.
+    with pytest.raises(FoundryError):
+        FinanceStore(task, snapshot_ids=[pack["id"]], session_id="sess").validate_explanation(spec)
 
 
 # --- month close and controls ---------------------------------------------------------------------------------------

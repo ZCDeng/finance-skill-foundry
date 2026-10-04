@@ -210,9 +210,11 @@ class FinanceStore:
 
         for dataset_id in recipe_dataset_ids(recipes):
             self._authorize({"evidence": dataset_id})
-        # A recipe's claim cites a run cell, whose value the recipe's result shows (analysis_cli._bound_evidence).
-        for run_id in recipe_run_ids(recipes):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        # A recipe's claim cites a run cell, whose value the recipe's result shows: a session may cite only a run it
+        # may read (analysis_cli._bound_evidence). The manager's recipes report a run that does not read as an issue.
+        if self.allowed is not None:
+            for run_id in recipe_run_ids(recipes):
+                self._authorize(self.analysis.get_run(run_id)["bindings"])
 
     def _authorize_consistency_sources(self, sources):
         from foundry.financial_evidence import consistency_dataset_ids
@@ -221,7 +223,10 @@ class FinanceStore:
             self._authorize({"consistency": dataset_id})
 
     def _authorize_draft(self, draft):
-        """Every snapshot a saved draft rests on (AnalysisStore.draft_snapshots), as analysis_cli._bound_draft checks it."""
+        """Every snapshot a saved draft rests on (AnalysisStore.draft_snapshots), as analysis_cli._bound_draft checks it.
+        The manager reads every draft."""
+        if self.allowed is None:
+            return
         self._authorize({f"source{index}": dataset_id
                          for index, dataset_id in enumerate(sorted(self.analysis.draft_snapshots(draft)))})
 
@@ -840,12 +845,11 @@ class FinanceStore:
                                           if row.get("completion_request_key") == key], attempt)
             if previous:
                 self._authorize_draft(previous)
-                receipt = (self.analysis._get("completions", attempt["completion_id"])
-                           if attempt.get("completion_id") else
-                           record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed))
+                receipt = self._readable_receipt(
+                    self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
+                    record_completion(self.analysis, previous, previous["explanation_check"]))
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
-                return {**self._readable_draft(previous), "completion": self._readable_receipt(receipt),
-                        "completion_operation": operation,
+                return {**self._readable_draft(previous), "completion": receipt, "completion_operation": operation,
                         "replayed": True, "validation_basis": "saved_draft_version"}
 
             def check_deadline():
@@ -884,8 +888,10 @@ class FinanceStore:
                     "primary_detail": primary_detail,
                 })
                 raise
-            operation = operations.settle(operation_id, attempt["revision"], result, result["completion"])
-            return {**result, "completion": self._readable_receipt(result["completion"]), "completion_operation": operation}
+            # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
+            receipt = self._readable_receipt(result["completion"])
+            operation = operations.settle(operation_id, attempt["revision"], result, receipt)
+            return {**result, "completion": receipt, "completion_operation": operation}
 
     def recover_completion_draft(self, spec):
         """Manager-owned recovery of an explicitly selected completion attempt."""
@@ -942,7 +948,8 @@ class FinanceStore:
                 receipt = (self.analysis._get("completions", attempt["completion_id"])
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
-                settled = operations.settle(operation["id"], revision, previous_by_revision, receipt)
+                settled = operations.settle(operation["id"], revision, previous_by_revision,
+                                            self._operation_receipt(operation, receipt))
                 return {**self._readable_draft(previous_by_revision), "completion": receipt, "completion_operation": settled,
                         "replayed": True, "validation_basis": "saved_draft_version"}
             if int(operation.get("current_revision", 0)) != revision:
@@ -956,8 +963,17 @@ class FinanceStore:
                 "completion_operation_revision": revision,
             }
             result = self._save_explanation_draft(save_spec)
-            settled = operations.settle(operation["id"], revision, result, result["completion"])
+            settled = operations.settle(operation["id"], revision, result, self._operation_receipt(operation, result["completion"]))
             return {**result, "completion_operation": settled}
+
+    def _operation_receipt(self, operation, receipt):
+        """A receipt as the session that owns a completion operation reads it, which its operation settles on; the
+        receipt as stored when that session may not read it at all."""
+        ceiling = operation.get("snapshot_ids")
+        if ceiling is None:
+            return receipt
+        view = self.analysis.completion_in_view(receipt, set(ceiling))
+        return receipt if view is None else view
 
     @staticmethod
     def _reject_completion_authority(spec):
@@ -987,7 +1003,7 @@ class FinanceStore:
                 # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
                 self._parent_draft(spec.get("parent_id"))
                 self._authorize_draft(previous)
-                receipt = record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed)
+                receipt = record_completion(self.analysis, previous, previous["explanation_check"])
                 return {**self._readable_draft(previous), "completion": self._readable_receipt(receipt), "replayed": True,
                         "validation_basis": "saved_draft_version"}
             result = self._save_explanation_draft({**spec, "completion_request_key": key})
@@ -1150,8 +1166,8 @@ class FinanceStore:
 
         from foundry.finance_completion import record_completion
 
-        completion = record_completion(self.analysis, draft, draft["explanation_check"], allowed=self.allowed)
-        # The stored receipt: an operation settles on it; the public saves hand back _readable_receipt.
+        completion = record_completion(self.analysis, draft, draft["explanation_check"])
+        # The stored receipt: the public saves and a session's operation read it through _readable_receipt.
         return {**self._readable_draft(draft), "completion": completion}
 
     def _readable_draft(self, draft):

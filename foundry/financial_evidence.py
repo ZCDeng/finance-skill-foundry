@@ -170,8 +170,9 @@ def recipe_dataset_ids(recipes: list[Any] | None) -> set[str]:
 
 
 def recipe_run_ids(recipes: list[Any] | None) -> list[str]:
-    """The runs recipes' claims cite, in order."""
-    return list(dict.fromkeys(recipe["claim"]["run_id"] for recipe in _clean_recipes(recipes)))
+    """The runs recipes' claims cite, in order and as the recipes name them (as a saved draft keeps them)."""
+    _clean_recipes(recipes)
+    return list(dict.fromkeys(recipe["claim"]["run_id"] for recipe in recipes or []))
 
 
 def evidence_quality_issues(report: dict[str, Any]) -> list[dict[str, Any]]:
