@@ -613,8 +613,10 @@ def gather_candidates(store: Any) -> tuple[list[dict[str, Any]], list[str]]:
     current = [row for row in datasets if row["id"] not in replaced
                and (store.allowed is None or row["id"] in store.allowed)]
     notes: list[str] = []
-    if replaced:
-        notes.append(f"{len(replaced)} 份已被新版本取代的资料没有参与比对。")
+    # Only the replaced files this session may read are counted: the others are not its to know of.
+    visible = replaced if store.allowed is None else replaced & store.allowed
+    if visible:
+        notes.append(f"{len(visible)} 份已被新版本取代的资料没有参与比对。")
     scope_units: dict[str, set[str]] = {}
     scope_scenarios: dict[str, set[str]] = {}
     for context in store._list("contexts"):

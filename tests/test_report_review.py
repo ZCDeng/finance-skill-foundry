@@ -468,6 +468,11 @@ def test_review_leaves_out_a_table_read_from_a_replaced_workbook_whose_sheet_was
     assert not cited & ({old["id"]} | tables)
     assert items["800 万元"]["status"] != "match"
     assert items["820 万元"]["status"] == "match" and items["820 万元"]["candidates"][0]["dataset_id"] == newer["id"]
+    assert f"{1 + len(tables)} 份已被新版本取代的资料没有参与比对。" in review["notes"]
+    # A session that may read only the new file is not told how many older files the task holds.
+    narrow = FinanceStore(task, actor="manager", snapshot_ids=[newer["id"]])
+    assert not [note for note in narrow.report_review({"document": _report(_paragraph("营业成本 820 万元。"))})["notes"]
+                if "已被新版本取代" in note]
 
 
 def test_review_skips_a_sheet_with_uncached_formulas_and_says_so(tmp_path: Path) -> None:
