@@ -589,7 +589,11 @@ export type FinanceCommand =
   | 'workbook-bind'
   | 'workbook-read'
   | 'workbook-preview'
-  | 'workbook-apply';
+  | 'workbook-apply'
+  | 'workbook-rollforward-preview'
+  | 'workbook-rollforward-apply'
+  | 'workbook-rollforward-templates'
+  | 'workbook-rollforward-template-save';
 
 export interface FinanceContextState {
   task_id: string;

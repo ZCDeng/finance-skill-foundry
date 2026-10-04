@@ -170,6 +170,27 @@ describe('analysis IPC task and session binding', () => {
     ]);
   });
 
+  it('routes the roll-forward as the manager and lets the conversation see the new copy', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] })
+      : JSON.stringify({ plan_id: 'plan-1' }));
+    for (const [name, spec] of [
+      ['workbook-rollforward-preview', { dataset_id: 'august', source_hash: 'hash', period: '2026-09', mappings: [] }],
+      ['workbook-rollforward-templates', { dataset_id: 'august' }],
+      ['workbook-rollforward-template-save', { plan_id: 'plan-1', name: '月度套表' }],
+    ] as const) {
+      expect((await invoke(CHANNELS.financeCall, task, name, spec)).ok).toBe(true);
+      expect(mocks.run).toHaveBeenLastCalledWith({ varRoot: '/store', task, actor: 'manager' }, name, ['--spec', JSON.stringify(spec)]);
+    }
+    // Only the apply files a snapshot, so only the apply refreshes the conversation.
+    expect(mocks.run.mock.calls.map((call) => call[1])).not.toContain('analysis-refresh');
+    mocks.run.mockClear();
+    expect((await invoke(CHANNELS.financeCall, task, 'workbook-rollforward-apply', { plan_id: 'plan-1' })).ok).toBe(true);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['workbook-rollforward-apply', 'task-show', 'analysis-refresh']);
+    expect(mocks.run.mock.calls[0][0]).toEqual({ varRoot: '/store', task, actor: 'manager' });
+  });
+
   it('answers a repeat upload instead of filing it, and leaves the conversation alone', async () => {
     registerIpc({ varRoot: '/store' });
     mocks.chooser.mockResolvedValue({ canceled: false, filePaths: ['/chosen/月结.xlsx'] });
