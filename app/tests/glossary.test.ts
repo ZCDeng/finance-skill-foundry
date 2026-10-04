@@ -23,6 +23,13 @@ describe('friendlyError', () => {
     expect(friendlyError('CSV row has more fields than its header')).toContain('分隔符或引号');
   });
 
+  it('says which five kinds a difference can be, and when there is no difference to type', () => {
+    expect(friendlyError('finding type must be one of formula_control, source_conflict, unsupported_assumption, not_updated, basis_difference'))
+      .toContain('问题类型只能从五类里选');
+    expect(friendlyError('only a current difference can be given a finding type; run the control first')).toContain('不能定问题类型');
+    expect(friendlyError('finding note is too long')).toContain('最多 500 字');
+  });
+
   it('does not translate a sentence twice', () => {
     const once = friendlyError('dataset integrity check failed');
     expect(friendlyError(once)).toBe(once);

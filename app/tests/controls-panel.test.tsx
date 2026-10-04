@@ -206,3 +206,46 @@ it('reads a full-width range, refuses to keep a comparison it could not read, an
   expect(await screen.findByText(/运行没有完成，请点「重新运行」/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '确认并保存这条对比' })).toBeNull();
 });
+
+it('offers the assistant suggestion as a suggestion and adopts it only when the manager says so', async () => {
+  const suggested: ControlRow = { ...broken, finding: { set_by_manager: false, suggested_type: 'source_conflict', suggested_type_label: '来源矛盾', suggested_note: '台账与月结实收对不上' } };
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([suggested]) : {});
+  render(<ControlsPanel taskId="t" />);
+  expect(await screen.findByText('助手建议：来源矛盾（台账与月结实收对不上）')).toBeTruthy();
+  // A suggestion is not the type: nothing in the row header says so yet.
+  expect(document.querySelector('[data-slot="badge"]')).toBeNull();
+  expect(calls.mock.calls.some(([, command]) => command === 'finance-control-finding-save')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '采用建议' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-finding-save', { control_id: 'c1', finding_type: 'source_conflict', note: '台账与月结实收对不上' }));
+});
+
+it('lets the manager choose one of the five types, shows the decided one, and never asks for it before a disposition', async () => {
+  const typed: ControlRow = { ...broken, finding: { set_by_manager: true, type: 'not_updated', type_label: '未更新' } };
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([typed]) : {});
+  render(<ControlsPanel taskId="t" />);
+  await screen.findByText(/差额 11655/);
+  expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe('问题类型：未更新');
+  const save = screen.getByRole('button', { name: '保存问题类型' }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '问题类型' }));
+  expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    expect.stringMatching(/^公式或控制缺陷/), expect.stringMatching(/^来源矛盾/), expect.stringMatching(/^无依据假设/),
+    expect.stringMatching(/^未更新/), expect.stringMatching(/^口径不同.*要列调节而不是改数/),
+  ]);
+  fireEvent.mouseDown(screen.getByRole('option', { name: /^口径不同/ }));
+  fireEvent.change(screen.getByLabelText('类型说明（可选）'), { target: { value: '台账含税，月结不含税' } });
+  fireEvent.click(save);
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-finding-save', { control_id: 'c1', finding_type: 'basis_difference', note: '台账含税，月结不含税' }));
+  // The disposition does not wait on a type.
+  fireEvent.click(screen.getByLabelText('接受差异并说明'));
+  fireEvent.change(screen.getByLabelText('说明'), { target: { value: '已知口径差' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存处置' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-disposition-save', { control_id: 'c1', decision: 'waived', reason: '已知口径差' }));
+});
+
+it('says a type decided about another difference no longer applies', async () => {
+  mount(() => listOf([{ ...broken, finding: { set_by_manager: false, outdated: true } }]));
+  render(<ControlsPanel taskId="t" />);
+  expect(await screen.findByText('之前定的问题类型针对的是另一笔差额，已不适用。')).toBeTruthy();
+  expect(document.querySelector('[data-slot="badge"]')).toBeNull();
+});

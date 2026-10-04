@@ -339,4 +339,23 @@
 .analysis-close-block li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
 .analysis-close-item--blocking { color: var(--fnd-warning); }
 .analysis-scope-candidate-source { margin: 0 12px 0 6px; }
+/* 问题类型 on a difference, and the 套表可用结论 under the month-close headline (2026-10-04).
+   The conclusion's level is in its words and icon; 不可用 takes the warning tokens and 无法判断
+   the muted ink. Gold stays for location and focus. */
+.analysis-controls-finding { display: grid; gap: 8px; }
+.analysis-controls-finding-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.analysis-controls-finding-suggestion .analysis-note { margin: 0; }
+.analysis-controls-finding-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 12px; align-items: end; }
+.analysis-close-conclusion { display: grid; gap: 6px; padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: 8px; }
+.analysis-close-conclusion-head { display: flex; align-items: center; gap: 8px; }
+.analysis-close-conclusion-head h4 { margin: 0; font-size: var(--fnd-size-reading); line-height: 24px; font-weight: var(--fnd-weight-strong); }
+.analysis-close-conclusion-head svg { flex: none; }
+.analysis-close-conclusion .analysis-note { margin: 0; }
+.analysis-close-conclusion-reasons, .analysis-close-conclusion-books { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
+.analysis-close-conclusion-books { padding-left: 0; list-style: none; }
+.analysis-close-conclusion--not_usable { border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
+.analysis-close-conclusion--not_usable .analysis-close-conclusion-head { color: var(--fnd-warning); }
+.analysis-close-conclusion--not_assessable .analysis-close-conclusion-head { color: var(--fnd-muted); }
+.analysis-close-conclusion-book--not_usable > span { color: var(--fnd-warning); }
+.analysis-close-conclusion-book--not_assessable > span { color: var(--fnd-muted); }
 }

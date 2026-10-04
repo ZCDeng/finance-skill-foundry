@@ -345,6 +345,7 @@ export function registerIpc(
     'finance-control-settings-save',
     'finance-control-disposition-save',
     'finance-control-disposition-review',
+    'finance-control-finding-save',
     'finance-control-confirmation-sheet',
     'report-template-list',
     'report-template-apply',
