@@ -94,6 +94,12 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 **验证边界。** 已核对最终整窗图与[流程](build/ui-workspace-review/final/verification.json)、[比较补拍](build/ui-workspace-review/final/comparison-recapture.json)、[原生检查](build/verification/native-workspace-final.json)、[产物记录](build/verification/ui-final-artifacts.json)：26 项原生检查和 6 项界面流程通过，资料为合成 fixture，真实 provider 调用为 0。真实模型接收/流式响应、物理 macOS 中文候选窗、完整屏幕阅读器流程未验收。[最终 ship](docs/reviews/2026-09-06-ui-finish-review.md)仅覆盖 F1–F4 修复评分；详细实现与限制见 [UI 实施记录](docs/plans/2026-09-06-ui-execution-log.md)。
 
+### shadcn 原语（2026-10-04）
+
+底座保持 Radix（`radix-ui` 统一包），不迁到 Base UI；组件从 shadcn 结构出发，视觉只读 `--fnd-*` token，不跑 `shadcn apply` 覆盖。
+
+- **设置与高级。** 分析页和财务工作台共用一个 `SettingsPanel`（shadcn Collapsible）：在页面内原位展开、打开时替换入口，不做浮层，因为面板里有自带弹出层的搜索选择，计算结果也要留在下方可读。用户打开时焦点进入面板，Escape 或「关闭」后回到原处；计算成功等程序性关闭不移动焦点。
+
 ## Do's and Don'ts
 
 - **Do** 沿用现有 FA 标识、离线字体、系统主题、真实任务归属与可见焦点。
