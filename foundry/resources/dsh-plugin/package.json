@@ -114,6 +114,7 @@
             "finance_controls_save",
             "finance_controls_run",
             "finance_controls_list",
+            "finance_control_finding_save",
             "structure_proposal_list",
             "structure_proposal_confirm",
             "structure_template_list",

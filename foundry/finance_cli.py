@@ -59,10 +59,12 @@ OPERATIONS = {
     "finance-control-settings-save": "finance_control_settings_save",
     "finance-control-disposition-save": "finance_control_disposition_save",
     "finance-control-disposition-review": "finance_control_disposition_review",
+    "finance-control-finding-save": "finance_control_finding_save",
     "finance-control-confirmation-sheet": "finance_control_confirmation_sheet",
 }
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
 FILE_OPERATIONS["workbook-range-preview"] = "range_preview"
+FILE_OPERATIONS["workbook-health"] = "health"
 OPERATIONS["finance-completion-recover"] = "recover_completion_draft"
 LIST_COMMANDS = {
     "list-finance-context",

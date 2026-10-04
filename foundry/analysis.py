@@ -418,6 +418,13 @@ class AnalysisStore:
         for paragraph in parsed.get("paragraphs", []):
             paragraph["source_hash"] = source_hash
         encoded = _bytes(parsed)
+        extra: dict[str, Any] = {}
+        if suffix == ".xlsx":
+            # Hints only, read before the lock: check_workbook never raises, so
+            # nothing it finds can refuse or delay the import beyond its own scan.
+            from foundry.workbook_health import check_workbook
+
+            extra["workbook_health"] = check_workbook(data)
         record = _new(
             self.task,
             name=name,
@@ -431,6 +438,7 @@ class AnalysisStore:
             metadata=metadata,
             transformation=parsed["transformation"],
             source_file="source" + suffix,
+            **extra,
         )
         folder = self._inside(self.root / "datasets" / record["id"])
         with exclusive(self.task.lock_path, timeout=10):

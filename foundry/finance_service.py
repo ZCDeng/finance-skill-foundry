@@ -60,6 +60,7 @@ COLLECTIONS = {
     "control_runs",
     "control_dispositions",
     "control_settings",
+    "control_findings",
 }
 
 
@@ -1584,12 +1585,14 @@ class FinanceStore:
             if result and any(current.get(dataset_id) != digest or dataset_id in replaced for dataset_id, digest in hashes.items()):
                 result = {**result, "status": "stale", "reason": "资料快照在这次运行之后已变化"}
             rows.append({**head, "result": result})
-        from foundry.finance_controls import control_issue
+        from foundry.finance_controls import control_finding, control_issue, lineage
 
         settings = self._control_settings()
         decided = self._latest_dispositions()
+        findings = self._findings_by_lineage()
         for row in rows:
             row["issue"] = control_issue(row, decided.get(row["id"]), require_second_review=settings["require_second_review"])
+            row["finding"] = control_finding(row, findings.get(lineage(row["control"]), []))
         results = [row["result"] | {"state": row.get("state")} for row in rows if row.get("result")]
         summary = _control_summary(results, total=len(rows))
         summary["blocking"] = sum(1 for row in rows if (row.get("issue") or {}).get("blocking"))
@@ -1605,6 +1608,52 @@ class FinanceStore:
         for row in self._list("control_dispositions"):
             latest[row["control_id"]] = row
         return latest
+
+    def _findings_by_lineage(self):
+        """Every finding kept for each check, oldest first, whichever version of it was current then."""
+        kept = {}
+        for row in self._list("control_findings"):
+            kept.setdefault(row["control_key"], []).append(row)
+        return kept
+
+    def finance_control_finding_save(self, spec):
+        """问题类型 for one difference. The assistant's record is a suggestion; the manager's is the decision.
+
+        Bound to the exact difference, like a disposition, but kept by the check's lineage rather
+        than its version id, so confirming or editing the control does not lose it.
+        """
+        from foundry.finance_controls import applies_to, clean_finding, lineage
+
+        if not isinstance(spec, dict) or not isinstance(spec.get("control_id"), str) or not spec["control_id"]:
+            raise FoundryError("finding requires control_id")
+        fields = clean_finding(spec)
+        listed = {row["id"]: row for row in self.finance_controls_list({})["controls"]}
+        row = listed.get(spec["control_id"])
+        if row is None:
+            raise FoundryError("control is not the latest version or does not exist")
+        result = row.get("result") or {}
+        if result.get("status") not in {"break", "error"}:
+            raise FoundryError("only a current difference can be given a finding type; this control passes, reads a replaced snapshot, or has not run")
+        key = lineage(row["control"])
+        kept = self._findings_by_lineage().get(key, [])
+        last = kept[-1] if kept else None
+        # Saying the same thing again, with nothing said in between, is not a new record.
+        if last and last.get("set_by") == self.actor and applies_to(last, result) and (
+            last["finding_type"], last.get("note", "")) == (fields["finding_type"], fields["note"]):
+            return last
+        return self._write(
+            "control_findings",
+            control_key=key,
+            control_id=row["id"],
+            run_id=result.get("run_id"),
+            status=result.get("status"),
+            difference=result.get("difference"),
+            source_hashes=result.get("source_hashes"),
+            bindings=row["bindings"],
+            set_by=self.actor,
+            **fields,
+            **({"parent_id": last["id"]} if last else {}),
+        )
 
     def finance_control_settings_save(self, spec):
         self._manager_only("change control settings")

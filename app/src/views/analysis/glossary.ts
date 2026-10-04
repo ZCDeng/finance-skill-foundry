@@ -96,6 +96,11 @@ const RULES: Rule[] = [
   [/control (left|right) range is too large/i, '区域太大，请缩小到 2 万个单元格以内，或改选合计所在的单元格。'],
   [/control refers to a snapshot a newer upload has replaced/i, '这本工作簿已被新上传的版本取代，请在新版本上选择。'],
   [/control refers to a snapshot that is not in this task/i, '这本工作簿不在当前任务里，请重新打开表单选择。'],
+  // 问题类型 on a difference.
+  [/finding type must be one of/i, '问题类型只能从五类里选：公式或控制缺陷、来源矛盾、无依据假设、未更新、口径不同。'],
+  [/only a current difference can be given a finding type/i, '这条控制现在没有可定类型的差异：可能已经相符、读的资料已有新版本，或还没运行。点「重新运行」看最新结果；仍不相符或读不出的差异才能定问题类型。'],
+  [/finding note is too long/i, '类型说明最多 500 字，请精简后再保存。'],
+  [/finding requires control_id/i, '没有指明是哪项差异，请刷新后重新选择。'],
   // The scope record (analysis requirements).
   [/requirements update must reference the latest version/i, '范围在别处已经更新过，请刷新后再保存。'],
   [/requirements parent does not exist/i, '这个范围版本已不存在，请刷新后重新保存。'],
@@ -120,6 +125,7 @@ const RULES: Rule[] = [
   [/cannot parse \.csv source/i, '无法读取这份 CSV：编码或分隔格式有误。这次读取没有生成任何数据，已有资料不受影响。请另存为 UTF-8 编码的 CSV 后重试。'],
   [/cannot parse \.\w+ source/i, '无法读取这份文件：内容与扩展名标示的格式不符。这次读取没有生成任何数据，已有资料不受影响。请检查文件后重试。'],
   [/dataset source workbook integrity check failed/i, '这份 Excel 与登记时的内容不一致，请重新添加这份资料。'],
+  [/finance file bindings require an XLSX snapshot/i, '这一步只适用于 Excel（.xlsx）资料，请选择一本 Excel 工作簿。'],
   [/integrity check failed/i, '资料内容与登记时不一致，请重新添加这份资料后再计算。'],
   [/outside (this session context|run bindings|the run)|is outside/i, '引用的资料不属于当前任务或这次计算，请重新选择资料。'],
   [/source batch is not published|snapshot is unavailable/i, '这份来源还没有可用的数据快照，请先完成来源更新。'],

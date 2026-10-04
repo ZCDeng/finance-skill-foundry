@@ -1,12 +1,12 @@
 ---
 name: financial-statements
-description: Generate financial statements (income statement, balance sheet, cash flow) with period-over-period comparison and variance analysis. Use when preparing a monthly or quarterly P&L, closing the books and need to flag material variances, comparing actuals to budget, building a financial summary for leadership review, or looking up GAAP presentation requirements and period-end adjustments.
+description: Generate financial statements (income statement, balance sheet, cash flow) with period-over-period comparison and variance analysis. Use when preparing a monthly or quarterly P&L, closing the books and need to flag material variances, comparing actuals to budget, building a financial summary for leadership review, or looking up GAAP presentation requirements and period-end adjustments. Do not claim an ERP or warehouse connection; work from the task's files.
 argument-hint: "<frequency> <period>"
 ---
 
 # /financial-statements
 
-> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/financial-statements). Licensed Apache-2.0. This copy is for local Cursor use; see NOTICE.
+> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/financial-statements). Licensed Apache-2.0. This modified copy ships inside FA Foundry; see NOTICE.
 
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >
@@ -188,7 +188,7 @@ Provide:
 2. Key metrics summary
 3. Material variance listing with investigation flags
 4. Suggested follow-up questions for unexplained variances
-5. Offer to drill into any specific variance with `/flux`
+5. Offer to drill into any specific variance with `/variance-analysis`
 
 ## GAAP Presentation Requirements
 
@@ -330,11 +330,13 @@ Cash and cash equivalents, end of period
 
 ## Common Adjustments and Reclassifications
 
+In Foundry this list is reference material. Foundry does not post entries or make payments, so treat any adjustment here as a draft for the manager to review.
+
 ### Period-End Adjustments
 
 1. **Accruals:** Record expenses incurred but not yet paid (AP accruals, payroll accruals, interest accruals)
 2. **Deferrals:** Adjust prepaid expenses, deferred revenue, and deferred costs for the period
-3. **Depreciation and amortization:** Book periodic depreciation/amortization from fixed asset and intangible schedules
+3. **Depreciation and amortization:** Draft periodic depreciation/amortization entries from fixed asset and intangible schedules
 4. **Bad debt provision:** Adjust allowance for credit losses based on aging analysis and historical loss rates
 5. **Inventory adjustments:** Record write-downs for obsolete, slow-moving, or impaired inventory
 6. **FX revaluation:** Revalue foreign-currency-denominated monetary assets and liabilities at period-end rates
