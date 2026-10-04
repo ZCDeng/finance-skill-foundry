@@ -58,7 +58,8 @@ RESULT_FIELDS = frozenset(
     }
 )
 
-TOOL_TOKEN = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?:\.[A-Za-z0-9_.]+)?`")
+# A bare name, a field path (`tool.field`) or a call (`tool(args)`).
+TOOL_TOKEN = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?:\.[A-Za-z0-9_.]+|\([^`)]*\))?`")
 # The DSH gesture grammar is whitespace-bounded; skills also write commands in
 # backticks or parentheses, so this reads a little wider than the runtime.
 SLASH_COMMAND = re.compile(
@@ -70,19 +71,23 @@ METHOD_RESOURCE_REF = re.compile(
     r'method-resource\s*\{\s*skill:\s*"([^"]*)"\s*,\s*resource:\s*"([^"]*)"\s*\}'
 )
 
-CONNECTOR_CONDITIONAL = re.compile(r"\bis connected\b|\bif ~~|\bconnect ~~", re.IGNORECASE)
+# Phrase patterns use \s+ so that hard-wrapped or double-spaced text still matches.
+CONNECTOR_CONDITIONAL = re.compile(
+    r"\bis\s+connected\b|\bif\s+~~|\bconnect\s+~~", re.IGNORECASE
+)
 CONNECTOR_GUARD = re.compile(
     r"\bdo not\b[^.\n]*\bclaim\b[^.\n]*\bunless\b[^.\n]*\bconfigured\b[^.\n]*\bnamed\b",
     re.IGNORECASE,
 )
 CONNECTION_CLAIM = re.compile(
-    r"is connected to|connected ERP|live ledger connection|已连接|已接通", re.IGNORECASE
+    r"is\s+connected\s+to|connected\s+ERP|live\s+ledger\s+connection|已\s*连接|已\s*接通",
+    re.IGNORECASE,
 )
 NEGATION = re.compile(r"\b(?:not|no|never)\b|不|未|没有", re.IGNORECASE)
 LIVE_MARKET_DATA = re.compile(
-    r"\b(?:Bloomberg|FactSet|Refinitiv|Capital IQ|PitchBook)\b"
-    r"|real[- ]time (?:quotes?|prices?|market)"
-    r"|live (?:market data|quotes?|prices?)"
+    r"\b(?:Bloomberg|FactSet|Refinitiv|Capital\s+IQ|PitchBook)\b"
+    r"|real(?:-|\s+)time\s+(?:quotes?|prices?|market)"
+    r"|live\s+(?:market\s+data|quotes?|prices?)"
     r"|万得|实时行情",
     re.IGNORECASE,
 )
@@ -100,7 +105,12 @@ PAYMENT_GUARD = re.compile(
     r"|\bno\b[^.\n]{0,20}\bpayments?\b",
     re.IGNORECASE,
 )
-SENTENCE_BREAK = re.compile(r"(?<=[.!?;:])\s+|[。！？；\n]")
+# A hard-wrapped line continues its sentence. Sentence punctuation, a blank line
+# and the start of a list item, table row, heading or quote end one.
+SENTENCE_BREAK = re.compile(
+    r"(?<=[.!?;:])\s+|[。！？；]|\n[ \t]*\n\s*"
+    r"|\n(?=[ \t]*(?:[-*+][ \t]|\d+[.)][ \t]|[|#>]|```))"
+)
 
 
 def _label(path: Path) -> str:
@@ -152,6 +162,35 @@ def _sentences(text: str) -> list[str]:
     return [part for part in SENTENCE_BREAK.split(text) if part.strip()]
 
 
+def _unnegated_claims(text: str) -> list[str]:
+    return [
+        " ".join(sentence.split())
+        for sentence in _sentences(text)
+        if CONNECTION_CLAIM.search(sentence) and not NEGATION.search(sentence)
+    ]
+
+
+def _method_resource_errors(tree: Path, relative: Path, text: str) -> list[str]:
+    owner = relative.parts[0] if len(relative.parts) == 2 and relative.name == "SKILL.md" else None
+    references = METHOD_RESOURCE_REF.findall(text)
+    errors = []
+    if owner in BUNDLED_IDS and not references:
+        errors.append(f"{relative}: companion notes are no longer referenced")
+    for skill, resource in references:
+        # read_method_resource serves any of the four method ids, whichever skill
+        # is loaded, and never a pack id. A method's own notes name the method
+        # itself; packs and root notes may name any bundled method.
+        if skill not in BUNDLED_IDS:
+            errors.append(f"{relative}: {skill} is not a bundled method")
+        elif owner in BUNDLED_IDS and skill != owner:
+            errors.append(f"{relative}: references {skill}")
+        if resource not in METHOD_RESOURCE_NAMES:
+            errors.append(f"{relative}: {resource} is not a method resource")
+        elif not (tree / resource).is_file():
+            errors.append(f"{relative}: {resource} is missing")
+    return errors
+
+
 def _block(source: str, start_marker: str) -> str:
     start = source.index(start_marker)
     return source[start : source.index("\n};", start)]
@@ -194,10 +233,34 @@ def test_contract_patterns_reject_unguarded_wording(
 def test_contract_patterns_find_invented_names_and_market_data() -> None:
     assert LIVE_MARKET_DATA.search("Pull real-time quotes from Bloomberg.")
     assert SLASH_COMMAND.findall("Drill in with `/flux` or /je now") == ["flux", "je"]
-    assert TOOL_TOKEN.findall("Call `post_journal_entry` then `drilldown_fact.section`.") == [
-        "post_journal_entry",
-        "drilldown_fact",
-    ]
+    assert TOOL_TOKEN.findall(
+        "Call `post_journal_entry`, `post_journal_entry()`, `post_journal_entry(entry)` "
+        'then `drilldown_fact.section` and `drilldown_fact(section="detail_rows")`.'
+    ) == ["post_journal_entry"] * 3 + ["drilldown_fact"] * 2
+    assert TOOL_TOKEN.findall('`file_identity_policy: "snapshot_only"`') == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Foundry is connected\nto NetSuite for these skills.",
+        "Foundry has a connected\nERP.",
+        "the connected  ERP",
+        "Pull from the live ledger\n   connection.",
+        "本产品已\n接通金蝶账套。",
+        "- Foundry is connected to NetSuite\n- not reviewed",
+        "| ERP | is connected to NetSuite |\n| no | other |",
+    ],
+)
+def test_connection_claims_are_found_across_wrapped_lines(text: str) -> None:
+    assert _unnegated_claims(text)
+
+
+def test_wrapped_negated_connection_wording_passes() -> None:
+    assert _unnegated_claims("No ERP is connected\nto Foundry; work from the files.") == []
+    assert _unnegated_claims("Foundry does not have a connected\nERP.") == []
+    assert CONNECTOR_CONDITIONAL.search("When the ledger is\nconnected, pull it.")
+    assert LIVE_MARKET_DATA.search("Pull real-time\nquotes or live  market data.")
 
 
 @pytest.mark.parametrize(("tree", "skill_id"), SKILLS)
@@ -244,17 +307,23 @@ def test_local_links_and_method_resources_resolve(tree: Path, relative: Path) ->
         assert resolved.is_file(), f"{relative}: broken link {target}"
         assert resolved.is_relative_to(tree.resolve()), f"{relative}: {target} leaves the tree"
 
-    references = METHOD_RESOURCE_REF.findall(text)
-    owner = relative.parts[0] if len(relative.parts) == 2 and relative.name == "SKILL.md" else None
-    if owner in BUNDLED_IDS:
-        assert references, f"{relative}: companion notes are no longer referenced"
-    for skill, resource in references:
-        # read_method_resource only serves the four method ids, never a pack id.
-        assert skill in BUNDLED_IDS, f"{relative}: {skill}"
-        if owner is not None:
-            assert skill == owner, f"{relative}: references {skill}"
-        assert resource in METHOD_RESOURCE_NAMES, f"{relative}: {resource}"
-        assert (tree / resource).is_file(), f"{relative}: {resource}"
+    assert _method_resource_errors(tree, relative, text) == []
+
+
+def test_method_resource_rule_follows_what_the_runtime_serves() -> None:
+    tree = TREES[0]
+    pack, method = Path("close/SKILL.md"), Path("journal-entry/SKILL.md")
+
+    def ref(skill: str, resource: str = "FOUNDRY.md") -> str:
+        return f'method-resource {{skill: "{skill}", resource: "{resource}"}}'
+
+    assert _method_resource_errors(tree, pack, ref("financial-statements")) == []
+    assert _method_resource_errors(tree, Path("report-visuals.md"), ref("reconciliation")) == []
+    assert _method_resource_errors(tree, method, ref("journal-entry")) == []
+    assert _method_resource_errors(tree, pack, ref("close"))
+    assert _method_resource_errors(tree, pack, ref("financial-statements", "packs.json"))
+    assert _method_resource_errors(tree, method, ref("reconciliation"))
+    assert _method_resource_errors(tree, method, "")
 
 
 @pytest.mark.parametrize(("tree", "skill_id"), SKILLS)
@@ -329,9 +398,7 @@ def test_connector_conditional_pattern_still_finds_the_upstream_text() -> None:
 @pytest.mark.parametrize(("tree", "relative"), FILES)
 def test_no_unconditional_connection_or_market_data_claims(tree: Path, relative: Path) -> None:
     text = _read(tree / relative)
-    for sentence in _sentences(text):
-        if CONNECTION_CLAIM.search(sentence):
-            assert NEGATION.search(sentence), f"{relative}: {sentence.strip()}"
+    assert _unnegated_claims(text) == [], relative
     assert not LIVE_MARKET_DATA.search(text), f"{relative} claims live market data"
 
 
