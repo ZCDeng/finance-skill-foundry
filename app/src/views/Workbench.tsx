@@ -8,6 +8,7 @@ import {
 import { APP_NAME } from '../components/Shell.js';
 import { WaitOrb } from '../components/WaitOrb.js';
 import type { HarnessStatus, TaskDetail, TaskRow } from '../bridge.js';
+import { NativeSelect } from '../components/ui/native-select.js';
 
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
@@ -80,8 +81,9 @@ export function TaskBar({
     : 0;
   return (
     <div className="fnd-taskbar">
-      <select
+      <NativeSelect
         className="fnd-picker"
+        wrapperClassName="fnd-native-select--picker"
         aria-label="任务"
         value={task?.id ?? ''}
         disabled={busy}
@@ -102,7 +104,7 @@ export function TaskBar({
           </option>
         ))}
         <option value={NEW_TASK}>＋ 新建任务…</option>
-      </select>
+      </NativeSelect>
 
       {task && session?.intent !== 'analysis' ? (
         <>
@@ -150,11 +152,11 @@ export function TaskBar({
           {label}
         </button>
       ))}
-      <select className="fnd-picker" aria-label="旧版期间流程" value="" disabled={!task || busy}
+      <NativeSelect className="fnd-picker" wrapperClassName="fnd-native-select--picker" aria-label="旧版期间流程" value="" disabled={!task || busy}
         onChange={(event) => { if (event.target.value) onOpen(event.target.value as Intent); }}>
         <option value="">旧版期间流程…</option>
         {INTENTS.filter(({ id }) => id !== 'analysis').map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-      </select>
+      </NativeSelect>
     </div>
   );
 }

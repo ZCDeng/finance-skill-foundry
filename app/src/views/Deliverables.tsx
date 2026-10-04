@@ -15,6 +15,7 @@ import {
 } from '../bridge.js';
 import { draftStateText } from './analysis/presentation.js';
 import { TechnicalInfo } from './analysis/TechnicalInfo.js';
+import { Empty, EmptyDescription } from '../components/ui/empty.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -199,7 +200,7 @@ export function Deliverables({
   }
 
   if (rows.length === 0) {
-    return <p className="fnd-empty">还没有产出物。出一次稿就会有第一版。</p>;
+    return <Empty><EmptyDescription>还没有产出物。出一次稿就会有第一版。</EmptyDescription></Empty>;
   }
 
   return (

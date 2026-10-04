@@ -61,10 +61,10 @@ it('offers differences first among suggestions and confirms only the ticked ones
   render(<ControlsPanel taskId="t" />);
   fireEvent.click(await screen.findByRole('button', { name: /找建议控制/ }));
   const group = (await screen.findByText('建议的控制（勾选要确认的）')).closest('fieldset')!;
-  const boxes = Array.from(group.querySelectorAll('input[type=checkbox]'));
+  const boxes = Array.from(group.querySelectorAll('[role=checkbox]'));
   // The break is listed first and ticked; the passing one is not.
-  expect((boxes[0] as HTMLInputElement).checked).toBe(true);
-  expect((boxes[1] as HTMLInputElement).checked).toBe(false);
+  expect(boxes[0].getAttribute('aria-checked')).toBe('true');
+  expect(boxes[1].getAttribute('aria-checked')).toBe('false');
   fireEvent.click(screen.getByRole('button', { name: /确认选中的 1 条/ }));
   await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-controls-save', { controls: [control], origin: 'suggested', confirm: true }));
 });
@@ -269,4 +269,13 @@ it('offers keeping a type only when the manager has decided one', async () => {
   render(<ControlsPanel taskId="t" />);
   expect(await screen.findByRole('button', { name: '采用建议' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '保留我的类型' })).toBeNull();
+});
+
+it('turns second review on from a labelled switch', async () => {
+  const calls = mount((command) => command === 'finance-controls-list' ? listOf([broken]) : {});
+  render(<ControlsPanel taskId="t" />);
+  const toggle = await screen.findByRole('switch', { name: '接受差异后需要第二人复核' });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  fireEvent.click(screen.getByText('接受差异后需要第二人复核'));
+  await waitFor(() => expect(calls).toHaveBeenCalledWith('t', 'finance-control-settings-save', { require_second_review: true }));
 });
