@@ -11,6 +11,8 @@ import {
 } from './controls.js';
 import { errorText, unwrap } from './shared.js';
 import { TieOutForm } from './TieOutForm.js';
+import { Checkbox } from '../../components/ui/checkbox.js';
+import { Switch } from '../../components/ui/switch.js';
 
 type Decision = Disposition['decision'];
 
@@ -135,7 +137,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
         <ul className="analysis-controls-list">
           {suggestions.map((row, index) => <li key={index}>
             <label className="analysis-controls-pick">
-              <input type="checkbox" checked={Boolean(picked[index])} onChange={(event) => setPicked((current) => ({ ...current, [index]: event.target.checked }))} />
+              <Checkbox checked={Boolean(picked[index])} onCheckedChange={(state) => setPicked((current) => ({ ...current, [index]: state === true }))} />
               <span>{row.control.label}</span>
               <span className={`analysis-controls-status analysis-controls-status--${row.preview.status}`}>{STATUS_LABELS[row.preview.status]}</span>
               {row.preview.status === 'break' ? <span className="analysis-note">差额 {row.preview.difference} · {where(row.control.left)} 对 {where(row.control.right)}</span> : null}
@@ -163,7 +165,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
       </div> : null}
 
       <label className="analysis-controls-setting">
-        <input type="checkbox" disabled={locked} checked={Boolean(list?.settings?.require_second_review)} onChange={(event) => void toggleReview(event.target.checked)} />
+        <Switch disabled={locked} checked={Boolean(list?.settings?.require_second_review)} onCheckedChange={(state) => void toggleReview(state)} />
         接受差异后需要第二人复核
       </label>
     </section>

@@ -251,14 +251,7 @@
 .analysis-structure-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .analysis-structure-field > label { min-width: 12rem; font-size: var(--fnd-size-body); }
 .analysis-structure-field input[type="number"] { width: 6rem; }
-.analysis-structure-field select,
-.analysis-structure-columns select {
-  color: var(--fnd-ink);
-  background: var(--fnd-surface);
-  border: 1px solid var(--fnd-line);
-  border-radius: 6px;
-  padding: 4px 6px;
-}
+.analysis-structure-field > .fnd-native-select { width: auto; }
 .analysis-structure-preview,
 .analysis-structure-columns { width: 100%; border-collapse: collapse; font-size: var(--fnd-size-small); }
 .analysis-structure-preview th,
@@ -298,12 +291,11 @@
 .analysis-account-map-table td { border: 1px solid var(--fnd-line, #e5e2dc); padding: 4px 6px; text-align: left; }
 .analysis-account-map-table thead th { background: var(--fnd-selection-surface); color: var(--fnd-ink); font-weight: 600; }
 .analysis-account-map-table td:last-child { width: 1%; white-space: nowrap; }
-.analysis-account-map select { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--fnd-line, #e5e2dc); border-radius: 6px; background: var(--fnd-surface, #fff); color: inherit; }
 .analysis-controls-card { display: grid; gap: 12px; }
 .analysis-controls-card h4 { font-size: var(--fnd-size-h3); line-height: 24px; }
 .analysis-controls-card .analysis-section-heading h5 { margin: 0; font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); }
 .analysis-controls-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
-.analysis-controls-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--fnd-size-body); }
+.analysis-controls-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fnd-size-body); }
 .analysis-controls-status, .analysis-controls-state { font-size: var(--fnd-size-small); padding: 0 6px; border: 1px solid var(--fnd-line, currentColor); border-radius: 4px; }
 .analysis-controls-status--break, .analysis-controls-status--error, .analysis-controls-state--blocking { color: var(--fnd-warning); border-color: var(--fnd-warning-line); }
 .analysis-controls-issue { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--fnd-line, rgba(0,0,0,.08)); }
