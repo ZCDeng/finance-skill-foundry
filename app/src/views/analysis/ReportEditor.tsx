@@ -74,6 +74,7 @@ import { errorText, unwrap } from './shared.js';
 import { ReportVisualComposer } from './ReportVisualComposer.js';
 import { REPORT_VISUAL_EDIT_EVENT, ReportVisualNode } from './ReportVisualNode.js';
 import { normalizeReportVisual, type ReportVisual } from '../../../electron/reports/visuals.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 type ReportMode = "read" | "edit" | "print";
 type ExportFormat = ReportFormat;
@@ -1584,16 +1585,15 @@ export function ReportEditor({
                 </label>
                 <label>
                   我的审阅状态
-                  <select
+                  <NativeSelect
                     aria-label="我的审阅状态"
-                    className="fnd-field"
                     value={review}
                     onChange={(event) => onReview(event.target.value)}
                   >
                     <option value="unreviewed">未阅</option>
                     <option value="reviewed">已阅</option>
                     <option value="accepted">认可</option>
-                  </select>
+                  </NativeSelect>
                 </label>
               </div>
             </fieldset>
@@ -1811,8 +1811,7 @@ function ImportPreview({
           <div className="report-import-sheet">
             <label>
               工作表
-              <select
-                className="fnd-field"
+              <NativeSelect
                 aria-label="导入工作表"
                 value={sheet}
                 onChange={(event) => onSheet(event.target.value)}
@@ -1822,7 +1821,7 @@ function ImportPreview({
                     {item}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label>
               区域
