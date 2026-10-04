@@ -46,6 +46,7 @@ def _dropped_hierarchy_action(item):
 
 
 def record_completion(analysis, draft, quality):
+    from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
     requirements = quality.get('requirements', {})
@@ -105,8 +106,13 @@ def record_completion(analysis, draft, quality):
                       {'requirements_id': requirement_id} if requirement_id else
                       {'unscoped_run_hashes': sorted(run_hashes.values(), key=str)})
     issue_fingerprint = _hash(issues)
+    # Labels, posture and freshness read differently for each reader (AnalysisStore.draft_in_view) and never
+    # decide completion; a receipt a session is handed must not carry a digest of the stored ones. A draft
+    # saved before drafts kept their evidence basis keeps the key its receipts were filed under.
+    keyed = ({key: value for key, value in quality.items() if key not in EVIDENCE_FIELDS}
+             if isinstance(draft.get('evidence_basis'), dict) else quality)
     input_key = _hash({'chain_key': chain_key, 'draft_id': draft['id'],
-                       'draft_content_hash': draft['content_hash'], 'quality': quality,
+                       'draft_content_hash': draft['content_hash'], 'quality': keyed,
                        'completion_policy_version': COMPLETION_POLICY_VERSION})
     with exclusive(analysis.task.lock_path, timeout=10):
         history = [row for row in analysis._list('completions') if row.get('chain_key') == chain_key]

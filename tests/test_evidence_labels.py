@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from foundry.analysis import AnalysisStore
+from foundry import finance_readiness
+from foundry.analysis import AnalysisStore, _hash
 from foundry.cli import main
+from foundry.errors import FoundryError
 from foundry.evidence_labels import (
     FRESHNESS,
     LABELS,
@@ -572,22 +574,35 @@ def test_the_assistant_draft_tool_judges_freshness_only_by_the_files_its_session
     assert _one(check["evidence_labels"], "claim")["label"] == "fact_source_reported"
 
 
-def test_applying_a_report_template_in_a_session_never_opens_a_file_outside_it(tmp_path, monkeypatch):
+def test_applying_a_report_template_in_a_session_reads_no_file_outside_it(tmp_path, monkeypatch):
     task, analysis, store = _readiness_task(tmp_path)
     older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
     _period(store, older["id"])
     newer = analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
     opened: list[str] = []
     read = AnalysisStore.read_dataset
+    replacements = finance_readiness.dataset_replacements
+    for_basis: list[bool] = []
 
     def spy(self, dataset_id, *args, **kwargs):
-        opened.append(dataset_id)
+        if not for_basis:
+            opened.append(dataset_id)
         return read(self, dataset_id, *args, **kwargs)
 
+    def basis(*args, **kwargs):
+        # What every reader of the draft reads it against, the manager included; it never reaches the session.
+        for_basis.append(True)
+        try:
+            return replacements(*args, **kwargs)
+        finally:
+            for_basis.pop()
+
     monkeypatch.setattr(AnalysisStore, "read_dataset", spy)
+    monkeypatch.setattr(finance_readiness, "dataset_replacements", basis)
     session = FinanceStore(task, snapshot_ids=[older["id"]])
     for template_id in ("management-brief-v1", "management-brief-xlsx-v1"):
-        session.report_template_apply({"template_id": template_id})
+        applied = session.report_template_apply({"template_id": template_id})
+        assert newer["id"] not in json.dumps(applied)
     assert newer["id"] not in opened
 
 
@@ -799,6 +814,297 @@ def test_assistant_and_manager_read_the_same_labels(finance, capsys):
                      "--spec", json.dumps({"draft_id": draft["id"]})]) == 0
         answers.append(json.loads(capsys.readouterr().out)["evidence_posture"])
     assert answers[0] == answers[1] == draft["explanation_check"]["evidence_posture"]
+
+
+# --- drafts read by a narrower session ---------------------------------------------------------------------------
+
+
+EVIDENCE_KEYS = ("evidence_labels", "evidence_posture", "dataset_freshness")
+
+
+def _managers_draft_on_a_replaced_file(tmp_path):
+    """The manager's draft cites v1 while a newer v2 of the same name exists; session 'sess' holds only v1."""
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    task.record_session("sess", role="analysis")
+    newer = analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    draft = analysis.save_draft({"title": "八月说明", "body": "收入 100。",
+                                 "claims": [{"basis": "source_fact", "dataset_id": older["id"], "text": "收入 100"}]})
+    assert draft["explanation_check"]["dataset_freshness"][older["id"]]["freshness"]["state"] == "source_stale"
+    return task, analysis, older, newer, draft
+
+
+def _cli(tmp_path, capsys, *args, session="sess"):
+    assert main(["--var", str(tmp_path / "var"), *(["--session", session] if session else []), *args]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_a_session_reads_the_managers_draft_without_a_newer_file_it_may_not_read(tmp_path, capsys):
+    task, analysis, older, newer, draft = _managers_draft_on_a_replaced_file(tmp_path)
+    state = _cli(tmp_path, capsys, "analysis-state")
+    read = _cli(tmp_path, capsys, "report-draft-read", "--draft", draft["id"])
+    listed = next(row for row in state["drafts"] if row["id"] == draft["id"])
+    for record in (listed, read):
+        for key in ("explanation_check", "quality"):
+            check = record[key]
+            assert check["dataset_freshness"][older["id"]]["freshness"] == {"state": "current", "reasons": []}
+            assert _one(check["evidence_labels"], "claim")["label"] == "fact_source_reported"
+            assert "stale_source" not in check["evidence_posture"]["counts"]
+            assert "stale_source" not in json.dumps(check["evidence_posture"]["drivers"])
+        # What the labels were read from names the newer file; it never leaves the store for a session.
+        assert "evidence_basis" not in record and "_integrity_hash" not in record
+        assert newer["id"] not in json.dumps(record) and "superseded" not in json.dumps(record)
+    audit = _cli(tmp_path, capsys, "report-projection-read", "--draft", draft["id"], "--mode", "audit")
+    assert "superseded" not in audit["body"] and "已被更新的版本取代" not in audit["body"]
+    exported = _cli(tmp_path, capsys, "analysis-export", "--draft", draft["id"], "--format", "md", "--mode", "audit")
+    assert "superseded" not in Path(exported["path"]).read_text(encoding="utf-8")
+    # The manager still reads the draft as it was saved.
+    manager = _cli(tmp_path, capsys, "--task", task.id, "report-draft-read", "--draft", draft["id"], session=None)
+    assert manager["explanation_check"] == draft["explanation_check"]
+    manager_audit = _cli(tmp_path, capsys, "--task", task.id, "report-projection-read", "--draft", draft["id"],
+                         "--mode", "audit", session=None)
+    assert "superseded" in manager_audit["body"] and manager_audit["projection_hash"] != audit["projection_hash"]
+
+
+def test_a_session_that_holds_the_newer_file_reads_the_draft_as_it_was_saved(tmp_path, capsys):
+    task, analysis, older, newer, draft = _managers_draft_on_a_replaced_file(tmp_path)
+    _cli(tmp_path, capsys, "analysis-refresh")
+    read = _cli(tmp_path, capsys, "report-draft-read", "--draft", draft["id"])
+    for key in EVIDENCE_KEYS:
+        assert read["explanation_check"][key] == draft["explanation_check"][key]
+    audit = _cli(tmp_path, capsys, "report-projection-read", "--draft", draft["id"], "--mode", "audit")
+    manager = analysis.projection_for_draft(draft["id"], "audit")
+    assert audit["projection_hash"] == manager["projection_hash"]
+
+
+def test_a_narrower_session_reads_the_draft_as_it_would_have_saved_it(finance):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    path = tmp / "actual-v2.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 121, "period": "2026-09"}]))
+    newer = store.analysis.add_dataset(path, name="actual")
+    spec = {"body": "利润超预算，另有 999 万元待确认。", "run_ids": [run["id"]],
+            "claims": [{"basis": "user_assumption", "reason": "9 月回款按合同节点"},
+                       {"basis": "source_fact", "dataset_id": run["bindings"]["actual"], "text": "收入 120"}]}
+    saved = store.save_explanation_draft(spec)
+    assert saved["explanation_check"]["dataset_freshness"][run["bindings"]["actual"]]["state"] == "source_stale"
+    ceiling = set(run["bindings"].values())
+    narrow = FinanceStore(store.task, snapshot_ids=sorted(ceiling))
+    view = store.analysis.draft_in_view(store.analysis.get_draft(saved["id"]), ceiling)
+    own = narrow.save_explanation_draft({**spec, "body": spec["body"] + " "})
+    assert "evidence_basis" not in own and "evidence_basis" in store.analysis.get_draft(own["id"])
+    for key in EVIDENCE_KEYS:
+        assert view["explanation_check"][key] == own["explanation_check"][key], key
+    assert view["explanation_check"]["dataset_freshness"][run["bindings"]["actual"]]["state"] == "current"
+    # Every other part of the check stands as saved.
+    rest = {key: value for key, value in saved["explanation_check"].items() if key not in EVIDENCE_KEYS}
+    assert {key: value for key, value in view["explanation_check"].items() if key not in EVIDENCE_KEYS} == rest
+    assert newer["id"] not in json.dumps(view)
+
+
+def test_a_retried_save_hands_a_session_the_saved_draft_as_it_may_read_it(finance):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    path = tmp / "actual-v2.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 121, "period": "2026-09"}]))
+    newer = store.analysis.add_dataset(path, name="actual")
+    spec = {"body": "请查看计算依据。", "run_ids": [run["id"]]}
+    saved = store.save_explanation_draft(spec)
+    replayed = FinanceStore(store.task, snapshot_ids=sorted(run["bindings"].values())).save_explanation_draft(spec)
+    assert replayed["replayed"] is True and replayed["id"] == saved["id"]
+    assert {row["state"] for row in replayed["explanation_check"]["dataset_freshness"].values()} == {"current"}
+    assert "evidence_basis" not in replayed and newer["id"] not in json.dumps(replayed)
+    # The manager's retry gets the draft as saved.
+    again = store.save_explanation_draft(spec)
+    assert again["explanation_check"] == saved["explanation_check"] and "evidence_basis" in again
+
+
+def test_an_older_run_counts_only_when_the_session_may_read_a_newer_one(finance):
+    store, context, _tmp = finance
+    old = store.explain_variance({"context_id": context["id"]})
+    store.analysis.run_analysis(old["analysis_id"])
+    draft = store.analysis.get_draft(store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [old["id"]]})["id"])
+    ceiling = set(old["bindings"].values())
+    assert list(draft["evidence_basis"]["newer_runs"]) == [old["id"]]
+    assert draft_labels(store.analysis.draft_in_view(draft, ceiling)) == draft_labels(draft)
+    # A newer run reads the same files as the run it reruns; were it to read one outside the session, the
+    # session would not see it.
+    hidden = {**draft, "evidence_basis": {**draft["evidence_basis"], "newer_runs": {old["id"]: [["z" * 32]]}}}
+    facts = [entry for entry in store.analysis.draft_in_view(hidden, ceiling)["explanation_check"]["evidence_labels"]
+             if entry["key"]["kind"] == "fact"]
+    assert facts and {entry["label"] for entry in facts} == {"fact_provider_standardized"}
+
+
+def draft_labels(draft: dict) -> list[str]:
+    return [entry["label"] for entry in draft["explanation_check"]["evidence_labels"]]
+
+
+def test_each_session_reads_a_draft_by_the_newer_files_it_may_read_itself(tmp_path, capsys):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    for session in ("a", "b", "c"):
+        task.record_session(session, role="analysis")
+    # Two corrections of the same file, each uploaded in one session only.
+    mine = analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    task.update_session_context("a", snapshot_ids=[older["id"], mine["id"]])
+    path = tmp_path / "v3.csv"
+    path.write_text("period,account_code,management_account,amount,currency\n2026-08,6001,revenue,102,CNY\n", encoding="utf-8")
+    theirs = analysis.add_dataset(path, name="8月总账")
+    task.update_session_context("b", snapshot_ids=[older["id"], theirs["id"]])
+    spec = {"title": "八月说明", "body": "收入 100。",
+            "claims": [{"basis": "source_fact", "dataset_id": older["id"], "text": "收入 100"}]}
+    saved = _cli(tmp_path, capsys, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False), session="a")
+    assert saved["explanation_check"]["dataset_freshness"][older["id"]]["state"] == "source_stale"
+    # b's own correction replaces the cited file just as a's does: b reads the draft as b would have saved it.
+    read = _cli(tmp_path, capsys, "report-draft-read", "--draft", saved["id"], session="b")
+    own = _cli(tmp_path, capsys, "analysis-draft", "--spec", json.dumps({**spec, "title": "八月说明（b）"}, ensure_ascii=False),
+               session="b")
+    for key in EVIDENCE_KEYS:
+        assert read["explanation_check"][key] == own["explanation_check"][key], key
+    assert read["explanation_check"]["dataset_freshness"][older["id"]]["state"] == "source_stale"
+    assert mine["id"] not in json.dumps(read)
+    alone = _cli(tmp_path, capsys, "report-draft-read", "--draft", saved["id"], session="c")
+    assert alone["explanation_check"]["dataset_freshness"][older["id"]]["state"] == "current"
+    assert mine["id"] not in json.dumps(alone) and theirs["id"] not in json.dumps(alone)
+
+
+def test_the_manager_reads_a_sessions_draft_by_every_newer_file_there_was(finance):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    actual = run["bindings"]["actual"]
+    narrow = FinanceStore(store.task, snapshot_ids=sorted(run["bindings"].values()))
+    before = narrow.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [run["id"]]})
+    path = tmp / "actual-v2.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 121, "period": "2026-09"}]))
+    store.analysis.add_dataset(path, name="actual")
+    spec = {"body": "利润超预算。", "run_ids": [run["id"]],
+            "claims": [{"basis": "source_fact", "dataset_id": actual, "text": "收入 120"}]}
+    saved = narrow.save_explanation_draft(spec)
+    assert saved["explanation_check"]["dataset_freshness"][actual]["state"] == "current"
+    # The manager's retry of the same request hands back the session's draft, read as the manager would have
+    # saved it.
+    replayed = store.save_explanation_draft(spec)
+    assert replayed["replayed"] is True and replayed["id"] == saved["id"]
+    own = store.save_explanation_draft({**spec, "body": spec["body"] + " "})
+    for key in EVIDENCE_KEYS:
+        assert replayed["explanation_check"][key] == own["explanation_check"][key], key
+    assert replayed["explanation_check"]["dataset_freshness"][actual]["state"] == "source_stale"
+    # A file uploaded after a draft was saved never decides how it reads.
+    stored = store.analysis.get_draft(before["id"])
+    assert store.analysis.draft_in_view(stored, None) is stored
+    assert stored["explanation_check"]["dataset_freshness"][actual]["state"] == "current"
+
+
+def test_a_completion_receipt_digests_nothing_a_session_reads_differently(finance):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    path = tmp / "actual-v2.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 121, "period": "2026-09"}]))
+    store.analysis.add_dataset(path, name="actual")
+    spec = {"body": "请查看计算依据。", "run_ids": [run["id"]]}
+    store.save_explanation_draft(spec)
+    replayed = FinanceStore(store.task, snapshot_ids=sorted(run["bindings"].values())).save_explanation_draft(spec)
+    receipt = replayed["completion"]
+    # Everything the receipt's key covers is in what the session is shown, so the key tells it nothing more.
+    shown = {key: value for key, value in replayed["quality"].items() if key not in EVIDENCE_KEYS}
+    assert receipt["input_key"] == _hash({
+        "chain_key": receipt["chain_key"], "draft_id": replayed["id"], "draft_content_hash": replayed["content_hash"],
+        "quality": shown, "completion_policy_version": receipt["completion_policy_version"],
+    })
+
+
+def test_a_sessions_audit_export_is_filed_apart_from_the_managers(tmp_path, capsys):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    task.record_session("sess", role="analysis")
+    draft = analysis.save_draft({"title": "八月说明", "body": "收入 100。",
+                                 "claims": [{"basis": "source_fact", "dataset_id": older["id"], "text": "收入 100"}]})
+    # Nothing outside the session changes how it reads this draft, yet its audit export is its own file:
+    # getting the manager's back would otherwise tell it whether a file it may not read changed its view.
+    manager = analysis.export_draft(draft["id"], "md", mode="audit")
+    session = _cli(tmp_path, capsys, "analysis-export", "--draft", draft["id"], "--format", "md", "--mode", "audit")
+    assert session["projection_hash"] == manager["projection_hash"] and session["path"] != manager["path"]
+    page = tmp_path / "audit.html"
+    page.write_text("<p>audit</p>", encoding="utf-8")
+    filed = analysis.register_report_export(draft["id"], "html", page, content_mode="audit",
+                                            projection_hash=manager["projection_hash"])
+    other = tmp_path / "audit-session.html"
+    other.write_text("<p>audit, session</p>", encoding="utf-8")
+    own = analysis.register_report_export(draft["id"], "html", other, content_mode="audit",
+                                          projection_hash=manager["projection_hash"], allowed={older["id"]})
+    assert own["path"] != filed["path"] and own["sha256"] != filed["sha256"]
+    # A management projection reads the same for every reader, so its export is shared.
+    shared = analysis.export_draft(draft["id"], "md", mode="management")
+    assert _cli(tmp_path, capsys, "analysis-export", "--draft", draft["id"], "--format", "md",
+                "--mode", "management")["path"] == shared["path"]
+
+
+def test_the_manager_lists_a_sessions_draft_as_every_other_manager_read_shows_it(tmp_path, capsys):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    task.record_session("sess", role="analysis")
+    analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    spec = {"title": "八月说明", "body": "收入 100。",
+            "claims": [{"basis": "source_fact", "dataset_id": older["id"], "text": "收入 100"}]}
+    saved = _cli(tmp_path, capsys, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))
+    state = _cli(tmp_path, capsys, "--task", task.id, "analysis-state", session=None)
+    read = _cli(tmp_path, capsys, "--task", task.id, "report-draft-read", "--draft", saved["id"], session=None)
+    listed = next(row for row in state["drafts"] if row["id"] == saved["id"])
+    for key in ("explanation_check", "quality"):
+        assert listed[key] == read[key]
+        assert listed[key]["dataset_freshness"][older["id"]]["state"] == "source_stale"
+
+
+def test_a_draft_whose_run_no_longer_reads_is_listed_without_labels_it_cannot_read_again(finance, monkeypatch):
+    store, context, tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    path = tmp / "actual-v2.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 121, "period": "2026-09"}]))
+    store.analysis.add_dataset(path, name="actual")
+    ceiling = set(run["bindings"].values())
+    saved = FinanceStore(store.task, snapshot_ids=sorted(ceiling)).save_explanation_draft(
+        {"body": "请查看计算依据。", "run_ids": [run["id"]]})
+    stored = store.analysis.get_draft(saved["id"])
+
+    def unreadable(self, run_id):
+        raise FoundryError("run output integrity check failed")
+
+    monkeypatch.setattr(AnalysisStore, "get_run", unreadable)
+    # The manager reads the draft as saved; a reader who cannot read it as saved gets no labels.
+    assert store.analysis.draft_in_view(stored, None) is stored
+    hidden = {**stored, "evidence_basis": {**stored["evidence_basis"], "older_runs": [run["id"]]}}
+    view = store.analysis.draft_in_view(hidden, ceiling)
+    assert not set(EVIDENCE_KEYS) & (set(view["explanation_check"]) | set(view["quality"]))
+
+
+def test_a_draft_saved_before_drafts_kept_a_basis_keeps_its_completion_key(finance):
+    from foundry.finance_completion import COMPLETION_POLICY_VERSION, record_completion
+
+    store, context, _tmp = finance
+    run = store.explain_variance({"context_id": context["id"]})
+    saved = store.save_explanation_draft({"body": "请查看计算依据。", "run_ids": [run["id"]]})
+    earlier = {key: value for key, value in store.analysis.get_draft(saved["id"]).items() if key != "evidence_basis"}
+    receipt = record_completion(store.analysis, earlier, earlier["explanation_check"])
+    # The key its receipts were filed under, so a retry of the same request finds them.
+    assert receipt["input_key"] == _hash({
+        "chain_key": receipt["chain_key"], "draft_id": earlier["id"], "draft_content_hash": earlier["content_hash"],
+        "quality": earlier["explanation_check"], "completion_policy_version": COMPLETION_POLICY_VERSION,
+    })
+    assert record_completion(store.analysis, earlier, earlier["explanation_check"])["id"] == receipt["id"]
+
+
+def test_a_session_reads_a_draft_saved_before_drafts_kept_a_basis_without_labels(tmp_path):
+    task, analysis, older, _newer, draft = _managers_draft_on_a_replaced_file(tmp_path)
+    earlier = {key: value for key, value in draft.items() if key != "evidence_basis"}
+    view = analysis.draft_in_view(earlier, {older["id"]})
+    for key in ("explanation_check", "quality"):
+        assert not set(EVIDENCE_KEYS) & set(view[key])
+        assert view[key]["status_dimensions"] == draft[key]["status_dimensions"]
+    assert analysis.draft_in_view(earlier, None) is earlier
 
 
 # --- the label map the app shows -------------------------------------------------------------------------------

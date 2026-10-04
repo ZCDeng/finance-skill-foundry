@@ -174,6 +174,11 @@ def _bound_evidence(context, service, spec):
             _bound(context, service.get_run(claim["run_id"])["bindings"])
 
 
+def _ceiling(context):
+    """The snapshots this session may read; None outside a session (the manager's full view)."""
+    return set(context.snapshot_ids) if context.session_id else None
+
+
 def _draft_visible(context, service, draft):
     try:
         _bound_draft(context, service, draft)
@@ -266,10 +271,10 @@ def dispatch(args) -> bool:
             ]
             run_ids = {r["id"] for r in result["runs"]}
             result["drafts"] = [
-                d
-                for d in result["drafts"]
+                d for d in result["drafts"]
                 if set(d["run_ids"]) <= run_ids and _draft_visible(context, service, d)
             ]
+        result["drafts"] = [service.draft_in_view(d, _ceiling(context)) for d in result["drafts"]]
         result["context"] = {
             "session_id": context.session_id,
             "context_revision": context.context_revision,
@@ -371,15 +376,16 @@ def dispatch(args) -> bool:
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 _bound(context, {"source": claim["dataset_id"]})
         # Evidence freshness reads only the files this session may read, as the finance draft path does.
-        result = service.save_draft(spec, _allowed=set(context.snapshot_ids) if context.session_id else None)
+        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context)), _ceiling(context))
     elif args.cmd == "analysis-export":
         draft = service.get_draft(args.draft)
         _bound_draft(context, service, draft)
-        result = service.export_draft(args.draft, args.format, mode=args.mode)
+        result = service.export_draft(args.draft, args.format, mode=args.mode, allowed=_ceiling(context))
     elif args.cmd in {"report-draft-read", "report-projection-read"}:
         draft = service.get_draft(args.draft)
         _bound_draft(context, service, draft)
-        result = service.projection_for_draft(args.draft, args.mode) if args.cmd == "report-projection-read" else draft
+        result = (service.projection_for_draft(args.draft, args.mode, allowed=_ceiling(context))
+                  if args.cmd == "report-projection-read" else service.draft_in_view(draft, _ceiling(context)))
     elif args.cmd == "report-source-add":
         result = service.add_report_source(_uploaded_path(context, args.path))
     elif args.cmd == "report-source-read":
@@ -391,7 +397,8 @@ def dispatch(args) -> bool:
     elif args.cmd == "report-export-register":
         _bound_draft(context, service, service.get_draft(args.draft))
         result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path),
-                                                content_mode=args.mode, projection_hash=args.projection_hash)
+                                                content_mode=args.mode, projection_hash=args.projection_hash,
+                                                allowed=_ceiling(context))
     elif args.cmd in {"analysis-deliverables", "analysis-export-path"}:
         from foundry.analysis_deliverables import export_path, list_analysis_deliverables
 

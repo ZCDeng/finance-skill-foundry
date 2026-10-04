@@ -380,7 +380,7 @@ def _currency(dataset: dict, period: str, *, task_period: str, superseded: set[s
     names, and its rows need not carry it: that period is the file's period, and the cutoff says how
     complete the extract of that period is, never a balance date of its own.
     """
-    from foundry.evidence_labels import as_of_date, dataset_freshness, period_span
+    from foundry.evidence_labels import as_of_date, period_span
 
     hints = _declared_hints(dataset) if dataset else {}
     refresh = _refresh_scope(dataset)
@@ -400,19 +400,23 @@ def _currency(dataset: dict, period: str, *, task_period: str, superseded: set[s
         period_kind = span[2]
     else:
         period_kind = "as_of" if as_of and not period and as_of_source == "title" else None
-    return {
-        "period": period,
-        "as_of": as_of,
-        "as_of_source": as_of_source,
-        "period_kind": period_kind,
-        "freshness": dataset_freshness(
-            period=period or None,
-            # A refresh cutoff without the period it completes is not a point in time: say nothing rather than guess.
-            as_of=as_of if period or as_of_source == "title" else None,
-            period_kind=period_kind,
-            task_period=task_period, superseded=bool(dataset) and dataset.get("id") in superseded,
-        ),
-    }
+    currency = {"period": period, "as_of": as_of, "as_of_source": as_of_source, "period_kind": period_kind}
+    return {**currency, "freshness": currency_freshness(
+        currency, task_period=task_period, superseded=bool(dataset) and dataset.get("id") in superseded)}
+
+
+def currency_freshness(currency: dict[str, Any], *, task_period: str, superseded: bool) -> dict[str, Any]:
+    """One file's freshness from its period, as-of date and kind, as _currency judges it."""
+    from foundry.evidence_labels import dataset_freshness
+
+    period = currency.get("period") or ""
+    return dataset_freshness(
+        period=period or None,
+        # A refresh cutoff without the period it completes is not a point in time: say nothing rather than guess.
+        as_of=currency.get("as_of") if period or currency.get("as_of_source") == "title" else None,
+        period_kind=currency.get("period_kind"),
+        task_period=task_period, superseded=superseded,
+    )
 
 
 def _same_period(left: str, right: str) -> bool:
@@ -429,7 +433,13 @@ def _same_period(left: str, right: str) -> bool:
 
 def _superseded_for_freshness(analysis, datasets: list[dict], known_periods: dict[str, str],
                               allowed: set[str] | None = None) -> set[str]:
-    """Snapshots a newer one has replaced, for freshness.
+    """Snapshots a newer one has replaced, for freshness (see _supersessions)."""
+    return set(_supersessions(analysis, datasets, known_periods, allowed))
+
+
+def _supersessions(analysis, datasets: list[dict], known_periods: dict[str, str],
+                   allowed: set[str] | None = None) -> dict[str, set[str]]:
+    """Each snapshot a newer one has replaced, for freshness, with every snapshot that replaces it.
 
     A published refresh replaces the prior snapshot of the same scope, period included. A newer upload of
     the same name replaces an older one unless the two declare different periods: monthly packs share sheet
@@ -437,16 +447,20 @@ def _superseded_for_freshness(analysis, datasets: list[dict], known_periods: dic
     of this month's. Controls keep their own rule (finance_controls.superseded_snapshots).
 
     In a session only the snapshots it may read count, as replacements and as files to compare: a newer
-    file outside the session is neither opened nor allowed to make one inside it look stale.
+    file outside the session is neither opened nor allowed to make one inside it look stale. ``known_periods``
+    holds periods already read and gains the ones read here.
     """
     from foundry.finance_controls import refreshed_snapshots
 
     def visible(dataset_id: Any) -> bool:
         return allowed is None or dataset_id in allowed
 
-    replaced = {prior for prior, newer in refreshed_snapshots(analysis.task).items() if visible(newer)}
+    replaced: dict[str, set[str]] = {}
+    for prior, newer in refreshed_snapshots(analysis.task).items():
+        if visible(newer):
+            replaced.setdefault(prior, set()).add(newer)
     datasets = [record for record in datasets if visible(record.get("id"))]
-    periods = dict(known_periods)
+    periods = known_periods
 
     def period_of(record: dict) -> str:
         if record["id"] not in periods:
@@ -464,8 +478,9 @@ def _superseded_for_freshness(analysis, datasets: list[dict], known_periods: dic
     for group in by_name.values():
         ordered = sorted(group, key=lambda row: (row.get("seq", 0), str(row.get("created_at") or ""), row["id"]))
         for index, older in enumerate(ordered):
-            if any(_same_period(period_of(older), period_of(newer)) for newer in ordered[index + 1:]):
-                replaced.add(older["id"])
+            for newer in ordered[index + 1:]:
+                if _same_period(period_of(older), period_of(newer)):
+                    replaced.setdefault(older["id"], set()).add(newer["id"])
     return replaced
 
 
@@ -481,15 +496,17 @@ def _snapshot_period(dataset: dict) -> str:
 
 
 def dataset_currency(analysis, dataset_ids: list[str], *, task_period: Any = None,
-                     allowed: set[str] | None = None) -> dict[str, dict[str, Any]]:
+                     allowed: set[str] | None = None, periods: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
     """The readiness report's as-of, period and freshness for the datasets a draft cites, by id.
 
     A file's period is read as the readiness report reads it (column, then confirmed title hint, then
     title words). A workbook's own sheets are not re-read here: the tables confirmed from it carry its period.
-    ``allowed`` is the session's snapshot ceiling, as for the readiness report.
+    ``allowed`` is the session's snapshot ceiling, as for the readiness report. ``periods`` caches files'
+    periods across calls.
     """
     period_text = task_period.strip() if isinstance(task_period, str) else ""
-    superseded = _superseded_for_freshness(analysis, analysis.published_datasets(), {}, allowed)
+    superseded = _superseded_for_freshness(analysis, analysis.published_datasets(), {} if periods is None else periods,
+                                           allowed)
     found: dict[str, dict[str, Any]] = {}
     for dataset_id in dataset_ids:
         try:
@@ -507,6 +524,17 @@ def dataset_currency(analysis, dataset_ids: list[str], *, task_period: Any = Non
             **_currency(dataset, _snapshot_period(dataset), task_period=period_text, superseded=superseded),
         }
     return found
+
+
+def dataset_replacements(analysis, dataset_ids: list[str], *,
+                         periods: dict[str, str] | None = None) -> dict[str, list[str]]:
+    """Every newer snapshot that replaces each of these, whoever may read it (see _supersessions).
+
+    Whether a newer snapshot replaces an older one depends on the two alone, so a reader whose snapshot
+    ceiling holds any of a file's replacements reads that file as replaced, and one that holds none does not.
+    """
+    replacing = _supersessions(analysis, analysis.published_datasets(), {} if periods is None else periods)
+    return {dataset_id: sorted(replacing.get(dataset_id, ())) for dataset_id in dataset_ids}
 
 
 def _is_workbook_shell(dataset: dict) -> bool:
