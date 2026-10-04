@@ -111,6 +111,25 @@ it('shows a refused on-demand check in the manager\'s words', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('这份 Excel 与登记时的内容不一致');
 });
 
+it('drops a check that settles after the manager has moved to another task', async () => {
+  let settle: (answer: unknown) => void = () => {};
+  const financeCall = vi.fn(() => new Promise((resolve) => { settle = resolve; }));
+  (globalThis as { foundry?: unknown }).foundry = { financeCall };
+  const other = 'd'.repeat(32);
+  const later: DatasetSnapshot = { ...base, id: 'e'.repeat(32), task_id: other, name: '下月套表' };
+  const { rerender } = render(<FormulaHealthPanel taskId={taskId} datasets={[base]} />);
+  fireEvent.click(screen.getByRole('button', { name: '体检这本工作簿：月结套表' }));
+  expect(screen.getByText('正在体检…')).toBeTruthy();
+  rerender(<FormulaHealthPanel taskId={other} datasets={[later]} />);
+  const button = screen.getByRole('button', { name: '体检这本工作簿：下月套表' }) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+  settle({ ok: false, refused: true, message: 'dataset source workbook integrity check failed' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(button.disabled).toBe(false);
+  expect(financeCall).toHaveBeenCalledWith(taskId, 'workbook-health', { dataset_id: base.id });
+});
+
 it('names hidden sheets and linked files without offering a cell to open', () => {
   mount();
   const sheets: WorkbookHealth = { ...clean, issue_count: 2, issues: [

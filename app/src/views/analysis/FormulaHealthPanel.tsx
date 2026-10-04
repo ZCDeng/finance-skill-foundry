@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Info, TriangleAlert } from 'lucide-react';
 import { bridge, type Answer, type DatasetSnapshot, type WorkbookHealth, type WorkbookHealthIssue, type WorkbookHealthSample } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
@@ -57,6 +57,15 @@ export function FormulaHealthPanel({ taskId, datasets }: { taskId: string; datas
   const [error, setError] = useState('');
   const [opened, setOpened] = useState<Opened | null>(null);
   const canCheck = Boolean(bridge()?.financeCall);
+  // A check started on one task must not land on the next one.
+  const currentTask = useRef(taskId);
+  currentTask.current = taskId;
+  const mountedTask = useRef(taskId);
+  useEffect(() => {
+    if (mountedTask.current === taskId) return;
+    mountedTask.current = taskId;
+    setChecked({}); setWorking(''); setError(''); setOpened(null);
+  }, [taskId]);
 
   const rows = datasets.flatMap((dataset): Row[] => {
     const health = dataset.workbook_health ?? checked[dataset.id];
@@ -68,14 +77,16 @@ export function FormulaHealthPanel({ taskId, datasets }: { taskId: string; datas
 
   async function check(dataset: DatasetSnapshot) {
     const api = bridge(); if (!api?.financeCall) return;
+    const forTask = taskId;
     setWorking(dataset.id); setError('');
     try {
-      const result = unwrap(await api.financeCall(taskId, 'workbook-health', { dataset_id: dataset.id }) as Answer<Record<string, unknown>>);
+      const result = unwrap(await api.financeCall(forTask, 'workbook-health', { dataset_id: dataset.id }) as Answer<Record<string, unknown>>);
+      if (currentTask.current !== forTask) return;
       setChecked((current) => ({ ...current, [dataset.id]: result as unknown as WorkbookHealth }));
     } catch (failure) {
-      setError(errorText(failure));
+      if (currentTask.current === forTask) setError(errorText(failure));
     } finally {
-      setWorking('');
+      if (currentTask.current === forTask) setWorking('');
     }
   }
 
