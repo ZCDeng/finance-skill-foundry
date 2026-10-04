@@ -439,6 +439,8 @@ function useActiveOptionAnnounced(root: HTMLElement | null) {
  * shadcn Combobox: Popover + Command (cmdk). Filtering stays ours (label, then
  * code, then meta; capped list), so cmdk only keeps the active option, arrow
  * keys, Enter and aria-activedescendant. Enter waits for IME composition.
+ * cmdk's aria-selected marks the highlighted row, so multi-select options carry
+ * their chosen state in aria-checked instead.
  */
 function SelectPopover({ label, query, setQuery, result, value, multi, compact, feedback, emptyLabel, placeholder, truncatedLabel, onPick }: {
   label: string; query: string; setQuery(value: string): void; result: FilteredOptions; value: string | string[];
@@ -458,9 +460,9 @@ function SelectPopover({ label, query, setQuery, result, value, multi, compact, 
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} />
       {feedback ? <p className="fnd-combobox__state" data-state={feedback.kind} role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p>
         : options.length ? <>
-          <CommandList label={label} aria-multiselectable={multi || undefined}>
+          <CommandList label={label}>
             {options.map((option, index) => <CommandItem key={`${option.value}:${index}`} value={String(index)} disabled={option.disabled}
-              data-checked={chosen(option) ? 'true' : undefined} onSelect={() => onPick(option)}>
+              data-checked={chosen(option) ? 'true' : undefined} aria-checked={multi ? chosen(option) : undefined} onSelect={() => onPick(option)}>
               <span>{option.label}</span>{option.meta ? <small>{option.meta}</small> : null}{chosen(option) ? <Check size={14} aria-label="已选" /> : null}
             </CommandItem>)}
           </CommandList>

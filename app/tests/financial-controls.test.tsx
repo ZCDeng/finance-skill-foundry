@@ -176,6 +176,7 @@ describe('financial web controls', () => {
     ]} />);
 
     fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
+    expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     const search = screen.getByLabelText('应收状态筛选搜索');
     fireEvent.change(search, { target: { value: '争议' } });
     fireEvent.compositionStart(search);
