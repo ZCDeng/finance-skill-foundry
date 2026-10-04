@@ -533,7 +533,9 @@ def _multi_sheet(path: Path) -> Path:
 
 
 def test_add_dataset_stores_health_beside_metadata(work: AnalysisStore, tmp_path: Path) -> None:
-    dataset = work.add_dataset(_multi_sheet(tmp_path / "月结.xlsx"), name="月结套表", metadata={"period": "2026-08"})
+    # One file added twice: a workbook saved again in another second carries another timestamp, so other bytes.
+    path = _multi_sheet(tmp_path / "月结.xlsx")
+    dataset = work.add_dataset(path, name="月结套表", metadata={"period": "2026-08"})
     health = dataset["workbook_health"]
     assert health["status"] == "checked"
     assert _codes(health) == ["hardcoded_number", "formula_without_cache"]
@@ -543,7 +545,7 @@ def test_add_dataset_stores_health_beside_metadata(work: AnalysisStore, tmp_path
     assert work.read_dataset(dataset["id"])["workbook_health"] == health
     assert work.state()["datasets"][0]["workbook_health"] == health
 
-    again = work.add_dataset(_multi_sheet(tmp_path / "月结.xlsx"), name="月结套表")
+    again = work.add_dataset(path, name="月结套表")
     assert again["duplicate_of"] == dataset["id"]
     assert again["workbook_health"] == health
 
