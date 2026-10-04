@@ -372,4 +372,22 @@
 .analysis-close-conclusion--not_assessable .analysis-close-conclusion-head { color: var(--fnd-muted); }
 .analysis-close-conclusion-book--not_usable > span { color: var(--fnd-warning); }
 .analysis-close-conclusion-book--not_assessable > span { color: var(--fnd-muted); }
+
+/* Evidence labels, 证据等级 and dataset freshness (2026-10-04). Problem labels and stale or
+   mismatched files use the warning tokens with an icon and words; gold is never used here. */
+.analysis-readiness-freshness { display: inline-flex; align-items: baseline; gap: 4px; }
+.analysis-readiness-freshness svg { align-self: center; flex: none; }
+.analysis-readiness-freshness--warning { color: var(--fnd-warning); }
+.analysis-readiness-freshness--unknown { color: var(--fnd-muted); }
+.analysis-readiness-table caption .fnd-help-link { vertical-align: middle; }
+.analysis-evidence-posture { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
+.analysis-evidence-posture-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-body); }
+.analysis-evidence-posture-line svg { flex: none; }
+.analysis-evidence-posture[data-level='unsupported'] { border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
+.analysis-evidence-posture[data-level='unsupported'] .analysis-evidence-posture-line { color: var(--fnd-warning); }
+.analysis-evidence-drivers { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-size: var(--fnd-size-small); }
+.analysis-evidence-list { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: var(--fnd-size-small); }
+.analysis-evidence-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.analysis-evidence-chip { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.analysis-evidence-reason { color: var(--fnd-warning); font-size: var(--fnd-size-small); }
 }

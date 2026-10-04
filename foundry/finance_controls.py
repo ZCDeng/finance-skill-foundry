@@ -312,6 +312,18 @@ def _text_cells(data: bytes, sheet: str) -> set[str]:
         book.close()
 
 
+def refreshed_snapshots(task: Any) -> dict[str, str]:
+    """Each snapshot a published source refresh replaced, with the snapshot that replaced it."""
+    from foundry.source_refresh import SourceRefreshService
+
+    return {
+        row["prior_snapshot_id"]: row["dataset_id"]
+        for row in SourceRefreshService(task).batches()
+        if row.get("publication_status") == "published"
+        and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]
+    }
+
+
 def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None) -> set[str]:
     """Snapshots a newer one has replaced: by a published source refresh, or by a later upload under the same name.
 
@@ -319,14 +331,8 @@ def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None
     the task for runs that read it, but a control on it no longer speaks for the pack.
     """
     from foundry.analysis import AnalysisStore
-    from foundry.source_refresh import SourceRefreshService
 
-    replaced = {
-        row["prior_snapshot_id"]
-        for row in SourceRefreshService(task).batches()
-        if row.get("publication_status") == "published"
-        and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]
-    }
+    replaced = set(refreshed_snapshots(task))
     rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:

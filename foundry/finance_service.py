@@ -1094,7 +1094,7 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed)
 
         from foundry.finance_completion import record_completion
 
@@ -1174,7 +1174,18 @@ class FinanceStore:
         # evaluated again by validate_explanation and only that fresh report reaches coverage.
         merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
         quality = validate_explanation_payload(self.analysis, merged)
-        return augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"])
+        checked = augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"])
+        from foundry.analysis_data import json_value
+        from foundry.evidence_labels import draft_evidence
+
+        # The same labeler save_draft runs, over the same records, so the preview and the saved draft agree.
+        # Labels or a posture in the spec or on the stored draft are never read.
+        return {**checked, **draft_evidence(
+            self.analysis, checked, claims=json_value(merged.get("claims", [])), fact_ids=merged.get("fact_ids", []),
+            runs={run_id: self.analysis.get_run(run_id) for run_id in dict.fromkeys(run_ids)},
+            evidence_report=quality["evidence_report"], consistency_report=quality["consistency_report"],
+            source_read_failures=merged.get("source_read_failures", []), allowed=self.allowed,
+        )}
 
     def finance_background_save(self, spec):
         if not isinstance(spec, dict):
@@ -2247,7 +2258,8 @@ class FinanceStore:
                 },
                 registered_source_ids={source["id"]},
             )
-        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
+        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document},
+                                         _allowed=self.allowed)
         return {
             "draft": draft,
             "template_id": template_id,

@@ -349,9 +349,8 @@ class AnalysisStore:
             key=lambda row: (row["created_at"], row["task_id"], row.get("seq", 0)),
         )
 
-    def state(self) -> dict:
-        from foundry.result_semantics import declared_runs
-
+    def published_datasets(self) -> list[dict]:
+        """Every published dataset record of the task, oldest first, without reading its rows."""
         root = self._inside(self.root / "datasets")
         datasets = (
             [record for path in root.glob("*/meta.json")
@@ -359,13 +358,16 @@ class AnalysisStore:
             if root.exists()
             else []
         )
+        return sorted(datasets, key=lambda r: (r.get("seq", 0), r["created_at"], r["id"]))
+
+    def state(self) -> dict:
+        from foundry.result_semantics import declared_runs
+
         requirements = self._list("requirements")
         return {
             "schema_version": 1,
             "task_id": self.task.id,
-            "datasets": sorted(
-                datasets, key=lambda r: (r.get("seq", 0), r["created_at"], r["id"])
-            ),
+            "datasets": self.published_datasets(),
             "analyses": self._list("revisions"),
             # Row declarations are read as the workbench shows them: recomputed when stored under older
             # rules, and with the latest requirements' estimates added. Stored records are never rewritten.
@@ -835,11 +837,12 @@ class AnalysisStore:
                 sources[record["id"]] = self._report_source_public(record)
         return sources
 
-    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None) -> dict:
+    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None) -> dict:
         """Save an immutable draft version.
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
         with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
+        `_allowed` is the calling session's snapshot ceiling, so evidence freshness reads only what it may.
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
@@ -1062,6 +1065,14 @@ class AnalysisStore:
             "status": "needs_attention" if quality_issues else explanation_check.get("status", "pass"),
             "status_dimensions": status_dimensions,
         }
+        from foundry.evidence_labels import draft_evidence
+
+        # Beside the status, never in it: labels and posture classify the evidence and add no issue.
+        explanation_check = {**explanation_check, **draft_evidence(
+            self, explanation_check, claims=claims, fact_ids=fact_ids, runs=runs,
+            evidence_report=evidence_report, consistency_report=consistency_report,
+            source_read_failures=source_read_failures, allowed=_allowed,
+        )}
         if document is not None:
             from foundry.report_estimates import estimated_cells
             from foundry.report_visuals import mark_visual_estimates
