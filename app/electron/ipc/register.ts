@@ -401,6 +401,22 @@ export function registerIpc(
         objectJson({ ...(rawSpec as Record<string, unknown>), path: selected.filePaths[0] }),
       ]);
     }));
+  ipcMain.handle(CHANNELS.rollforwardExport, (_e, rawTask: unknown, rawRun: unknown, rawName: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const run = String(rawRun ?? '');
+      if (!/^[0-9a-f]{32}$/.test(run)) throw new Error('invalid roll-forward run id');
+      // Only a suggested file name comes from the renderer; the folder is the manager's pick.
+      const named = typeof rawName === 'string' && rawName.trim() ? lineOf(rawName, 'file name', 200) : '下月副本';
+      const selected = await dialog.showSaveDialog({
+        title: '导出下月副本', defaultPath: `${named.replace(/[\\/:*?"<>|]/g, '_')}.xlsx`,
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+      });
+      if (selected.canceled || !selected.filePath) return { cancelled: true };
+      // The CLI refuses a name without .xlsx rather than this side adding one past the dialog's overwrite check.
+      const result = await analysisCall(task, 'workbook-rollforward-export', ['--spec', objectJson({ run_id: run, destination: selected.filePath })]);
+      return { exported: true, filename: String(result.filename ?? path.basename(selected.filePath)) };
+    }));
   ipcMain.handle(CHANNELS.analysisOpenOutput, (_e, task: unknown, run: unknown, output: unknown) =>
     answer(async () => {
       const result = await analysisCall(task, 'analysis-output', ['--run', objectId(run), '--output', lineOf(output, 'output name', 1000)]);

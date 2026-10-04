@@ -159,6 +159,11 @@ export interface Bridge {
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
   sourceLocatorOpen?(task: string, spec: { fact_id: string } | { run_id: string; row: number; column?: string }): Promise<Answer<SourceLocatorResult>>;
   financeSourceRefresh?(task: string, spec: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
+  /**
+   * Save a roll-forward copy where the manager picks in the save dialog. The
+   * renderer names the run; main picks the place and answers with the file name only.
+   */
+  rollforwardExport?(task: string, runId: string, name?: string): Promise<Answer<{ cancelled?: boolean; exported?: boolean; filename?: string }>>;
   /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
   timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
   tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;

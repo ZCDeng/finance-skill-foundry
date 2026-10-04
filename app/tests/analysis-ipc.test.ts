@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
-  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
+  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), saver: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: any) => mocks.handlers.set(name, handler) },
-  shell: { openPath: mocks.openPath }, dialog: { showOpenDialog: mocks.chooser },
+  shell: { openPath: mocks.openPath }, dialog: { showOpenDialog: mocks.chooser, showSaveDialog: mocks.saver },
 }));
 vi.mock('../electron/foundry.js', async (original) => ({
   ...await original<typeof import('../electron/foundry.js')>(), runFoundry: mocks.run,
@@ -189,6 +189,31 @@ describe('analysis IPC task and session binding', () => {
     expect((await invoke(CHANNELS.financeCall, task, 'workbook-rollforward-apply', { plan_id: 'plan-1' })).ok).toBe(true);
     expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['workbook-rollforward-apply', 'task-show', 'analysis-refresh']);
     expect(mocks.run.mock.calls[0][0]).toEqual({ varRoot: '/store', task, actor: 'manager' });
+  });
+
+  it('exports a roll-forward copy only where the save dialog says, and never names the path back', async () => {
+    registerIpc({ varRoot: '/store' });
+    const run = 'c'.repeat(32);
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: '/chosen/八月套表（2026-09 滚动）.xlsx' });
+    mocks.run.mockResolvedValue(JSON.stringify({ filename: '八月套表（2026-09 滚动）.xlsx', sha256: 'f'.repeat(64) }));
+    expect(await invoke(CHANNELS.rollforwardExport, task, run, '八月套表（2026-09 滚动）')).toEqual({
+      ok: true, value: { exported: true, filename: '八月套表（2026-09 滚动）.xlsx' },
+    });
+    expect(mocks.saver.mock.calls[0][0].defaultPath).toBe('八月套表（2026-09 滚动）.xlsx');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'workbook-rollforward-export',
+      ['--spec', JSON.stringify({ run_id: run, destination: '/chosen/八月套表（2026-09 滚动）.xlsx' })]);
+    // A suggested name cannot steer the folder.
+    await invoke(CHANNELS.rollforwardExport, task, run, '../../etc/x');
+    expect(mocks.saver.mock.calls[1][0].defaultPath).toBe('.._.._etc_x.xlsx');
+    mocks.run.mockClear();
+    mocks.saver.mockResolvedValue({ canceled: true, filePath: '' });
+    expect(await invoke(CHANNELS.rollforwardExport, task, run)).toEqual({ ok: true, value: { cancelled: true } });
+    expect((await invoke(CHANNELS.rollforwardExport, task, '../run')).ok).toBe(false);
+    expect(mocks.run).not.toHaveBeenCalled();
+    // The renderer cannot name a destination through the generic channel.
+    expect(await invoke(CHANNELS.financeCall, task, 'workbook-rollforward-export', { run_id: run, destination: '/etc/passwd.xlsx' }))
+      .toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it('answers a repeat upload instead of filing it, and leaves the conversation alone', async () => {

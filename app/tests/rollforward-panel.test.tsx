@@ -16,9 +16,9 @@ const run = {
   result: { columns: [{ name: 'org', type: 'VARCHAR' }, { name: 'amount', type: 'DECIMAL(38,2)' }], rows: [{ org: '华东', amount: '100.25' }], row_count: 1, truncated: false },
 } as AnalysisRun;
 
-const mount = (handler: (command: string, spec: Record<string, unknown>) => unknown) => {
+const mount = (handler: (command: string, spec: Record<string, unknown>) => unknown, extra: Partial<Bridge> = {}) => {
   const financeCall = vi.fn(async (_task: string, command: string, spec?: Record<string, unknown>) => ({ ok: true, value: handler(command, spec ?? {}) }));
-  (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall: financeCall as unknown as Bridge['financeCall'] };
+  (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall: financeCall as unknown as Bridge['financeCall'], ...extra };
   return financeCall;
 };
 function choose(label: string, option: RegExp | string) {
@@ -39,6 +39,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   const onApplied = vi.fn();
+  const rollforwardExport = vi.fn(async () => ({ ok: true as const, value: { exported: true, filename: '八月套表（2026-09 滚动）.xlsx' } }));
   const financeCall = mount((command) => {
     if (command === 'workbook-rollforward-templates') return { templates: [] };
     if (command === 'workbook-rollforward-preview') return {
@@ -57,7 +58,7 @@ it('previews the mapping, writes the copy as the manager and says what it did an
     };
     if (command === 'workbook-rollforward-template-save') return { id: 'tpl-1', name: '华东月度套表', mapping_count: 3, mappings: [] };
     return {};
-  });
+  }, { rollforwardExport });
   render(<RollforwardPanel taskId="t" datasets={[august, balances, ledger]} runs={[run]} busy={false} onApplied={onApplied} />);
   // Nothing is picked or loaded until the manager chooses last month's workbook.
   expect(financeCall).not.toHaveBeenCalled();
@@ -97,6 +98,8 @@ it('previews the mapping, writes the copy as the manager and says what it did an
   }));
   const table = await screen.findByRole('region', { name: '滚动预览' });
   expect(within(table).getAllByText('将写入')).toHaveLength(3);
+  // The title goes in as text, and says so; the amounts do not need to.
+  expect(within(table).getAllByText('按文字写入')).toHaveLength(1);
   expect(within(table).getByText('九月余额 · 科目余额!B1:B2（合计）')).toBeTruthy();
   expect(within(table).getByText('计算结果 第 1 行 · amount')).toBeTruthy();
   expect(screen.getByText(/预览完成：将写入 3 格/)).toBeTruthy();
@@ -105,12 +108,17 @@ it('previews the mapping, writes the copy as the manager and says what it did an
 
   fireEvent.click(screen.getByRole('button', { name: '生成下月副本' }));
   await waitFor(() => expect(financeCall).toHaveBeenCalledWith('t', 'workbook-rollforward-apply', { plan_id: 'plan-1' }));
-  expect(await screen.findByText('已生成「八月套表（2026-09 滚动）」，在资料列表里。原工作簿未改动；公式会在 Excel 打开时重算，打开并保存一次后本应用才能读到公式结果。')).toBeTruthy();
+  expect(await screen.findByText('已生成「八月套表（2026-09 滚动）」，在资料列表里。原工作簿未改动；公式会在 Excel 打开时重算：请「导出下月副本」，在 Excel 里打开并保存，再重新添加，本应用才能读到公式结果。')).toBeTruthy();
   expect(onApplied).toHaveBeenCalled();
   expect((screen.getByRole('button', { name: '生成下月副本' }) as HTMLButtonElement).disabled).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: '复制变更记录' }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('单元格\t原值\t新值\t来源\t状态/原因\n'));
+
+  // The copy goes where she saves it; the filed one stays as it was made.
+  fireEvent.click(screen.getByRole('button', { name: '导出下月副本' }));
+  await waitFor(() => expect(rollforwardExport).toHaveBeenCalledWith('t', 'plan-1', '八月套表（2026-09 滚动）'));
+  expect(await screen.findByText(/已导出「八月套表（2026-09 滚动）.xlsx」。在 Excel 里打开、检查并保存后，再到资料页重新添加/)).toBeTruthy();
 
   type('模板名称', '华东月度套表');
   fireEvent.click(screen.getByRole('button', { name: '存为下月模板' }));
@@ -125,11 +133,12 @@ it('lists what will not be written, with the reason in words, and offers the sta
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   const financeCall = mount((command) => command === 'workbook-rollforward-preview' ? {
-    plan_id: 'plan-2', period: '2026-09', workbook_supported: false, unsupported_features: ['charts', 'drawings'],
-    counts: { write: 1, blocked: 2, unchanged: 1 },
+    plan_id: 'plan-2', period: '2026-09', workbook_supported: false, unsupported_features: ['charts', 'drawings', 'extensions'],
+    counts: { write: 1, blocked: 3, unchanged: 1 },
     title_hints: [{ sheet: '利润表', cell: 'A1', target: '利润表!A1', text: '华东公司利润表 2026年08月', period: '2026-08', mapped: false }],
     rows: [
       { index: 0, target: '利润表!B7', status: 'blocked', reason_code: 'formula_cell', reason: '目标是公式单元格，公式不会被覆盖', old_value: '=B5-B6', new_value: '400', cell_type: 'number', notes: [], source: { kind: 'value', manager_value: '400' } },
+      { index: 4, target: '利润表!B8', status: 'blocked', reason_code: 'text_into_number_cell', reason: '目标原来是数字（或设成了数字、日期格式），这个值会按文字写入，Excel 的合计和公式会漏掉它；金额请写成不带千分位、括号和货币符号的数字，例如 -1200.50', old_value: '1000', new_value: '1,200', cell_type: 'text', notes: [], source: { kind: 'value', manager_value: '1,200' } },
       { index: 1, target: '利润表!E6', status: 'blocked', reason_code: 'merged_non_anchor', reason: '目标在合并单元格里，但不是左上角那一格；只能写左上角', old_value: null, new_value: '1', cell_type: 'number', notes: [], source: { kind: 'value', manager_value: '1' } },
       { index: 2, target: '利润表!B5', status: 'write', old_value: '1000', new_value: '123456789012345678.12', cell_type: 'text', notes: ['decimal_written_as_text'], source: { kind: 'value', manager_value: '123456789012345678.12' } },
       { index: 3, target: '利润表!B6', status: 'unchanged', old_value: '600', new_value: '600', cell_type: 'number', notes: [], source: { kind: 'value', manager_value: '600' } },
@@ -145,8 +154,14 @@ it('lists what will not be written, with the reason in words, and offers the sta
   fireEvent.click(screen.getByRole('button', { name: '预览' }));
 
   const table = await screen.findByRole('region', { name: '滚动预览' });
-  expect(within(table).getAllByText('不写入')).toHaveLength(2);
+  expect(within(table).getAllByText('不写入')).toHaveLength(3);
   expect(within(table).getByText('目标是公式单元格，公式不会被覆盖')).toBeTruthy();
+  // Text that would turn an amount cell into text is listed, not written, with what to do instead.
+  expect(within(table).getByText(/Excel 的合计和公式会漏掉它；金额请写成不带千分位/)).toBeTruthy();
+  // No copy will be made of this workbook, so nothing says 将写入: those cells are hers to fill in.
+  expect(within(table).queryByText('将写入')).toBeNull();
+  expect(within(table).getByText('需手工填写')).toBeTruthy();
+  expect(within(table).getByText(/需手工填写 1/)).toBeTruthy();
   expect(within(table).getByText('目标在合并单元格里，但不是左上角那一格；只能写左上角')).toBeTruthy();
   expect(within(table).getByText('无变化')).toBeTruthy();
   expect(within(table).getByText('位数超出 Excel 能精确保存的范围，按文字写入完整数字')).toBeTruthy();
@@ -155,7 +170,7 @@ it('lists what will not be written, with the reason in words, and offers the sta
   expect(badge.querySelector('svg')).toBeTruthy();
   expect(badge.getAttribute('data-variant')).toBe('destructive');
 
-  expect(screen.getByText(/含有图表、图片、形状或批注，复制后会丢失，所以不会生成副本/)).toBeTruthy();
+  expect(screen.getByText(/含有图表、图片、形状或批注、迷你图、部分下拉列表或条件格式等扩展内容，复制后会丢失，所以不会生成副本/)).toBeTruthy();
   expect((screen.getByRole('button', { name: '生成下月副本' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '复制清单' }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('checklist-tsv'));
@@ -207,4 +222,13 @@ it('renders nothing when the task has no workbook and tolerates an older engine'
   // An answer without rows or counts draws an empty preview rather than crashing.
   expect(await screen.findByRole('region', { name: '滚动预览' })).toBeTruthy();
   expect((screen.getByRole('button', { name: '生成下月副本' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('says in words why a copy was not made or not exported', async () => {
+  const { friendlyError } = await import('../src/views/analysis/glossary.js');
+  expect(friendlyError('rollforward workbook has parts a copy would lose (charts, extensions); no copy was made')).toMatch(/^这本工作簿含有.*迷你图/);
+  expect(friendlyError('rollforward export destination must be an absolute .xlsx path')).toMatch(/^请把文件名保存为 \.xlsx/);
+  expect(friendlyError('rollforward export destination cannot be inside the store')).toMatch(/^不能导出到本应用自己的数据文件夹/);
+  expect(friendlyError('rollforward copy integrity check failed')).toMatch(/^资料列表里的下月副本和生成时的记录对不上/);
+  expect(friendlyError('only the manager can export a roll-forward copy')).toMatch(/^下月副本只能由你/);
 });

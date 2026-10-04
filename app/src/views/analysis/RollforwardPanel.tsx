@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Ban, ClipboardCopy, Equal, FileSearch, FileSpreadsheet, ListPlus, PenLine, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
+import { Ban, ClipboardCopy, Download, Equal, FileSearch, FileSpreadsheet, Hand, ListPlus, PenLine, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
 import { bridge, type AnalysisRun, type Answer, type DatasetSnapshot } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
@@ -39,6 +39,7 @@ const KIND_OPTIONS: SelectOption[] = [
 // The parts openpyxl would drop, as _unsupported_features names them.
 const FEATURE_WORDS: Record<string, string> = {
   charts: '图表', drawings: '图片、形状或批注', externalLinks: '外部链接', 'macro project': '宏', 'macro-enabled extension': '宏',
+  extensions: '迷你图、部分下拉列表或条件格式等扩展内容',
 };
 const NOTE_WORDS: Record<string, string> = {
   decimal_written_as_text: '位数超出 Excel 能精确保存的范围，按文字写入完整数字',
@@ -99,7 +100,9 @@ function sourceText(source: Record<string, unknown> = {}): string {
   return `手填${source.note ? `：${String(source.note)}` : ''}`;
 }
 
-function StatusBadge({ row }: { row: PlanRow }) {
+/** No copy is made of a workbook it would damage, so its 「将写入」 rows are hers to fill in. */
+function StatusBadge({ row, copied }: { row: PlanRow; copied: boolean }) {
+  if (row.status === 'write' && !copied) return <Badge variant="outline"><Hand size={12} aria-hidden />需手工填写</Badge>;
   if (row.status === 'write') return <Badge variant="outline"><PenLine size={12} aria-hidden />将写入</Badge>;
   if (row.status === 'unchanged') return <Badge variant="secondary"><Equal size={12} aria-hidden />无变化</Badge>;
   return <Badge variant="destructive"><Ban size={12} aria-hidden />不写入</Badge>;
@@ -171,6 +174,8 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
   const planRows = Array.isArray(plan?.rows) ? plan.rows : [];
   const unmappedTitles = (plan?.title_hints ?? []).filter((hint) => !hint.mapped);
   const features = (plan?.unsupported_features ?? []).map((name) => FEATURE_WORDS[name] ?? name).filter((word, index, all) => all.indexOf(word) === index);
+  const copied = plan?.workbook_supported !== false;
+  const writeWord = copied ? '将写入' : '需手工填写';
 
   const preview = () => track('正在预览…', async () => {
     const key = specKey;
@@ -184,10 +189,17 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
     const result = await call<Applied>('workbook-rollforward-apply', { plan_id: plan.plan_id });
     setApplied(result);
     const skipped = result.counts?.blocked ? ` 另有 ${result.counts.blocked} 格没有写入，见变更记录。` : '';
-    const formulas = result.formula_cache_cleared === false ? '' : '公式会在 Excel 打开时重算，打开并保存一次后本应用才能读到公式结果。';
+    const formulas = result.formula_cache_cleared === false ? '' : '公式会在 Excel 打开时重算：请「导出下月副本」，在 Excel 里打开并保存，再重新添加，本应用才能读到公式结果。';
     setMessage(`已生成「${result.output_name ?? '下月副本'}」，在资料列表里。原工作簿未改动；${formulas}${skipped}`);
     window.dispatchEvent(new Event('fnd:task-changed'));
     await onApplied?.();
+  });
+  const exportCopy = () => track('正在导出…', async () => {
+    const api = bridge();
+    if (!applied?.run_id || !api?.rollforwardExport) return;
+    const saved = unwrap(await api.rollforwardExport(taskId, applied.run_id, applied.output_name));
+    if (saved.cancelled) return;
+    setMessage(`已导出「${saved.filename ?? '下月副本'}」。在 Excel 里打开、检查并保存后，再到资料页重新添加，本应用才能读到公式结果。资料列表里的副本保持生成时的样子。`);
   });
   const copy = (text: string | undefined, done: string) => track('正在复制…', async () => {
     if (!text) throw new Error('没有可复制的记录。');
@@ -292,7 +304,7 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
       <table className="fnd-table analysis-table analysis-rollforward-table">
         <caption>
           <span className="analysis-rollforward-counts">
-            <span><PenLine size={13} aria-hidden />将写入 {counts.write}</span>
+            <span>{copied ? <PenLine size={13} aria-hidden /> : <Hand size={13} aria-hidden />}{writeWord} {counts.write}</span>
             <span><Ban size={13} aria-hidden />不写入 {counts.blocked}</span>
             <span><Equal size={13} aria-hidden />无变化 {counts.unchanged}</span>
           </span>
@@ -300,9 +312,10 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
         <thead><tr><th scope="col">目标单元格</th><th scope="col">状态</th><th scope="col">原值</th><th scope="col">新值</th><th scope="col">来源</th></tr></thead>
         <tbody>{planRows.map((row) => <tr key={row.index} data-status={row.status}>
           <td>{row.target}</td>
-          <td><StatusBadge row={row} />{row.status === 'blocked' && row.reason ? <span className="analysis-rollforward-reason">{row.reason}</span> : null}</td>
+          <td><StatusBadge row={row} copied={copied} />{row.status === 'blocked' && row.reason ? <span className="analysis-rollforward-reason">{row.reason}</span> : null}</td>
           <td>{textValue(row.old_value)}</td>
-          <td>{textValue(row.new_value)}{(row.notes ?? []).map((note) => <span key={note} className="analysis-rollforward-reason">{NOTE_WORDS[note] ?? note}</span>)}</td>
+          <td>{textValue(row.new_value)}{(row.notes ?? []).map((note) => <span key={note} className="analysis-rollforward-reason">{NOTE_WORDS[note] ?? note}</span>)}
+            {row.status === 'write' && row.cell_type === 'text' && !(row.notes ?? []).length ? <span className="analysis-rollforward-reason">按文字写入</span> : null}</td>
           <td>{sourceText(row.source)}</td>
         </tr>)}</tbody>
       </table>
@@ -312,6 +325,8 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
       <Button variant="outline" type="button" disabled={locked || !templateName.trim()} onClick={saveTemplate}><Save size={14} aria-hidden />存为下月模板</Button>
     </div>}
     {applied && <div className="analysis-actions">
+      {bridge()?.rollforwardExport && <Button size="sm" type="button" disabled={locked} onClick={exportCopy}>
+        <Download size={14} aria-hidden />导出下月副本</Button>}
       <Button variant="outline" size="sm" type="button" disabled={locked} onClick={() => copy(applied.change_log?.tsv, '已复制变更记录，可直接粘贴到 Excel。')}>
         <ClipboardCopy size={14} aria-hidden />复制变更记录</Button>
       <Button variant="outline" size="sm" type="button" disabled={locked} onClick={() => copy(applied.change_log?.markdown, '已复制为文字，可粘贴到邮件或文档。')}>复制为文字</Button>
