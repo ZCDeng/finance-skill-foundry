@@ -62,6 +62,7 @@ COLLECTIONS = {
     "control_dispositions",
     "control_settings",
     "control_findings",
+    "report_reviews",
 }
 
 
@@ -215,6 +216,26 @@ class FinanceStore:
 
         for dataset_id in consistency_dataset_ids(sources):
             self._authorize({"consistency": dataset_id})
+
+    def _authorize_draft(self, draft):
+        """Every snapshot a saved draft was built from, as analysis_cli._bound_draft checks it."""
+        for run_id in draft.get("run_ids", []):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        for claim in draft.get("claims", []):
+            if isinstance(claim, dict):
+                if claim.get("dataset_id"):
+                    self._authorize({"source": claim["dataset_id"]})
+                if claim.get("run_id"):
+                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        recipes = draft.get("evidence_recipes", [])
+        self._authorize_evidence_recipes(recipes)
+        for recipe in recipes:
+            claim = recipe.get("claim") if isinstance(recipe, dict) else None
+            if isinstance(claim, dict) and claim.get("run_id"):
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        self._authorize_consistency_sources(draft.get("consistency_sources", {}))
+        if draft.get("requirements_id"):
+            self._authorize(self.analysis._get("requirements", draft["requirements_id"]).get("bindings", {}))
 
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
@@ -2319,6 +2340,58 @@ class FinanceStore:
             "unfilled_named_ranges": unfilled,
         }
 
+    def report_review(self, spec):
+        """Check the numbers of an imported report against the task's current workbooks and calculations.
+
+        `{draft_id}` reviews a saved draft's document; `{document}` an import not yet adopted. The
+        result is filed as its own immutable record: the draft, its review status and the report's
+        text stay as they were, and a matching number only says where the same value was found.
+        """
+        from pathlib import Path
+
+        from foundry.report_documents import validate_report_document
+        from foundry.report_review import gather_candidates, review_report
+
+        if not isinstance(spec, dict):
+            raise FoundryError("report review spec must be an object")
+        draft_id, document = spec.get("draft_id"), spec.get("document")
+        if (draft_id in (None, "")) == (document is None):
+            raise FoundryError("report review requires either a draft_id or a document")
+        if draft_id not in (None, ""):
+            draft = self.analysis.get_draft(draft_id)
+            self._authorize_draft(draft)
+            if draft.get("document") is None:
+                raise FoundryError("report review requires a draft saved with a structured document")
+            document = draft["document"]
+            origin = {"origin": "draft", "draft_id": draft["id"], "draft_content_hash": draft.get("content_hash")}
+        else:
+            # The PDF converter numbers pages; the document contract keeps every location as text.
+            document = _text_pages(document)
+            origin = {"origin": "import"}
+        registry = self.analysis._registered_report_sources()
+        clean = validate_report_document(document, registered_source_ids=set(registry))
+        # A source's name, format and hash come from the registry, never from the caller (as save_draft does).
+        if clean.get("sources"):
+            clean["sources"] = [registry[source["id"]] for source in clean["sources"]]
+        candidates, notes = gather_candidates(self)
+        result = review_report(clean, candidates, notes)
+        cited = sorted({candidate["dataset_id"] for item in result["items"] for candidate in item["candidates"]
+                        if candidate.get("dataset_id")})
+        return self._write(
+            "report_reviews",
+            **origin,
+            document_hash=_hash(clean),
+            sources=[{"id": source["id"], "name": Path(source["name"]).name, "format": source["format"],
+                      "sha256": source["sha256"]} for source in clean.get("sources", [])],
+            bindings={f"source{index}": dataset_id for index, dataset_id in enumerate(cited)},
+            review_schema_version=result["schema_version"],
+            summary=result["summary"],
+            items=result["items"],
+            issues=result["issues"],
+            notes=result["notes"],
+            closing_note=result["closing_note"],
+        )
+
     def chart_deliverable_save(self, spec):
         from foundry.chart_deliverables import normalize_chart
 
@@ -2476,6 +2549,22 @@ def _replayable_draft(drafts, attempt=None):
     if attempt and attempt.get("completion_id"):
         return next((row for row in drafts if row.get("id") == attempt.get("draft_id")), drafts[0] if drafts else None)
     return next((row for row in reversed(drafts) if row.get("check_policy_version") == COMPLETION_POLICY_VERSION), None)
+
+
+def _text_pages(node):
+    """A copy with every node's numeric `page` written as text, as the document contract requires."""
+    from decimal import Decimal
+
+    if isinstance(node, list):
+        return [_text_pages(child) for child in node]
+    if not isinstance(node, dict):
+        return node
+    copy = {key: _text_pages(value) for key, value in node.items()}
+    attrs = copy.get("attrs")
+    page = attrs.get("page") if isinstance(attrs, dict) else None
+    if isinstance(page, (int, Decimal)) and not isinstance(page, bool) and page == int(page):
+        copy["attrs"] = {**attrs, "page": str(int(page))}
+    return copy
 
 
 def _dedupe_explanation_claims(claims):

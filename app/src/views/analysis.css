@@ -411,4 +411,31 @@
 @media (max-width: 680px) {
   .analysis-rollforward-row > .fnd-control { flex-basis: 100%; }
 }
+
+/* Report number review (外部报告复核): counts in words with an icon, one list per result. */
+.analysis-report-review { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); }
+.analysis-report-review h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
+.analysis-report-review-action, .analysis-report-review-draft { display: grid; gap: 10px; }
+.analysis-report-review-draft > h4 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
+.analysis-report-review-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.analysis-report-review-intro .analysis-note { margin: 0; flex: 1 1 280px; }
+.analysis-report-review-headline { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fnd-size-reading); font-weight: var(--fnd-weight-strong); }
+.analysis-report-review-headline svg, .analysis-report-review-count svg { flex: none; }
+.analysis-report-review-headline--attention { color: var(--fnd-warning); }
+.analysis-report-review-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.analysis-report-review-count { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); font-size: var(--fnd-size-body); }
+.analysis-report-review-count strong { font-variant-numeric: tabular-nums; }
+.analysis-report-review-count--attention { color: var(--fnd-warning); border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
+.analysis-report-review-tabs { flex-wrap: wrap; }
+.analysis-report-review-items { display: grid; margin: 0; padding: 0; list-style: none; }
+.analysis-report-review-item { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--fnd-line); }
+.analysis-report-review-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.analysis-report-review-number { font-size: var(--fnd-size-reading); font-variant-numeric: tabular-nums; }
+.analysis-report-review-status { font-size: var(--fnd-size-small); padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: 4px; }
+.analysis-report-review-item--mismatch .analysis-report-review-status,
+.analysis-report-review-item--match_scaled .analysis-report-review-status { color: var(--fnd-warning); border-color: var(--fnd-warning-line); }
+.analysis-report-review-excerpt { margin: 0; padding-left: 10px; border-left: 2px solid var(--fnd-line-hover); color: var(--fnd-muted); font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
+.analysis-report-review-candidate, .analysis-report-review-difference { margin: 0; font-size: var(--fnd-size-body); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-report-review-difference { color: var(--fnd-warning); }
+.analysis-report-review-closing { margin: 0; padding-top: 10px; border-top: 1px solid var(--fnd-line); color: var(--fnd-ink); font-size: var(--fnd-size-small); }
 }

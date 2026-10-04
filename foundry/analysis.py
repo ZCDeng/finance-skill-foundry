@@ -1191,6 +1191,14 @@ class AnalysisStore:
             range_ref=range_ref,
         )
 
+    def read_report_pptx(self, source_id: str) -> dict:
+        from foundry.report_pptx import report_document_from_pptx
+
+        resolved = self.read_report_source(source_id)
+        if resolved["source"]["format"] != "pptx":
+            raise FoundryError("report pptx read requires a PPTX source")
+        return report_document_from_pptx(Path(resolved["path"]).read_bytes(), resolved["source"])
+
     def register_report_export(
         self,
         draft_id: str,

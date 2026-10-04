@@ -5,7 +5,8 @@ import { TechnicalInfo } from './TechnicalInfo.js';
 import { RunStatus, draftStateText, textValue } from './presentation.js';
 import { ClaimBindingRepair } from './ClaimBindingRepair.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { ReportEditor, type ReportDraftDocument } from './ReportEditor.js';
+import { PdfComparison, ReportEditor, type ReportDraftDocument } from './ReportEditor.js';
+import { ReportReviewAction, type ReportReviewPdf } from './ReportReviewPanel.js';
 import { documentFromMarkdown, documentToMarkdown } from '../../../electron/reports/format.js';
 import { RequirementsPanel } from './RequirementsPanel.js';
 import type { AnalysisScope } from './scope.js';
@@ -362,6 +363,13 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     <section className="analysis-prepublish" aria-label="发布前检查">
     <div className="analysis-section-heading"><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
     {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
+    {draft && importedSources(draft).length > 0 && <section className="analysis-report-review-draft" aria-label="复核外部报告数字">
+      <h4>外部报告数字</h4>
+      <ReportReviewAction key={draft.id} taskId={taskId} spec={{ draft_id: draft.id }} label="复核外部报告数字" disabled={busy}
+        intro={changed ? '复核的是已保存的版本，还没保存的修改不在其中。复核不改动文稿，也不改变它的复核状态。'
+          : '把这份导入文稿里的数字和当前任务的套表、资料表、计算结果逐项比对。复核不改动文稿，也不改变它的复核状态。'}
+        pdf={sourcePdf(taskId, importedSources(draft))} />
+    </section>}
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
@@ -431,6 +439,24 @@ function hasMeaningfulUnsavedDraft(draft: AnalysisDraft | undefined, edit: Draft
 function draftEditDiffers(draft: AnalysisDraft, edit: DraftEdit): boolean {
   return edit.title !== draft.title || edit.body !== draft.body || edit.limitations !== draft.limitations.join('\n')
     || edit.review !== draft.review_status || !sameDocument(edit.document, richDraftDocument(draft)) || !sameMateriality(edit.materiality, draft.materiality) || Boolean(edit.recovery);
+}
+
+/** The files a saved draft's document was imported from; a draft written here has none. */
+function importedSources(draft: AnalysisDraft): NonNullable<ReportDraftDocument['sources']> {
+  return richDraftDocument(draft)?.sources ?? [];
+}
+
+function sourcePdf(taskId: string, sources: NonNullable<ReportDraftDocument['sources']>): ReportReviewPdf | undefined {
+  const api = bridge();
+  if (!api?.reportSource || !sources.some((source) => source.format === 'pdf')) return undefined;
+  return {
+    load: async (id) => {
+      if (!sources.some((source) => source.id === id && source.format === 'pdf')) return undefined;
+      const payload = unwrap(await api.reportSource!(taskId, id) as Answer<{ data_base64?: string }>);
+      return payload.data_base64 ? `data:application/pdf;base64,${payload.data_base64}` : undefined;
+    },
+    render: (dataUrl, page) => <PdfComparison dataUrl={dataUrl} page={page} />,
+  };
 }
 
 function richDraftDocument(draft: AnalysisDraft | undefined): ReportDraftDocument | undefined {

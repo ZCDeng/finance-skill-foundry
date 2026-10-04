@@ -128,6 +128,27 @@ describe('document boundary and task ownership', () => {
     expect(await host.import(task)).toEqual({ cancelled: true, warnings: [] });
     expect(mocks.call).not.toHaveBeenCalled();
   });
+  it('offers PPTX in the import picker and reads a deck through Foundry, never the converter', async () => {
+    const deck = { id: 'c'.repeat(32), name: '八月月报.pptx', format: 'pptx', sha256: 'e'.repeat(64) };
+    const imported = { document: createReportDocument(), title: '八月月报.pptx', warnings: ['PPT 导入只取文字和表格，图表、图片和版式不导入；数字需复核。'], source: deck, needsReview: true };
+    mocks.open.mockResolvedValue({ canceled: false, filePaths: ['/chosen/八月月报.pptx'] });
+    mocks.call.mockImplementation(async (_binding, command) => command === 'report-source-add' ? { source: deck, path: '/store/deck.pptx' } : imported);
+    const host = new ReportHost({ varRoot: '/store' });
+    expect(await host.import(task)).toEqual(imported);
+    expect(mocks.open.mock.calls[0][0].filters[0].extensions).toEqual(['docx', 'pdf', 'html', 'md', 'xlsx', 'pptx']);
+    expect(mocks.call.mock.calls.map((call) => [call[1], call[2]])).toEqual([
+      ['report-source-add', ['--path', '/chosen/八月月报.pptx']],
+      ['report-pptx-read', ['--source', deck.id]],
+    ]);
+  });
+  it('never exports a draft as PPTX', async () => {
+    expect(() => reportFormat('pptx')).toThrow('不支持的文稿格式');
+    for (const format of ['docx', 'pdf', 'html', 'md', 'xlsx']) expect(reportFormat(format)).toBe(format);
+    const host = new ReportHost({ varRoot: '/store' });
+    await expect(host.export(task, 'draft', 'pptx')).rejects.toThrow('不支持的文稿格式');
+    expect(mocks.call).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
   it('checks the actual source bytes before giving the original to the viewer', async () => {
     const original = path.join(directory, 'source.md');
     await writeFile(original, '收入 123.4500 万元');

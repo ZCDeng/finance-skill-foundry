@@ -153,7 +153,7 @@ export interface Bridge {
   analysisSave?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   analysisRun?(task: string, id: string): Promise<Answer<AnalysisRun>>;
   analysisDraft?(task: string, spec: Record<string, unknown>): Promise<Answer<AnalysisDraft>>;
-  analysisExport?(task: string, id: string, format: import('../electron/reports/model').ReportFormat, mode?: 'management' | 'audit'): Promise<Answer<Record<string, unknown>>>;
+  analysisExport?(task: string, id: string, format: import('../electron/reports/model').ReportExportFormat, mode?: 'management' | 'audit'): Promise<Answer<Record<string, unknown>>>;
   analysisMethodSave?(task: string, id: string, name: string): Promise<Answer<AnalysisMethod>>;
   analysisMethodApply?(task: string, id: string, bindings: Record<string, string>, parameters?: unknown[] | Record<string, unknown>): Promise<Answer<AnalysisRevision>>;
   financeCall?(task: string, command: FinanceCommand, spec?: Record<string, unknown>): Promise<Answer<Record<string, unknown>>>;
@@ -612,6 +612,7 @@ export type FinanceCommand =
   | 'finance-control-disposition-review'
   | 'finance-control-finding-save'
   | 'finance-control-confirmation-sheet'
+  | 'report-review'
   | 'report-template-list'
   | 'report-template-apply'
   | 'chart-deliverable-save'

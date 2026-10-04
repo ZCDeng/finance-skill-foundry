@@ -18,8 +18,11 @@ from openpyxl.utils.cell import get_column_letter, range_boundaries
 from foundry.analysis_data import MAX_COLUMNS, MAX_ROWS, MAX_SOURCE_BYTES, excel_number, json_value
 from foundry.errors import FoundryError
 
-REPORT_FORMATS = {"docx", "pdf", "html", "md", "xlsx"}
-REPORT_SUFFIXES = {".docx": "docx", ".pdf": "pdf", ".html": "html", ".htm": "html", ".md": "md", ".xlsx": "xlsx"}
+# Formats a report can be imported from. PPTX is read for review only: it is never a template or an export
+# format (see report_templates.reject_pptx and analysis.REPORT_EXPORT_FORMATS).
+REPORT_FORMATS = {"docx", "pdf", "html", "md", "xlsx", "pptx"}
+REPORT_SUFFIXES = {".docx": "docx", ".pdf": "pdf", ".html": "html", ".htm": "html", ".md": "md", ".xlsx": "xlsx", ".pptx": "pptx"}
+ZIP_REPORT_FORMATS = {"docx", "xlsx", "pptx"}
 REPORT_TEMPLATE_VERSION = "annual-v1"
 MAX_DOCUMENT_NODES = 20_000
 MAX_DOCUMENT_TEXT = 1_000_000
@@ -68,16 +71,16 @@ def _source_id(value: Any) -> str:
 def report_format_for_path(path: Path) -> str:
     suffix = path.suffix.casefold()
     if suffix not in REPORT_SUFFIXES:
-        raise FoundryError("report source format must be docx, pdf, html, md or xlsx")
+        raise FoundryError("report source format must be docx, pdf, html, md, xlsx or pptx")
     return REPORT_SUFFIXES[suffix]
 
 
 def check_report_source_bytes(data: bytes, fmt: str) -> None:
     if fmt not in REPORT_FORMATS:
-        raise FoundryError("report format must be docx, pdf, html, md or xlsx")
+        raise FoundryError("report format must be docx, pdf, html, md, xlsx or pptx")
     if len(data) > MAX_SOURCE_BYTES:
         raise FoundryError("report source exceeds 32 MiB limit")
-    if fmt in {"docx", "xlsx"}:
+    if fmt in ZIP_REPORT_FORMATS:
         try:
             with ZipFile(io.BytesIO(data)) as archive:
                 if sum(item.file_size for item in archive.infolist()) > MAX_SOURCE_BYTES * 4:
@@ -92,7 +95,7 @@ def validate_report_source(source: Any) -> dict[str, Any]:
     source_id = _source_id(source.get("id"))
     fmt = source.get("format")
     if fmt not in REPORT_FORMATS:
-        raise FoundryError("report source format must be docx, pdf, html, md or xlsx")
+        raise FoundryError("report source format must be docx, pdf, html, md, xlsx or pptx")
     sha256 = source.get("sha256")
     if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise FoundryError("report source requires a sha256")
