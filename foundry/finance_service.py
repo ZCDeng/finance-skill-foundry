@@ -2258,7 +2258,8 @@ class FinanceStore:
                 },
                 registered_source_ids={source["id"]},
             )
-        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document})
+        draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document},
+                                         _allowed=self.allowed)
         return {
             "draft": draft,
             "template_id": template_id,
