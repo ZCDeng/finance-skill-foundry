@@ -13,6 +13,7 @@ import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
 import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
 import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 function bridgeScenarioLabels(context?: FinanceContext): { actual: string; baseline: string } {
   const scopes = context?.scopes ?? {};
@@ -378,8 +379,8 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     {advancedChildren ? <section className="analysis-finance-definition" aria-label="计算定义">{advancedChildren}</section> : null}
     {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
       <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
-        <FieldShell label="情景类型"><select aria-label="情景类型" className="fnd-field" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
-          <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></select></FieldShell>
+        <FieldShell label="情景类型"><NativeSelect aria-label="情景类型" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
+          <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></NativeSelect></FieldShell>
         <TextField label="情景名称" value={scenarioLabel} onChange={setScenarioLabel} />
         <SearchableSelect label={scenarioKind === 'receivables_aging' ? '应收/发票资料' : '回款资料'} value={scenarioPrimary}
           options={aliasOptions(aliases, selectedContext, datasets)} onChange={setScenarioPrimary} placeholder="选择资料" />

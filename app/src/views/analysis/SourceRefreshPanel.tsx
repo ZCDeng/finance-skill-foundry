@@ -5,6 +5,7 @@ import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 // The engine refreshes a whole period or only what changed since the last refresh; it takes nothing else.
 type SourceRefreshMode = 'full_period' | 'incremental';
@@ -72,11 +73,11 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
       <TextField label="版本" value={version} onChange={setVersion} />
       <TextField label="资料名称" value={name} onChange={setName} />
       <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
-      <FieldShell label="刷新模式"><select aria-label="刷新模式" className="fnd-field" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value as SourceRefreshMode })}>
-        <option value="full_period">整期</option><option value="incremental">增量</option></select></FieldShell>
+      <FieldShell label="刷新模式"><NativeSelect aria-label="刷新模式" value={scope.mode} onChange={(event) => setScope({ ...scope, mode: event.target.value as SourceRefreshMode })}>
+        <option value="full_period">整期</option><option value="incremental">增量</option></NativeSelect></FieldShell>
       <p className="analysis-note">按业务键逐行比对时生效：整期把文件视为整个期间，文件里没有的行记为已删除；增量只更新文件里出现的行。旧结果仍按原资料保留。</p>
-      <FieldShell label="文件识别方式"><select aria-label="文件识别方式" className="fnd-field" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
-        <option value="snapshot_only">整份替换</option><option value="business_key">按业务键逐行比对</option></select></FieldShell>
+      <FieldShell label="文件识别方式"><NativeSelect aria-label="文件识别方式" value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}>
+        <option value="snapshot_only">整份替换</option><option value="business_key">按业务键逐行比对</option></NativeSelect></FieldShell>
     </div></details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
       <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>

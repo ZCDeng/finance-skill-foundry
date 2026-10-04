@@ -419,6 +419,20 @@ textarea.fnd-field {
   outline-offset: -1px;
 }
 
+/* NativeSelect: the wrapper carries the chevron; the select stays a real field. */
+.fnd-native-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.fnd-native-select--picker {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 280px;
+}
+
 /* -- the header's own help ------------------------------------------------ */
 
 /*
