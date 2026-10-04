@@ -7,7 +7,7 @@ vi.mock('../src/views/analysis/ReportEditor.js', () => ({
   PdfComparison: ({ page }: { page?: number }) => <div>PDF 原页 {page}</div>,
 }));
 import { DraftEditor } from '../src/views/analysis/DraftEditor.js';
-import { ReportReviewPanel, candidateWords, groupedNumber, reviewPlace, type ReportReview } from '../src/views/analysis/ReportReviewPanel.js';
+import { ReportReviewPanel, candidateWords, gapWords, groupedNumber, reviewPlace, type ReportReview } from '../src/views/analysis/ReportReviewPanel.js';
 
 const taskId = 'a'.repeat(32);
 const dataset = 'd'.repeat(32);
@@ -17,9 +17,9 @@ const review: ReportReview = {
   summary: { status: 'needs_attention', total: 5, match: 1, match_rounded: 1, match_scaled: 1, mismatch: 1, needs_review: 1, needs_review_not_amount: 0 },
   items: [
     { id: 'n1', text: '820 万元', value: '820', unit: '万元', status: 'mismatch', excerpt: '营业成本本月实际 820 万元。',
-      location: { source_id: pdfSource, page: '3', section: '第 3 页', kind: 'paragraph' },
+      location: { source_id: pdfSource, source_format: 'pdf', page: '3', section: '第 3 页', kind: 'paragraph' },
       candidates: [{ kind: 'workbook', dataset_id: dataset, sheet: '利润表', range: 'B5', label: '营业成本 · 本月实际', value: '800', unit: '万元' }],
-      compared_value: '800', difference: '20' },
+      compared_value: '800', compared_basis: 'same', difference: '20' },
     { id: 'n2', text: '1,234.56', value: '1234.56', unit: '万元', status: 'match_scaled',
       location: { kind: 'table_cell', table_index: 2, row: 4, column: 3, section: '明细' }, excerpt: '1,234.56',
       candidates: [{ kind: 'workbook', dataset_id: dataset, sheet: '明细', range: 'B12', label: '一店 · 收入', value: '12345600', unit: '元' }],
@@ -53,6 +53,13 @@ describe('report review words', () => {
     expect(candidateWords({ kind: 'workbook', sheet: '利润表', range: 'B12', value: '1234.56', unit: '万元' })).toBe('套表 利润表!B12 = 1,234.56 万元');
     expect(candidateWords({ kind: 'workbook', sheet: '利润表', range: 'B7', label: '毛利率', value: '35.2', unit: '%' })).toBe('套表 利润表!B7 「毛利率」 = 35.2%');
   });
+  it('says which side is larger, and gives a gap between percentages in percentage points', () => {
+    expect(gapWords('20', '万元')).toBe('文稿比来源多 20 万元');
+    expect(gapWords('-1385', '万元')).toBe('文稿比来源少 1,385 万元');
+    expect(gapWords('5', '%')).toBe('文稿比来源高 5 个百分点');
+    expect(gapWords('-0.05', '%')).toBe('文稿比来源低 0.05 个百分点');
+    expect(gapWords('12', null)).toBe('文稿比来源多 12');
+  });
 });
 
 describe('ReportReviewPanel', () => {
@@ -74,7 +81,7 @@ describe('ReportReviewPanel', () => {
     expect(within(current).getByText('第 3 页')).toBeTruthy();
     expect(within(current).getByText('营业成本本月实际 820 万元。')).toBeTruthy();
     expect(within(current).getByText('来源：套表 利润表!B5 「营业成本 · 本月实际」 = 800 万元')).toBeTruthy();
-    expect(within(current).getByText('按文稿单位折算来源为 800 万元，相差 20 万元')).toBeTruthy();
+    expect(within(current).getByText('文稿比来源多 20 万元')).toBeTruthy();
 
     fireEvent.mouseDown(within(panel).getByRole('tab', { name: '疑似单位换算1' }), { button: 0 });
     const scaled = within(panel).getByRole('tabpanel');
@@ -91,6 +98,47 @@ describe('ReportReviewPanel', () => {
     expect(screen.getByText('1 份已被新版本取代的资料没有参与比对。')).toBeTruthy();
     expect(screen.getByText('复核只比对数字，不判断表述是否恰当，也不代表报告可以对外发送。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '使用指南：复核外部报告数字' })).toBeTruthy();
+  });
+
+  it('words a converted source value, and never shows a cut-off review as all clear', () => {
+    render(<ReportReviewPanel taskId={taskId} review={{
+      summary: { status: 'needs_attention', total: 3, match: 1, mismatch: 2, truncated: true },
+      items: [
+        { id: 'n1', text: '35.7%', value: '35.7', unit: '%', status: 'mismatch', compared_value: '35.2', compared_basis: 'ratio', difference: '0.5',
+          candidates: [{ kind: 'workbook', sheet: '利润表', range: 'B6', label: '毛利率 · 本月实际', value: '0.352', unit: null }] },
+        // A record from before compared_basis: the source was converted into the report's unit.
+        { id: 'n2', text: '820 万元', value: '820', unit: '万元', status: 'mismatch', compared_value: '800', difference: '20',
+          candidates: [{ kind: 'workbook', sheet: '利润表', range: 'B5', value: '8000000', unit: '元' }] },
+      ],
+    }} />);
+    expect(screen.getByText('来源是比例值，即 35.2%，文稿比来源高 0.5 个百分点')).toBeTruthy();
+    expect(screen.getByText('来源折成文稿单位是 800 万元，文稿比来源多 20 万元')).toBeTruthy();
+    cleanup();
+
+    render(<ReportReviewPanel taskId={taskId} review={{
+      summary: { status: 'needs_attention', total: 1, match: 1, truncated: true },
+      items: [{ id: 'n1', text: '9,876.54 万元', value: '9876.54', unit: '万元', status: 'match', candidates: [] }],
+      notes: ['文稿里的数字超过 3000 个，只复核了前 3000 个。'],
+    }} />);
+    const headline = screen.getByRole('status');
+    expect(headline.textContent).toBe('复核了前 1 个数字，都找到了一致的数值。文稿里的数字超过复核上限，其余数字没有复核，请人工核对。');
+    expect(headline.className).toContain('analysis-report-review-headline--attention');
+  });
+
+  it('offers the original page only for a number read from a PDF', () => {
+    const load = vi.fn(async () => 'data:application/pdf;base64,JVBE');
+    render(<ReportReviewPanel taskId={taskId} pdf={{ load, render: () => null }} review={{
+      summary: { status: 'needs_attention', total: 2, needs_review: 2 },
+      items: [
+        { id: 'n1', text: '500 万元', value: '500', unit: '万元', status: 'needs_review', candidates: [],
+          location: { source_id: 'p'.repeat(32), source_format: 'pptx', page: '2', kind: 'paragraph' } },
+        // An older record names no format: no page button rather than one that cannot open.
+        { id: 'n2', text: '600 万元', value: '600', unit: '万元', status: 'needs_review', candidates: [],
+          location: { source_id: pdfSource, page: '4', kind: 'paragraph' } },
+      ],
+    }} />);
+    expect(screen.getByText('第 2 页')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /查看原文第/ })).toBeNull();
   });
 
   it('opens the cited PDF page through the parent and tolerates a record from an older engine', async () => {

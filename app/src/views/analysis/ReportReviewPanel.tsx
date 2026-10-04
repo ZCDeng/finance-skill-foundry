@@ -15,13 +15,13 @@ export interface ReportReviewCandidate {
   label?: string; value?: string; unit?: string | null; display?: string;
 }
 export interface ReportReviewLocation {
-  source_id?: string; page?: string; section?: string; kind?: string;
+  source_id?: string; source_format?: string; page?: string; section?: string; kind?: string;
   table_index?: number; row?: number; column?: number; sheet?: string; range?: string;
 }
 export interface ReportReviewItem {
   id: string; text?: string; value?: string; unit?: string | null; location?: ReportReviewLocation; excerpt?: string;
   status?: ReportReviewStatus | string; candidates?: ReportReviewCandidate[]; note?: string; amount_like?: boolean;
-  compared_value?: string; difference?: string;
+  compared_value?: string; compared_basis?: 'same' | 'unit' | 'ratio' | string; difference?: string;
 }
 export interface ReportReview {
   id?: string;
@@ -91,6 +91,33 @@ function pageNumber(page: string | undefined): number | undefined {
   // A page is a place in the file, not an amount: a whole number is enough here.
   return page && /^\d{1,5}$/.test(page) ? Number.parseInt(page, 10) : undefined;
 }
+/** Only a number read from a PDF has a page to open; a PPT slide or a Word page number does not. */
+function pdfPage(location: ReportReviewLocation | undefined): number | undefined {
+  return location?.source_id && location.source_format === 'pdf' ? pageNumber(location.page) : undefined;
+}
+/** 「文稿比来源多 20 万元」; a gap between percentages is in 个百分点. The sign is read off the string. */
+export function gapWords(difference: string, unit: string | null | undefined): string {
+  const text = difference.trim();
+  const less = text.startsWith('-');
+  const size = text.replace(/^[+-]/, '');
+  if (unit === '%') return `文稿比来源${less ? '低' : '高'} ${groupedNumber(size)} 个百分点`;
+  return `文稿比来源${less ? '少' : '多'} ${amountWords(size, unit)}`;
+}
+function headline(total: number, attention: number, truncated: boolean): string {
+  if (total === 0) return '文稿里没有找到可比对的数字。';
+  const counted = truncated ? `复核了前 ${total} 个数字` : `共 ${total} 个数字`;
+  const result = attention ? `${counted}，${attention} 个需要你核对。`
+    : truncated ? `${counted}，都找到了一致的数值。` : `${counted}，都在当前资料或计算结果中找到了一致的数值。`;
+  // Numbers past the cap were never checked, so a cut-off review is never shown as all clear.
+  return truncated ? `${result}文稿里的数字超过复核上限，其余数字没有复核，请人工核对。` : result;
+}
+function differenceWords(item: ReportReviewItem): string {
+  const gap = gapWords(item.difference ?? '', item.unit);
+  const compared = amountWords(item.compared_value, item.unit);
+  if (item.compared_basis === 'ratio') return `来源是比例值，即 ${compared}，${gap}`;
+  if (item.compared_basis === 'same') return gap;
+  return `来源折成文稿单位是 ${compared}，${gap}`;
+}
 
 /** Ask Foundry to check the numbers of a saved draft or of a document still in the import preview. */
 export async function requestReportReview(taskId: string, spec: { draft_id: string } | { document: unknown }): Promise<ReportReview> {
@@ -109,8 +136,10 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
   const summary = review.summary ?? {};
   const total = summary.total ?? items.length;
   const attention = (summary.mismatch ?? 0) + (summary.match_scaled ?? 0) + (summary.needs_review ?? 0);
+  const truncated = summary.truncated === true;
+  const warn = attention > 0 || truncated;
   const openPage = async (item: ReportReviewItem) => {
-    const number = pageNumber(item.location?.page);
+    const number = pdfPage(item.location);
     if (!pdf || !item.location?.source_id || !number) return;
     setPageError('');
     try {
@@ -122,11 +151,9 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
   return <section className="analysis-report-review" aria-label="报告数字复核结果">
     <div className="analysis-section-heading"><h4><ListChecks size={16} aria-hidden />数字复核结果</h4>
       <HelpLink article="report-review" label="复核外部报告数字" /></div>
-    <p className={`analysis-report-review-headline${attention ? ' analysis-report-review-headline--attention' : ''}`} role="status">
-      {attention ? <TriangleAlert size={16} aria-hidden /> : <CircleCheck size={16} aria-hidden />}
-      {total === 0 ? '文稿里没有找到可比对的数字。'
-        : attention ? `共 ${total} 个数字，${attention} 个需要你核对。`
-          : `共 ${total} 个数字，都在当前资料或计算结果中找到了一致的数值。`}
+    <p className={`analysis-report-review-headline${warn ? ' analysis-report-review-headline--attention' : ''}`} role="status">
+      {warn ? <TriangleAlert size={16} aria-hidden /> : <CircleCheck size={16} aria-hidden />}
+      {headline(total, attention, truncated)}
     </p>
     <ul className="analysis-report-review-summary" aria-label="复核结果统计">
       {groups.map(({ id, label, Icon, items: rows }) => <li key={id}
@@ -144,7 +171,7 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
           : <ol className="analysis-report-review-items">{rows.map((item) => {
             const best = item.candidates?.[0];
             const range = sourceRange(best);
-            const canOpenPage = Boolean(pdf && item.location?.source_id && pageNumber(item.location?.page));
+            const canOpenPage = Boolean(pdf && pdfPage(item.location));
             return <li key={item.id} className={`analysis-report-review-item analysis-report-review-item--${item.status}`}>
               <div className="analysis-report-review-item-head">
                 <strong className="analysis-report-review-number">{item.text}</strong>
@@ -154,7 +181,7 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
               {item.excerpt && <blockquote className="analysis-report-review-excerpt">{item.excerpt}</blockquote>}
               {best && <p className="analysis-report-review-candidate">{item.status === 'mismatch' ? '来源：' : item.status === 'needs_review' ? '最接近的来源：' : '对应来源：'}{candidateWords(best)}</p>}
               {item.status === 'mismatch' && item.difference != null && <p className="analysis-report-review-difference">
-                按文稿单位折算来源为 {amountWords(item.compared_value, item.unit)}，相差 {amountWords(item.difference, item.unit)}</p>}
+                {differenceWords(item)}</p>}
               {item.note && <p className="analysis-note">{item.note}</p>}
               {(item.candidates?.length ?? 0) > 1 && <details className="analysis-details"><summary>其他候选来源 · {item.candidates!.length - 1} 个</summary>
                 <ul>{item.candidates!.slice(1).map((candidate, index) => <li key={index}>{candidateWords(candidate)}</li>)}</ul></details>}
