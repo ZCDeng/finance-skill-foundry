@@ -327,6 +327,7 @@ export function registerIpc(
     'finance-completion-recoveries',
     'finance-completion-recover',
     'workbook-range-preview',
+    'workbook-health',
     'prepare-explanation',
     'validate-explanation',
     'finance-background-save',

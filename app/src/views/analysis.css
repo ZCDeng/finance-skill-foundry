@@ -331,6 +331,28 @@
 .analysis-close-block li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
 .analysis-close-item--blocking { color: var(--fnd-warning); }
 .analysis-scope-candidate-source { margin: 0 12px 0 6px; }
+
+/* Workbook formula health hints (公式体检, 2026-10-04). Hints never block: a
+   warning reads in the brick-red warning tokens with a word and an icon, an
+   info hint stays muted, and gold is never used here. */
+.analysis-formula-health { display: grid; gap: 8px; }
+.analysis-formula-health [data-slot="button"] { margin-top: 0; }
+.analysis-formula-health-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.analysis-formula-health-body { display: grid; gap: 10px; }
+.analysis-formula-health-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.analysis-formula-health-item { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--fnd-line); }
+.analysis-formula-health-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--fnd-ink); font-size: var(--fnd-size-body); font-weight: var(--fnd-weight-strong); }
+.analysis-formula-health-severity { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: 4px; color: var(--fnd-muted); font-size: var(--fnd-size-label); font-weight: normal; }
+.analysis-formula-health-item--warning .analysis-formula-health-severity { color: var(--fnd-warning); border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
+.analysis-formula-health-count { color: var(--fnd-muted); font-size: var(--fnd-size-small); font-weight: normal; }
+.analysis-formula-health-why { margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.analysis-formula-health-samples { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: var(--fnd-size-small); }
+.analysis-formula-health-samples li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; overflow-wrap: anywhere; }
+.analysis-formula-health-formula { font-family: ui-monospace, monospace; font-size: var(--fnd-size-small); }
+.analysis-formula-health-detail { color: var(--fnd-muted); }
+.analysis-formula-health-view { display: grid; gap: 8px; }
+.analysis-formula-health-close { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
 /* 问题类型 on a difference, and the 套表可用结论 under the month-close headline (2026-10-04).
    The conclusion's level is in its words and icon; 不可用 takes the warning tokens and 无法判断
    the muted ink. Gold stays for location and focus. */

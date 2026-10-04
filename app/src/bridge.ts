@@ -332,6 +332,40 @@ export interface DatasetSnapshot extends AnalysisObject {
   row_count?: number;
   transformation?: { sheet_count?: number; [key: string]: unknown };
   filename?: string;
+  /** "source.xlsx" for an uploaded workbook; the archived file's own name inside the snapshot. */
+  source_file?: string;
+  /** 公式体检, read when the workbook was added. Absent on snapshots filed before it existed. */
+  workbook_health?: WorkbookHealth;
+}
+/** One sample of a formula health hint: a sheet, and for a cell its address and a bounded range around it. */
+export interface WorkbookHealthSample {
+  sheet: string;
+  cell?: string;
+  range?: string;
+  formula?: string;
+  detail?: string;
+}
+export interface WorkbookHealthIssue {
+  code: string;
+  severity: 'warning' | 'info' | string;
+  /** Occurrences: cells, sheets or links, by code. */
+  count: number;
+  sheets?: string[];
+  samples?: WorkbookHealthSample[];
+  /** external_links only: the linked files' names, never their paths. */
+  targets?: string[];
+}
+/** Hints only: nothing here blocks an import or a calculation. */
+export interface WorkbookHealth {
+  schema_version: number;
+  status: 'checked' | 'unavailable' | string;
+  checked_formula_cells?: number;
+  truncated?: boolean;
+  sheet_count?: number;
+  /** How many kinds of hint (codes) have at least one occurrence. */
+  issue_count?: number;
+  issues?: WorkbookHealthIssue[];
+  reason?: string;
 }
 export type AnalysisScalar = string | number | boolean | null;
 export interface AnalysisParameterMetadata {
@@ -551,6 +585,7 @@ export type FinanceCommand =
   | 'finance-completion-recoveries'
   | 'finance-completion-recover'
   | 'workbook-range-preview'
+  | 'workbook-health'
   | 'prepare-explanation'
   | 'validate-explanation'
   | 'finance-background-save'

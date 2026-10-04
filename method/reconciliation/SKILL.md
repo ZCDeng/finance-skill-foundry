@@ -1,12 +1,12 @@
 ---
 name: reconciliation
-description: Reconcile accounts by comparing GL balances to subledgers, bank statements, or third-party data. Use when performing bank reconciliations, GL-to-subledger recs, intercompany reconciliations, or identifying and categorizing reconciling items.
+description: Reconcile accounts by comparing GL balances to subledgers, bank statements, or third-party data. Use when performing bank reconciliations, GL-to-subledger recs, intercompany reconciliations, or identifying and categorizing reconciling items. Do not use to post adjustments or initiate payments.
 argument-hint: "<type> [period]"
 ---
 
 # Reconciliation
 
-> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/reconciliation). Licensed Apache-2.0. This copy is for local Cursor use; see NOTICE.
+> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/reconciliation). Licensed Apache-2.0. This modified copy ships inside FA Foundry; see NOTICE.
 
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >

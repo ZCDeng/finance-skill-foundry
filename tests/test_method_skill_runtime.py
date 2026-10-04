@@ -204,3 +204,27 @@ process.stdout.write(JSON.stringify({
     assert result["diagnostics"]["badLoaded"] is None
     warnings = "\n".join(result["diagnostics"]["providerWarnings"])
     assert "bad-skill/SKILL.md ignored: frontmatter requires name and description" in warnings
+
+
+def test_real_filesystem_provider_catalogs_exactly_the_eight_bundled_skills(tmp_path: Path) -> None:
+    import yaml
+
+    result = _driver(
+        tmp_path,
+        """
+const result = await collect();
+process.stdout.write(JSON.stringify(result));
+""",
+    )
+    bundled = {skill["name"]: skill for skill in result["summaries"] if skill["source"] == "bundled"}
+    assert set(bundled) == set(BUNDLED_IDS) | set(BUNDLED_PACKS)
+    for name, summary in bundled.items():
+        text = (method_root() / name / "SKILL.md").read_text(encoding="utf-8")
+        frontmatter = yaml.safe_load(text.split("\n---\n", 1)[0].removeprefix("---\n"))
+        # The catalog shows the edited description, including its "do not" clause.
+        assert summary["description"] == frontmatter["description"]
+        assert "Use when" in summary["description"]
+    warnings = [message["content"] for message in result["logs"] if message["type"] == "warn"]
+    assert not [line for line in warnings if "SKILL.md ignored" in line]
+    for note in ("CONNECTORS.md", "FOUNDRY.md", "README.md", "report-visuals.md"):
+        assert any(line.endswith(f"{note} ignored: missing YAML frontmatter") for line in warnings), note

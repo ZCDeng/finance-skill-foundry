@@ -59,10 +59,11 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.reportExport).toHaveBeenCalledTimes(1);
   });
 
-  it('routes bounded workbook preview and explicit recovery through manager task authority', async () => {
+  it('routes bounded workbook preview, the on-demand formula health check and explicit recovery through manager task authority', async () => {
     registerIpc({ varRoot: '/store' });
     for (const [name, spec] of [
       ['workbook-range-preview', { dataset_id: 'source', sheet: '预算', range: 'B36:I39' }],
+      ['workbook-health', { dataset_id: 'source' }],
       ['finance-completion-recover', { operation_id: 'operation', revision: 'revision', draft: { title: '纠正稿' } }],
     ] as const) {
       expect((await invoke(CHANNELS.financeCall, task, name, spec)).ok).toBe(true);
