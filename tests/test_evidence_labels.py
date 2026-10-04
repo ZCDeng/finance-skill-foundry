@@ -572,6 +572,25 @@ def test_the_assistant_draft_tool_judges_freshness_only_by_the_files_its_session
     assert _one(check["evidence_labels"], "claim")["label"] == "fact_source_reported"
 
 
+def test_applying_a_report_template_in_a_session_never_opens_a_file_outside_it(tmp_path, monkeypatch):
+    task, analysis, store = _readiness_task(tmp_path)
+    older = analysis.add_dataset(_ledger(tmp_path / "v1.csv", "2026-08"), name="8月总账")
+    _period(store, older["id"])
+    newer = analysis.add_dataset(_corrected(tmp_path / "v2.csv"), name="8月总账")
+    opened: list[str] = []
+    read = AnalysisStore.read_dataset
+
+    def spy(self, dataset_id, *args, **kwargs):
+        opened.append(dataset_id)
+        return read(self, dataset_id, *args, **kwargs)
+
+    monkeypatch.setattr(AnalysisStore, "read_dataset", spy)
+    session = FinanceStore(task, snapshot_ids=[older["id"]])
+    for template_id in ("management-brief-v1", "management-brief-xlsx-v1"):
+        session.report_template_apply({"template_id": template_id})
+    assert newer["id"] not in opened
+
+
 def test_a_refresh_outside_the_session_does_not_make_its_prior_snapshot_stale(tmp_path):
     task, analysis, store = _readiness_task(tmp_path)
     first = _refresh(task, tmp_path)
