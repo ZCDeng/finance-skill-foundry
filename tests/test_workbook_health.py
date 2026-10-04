@@ -259,6 +259,23 @@ def test_no_pattern_without_a_dominant_signature() -> None:
     assert _issue(result, "inconsistent_row_formula") is None
 
 
+def test_copies_share_a_shape_and_text_never_does() -> None:
+    shape = workbook_health._shape
+    assert shape("B5*C5", 5, 4) == shape("B6*C6", 6, 4) == "R[0]C[-2]*R[0]C[-1]"
+    assert shape("Sheet2!B5+$A$1", 5, 3) == shape("Sheet2!C5+$A$1", 5, 4)
+    # Quoted text, quoted sheet names, function names and exponents are not references.
+    assert shape('IF(A1="B5",LOG10(A1),1E5)', 9, 9) == 'IF(R[-8]C[-8]="B5",LOG10(R[-8]C[-8]),1E5)'
+    assert shape("'Q1 2026'!B5", 1, 1) == "'Q1 2026'!R[4]C[1]"
+    # The same shape at another cell is the same analysis; a different literal is a different shape.
+    assert shape("B5*1.13", 5, 3) != shape("B6*1.15", 6, 3)
+    data = _bytes(_book({f"C{row}": f"=Sheet1!A{row}*2" for row in range(2, 10)} | {"C6": "=Sheet1!A6*3"}))
+    result = check_workbook(data)
+    assert [sample["cell"] for sample in _issue(result, "inconsistent_column_formula")["samples"]] == ["C6"]
+    assert _issue(result, "hardcoded_number")["samples"] == [
+        {"sheet": "汇总", "cell": "C6", "range": "A2:C10", "formula": "=Sheet1!A6*3", "detail": "3"},
+    ]
+
+
 def test_shared_formulas_count_every_copy_and_show_the_copy_text() -> None:
     data = _rewrite(_bytes(_book({f"C{row}": "x" for row in range(2, 10)})), {
         SHEET1: _cells({

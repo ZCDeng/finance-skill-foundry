@@ -578,9 +578,13 @@ def _scan_sheet(archive, part: str, name: str, ns: str, formulas: _FormulaCache,
                 continue
             given = element.get("r")
             row_number = int(given) if given and given.isdigit() else row_number + 1
-            column_number = 0
-            for cell in element:
-                if cell.tag != cell_tag:
+            cells = element.findall(cell_tag)
+            last = len(cells) - 1
+            for index, cell in enumerate(cells):
+                cell_type = cell.get("t")
+                formula_element = cell.find(formula_tag)
+                # Plain values only matter for the sheet's extent, which its last cell in the row gives.
+                if formula_element is None and cell_type != "e" and index != last:
                     continue
                 reference = cell.get("r")
                 matched = _CELL.match(reference) if reference else None
@@ -588,7 +592,7 @@ def _scan_sheet(archive, part: str, name: str, ns: str, formulas: _FormulaCache,
                     column_number = _column_index(matched.group(1))
                     row = int(matched.group(2))
                 else:
-                    column_number += 1
+                    column_number = index + 1
                     row = row_number
                 if row > MAX_ROWS + 1 or column_number > MAX_COLUMNS:
                     # One oversized sheet must not cost the manager the rest of the workbook.
@@ -598,8 +602,8 @@ def _scan_sheet(archive, part: str, name: str, ns: str, formulas: _FormulaCache,
                     scan.max_row = row
                 if column_number > scan.max_column:
                     scan.max_column = column_number
-                cell_type = cell.get("t")
-                formula_element = cell.find(formula_tag)
+                if formula_element is None and cell_type != "e":
+                    continue
                 value = cell.find(value_tag)
                 text: Any = None
                 if formula_element is not None:
