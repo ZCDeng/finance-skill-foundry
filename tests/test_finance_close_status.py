@@ -175,3 +175,130 @@ def test_a_failed_run_after_the_last_success_is_flagged():
     result = _status(runs=[RUN, {"execution_status": "failed", "seq": 11}], draft={**CLEAN_DRAFT, "seq": 12})
     review = result["blocks"][-1]
     assert any(item["text"] == "最近一次计算没有成功" for item in review["items"])
+
+
+# ---- 可用结论: whether the books as they stand can be used, beside the headline -----------------
+
+BOOK = {"id": "b1", "name": "月结套表.xlsx", "source_hash": "b" * 64, "source_file": "source.xlsx"}
+LEDGER = {"id": "b2", "name": "合同台账.xlsx", "source_hash": "c" * 64, "source_file": "source.xlsx"}
+
+
+def _on(row, left="b1", right="b1"):
+    return {**row, "control": {**row["control"], "left": {"dataset_id": left}, "right": {"dataset_id": right}}}
+
+
+def _typed(row, finding_type="source_conflict", label="来源矛盾", *, by_manager=True):
+    finding = ({"set_by_manager": True, "type": finding_type, "type_label": label} if by_manager
+               else {"set_by_manager": False, "suggested_type": finding_type, "suggested_type_label": label})
+    return {**row, "finding": finding}
+
+
+def _words(conclusion):
+    return [conclusion["text"], *(reason["text"] for reason in conclusion["reasons"]),
+            *(text for book in conclusion["workbooks"] for text in (book["text"], *(reason["text"] for reason in book["reasons"])))]
+
+
+def test_every_confirmed_control_passing_is_usable_and_the_headline_is_unchanged():
+    result = _status()
+    assert result["headline"] == {"state": "ready_for_review", "text": "可提交经理复核"}
+    assert result["conclusion"] == {
+        "level": "usable", "text": "可用", "reasons": [{"text": "经理确认的 1 条控制全部相符", "target": "controls"}],
+        "basis": {"confirmed": 1, "passed": 1, "waived": 0, "open": 0}, "workbooks": [],
+    }
+
+
+@pytest.mark.parametrize("controls,why", [
+    ([], "还没有经理确认的勾稽控制"),
+    ([{**PASSING, "state": "proposed"}], "还没有经理确认的勾稽控制"),
+    ([PASSING, {"state": "confirmed", "control": {"label": "台账"}, "result": None, "issue": {"state": "not_run", "blocking": True}}], "1 条控制已确认但还没运行"),
+    ([{"state": "confirmed", "control": {"label": "台账"}, "result": {"status": "stale"}, "issue": {"state": "stale", "blocking": True}}], "1 条控制读的资料已有新版本，要在新版本上重新确认"),
+    ([_break("awaiting_reimport", status="error")], "坏账分项 读不出数"),
+])
+def test_without_a_confirmed_current_reading_the_answer_is_not_assessable(controls, why):
+    conclusion = _status(controls=controls)["conclusion"]
+    assert conclusion["level"] == "not_assessable" and conclusion["text"] == "无法判断"
+    assert why in [reason["text"] for reason in conclusion["reasons"]]
+
+
+def test_inputs_still_unconfirmed_make_it_not_assessable_and_say_which():
+    conclusion = _status(scope={**SCOPE, "period": ""}, pending_structures=["月结"], controls=[_break("open")])["conclusion"]
+    assert conclusion["level"] == "not_assessable"
+    assert conclusion["reasons"][:2] == [{"text": "期间未确认", "target": "scope"}, {"text": "月结 的表结构等你确认", "target": "structure"}]
+    assert _status(datasets=[])["conclusion"]["reasons"][0] == {"text": "还没有资料", "target": "datasets"}
+
+
+@pytest.mark.parametrize("state", ["open", "pending_external", "awaiting_reimport", "awaiting_review"])
+def test_a_difference_still_held_makes_the_books_not_usable(state):
+    conclusion = _status(controls=[PASSING, _typed(_break(state))])["conclusion"]
+    assert conclusion["level"] == "not_usable" and conclusion["text"] == "不可用"
+    from foundry.finance_close_status import ISSUE_TEXT
+
+    assert conclusion["reasons"] == [{"text": f"坏账分项：差额 11655，来源矛盾，{ISSUE_TEXT[state]}", "target": "controls"}]
+    assert conclusion["basis"] == {"confirmed": 2, "passed": 1, "waived": 0, "open": 1}
+
+
+def test_an_assistant_suggestion_names_no_type_and_moves_no_level():
+    suggested = _status(controls=[_typed(_break("open"), by_manager=False)])["conclusion"]
+    assert suggested["reasons"][0]["text"] == "坏账分项：差额 11655，未定类型，差异待处理"
+    # A type, the manager's or the assistant's, never lifts a difference out of the way.
+    for row in (_typed(_break("open")), _typed(_break("open"), "basis_difference", "口径不同"), _break("open")):
+        assert _status(controls=[row])["conclusion"]["level"] == "not_usable"
+    assert _status(controls=[_typed(_break("waived", blocking=False))])["conclusion"]["level"] == "usable_with_caveats"
+
+
+def test_an_accepted_difference_leaves_the_books_usable_with_caveats_named():
+    waived = _typed(_break("waived", blocking=False), "basis_difference", "口径不同")
+    conclusion = _status(controls=[PASSING, waived, _break("waived", blocking=False)])["conclusion"]
+    assert conclusion["level"] == "usable_with_caveats" and conclusion["text"] == "带保留可用"
+    assert [reason["text"] for reason in conclusion["reasons"]] == [
+        "坏账分项：差额 11655，口径不同，已接受差异（已知）", "坏账分项：差额 11655，未定类型，已接受差异（已知）"]
+    assert conclusion["basis"] == {"confirmed": 3, "passed": 1, "waived": 2, "open": 0}
+
+
+def test_each_workbook_is_judged_by_the_controls_that_read_it():
+    derived = {**BOOK, "id": "t1", "name": "月结套表 · 08·AR", "metadata": {"derived_from": "b1"}, "transformation": {"structure": {}}}
+    csv = {"id": "c1", "name": "科目余额.csv", "source_hash": "d" * 64, "source_file": "source.csv"}
+    other = {"id": "b3", "name": "银行流水.xlsx", "source_hash": "e" * 64, "source_file": "source.xlsx"}
+    across = _typed(_on(_break("open"), "b2", "b1"))
+    result = _status(datasets=[derived, BOOK, LEDGER, csv, other], controls=[_on(PASSING), across])
+    books = {book["name"]: book for book in result["conclusion"]["workbooks"]}
+    # One line per Excel file: the derived table is the same file, a CSV is not a workbook.
+    assert list(books) == ["月结套表.xlsx", "合同台账.xlsx", "银行流水.xlsx"]
+    assert books["月结套表.xlsx"]["dataset_id"] == "b1"
+    # A tie-out across two workbooks counts against both.
+    for name in ("月结套表.xlsx", "合同台账.xlsx"):
+        assert books[name]["level"] == "not_usable"
+        assert books[name]["reasons"] == [{"text": "坏账分项：差额 11655，来源矛盾，差异待处理", "target": "controls"}]
+    assert books["银行流水.xlsx"] == {"dataset_id": "b3", "name": "银行流水.xlsx", "level": "not_assessable", "text": "无法判断",
+                                    "reasons": [{"text": "还没有经理确认的勾稽控制涉及这本工作簿", "target": "controls"}]}
+    # Once accepted, the pack and both workbooks it reads are usable with that caveat; the other passes on its own.
+    accepted = _on(_break("waived", blocking=False), "b2", "b1")
+    books = {book["name"]: book for book in _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b1", "b1"), accepted])["conclusion"]["workbooks"]}
+    assert books["月结套表.xlsx"]["level"] == books["合同台账.xlsx"]["level"] == "usable_with_caveats"
+    only_ledger = _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b2", "b2"), _on(_break("open"), "b1", "b1")])["conclusion"]
+    assert {book["name"]: book["text"] for book in only_ledger["workbooks"]} == {"月结套表.xlsx": "不可用", "合同台账.xlsx": "可用"}
+    assert only_ledger["text"] == "不可用"
+
+
+def test_a_scope_gap_holds_every_workbook_and_a_structure_only_its_own():
+    controls = [_on(PASSING, "b1", "b1"), _on(PASSING, "b2", "b2")]
+    books = _status(datasets=[BOOK, LEDGER], controls=controls, scope={**SCOPE, "unit": ""})["conclusion"]["workbooks"]
+    assert [book["level"] for book in books] == ["not_assessable", "not_assessable"]
+    assert all(book["reasons"] == [{"text": "单位未确认", "target": "scope"}] for book in books)
+    books = _status(datasets=[BOOK, LEDGER], controls=controls, pending_structures=["合同台账.xlsx"])["conclusion"]["workbooks"]
+    assert [(book["name"], book["level"]) for book in books] == [("月结套表.xlsx", "usable"), ("合同台账.xlsx", "not_assessable")]
+
+
+def test_an_archived_task_is_judged_like_any_other():
+    archived = _status(archived=True, controls=[_break("open")])
+    assert archived["headline"]["state"] == "archived" and archived["conclusion"]["level"] == "not_usable"
+    assert _status(archived=True)["conclusion"]["level"] == "usable"
+
+
+@pytest.mark.parametrize("controls", [
+    [PASSING], [], [_typed(_break("open"))], [_break("waived", blocking=False)], [_break("open", status="error")],
+])
+def test_the_conclusion_never_says_done_or_passed(controls):
+    result = _status(datasets=[BOOK, LEDGER], controls=[_on(row) if row.get("control") else row for row in controls])
+    for text in _words(result["conclusion"]):
+        assert "完成" not in text and "通过" not in text
