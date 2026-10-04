@@ -1,12 +1,12 @@
 ---
 name: variance-analysis
-description: Decompose financial variances into drivers with narrative explanations and waterfall analysis. Use when analyzing budget vs. actual, period-over-period changes, revenue or expense variances, or preparing variance commentary for leadership.
+description: Decompose financial variances into drivers with narrative explanations and waterfall analysis. Use when analyzing budget vs. actual, period-over-period changes, revenue or expense variances, or preparing variance commentary for leadership. Do not use for sell-side research or valuation.
 argument-hint: "<line> vs <base>"
 ---
 
 # Variance Analysis
 
-> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/variance-analysis). Licensed Apache-2.0. This copy is for local Cursor use; see NOTICE.
+> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/variance-analysis). Licensed Apache-2.0. This modified copy ships inside FA Foundry; see NOTICE.
 
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >

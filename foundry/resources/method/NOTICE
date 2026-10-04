@@ -14,7 +14,12 @@ Included skill paths:
 The close-package web app in this repository is a derivative implementation of
 those skills' workflows, formats, checklists, and materiality guidance.
 Extracted SKILL.md copies add a short attribution banner and point connector
-placeholders at CONNECTORS.md.
+placeholders at CONNECTORS.md. They are modified files under Section 4(b) of
+the Apache License: FA Foundry further changed them by adding Foundry runtime
+notes and analysis-mode sections, adding "do not use" clauses to their
+descriptions, adding guard sentences (journal entries are drafts only; no ERP
+or data-warehouse connection is claimed unless the session configures one;
+no posting or payment), and renaming slash commands to the bundled skill names.
 
 Report visual method adaptations
 ===============================

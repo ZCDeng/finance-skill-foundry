@@ -29,7 +29,7 @@
 | 子任务 | 真实 spawn/fork，冻结父任务上下文，有深度与工具范围限制；记录结束状态 |
 | Office | 隔离 Python/openpyxl 生成或修改工作簿成果，原始快照保持不变；可导出、打开后重新导入 |
 | 方法 | SQL 方法显式保存，移除注释与具体字面值，跨任务重新绑定；脚本暂不保存为方法 |
-| 财务方法技能 | 随包提供 financial-statements、variance-analysis、reconciliation、journal-entry；分析会话可发现并加载正文与配套说明。连接器占位不代表已连接 ERP，分录技能用于草拟 |
+| 财务方法技能 | 随包提供 financial-statements、variance-analysis、reconciliation、journal-entry 四项方法，以及 setup、close、bva、cash 四个路由包；分析会话可发现并加载正文与配套说明。连接器占位不代表已连接 ERP，分录技能用于草拟。随包技能的措辞由契约测试把关：不声称已接通 ERP、能过账或付款，斜杠命令和正文里反引号标出的工具名必须真实存在；这只检查文字，助手的回答仍需经理核对 |
 | 后续领域 | 总账、凭证过账、银行支付尚未实现；现金预测属于分析，不执行资金划拨 |
 
 脚本隔离目前只支持 macOS；其它系统拒绝执行，没有静默降级。Bash 支持受限命令，不提供任意子进程或网络。工作簿生成不包含 Excel 公式重算引擎；带公式但缺少缓存值的输入会明确报错。日常回归使用确定性适配器；真实模型验收另用显式 `--live` 入口，在临时配置中使用已有 provider 和合成资料。每次实测分别记录模型、技能来源、计算和草稿。新版解释质量的功能验收、首轮模型成绩和边界见 [解释质量交付记录](docs/finance/explanation-quality-delivery.md)；历史基线见 [r2 实施记录](docs/plans/2026-09-06-finance-r2-execution-log.md)。
