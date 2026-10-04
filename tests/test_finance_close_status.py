@@ -296,6 +296,17 @@ def test_a_workbook_no_control_reads_keeps_the_pack_from_being_called_usable():
     assert _status(datasets=[BOOK, LEDGER], controls=[])["conclusion"]["reasons"] == [{"text": "还没有你确认的勾稽控制", "target": "controls"}]
 
 
+def test_last_months_workbook_a_roll_forward_copy_was_made_from_is_not_a_book_of_the_pack():
+    copy = {"id": "c1", "name": "月结套表（2026-09 滚动）.xlsx", "source_hash": "d" * 64, "source_file": "source.xlsx"}
+    table = {**BOOK, "id": "t1", "name": "利润表", "metadata": {"derived_from": "b1"}}
+    conclusion = _status(datasets=[BOOK, table, copy], controls=[_on(PASSING, "c1", "c1")],
+                         templates={BOOK["source_hash"]})["conclusion"]
+    assert conclusion["level"] == "usable"
+    assert [book["dataset_id"] for book in conclusion["workbooks"]] == ["c1"]
+    # Without the roll-forward, the same workbook is one the pack still waits on.
+    assert _status(datasets=[BOOK, copy], controls=[_on(PASSING, "c1", "c1")])["conclusion"]["level"] == "not_assessable"
+
+
 def test_several_passing_controls_read_as_all_agreeing():
     reasons = _status(controls=[PASSING, PASSING])["conclusion"]["reasons"]
     assert reasons == [{"text": "你确认的 2 条控制都相符", "target": "controls"}]

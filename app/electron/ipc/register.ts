@@ -411,7 +411,7 @@ export function registerIpc(
       // Only a suggested file name comes from the renderer; the folder is the manager's pick.
       const named = typeof rawName === 'string' && rawName.trim() ? lineOf(rawName, 'file name', 200) : '下月副本';
       const selected = await dialog.showSaveDialog({
-        title: '导出下月副本', defaultPath: `${named.replace(/[\\/:*?"<>|]/g, '_')}.xlsx`,
+        title: '导出下月副本', defaultPath: `${named.replace(/\.xlsx$/i, '').replace(/[\\/:*?"<>|]/g, '_')}.xlsx`,
         filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
       });
       if (selected.canceled || !selected.filePath) return { cancelled: true };

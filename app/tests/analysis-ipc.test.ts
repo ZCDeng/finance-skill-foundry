@@ -213,6 +213,9 @@ describe('analysis IPC task and session binding', () => {
     // A suggested name cannot steer the folder.
     await invoke(CHANNELS.rollforwardExport, task, run, '../../etc/x');
     expect(mocks.saver.mock.calls[1][0].defaultPath).toBe('.._.._etc_x.xlsx');
+    // The copy's own name already ends in .xlsx: the suggestion is that name, not one with .xlsx twice.
+    await invoke(CHANNELS.rollforwardExport, task, run, '八月套表（2026-09 滚动）.xlsx');
+    expect(mocks.saver.mock.calls[2][0].defaultPath).toBe('八月套表（2026-09 滚动）.xlsx');
     mocks.run.mockClear();
     mocks.saver.mockResolvedValue({ canceled: true, filePath: '' });
     expect(await invoke(CHANNELS.rollforwardExport, task, run)).toEqual({ ok: true, value: { cancelled: true } });

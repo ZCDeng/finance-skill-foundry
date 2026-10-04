@@ -199,7 +199,7 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
     if (!applied?.run_id || !api?.rollforwardExport) return;
     const saved = unwrap(await api.rollforwardExport(taskId, applied.run_id, applied.output_name));
     if (saved.cancelled) return;
-    setMessage(`已导出「${saved.filename ?? '下月副本'}」。在 Excel 里打开、检查并保存后，再到资料页重新添加，本应用才能读到公式结果。资料列表里的副本保持生成时的样子。`);
+    setMessage(`已导出「${saved.filename ?? '下月副本'}」。在 Excel 里打开、检查并保存后，再到资料页重新添加，本应用才能读到公式结果。保存时保留这个文件名，重新添加后会取代列表里的副本。`);
   });
   const copy = (text: string | undefined, done: string) => track('正在复制…', async () => {
     if (!text) throw new Error('没有可复制的记录。');

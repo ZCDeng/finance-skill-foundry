@@ -642,7 +642,13 @@ def output_filename(source_name: str, period: str) -> str:
 
 
 def output_name(name: str, period: str) -> str:
-    return f"{str(name or '工作簿')[:160]}（{period} 滚动）"
+    """The copy's name in the file list, which is also the file name its export suggests.
+
+    A file added from disk is named after its file name, so the copy saved in Excel under
+    the suggested name and added again replaces the copy as a newer version of it.
+    """
+    stem = re.sub(r"\.xlsx$", "", str(name or "").strip(), flags=re.I) or "工作簿"
+    return f"{stem[:160]}（{period} 滚动）.xlsx"
 
 
 # ---------------------------------------------------------------- change log
