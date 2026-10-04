@@ -120,6 +120,7 @@ const RULES: Rule[] = [
   [/cannot parse \.csv source/i, '无法读取这份 CSV：编码或分隔格式有误。这次读取没有生成任何数据，已有资料不受影响。请另存为 UTF-8 编码的 CSV 后重试。'],
   [/cannot parse \.\w+ source/i, '无法读取这份文件：内容与扩展名标示的格式不符。这次读取没有生成任何数据，已有资料不受影响。请检查文件后重试。'],
   [/dataset source workbook integrity check failed/i, '这份 Excel 与登记时的内容不一致，请重新添加这份资料。'],
+  [/finance file bindings require an XLSX snapshot/i, '这一步只适用于 Excel（.xlsx）资料，请选择一本 Excel 工作簿。'],
   [/integrity check failed/i, '资料内容与登记时不一致，请重新添加这份资料后再计算。'],
   [/outside (this session context|run bindings|the run)|is outside/i, '引用的资料不属于当前任务或这次计算，请重新选择资料。'],
   [/source batch is not published|snapshot is unavailable/i, '这份来源还没有可用的数据快照，请先完成来源更新。'],
