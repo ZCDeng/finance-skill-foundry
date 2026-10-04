@@ -103,7 +103,7 @@ function sourceRefreshField(label: string) {
 }
 function chooseSearchable(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
-  fireEvent.mouseDown(screen.getByRole('option', { name: option }));
+  fireEvent.click(screen.getByRole('option', { name: option }));
 }
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -1109,7 +1109,7 @@ ${canonicalAppendix} 已改写`;
     fireEvent.change(screen.getByLabelText('第 2 行科目代码'), { target: { value: '6402' } });
     expect((screen.getByLabelText('第 2 行科目代码') as HTMLInputElement).value).toBe('6402');
     fireEvent.click(screen.getByRole('button', { name: '已保存映射' }));
-    fireEvent.mouseDown(await screen.findByRole('option', { name: /标准管理科目映射/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /标准管理科目映射/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '已保存映射' }).textContent).toContain('标准管理科目映射'));
     expect(screen.getByText(/计算损益表时使用管理科目映射/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '计算损益表' }));
@@ -2683,7 +2683,7 @@ ${canonicalAppendix} 已改写`;
     await screen.findByText('情景测算');
     fireEvent.change(screen.getByLabelText('账龄日期'), { target: { value: '2026-08-31' } });
     fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
-    fireEvent.mouseDown(screen.getByRole('option', { name: /争议应收/ }));
+    fireEvent.click(screen.getByRole('option', { name: /争议应收/ }));
     fireEvent.click(screen.getByRole('button', { name: /计算基准情景/ }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-run', { scenario_id: '5'.repeat(32) }));
     expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-scenario-save', expect.objectContaining({

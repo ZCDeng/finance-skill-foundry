@@ -71,12 +71,15 @@ describe('financial web controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '对比期间打开年月选择' }));
     fireEvent.click(screen.getByRole('button', { name: '7月' }));
     expect(onPeriod).toHaveBeenLastCalledWith('2026-07');
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('对比期间')));
 
     fireEvent.click(screen.getByRole('button', { name: '账龄日期打开日期选择' }));
     const dialog = screen.getByRole('dialog', { name: '账龄日期日期选择' });
-    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    // shadcn Calendar: focus lands on the chosen day; weeks start on Monday.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /2026年8月31日/ })));
     expect(dialog.textContent).toContain('2026 年 8 月');
-    fireEvent.click(screen.getByRole('button', { name: '15' }));
+    expect(Array.from(dialog.querySelectorAll('th')).map((cell) => cell.textContent)).toEqual(['一', '二', '三', '四', '五', '六', '日']);
+    fireEvent.click(screen.getByRole('button', { name: /2026年8月15日/ }));
     expect(onDate).toHaveBeenLastCalledWith('2026-08-15');
   });
 
@@ -107,25 +110,26 @@ describe('financial web controls', () => {
     fireEvent.keyDown(periodDialog, { key: 'ArrowRight' });
     fireEvent.keyDown(periodDialog, { key: 'Enter' });
     expect(onPeriod).toHaveBeenLastCalledWith('2026-09');
-    expect(document.activeElement).toBe(periodInput);
+    await waitFor(() => expect(document.activeElement).toBe(periodInput));
 
     const dateInput = screen.getByLabelText('键盘日期');
     fireEvent.click(screen.getByRole('button', { name: '键盘日期打开日期选择' }));
-    const dateDialog = screen.getByRole('dialog', { name: '键盘日期日期选择' });
-    await waitFor(() => expect(document.activeElement).toBe(dateDialog));
-    fireEvent.keyDown(dateDialog, { key: 'ArrowRight' });
-    fireEvent.keyDown(dateDialog, { key: 'Escape' });
+    const day15 = screen.getByRole('button', { name: /2026年8月15日/ });
+    await waitFor(() => expect(document.activeElement).toBe(day15));
+    fireEvent.keyDown(day15, { key: 'ArrowRight' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /2026年8月16日/ })));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(onDate).not.toHaveBeenCalledWith('2026-08-16');
-    expect(screen.queryByRole('dialog', { name: '键盘日期日期选择' })).toBeNull();
-    expect(document.activeElement).toBe(dateInput);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '键盘日期日期选择' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(dateInput));
 
     fireEvent.click(screen.getByRole('button', { name: '键盘日期打开日期选择' }));
-    const reopenedDateDialog = screen.getByRole('dialog', { name: '键盘日期日期选择' });
-    await waitFor(() => expect(document.activeElement).toBe(reopenedDateDialog));
-    fireEvent.keyDown(reopenedDateDialog, { key: 'ArrowRight' });
-    fireEvent.keyDown(reopenedDateDialog, { key: 'Enter' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /2026年8月15日/ })));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /2026年8月16日/ })));
+    fireEvent.click(document.activeElement!);
     expect(onDate).toHaveBeenLastCalledWith('2026-08-16');
-    expect(document.activeElement).toBe(dateInput);
+    await waitFor(() => expect(document.activeElement).toBe(dateInput));
   });
 
   it('keeps already submitted range endpoints when Escape closes field editing', () => {
@@ -207,7 +211,7 @@ describe('financial web controls', () => {
     expect(onChange).toHaveBeenLastCalledWith('actual-erp');
   });
 
-  it('keeps compact version summaries searchable by full metadata and restores keyboard focus', () => {
+  it('keeps compact version summaries searchable by full metadata and restores keyboard focus', async () => {
     const onChange = vi.fn();
     render(<SearchableSelect label="文稿版本" compact triggerText="09-08 22:55" value="v2" onChange={onChange} options={[
       { value: 'v1', label: '经营简报', meta: '草稿 · 2026-09-08 20:00 · old-revision' },
@@ -224,8 +228,8 @@ describe('financial web controls', () => {
     expect(screen.getByRole('option', { name: /2026-09-08 20:00/ })).toBeTruthy();
     fireEvent.keyDown(search, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('v1');
-    expect(document.activeElement).toBe(trigger);
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it('links help and validation copy to the active input for assistive technology', () => {
@@ -291,27 +295,23 @@ describe('financial web controls', () => {
     expect(onChange).toHaveBeenLastCalledWith('customer-081');
   });
 
-  it('uses a fixed portal popover that flips inside the viewport and restores trigger focus on Escape', async () => {
+  it('opens in a body portal placed by the shared popover and restores trigger focus on Escape', async () => {
     const onChange = vi.fn();
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 });
     render(<SearchableSelect label="贴边选择" value="" options={[{ value: 'a', label: 'A' }]} onChange={onChange} />);
     const trigger = screen.getByRole('button', { name: '贴边选择' });
-    Object.defineProperty(trigger, 'getBoundingClientRect', { configurable: true, value: () => ({
-      top: 720, bottom: 752, left: 900, right: 1020, width: 120, height: 32, x: 900, y: 720, toJSON: () => ({}),
-    }) });
 
     fireEvent.click(trigger);
     const search = screen.getByLabelText('贴边选择搜索');
+    await waitFor(() => expect(document.activeElement).toBe(search));
     const popover = document.body.querySelector('.fnd-combobox__popover') as HTMLElement;
-    await waitFor(() => expect(popover.dataset.placement).toBe('top'));
-    expect(popover.dataset.align).toBe('end');
-    expect(popover.parentElement).toBe(document.body);
+    expect(popover.getAttribute('data-slot')).toBe('popover-content');
+    expect(popover.closest('.fnd-control')).toBeNull();
+    expect(popover.dataset.side).toBeTruthy();
+    expect(trigger.getAttribute('aria-controls')).toBe(popover.id);
     fireEvent.keyDown(search, { key: 'Escape' });
-    expect(screen.queryByLabelText('贴边选择搜索')).toBeNull();
-    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => expect(screen.queryByLabelText('贴边选择搜索')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
-
 
   it('does not submit hidden options while loading or otherwise showing feedback', () => {
     const onChange = vi.fn();
@@ -336,17 +336,18 @@ describe('financial web controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '客户' }));
     const search = screen.getByLabelText('客户搜索');
-    await waitFor(() => expect(search.getAttribute('aria-activedescendant')).toMatch(/-option-0$/));
+    const rows = screen.getAllByRole('option');
+    await waitFor(() => expect(search.getAttribute('aria-activedescendant')).toBe(rows[0].id));
     scrollIntoView.mockClear();
     fireEvent.keyDown(search, { key: 'ArrowDown' });
-    await waitFor(() => expect(search.getAttribute('aria-activedescendant')).toMatch(/-option-1$/));
+    await waitFor(() => expect(search.getAttribute('aria-activedescendant')).toBe(rows[1].id));
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     fireEvent.keyDown(search, { key: 'Enter' });
     expect(onChange).toHaveBeenLastCalledWith('customer-2');
   });
 
 
-  it('keeps keyboard selection on the first search result when a stale hover target remains under the pointer', () => {
+  it('keeps keyboard selection on the first search result when a stale hover target remains under the pointer', async () => {
     const onChange = vi.fn();
     render(<MultiSelect label="应收状态筛选" values={['disputed']} onChange={onChange} options={[
       { value: 'active', label: '正常应收', meta: '正常、未逾期、open' },
@@ -357,14 +358,14 @@ describe('financial web controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
     const search = screen.getByLabelText('应收状态筛选搜索');
     fireEvent.change(search, { target: { value: '逾期' } });
-    expect(screen.getByRole('option', { name: /逾期应收/ }).getAttribute('data-active')).toBe('true');
+    await waitFor(() => expect(screen.getByRole('option', { name: /逾期应收/ }).getAttribute('data-selected')).toBe('true'));
     fireEvent.mouseEnter(screen.getByRole('option', { name: /正常应收/ }));
     fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(onChange).toHaveBeenLastCalledWith(['disputed', 'overdue']);
   });
 
-  it('lets actual pointer movement take over the active option before Enter', () => {
+  it('lets actual pointer movement take over the active option before Enter', async () => {
     const onChange = vi.fn();
     render(<MultiSelect label="应收状态筛选" values={['disputed']} onChange={onChange} options={[
       { value: 'active', label: '正常应收', meta: '正常、未逾期、open' },
@@ -375,8 +376,8 @@ describe('financial web controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '应收状态筛选' }));
     const search = screen.getByLabelText('应收状态筛选搜索');
     fireEvent.change(search, { target: { value: '逾期' } });
-    fireEvent.mouseMove(screen.getByRole('option', { name: /正常应收/ }));
-    expect(screen.getByRole('option', { name: /正常应收/ }).getAttribute('data-active')).toBe('true');
+    fireEvent.pointerMove(screen.getByRole('option', { name: /正常应收/ }));
+    await waitFor(() => expect(screen.getByRole('option', { name: /正常应收/ }).getAttribute('data-selected')).toBe('true'));
     fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(onChange).toHaveBeenLastCalledWith(['disputed', 'active']);

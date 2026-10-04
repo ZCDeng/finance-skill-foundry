@@ -94,6 +94,12 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 **验证边界。** 已核对最终整窗图与[流程](build/ui-workspace-review/final/verification.json)、[比较补拍](build/ui-workspace-review/final/comparison-recapture.json)、[原生检查](build/verification/native-workspace-final.json)、[产物记录](build/verification/ui-final-artifacts.json)：26 项原生检查和 6 项界面流程通过，资料为合成 fixture，真实 provider 调用为 0。真实模型接收/流式响应、物理 macOS 中文候选窗、完整屏幕阅读器流程未验收。[最终 ship](docs/reviews/2026-09-06-ui-finish-review.md)仅覆盖 F1–F4 修复评分；详细实现与限制见 [UI 实施记录](docs/plans/2026-09-06-ui-execution-log.md)。
 
+### shadcn 原语（2026-10-04）
+
+底座保持 Radix（`radix-ui` 统一包），不迁到 Base UI；组件从 shadcn 结构出发，视觉只读 `--fnd-*` token，不跑 `shadcn apply` 覆盖。
+
+- **日期与搜索选择。** 浮层统一用 Popover（Radix 定位，贴边自动翻转，挂到 body，宽度跟随触发控件）。日期选择用 Calendar（react-day-picker）：周一开头、标题「2026 年 8 月」、星期单字，打开后焦点落在已选日（没有则今天），方向键、PageUp/PageDown、Enter 由日历处理。会计期间仍为 YYYY-MM 月份网格（shadcn 没有月份视图），放在同一种 Popover 里。搜索选择与多选用 Combobox（Popover + Command）：筛选和排序仍按名称、编码、说明的顺序且最多显示 80 项，Command 只负责高亮项、方向键与 Enter；输入法组字时 Enter 不选中。选中或 Escape 后焦点回到触发控件，点外面关闭时焦点留在点击处。
+
 ## Do's and Don'ts
 
 - **Do** 沿用现有 FA 标识、离线字体、系统主题、真实任务归属与可见焦点。
