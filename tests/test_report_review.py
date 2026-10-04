@@ -487,6 +487,34 @@ def test_review_reads_only_snapshots_the_session_may_see(tmp_path: Path) -> None
         narrow.report_review({"draft_id": draft["id"]})
 
 
+def test_review_of_a_draft_needs_every_snapshot_the_draft_was_built_from(pack, tmp_path: Path) -> None:
+    task, analysis, workbook = pack
+    other = analysis.add_dataset(_month_pack(tmp_path / "另一本.xlsx", cost=700), name="另一本.xlsx")
+    draft = analysis.save_draft({
+        "title": "八月月报",
+        "document": _report(_paragraph("营业成本本月实际 800 万元。")),
+        "consistency_sources": {"cost": {"kind": "number", "dataset_id": workbook["id"],
+                                         "source_hash": workbook["source_hash"], "sheet": "利润表", "range": "B5"}},
+    })
+    # No run and no claim names the workbook: only the consistency source does.
+    assert draft["run_ids"] == [] and draft["claims"] == []
+    assert FinanceStore(task, actor="manager").report_review({"draft_id": draft["id"]})["summary"]["status"] == "pass"
+    narrow = FinanceStore(task, actor="manager", snapshot_ids=[other["id"]])
+    with pytest.raises(FoundryError, match="outside this session context"):
+        narrow.report_review({"draft_id": draft["id"]})
+
+
+def test_a_calculation_percentage_is_read_the_way_its_fact_shows_it() -> None:
+    facts = [
+        # A generic row that declares % holds the percentage; a _pct column too; a ratio column the ratio.
+        {"run_id": "r", "row": 0, "column": "value", "value": "35.2", "unit": "%", "label": "毛利率"},
+        {"run_id": "r", "row": 1, "column": "gross_margin_pct", "value": "35.2", "unit": "%", "label": "毛利率"},
+        {"run_id": "r", "row": 2, "column": "ratio", "value": "0.352", "unit": "%", "label": "毛利率"},
+    ]
+    found = report_review.fact_candidates(facts, {})
+    assert [(candidate["raw"], candidate["unit"]) for candidate in found] == [(Decimal("35.2"), "%")] * 3
+
+
 def test_review_record_is_its_own_immutable_record_and_leaves_the_draft_alone(pack, tmp_path: Path) -> None:
     task, analysis, _ = pack
     html = tmp_path / "八月月报.html"

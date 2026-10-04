@@ -21,7 +21,7 @@ from typing import Any
 from openpyxl.utils.cell import column_index_from_string, coordinate_from_string, get_column_letter, range_boundaries
 
 from foundry.errors import FoundryError
-from foundry.finance_explanations import METRIC_LABELS, _body_numbers
+from foundry.finance_explanations import METRIC_LABELS, _body_numbers, _is_ratio_column
 from foundry.financial_evidence import UNIT_SCALE_EXPONENTS
 from foundry.report_documents import _markdown_numeric_like, validate_report_document
 
@@ -458,7 +458,9 @@ def fact_candidates(facts: list[dict[str, Any]], bindings: dict[str, dict[str, s
             continue
         unit = fact.get("unit") if isinstance(fact.get("unit"), str) else None
         column = str(fact.get("column") or "")
-        if unit == PERCENT and not column.endswith("_pct"):
+        # As the fact's own display shows it: a ratio column holds 0.352 for 35.2%, while
+        # a _pct column or a row that declares % holds the percentage itself.
+        if unit == PERCENT and _is_ratio_column(column) and not column.endswith("_pct"):
             value = _scale(value, 2)
         parts = str(fact.get("label") or "").split(" / ")
         metric = (fact.get("semantics") or {}).get("metric") or parts[0]

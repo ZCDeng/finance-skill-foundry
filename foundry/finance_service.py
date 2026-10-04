@@ -169,6 +169,26 @@ class FinanceStore:
         for dataset_id in consistency_dataset_ids(sources):
             self._authorize({"consistency": dataset_id})
 
+    def _authorize_draft(self, draft):
+        """Every snapshot a saved draft was built from, as analysis_cli._bound_draft checks it."""
+        for run_id in draft.get("run_ids", []):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        for claim in draft.get("claims", []):
+            if isinstance(claim, dict):
+                if claim.get("dataset_id"):
+                    self._authorize({"source": claim["dataset_id"]})
+                if claim.get("run_id"):
+                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        recipes = draft.get("evidence_recipes", [])
+        self._authorize_evidence_recipes(recipes)
+        for recipe in recipes:
+            claim = recipe.get("claim") if isinstance(recipe, dict) else None
+            if isinstance(claim, dict) and claim.get("run_id"):
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        self._authorize_consistency_sources(draft.get("consistency_sources", {}))
+        if draft.get("requirements_id"):
+            self._authorize(self.analysis._get("requirements", draft["requirements_id"]).get("bindings", {}))
+
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
 
@@ -2227,11 +2247,7 @@ class FinanceStore:
             raise FoundryError("report review requires either a draft_id or a document")
         if draft_id not in (None, ""):
             draft = self.analysis.get_draft(draft_id)
-            for run_id in draft.get("run_ids", []):
-                self._authorize(self.analysis.get_run(run_id)["bindings"])
-            for claim in draft.get("claims", []):
-                if isinstance(claim, dict) and claim.get("dataset_id"):
-                    self._authorize({"source": claim["dataset_id"]})
+            self._authorize_draft(draft)
             if draft.get("document") is None:
                 raise FoundryError("report review requires a draft saved with a structured document")
             document = draft["document"]
