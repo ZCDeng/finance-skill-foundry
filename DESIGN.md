@@ -101,6 +101,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 - **字段结构。** `FieldShell` 使用 Field 结构（`field`、`field-label`、`field-description`、`field-error` 四个 data-slot），错误时字段带 `data-invalid`、控件带 `aria-invalid`，类名仍为 `fnd-control*`。
 - **选择框。** 一律用 NativeSelect：仍是原生 `select`，菜单由系统绘制，能盖在原生视图之上；外层只加 16px 下拉箭头，字段状态与输入框相同（高 36px、`fnd-field`）。任务栏的选择框沿用 `fnd-picker` 尺寸。页面样式不再单独给 `select` 写边框和内边距。
 - **勾选与开关。** 多选和逐项纳入用 Checkbox（16px，选中为主色底）；保存即生效的设置用 Switch（如「接受差异后需要第二人复核」）。两者均为 `role="checkbox"`/`role="switch"` 按钮，标签包住控件即可点击文字切换。
+- **空状态。** 整屏或整块的空状态用 Empty（`empty`、`empty-header`、`empty-title`、`empty-description`、`empty-content`）：左对齐、弱色说明、不加卡片和插图；标题用 `asChild` 保留所在页面的标题层级，操作按钮放在 `empty-content`。面板里一句话的「还没有……」仍用普通说明文字。不引入 Toast（内联提示更符合结论优先）、`cn` 独立包和 Rhea 紧凑风格（与 36px 控件高度冲突）。
 - **设置与高级。** 分析页和财务工作台共用一个 `SettingsPanel`（shadcn Collapsible）：在页面内原位展开、打开时替换入口，不做浮层，因为面板里有自带弹出层的搜索选择，计算结果也要留在下方可读。用户打开时焦点进入面板；之后无论 Escape、「关闭」还是计算成功自动收起，焦点都回到打开前的位置（已不在页面时回到入口），不会落到页面顶端。首次进入时默认展开的面板不抢焦点。
 
 ## Do's and Don'ts

@@ -21,7 +21,7 @@
 .analysis-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--fnd-line); }
 .analysis-tabs { display: flex; gap: 22px; min-width: 0; }
 .analysis-content { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.analysis-empty { padding: 28px 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.analysis-empty { padding: 28px 0; }
 .analysis-empty h3 { font-size: 20px; line-height: 1.4; }
 .analysis-empty p { font-size: var(--fnd-size-small); color: var(--fnd-muted); max-width: 42ch; }
 .analysis-empty [data-slot='button'] { align-self: flex-start; }
