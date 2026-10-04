@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from foundry.analysis import REPORT_EXPORT_FORMATS, AnalysisStore
 from foundry.cli import main
@@ -446,6 +446,28 @@ def test_review_ignores_superseded_snapshots(pack, tmp_path: Path) -> None:
     cited = {candidate["dataset_id"] for item in review["items"] for candidate in item["candidates"]}
     assert old["id"] not in cited
     assert any("已被新版本取代" in note for note in review["notes"])
+
+
+def test_review_leaves_out_a_table_read_from_a_replaced_workbook_whose_sheet_was_renamed(pack, tmp_path: Path) -> None:
+    task, analysis, old = pack
+    store = FinanceStore(task, actor="manager")
+    store.structure_propose(old["id"])
+    proposal = store.structure_proposal_list({"dataset_id": old["id"]})["proposals"][0]
+    store.structure_proposal_confirm({"dataset_id": old["id"], "revision": proposal["revision"]})
+    tables = {row["id"] for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("derived_from") == old["id"]}
+    assert tables
+    path = _month_pack(tmp_path / "更正.xlsx", cost=820)
+    book = load_workbook(path)
+    book["利润表"].title = "利润表（更正）"
+    book.save(path)
+    newer = analysis.add_dataset(path, name="月结.xlsx")
+    review = store.report_review({"document": _report(_paragraph("营业成本本月实际 800 万元，更正后 820 万元。"))})
+    items = _by_text(review)
+    # The old 利润表 table keeps its sheet's name, but its figures went with the replaced file.
+    cited = {candidate["dataset_id"] for item in review["items"] for candidate in item["candidates"]}
+    assert not cited & ({old["id"]} | tables)
+    assert items["800 万元"]["status"] != "match"
+    assert items["820 万元"]["status"] == "match" and items["820 万元"]["candidates"][0]["dataset_id"] == newer["id"]
 
 
 def test_review_skips_a_sheet_with_uncached_formulas_and_says_so(tmp_path: Path) -> None:

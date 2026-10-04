@@ -606,6 +606,9 @@ def gather_candidates(store: Any) -> tuple[list[dict[str, Any]], list[str]]:
     state = analysis.state()
     datasets = state["datasets"]
     replaced = superseded_snapshots(store.task, datasets)
+    # A table read from a replaced workbook is named after its sheet, so one the new version renamed is
+    # not replaced by name; it goes with its workbook (as the month-close workbook list leaves it out).
+    replaced |= {row["id"] for row in datasets if (row.get("metadata") or {}).get("derived_from") in replaced}
     published = {row["id"] for row in datasets}
     current = [row for row in datasets if row["id"] not in replaced
                and (store.allowed is None or row["id"] in store.allowed)]
