@@ -7,6 +7,8 @@ import { PdfComparison } from './ReportEditor.js';
 import { Button } from '../../components/ui/button.js';
 import { metricLabel, scopeSummary } from './shared.js';
 import { HelpLink } from '../guide/GuideHub.js';
+import { EvidenceLabelChip, EvidencePostureSummary } from './EvidencePosture.js';
+import type { DatasetFreshness, EvidenceLabelEntry, EvidencePosture } from './evidenceLabels.js';
 
 export interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
@@ -17,6 +19,11 @@ export interface ExplanationQuality {
   readability?: { status: 'clear' | 'suggestions'; issues: { code: string; message: string; position?: number }[] };
   checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
   requirements?: { scope_changed?: boolean; items?: { id: string; label: string; status: string; provenance_status: string }[] };
+  /** What kind of evidence each claim and cited fact rests on; absent from older CLIs. */
+  evidence_labels?: EvidenceLabelEntry[];
+  /** How much the cited evidence can bear. A classification beside the checks, never one of them. */
+  evidence_posture?: EvidencePosture;
+  dataset_freshness?: Record<string, { name?: string; as_of?: string | null; period?: string; state?: string; freshness?: DatasetFreshness }>;
 }
 
 function qualityLabel(state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'): string {
@@ -60,6 +67,9 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
   const gaps = [...checkGaps, ...dimensionGaps(quality?.status_dimensions, stale)];
   const accepted = qualityChecks.filter(([key]) => quality?.checks?.[key]?.status === 'pass_with_accepted_estimates').map(([, label]) => label);
   const itemCount = (quality?.checks ? qualityChecks.length : 0) + 4;
+  const labels = Array.isArray(quality?.evidence_labels) ? quality.evidence_labels : [];
+  const evidenceFor = (id: string) => labels.find((entry) => entry.key?.kind === 'fact' && entry.key.fact_id === id);
+  const shownOnCard = new Set(facts.map((fact) => fact.id));
   return <section className="analysis-quality" aria-label="文稿质量检查">
     <div className="analysis-section-heading"><div><span className="fnd-with-help"><h4>文稿质量检查</h4><HelpLink article="statuses" label="状态互不替代" /></span><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
@@ -67,6 +77,8 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : dimensionStates(quality?.status_dimensions).join(' · ')}</p>}
     {quality && accepted.length > 0 && <p className="analysis-note">{accepted.join('、')}已核对，其中含经理已接受的估算。</p>}
     <p className="analysis-note">计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
+    <EvidencePostureSummary posture={quality?.evidence_posture} labels={labels} stale={stale}
+      listed={(entry) => !(entry.key?.kind === 'fact' && entry.key.fact_id && shownOnCard.has(entry.key.fact_id))} />
     <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>
       {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
         {qualityChecks.map(([key, label]) => {
@@ -87,6 +99,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
+        <EvidenceLabelChip entry={evidenceFor(fact.id)} />
         <p className="analysis-note">计算结果第 {Number(fact.row ?? 0) + 1} 行{fact.column ? ` · ${fact.column}` : ''}{fact.scope ? ` · ${scopeSummary(fact.scope)}` : ''}</p>
         <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenLocator(fact)}>打开原文定位</Button>
         {fact.row != null && <Button variant="outline" type="button" disabled={busy} onClick={() => onOpenFact(fact)}>下钻此事实来源</Button>}

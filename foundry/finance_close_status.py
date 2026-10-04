@@ -11,6 +11,11 @@ terms. The top line is one of five, never a bare 完成 or 通过:
     可提交经理复核  everything the system can check is clear; a person signs it off
     已归档     the task is archived with what it held then
 
+Beside the top line, and never merged into it, ``conclusion`` says whether the books as they
+stand can be used: 可用, 带保留可用, 不可用 or 无法判断, for the whole pack and per workbook.
+It reads only what the manager confirmed and decided; an assistant's suggested 问题类型 adds
+nothing to it.
+
 Pure: ``close_status`` takes the facts the store already holds and decides.
 """
 
@@ -39,6 +44,12 @@ ISSUE_TEXT = {
     "stale": "资料已更新，控制需要在新版本上重新确认",
     "not_run": "已确认但还没运行",
 }
+
+USABLE = "usable"
+USABLE_WITH_CAVEATS = "usable_with_caveats"
+NOT_USABLE = "not_usable"
+NOT_ASSESSABLE = "not_assessable"
+CONCLUSION_TEXT = {USABLE: "可用", USABLE_WITH_CAVEATS: "带保留可用", NOT_USABLE: "不可用", NOT_ASSESSABLE: "无法判断"}
 
 
 def close_status(
@@ -89,6 +100,7 @@ def close_status(
         "headline": headline,
         "blocks": blocks,
         "blocking": [*must, *later],
+        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced),
     }
 
 
@@ -179,6 +191,120 @@ def _exceptions_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
             reason = (issue.get("disposition") or {}).get("reason") or ""
             items.append(_item(f"{row['control']['label']}：已接受差异（{reason}）", attention=True, target="controls"))
     return _block("exceptions", "异常", items or [_item("没有未处置的差异")])
+
+
+def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], inputs: list[dict[str, Any]],
+                pending_structures: list[str], replaced: set[str] | frozenset[str]) -> dict[str, Any]:
+    """可用结论: can these books be used as they stand, for the whole pack and for each workbook.
+
+    Only confirmed controls and the manager's dispositions decide the level. A finding type only
+    names the kind of problem in a reason; with or without one, a difference weighs the same.
+    """
+    confirmed = [row for row in controls if row.get("state") == "confirmed"]
+    held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
+    # Scope holds every workbook; a structure waiting on the manager holds only its own file.
+    scope_held = [_reason(item["text"], item.get("target")) for item in inputs[0]["items"] if item["blocking"]]
+    names = {row["id"]: row.get("name") or "资料" for row in datasets}
+    book_of = {row["id"]: row.get("source_hash") or row["id"] for row in datasets}
+    workbooks, unread = [], []
+    for book in _workbooks(datasets, replaced):
+        digest = book.get("source_hash") or book["id"]
+        touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
+        own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
+        waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
+        level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
+        workbooks.append({"dataset_id": book["id"], "name": book.get("name") or "资料", **level})
+        if not touching:
+            unread.append(book.get("name") or "资料")
+    # A workbook no confirmed control reads is unjudged, so the pack it belongs to cannot be called usable.
+    if confirmed:
+        held += [_reason(f"{name} 还没有你确认的勾稽控制读到", "controls") for name in unread]
+    overall = _level(confirmed, held, missing="还没有你确认的勾稽控制")
+    issues = [row.get("issue") or {} for row in confirmed]
+    overall["basis"] = {
+        "confirmed": len(confirmed),
+        "passed": sum(1 for row in confirmed if (row.get("result") or {}).get("status") == "pass"),
+        "waived": sum(1 for issue in issues if issue.get("state") == "waived" and not issue.get("blocking")),
+        "open": sum(1 for issue in issues if issue.get("blocking")),
+    }
+    return {**overall, "workbooks": workbooks}
+
+
+def _level(confirmed: list[dict[str, Any]], held: list[dict[str, Any]], *, missing: str) -> dict[str, Any]:
+    """One level from the controls that count here, with the reasons a manager can check it by."""
+    unknown = list(held)
+    if not confirmed:
+        unknown.append(_reason(missing, "controls"))
+    not_run = sum(1 for row in confirmed if (row.get("issue") or {}).get("state") == "not_run")
+    stale = sum(1 for row in confirmed if (row.get("issue") or {}).get("state") == "stale")
+    if not_run:
+        unknown.append(_reason(f"{not_run} 条控制已确认但还没运行", "controls"))
+    if stale:
+        # Confirming the check again on the new file is not enough: the old one holds until it is retired.
+        unknown.append(_reason(f"{stale} 条控制还读着旧版本资料：在新版本上确认对应控制后，把旧的停用", "controls"))
+    for row in confirmed:
+        if (row.get("result") or {}).get("status") == "error":
+            unknown.append(_reason(f"{row['control']['label']} 读不出数", "controls"))
+    if unknown:
+        return _verdict(NOT_ASSESSABLE, unknown)
+    breaks = [row for row in confirmed if (row.get("result") or {}).get("status") == "break"]
+    # Only an acceptance that no longer holds the close clears a difference; anything else still counts against it.
+    blocking = [row for row in breaks if (row.get("issue") or {}).get("state") != "waived" or (row.get("issue") or {}).get("blocking")]
+    if blocking:
+        return _verdict(NOT_USABLE, [
+            _reason(f"{_difference(row)}，{ISSUE_TEXT.get((row.get('issue') or {}).get('state'), '待处理')}", "controls")
+            for row in blocking
+        ])
+    if breaks:
+        return _verdict(USABLE_WITH_CAVEATS, [
+            _reason(f"{_difference(row)}，已接受差异（{((row.get('issue') or {}).get('disposition') or {}).get('reason') or ''}）", "controls")
+            for row in breaks
+        ])
+    agree = "你确认的 1 条控制相符" if len(confirmed) == 1 else f"你确认的 {len(confirmed)} 条控制都相符"
+    return _verdict(USABLE, [_reason(agree, "controls")])
+
+
+def _verdict(level: str, reasons: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"level": level, "text": CONCLUSION_TEXT[level], "reasons": reasons}
+
+
+def _reason(text: str, target: str | None = None) -> dict[str, Any]:
+    return {"text": text, **({"target": target} if target else {})}
+
+
+def _difference(row: dict[str, Any]) -> str:
+    """「坏账分项：差额 11655，来源矛盾」: only the manager's type names it; a suggestion does not."""
+    finding = row.get("finding") or {}
+    kind = finding.get("type_label") if finding.get("set_by_manager") and finding.get("type_label") else "未定类型"
+    return f"{row['control']['label']}：差额 {(row.get('result') or {}).get('difference')}，{kind}"
+
+
+def _sides(row: dict[str, Any]) -> set[str]:
+    control = row.get("control") or {}
+    return {str(side.get("dataset_id")) for side in (control.get("left") or {}, control.get("right") or {}) if side.get("dataset_id")}
+
+
+def _workbooks(datasets: list[dict[str, Any]], replaced: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    """One per Excel file: a table derived from a sheet carries its workbook's bytes and is not another file.
+
+    A table read from a workbook a newer upload replaced is left out: it is named after its sheet,
+    so a sheet the new version renamed or dropped would otherwise stand in for the old file.
+    """
+    books: dict[str, dict[str, Any]] = {}
+    for row in datasets:
+        if row.get("source_file") != "source.xlsx":
+            continue
+        if (row.get("metadata") or {}).get("derived_from") in replaced:
+            continue
+        digest = row.get("source_hash") or row["id"]
+        held = books.get(digest)
+        if held is None or (_derived(held) and not _derived(row)):
+            books[digest] = row
+    return list(books.values())
+
+
+def _derived(row: dict[str, Any]) -> bool:
+    return bool((row.get("transformation") or {}).get("structure") or (row.get("metadata") or {}).get("derived_from"))
 
 
 def _run_key(run: dict[str, Any]) -> str:

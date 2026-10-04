@@ -30,6 +30,13 @@ export const CHANNELS = {
   financeCall: 'finance:call',
   financeSourceRefresh: 'finance:source-refresh',
   /**
+   * Save a roll-forward copy (滚动到下月) outside the store, to open in Excel.
+   * The renderer names a run; main asks where in a save dialog and the CLI
+   * writes the bytes it has just checked. The archived copy is never opened in
+   * place, since saving it in Excel would change a hashed snapshot.
+   */
+  rollforwardExport: 'rollforward:export',
+  /**
    * Write-only: one line per user wait, appended to a file in this app's own
    * folder. Nothing reads it back over IPC, and it never reaches the task store.
    */

@@ -265,7 +265,7 @@ export function registerIpc(
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>
     JSON.parse(await runFoundry({ ...binding, task: taskId(rawTask) }, command, args));
   /** Commands that make a new snapshot the root session should be able to see. */
-  const widensTheSession = new Set(['structure-proposal-confirm', 'structure-reject', 'structure-withdraw']);
+  const widensTheSession = new Set(['structure-proposal-confirm', 'structure-reject', 'structure-withdraw', 'workbook-rollforward-apply']);
   let reportHost: Promise<ReportHost> | undefined;
   const reports = () => reportHost ??= import('../reports/host.js').then(({ ReportHost }) => new ReportHost(binding,
     (task, phase) => panes?.window()?.webContents.send(CHANNELS.reportProgress, { task, phase })));
@@ -327,6 +327,7 @@ export function registerIpc(
     'finance-completion-recoveries',
     'finance-completion-recover',
     'workbook-range-preview',
+    'workbook-health',
     'prepare-explanation',
     'validate-explanation',
     'finance-background-save',
@@ -345,6 +346,7 @@ export function registerIpc(
     'finance-control-settings-save',
     'finance-control-disposition-save',
     'finance-control-disposition-review',
+    'finance-control-finding-save',
     'finance-control-confirmation-sheet',
     'report-review',
     'report-template-list',
@@ -366,6 +368,10 @@ export function registerIpc(
     'workbook-read',
     'workbook-preview',
     'workbook-apply',
+    'workbook-rollforward-preview',
+    'workbook-rollforward-apply',
+    'workbook-rollforward-templates',
+    'workbook-rollforward-template-save',
   ]);
   const financeListCommands = new Set(['list-finance-context', 'finance-source-list', 'finance-readiness', 'finance-close-status', 'finance-completion-recoveries']);
   ipcMain.handle(CHANNELS.financeCall, (_e, task: unknown, command: unknown, spec: unknown = undefined) =>
@@ -398,6 +404,22 @@ export function registerIpc(
         '--spec',
         objectJson({ ...(rawSpec as Record<string, unknown>), path: selected.filePaths[0] }),
       ]);
+    }));
+  ipcMain.handle(CHANNELS.rollforwardExport, (_e, rawTask: unknown, rawRun: unknown, rawName: unknown) =>
+    answer(async () => {
+      const task = taskId(rawTask);
+      const run = String(rawRun ?? '');
+      if (!/^[0-9a-f]{32}$/.test(run)) throw new Error('invalid roll-forward run id');
+      // Only a suggested file name comes from the renderer; the folder is the manager's pick.
+      const named = typeof rawName === 'string' && rawName.trim() ? lineOf(rawName, 'file name', 200) : '下月副本';
+      const selected = await dialog.showSaveDialog({
+        title: '导出下月副本', defaultPath: `${named.replace(/[\\/:*?"<>|]/g, '_')}.xlsx`,
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+      });
+      if (selected.canceled || !selected.filePath) return { cancelled: true };
+      // The CLI refuses a name without .xlsx rather than this side adding one past the dialog's overwrite check.
+      const result = await analysisCall(task, 'workbook-rollforward-export', ['--spec', objectJson({ run_id: run, destination: selected.filePath })]);
+      return { exported: true, filename: String(result.filename ?? path.basename(selected.filePath)) };
     }));
   ipcMain.handle(CHANNELS.analysisOpenOutput, (_e, task: unknown, run: unknown, output: unknown) =>
     answer(async () => {

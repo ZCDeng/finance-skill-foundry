@@ -1,12 +1,12 @@
 ---
 name: journal-entry
-description: Prepare journal entries with proper debits, credits, and supporting detail. Use when booking month-end accruals (AP, payroll, prepaid), recording depreciation or amortization, posting revenue recognition or deferred revenue adjustments, or documenting an entry for audit review.
+description: Prepare draft journal entries with proper debits, credits, and supporting detail. Use when drafting month-end accruals (AP, payroll, prepaid), depreciation or amortization entries, revenue recognition or deferred revenue adjustments, or documenting an entry for audit review. Drafts only; do not use to post entries. Foundry does not post to an ERP.
 argument-hint: "<type> [period]"
 ---
 
 # Journal Entry Preparation
 
-> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/journal-entry). Licensed Apache-2.0. This copy is for local Cursor use; see NOTICE.
+> Extracted from Anthropic's `finance` plugin in [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins/tree/main/finance/skills/journal-entry). Licensed Apache-2.0. This modified copy ships inside FA Foundry; see NOTICE.
 
 > If you see unfamiliar placeholders or need to check which tools are connected, see [CONNECTORS.md](../CONNECTORS.md).
 >
@@ -21,7 +21,7 @@ Prepare journal entries with proper debits, credits, supporting detail, and revi
 ## Usage
 
 ```
-/je <type> <period>
+/journal-entry <type> <period>
 ```
 
 ### Arguments
@@ -37,6 +37,8 @@ Prepare journal entries with proper debits, credits, supporting detail, and revi
 ## Workflow
 
 ### 1. Gather Source Data
+
+Do not claim an ERP or data-warehouse connection unless this session has configured and named one; otherwise work from the task's files and registered datasets.
 
 If ~~erp or ~~data warehouse is connected:
 - Pull the trial balance for the specified period

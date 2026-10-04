@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
-  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
+  run: vi.fn(), openPath: vi.fn(), chooser: vi.fn(), saver: vi.fn(), workspace: vi.fn(), reportExport: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: any) => mocks.handlers.set(name, handler) },
-  shell: { openPath: mocks.openPath }, dialog: { showOpenDialog: mocks.chooser },
+  shell: { openPath: mocks.openPath }, dialog: { showOpenDialog: mocks.chooser, showSaveDialog: mocks.saver },
 }));
 vi.mock('../electron/foundry.js', async (original) => ({
   ...await original<typeof import('../electron/foundry.js')>(), runFoundry: mocks.run,
@@ -59,10 +59,11 @@ describe('analysis IPC task and session binding', () => {
     expect(mocks.reportExport).toHaveBeenCalledTimes(1);
   });
 
-  it('routes bounded workbook preview and explicit recovery through manager task authority', async () => {
+  it('routes bounded workbook preview, the on-demand formula health check and explicit recovery through manager task authority', async () => {
     registerIpc({ varRoot: '/store' });
     for (const [name, spec] of [
       ['workbook-range-preview', { dataset_id: 'source', sheet: '预算', range: 'B36:I39' }],
+      ['workbook-health', { dataset_id: 'source' }],
       ['finance-completion-recover', { operation_id: 'operation', revision: 'revision', draft: { title: '纠正稿' } }],
     ] as const) {
       expect((await invoke(CHANNELS.financeCall, task, name, spec)).ok).toBe(true);
@@ -157,6 +158,13 @@ describe('analysis IPC task and session binding', () => {
     expect(refused).toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
   });
 
+  it('lets the controls panel save a 问题类型 as the manager', async () => {
+    registerIpc({ varRoot: '/store' });
+    const spec = { control_id: 'c'.repeat(32), finding_type: 'source_conflict', note: '台账与月结实收对不上' };
+    expect((await invoke(CHANNELS.financeCall, task, 'finance-control-finding-save', spec)).ok).toBe(true);
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'finance-control-finding-save', ['--spec', JSON.stringify(spec)]);
+  });
+
   it('reaches the conversation after a confirmation so it can bind the new table', async () => {
     registerIpc({ varRoot: '/store' });
     mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
@@ -168,6 +176,52 @@ describe('analysis IPC task and session binding', () => {
       'task-show',
       'analysis-refresh',
     ]);
+  });
+
+  it('routes the roll-forward as the manager and lets the conversation see the new copy', async () => {
+    registerIpc({ varRoot: '/store' });
+    mocks.run.mockImplementation(async (_binding, command) => command === 'task-show'
+      ? JSON.stringify({ sessions: [{ role: 'analysis', session_id: 'root' }] })
+      : JSON.stringify({ plan_id: 'plan-1' }));
+    for (const [name, spec] of [
+      ['workbook-rollforward-preview', { dataset_id: 'august', source_hash: 'hash', period: '2026-09', mappings: [] }],
+      ['workbook-rollforward-templates', { dataset_id: 'august' }],
+      ['workbook-rollforward-template-save', { plan_id: 'plan-1', name: '月度套表' }],
+    ] as const) {
+      expect((await invoke(CHANNELS.financeCall, task, name, spec)).ok).toBe(true);
+      expect(mocks.run).toHaveBeenLastCalledWith({ varRoot: '/store', task, actor: 'manager' }, name, ['--spec', JSON.stringify(spec)]);
+    }
+    // Only the apply files a snapshot, so only the apply refreshes the conversation.
+    expect(mocks.run.mock.calls.map((call) => call[1])).not.toContain('analysis-refresh');
+    mocks.run.mockClear();
+    expect((await invoke(CHANNELS.financeCall, task, 'workbook-rollforward-apply', { plan_id: 'plan-1' })).ok).toBe(true);
+    expect(mocks.run.mock.calls.map((call) => call[1])).toEqual(['workbook-rollforward-apply', 'task-show', 'analysis-refresh']);
+    expect(mocks.run.mock.calls[0][0]).toEqual({ varRoot: '/store', task, actor: 'manager' });
+  });
+
+  it('exports a roll-forward copy only where the save dialog says, and never names the path back', async () => {
+    registerIpc({ varRoot: '/store' });
+    const run = 'c'.repeat(32);
+    mocks.saver.mockResolvedValue({ canceled: false, filePath: '/chosen/八月套表（2026-09 滚动）.xlsx' });
+    mocks.run.mockResolvedValue(JSON.stringify({ filename: '八月套表（2026-09 滚动）.xlsx', sha256: 'f'.repeat(64) }));
+    expect(await invoke(CHANNELS.rollforwardExport, task, run, '八月套表（2026-09 滚动）')).toEqual({
+      ok: true, value: { exported: true, filename: '八月套表（2026-09 滚动）.xlsx' },
+    });
+    expect(mocks.saver.mock.calls[0][0].defaultPath).toBe('八月套表（2026-09 滚动）.xlsx');
+    expect(mocks.run).toHaveBeenCalledWith({ varRoot: '/store', task, actor: 'manager' }, 'workbook-rollforward-export',
+      ['--spec', JSON.stringify({ run_id: run, destination: '/chosen/八月套表（2026-09 滚动）.xlsx' })]);
+    // A suggested name cannot steer the folder.
+    await invoke(CHANNELS.rollforwardExport, task, run, '../../etc/x');
+    expect(mocks.saver.mock.calls[1][0].defaultPath).toBe('.._.._etc_x.xlsx');
+    mocks.run.mockClear();
+    mocks.saver.mockResolvedValue({ canceled: true, filePath: '' });
+    expect(await invoke(CHANNELS.rollforwardExport, task, run)).toEqual({ ok: true, value: { cancelled: true } });
+    expect((await invoke(CHANNELS.rollforwardExport, task, '../run')).ok).toBe(false);
+    expect(mocks.run).not.toHaveBeenCalled();
+    // The renderer cannot name a destination through the generic channel.
+    expect(await invoke(CHANNELS.financeCall, task, 'workbook-rollforward-export', { run_id: run, destination: '/etc/passwd.xlsx' }))
+      .toEqual({ ok: false, refused: false, message: 'unsupported finance command' });
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it('answers a repeat upload instead of filing it, and leaves the conversation alone', async () => {

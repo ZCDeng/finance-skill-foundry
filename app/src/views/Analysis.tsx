@@ -19,8 +19,10 @@ import { Textarea } from '../components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
 import { StructurePanel } from './analysis/StructurePanel.js';
+import { FormulaHealthPanel } from './analysis/FormulaHealthPanel.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
+import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
 import { SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
@@ -396,6 +398,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
           <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
+          <FormulaHealthPanel taskId={task.id} datasets={view.datasets} />
           <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
             type="button" onClick={() => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
@@ -415,6 +418,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           <HelpLink article="data-safety" label="资料快照与原文件" />
           <details className="analysis-details"><summary>写回 Excel</summary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
+          </details>
+          <details className="analysis-details"><summary>滚动到下月</summary>
+            <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
           </details>
         </>}
         {view && tab === 'results' && <>

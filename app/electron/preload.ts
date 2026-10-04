@@ -33,6 +33,7 @@ const api = {
   analysisMethodApply: (task: string, id: string, bindings: unknown, parameters: unknown = []) => ipcRenderer.invoke('analysis:method-apply', task, id, bindings, parameters),
   financeCall: (task: string, command: string, spec?: unknown) => ipcRenderer.invoke('finance:call', task, command, spec),
   financeSourceRefresh: (task: string, spec: unknown) => ipcRenderer.invoke('finance:source-refresh', task, spec),
+  rollforwardExport: (task: string, runId: string, name?: string) => ipcRenderer.invoke('rollforward:export', task, runId, name),
   timingLog: (entry: unknown) => ipcRenderer.invoke('timing:log', entry),
   tasks: (lifecycle?: string) => ipcRenderer.invoke('foundry:tasks', lifecycle),
   task: (id: string) => ipcRenderer.invoke('foundry:task', id),

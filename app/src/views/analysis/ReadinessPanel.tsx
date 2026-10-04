@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CircleCheck, CircleSlash, ClipboardList, RefreshCw } from 'lucide-react';
+import { CircleCheck, CircleHelp, CircleSlash, ClipboardList, RefreshCw, TriangleAlert } from 'lucide-react';
 import { bridge, type Answer, type ReadinessDataset, type ReadinessReport } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
+import { HelpLink } from '../guide/GuideHub.js';
+import { FRESHNESS_TEXT, reasonText } from './evidenceLabels.js';
 import { scenarioLabel } from './glossary.js';
 import { errorText } from './shared.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
@@ -47,6 +49,37 @@ function scopeLine(row: ReadinessDataset): string {
     scenario && `情景 ${scenarioLabel(scenario)}`,
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : '标题里没读到范围';
+}
+
+const PERIOD_KIND: Record<string, string> = { month: '月度', annual: '年度', as_of: '时点' };
+const AS_OF_SOURCE: Record<string, string> = { title: '来自标题', source_refresh: '刷新截止' };
+
+/** 截至日 and 期间 as the file declares them; 未声明 rather than a guess. */
+function asOfLine(row: ReadinessDataset): string {
+  const parts = [
+    row.as_of && `截至 ${row.as_of}${row.as_of_source && AS_OF_SOURCE[row.as_of_source] ? `（${AS_OF_SOURCE[row.as_of_source]}）` : ''}`,
+    (row.period || row.scope?.period) && `期间 ${row.period || row.scope?.period}`,
+    row.period_kind && PERIOD_KIND[row.period_kind],
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : '未声明';
+}
+
+/** Unknown because the analysis period is missing or unreadable, not because the file left something out. */
+const NO_TASK_PERIOD = new Set(['no_task_period', 'task_period_unreadable']);
+
+/** 当前 / 资料过期 / 期间不符 / 未声明 / 无法判断, in words and with an icon, never colour alone. */
+function FreshnessCell({ row }: { row: ReadinessDataset }) {
+  const state = row.freshness?.state;
+  if (!state) return <>—</>;
+  const undecided = state === 'unknown' && (row.freshness?.reasons ?? []).some((reason) => NO_TASK_PERIOD.has(reason.code));
+  const words = undecided ? '无法判断' : (FRESHNESS_TEXT as Record<string, string>)[state] ?? state;
+  const why = reasonText(row.freshness?.reasons);
+  const warning = state === 'source_stale' || state === 'period_mismatch';
+  const Icon = warning ? TriangleAlert : state === 'current' ? CircleCheck : CircleHelp;
+  return <span className={`analysis-readiness-freshness analysis-readiness-freshness--${warning ? 'warning' : state === 'current' ? 'current' : 'unknown'}`}>
+    <Icon size={14} strokeWidth={1.5} aria-hidden />
+    <span>{state !== 'current' && why ? `${words}（${why}）` : words}</span>
+  </span>;
 }
 
 function datasetLabel(row: ReadinessDataset, index: number): string {
@@ -133,10 +166,11 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
           {perFile.length > 0 && (
             <table className="analysis-readiness-table">
               <caption className="analysis-note">
-                每份文件各自声明的范围。空着的格子表示标题和数据里都没有这一项。
+                每份文件各自声明的范围。空着的格子表示标题和数据里都没有这一项。时效只拿资料声明的期间、截至日和分析期间比较，不用电脑日期。
+                <HelpLink article="evidence" label="资料时效与证据标签" />
               </caption>
               <thead>
-                <tr><th scope="col">资料</th><th scope="col">读到的范围</th><th scope="col">还缺</th><th scope="col">能算</th></tr>
+                <tr><th scope="col">资料</th><th scope="col">读到的范围</th><th scope="col">截至日 / 期间</th><th scope="col">时效</th><th scope="col">还缺</th><th scope="col">能算</th></tr>
               </thead>
               <tbody>
                 {perFile.map((row, index) => (
@@ -146,6 +180,8 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
                       <TechnicalInfo rows={[['资料编号', row.dataset_id]]} />
                     </th>
                     <td>{scopeLine(row)}</td>
+                    <td>{asOfLine(row)}</td>
+                    <td><FreshnessCell row={row} /></td>
                     <td>{row.missing_fields?.length ? fields(row.missing_fields) : '—'}</td>
                     <td>
                       {row.can_run?.length
