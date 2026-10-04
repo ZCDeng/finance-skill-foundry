@@ -5,6 +5,8 @@ import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { normalizeReportVisual, renderReportVisualSvg, type ReportVisual } from '../../../electron/reports/visuals.js';
 import { errorText, unwrap } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
+import { Checkbox } from '../../components/ui/checkbox.js';
 
 type ChartSeries = { columns: unknown[]; rows: Record<string, unknown>[] };
 type ChartRecord = { id: string; label?: string; run_id?: string; snapshot_hash?: string; series?: ChartSeries; report_series?: ChartSeries };
@@ -98,22 +100,22 @@ export function ReportVisualComposer({ taskId, runs, initial, onApply, onCancel 
   return <section className="report-visual-composer" aria-label={initial ? '编辑文稿图表' : '插入文稿图表'} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onCancel(); } }}>
     <div className="report-visual-composer__heading"><div><h3>{initial ? '编辑图表' : '插入图表'}</h3><p>先选适合问题的图型，再核对数据、单位和图题。</p></div><Button type="button" variant="ghost" onClick={onCancel}>取消图表</Button></div>
     <div className="report-visual-composer__fields">
-      <label>图表类型<select className="fnd-field" aria-label="图表类型" value={kind} onChange={(event) => setKind(event.target.value as ReportVisual['kind'])}><option value="bar">条形图 · 比较大小</option><option value="line">折线图 · 展示趋势</option><option value="flow">流程图 · 解释关系</option></select></label>
+      <label>图表类型<NativeSelect aria-label="图表类型" value={kind} onChange={(event) => setKind(event.target.value as ReportVisual['kind'])}><option value="bar">条形图 · 比较大小</option><option value="line">折线图 · 展示趋势</option><option value="flow">流程图 · 解释关系</option></NativeSelect></label>
       <label>图表标题<Input aria-label="图表标题" maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="用标题说明要比较或解释的问题" /></label>
       <label className="report-visual-composer__wide">结论（可选）<Textarea aria-label="图表结论" rows={2} maxLength={300} value={takeaway} onChange={(event) => setTakeaway(event.target.value)} placeholder="写下经核对后能够支持的结论" /></label>
       {kind !== 'flow' ? <>
-        <label className="report-visual-composer__wide">图表数据<select className="fnd-field" aria-label="图表数据" value={selection} onChange={(event) => void selectSource(event.target.value)}><option value="">选择已有计算结果或归档图</option>
+        <label className="report-visual-composer__wide">图表数据<NativeSelect aria-label="图表数据" value={selection} onChange={(event) => void selectSource(event.target.value)}><option value="">选择已有计算结果或归档图</option>
           {numeric && !charts.some((row) => row.id === numeric.chart_id) && <option value={`chart:${numeric.chart_id}`}>{numeric.source_label || '文稿中的结果图'}</option>}
           {charts.length > 0 && <optgroup label="已归档图">{charts.map((row, index) => <option key={row.id} value={`chart:${row.id}`}>{row.label || `归档图 ${index + 1}`}</option>)}</optgroup>}
           {successfulRuns.length > 0 && <optgroup label="已完成计算">{successfulRuns.map((run, index) => <option key={run.id} value={`run:${run.id}`}>第 {index + 1} 次计算 · {when(run.created_at)}</option>)}</optgroup>}
-        </select></label>
+        </NativeSelect></label>
         {loadingList && <p role="status" className="report-visual-composer__wide">正在读取归档图…</p>}
         {empty && <p className="report-visual-composer__wide">还没有可用的计算结果。先完成一次计算后可制作数值图，也可以选择流程图解释分析步骤。</p>}
         {loadingSource && <p role="status" className="report-visual-composer__wide">正在读取结果数据…</p>}
         {opened && <>
-          <label>类别列<select className="fnd-field" aria-label="类别列" value={category} onChange={(event) => { setCategory(event.target.value); setValues((previous) => previous.filter((name) => name !== event.target.value)); }}><option value="">选择类别列</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+          <label>类别列<NativeSelect aria-label="类别列" value={category} onChange={(event) => { setCategory(event.target.value); setValues((previous) => previous.filter((name) => name !== event.target.value)); }}><option value="">选择类别列</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</NativeSelect></label>
           <label>单位<Input aria-label="图表单位" value={unit} maxLength={40} onChange={(event) => setUnit(event.target.value)} placeholder="例如：万元、%、天" /></label>
-          <fieldset className="report-visual-composer__series report-visual-composer__wide"><legend>数值列（最多 3 列，单位必须一致）</legend>{columns.filter((name) => name !== category).map((name) => <label key={name}><input type="checkbox" aria-label={`数值列 ${name}`} checked={values.includes(name)} disabled={!values.includes(name) && values.length >= 3} onChange={(event) => setValues((previous) => event.target.checked ? [...previous, name] : previous.filter((value) => value !== name))} />{name}</label>)}</fieldset>
+          <fieldset className="report-visual-composer__series report-visual-composer__wide"><legend>数值列（最多 3 列，单位必须一致）</legend>{columns.filter((name) => name !== category).map((name) => <label key={name}><Checkbox aria-label={`数值列 ${name}`} checked={values.includes(name)} disabled={!values.includes(name) && values.length >= 3} onCheckedChange={(state) => setValues((previous) => state === true ? [...previous, name] : previous.filter((value) => value !== name))} />{name}</label>)}</fieldset>
           <p className="report-visual-composer__wide analysis-note">单位仅作展示，不换算数值。条形图最多 12 条数值（类别数×数值列数），折线图最多 24 个点；文字过密时请缩短说明或拆图。折线按结果中的顺序连接。</p>
         </>}
       </> : <>

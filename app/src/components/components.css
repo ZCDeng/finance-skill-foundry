@@ -238,9 +238,39 @@
 }
 
 .fnd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
   color: var(--fnd-muted);
   font-size: var(--fnd-size-small);
   padding: 40px 0;
+}
+
+.fnd-empty__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fnd-empty__title {
+  margin: 0;
+  color: var(--fnd-ink);
+  font-size: var(--fnd-size-body);
+  font-weight: var(--fnd-weight-strong);
+  line-height: 1.6;
+}
+
+.fnd-empty__description {
+  margin: 0;
+  max-width: 60ch;
+  line-height: 1.6;
+}
+
+.fnd-empty__content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .fnd-refusal {
@@ -417,6 +447,20 @@ textarea.fnd-field {
 .fnd-field:focus-visible:not(:disabled) {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
+}
+
+/* NativeSelect: the wrapper carries the chevron; the select stays a real field. */
+.fnd-native-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.fnd-native-select--picker {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 280px;
 }
 
 /* -- the header's own help ------------------------------------------------ */

@@ -11,6 +11,7 @@ import { TechnicalInfo } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -89,9 +90,9 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     </aside></div>}
     {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
       <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
-      <label className="analysis-select-label">对照结果<select className="fnd-field" value={comparison} onChange={(event) => setComparison(event.target.value)}>
+      <label className="analysis-select-label">对照结果<NativeSelect value={comparison} onChange={(event) => setComparison(event.target.value)}>
         <option value="">选择一次已保存的计算</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
-          <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</option>)}</select></label>
+          <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</option>)}</NativeSelect></label>
       {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} tablesBelow />
       <p className="analysis-note">完整原始结果仍按各次计算自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
         const definition = analyses.find((item) => item.id === row.analysis_id);
@@ -570,10 +571,10 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
     {run.finance_scope && <details className="analysis-details"><summary>计算范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
       <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
     {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">
-      <div className="analysis-edit-grid"><label>结果行来源<select className="fnd-field" value={target} onChange={(event) => setTarget(event.target.value)}>
+      <div className="analysis-edit-grid"><label>结果行来源<NativeSelect value={target} onChange={(event) => setTarget(event.target.value)}>
         <option value="">选择一行查看来源</option>{sourceRows.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-      </select></label><label>来源列（可选）<select className="fnd-field" value={column} onChange={(event) => setColumn(event.target.value)}>
-        <option value="">整行来源</option>{sourceColumnOptions(run, columns).map(({ name, label }) => <option key={name} value={name}>{label}</option>)}</select></label></div>
+      </NativeSelect></label><label>来源列（可选）<NativeSelect value={column} onChange={(event) => setColumn(event.target.value)}>
+        <option value="">整行来源</option>{sourceColumnOptions(run, columns).map(({ name, label }) => <option key={name} value={name}>{label}</option>)}</NativeSelect></label></div>
       <Button variant="outline" type="button" disabled={busy || !target} onClick={() => void open()}>查看来源行</Button>
       {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
       {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>

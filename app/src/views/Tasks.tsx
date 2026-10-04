@@ -4,6 +4,7 @@ import { FileClock, FolderPlus, Layers } from 'lucide-react';
 import { type TaskRow, when } from '../bridge.js';
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
+import { Empty, EmptyDescription } from '../components/ui/empty.js';
 
 /**
  * Where the first task comes from.
@@ -80,9 +81,9 @@ export function Tasks({
     <div className="fnd-stack">
       <NewTask busy={busy} onCreate={onCreate} />
       {tasks.length === 0 ? (
-        <p className="fnd-empty">
-          还没有任务。上面开一个, 会话才有地方写。也可以从一次导入开始, 第一个碰到它的任务会把窗口收编。
-        </p>
+        <Empty>
+          <EmptyDescription>还没有任务。上面开一个, 会话才有地方写。也可以从一次导入开始, 第一个碰到它的任务会把窗口收编。</EmptyDescription>
+        </Empty>
       ) : null}
       {tasks.map((task) => (
         <button key={task.id} type="button" className="fnd-card" onClick={() => onOpen(task.id)}>

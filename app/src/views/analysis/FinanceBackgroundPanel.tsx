@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, UNIT_OPTIONS } from './glossary.js';
 import { datasetOptions, scopeSummary } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 export interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
@@ -26,8 +27,8 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
     <p className="analysis-note">保存业务原因、经理判断或资料来源解释。背景按范围和有效期复用，经理可改适用范围。</p>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
       <label>标题<Input className="min-w-0 flex-1" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })}  /></label>
-      <FieldShell label="依据类型"><select aria-label="依据类型" className="fnd-field" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
-        <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></select></FieldShell>
+      <FieldShell label="依据类型"><NativeSelect aria-label="依据类型" value={background.basis} onChange={(event) => onBackground({ ...background, basis: event.target.value })}>
+        <option value="professional_judgment">经理专业判断</option><option value="user_assumption">业务假设</option><option value="source_fact">资料事实</option><option value="external_reference">外部依据</option></NativeSelect></FieldShell>
       <div className="analysis-period-range"><PeriodRangeInput label="适用期间范围" start={background.effective_from} end={background.effective_to}
         onChange={({ start, end }) => onBackground({ ...background, effective_from: start, effective_to: end })}
         help="设置这项背景适用的开始与结束期间；结束期间可留空。" /></div>
