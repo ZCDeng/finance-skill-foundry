@@ -30,6 +30,7 @@ import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 import { Button } from './components/ui/button.js';
 import { GUIDE_EVENT, GuideHub } from './views/guide/GuideHub.js';
 import type { GuideTarget } from './views/guide/articles.js';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from './components/ui/empty.js';
 
 /**
  * A refusal is a sentence the store wrote. Show it, do not translate it.
@@ -772,9 +773,9 @@ export function App() {
   if (!api) {
     return (
       <Shell screen={screen} onScreen={setScreen}>
-        <p className="fnd-empty">
-          分析服务尚未连接。请从 FA Foundry 桌面应用打开工作区。
-        </p>
+        <Empty>
+          <EmptyDescription>分析服务尚未连接。请从 FA Foundry 桌面应用打开工作区。</EmptyDescription>
+        </Empty>
       </Shell>
     );
   }
@@ -880,7 +881,7 @@ export function App() {
             : !ready || opening ? <div className="workspace-connection"><Booting /></div>
             : session?.taskId !== current ? <div className="workspace-connection"><p>连接这项任务的对话</p><Button variant="outline" onClick={() => void chatAnalysis().catch(() => undefined)}>继续分析</Button></div> : null}>
           {problem ? <Refusal message={problem} onDismiss={() => setProblem(null)} /> : null}
-          {boundReadOnly ? <div className="fnd-empty"><h2>任务已停用编辑</h2><p>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</p><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></div> :
+          {boundReadOnly ? <Empty><EmptyHeader><EmptyTitle asChild><h2>任务已停用编辑</h2></EmptyTitle><EmptyDescription>这个任务在{boundLifecycle === 'archived' ? '归档' : '回收站'}中。可以查看已生成成果，恢复任务后打开文稿、继续提问或打开数据定位。</EmptyDescription></EmptyHeader><EmptyContent><Button variant="outline" onClick={() => bound ? void changeTaskLifecycle(bound.id, 'restore') : undefined}>恢复任务</Button></EmptyContent></Empty> :
             <Analysis active={inWorkspace} embedded section={analysisSection} onSectionChange={setAnalysisSection}
               task={bound} tasks={tasks} draftRequest={draftRequest} onPick={pickAnalysisTask} onNew={newAnalysisTask} onChat={chatAnalysis}
               onLocatorPreview={api.sourceLocatorOpen ? (spec) => {

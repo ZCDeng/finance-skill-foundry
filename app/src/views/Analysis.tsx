@@ -26,6 +26,7 @@ import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js'
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
 import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
@@ -388,7 +389,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'datasets' && <>
           {embedded && <div className="analysis-section-heading"><h3>任务资料</h3>{view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>}
-          {!view.datasets.length && <Empty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
+          {!view.datasets.length && <AnalysisEmpty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
@@ -418,7 +419,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
           {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
-          {!analysis ? <Empty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
+          {!analysis ? <AnalysisEmpty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
             <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
               triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
@@ -559,12 +560,13 @@ function definitionCopy(analysis: AnalysisRevision): { note: string; detailSumma
   return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };
 }
 
-function Empty({ title, body, onAddFiles, onChat }: { title: string; body: string; onAddFiles?(): void; onChat(): void }) {
-  return <div className="analysis-empty"><h3>{title}</h3><p>{body}</p><div className="analysis-actions">
-    {onAddFiles ? <Button type="button" onClick={onAddFiles}><FilePlus2 size={14} aria-hidden />添加资料</Button> : null}
-    <Button variant="outline" type="button" onClick={onChat}>
-      <MessageSquare size={14} aria-hidden />与助手讨论</Button>
-  </div></div>;
+function AnalysisEmpty({ title, body, onAddFiles, onChat }: { title: string; body: string; onAddFiles?(): void; onChat(): void }) {
+  return <Empty className="analysis-empty"><EmptyHeader><EmptyTitle asChild><h3>{title}</h3></EmptyTitle><EmptyDescription>{body}</EmptyDescription></EmptyHeader>
+    <EmptyContent>
+      {onAddFiles ? <Button type="button" onClick={onAddFiles}><FilePlus2 size={14} aria-hidden />添加资料</Button> : null}
+      <Button variant="outline" type="button" onClick={onChat}>
+        <MessageSquare size={14} aria-hidden />与助手讨论</Button>
+    </EmptyContent></Empty>;
 }
 
 function sourceFormatLabel(format: 'docx' | 'pdf' | 'html' | 'md' | 'xlsx'): string {
