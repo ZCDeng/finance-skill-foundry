@@ -22,6 +22,7 @@ import { StructurePanel } from './analysis/StructurePanel.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
+import { SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
@@ -504,44 +505,8 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
 
 
 function AnalysisSettingsFallback({ children }: { children(close: () => void): ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDivElement>(null);
-  const restoreFocusTo = useRef<HTMLElement | null>(null);
-  const focusAfterOpen = useRef(false);
-  function close() { setOpen(false); }
-  function toggle() {
-    if (open) { close(); return; }
-    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    restoreFocusTo.current = activeElement && activeElement !== document.body ? activeElement : trigger.current;
-    focusAfterOpen.current = true;
-    setOpen(true);
-  }
-  useEffect(() => {
-    if (!open || !focusAfterOpen.current) return;
-    focusAfterOpen.current = false;
-    dialog.current?.focus({ preventScroll: true });
-  }, [open]);
-  useEffect(() => {
-    if (open) return;
-    const previous = restoreFocusTo.current;
-    restoreFocusTo.current = null;
-    if (!previous) return;
-    const target = previous.isConnected ? previous : trigger.current;
-    target?.focus({ preventScroll: true });
-  }, [open]);
-  return <div className="analysis-finance-setup">
-    {!open ? <button ref={trigger} type="button" className="analysis-finance-setup-trigger" aria-expanded={open} aria-controls="analysis-finance-settings"
-      aria-label="打开设置与高级" onClick={toggle}>
-      <div className="analysis-section-heading"><h3>设置与高级</h3><span className="analysis-note">调整计算定义和高级参数。</span></div>
-    </button> : null}
-    {open ? <div id="analysis-finance-settings" ref={dialog} className="analysis-finance-setup-dialog" role="dialog" aria-modal="false" aria-label="设置与高级" tabIndex={-1}
-      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
-      <div className="analysis-finance-setup-head analysis-section-heading"><div><h3>设置与高级</h3><p className="analysis-note">调整计算定义和高级参数。</p></div>
-        <Button variant="outline" type="button" aria-label="关闭设置与高级" onClick={close}>关闭</Button></div>
-      <div className="analysis-finance-setup-scroll">{children(close)}</div>
-    </div> : null}
-  </div>;
+  const settings = useSettingsPanel();
+  return <SettingsPanel state={settings} summary="调整计算定义和高级参数。" note="调整计算定义和高级参数。">{children(settings.close)}</SettingsPanel>;
 }
 
 const FINANCE_OPERATION: Record<string, string> = { metric: '损益指标', variance: '差异分析', scenario: '情景测算' };

@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
 import { FinanceChartPanel } from './FinanceChartPanel.js';
+import { SettingsPanel, useSettingsPanel } from './SettingsPanel.js';
 import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
 import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
@@ -88,13 +89,10 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   const [delayDays, setDelayDays] = useState('14');
   const [baselineScenarioId, setBaselineScenarioId] = useState('');
   const hasSuccessfulResults = runs.some((row) => row.execution_status === 'succeeded' || row.execution_status === 'success');
-  const [setupOpen, setSetupOpen] = useState(!hasSuccessfulResults);
+  const settings = useSettingsPanel(!hasSuccessfulResults);
+  const setSetupOpen = settings.setOpen;
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const setup = useRef<HTMLDivElement>(null);
-  const setupTrigger = useRef<HTMLButtonElement>(null);
-  const restoreFocusTo = useRef<HTMLElement | null>(null);
-  const focusSetupAfterOpen = useRef(false);
   // A remount (tab change, new task) must not replay a request it did not see.
   const seenRequest = useRef(openRequest.count);
   useEffect(() => { setActual((value) => value || datasets[0]?.id || ''); }, [datasets]);
@@ -102,10 +100,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   useEffect(() => {
     if (openRequest.count === seenRequest.current) return;
     seenRequest.current = openRequest.count;
-    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    restoreFocusTo.current = activeElement && activeElement !== document.body ? activeElement : setupTrigger.current;
-    focusSetupAfterOpen.current = true;
-    setSetupOpen(true);
+    settings.openWithFocus();
     void openScopeOf(openRequest.contextId);
   }, [openRequest.count]);
   /**
@@ -310,29 +305,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     });
   }
 
-  useEffect(() => {
-    if (!setupOpen) {
-      const previous = restoreFocusTo.current;
-      restoreFocusTo.current = null;
-      if (!previous) return;
-      const target = previous.isConnected ? previous : setupTrigger.current;
-      target?.focus({ preventScroll: true });
-      return;
-    }
-    setup.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
-    if (focusSetupAfterOpen.current) {
-      focusSetupAfterOpen.current = false;
-      setup.current?.focus({ preventScroll: true });
-    }
-  }, [setupOpen]);
-  function openSetup() {
-    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    restoreFocusTo.current = activeElement && activeElement !== document.body ? activeElement : setupTrigger.current;
-    focusSetupAfterOpen.current = true;
-    setSetupOpen(true);
-  }
-  function closeSetup() { setSetupOpen(false); }
-  function toggleSetup() { if (setupOpen) closeSetup(); else openSetup(); }
+  const closeSetup = settings.close;
   const locked = busy || Boolean(running) || analysisScope.loading || analysisScope.saving || analysisScope.conflicts.length > 0 || Boolean(analysisScope.error);
   const disabled = locked || !actual;
   // A file that names its month must not be calculated across every month it holds.
@@ -340,16 +313,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
-  return <><div className="analysis-finance-setup">
-    {!setupOpen ? <button ref={setupTrigger} type="button" className="analysis-finance-setup-trigger" aria-expanded={setupOpen} aria-controls="analysis-finance-settings"
-      aria-label="打开设置与高级" onClick={toggleSetup}>
-      <div className="analysis-section-heading"><h3>设置与高级</h3><span className="analysis-note">选好实际资料（和预算资料），确认范围后计算；高级定义也从这里进入。</span></div>
-    </button> : null}
-    {setupOpen ? <div id="analysis-finance-settings" ref={setup} className="analysis-finance-setup-dialog" role="dialog" aria-modal="false" aria-label="设置与高级" tabIndex={-1}
-      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeSetup(); } }}>
-      <div className="analysis-finance-setup-head analysis-section-heading"><div><h3>设置与高级</h3><p className="analysis-note">选好范围后计算；高级定义也从这里进入。</p></div>
-        <Button variant="outline" type="button" aria-label="关闭设置与高级" onClick={closeSetup}>关闭</Button></div>
-      <div className="analysis-finance-setup-scroll">
+  return <><SettingsPanel state={settings} scrollIntoView summary="选好实际资料（和预算资料），确认范围后计算；高级定义也从这里进入。" note="选好范围后计算；高级定义也从这里进入。">
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
         setActual(value);
@@ -422,8 +386,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       {accountMapId && <p className="analysis-note">计算损益表时使用管理科目映射：{textValue(accountMapName ?? '已保存的映射')}。</p>}
       <Button variant="outline" type="button" disabled={locked || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
-      </div>
-  </div> : null}</div>
+  </SettingsPanel>
   {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
   {running ? <p role="status" className="analysis-message"><WaitOrb state="solving" />{running}</p>
     : outcome?.result === 'ok' ? <p role="status" className="analysis-message">{outcome.message}</p>
