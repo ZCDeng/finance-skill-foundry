@@ -23,7 +23,7 @@ const mount = (handler: (command: string, spec: Record<string, unknown>) => unkn
 };
 function choose(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
-  fireEvent.mouseDown(screen.getByRole('option', { name: option }));
+  fireEvent.click(screen.getByRole('option', { name: option }));
 }
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 const commands = (financeCall: ReturnType<typeof mount>) => financeCall.mock.calls.map((call) => call[1]);
