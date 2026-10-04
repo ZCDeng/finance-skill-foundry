@@ -687,26 +687,79 @@ def test_an_apply_that_fails_after_filing_the_copy_is_finished_by_the_next_one(p
         FinanceFiles(task, actor="manager").rollforward_apply({"plan_id": plan["plan_id"]})
 
 
+def _saved_in_excel(analysis: AnalysisStore, copy: dict, folder: Path) -> Path:
+    """The copy as Excel would save it: the same workbook under the file name its export suggests."""
+    saved = load_workbook(_archived(analysis, copy))
+    saved.properties.title = "Excel 保存过"
+    path = folder / copy["name"]
+    saved.save(path)
+    return path
+
+
+def _close_texts(status: dict) -> list[str]:
+    """What the month-close page says the pack waits on; its source list names every file in the task."""
+    reasons = [reason["text"] for reason in status["conclusion"]["reasons"]]
+    return reasons + [item["text"] for block in status["blocks"] if block["key"] != "source" for item in block["items"]]
+
+
 def test_the_copy_saved_in_excel_and_added_again_replaces_it_and_last_month_stays_out_of_the_pack(pack, tmp_path: Path) -> None:
     from foundry.finance_controls import superseded_snapshots
     from foundry.finance_service import FinanceStore
     from foundry.workbook_rollforward import output_name
 
     task, analysis, august, balances, _ = pack
+    store = FinanceStore(task, actor="manager")
+    store.structure_propose(august["id"])  # the desktop proposes a structure for every workbook it adds
+    assert store.dataset_structure_state(august["id"]) in {"pending_confirmation", "pending_acknowledgement"}
     run = FinanceFiles(task, actor="manager").rollforward_apply(
         {"plan_id": _preview(FinanceFiles(task, actor="manager"), august, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
     copy = analysis.read_dataset(run["output_dataset_id"])
     # A file added from disk is named after its file name; the copy's name is that file name, which its export suggests.
     assert copy["name"] == output_name("八月套表.xlsx", "2026-09") == "八月套表（2026-09 滚动）.xlsx"
-    saved = load_workbook(_archived(analysis, copy))
-    saved.properties.title = "Excel 保存过"  # stands for Excel recalculating and saving it
-    saved.save(tmp_path / copy["name"])
-    readded = analysis.add_dataset(tmp_path / copy["name"], name=copy["name"], metadata={"mode": "workbook"})
+    readded = analysis.add_dataset(_saved_in_excel(analysis, copy, tmp_path), name=copy["name"], metadata={"mode": "workbook"})
     assert run["output_dataset_id"] in superseded_snapshots(task)
-    # 八月套表 is the template the copy was made from: last month's book, not one this month's pack waits on.
-    books = FinanceStore(task, actor="manager").finance_close_status()["conclusion"]["workbooks"]
-    assert august["id"] not in {book["dataset_id"] for book in books}
-    assert {readded["id"], balances["id"]} <= {book["dataset_id"] for book in books}
+    # 八月套表 is the template the copy was made from: last month's book, whose table structure and
+    # controls this month's pack does not wait on.
+    status = store.finance_close_status()
+    books = {book["dataset_id"] for book in status["conclusion"]["workbooks"]}
+    assert august["id"] not in books and {readded["id"], balances["id"]} <= books
+    assert not [text for text in _close_texts(status) if "八月套表 " in text or text.startswith("八月套表的")]
+
+
+def test_a_name_the_export_dialog_cannot_use_is_replaced_in_the_copy_name_as_well(pack, tmp_path: Path) -> None:
+    from foundry.finance_controls import superseded_snapshots
+    from foundry.workbook_rollforward import output_name
+
+    task, analysis, august, balances, _ = pack
+    source = analysis.add_dataset(_archived(analysis, august), name="华东:华南套表.xlsx", metadata={"mode": "workbook"},
+                                  allow_duplicate=True)
+    files = FinanceFiles(task, actor="manager")
+    run = files.rollforward_apply({"plan_id": _preview(files, source, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
+    copy = analysis.read_dataset(run["output_dataset_id"])
+    # The dialog suggests the copy's name with \\ / : * ? " < > | as _, so the name in the list matches it.
+    assert copy["name"] == output_name("华东:华南套表.xlsx", "2026-09") == "华东_华南套表（2026-09 滚动）.xlsx"
+    analysis.add_dataset(_saved_in_excel(analysis, copy, tmp_path), name=copy["name"], metadata={"mode": "workbook"})
+    assert run["output_dataset_id"] in superseded_snapshots(task)
+
+
+def test_a_copy_made_for_next_month_is_that_months_book_not_this_ones(pack, tmp_path: Path) -> None:
+    from foundry.finance_service import FinanceStore
+
+    task, analysis, august, balances, _ = pack
+    store = FinanceStore(task, actor="manager")
+    # This task closes August; rolling its own pack forward makes September's copy.
+    store.analysis_requirements_save({"question": "八月月结", "scope": {"period": "2026-08"},
+                                      "bindings": {"ledger": balances["id"]}, "items": []})
+    files = FinanceFiles(task, actor="manager")
+    run = files.rollforward_apply({"plan_id": _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])["plan_id"]})
+    copy = analysis.read_dataset(run["output_dataset_id"])
+    books = {book["dataset_id"] for book in store.finance_close_status()["conclusion"]["workbooks"]}
+    assert august["id"] in books and copy["id"] not in books
+    # Saved in Excel and added again here, it is still September's.
+    readded = analysis.add_dataset(_saved_in_excel(analysis, copy, tmp_path), name=copy["name"], metadata={"mode": "workbook"})
+    status = store.finance_close_status()
+    assert readded["id"] not in {book["dataset_id"] for book in status["conclusion"]["workbooks"]}
+    assert not [text for text in _close_texts(status) if copy["name"] in text]
 
 
 def test_apply_refuses_when_the_source_of_a_blocked_row_changed(pack) -> None:

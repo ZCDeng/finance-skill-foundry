@@ -96,6 +96,30 @@ def _render_fact_template_in_document(document: dict, facts: list[dict]) -> tupl
     return rendered, used
 
 
+def _other_month_workbooks(rows, current, period):
+    """Workbooks a roll-forward places in another month than the task's, by source hash.
+
+    A copy made for this month comes from last month's workbook, its template. A copy made for
+    another month (rolled forward from this month's pack) is that month's, and so is the file it
+    was saved as in Excel and added again under its name. A copy whose month is unknown here
+    counts as this month's.
+    """
+    found: set[str] = set()
+    elsewhere: set[str] = set()
+    for row in rows:
+        metadata = row.get("metadata") or {}
+        rolled = metadata.get("rollforward") or {}
+        if not rolled.get("source_hash"):
+            continue
+        if period and metadata.get("period") and metadata["period"] != period:
+            found.add(row.get("source_hash") or row["id"])
+            elsewhere.add(str(row.get("name") or ""))
+        else:
+            found.add(rolled["source_hash"])
+    found.update(row.get("source_hash") or row["id"] for row in current if row.get("name") and row["name"] in elsewhere)
+    return found
+
+
 class FinanceStore:
     def __init__(
         self,
@@ -1737,18 +1761,19 @@ class FinanceStore:
         rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
         replaced = superseded_snapshots(self.task, state["datasets"])
         current = [row for row in rows if row["id"] not in replaced]
-        # Last month's workbook a roll-forward copy was made from, even once the copy itself was replaced.
-        templates = {((row.get("metadata") or {}).get("rollforward") or {}).get("source_hash") for row in rows} - {None}
+        requirements = latest_requirements(self.analysis)
+        other_months = _other_month_workbooks(rows, current, ((requirements or {}).get("scope") or {}).get("period"))
         from foundry.finance_readiness import _is_workbook_shell
         from foundry.structure_records import NO_TABLE, WITHDRAWN
 
         pending = []
         for row in current:
+            if (row.get("source_hash") or row["id"]) in other_months:
+                continue  # its table structure is that month's to confirm
             structure = self.dataset_structure_state(row["id"])
             # The readiness report's rules: a workbook nothing was derived from, or a withdrawn table, is not confirmed.
             if structure in {PENDING_CONFIRMATION, PENDING_ACKNOWLEDGEMENT, WITHDRAWN} or (structure == NO_TABLE and _is_workbook_shell(row)):
                 pending.append(row.get("name") or "资料")
-        requirements = latest_requirements(self.analysis)
         drafts = [row for row in state.get("drafts") or [] if row.get("publication_status") != "archived"]
         runs = [row for row in state.get("runs") or [] if self.allowed is None or set((row.get("bindings") or {}).values()) <= self.allowed]
         readiness = self.finance_readiness({})
@@ -1756,7 +1781,7 @@ class FinanceStore:
         return close_status(
             archived=self.task.lifecycle_status() in {"archived", "trashed"},
             replaced=replaced,
-            templates=templates,
+            other_months=other_months,
             organization_required=bool(organizations),
             scope=(requirements or {}).get("scope"),
             scope_seq=(requirements or {}).get("seq"),
