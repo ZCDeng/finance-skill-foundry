@@ -367,7 +367,8 @@ def dispatch(args) -> bool:
         for claim in [*parent.get("claims", []), *spec.get("claims", [])]:
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 _bound(context, {"source": claim["dataset_id"]})
-        result = service.save_draft(spec)
+        # Evidence freshness reads only the files this session may read, as the finance draft path does.
+        result = service.save_draft(spec, _allowed=set(context.snapshot_ids) if context.session_id else None)
     elif args.cmd == "analysis-export":
         draft = service.get_draft(args.draft)
         _bound_draft(context, service, draft)
