@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { STATUS_LABELS, where, type ControlResult, type ControlSpec } from './controls.js';
 import { errorText } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 export type ControlSource = { dataset_id: string; source_hash: string; name: string; sheets: string[] };
 type Place = { dataset_id: string; sheet: string; range: string; unit: string };
@@ -125,20 +126,20 @@ function PlaceFields({ title, place, sources, onChange }: { title: string; place
   return <div className="analysis-tieout-place" role="group" aria-label={title}>
     <h5>{title}</h5>
     <label>工作簿
-      <select className="fnd-field" aria-label={`${title}工作簿`} value={place.dataset_id} onChange={(event) => onChange({ ...place, dataset_id: event.target.value, sheet: '' })}>
+      <NativeSelect aria-label={`${title}工作簿`} value={place.dataset_id} onChange={(event) => onChange({ ...place, dataset_id: event.target.value, sheet: '' })}>
         <option value="">选择工作簿</option>
         {sources.map((row) => <option key={row.dataset_id} value={row.dataset_id}>{row.name}</option>)}
-      </select></label>
+      </NativeSelect></label>
     <label>工作表
-      <select className="fnd-field" aria-label={`${title}工作表`} value={place.sheet} disabled={!sheets.length} onChange={(event) => onChange({ ...place, sheet: event.target.value })}>
+      <NativeSelect aria-label={`${title}工作表`} value={place.sheet} disabled={!sheets.length} onChange={(event) => onChange({ ...place, sheet: event.target.value })}>
         <option value="">选择工作表</option>
         {sheets.map((name) => <option key={name} value={name}>{name}</option>)}
-      </select></label>
+      </NativeSelect></label>
     <label>单元格或区域
       <Input aria-label={`${title}单元格`} maxLength={40} value={place.range} placeholder="例如 T605 或 B5:B604" onChange={(event) => onChange({ ...place, range: event.target.value })} /></label>
     <label>这一处的单位
-      <select className="fnd-field" aria-label={`${title}单位`} value={place.unit} onChange={(event) => onChange({ ...place, unit: event.target.value })}>
+      <NativeSelect aria-label={`${title}单位`} value={place.unit} onChange={(event) => onChange({ ...place, unit: event.target.value })}>
         {UNITS.map(([name]) => <option key={name} value={name}>{name}</option>)}
-      </select></label>
+      </NativeSelect></label>
   </div>;
 }

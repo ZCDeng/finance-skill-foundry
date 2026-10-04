@@ -45,8 +45,9 @@
   font-size: var(--fnd-size-small);
 }
 
-.analysis-workbook-browser-form input,
-.analysis-workbook-browser-form select {
+.analysis-workbook-browser-form .fnd-native-select { min-width: 9rem; }
+
+.analysis-workbook-browser-form input {
   min-width: 9rem;
   color: var(--fnd-ink, #1f1b16);
   background: var(--fnd-surface, #fff);

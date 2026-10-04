@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input.js';
 import './WorkbookBrowser.css';
 import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 export interface WorkbookCellPreview {
   address: string;
@@ -175,9 +176,9 @@ export function WorkbookBrowser({
           <label>
             工作表
             {sheets.length > 0 ? (
-              <select value={sheet} disabled={working} onChange={(event) => setSheet(event.target.value)}>
+              <NativeSelect value={sheet} disabled={working} onChange={(event) => setSheet(event.target.value)}>
                 {filteredSheets.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
+              </NativeSelect>
             ) : (
               <Input value={sheet} disabled={working} onChange={(event) => setSheet(event.target.value)} />
             )}
