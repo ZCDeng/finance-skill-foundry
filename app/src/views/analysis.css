@@ -390,4 +390,25 @@
 .analysis-evidence-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
 .analysis-evidence-chip { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .analysis-evidence-reason { color: var(--fnd-warning); font-size: var(--fnd-size-small); }
+
+/* Roll last month's workbook forward (滚动到下月). */
+.analysis-rollforward { display: flex; flex-direction: column; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--fnd-line); min-width: 0; }
+.analysis-rollforward h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
+.analysis-rollforward-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.analysis-rollforward-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--fnd-line); }
+.analysis-rollforward-row > .fnd-control { flex: 1 1 180px; min-width: 0; }
+.analysis-rollforward-row > [data-slot='button'] { flex: none; }
+.analysis-rollforward-row-number { flex: none; width: 20px; align-self: center; color: var(--fnd-muted); font-size: var(--fnd-size-small); font-variant-numeric: tabular-nums; }
+.analysis-rollforward-gap { flex-basis: 100%; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.analysis-rollforward-warning { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border: 1px solid var(--fnd-warning-line); border-radius: var(--fnd-radius-control); background: var(--fnd-warning-fill); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.analysis-rollforward-warning > svg { flex: none; margin-top: 2px; color: var(--fnd-warning); }
+.analysis-rollforward-warning p { margin: 0 0 8px; }
+.analysis-rollforward-counts { display: inline-flex; flex-wrap: wrap; gap: 6px 16px; }
+.analysis-rollforward-counts > span { display: inline-flex; align-items: center; gap: 4px; }
+.analysis-rollforward-table td { white-space: normal; overflow-wrap: anywhere; }
+.analysis-rollforward-table td:first-child { white-space: nowrap; }
+.analysis-rollforward-reason { display: block; margin-top: 4px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+@media (max-width: 680px) {
+  .analysis-rollforward-row > .fnd-control { flex-basis: 100%; }
+}
 }

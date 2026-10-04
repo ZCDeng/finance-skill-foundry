@@ -65,6 +65,14 @@ OPERATIONS = {
 FILE_OPERATIONS = {f"workbook-{name}": name for name in ("inspect", "bind", "read", "preview", "apply")}
 FILE_OPERATIONS["workbook-range-preview"] = "range_preview"
 FILE_OPERATIONS["workbook-health"] = "health"
+FILE_OPERATIONS.update({
+    "workbook-rollforward-preview": "rollforward_preview",
+    "workbook-rollforward-apply": "rollforward_apply",
+    "workbook-rollforward-templates": "rollforward_templates",
+    "workbook-rollforward-template-save": "rollforward_template_save",
+    # Desktop only: main adds the save dialog's destination; not on finance:call.
+    "workbook-rollforward-export": "rollforward_export",
+})
 OPERATIONS["finance-completion-recover"] = "recover_completion_draft"
 LIST_COMMANDS = {
     "list-finance-context",
@@ -198,7 +206,8 @@ def dispatch(args):
         print(stage_source_locator_preview(service, _json(args.spec, "finance spec")))
         return True
     elif args.cmd in FILE_OPERATIONS:
-        files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None)
+        files = FinanceFiles(context.task, snapshot_ids=context.snapshot_ids if context.session_id else None,
+                             session_id=context.session_id, actor=getattr(args, "actor", "") or None)
         result = getattr(files, FILE_OPERATIONS[args.cmd])(_json(args.spec, "workbook spec"))
     else:
         result = getattr(service, OPERATIONS[args.cmd])(

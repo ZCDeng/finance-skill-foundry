@@ -22,6 +22,7 @@ import { StructurePanel } from './analysis/StructurePanel.js';
 import { FormulaHealthPanel } from './analysis/FormulaHealthPanel.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
+import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
 import { SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
@@ -417,6 +418,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           <HelpLink article="data-safety" label="资料快照与原文件" />
           <details className="analysis-details"><summary>写回 Excel</summary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
+          </details>
+          <details className="analysis-details"><summary>滚动到下月</summary>
+            <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
           </details>
         </>}
         {view && tab === 'results' && <>

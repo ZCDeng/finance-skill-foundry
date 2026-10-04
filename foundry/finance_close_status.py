@@ -65,6 +65,7 @@ def close_status(
     draft: dict[str, Any] | None,
     replaced: set[str] | frozenset[str] = frozenset(),
     organization_required: bool = True,
+    other_months: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     blocks = [
         _scope_block(scope, organization_required=organization_required),
@@ -72,7 +73,9 @@ def close_status(
         _structure_block(datasets, pending_structures),
         _controls_block(controls),
         _exceptions_block(controls),
-        _review_block(runs, draft, scope_seq, datasets=datasets, replaced=replaced),
+        # A file a roll-forward places in another month is not one this month's calculation must read.
+        _review_block(runs, draft, scope_seq, replaced=replaced,
+                      datasets=[row for row in datasets if (row.get("source_hash") or row["id"]) not in other_months]),
     ]
     must = [item["text"] for block in blocks[:3] for item in block["items"] if item["blocking"]]
     later = [item["text"] for block in blocks[3:] for item in block["items"] if item["blocking"]]
@@ -100,7 +103,7 @@ def close_status(
         "headline": headline,
         "blocks": blocks,
         "blocking": [*must, *later],
-        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced),
+        "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced, other_months),
     }
 
 
@@ -194,11 +197,15 @@ def _exceptions_block(controls: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], inputs: list[dict[str, Any]],
-                pending_structures: list[str], replaced: set[str] | frozenset[str]) -> dict[str, Any]:
+                pending_structures: list[str], replaced: set[str] | frozenset[str],
+                other_months: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
     """可用结论: can these books be used as they stand, for the whole pack and for each workbook.
 
     Only confirmed controls and the manager's dispositions decide the level. A finding type only
     names the kind of problem in a reason; with or without one, a difference weighs the same.
+    `other_months` are workbooks a roll-forward places in another month (last month's template a
+    copy was made from, or a copy made for another month): one no confirmed control reads is not a
+    book this pack waits on; one a control reads stays listed, so its result shows under its name.
     """
     confirmed = [row for row in controls if row.get("state") == "confirmed"]
     held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
@@ -210,6 +217,8 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     for book in _workbooks(datasets, replaced):
         digest = book.get("source_hash") or book["id"]
         touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
+        if digest in other_months and not touching:
+            continue
         own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
         waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
         level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
