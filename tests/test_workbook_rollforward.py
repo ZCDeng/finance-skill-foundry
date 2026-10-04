@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -242,7 +243,8 @@ def test_the_original_snapshot_is_untouched_and_the_copy_is_a_new_snapshot(pack)
     assert output["metadata"] == {
         "mode": "workbook",
         "period": "2026-09",
-        "rollforward": {"plan_id": plan["plan_id"], "source_dataset_id": august["id"], "source_hash": august["source_hash"]},
+        "rollforward": {"plan_id": plan["plan_id"], "source_dataset_id": august["id"], "source_hash": august["source_hash"],
+                        "formula_cache_cleared": run["formula_cache_cleared"]},
     }
     assert output["source_hash"] == run["output_sha256"]
     assert run["output_dataset_id"] in {row["id"] for row in analysis.state()["datasets"]}
@@ -442,20 +444,25 @@ def test_a_template_keeps_the_mapping_without_this_months_snapshots(pack, tmp_pa
         _map("利润表", "A1", {"kind": "value", "value": "华东公司利润表 2026年09月", "note": "标题"}),
         _map("利润表", "H5", {"kind": "value", "value": "98765.43", "note": "调整"}),
         _map("利润表", "G5", {"kind": "value", "value": "1,234.50"}),
+        _map("利润表", "A2", {"kind": "value", "value": "1,200元"}),
+        _map("利润表", "A3", {"kind": "value", "value": "ＲＭＢ 100万", "note": "备注"}),
     ])
     saved = files.rollforward_template_save({"plan_id": plan["plan_id"], "name": "华东月度套表"})
     assert saved["sheet_pattern"] == "利润表|锁定表"
     assert saved["mappings"] == [
         {"target": {"sheet": "利润表", "cell": "B5"}, "source": {"kind": "dataset", "sheet": "科目余额", "range": "B1:B2", "hint": "九月余额"}},
         {"target": {"sheet": "利润表", "cell": "B6"}, "source": {"kind": "run", "row": 0, "column": "amount"}},
-        {"target": {"sheet": "利润表", "cell": "A1"}, "source": {"kind": "value", "note": "标题", "last_value": "华东公司利润表 2026年09月"}},
-        # This month's typed amounts are not carried to other months' tasks.
+        {"target": {"sheet": "利润表", "cell": "A1"}, "source": {"kind": "value", "note": "标题", "last_value": "华东公司利润表 ####年##月"}},
+        # This month's typed amounts are not carried to other months' tasks, nor are the digits of typed text.
         {"target": {"sheet": "利润表", "cell": "H5"}, "source": {"kind": "value", "note": "调整"}},
         {"target": {"sheet": "利润表", "cell": "G5"}, "source": {"kind": "value", "note": ""}},
+        {"target": {"sheet": "利润表", "cell": "A2"}, "source": {"kind": "value", "note": "", "last_value": "#,###元"}},
+        {"target": {"sheet": "利润表", "cell": "A3"}, "source": {"kind": "value", "note": "备注", "last_value": "RMB ###万"}},
     ]
     text = json.dumps(saved, ensure_ascii=False)
     for month_specific in (balances["id"], balances["source_hash"], "a" * 32, august["id"], "98765.43", "1,234.50"):
         assert month_specific not in text
+    assert not re.search(r"\d", "".join(mapping["source"].get("last_value") or "" for mapping in saved["mappings"]))
     with pytest.raises(FoundryError, match="template name"):
         files.rollforward_template_save({"plan_id": plan["plan_id"], "name": "  "})
 
@@ -467,7 +474,7 @@ def test_a_template_keeps_the_mapping_without_this_months_snapshots(pack, tmp_pa
     later = FinanceFiles(october, actor="manager")
     listed = later.rollforward_templates({"dataset_id": rolled["id"]})
     assert [row["name"] for row in listed["templates"]] == ["华东月度套表"]
-    assert listed["templates"][0]["mapping_count"] == 5
+    assert listed["templates"][0]["mapping_count"] == 7
     assert later.rollforward_templates({"dataset_id": other["id"]})["templates"] == []
     assert len(later.rollforward_templates({})["templates"]) == 1
     registry = Path(task.store.var_root) / "rollforward_templates"
@@ -656,6 +663,28 @@ def test_a_second_apply_cannot_slip_in_before_the_first_is_recorded(pack) -> Non
     rolled = [row for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("rollforward")]
     assert [row["id"] for row in rolled] == [run["output_dataset_id"]]
     assert not (analysis.root / ".rollforward-staging").exists()
+
+
+def test_an_apply_that_fails_after_filing_the_copy_is_finished_by_the_next_one(pack) -> None:
+    task, analysis, august, balances, _ = pack
+    files = FinanceFiles(task, actor="manager")
+    plan = _preview(files, august, [_map("利润表", "B5", _cell(balances, "B1"))])
+
+    def lock_timeout(snapshot_ids: list[str]) -> None:
+        raise FoundryError("task is busy")
+
+    files._widen_session = lock_timeout
+    with pytest.raises(FoundryError, match="task is busy"):
+        files.rollforward_apply({"plan_id": plan["plan_id"]})
+    rolled = [row for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("rollforward")]
+    assert len(rolled) == 1 and not (analysis.root / ".rollforward-staging").exists()
+    # Applying the plan again files the record for that copy instead of making a second one.
+    run = FinanceFiles(task, actor="manager").rollforward_apply({"plan_id": plan["plan_id"]})
+    assert run["output_dataset_id"] == rolled[0]["id"] and run["output_sha256"] == rolled[0]["source_hash"]
+    assert run["formula_cache_cleared"] is rolled[0]["metadata"]["rollforward"]["formula_cache_cleared"]
+    assert [row["id"] for row in analysis.state()["datasets"] if (row.get("metadata") or {}).get("rollforward")] == [rolled[0]["id"]]
+    with pytest.raises(FoundryError, match="already applied"):
+        FinanceFiles(task, actor="manager").rollforward_apply({"plan_id": plan["plan_id"]})
 
 
 def test_apply_refuses_when_the_source_of_a_blocked_row_changed(pack) -> None:

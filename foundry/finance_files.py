@@ -427,6 +427,13 @@ class FinanceFiles:
         finally:
             sources.close()
 
+    def _filed_copy(self, plan_id: str) -> dict[str, Any] | None:
+        """The snapshot an apply of this plan registered, if one did."""
+        for row in self.analysis.state()["datasets"]:
+            if ((row.get("metadata") or {}).get("rollforward") or {}).get("plan_id") == plan_id:
+                return row
+        return None
+
     def rollforward_apply(self, spec: dict[str, Any]) -> dict[str, Any]:
         """Write the previewed cells into a new copy and file it as this task's snapshot. Manager only."""
         import shutil
@@ -475,27 +482,35 @@ class FinanceFiles:
         # record is filed, so a second apply cannot slip in between the copy
         # being registered and the record that says it was.
         try:
-            path = self.analysis._inside(staging / output_filename(dataset["source_name"], plan["period"]))
-            written = write_copy(data, path, plan["rows"])
-            digest = sha256_bytes(path.read_bytes())
-            # Not under the task lock: add_dataset takes it. No structure proposal
-            # either: the copy's formulas have no cached results until Excel saves it.
-            output = self.analysis.add_dataset(
-                path,
-                name=output_name(dataset["name"], plan["period"]),
-                metadata={
-                    "mode": "workbook",
-                    "period": plan["period"],
-                    "rollforward": {
-                        "plan_id": plan["id"],
-                        "source_dataset_id": dataset["id"],
-                        "source_hash": dataset["source_hash"],
+            # A copy filed by an earlier apply of this plan that failed before its
+            # record was written is taken up again, not filed a second time.
+            output = self._filed_copy(plan["id"])
+            if output is None:
+                path = self.analysis._inside(staging / output_filename(dataset["source_name"], plan["period"]))
+                written = write_copy(data, path, plan["rows"])
+                digest = sha256_bytes(path.read_bytes())
+                # Not under the task lock: add_dataset takes it. No structure proposal
+                # either: the copy's formulas have no cached results until Excel saves it.
+                output = self.analysis.add_dataset(
+                    path,
+                    name=output_name(dataset["name"], plan["period"]),
+                    metadata={
+                        "mode": "workbook",
+                        "period": plan["period"],
+                        "rollforward": {
+                            "plan_id": plan["id"],
+                            "source_dataset_id": dataset["id"],
+                            "source_hash": dataset["source_hash"],
+                            "formula_cache_cleared": written["formula_cache_cleared"],
+                        },
                     },
-                },
-                allow_duplicate=True,
-            )
-            if output["source_hash"] != digest:
-                raise FoundryError("rollforward copy changed before it was filed")
+                    allow_duplicate=True,
+                )
+                if output["source_hash"] != digest:
+                    raise FoundryError("rollforward copy changed before it was filed")
+            else:
+                digest = output["source_hash"]
+                written = {"formula_cache_cleared": bool(output["metadata"]["rollforward"].get("formula_cache_cleared"))}
             self._widen_session([output["id"]])
             record = _new(
                 self.task,

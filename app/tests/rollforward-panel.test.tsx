@@ -188,7 +188,7 @@ it('fills the mapping from a saved template and waits for this month\'s sources'
   const financeCall = mount((command) => command === 'workbook-rollforward-templates' ? {
     templates: [{ id: 'tpl-1', name: '华东月度套表', mapping_count: 2, mappings: [
       { target: { sheet: '利润表', cell: 'B5' }, source: { kind: 'dataset', sheet: '科目余额', range: 'B1:B2', hint: '#月余额' } },
-      { target: { sheet: '利润表', cell: 'A1' }, source: { kind: 'value', note: '标题', last_value: '华东公司利润表 2026年09月' } },
+      { target: { sheet: '利润表', cell: 'A1' }, source: { kind: 'value', note: '标题', last_value: '华东公司利润表 ####年##月' } },
     ] }],
   } : {});
   render(<RollforwardPanel taskId="t" datasets={[august, balances]} runs={[]} busy={false} />);

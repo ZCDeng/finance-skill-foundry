@@ -327,6 +327,9 @@ def read_manager_value(text: str) -> SourceValue:
     return SourceValue(text=_cell_text(text, "手填值"))
 
 
+ANY_DIGIT = re.compile(r"\d")
+
+
 def looks_like_number(text: str) -> bool:
     """Whether text reads as an amount once grouping, brackets and symbols are set aside.
 
@@ -742,7 +745,7 @@ def template_mappings(rows: list[dict[str, Any]], mappings: list[dict[str, Any]]
     masked, so next month the manager picks that month's file herself. Typed
     text, such as a title, is kept only as a reminder of what to type; a typed
     amount is not kept at all, since it is this month's figure and the shelf is
-    read from every later task.
+    read from every later task. Digits in typed text are masked for the same reason.
     """
     from foundry.structure_templates import sheet_pattern as masked
 
@@ -757,7 +760,9 @@ def template_mappings(rows: list[dict[str, Any]], mappings: list[dict[str, Any]]
         else:
             stripped = {"kind": "value", "note": source["note"]}
             if not looks_like_number(source["manager_value"]):
-                stripped["last_value"] = source["manager_value"][:200]
+                # Digits masked: 「2026年09月」 reminds her of the form as 「####年##月」, and
+                # 「1,200元」 or 「RMB 100万」 keep no figure at all.
+                stripped["last_value"] = ANY_DIGIT.sub("#", unicodedata.normalize("NFKC", source["manager_value"]))[:200]
         kept.append({"target": dict(mapping["target"]), "source": stripped})
     return kept
 
