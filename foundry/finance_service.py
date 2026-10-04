@@ -206,10 +206,13 @@ class FinanceStore:
             _assert_id(dataset_id)
 
     def _authorize_evidence_recipes(self, recipes):
-        from foundry.financial_evidence import recipe_dataset_ids
+        from foundry.financial_evidence import recipe_dataset_ids, recipe_run_ids
 
         for dataset_id in recipe_dataset_ids(recipes):
             self._authorize({"evidence": dataset_id})
+        # A recipe's claim cites a run cell, whose value the recipe's result shows (analysis_cli._bound_evidence).
+        for run_id in recipe_run_ids(recipes):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
 
     def _authorize_consistency_sources(self, sources):
         from foundry.financial_evidence import consistency_dataset_ids
@@ -1636,6 +1639,9 @@ class FinanceStore:
 
     def finance_controls_list(self, spec):
         """Live controls, each with its latest result; a result read from a snapshot that changed since is stale."""
+        import json
+
+        from foundry.analysis_data import json_value
         from foundry.finance_controls import STALE, evaluate_control, superseded_snapshots
 
         spec = spec if isinstance(spec, dict) else {}
@@ -1659,9 +1665,12 @@ class FinanceStore:
             hashes = (result or {}).get("source_hashes") or {}
             if (self.allowed is not None and result and result.get("status") == STALE
                     and result.get("reason") == "资料已有更新的版本" and not set(hashes) & replaced):
-                # Judged stale by a newer file this session may not read: judge it by the files it may read.
-                result = {**{key: result[key] for key in ("control_id", "label", "state", "run_id", "run_at") if key in result},
-                          **evaluate_control(self.analysis, head["control"], cache=cache, allowed=self.allowed)}
+                # Judged stale by a newer file this session may not read: judge it by the files it may read, and read
+                # the result as a stored one reads (keys sorted as written, then the run it came with).
+                fresh = {**{key: result[key] for key in ("control_id", "label", "state") if key in result},
+                         **evaluate_control(self.analysis, head["control"], cache=cache, allowed=self.allowed)}
+                result = {**json.loads(json.dumps(json_value(fresh), sort_keys=True)),
+                          **{key: result[key] for key in ("run_id", "run_at") if key in result}}
                 hashes = result.get("source_hashes") or {}
             if result and any(current.get(dataset_id) != digest or dataset_id in replaced for dataset_id, digest in hashes.items()):
                 result = {**result, "status": "stale", "reason": "资料快照在这次运行之后已变化"}
@@ -1811,15 +1820,15 @@ class FinanceStore:
         """The month-close control center's six blocks and its one headline (finance_close_status)."""
         from foundry.finance_close_status import close_status
         from foundry.finance_controls import superseded_snapshots
-        from foundry.finance_requirements import latest_requirements
         from foundry.structure_records import PENDING_ACKNOWLEDGEMENT, PENDING_CONFIRMATION
 
-        state = self.analysis.state()
+        state = self.analysis.state(self.allowed)
         rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
         # A session's close status is the one its own files give: a newer file outside it replaces nothing here.
         replaced = superseded_snapshots(self.task, state["datasets"], allowed=self.allowed)
         current = [row for row in rows if row["id"] not in replaced]
-        requirements = latest_requirements(self.analysis)
+        # The newest requirements version this reader may read, as analysis_requirements_list names its current one.
+        requirements = state["requirements"][-1] if state["requirements"] else None
         other_months = _other_month_workbooks(rows, current, ((requirements or {}).get("scope") or {}).get("period"))
         from foundry.finance_readiness import _is_workbook_shell
         from foundry.structure_records import NO_TABLE, WITHDRAWN

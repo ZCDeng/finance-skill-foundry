@@ -169,6 +169,11 @@ def recipe_dataset_ids(recipes: list[Any] | None) -> set[str]:
     return ids
 
 
+def recipe_run_ids(recipes: list[Any] | None) -> list[str]:
+    """The runs recipes' claims cite, in order."""
+    return list(dict.fromkeys(recipe["claim"]["run_id"] for recipe in _clean_recipes(recipes)))
+
+
 def evidence_quality_issues(report: dict[str, Any]) -> list[dict[str, Any]]:
     return list(report.get("issues") or [])
 

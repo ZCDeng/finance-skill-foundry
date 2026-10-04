@@ -286,8 +286,8 @@ def dispatch(args) -> bool:
         listed = {d["id"] for d in result["drafts"]} if context.session_id else None
         # A receipt reads the way its draft reads (AnalysisStore.completion_in_view).
         result["completions"] = [
-            receipt for receipt in (service.completion_in_view(c, _ceiling(context), readable_ids=listed)
-                                    for c in result["completions"]) if receipt is not None
+            receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context), readable_ids=listed)
+            if receipt is not None
         ]
         result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed) for d in result["drafts"]]
         result["context"] = {

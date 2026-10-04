@@ -54,9 +54,10 @@ def _codes(check: dict) -> list[str]:
 
 
 def _normalized(value) -> str:
-    """Two worlds draw different ids and clocks: number the ids by first appearance and blank the clocks."""
+    """Two worlds draw different ids and clocks: number the ids by first appearance and blank the clocks. Keys stay
+    in the order they were read."""
     text = re.sub(r'"_integrity_hash": "[0-9a-f]{64}"', '"_integrity_hash": "<hash>"',
-                  json.dumps(value, ensure_ascii=False, sort_keys=True))
+                  json.dumps(value, ensure_ascii=False))
     seen: dict[str, str] = {}
     text = re.sub(r"\b[0-9a-f]{32}\b", lambda match: seen.setdefault(match.group(0), f"<id{len(seen)}>"), text)
     return re.sub(r"\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})?", "<ts>", text)
@@ -166,18 +167,64 @@ def test_a_retried_save_is_refused_to_a_session_that_may_not_read_the_parent(rev
         FinanceStore(revision.task, snapshot_ids=[revision.a["id"]], session_id="sess").save_explanation_draft(spec)
 
 
-def test_a_context_grant_refuses_to_validate_against_a_parent_outside_it(revision):
+def test_a_context_grant_answers_a_hidden_parent_as_an_unknown_one(revision):
     from foundry.finance_mcp import FinanceMcpServer, McpRefused
 
-    service = FinanceStore(revision.task, snapshot_ids=[revision.a["id"]])
+    service = FinanceStore(revision.task, snapshot_ids=[revision.a["id"]], session_id="sess")
     granted = "0" * 32
     grant = {"snapshot_ids": [revision.a["id"]], "context_ids": [granted]}
     FinanceMcpServer._authorize_context(None, grant, service, "validate_explanation", {"context_id": granted})
-    # The parent's runs are in no context the grant holds, as for a revision saved under the grant.
+    # A parent outside the grant with no run says nothing a parent with runs or no parent at all would not.
+    runless = revision.analysis.save_draft({"title": "无运行", "body": "薪酬说明。", "claims": [
+        {"basis": "source_fact", "dataset_id": revision.h["id"], "text": "薪酬"}]})
     for tool in ("validate_explanation", "save_explanation_draft"):
+        errors = []
+        for parent_id in (revision.parent["id"], runless["id"], "f" * 32):
+            with pytest.raises(FoundryError) as refused:
+                FinanceMcpServer._authorize_context(None, grant, service, tool, {"context_id": granted, "parent_id": parent_id})
+            assert not isinstance(refused.value, McpRefused)
+            errors.append(str(refused.value))
+        assert set(errors) == {PARENT_UNAVAILABLE}
+        # A parent the grant may read is held to the grant's contexts: its run is in none of them.
         with pytest.raises(McpRefused):
             FinanceMcpServer._authorize_context(None, grant, service, tool,
-                                                {"context_id": granted, "parent_id": revision.parent["id"]})
+                                                {"context_id": granted, "parent_id": revision.child["id"]})
+
+
+def test_a_session_reads_a_revision_s_statuses_as_saved_with_no_parent(tmp_path, capsys):
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="复核状态")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(tmp_path / "a.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="A")
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_csv(tmp_path / "h.csv", [("revenue", "2026-08", "集团", SECRET, "CNY", "元")]), name="H")
+
+    def run_twice(dataset):
+        analysis_id = analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": dataset["id"]}})["id"]
+        analysis.run_analysis(analysis_id)
+        return analysis.run_analysis(analysis_id)
+
+    ra, rh = run_twice(a), run_twice(h)
+    assert ra["reproducibility_status"] == "reproducible"
+
+    def claim(run):
+        return {"basis": "calculation", "run_id": run["id"], "row": 0, "column": "amount", "value": run["result"]["rows"][0]["amount"]}
+
+    parent = analysis.save_draft({"title": "P", "body": f"收入 {SECRET} 元。", "run_ids": [rh["id"]], "claims": [claim(rh)]})
+    spec = {"title": "C", "body": "收入 100 元。", "run_ids": [ra["id"]], "claims": [claim(ra)], "review_status": "reviewed"}
+    child = analysis.save_draft({**spec, "parent_id": parent["id"]})
+    alone = analysis.save_draft(spec)
+    assert (child["review_status"], child["reproducibility_status"]) == ("unreviewed", "unverified")
+    assert (alone["review_status"], alone["reproducibility_status"]) == ("reviewed", "reproducible")
+    read = {draft_id: _cli(capsys, var, "report-draft-read", "--draft", draft_id)[1] for draft_id in (child["id"], alone["id"])}
+    shown, expected = read[child["id"]], read[alone["id"]]
+    assert _shows(shown, [parent["id"], rh["id"], h["id"], SECRET]) == []
+    assert "requested_review_status" not in shown
+    for key in ("review_status", "reproducibility_status", "explanation_check", "quality"):
+        assert shown[key] == expected[key]
+    # The manager, and a session that may read the parent, read the statuses the change from the parent reset.
+    code, managed = _cli(capsys, var, "report-draft-read", "--draft", child["id"], session=None, task=task.id)
+    assert (managed["review_status"], managed["reproducibility_status"]) == ("unreviewed", "unverified")
 
 
 # --- completion receipts -------------------------------------------------------------------------------------------
@@ -243,6 +290,24 @@ def test_drafts_a_session_may_not_read_spend_none_of_its_repairs(tmp_path):
     assert wide.save_explanation_draft({"body": "宽口径。"})["completion"]["repair_attempts"] == 2
 
 
+def test_a_session_reads_a_repair_budget_spent_only_by_drafts_it_may_read(tmp_path, capsys):
+    read = []
+    for hidden in (0, 2):
+        sess, wide, _run = _chain(tmp_path, hidden)
+        shown = wide.save_explanation_draft({"body": "请查看计算依据。"})
+        assert shown["completion"]["repair_attempts"] == hidden
+        code, state = _cli(capsys, tmp_path / f"var{hidden}", "analysis-state")
+        assert code == 0
+        [listed] = [receipt for receipt in state["completions"] if receipt["draft_id"] == shown["id"]]
+        # The same request again: the session is handed the receipt already filed, as it reads it.
+        replayed = sess.save_explanation_draft({"body": "请查看计算依据。"})
+        assert replayed["id"] == shown["id"]
+        read.append([listed, replayed["completion"]])
+    for receipts in read:
+        assert [(receipt["repair_attempts"], receipt["status"], receipt["stop_reason"], receipt["repair_allowed"])
+                for receipt in receipts] == [(0, "repair_available", None, True)] * 2
+
+
 def test_a_session_lists_only_the_requirements_and_evidence_checks_it_may_read(tmp_path, capsys):
     var = tmp_path / "var"
     task = TaskStore(var).create(title="清单")
@@ -269,14 +334,14 @@ def test_a_session_lists_only_the_requirements_and_evidence_checks_it_may_read(t
 # --- the requirements check ----------------------------------------------------------------------------------------
 
 
-def _requirement_world(tmp_path):
+def _requirement_world(tmp_path, amount: str = "amount"):
     """R1 binds D1, inside the session; the manager runs control totals on D1 and a file D2 outside it."""
     var = tmp_path / "var"
     task = TaskStore(var).create(title="要求")
     analysis = AnalysisStore(task)
     manager = FinanceStore(task)
     d1 = analysis.add_dataset(_ledger(tmp_path / "gl.json", [
-        {"account_code": "6001", "management_account": "revenue", "amount": 100, "period": "2026-09",
+        {"account_code": "6001", "management_account": "revenue", amount: 100, "period": "2026-09",
          "organization": "O1", "currency": "CNY"}]), name="gl")["id"]
     requirement = manager.analysis_requirements_save({
         "question": "九月控制合计", "scope": {"period": "2026-09", "organization": "O1", "currency": "CNY"},
@@ -355,6 +420,14 @@ def test_a_session_cannot_check_a_draft_against_requirements_it_may_not_read(tmp
     assert len(analysis._list("drafts")) == before
     with pytest.raises(FoundryError):
         session.validate_explanation({"body": "收入 100。", "requirements_id": requirement["id"]})
+    # Once the current version is one it may read, an older one it may not read is still refused by name.
+    current = FinanceStore(task).analysis_requirements_save({
+        "question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": d1}, "parent_id": requirement["id"],
+        "change_reason": "换回总账", "items": [{"id": "rev", "metric": "revenue", "label": "收入"}]})
+    assert session.validate_explanation({"body": "收入 100。", "requirements_id": current["id"]})
+    with pytest.raises(FoundryError) as refused:
+        session.validate_explanation({"body": "收入 100。", "requirements_id": requirement["id"]})
+    assert _shows(str(refused.value), [d2, requirement["id"], "Falcon"]) == []
 
 
 def test_a_session_neither_lists_nor_reads_a_draft_checked_against_requirements_it_may_not_read(tmp_path, capsys):
@@ -417,6 +490,41 @@ def test_a_session_reads_a_draft_checked_before_policy_13_without_runs_it_may_no
     assert world.run["id"] in json.dumps(managed["explanation_check"]["requirements"])
 
 
+def test_a_session_reads_the_verdict_of_a_receipt_whose_draft_checked_a_run_it_may_not_read(tmp_path, monkeypatch, capsys):
+    from foundry import finance_completion, finance_requirements
+
+    # The ledger's amount column is not mapped: the engine path is blocked, and only the item names the run.
+    world = _requirement_world(tmp_path, amount="本期发生额")
+    with monkeypatch.context() as old:
+        old.setattr(finance_requirements, "_within_files", lambda files, bindings: True)
+        old.setattr(finance_completion, "COMPLETION_POLICY_VERSION", 12)
+        saved = world.manager.save_explanation_draft({"body": "控制合计待核。"})
+    stored = world.analysis.get_draft(saved["id"])
+    assert world.run["id"] in json.dumps(stored["explanation_check"]["requirements"])
+    assert _shows(saved["completion"], world.hidden) == []
+    code, state = _cli(capsys, world.var, "analysis-state")
+    assert code == 0
+    [receipt] = [receipt for receipt in state["completions"] if receipt["draft_id"] == saved["id"]]
+    assert "input_key" not in receipt and "issue_fingerprint" not in receipt
+    assert receipt["status"] == saved["completion"]["status"]
+
+
+def test_a_session_cites_no_run_it_may_not_read_through_an_evidence_recipe(revision, capsys):
+    recipe = {"id": "direct", "kind": "direct", "dataset_id": revision.a["id"], "source_hash": revision.a["source_hash"],
+              "sheet": "Sheet1", "range": "D2", "claim": {"run_id": revision.rh["id"], "row": 0, "column": "amount"}}
+    spec = {"body": "收入 100。", "run_ids": [revision.ra["id"]], "evidence_recipes": [recipe]}
+    session = FinanceStore(revision.task, snapshot_ids=[revision.a["id"]], session_id="sess")
+    before = len(revision.analysis._list("drafts"))
+    for call in (session.validate_explanation, session.save_explanation_draft,
+                 lambda spec: session.prepare_explanation({**spec, "run_ids": [revision.ra["id"]]})):
+        with pytest.raises(FoundryError) as refused:
+            call(spec)
+        assert _shows(str(refused.value), revision.hidden) == []
+    code, error = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))
+    assert code != 0 and _shows(error, revision.hidden) == []
+    assert len(revision.analysis._list("drafts")) == before
+
+
 # --- month close and controls ---------------------------------------------------------------------------------------
 
 
@@ -449,6 +557,14 @@ def _close_world(root: Path, hidden: str | None, _packs: dict[str, Path]):
                              "claims": [{"basis": "source_fact", "dataset_id": other["id"], "text": "收入 1"}]})
     elif hidden == "replacement_upload":
         analysis.add_dataset(pnl("actual-v2.json", [121, 70, 20]), name="actual")
+    elif hidden == "newer_requirements":
+        deal = analysis.add_dataset(_ledger(root / "deal.json", [
+            {"account_code": "9999", "management_account": "revenue", "amount": 7, "period": "2026-07",
+             "organization": "HIDDENCO", "currency": "USD"}]), name="并购")
+        manager.analysis_requirements_save({
+            "question": "并购", "scope": {"period": "2026-07", "organization": "HIDDENCO", "currency": "USD", "unit": "元"},
+            "parent_id": analysis._list("requirements")[-1]["id"], "change_reason": "换范围",
+            "bindings": {"deal": deal["id"]}, "items": [{"id": "rev", "metric": "revenue"}]})
     return task, root / "var"
 
 
@@ -484,6 +600,7 @@ def _control_world(root: Path, hidden: str | None, packs: dict[str, Path]):
 @pytest.mark.parametrize("build, hidden", [
     (_close_world, "newer_draft"),
     (_close_world, "replacement_upload"),
+    (_close_world, "newer_requirements"),
     (_control_world, "co_run"),
     (_control_world, "upload_before_run"),
     (_control_world, "upload_after_run"),

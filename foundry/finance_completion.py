@@ -51,8 +51,9 @@ def _dropped_hierarchy_action(item):
 def record_completion(analysis, draft, quality, *, allowed=None):
     """The receipt for one saved draft, or the one already filed for the same input.
 
-    ``allowed`` is the saver's snapshot ceiling: only receipts it may read (AnalysisStore.completion_in_view)
+    ``allowed`` is the saver's snapshot ceiling: only receipts it may read (AnalysisStore.completion_reader)
     count towards its repair budget, so a draft it may not read neither spends the budget nor shows through it.
+    The receipt is returned as stored; a session reads it through AnalysisStore.completion_in_view.
     """
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
@@ -122,13 +123,29 @@ def record_completion(analysis, draft, quality, *, allowed=None):
     input_key = _hash({'chain_key': chain_key, 'draft_id': draft['id'],
                        'draft_content_hash': draft['content_hash'], 'quality': keyed,
                        'completion_policy_version': COMPLETION_POLICY_VERSION})
+    readable = analysis.completion_reader(allowed) if allowed is not None else None
+
+    def spent(rows):
+        # The newest receipts of the chain the saver may read, as many as decide its budget: their count up to
+        # MAX_REPAIRS and the newest one's issues.
+        kept = []
+        for row in reversed(rows):
+            if readable(row):
+                kept.append(row)
+                if len(kept) >= MAX_REPAIRS:
+                    break
+        return kept[::-1]
+
+    if readable is not None:
+        # Read before taking the task lock; under it, only receipts filed since are read.
+        spent([row for row in analysis._list('completions') if row.get('chain_key') == chain_key])
     with exclusive(analysis.task.lock_path, timeout=10):
         history = [row for row in analysis._list('completions') if row.get('chain_key') == chain_key]
         same = next((row for row in history if row.get('input_key') == input_key), None)
         if same:
             return same
-        if allowed is not None:
-            history = [row for row in history if analysis.completion_in_view(row, allowed) is not None]
+        if readable is not None:
+            history = spent(history)
         repairs = min(len(history), MAX_REPAIRS)
         unassessed = (not requirement_id
                       or not analysis._get('requirements', requirement_id).get('items')

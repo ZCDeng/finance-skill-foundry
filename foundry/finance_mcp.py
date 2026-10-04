@@ -379,7 +379,8 @@ class FinanceMcpServer:
             for run_id in draft.get("run_ids", []):
                 context_ids.add(_run_finance_context(analysis, run_id))
         if spec.get("parent_id") and tool in {"save_explanation_draft", "validate_explanation"}:
-            draft = _draft(analysis, spec["parent_id"])
+            # A parent the grant may not read fails as an unknown one does, before its runs say anything.
+            draft = service._parent_draft(spec["parent_id"])
             for run_id in draft.get("run_ids", []):
                 context_ids.add(_run_finance_context(analysis, run_id))
         for claim in spec.get("claims", []):
