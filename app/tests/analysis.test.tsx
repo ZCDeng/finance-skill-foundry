@@ -2322,7 +2322,7 @@ ${canonicalAppendix} 已改写`;
     expect(financeCall.mock.calls.filter(([, command]) => command === 'run-metric')).toEqual([]);
     expect(screen.queryByRole('button', { name: '确认纳入' })).toBeNull();
     const checkbox = await screen.findByRole('checkbox', { name: '总部费用调整' });
-    expect((checkbox as HTMLInputElement).checked).toBe(true);
+    expect(checkbox.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '重算' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'run-metric', {
       context_id: context.id, metric: { kind: 'management_pnl' }, adjustment_ids: [confirmed.id],
