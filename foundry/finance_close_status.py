@@ -73,7 +73,9 @@ def close_status(
         _structure_block(datasets, pending_structures),
         _controls_block(controls),
         _exceptions_block(controls),
-        _review_block(runs, draft, scope_seq, datasets=datasets, replaced=replaced),
+        # A file a roll-forward places in another month is not one this month's calculation must read.
+        _review_block(runs, draft, scope_seq, replaced=replaced,
+                      datasets=[row for row in datasets if (row.get("source_hash") or row["id"]) not in other_months]),
     ]
     must = [item["text"] for block in blocks[:3] for item in block["items"] if item["blocking"]]
     later = [item["text"] for block in blocks[3:] for item in block["items"] if item["blocking"]]

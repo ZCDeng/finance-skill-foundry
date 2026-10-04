@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from decimal import localcontext
 from time import perf_counter
 
@@ -96,14 +97,33 @@ def _render_fact_template_in_document(document: dict, facts: list[dict]) -> tupl
     return rendered, used
 
 
+def _closing_month(period):
+    """The month a scope period closes, as YYYY-MM: the month itself, or the last month of a span.
+
+    None when the scope names no single closing month it can be read from (a year, free text).
+    """
+    from foundry.evidence_labels import period_span
+
+    if isinstance(period, (list, tuple)):
+        months = [_closing_month(item) for item in period]
+        return max(months) if months and all(months) else None
+    if not isinstance(period, str):
+        return None
+    text = period.strip()
+    parts = re.split(r"\s*(?:至|到|~|～|—|–)\s*", text)
+    span = period_span(text) or (period_span(f"{parts[0]}:{parts[1]}") if len(parts) == 2 else None)
+    return span[1][:7] if span and span[2] in {"month", "range", "as_of"} else None
+
+
 def _other_month_workbooks(rows, current, period):
     """Workbooks a roll-forward places in another month than the task's, by source hash.
 
     A copy made for this month comes from last month's workbook, its template. A copy made for
-    another month (rolled forward from this month's pack) is that month's, and so is the file it
-    was saved as in Excel and added again under its name. A copy whose month is unknown here
-    counts as this month's.
+    another month is that month's, and so is the file it was saved as in Excel and added again
+    under its name; when that month is earlier than the task's, so is its template. A copy whose
+    month is unknown here, or a task whose closing month is, counts as this month's.
     """
+    closing = _closing_month(period)
     found: set[str] = set()
     elsewhere: set[str] = set()
     for row in rows:
@@ -111,9 +131,12 @@ def _other_month_workbooks(rows, current, period):
         rolled = metadata.get("rollforward") or {}
         if not rolled.get("source_hash"):
             continue
-        if period and metadata.get("period") and metadata["period"] != period:
+        month = metadata.get("period")
+        if closing and month and month != closing:
             found.add(row.get("source_hash") or row["id"])
             elsewhere.add(str(row.get("name") or ""))
+            if month < closing:
+                found.add(rolled["source_hash"])
         else:
             found.add(rolled["source_hash"])
     found.update(row.get("source_hash") or row["id"] for row in current if row.get("name") and row["name"] in elsewhere)
