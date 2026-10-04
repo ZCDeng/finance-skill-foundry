@@ -168,6 +168,20 @@ class FinanceFiles:
             numeric_parser=archived_numeric_parser(dataset, source.read_bytes()),
         )
 
+    def health(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Formula health hints for a snapshot filed before import ran them.
+
+        Read-only: the archived record is not rewritten, and nothing is stored.
+        """
+        from foundry.workbook_health import check_workbook
+
+        dataset_id = str(spec.get("dataset_id") or "")
+        dataset, source = self._source_path(dataset_id)
+        data = source.read_bytes()
+        if sha256_bytes(data) != dataset["source_hash"]:
+            raise FoundryError("dataset source workbook integrity check failed")
+        return {"dataset_id": dataset["id"], "source_hash": dataset["source_hash"], **check_workbook(data)}
+
     def _verify_run_writes(
         self,
         run_id: str | None,

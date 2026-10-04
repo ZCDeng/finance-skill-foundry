@@ -337,6 +337,40 @@ export interface DatasetSnapshot extends AnalysisObject {
   row_count?: number;
   transformation?: { sheet_count?: number; [key: string]: unknown };
   filename?: string;
+  /** "source.xlsx" for an uploaded workbook; the archived file's own name inside the snapshot. */
+  source_file?: string;
+  /** 公式体检, read when the workbook was added. Absent on snapshots filed before it existed. */
+  workbook_health?: WorkbookHealth;
+}
+/** One sample of a formula health hint: a sheet, and for a cell its address and a bounded range around it. */
+export interface WorkbookHealthSample {
+  sheet: string;
+  cell?: string;
+  range?: string;
+  formula?: string;
+  detail?: string;
+}
+export interface WorkbookHealthIssue {
+  code: string;
+  severity: 'warning' | 'info' | string;
+  /** Occurrences: cells, sheets or links, by code. */
+  count: number;
+  sheets?: string[];
+  samples?: WorkbookHealthSample[];
+  /** external_links only: the linked files' names, never their paths. */
+  targets?: string[];
+}
+/** Hints only: nothing here blocks an import or a calculation. */
+export interface WorkbookHealth {
+  schema_version: number;
+  status: 'checked' | 'unavailable' | string;
+  checked_formula_cells?: number;
+  truncated?: boolean;
+  sheet_count?: number;
+  /** How many kinds of hint (codes) have at least one occurrence. */
+  issue_count?: number;
+  issues?: WorkbookHealthIssue[];
+  reason?: string;
 }
 export type AnalysisScalar = string | number | boolean | null;
 export interface AnalysisParameterMetadata {
@@ -556,6 +590,7 @@ export type FinanceCommand =
   | 'finance-completion-recoveries'
   | 'finance-completion-recover'
   | 'workbook-range-preview'
+  | 'workbook-health'
   | 'prepare-explanation'
   | 'validate-explanation'
   | 'finance-background-save'
@@ -575,6 +610,7 @@ export type FinanceCommand =
   | 'finance-control-settings-save'
   | 'finance-control-disposition-save'
   | 'finance-control-disposition-review'
+  | 'finance-control-finding-save'
   | 'finance-control-confirmation-sheet'
   | 'report-template-list'
   | 'report-template-apply'
@@ -629,6 +665,19 @@ export interface ReadinessDataset {
   missing_fields: string[];
   can_run: string[];
   blocked: { capability: string; missing_fields: string[]; reason: string }[];
+  /** The period freshness compares: the file's own (column, title), else the period its source refresh was for. */
+  period?: string;
+  /** The as-of date the file declares (confirmed title 基准日, or a source refresh cutoff); null when it declares none. */
+  as_of?: string | null;
+  as_of_source?: 'title' | 'source_refresh' | null;
+  period_kind?: 'month' | 'annual' | 'as_of' | null;
+  /** Whether the file speaks for the task period. Compared only with declared dates, never the clock. */
+  freshness?: ReadinessFreshness;
+}
+
+export interface ReadinessFreshness {
+  state?: 'current' | 'source_stale' | 'period_mismatch' | 'unknown' | string;
+  reasons?: { code: string; text?: string }[];
 }
 
 export interface ReadinessReport {

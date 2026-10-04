@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ClipboardCopy, GitCompareArrows, ListChecks, Play, Scale, SearchCheck } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
+import { SearchableSelect, TextField } from '../../components/FinancialControls.js';
+import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import {
-  DECISION_LABELS, ISSUE_LABELS, STATUS_LABELS, where,
-  type ControlList, type ControlRow, type Disposition, type Suggestion,
+  DECISION_LABELS, FINDING_TYPES, ISSUE_LABELS, STATUS_LABELS, where,
+  type ControlFinding, type ControlList, type ControlRow, type Disposition, type FindingType, type Suggestion,
 } from './controls.js';
 import { errorText, unwrap } from './shared.js';
 import { TieOutForm } from './TieOutForm.js';
@@ -160,6 +162,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
           {issues.map((row) => <IssueRow key={`${row.id}:${row.issue?.disposition?.id ?? ''}:${row.issue?.state}`} row={row} locked={locked} requireReview={Boolean(list?.settings?.require_second_review)}
             onDecide={(spec) => act('正在保存处置…', async () => { await call('finance-control-disposition-save', { control_id: row.id, ...spec }); return '已保存处置。'; })}
             onRetire={(reason) => act('正在停用…', async () => { await call('finance-controls-retire', { id: row.id, reason }); return '已停用这条控制。'; })}
+            onFinding={(spec) => act('正在保存问题类型…', async () => { await call('finance-control-finding-save', { control_id: row.id, ...spec }); return '已保存问题类型。'; })}
             onReview={(id, reviewer) => act('正在保存复核…', async () => { await call('finance-control-disposition-review', { id, reviewer }); return '已复核。'; })} />)}
         </ul>
       </div> : null}
@@ -172,11 +175,14 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
   );
 }
 
-function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire }: {
+type FindingSpec = { finding_type: FindingType; note?: string };
+
+function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, onFinding }: {
   row: ControlRow; locked: boolean; requireReview: boolean;
   onDecide(spec: { decision: Decision; reason: string; counterparty?: string; decided_by_name?: string }): void;
   onReview(id: string, reviewer: string): void;
   onRetire(reason: string): void;
+  onFinding(spec: FindingSpec): void;
 }) {
   const [changing, setChanging] = useState(false);
   const [retireReason, setRetireReason] = useState('');
@@ -194,10 +200,13 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire }: 
   const needsReason = decision === 'waived' || decision === 'pending_external';
   const needsName = decision === 'waived' && requireReview;
   const ready = decision && (!needsReason || reason.trim()) && (decision !== 'pending_external' || counterparty.trim()) && (!needsName || name.trim());
+  const finding = row.finding;
+  const decidedType = finding?.set_by_manager && finding.type ? FINDING_TYPES[finding.type]?.label ?? finding.type_label : undefined;
   return <li className="analysis-controls-issue">
     <div className="analysis-controls-issue-head">
       <strong>{row.control.label}</strong>
       <span className={`analysis-controls-state analysis-controls-state--${issue.blocking ? 'blocking' : 'clear'}`}>{ISSUE_LABELS[issue.state]}</span>
+      {decidedType ? <Badge><span className="sr-only">问题类型：</span>{decidedType}</Badge> : null}
     </div>
     {result?.left ? <p className="analysis-note">
       {where(result.left)} 合计 {result.left.value ?? '—'}；{where(result.right)} 合计 {result.right?.value ?? '—'}
@@ -214,6 +223,7 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire }: 
       {issue.disposition.counterparty ? ` · ${issue.disposition.counterparty}` : ''}{issue.disposition.reason ? ` · ${issue.disposition.reason}` : ''}
       {issue.disposition.reviewer ? ` · 复核人 ${issue.disposition.reviewer}` : ''}</p> : null}
     {issue.outdated_disposition ? <p className="analysis-note">之前的处置针对的是另一笔差额，已不适用。</p> : null}
+    {finding ? <FindingField key={`${finding.type ?? ''}:${finding.note ?? ''}`} finding={finding} locked={locked} onSave={onFinding} /> : null}
     {issue.state === 'awaiting_review' && issue.disposition ? <div className="analysis-actions">
       <Input aria-label="复核人" placeholder="复核人姓名" value={reviewer} disabled={locked} onChange={(event) => setReviewer(event.target.value)} />
       <Button type="button" size="sm" disabled={locked || !reviewer.trim()} onClick={() => onReview(issue.disposition!.id, reviewer.trim())}>复核通过</Button>
@@ -236,4 +246,40 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire }: 
       </> : null}
     </fieldset> : null}
   </li>;
+}
+
+const FINDING_OPTIONS = (Object.entries(FINDING_TYPES) as [FindingType, { label: string; meaning: string }][])
+  .map(([value, { label, meaning }]) => ({ value, label, meta: meaning }));
+
+/**
+ * 问题类型: what kind of problem this difference is. The assistant may suggest one; only what the
+ * manager saves here is the type. A type is never required before a disposition.
+ */
+function FindingField({ finding, locked, onSave }: { finding: ControlFinding; locked: boolean; onSave(spec: FindingSpec): void }) {
+  const [kind, setKind] = useState<FindingType | ''>(finding.type ?? '');
+  const [note, setNote] = useState(finding.note ?? '');
+  const suggested = finding.suggested_type && FINDING_TYPES[finding.suggested_type] ? finding.suggested_type : undefined;
+  const decided = finding.set_by_manager && finding.type && FINDING_TYPES[finding.type] ? finding.type : undefined;
+  const changed = Boolean(kind) && (kind !== (finding.type ?? '') || note.trim() !== (finding.note ?? ''));
+  return <div className="analysis-controls-finding">
+    {suggested ? <div className="analysis-controls-finding-suggestion">
+      <p className="analysis-note">助手建议：{FINDING_TYPES[suggested].label}{finding.suggested_note ? `（${finding.suggested_note}）` : ''}</p>
+      <Button type="button" size="sm" variant="outline" disabled={locked}
+        onClick={() => onSave({ finding_type: suggested, ...(finding.suggested_note ? { note: finding.suggested_note } : {}) })}>采用建议</Button>
+      {/* Saving her own type again answers the suggestion, which is then no longer offered. */}
+      {decided ? <Button type="button" size="sm" variant="outline" disabled={locked}
+        onClick={() => onSave({ finding_type: decided, ...(finding.note ? { note: finding.note } : {}) })}>保留我的类型</Button> : null}
+    </div> : null}
+    {finding.outdated ? <p className="analysis-note">之前定的问题类型针对的是另一笔差额，已不适用。</p> : null}
+    <div className="analysis-controls-finding-fields">
+      <SearchableSelect label="问题类型" value={kind} options={FINDING_OPTIONS} onChange={(value) => setKind(value as FindingType | '')}
+        placeholder="选择问题类型" disabled={locked} triggerText={kind ? FINDING_TYPES[kind]?.label : undefined} />
+      <TextField label="类型说明（可选）" value={note} onChange={setNote} placeholder="一句话，例如：合计公式漏了 D9" disabled={locked} />
+      <div className="analysis-actions">
+        <Button type="button" size="sm" variant="outline" disabled={locked || !changed}
+          onClick={() => onSave({ finding_type: kind as FindingType, ...(note.trim() ? { note: note.trim() } : {}) })}>保存问题类型</Button>
+        <HelpLink article="controls" label="问题类型怎么选" />
+      </div>
+    </div>
+  </div>;
 }
