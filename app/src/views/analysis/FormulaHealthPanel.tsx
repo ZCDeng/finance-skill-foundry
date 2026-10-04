@@ -20,16 +20,18 @@ const HINTS: Record<string, { title: string; why: string; unit?: string }> = {
     why: 'OFFSET、INDIRECT、TODAY、NOW、RAND 等函数每次打开都会重算，结果可能随日期或引用位置变化，复核时不容易追到来源。' },
   hardcoded_number: { title: '公式里写死了数字',
     why: '常见于手工调整或临时假设，建议改为引用输入单元格并注明来源。' },
-  error_in_formula: { title: '公式里写着错误值',
-    why: '公式里直接写着 #REF! 这类错误值，多半是被引用的行、列或工作表删掉后留下的断链。' },
+  error_in_formula: { title: '公式里有 #REF! 断链',
+    why: '公式里直接写着 #REF!，多半是被引用的行、列或工作表删掉后留下的断链，建议找回原来引用的位置后改正。' },
   cached_error: { title: '单元格的结果是错误值',
-    why: '保存时这些单元格显示 #DIV/0!、#N/A 等错误，引用它们的合计也可能跟着出错。' },
+    why: '保存时这些单元格显示 #DIV/0!、#N/A 等错误，引用它们的合计也可能跟着出错。若是有意返回的 #N/A（例如让图表留空），可以忽略。' },
   formula_without_cache: { title: '公式没有保存计算结果',
     why: '这类文件通常由程序生成、没在 Excel 里打开保存过。系统不重算公式，这些工作表要在 Excel 中打开并保存后，才能当作数据表读取。' },
   inconsistent_row_formula: { title: '同一行的公式写法不一致',
-    why: '左右两边的公式是同一写法复制的，夹在中间的这一格却不同，常见于复制后被手工改过。' },
+    why: '这一行的公式大多按同一写法复制，这一格（夹在中间或紧接在最后）却不同，常见于复制后被手工改过，或新增月份后公式没跟着改。'
+      + '引用本行这些格的小计、合计和比率不算在内；有意设置的其他写法也可能被列出，可以忽略。' },
   inconsistent_column_formula: { title: '同一列的公式写法不一致',
-    why: '上下的公式是同一写法复制的，夹在中间的这一格却不同，常见于复制后被手工改过。' },
+    why: '这一列的公式大多按同一写法复制，这一格（夹在中间或紧接在最后）却不同，常见于复制后被手工改过，或新增一行后公式没跟着改。'
+      + '引用本列这些格的小计、合计不算在内；有意设置的其他写法也可能被列出，可以忽略。' },
   sheet_too_large: { title: '工作表太大，没有逐格体检', unit: '张',
     why: '超过 10 万行或 256 列的工作表没有逐格检查，其他工作表照常体检。' },
 };
@@ -153,12 +155,15 @@ function Hint({ issue, onOpen }: { issue: WorkbookHealthIssue; onOpen(sample: Wo
   );
 }
 
+/** The engine lists values as "a, b"; the manager reads "a、b". */
+const listed = (detail: string) => detail.split(', ').join('、');
+
 function detailText(code: string, detail?: string): string {
   if (!detail) return '';
   switch (code) {
-    case 'hardcoded_number': return `写死的数：${detail}`;
-    case 'volatile_function': return `函数：${detail}`;
-    case 'error_in_formula': return `错误值：${detail}`;
+    case 'hardcoded_number': return `写死的数字：${listed(detail)}`;
+    case 'volatile_function': return `函数：${listed(detail)}`;
+    case 'error_in_formula': return `错误值：${listed(detail)}`;
     case 'cached_error': return `结果：${detail}`;
     case 'inconsistent_row_formula':
     case 'inconsistent_column_formula': return `与 ${detail} 的写法不同`;

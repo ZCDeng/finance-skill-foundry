@@ -59,7 +59,7 @@ it('lists each kind of hint with its words, count and sample cells, warnings fir
   expect(items[0].className).toContain('analysis-formula-health-item--warning');
   expect(within(items[0]).getByText('常见于手工调整或临时假设，建议改为引用输入单元格并注明来源。')).toBeTruthy();
   expect(within(items[0]).getByText('=B5*1.13')).toBeTruthy();
-  expect(within(items[0]).getByText('写死的数：1.13')).toBeTruthy();
+  expect(within(items[0]).getByText('写死的数字：1.13')).toBeTruthy();
   expect(within(items[1]).getByText(/在 Excel 中打开并保存后，才能当作数据表读取/)).toBeTruthy();
   expect(within(book).getByText(/这些是提示，不影响导入和计算；是否需要修改由你判断。/)).toBeTruthy();
   expect(within(book).getByRole('button', { name: '使用指南：工作簿公式体检' })).toBeTruthy();
@@ -121,4 +121,20 @@ it('names hidden sheets and linked files without offering a cell to open', () =>
   expect(screen.getByText('链接的文件：2026 预算.xlsx')).toBeTruthy();
   expect(screen.getByText('深度隐藏')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /^查看/ })).toBeNull();
+});
+
+it('lists several values in the manager\'s punctuation and explains deliberate #N/A results', () => {
+  mount();
+  const listed: WorkbookHealth = { ...clean, issue_count: 3, issues: [
+    { code: 'volatile_function', severity: 'info', count: 1, sheets: ['汇总'],
+      samples: [{ sheet: '汇总', cell: 'B2', range: 'A1:E6', formula: '=OFFSET(A1,0,0)+TODAY()', detail: 'OFFSET, TODAY' }] },
+    { code: 'hardcoded_number', severity: 'warning', count: 1, sheets: ['汇总'],
+      samples: [{ sheet: '汇总', cell: 'B5', range: 'A1:E9', formula: '=DATE(2026,9,30)', detail: '2026, 9, 30' }] },
+    { code: 'cached_error', severity: 'warning', count: 1, sheets: ['汇总'],
+      samples: [{ sheet: '汇总', cell: 'B7', range: 'A3:E10', detail: '#N/A' }] },
+  ] };
+  render(<FormulaHealthPanel taskId={taskId} datasets={[{ ...base, workbook_health: listed }]} />);
+  expect(screen.getByText('函数：OFFSET、TODAY')).toBeTruthy();
+  expect(screen.getByText('写死的数字：2026、9、30')).toBeTruthy();
+  expect(screen.getByText(/若是有意返回的 #N\/A（例如让图表留空），可以忽略。/)).toBeTruthy();
 });
