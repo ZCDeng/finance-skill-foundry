@@ -102,9 +102,15 @@ def control_key(control: dict[str, Any]) -> tuple:
     )
 
 
-def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | None = None) -> dict[str, Any]:
-    """Sum both sides and compare. Never raises for a bad snapshot; says so in the result."""
+def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | None = None,
+                     allowed: set[str] | None = None) -> dict[str, Any]:
+    """Sum both sides and compare. Never raises for a bad snapshot; says so in the result.
+
+    ``allowed`` is a session's snapshot ceiling: a newer file outside it does not make a side stale.
+    """
     cache = {} if cache is None else cache
+    if allowed is not None:
+        cache.setdefault("__allowed", set(allowed))
     sides = {}
     for name in ("left", "right"):
         side = control[name]
@@ -245,7 +251,8 @@ def _numerics(analysis: Any, side: dict[str, Any], cache: dict) -> dict[str, Dec
     if "__published" not in cache:
         rows = analysis.state().get("datasets") or []
         cache["__published"] = {row["id"] for row in rows}
-        cache["__superseded"] = superseded_snapshots(analysis.task, rows)
+        # A session's run is judged by the files it may read (evaluate_control's ``allowed``).
+        cache["__superseded"] = superseded_snapshots(analysis.task, rows, allowed=cache.get("__allowed"))
         cache["__datasets"] = {}
     dataset_id = side["dataset_id"]
     if dataset_id not in cache["__published"]:
@@ -324,18 +331,27 @@ def refreshed_snapshots(task: Any) -> dict[str, str]:
     }
 
 
-def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None) -> set[str]:
+def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None, *,
+                         allowed: set[str] | None = None) -> set[str]:
     """Snapshots a newer one has replaced: by a published source refresh, or by a later upload under the same name.
 
     A month pack is updated by adding the corrected file again. The old snapshot stays in
     the task for runs that read it, but a control on it no longer speaks for the pack.
+
+    ``allowed`` is a session's snapshot ceiling: only the replacements it may read count, as in
+    finance_readiness._supersessions, so a newer file outside the session replaces nothing it reads.
     """
     from foundry.analysis import AnalysisStore
 
-    replaced = set(refreshed_snapshots(task))
+    def visible(dataset_id: Any) -> bool:
+        return allowed is None or dataset_id in allowed
+
+    replaced = {prior for prior, newer in refreshed_snapshots(task).items() if visible(newer)}
     rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:
+        if not visible(row["id"]):
+            continue
         name = str(row.get("name") or "").strip()
         if not name:
             continue

@@ -568,6 +568,18 @@ def _bindings_match(required, run_bindings):
     return all(run_bindings.get(key) == value for key, value in required.items())
 
 
+def _bound_files(bindings):
+    return {value for value in (bindings or {}).values() if isinstance(value, str)} if isinstance(bindings, dict) else set()
+
+
+def _within_files(files, bindings):
+    """A run or context that reads no file outside ``files``: the requirement's files, and for a draft's check the
+    files of the runs it cites too. Only such a record, or a run the draft cites, is read for a requirement; one
+    that also read other files is neither named nor counted, so the check reads the same for every reader that
+    may read the draft, and names nothing outside what that reader may read."""
+    return bool(files) and isinstance(bindings, dict) and set(bindings.values()) <= files
+
+
 def _has_finance_scope(run):
     scopes = run.get('finance_scope')
     return isinstance(scopes, dict) and bool(scopes)
@@ -2440,8 +2452,13 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
     selected = latest if _requirements_record and latest.get('id') == selected_id else analysis._get('requirements', selected_id)
     # Public checks use current obligations; only internal appendix reconstruction
     # supplies an immutable historical record to recover its original text.
+    succeeded = {r['id']: r for r in analysis._list('runs') if r.get('execution_status') == 'succeeded'}
+    cited = {run_id for run_id in spec.get('run_ids') or [] if isinstance(run_id, str)}
+    files = _bound_files(latest.get('bindings')).union(
+        *(_bound_files(succeeded[run_id].get('bindings')) for run_id in cited if run_id in succeeded))
     runs = _with_engine_output_units(
-        analysis, {r['id']: r for r in analysis._list('runs') if r.get('execution_status') == 'succeeded'})
+        analysis, {run_id: run for run_id, run in succeeded.items()
+                   if run_id in cited or _within_files(files, run.get('bindings'))})
     evidence = _prepared_evidence(analysis, runs)
     # Recipe results are computed by the server in this call (or handed over by an internal caller
     # that just computed them); spec['evidence_report'] is never read.
@@ -2931,7 +2948,8 @@ def _evidence_environment(analysis, latest, runs=None):
     dataset_ids = [value for value in bindings.values() if isinstance(value, str)]
     if runs is None:
         try:
-            runs = {run['id']: run for run in analysis._list('runs') if run.get('execution_status') == 'succeeded'}
+            runs = {run['id']: run for run in analysis._list('runs') if run.get('execution_status') == 'succeeded'
+                    and _within_files(_bound_files(bindings), run.get('bindings'))}
         except FoundryError:
             runs = {}
     # Only a run on the requirement's own bindings is ever counted (_bindings_match), so only such a run
@@ -2944,7 +2962,8 @@ def _evidence_environment(analysis, latest, runs=None):
 
         store = FinanceStore(analysis.task)
         contexts = [context for context in store._list('contexts')
-                    if _bindings_match(bindings, context.get('bindings') or {})]
+                    if _within_files(_bound_files(bindings), context.get('bindings'))
+                    and _bindings_match(bindings, context.get('bindings') or {})]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         store = None
     workbooks, tables, rowless, readable, accounts, amount_columns = [], [], [], [], set(), {}
@@ -3761,6 +3780,59 @@ def _estimate_formula(evidence):
     dependent = _range_text(evidence.get('recipe_location'))
     factor = _range_text((evidence.get('factor') or {}).get('location'))
     return f'{dependent} × ({factor})' if factor else dependent
+
+
+# The completion policy from which a requirement reads only cited runs and records on its own files.
+OWN_FILES_POLICY = 13
+
+
+def requirements_in_view(check, readable):
+    """A check saved before completion policy 13, when a requirement counted every run on its files (one that also
+    read other files too), as a reader that may read only the runs ``readable`` accepts reads it.
+
+    An engine run it may not read is not named: not in the item, not in the fixup listing such runs, not in the
+    message read from them (_unanswered_message). Statuses stand as saved, as the runs counted then decided them.
+    """
+    requirements = check.get('requirements') if isinstance(check, dict) else None
+    if not isinstance(requirements, dict):
+        return check
+    changed, items = {}, []
+    for item in requirements.get('items') or []:
+        runs = item.get('engine_runs') if isinstance(item, dict) else None
+        kept = [run for run in runs or [] if isinstance(run, dict) and readable(run.get('run_id'))]
+        if not runs or len(kept) == len(runs):
+            items.append(item)
+            continue
+        fixups = []
+        for fixup in item.get('fixups') or []:
+            if isinstance(fixup, dict) and fixup.get('code') == 'engine_run_does_not_cover_requirement':
+                if kept:
+                    fixups.append({**fixup, 'runs': kept, 'reason': kept[-1].get('reason')})
+            else:
+                fixups.append(fixup)
+        view = {key: value for key, value in item.items() if key not in {'engine_runs', 'fixups'}}
+        view.update({**({'engine_runs': kept} if kept else {}), **({'fixups': fixups} if fixups else {})})
+        changed[item.get('id')] = view
+        items.append(view)
+    if not changed:
+        return check
+
+    def issue_in_view(issue):
+        if not (isinstance(issue, dict) and issue.get('code') == 'requirement_unanswered'
+                and issue.get('requirement_item_id') in changed):
+            return issue
+        item = changed[issue['requirement_item_id']]
+        return {**{key: value for key, value in issue.items() if key != 'fixups'}, 'message': _unanswered_message(item),
+                **({'fixups': item['fixups']} if item.get('fixups') else {})}
+
+    view = {**check, 'requirements': {**requirements, 'items': items},
+            'issues': [issue_in_view(issue) for issue in check.get('issues') or []]}
+    dimensions = check.get('status_dimensions')
+    numeric = dimensions.get('numeric_citation') if isinstance(dimensions, dict) else None
+    if isinstance(numeric, dict):
+        view['status_dimensions'] = {**dimensions, 'numeric_citation': {
+            **numeric, 'issues': [issue_in_view(issue) for issue in numeric.get('issues') or []]}}
+    return view
 
 
 def augment_quality(analysis, spec, quality, *, _recipe_report=None):

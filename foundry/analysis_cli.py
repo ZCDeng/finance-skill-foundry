@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import REPORT_EXPORT_FORMATS, AnalysisStore
+from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -144,17 +144,22 @@ def _bound(context, bindings):
 
 
 def _bound_draft(context, service, draft):
-    """Report presentation cannot widen a session's source permissions."""
-    for run_id in draft.get("run_ids", []):
-        _bound(context, service.get_run(run_id)["bindings"])
-    for claim in draft.get("claims", []):
-        if isinstance(claim, dict):
-            if claim.get("dataset_id"):
-                _bound(context, {"source": claim["dataset_id"]})
-            if claim.get("run_id"):
-                _bound(context, service.get_run(claim["run_id"])["bindings"])
-    _bound_evidence(context, service, draft)
-    _bound_requirements(context, service, draft)
+    """Report presentation cannot widen a session's source permissions (AnalysisStore.draft_snapshots)."""
+    _bound(context, {f"source{index}": dataset_id for index, dataset_id in enumerate(sorted(service.draft_snapshots(draft)))})
+
+
+def _parent_draft(context, service, parent_id):
+    """The draft a revision names as its parent. A session is refused one it may not read exactly as an unknown id."""
+    if not parent_id:
+        return {}
+    try:
+        parent = service.get_draft(parent_id)
+        _bound_draft(context, service, parent)
+    except FoundryError:
+        if not context.session_id:
+            raise
+        raise FoundryError(PARENT_UNAVAILABLE) from None
+    return parent
 
 
 def _bound_requirements(context, service, spec):
@@ -259,7 +264,7 @@ def dispatch(args) -> bool:
 
         result = read_method_resource(args.skill, args.resource)
     elif args.cmd == "analysis-state":
-        result = service.state()
+        result = service.state(_ceiling(context))
         if context.session_id:
             allowed = set(context.snapshot_ids)
             result["datasets"] = [d for d in result["datasets"] if d["id"] in allowed]
@@ -274,7 +279,17 @@ def dispatch(args) -> bool:
                 d for d in result["drafts"]
                 if set(d["run_ids"]) <= run_ids and _draft_visible(context, service, d)
             ]
-        result["drafts"] = [service.draft_in_view(d, _ceiling(context)) for d in result["drafts"]]
+            result["evidence_checks"] = [
+                c for c in result["evidence_checks"]
+                if set((c.get("bindings") or {}).values()) <= allowed and (c.get("location") or {}).get("run_id") in run_ids
+            ]
+        listed = {d["id"] for d in result["drafts"]} if context.session_id else None
+        # A receipt reads the way its draft reads (AnalysisStore.completion_in_view).
+        result["completions"] = [
+            receipt for receipt in (service.completion_in_view(c, _ceiling(context), readable_ids=listed)
+                                    for c in result["completions"]) if receipt is not None
+        ]
+        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed) for d in result["drafts"]]
         result["context"] = {
             "session_id": context.session_id,
             "context_revision": context.context_revision,
@@ -351,8 +366,7 @@ def dispatch(args) -> bool:
         spec = _json_spec(args, "draft spec")
         if context.session_id and spec.get("review_status", "unreviewed") != "unreviewed":
             raise FoundryError("professional review must be recorded by the manager, not the runtime session")
-        parent = service.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
-        _bound_draft(context, service, parent)
+        parent = _parent_draft(context, service, spec.get("parent_id"))
         _bound_evidence(context, service, spec)
         _bound_requirements(context, service, spec)
         from foundry.report_visuals import materialize_document
@@ -395,6 +409,10 @@ def dispatch(args) -> bool:
     elif args.cmd == "report-pptx-read":
         result = service.read_report_pptx(args.source)
     elif args.cmd == "report-export-register":
+        # The desktop files what it rendered; a conversation exports through analysis-export, which renders on
+        # the server, so no conversation decides what the manager's export returns.
+        if context.session_id:
+            raise FoundryError("report-export-register is the desktop's export receipt and does not take a session")
         _bound_draft(context, service, service.get_draft(args.draft))
         result = service.register_report_export(args.draft, args.format, _uploaded_path(context, args.path),
                                                 content_mode=args.mode, projection_hash=args.projection_hash,

@@ -22,7 +22,10 @@ MAX_REPAIRS = 2
 # 12: review round 9 filters rows on dimensions named level/breakdown/group_by/hierarchy again (only drilldown is
 #     a hierarchy level), keeps the original requirement incomplete when a version dropped a legacy level, and
 #     compares a finance run converted with policies.target_unit in the unit the engine wrote.
-COMPLETION_POLICY_VERSION = 12
+# 13: a requirement reads only the runs the draft cites, runs on no file but the requirement's and the cited runs'
+#     files, and finance contexts on the requirement's files alone: one that also read other files is neither named
+#     nor counted (finance_requirements._within_files), so the check reads the same for every reader of the draft.
+COMPLETION_POLICY_VERSION = 13
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
@@ -45,7 +48,12 @@ def _dropped_hierarchy_action(item):
                         '本稿没有按它逐一作答，原始要求记为未完成；答复须如实说明。')}
 
 
-def record_completion(analysis, draft, quality):
+def record_completion(analysis, draft, quality, *, allowed=None):
+    """The receipt for one saved draft, or the one already filed for the same input.
+
+    ``allowed`` is the saver's snapshot ceiling: only receipts it may read (AnalysisStore.completion_in_view)
+    count towards its repair budget, so a draft it may not read neither spends the budget nor shows through it.
+    """
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
@@ -119,6 +127,8 @@ def record_completion(analysis, draft, quality):
         same = next((row for row in history if row.get('input_key') == input_key), None)
         if same:
             return same
+        if allowed is not None:
+            history = [row for row in history if analysis.completion_in_view(row, allowed) is not None]
         repairs = min(len(history), MAX_REPAIRS)
         unassessed = (not requirement_id
                       or not analysis._get('requirements', requirement_id).get('items')
