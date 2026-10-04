@@ -7,12 +7,12 @@ import {
 } from './evidenceLabels.js';
 
 const BASIS_WORDS: Record<string, string> = {
-  calculation: '计算结果', source_fact: '来源事实', external_reference: '外部资料',
+  calculation: '计算', source_fact: '来源事实', external_reference: '外部资料',
   user_assumption: '用户假设', professional_judgment: '专业判断',
 };
 
 function cellWords(key: NonNullable<EvidenceLabelEntry['key']>): string {
-  return typeof key.row === 'number' ? `计算结果第 ${key.row + 1} 行${key.column ? ` · ${key.column}` : ''}` : '';
+  return typeof key.row === 'number' ? `结果第 ${key.row + 1} 行${key.column ? ` · ${key.column}` : ''}` : '';
 }
 
 /** Which claim, fact or record a label is about, in the words the draft screens use. */
@@ -49,7 +49,7 @@ export function EvidenceLabelChip({ entry }: { entry?: EvidenceLabelEntry }) {
   return <span className="analysis-evidence-chip">
     <Badge variant={problem ? 'destructive' : 'outline'} data-label={code} title={why || undefined}>
       {problem ? <TriangleAlert size={12} strokeWidth={1.5} aria-hidden /> : null}
-      <span><span className="sr-only">证据标签：</span>{text}{base ? ` · 原依据 ${base}` : ''}</span>
+      <span><span className="sr-only">证据标签：</span>{text}{base ? `（原为${base}）` : ''}</span>
     </Badge>
     {why ? problem ? <span className="analysis-evidence-reason">{why}</span> : <span className="sr-only">{why}</span> : null}
   </span>;

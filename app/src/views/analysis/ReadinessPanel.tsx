@@ -58,23 +58,27 @@ const AS_OF_SOURCE: Record<string, string> = { title: '来自标题', source_ref
 function asOfLine(row: ReadinessDataset): string {
   const parts = [
     row.as_of && `截至 ${row.as_of}${row.as_of_source && AS_OF_SOURCE[row.as_of_source] ? `（${AS_OF_SOURCE[row.as_of_source]}）` : ''}`,
-    row.scope?.period && `期间 ${row.scope.period}`,
+    (row.period || row.scope?.period) && `期间 ${row.period || row.scope?.period}`,
     row.period_kind && PERIOD_KIND[row.period_kind],
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : '未声明';
 }
 
-/** 当前 / 资料过期 / 期间不符 / 未声明, in words and with an icon, never colour alone. */
+/** Unknown because the analysis period is missing or unreadable, not because the file left something out. */
+const NO_TASK_PERIOD = new Set(['no_task_period', 'task_period_unreadable']);
+
+/** 当前 / 资料过期 / 期间不符 / 未声明 / 无法判断, in words and with an icon, never colour alone. */
 function FreshnessCell({ row }: { row: ReadinessDataset }) {
   const state = row.freshness?.state;
   if (!state) return <>—</>;
-  const words = (FRESHNESS_TEXT as Record<string, string>)[state] ?? state;
+  const undecided = state === 'unknown' && (row.freshness?.reasons ?? []).some((reason) => NO_TASK_PERIOD.has(reason.code));
+  const words = undecided ? '无法判断' : (FRESHNESS_TEXT as Record<string, string>)[state] ?? state;
   const why = reasonText(row.freshness?.reasons);
   const warning = state === 'source_stale' || state === 'period_mismatch';
   const Icon = warning ? TriangleAlert : state === 'current' ? CircleCheck : CircleHelp;
   return <span className={`analysis-readiness-freshness analysis-readiness-freshness--${warning ? 'warning' : state === 'current' ? 'current' : 'unknown'}`}>
     <Icon size={14} strokeWidth={1.5} aria-hidden />
-    <span>{warning && why ? `${words}（${why}）` : words}</span>
+    <span>{state !== 'current' && why ? `${words}（${why}）` : words}</span>
   </span>;
 }
 

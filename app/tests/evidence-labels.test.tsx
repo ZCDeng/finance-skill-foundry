@@ -21,6 +21,9 @@ const report = {
       freshness: { state: 'source_stale', reasons: [{ code: 'as_of_before_period_end', text: '截至日 2026-08-20 早于期末 2026-08-31' }] } },
     { dataset_id: 'd'.repeat(32), name: '预算', scope: scope(''), missing_fields: ['period'], can_run: [], blocked: [],
       as_of: null, period_kind: null, freshness: { state: 'unknown', reasons: [{ code: 'no_dataset_period', text: '资料没有声明期间或截至日' }] } },
+    // A source refresh whose rows carry no period column: the period is the one the refresh was for.
+    { dataset_id: 'f'.repeat(32), name: 'ERP 刷新', scope: scope(''), missing_fields: ['period'], can_run: [], blocked: [],
+      period: '2026-08', as_of: '2026-09-05', as_of_source: 'source_refresh', period_kind: 'month', freshness: { state: 'current', reasons: [] } },
     // An older CLI: none of the new fields.
     { dataset_id: 'e'.repeat(32), name: '旧版报告', scope: scope('2026-08'), missing_fields: [], can_run: [], blocked: [] },
   ],
@@ -55,9 +58,22 @@ describe('readiness: as-of, period and freshness per file', () => {
     expect(balance.textContent).toContain('资料过期（截至日 2026-08-20 早于期末 2026-08-31）');
 
     const budget = screen.getByRole('row', { name: /预算/ });
-    expect(budget.textContent).toContain('未声明');
-    expect(budget.querySelector('.analysis-readiness-freshness--unknown')).toBeTruthy();
+    expect(budget.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('未声明（资料没有声明期间或截至日）');
+
+    const refreshed = screen.getByRole('row', { name: /ERP 刷新/ });
+    expect(refreshed.textContent).toContain('截至 2026-09-05（刷新截止） · 期间 2026-08 · 月度');
+    expect(refreshed.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
     expect(screen.getByRole('button', { name: '使用指南：资料时效与证据标签' })).toBeTruthy();
+  });
+
+  it('says it cannot judge, rather than that the file left something out, while the analysis period is missing', async () => {
+    mountReadiness({ ...report, datasets: [{ ...report.datasets[0],
+      freshness: { state: 'unknown', reasons: [{ code: 'no_task_period', text: '分析期间还没确认，无法判断时效' }] } }] });
+    render(<ReadinessPanel taskId="t" />);
+    await screen.findByText('这批资料能算什么');
+    const row = screen.getByRole('row', { name: /8月总账/ });
+    expect(row.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('无法判断（分析期间还没确认，无法判断时效）');
+    expect(row.textContent).toContain('期间 2026-08 · 月度');
   });
 
   it('shows a dash for a file an older CLI reported without freshness', async () => {
@@ -91,6 +107,9 @@ const LABELLED = quality({
       text: '标准化数据', base_label: 'fact_provider_standardized', reasons: [{ code: 'engine_finance', text: '财务引擎按科目映射汇总的结果' }] },
     { key: { kind: 'fact', fact_id: '2'.repeat(64), run_id: 'r'.repeat(32), row: 1, column: 'actual' }, label: 'stale_source',
       text: '过期来源', base_label: 'fact_provider_standardized', reasons: [{ code: 'older_run', text: '引用的是旧一版计算结果，同一计算之后又算过' }] },
+    { key: { kind: 'claim', claim_index: 1, basis: 'calculation', run_id: 'r'.repeat(32), row: 0, column: 'total' },
+      label: 'derived_calculation', text: '派生计算', base_label: 'derived_calculation',
+      reasons: [{ code: 'run_calculation', text: '由一次计算得出，引用值与结果一致' }] },
     { key: { kind: 'number', text: '999', position: 3 }, label: 'unknown', text: '未知', base_label: 'unknown',
       reasons: [{ code: 'uncited_number', text: '正文数字「999」没有绑定到事实或引用' }] },
   ],
@@ -122,7 +141,7 @@ describe('quality panel: evidence posture and label chips', () => {
 
     const second = screen.getByRole('article', { name: `事实 ${'2'.repeat(64)}` });
     const stale = second.querySelector('[data-slot="badge"]')!;
-    expect(stale.textContent).toBe('证据标签：过期来源 · 原依据 标准化数据');
+    expect(stale.textContent).toBe('证据标签：过期来源（原为标准化数据）');
     expect(stale.getAttribute('data-variant')).toBe('destructive');
     expect(stale.querySelector('svg')).toBeTruthy();
     expect(second.textContent).toContain('引用的是旧一版计算结果，同一计算之后又算过');
@@ -131,10 +150,11 @@ describe('quality panel: evidence posture and label chips', () => {
   it('lists the claims and the other labelled items once, leaving facts to their cards', () => {
     panel(LABELLED);
     const block = screen.getByRole('region', { name: '证据等级' });
-    expect(within(block).getByText('依据分类 · 2 项')).toBeTruthy();
+    expect(within(block).getByText('依据分类 · 3 项')).toBeTruthy();
     const items = within(block).getAllByRole('listitem').filter((item) => item.closest('.analysis-evidence-list'));
     expect(items.map((item) => item.textContent)).toEqual([
       '引用 1 · 用户假设证据标签：用户假设按假设写入，没有来源可核对',
+      '引用 2 · 计算 · 结果第 1 行 · total证据标签：派生计算由一次计算得出，引用值与结果一致',
       '正文数字「999」证据标签：未知正文数字「999」没有绑定到事实或引用',
     ]);
   });

@@ -620,6 +620,8 @@ export interface ReadinessDataset {
   missing_fields: string[];
   can_run: string[];
   blocked: { capability: string; missing_fields: string[]; reason: string }[];
+  /** The period freshness compares: the file's own (column, title), else the period its source refresh was for. */
+  period?: string;
   /** The as-of date the file declares (confirmed title 基准日, or a source refresh cutoff); null when it declares none. */
   as_of?: string | null;
   as_of_source?: 'title' | 'source_refresh' | null;
