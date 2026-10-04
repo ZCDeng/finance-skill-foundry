@@ -202,6 +202,23 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
     """
     confirmed = [row for row in controls if row.get("state") == "confirmed"]
     held = [_reason(item["text"], item.get("target")) for block in inputs for item in block["items"] if item["blocking"]]
+    # Scope holds every workbook; a structure waiting on the manager holds only its own file.
+    scope_held = [_reason(item["text"], item.get("target")) for item in inputs[0]["items"] if item["blocking"]]
+    names = {row["id"]: row.get("name") or "资料" for row in datasets}
+    book_of = {row["id"]: row.get("source_hash") or row["id"] for row in datasets}
+    workbooks, unread = [], []
+    for book in _workbooks(datasets, replaced):
+        digest = book.get("source_hash") or book["id"]
+        touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
+        own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
+        waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
+        level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
+        workbooks.append({"dataset_id": book["id"], "name": book.get("name") or "资料", **level})
+        if not touching:
+            unread.append(book.get("name") or "资料")
+    # A workbook no confirmed control reads is unjudged, so the pack it belongs to cannot be called usable.
+    if confirmed:
+        held += [_reason(f"{name} 还没有你确认的勾稽控制读到", "controls") for name in unread]
     overall = _level(confirmed, held, missing="还没有你确认的勾稽控制")
     issues = [row.get("issue") or {} for row in confirmed]
     overall["basis"] = {
@@ -210,18 +227,6 @@ def _conclusion(controls: list[dict[str, Any]], datasets: list[dict[str, Any]], 
         "waived": sum(1 for issue in issues if issue.get("state") == "waived" and not issue.get("blocking")),
         "open": sum(1 for issue in issues if issue.get("blocking")),
     }
-    # Scope holds every workbook; a structure waiting on the manager holds only its own file.
-    scope_held = [_reason(item["text"], item.get("target")) for item in inputs[0]["items"] if item["blocking"]]
-    names = {row["id"]: row.get("name") or "资料" for row in datasets}
-    book_of = {row["id"]: row.get("source_hash") or row["id"] for row in datasets}
-    workbooks = []
-    for book in _workbooks(datasets, replaced):
-        digest = book.get("source_hash") or book["id"]
-        touching = [row for row in confirmed if digest in {book_of.get(dataset_id) for dataset_id in _sides(row)}]
-        own_names = {name for dataset_id, name in names.items() if book_of[dataset_id] == digest}
-        waiting = [_reason(f"{name} 的表结构等你确认", "structure") for name in pending_structures if name in own_names]
-        level = _level(touching, [*scope_held, *waiting], missing="还没有你确认的勾稽控制读到这本工作簿")
-        workbooks.append({"dataset_id": book["id"], "name": book.get("name") or "资料", **level})
     return {**overall, "workbooks": workbooks}
 
 

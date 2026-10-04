@@ -285,6 +285,17 @@ def test_each_workbook_is_judged_by_the_controls_that_read_it():
     assert only_ledger["text"] == "不可用"
 
 
+def test_a_workbook_no_control_reads_keeps_the_pack_from_being_called_usable():
+    # One passing control on the 月结套表 says nothing about the 合同台账 beside it.
+    conclusion = _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b1", "b1")])["conclusion"]
+    assert conclusion["level"] == "not_assessable" and conclusion["text"] == "无法判断"
+    assert conclusion["reasons"] == [{"text": "合同台账.xlsx 还没有你确认的勾稽控制读到", "target": "controls"}]
+    assert [(book["name"], book["text"]) for book in conclusion["workbooks"]] == [("月结套表.xlsx", "可用"), ("合同台账.xlsx", "无法判断")]
+    # A tie-out across both reads both, and with nothing confirmed the pack names that once, not per workbook.
+    assert _status(datasets=[BOOK, LEDGER], controls=[_on(PASSING, "b1", "b2")])["conclusion"]["level"] == "usable"
+    assert _status(datasets=[BOOK, LEDGER], controls=[])["conclusion"]["reasons"] == [{"text": "还没有你确认的勾稽控制", "target": "controls"}]
+
+
 def test_several_passing_controls_read_as_all_agreeing():
     reasons = _status(controls=[PASSING, PASSING])["conclusion"]["reasons"]
     assert reasons == [{"text": "你确认的 2 条控制都相符", "target": "controls"}]
