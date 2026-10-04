@@ -8,6 +8,7 @@ import { CURRENCY_OPTIONS, RESULT_SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel 
 import type { AnalysisScope } from './scope.js';
 import { errorText, scopeSummary, unwrap } from './shared.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
+import { Checkbox } from '../../components/ui/checkbox.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -647,8 +648,8 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
       <SearchableSelect label={`指标 ${index + 1}`} value={item.metric} onChange={(value) => onChange({ metric: value, label: item.label || itemLabel(value) })}
         options={metricOptionsForItem(item)} placeholder="选择指标" />
       <TextField label="显示名称" value={item.label} onChange={(value) => onChange({ label: value })} placeholder={itemLabel(item.metric)} />
-      <FieldShell label="指定下钻"><label className="analysis-select-label"><input type="checkbox" checked={item.requires_drilldown}
-        onChange={(event) => onChange({ requires_drilldown: event.target.checked })} />需要读取来源行</label></FieldShell>
+      <FieldShell label="指定下钻"><label className="analysis-select-label"><Checkbox checked={item.requires_drilldown}
+        onCheckedChange={(state) => onChange({ requires_drilldown: state === true })} />需要读取来源行</label></FieldShell>
     </div>
     <FieldShell label="适用期间">
       <div className="analysis-actions">

@@ -3,6 +3,7 @@ import { Plus, X } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
+import { NativeSelect } from '../../components/ui/native-select.js';
 
 /** The three the engine knows. Chinese account names map onto these. */
 const ACCOUNTS: { value: string; label: string }[] = [
@@ -77,11 +78,11 @@ export function AccountMapEditor({ value, disabled, onChange }: {
                   onChange={(event) => edit(index, { account_code: event.target.value })} />
               </td>
               <td>
-                <select aria-label={`第 ${index + 1} 行管理科目`} value={row.management_account} disabled={disabled}
+                <NativeSelect aria-label={`第 ${index + 1} 行管理科目`} value={row.management_account} disabled={disabled}
                   onChange={(event) => edit(index, { management_account: event.target.value })}>
                   <option value="">未选</option>
                   {ACCOUNTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
+                </NativeSelect>
               </td>
               <td>
                 <Button variant="outline" type="button" disabled={disabled}

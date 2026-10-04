@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Calendar } from './ui/calendar.js';
 import { Command, CommandInput, CommandItem, CommandList } from './ui/command.js';
+import { Field, FieldDescription, FieldError, FieldLabel, FieldTitle } from './ui/field.js';
 import { Input } from './ui/input.js';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from './ui/popover.js';
 import './financial-controls.css';
@@ -31,15 +32,14 @@ function fieldDescribedBy(id: string, ...messages: Array<string | undefined | fa
 export function FieldShell({ label, htmlFor, hideLabel, help, error, disabledReason, required, children }: FieldShellProps) {
   const hasMessage = Boolean(error || disabledReason || help);
   const descriptionId = htmlFor && hasMessage ? `${htmlFor}-description` : undefined;
-  return <div className="fnd-control" data-invalid={error ? 'true' : undefined}>
-    {!hideLabel && (htmlFor
-      ? <label className="fnd-control__label" htmlFor={htmlFor}>{label}{required ? <span aria-hidden> *</span> : null}</label>
-      : <span className="fnd-control__label">{label}{required ? <span aria-hidden> *</span> : null}</span>)}
+  const mark = required ? <span aria-hidden> *</span> : null;
+  return <Field data-invalid={error ? 'true' : undefined}>
+    {!hideLabel && (htmlFor ? <FieldLabel htmlFor={htmlFor}>{label}{mark}</FieldLabel> : <FieldTitle>{label}{mark}</FieldTitle>)}
     {children}
-    {hasMessage && <span id={descriptionId} className={error ? 'fnd-control__error' : 'fnd-control__help'}>
-      {error || disabledReason || help}
-    </span>}
-  </div>;
+    {hasMessage && (error
+      ? <FieldError id={descriptionId}>{error}</FieldError>
+      : <FieldDescription id={descriptionId}>{disabledReason || help}</FieldDescription>)}
+  </Field>;
 }
 
 export function TextField({ label, value, onChange, placeholder, help, error, disabled, ariaLabel, inputMode }: {
