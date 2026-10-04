@@ -134,7 +134,8 @@ def _preview_exact_numerics(data: bytes, sheet_name: str, numeric_parser: str) -
     try:
         return read_exact_numerics(data, sheet_name, numeric_parser)
     except FoundryError as exc:
-        if "formula has no cached value" not in str(exc):
+        # A preview shows the sheet as it is, an uncached formula or an error cell included.
+        if "formula has no cached value" not in str(exc) and "worksheet error at" not in str(exc):
             raise
         return _read_exact_numerics_without_formula_cache(data, sheet_name, numeric_parser)
 
