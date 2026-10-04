@@ -57,7 +57,7 @@ AMOUNT_EXTRA = ("借方", "贷方")
 def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     del spec
     diagnostics: list[dict] = []
-    datasets, structure_states, pending = _authorized_tables(store, diagnostics)
+    datasets, structure_states, pending, every_dataset = _authorized_tables(store, diagnostics)
     if pending:
         # A file whose table structure nobody has confirmed cannot answer for a
         # number yet, and saying "missing currency" about it would be a guess.
@@ -102,6 +102,17 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
     per_dataset = [
         _dataset_readiness(group, code_map)
         for group in _by_dataset(probes)
+    ]
+    # As of when, for which period, and whether that still speaks for the task's period.
+    from foundry.finance_controls import superseded_snapshots
+
+    task_period = _task_period(store.analysis)
+    superseded = superseded_snapshots(store.task, every_dataset)
+    by_id = {str(dataset.get("id") or ""): dataset for dataset in datasets}
+    per_dataset = [
+        {**entry, **_currency(by_id.get(entry["dataset_id"]) or {}, entry["scope"].get("period") or "",
+                              task_period=task_period, superseded=superseded)}
+        for entry in per_dataset
     ]
     can_run = [
         name
@@ -256,10 +267,10 @@ def _authorized_tables(store, diagnostics: list[dict]):
         WITHDRAWN,
     )
 
-    state = store.analysis.state()
+    every_dataset = store.analysis.published_datasets()
     records = [
         row
-        for row in state["datasets"]
+        for row in every_dataset
         if store.allowed is None or row["id"] in store.allowed
     ]
     tables = []
@@ -287,7 +298,7 @@ def _authorized_tables(store, diagnostics: list[dict]):
         if structure == WITHDRAWN:
             continue
         tables.append(dataset)
-    return tables, states, pending
+    return tables, states, pending, every_dataset
 
 
 def _account_code_map(store) -> dict[str, str]:
@@ -343,6 +354,84 @@ def _declared_hints(dataset: dict) -> dict[str, str]:
         "forecast",
     )
     return {key: str(hints.get(key) or "") for key in keys}
+
+
+def _task_period(analysis) -> str:
+    """The period the task was confirmed for: the latest requirements scope. Never the clock."""
+    from foundry.finance_requirements import latest_requirements
+
+    period = ((latest_requirements(analysis) or {}).get("scope") or {}).get("period")
+    return period.strip() if isinstance(period, str) else ""
+
+
+def _currency(dataset: dict, period: str, *, task_period: str, superseded: set[str]) -> dict[str, Any]:
+    """as_of, as_of_source, period_kind and freshness of one file, from what it declares.
+
+    The as-of date is the 基准日 the manager confirmed off the title, else the cutoff a source
+    refresh recorded; nothing else stands in for it.
+    """
+    from foundry.evidence_labels import as_of_date, dataset_freshness, period_span
+
+    hints = _declared_hints(dataset) if dataset else {}
+    as_of, as_of_source = as_of_date(hints.get("as_of_date")), None
+    if as_of:
+        as_of_source = "title"
+    else:
+        refresh = ((dataset.get("metadata") or {}).get("source_refresh") or {}) if dataset else {}
+        cutoff = str((refresh.get("scope") or {}).get("cutoff_at") or "") if isinstance(refresh, dict) else ""
+        as_of = as_of_date(cutoff[:10])
+        as_of_source = "source_refresh" if as_of else None
+    granularity = hints.get("granularity") or ""
+    span = period_span(period)
+    if granularity in {"annual", "as_of"}:
+        period_kind = granularity
+    elif span and span[2] in {"month", "annual"}:
+        period_kind = span[2]
+    else:
+        period_kind = "as_of" if as_of and not period else None
+    return {
+        "as_of": as_of,
+        "as_of_source": as_of_source,
+        "period_kind": period_kind,
+        "freshness": dataset_freshness(
+            period=period or None, as_of=as_of, period_kind=period_kind,
+            task_period=task_period, superseded=bool(dataset) and dataset.get("id") in superseded,
+        ),
+    }
+
+
+def dataset_currency(analysis, dataset_ids: list[str], *, task_period: Any = None) -> dict[str, dict[str, Any]]:
+    """The readiness report's as-of, period and freshness for the datasets a draft cites, by id.
+
+    A file's period is read as the readiness report reads it (column, then confirmed title hint, then
+    title words). A workbook's own sheets are not re-read here: the tables confirmed from it carry its period.
+    """
+    from foundry.finance_controls import superseded_snapshots
+
+    period_text = task_period.strip() if isinstance(task_period, str) else ""
+    superseded = superseded_snapshots(analysis.task, analysis.published_datasets())
+    found: dict[str, dict[str, Any]] = {}
+    for dataset_id in dataset_ids:
+        try:
+            dataset = analysis.read_dataset(dataset_id)
+        except FoundryError:
+            found[dataset_id] = {"name": "", "period": "", "as_of": None, "as_of_source": None, "period_kind": None,
+                                 "freshness": {"state": "unknown",
+                                               "reasons": [{"code": "dataset_unreadable", "text": "资料快照读不出"}]}}
+            continue
+        period = ""
+        if not _is_workbook_shell(dataset) and dataset.get("kind") != "background":
+            rows = list(dataset.get("rows") or [])
+            period = _probe(_headers_of(dataset, rows), rows, sheet="", hints=_declared_hints(dataset))["period"]
+        found[dataset_id] = {
+            "name": str(dataset.get("name") or ""),
+            "kind": dataset.get("kind"),
+            "source_hash": dataset.get("source_hash"),
+            "standardized": (dataset.get("transformation") or {}).get("basis") == "source_refresh_batch",
+            "period": period,
+            **_currency(dataset, period, task_period=period_text, superseded=superseded),
+        }
+    return found
 
 
 def _is_workbook_shell(dataset: dict) -> bool:
