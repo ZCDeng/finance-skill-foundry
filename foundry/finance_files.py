@@ -18,16 +18,34 @@ from foundry.workbook_bindings import (
     read_input,
 )
 
-COLLECTIONS = {"workbook_bindings", "workbook_patches", "workbook_outputs"}
+COLLECTIONS = {
+    "workbook_bindings",
+    "workbook_patches",
+    "workbook_outputs",
+    "rollforward_plans",
+    "rollforward_runs",
+}
 
 
 class FinanceFiles:
     """Task-scoped workbook file collaboration over authorized XLSX snapshots."""
 
-    def __init__(self, task, *, snapshot_ids: list[str] | set[str] | None = None):
+    def __init__(
+        self,
+        task,
+        *,
+        snapshot_ids: list[str] | set[str] | None = None,
+        session_id: str | None = None,
+        actor: str | None = None,
+    ):
+        from foundry.structure_records import resolve_source
+
         self.task = task
         self.analysis = AnalysisStore(task)
         self.allowed = None if snapshot_ids is None else set(snapshot_ids)
+        self.session_id = session_id
+        # Stamped by the call layer; an unstamped call is the assistant.
+        self.actor = resolve_source(actor)
 
     def _path(self, kind: str, object_id: str) -> Path:
         if kind not in COLLECTIONS:
@@ -281,3 +299,369 @@ class FinanceFiles:
             record["_integrity_hash"] = _hash(record)
             write_json_atomic(record_path, record)
         return record
+
+    # ------------------------------------------------------------------
+    # 滚动到下月: last month's workbook, this month's figures, a new copy.
+
+    def _manager_only(self, action: str) -> None:
+        from foundry.structure_records import MANAGER
+
+        if self.actor != MANAGER:
+            raise FoundryError(f"only the manager can {action}")
+
+    def _refuse_child_session(self, action: str) -> None:
+        if not self.session_id:
+            return
+        session = next((row for row in self.task.sessions() if row["session_id"] == self.session_id), None)
+        if session and session.get("parent_session_id"):
+            raise FoundryError(f"child sessions cannot {action}")
+
+    def _widen_session(self, snapshot_ids: list[str]) -> None:
+        """Keep a narrowed caller able to read the copy it just made."""
+        if self.allowed is not None:
+            self.allowed.update(snapshot_ids)
+        if self.session_id:
+            self.task.update_session_context(
+                self.session_id,
+                snapshot_ids=list(dict.fromkeys([*(self.allowed or []), *snapshot_ids])),
+            )
+
+    def _public_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        from foundry.workbook_rollforward import change_log
+
+        return {
+            "schema_version": 1,
+            "plan_id": plan["id"],
+            "dataset_id": plan["dataset_id"],
+            "source_hash": plan["source_hash"],
+            "dataset_name": plan["dataset_name"],
+            "period": plan["period"],
+            "workbook_supported": plan["workbook_supported"],
+            "unsupported_features": plan["unsupported_features"],
+            "sheet_pattern": plan["sheet_pattern"],
+            "rows": plan["rows"],
+            "counts": plan["counts"],
+            "title_hints": plan["title_hints"],
+            "change_log": change_log(plan["rows"], period=plan["period"], workbook=plan["dataset_name"]),
+        }
+
+    def rollforward_preview(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Classify every mapping against last month's workbook and file the plan; nothing is written."""
+        from foundry.workbook_bindings import _unsupported_features, open_workbook_bytes
+        from foundry.workbook_rollforward import (
+            counts,
+            normalize_mappings,
+            period_of,
+            plan_rows,
+            sheet_pattern,
+            title_hints,
+        )
+
+        if not isinstance(spec, dict):
+            raise FoundryError("rollforward spec must be an object")
+        dataset, source = self._source_path(str(spec.get("dataset_id") or ""))
+        if spec.get("source_hash") != dataset["source_hash"]:
+            raise FoundryError("rollforward workbook source_hash does not match the snapshot")
+        period = period_of(spec.get("period"))
+        mappings = normalize_mappings(spec.get("mappings"))
+        data = source.read_bytes()
+        if sha256_bytes(data) != dataset["source_hash"]:
+            raise FoundryError("dataset source workbook integrity check failed")
+        features = _unsupported_features(source)
+        book = open_workbook_bytes(data, data_only=False)
+        sources = _MappingSources(self)
+        try:
+            rows = plan_rows(book, data, archived_numeric_parser(dataset, data), mappings, sources)
+            hints = title_hints(book, rows, period)
+            sheet_names = list(book.sheetnames)
+        finally:
+            book.close()
+            sources.close()
+        plan = self._write(
+            "rollforward_plans",
+            dataset_id=dataset["id"],
+            source_hash=dataset["source_hash"],
+            source_name=dataset["source_name"],
+            dataset_name=dataset["name"],
+            period=period,
+            sheet_names=sheet_names,
+            sheet_pattern=sheet_pattern(sheet_names),
+            workbook_supported=not features,
+            unsupported_features=features,
+            mappings=mappings,
+            rows=rows,
+            counts=counts(rows),
+            title_hints=hints,
+        )
+        return self._public_plan(plan)
+
+    def _reverify_sources(self, plan: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+        """Every figure about to be written still reads the same from where it came."""
+        from foundry.workbook_rollforward import SourceUnreadable, rendered
+
+        sources = _MappingSources(self)
+        try:
+            for row in rows:
+                source = plan["mappings"][row["index"]]["source"]
+                if source["kind"] == "value":
+                    continue
+                try:
+                    value, _ = sources(source)
+                except SourceUnreadable:
+                    raise FoundryError("rollforward source changed since preview; preview again") from None
+                if rendered(value)[0] != row["new_value"]:
+                    raise FoundryError("rollforward source changed since preview; preview again")
+        finally:
+            sources.close()
+
+    def rollforward_apply(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Write the previewed cells into a new copy and file it as this task's snapshot. Manager only."""
+        import shutil
+
+        from foundry.structure_records import MANAGER
+        from foundry.workbook_rollforward import (
+            BLOCKED,
+            UNCHANGED,
+            WRITE,
+            change_log,
+            output_filename,
+            output_name,
+            write_copy,
+        )
+
+        self._manager_only("apply a workbook roll-forward")
+        self._refuse_child_session("apply a workbook roll-forward")
+        if not isinstance(spec, dict):
+            raise FoundryError("rollforward spec must be an object")
+        plan = self._read("rollforward_plans", str(spec.get("plan_id") or ""))
+        # One plan, one copy: the run record shares the plan's id, so a second
+        # apply finds it filed and the immutable write refuses a race.
+        record_path = self._path("rollforward_runs", plan["id"])
+        if record_path.exists():
+            raise FoundryError("rollforward plan was already applied; preview again for a new copy")
+        if not plan["workbook_supported"]:
+            raise FoundryError(
+                "rollforward workbook has parts a copy would lose ("
+                + ", ".join(plan["unsupported_features"])
+                + "); no copy was made"
+            )
+        writes = [row for row in plan["rows"] if row["status"] == WRITE]
+        if not writes:
+            raise FoundryError("rollforward plan has no cells to write")
+        dataset, source = self._source_path(plan["dataset_id"])
+        data = source.read_bytes()
+        if dataset["source_hash"] != plan["source_hash"] or sha256_bytes(data) != plan["source_hash"]:
+            raise FoundryError("rollforward workbook changed since preview; preview again")
+        self._reverify_sources(plan, writes)
+        staging = self.analysis._inside(self.analysis.root / ".rollforward-staging" / plan["id"])
+        try:
+            staging.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            raise FoundryError("rollforward plan is already being applied") from None
+        try:
+            path = self.analysis._inside(staging / output_filename(dataset["source_name"], plan["period"]))
+            written = write_copy(data, path, plan["rows"])
+            digest = sha256_bytes(path.read_bytes())
+            # Not under the task lock: add_dataset takes it. No structure proposal
+            # either: the copy's formulas have no cached results until Excel saves it.
+            output = self.analysis.add_dataset(
+                path,
+                name=output_name(dataset["name"], plan["period"]),
+                metadata={
+                    "mode": "workbook",
+                    "period": plan["period"],
+                    "rollforward": {
+                        "plan_id": plan["id"],
+                        "source_dataset_id": dataset["id"],
+                        "source_hash": dataset["source_hash"],
+                    },
+                },
+                allow_duplicate=True,
+            )
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            try:
+                staging.parent.rmdir()
+            except OSError:
+                pass  # another apply is still staging its copy
+        if output["source_hash"] != digest:
+            raise FoundryError("rollforward copy changed before it was filed")
+        self._widen_session([output["id"]])
+        record = _new(
+            self.task,
+            domain="foundry.finance_files.rollforward_runs.v1",
+            id=plan["id"],
+            plan_id=plan["id"],
+            dataset_id=dataset["id"],
+            source_dataset_id=dataset["id"],
+            source_hash=dataset["source_hash"],
+            output_dataset_id=output["id"],
+            output_name=output["name"],
+            output_sha256=digest,
+            period=plan["period"],
+            written=writes,
+            blocked=[row for row in plan["rows"] if row["status"] == BLOCKED],
+            unchanged=[row for row in plan["rows"] if row["status"] == UNCHANGED],
+            counts=plan["counts"],
+            formula_cache_cleared=written["formula_cache_cleared"],
+            applied_by=MANAGER,
+        )
+        record = self.analysis._write(record_path, record)
+        return {
+            **record,
+            "run_id": record["id"],
+            "change_log": change_log(
+                plan["rows"], period=plan["period"], workbook=dataset["name"], copy=output["name"]
+            ),
+        }
+
+    def rollforward_templates(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Saved mappings, only those whose sheets match the chosen workbook when one is named."""
+        from foundry.finance_controls import workbook_sheets
+        from foundry.workbook_rollforward import RollforwardTemplates, public_template, sheet_pattern
+
+        spec = spec if isinstance(spec, dict) else {}
+        pattern = None
+        if spec.get("dataset_id"):
+            _, source = self._source_path(str(spec["dataset_id"]))
+            pattern = sheet_pattern(workbook_sheets(source.read_bytes()))
+        templates = [
+            public_template(record)
+            for record in RollforwardTemplates(self.task.store.var_root).list()
+            if pattern is None or record.get("sheet_pattern") == pattern
+        ]
+        return {"schema_version": 1, "sheet_pattern": pattern, "templates": templates}
+
+    def rollforward_template_save(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Keep a previewed mapping for next month, without this month's snapshots. Manager only."""
+        from foundry.workbook_rollforward import RollforwardTemplates, public_template, template_mappings
+
+        self._manager_only("save a roll-forward template")
+        if not isinstance(spec, dict):
+            raise FoundryError("rollforward spec must be an object")
+        plan = self._read("rollforward_plans", str(spec.get("plan_id") or ""))
+        name = spec.get("name")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80 or any(ch in name for ch in "\r\n\t"):
+            raise FoundryError("rollforward template name must be one line of 1 to 80 characters")
+        record = RollforwardTemplates(self.task.store.var_root).create(
+            name=name.strip(),
+            sheet_pattern=plan["sheet_pattern"],
+            sheet_count=len(plan["sheet_names"]),
+            mappings=template_mappings(plan["rows"], plan["mappings"]),
+        )
+        return public_template(record)
+
+
+class _MappingSources:
+    """Reads mapping sources for one preview or apply, each workbook and sheet once."""
+
+    def __init__(self, files: FinanceFiles):
+        from foundry.finance_controls import superseded_snapshots
+
+        self.files = files
+        analysis = files.analysis
+        # The published snapshots, as AnalysisStore.state() lists them, without
+        # reading every run and draft in the task to get there.
+        root = analysis._inside(analysis.root / "datasets")
+        rows = [
+            record
+            for path in (root.glob("*/meta.json") if root.exists() else [])
+            if analysis._dataset_published(record := analysis._read(path))
+        ]
+        self.published = {row["id"]: row for row in rows}
+        self.superseded = superseded_snapshots(files.task, rows)
+        self.books: dict[str, Any] = {}
+        self.sheets: dict[tuple[str, str], Any] = {}
+
+    def close(self) -> None:
+        for entry in self.books.values():
+            if not isinstance(entry, Exception):
+                entry[1].close()
+
+    def __call__(self, source: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        from foundry.workbook_rollforward import SourceUnreadable, read_manager_value
+
+        if source["kind"] == "dataset":
+            reader, described = self._dataset, {**source, "name": ""}
+        elif source["kind"] == "run":
+            reader, described = self._run, dict(source)
+        else:
+            reader, described = (lambda _source, _described: read_manager_value(source["manager_value"])), dict(source)
+        try:
+            return reader(source, described), described
+        except SourceUnreadable as exc:
+            exc.described = described
+            raise
+
+    def _dataset(self, source: dict[str, Any], described: dict[str, Any]) -> Any:
+        from foundry.analysis import ID
+        from foundry.workbook_rollforward import SourceUnreadable, range_bounds, read_workbook_source, sheet_cells
+
+        dataset_id = source["dataset_id"]
+        if not dataset_id:
+            raise SourceUnreadable("还没有选择来源资料")
+        if ID.fullmatch(dataset_id) and self.files.allowed is not None and dataset_id not in self.files.allowed:
+            raise FoundryError("finance file snapshot is outside this session context")
+        row = self.published.get(dataset_id)
+        if row is None:
+            raise SourceUnreadable("来源资料不在当前任务里")
+        described["name"] = row.get("name") or ""
+        if dataset_id in self.superseded:
+            raise SourceUnreadable("来源资料已被同名的新资料取代，请改选新版本")
+        if source["source_hash"] != row.get("source_hash"):
+            raise SourceUnreadable("来源资料与选择时的版本不一致，请重新选择")
+        if row.get("source_file") != "source.xlsx":
+            raise SourceUnreadable("来源资料不是 Excel 工作簿")
+        bounds = range_bounds(source["range"])
+        if not source["sheet"] or bounds is None:
+            raise SourceUnreadable("来源区域要写成「工作表!B5」或「工作表!B5:B20」")
+        dataset, value_book, parser, data = self._workbook(dataset_id)
+        if source["sheet"] not in value_book.sheetnames:
+            raise SourceUnreadable(f"来源工作簿里没有工作表「{source['sheet']}」")
+        key = (dataset_id, source["sheet"])
+        if key not in self.sheets:
+            self.sheets[key] = sheet_cells(data, source["sheet"], parser)
+        return read_workbook_source(value_book, self.sheets[key], source["sheet"], bounds)
+
+    def _workbook(self, dataset_id: str) -> tuple[dict[str, Any], Any, str, bytes]:
+        from foundry.workbook_bindings import open_workbook_bytes
+        from foundry.workbook_rollforward import SourceUnreadable
+
+        if dataset_id not in self.books:
+            try:
+                dataset = self.files.analysis.read_dataset(dataset_id)
+                path = self.files.analysis._inside(
+                    self.files.analysis.root / "datasets" / dataset_id / dataset["source_file"]
+                )
+                data = path.read_bytes()
+                if sha256_bytes(data) != dataset["source_hash"]:
+                    raise FoundryError("dataset source workbook integrity check failed")
+                book = open_workbook_bytes(data, data_only=True)
+                self.books[dataset_id] = (dataset, book, archived_numeric_parser(dataset, data), data)
+            except (FoundryError, OSError) as exc:
+                self.books[dataset_id] = exc
+        entry = self.books[dataset_id]
+        if isinstance(entry, Exception):
+            raise SourceUnreadable("来源资料快照读不出或已损坏")
+        return entry
+
+    def _run(self, source: dict[str, Any], described: dict[str, Any]) -> Any:
+        from foundry.analysis import ID
+        from foundry.workbook_rollforward import SourceUnreadable, read_run_source
+
+        run_id = source["run_id"]
+        if not run_id:
+            raise SourceUnreadable("还没有选择计算结果")
+        if not ID.fullmatch(run_id):
+            raise SourceUnreadable("计算结果不存在")
+        try:
+            run = self.files.analysis.get_run(run_id)
+        except FoundryError:
+            raise SourceUnreadable("计算结果不存在或已损坏") from None
+        bindings = {value for value in (run.get("bindings") or {}).values() if isinstance(value, str)}
+        if self.files.allowed is not None and not bindings <= self.files.allowed:
+            raise FoundryError("run bindings are outside this session context")
+        described["created_at"] = run.get("created_at")
+        if bindings & self.superseded:
+            raise SourceUnreadable("这次计算用的资料已被同名的新资料取代，请重新计算")
+        return read_run_source(run, source["row"], source["column"])
