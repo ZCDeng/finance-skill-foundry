@@ -620,6 +620,17 @@ export interface ReadinessDataset {
   missing_fields: string[];
   can_run: string[];
   blocked: { capability: string; missing_fields: string[]; reason: string }[];
+  /** The as-of date the file declares (confirmed title 基准日, or a source refresh cutoff); null when it declares none. */
+  as_of?: string | null;
+  as_of_source?: 'title' | 'source_refresh' | null;
+  period_kind?: 'month' | 'annual' | 'as_of' | null;
+  /** Whether the file speaks for the task period. Compared only with declared dates, never the clock. */
+  freshness?: ReadinessFreshness;
+}
+
+export interface ReadinessFreshness {
+  state?: 'current' | 'source_stale' | 'period_mismatch' | 'unknown' | string;
+  reasons?: { code: string; text?: string }[];
 }
 
 export interface ReadinessReport {
