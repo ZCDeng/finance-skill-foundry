@@ -563,7 +563,8 @@ class ExcelBridgeApp:
     def _authorized_finance_runs(self, task: Task, context) -> list[dict[str, Any]]:
         allowed = set(context.snapshot_ids)
         runs = []
-        for run in AnalysisStore(task).state()["runs"]:
+        # As the session reads them (AnalysisStore.run_in_view): a requirements version outside it pins none of them.
+        for run in AnalysisStore(task).state(allowed)["runs"]:
             if (
                 run.get("engine") == "finance"
                 and run.get("execution_status") == "succeeded"

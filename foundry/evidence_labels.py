@@ -769,7 +769,6 @@ def draft_evidence_basis(
     from foundry.finance_close_status import _run_key
     from foundry.finance_readiness import dataset_currency, dataset_replacements
     from foundry.finance_requirements import latest_requirements
-    from foundry.result_semantics import declared_run
 
     latest = latest_requirements(analysis)
     task_period = ((latest or {}).get("scope") or {}).get("period")
@@ -819,12 +818,7 @@ def draft_evidence_basis(
     periods: dict[str, str] = {}
     datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period, allowed=allowed, periods=periods)
 
-    row_estimates: dict[tuple[str, int], list[dict]] = {}
-    for run_id, run in runs.items():
-        declaration = declared_run(analysis, run, latest).get("row_declarations")
-        for row in (declaration or {}).get("rows") or [] if isinstance(declaration, dict) else []:
-            if isinstance(row, dict) and row.get("estimate") and isinstance(row.get("row"), int):
-                row_estimates[(run_id, row["row"])] = list(row.get("estimate_sources") or [])
+    row_estimates = declared_row_estimates(analysis, runs, latest, allowed)
 
     fields = _evidence_fields(check, claims=claims, fact_ids=fact_ids, runs=runs, recipe_results=recipe_results,
                               consistency_results=consistency_results, older=older, row_estimates=row_estimates,
@@ -846,6 +840,26 @@ def draft_evidence_basis(
         "older_runs": sorted(older),
     }
     return fields, kept
+
+
+def declared_row_estimates(analysis, runs: dict[str, dict], latest: dict | None, allowed: set[str] | None, *,
+                           cache: dict | None = None) -> dict[tuple[str, int], list[dict]]:
+    """The estimate sources of each cited run row that reads as an estimate: its row declarations as a reader whose
+    snapshot ceiling is ``allowed`` reads the run (AnalysisStore.run_in_view), with ``latest``'s estimates added.
+    ``cache`` as for run_in_view."""
+    from foundry.result_semantics import declared_run
+
+    cache = {} if cache is None else cache
+    row_estimates: dict[tuple[str, int], list[dict]] = {}
+    for run_id, run in runs.items():
+        # Only a declaration is read here: a run without one reads none whoever reads it.
+        if isinstance(run.get("row_declarations"), dict):
+            run = analysis.run_in_view(run, allowed, cache=cache)
+        declaration = declared_run(analysis, run, latest).get("row_declarations")
+        for row in (declaration or {}).get("rows") or [] if isinstance(declaration, dict) else []:
+            if isinstance(row, dict) and row.get("estimate") and isinstance(row.get("row"), int):
+                row_estimates[(run_id, row["row"])] = list(row.get("estimate_sources") or [])
+    return row_estimates
 
 
 def _has_reason(info: dict[str, Any], code: str) -> bool:
@@ -877,7 +891,8 @@ def _evidence_fields(check: dict[str, Any], *, claims, fact_ids, runs, recipe_re
 
 
 def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[str] | None, *,
-                     runs: Callable[[], dict[str, dict]], force: bool = False) -> dict[str, Any] | None:
+                     runs: Callable[[], dict[str, dict]], force: bool = False,
+                     row_estimates: list | None = None) -> dict[str, Any] | None:
     """A stored draft's labels, posture and freshness as a reader whose snapshot ceiling is ``allowed`` (None:
     every file) reads them, or None when they stand as saved.
 
@@ -887,7 +902,9 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     file outside a session decides nothing it reads, and one the saver could not read but the reader can
     still counts. Whether a newer file replaces an older one, or a newer run reruns an older one, depends on
     the two alone, which is why counting by ceiling is enough. Everything else stands as saved (the task
-    period, estimates, the check itself). ``draft`` must carry ``evidence_basis``; ``runs`` loads the draft's
+    period, estimates, the check itself), save the row estimates of a cited run that reads pinned to another
+    requirements version (AnalysisStore._row_estimates_in_view): ``row_estimates``, when given, replace the
+    basis's and the fields are read again. ``draft`` must carry ``evidence_basis``; ``runs`` loads the draft's
     runs, only when the fields are read again. ``force`` reads them again even then: the check itself is not
     the one saved (a revision read without the parent it may not read).
     """
@@ -902,7 +919,8 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     older = {run_id for run_id, readings in (basis.get("newer_runs") or {}).items()
              if any(readable(files) for files in readings)}
     saved = set(basis.get("superseded") or [])
-    if not force and superseded == saved and older == set(basis.get("older_runs") or []):
+    if (not force and row_estimates is None and superseded == saved
+            and older == set(basis.get("older_runs") or [])):
         return None
     datasets = {
         dataset_id: ({**info, "freshness": currency_freshness(info, task_period=basis.get("task_period") or "",
@@ -917,6 +935,7 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
         consistency_results=[result for result in (draft.get("consistency_report") or {}).get("results") or []
                              if isinstance(result, dict)],
         older=older,
-        row_estimates={(run_id, row): list(sources) for run_id, row, sources in basis.get("row_estimates") or []},
+        row_estimates={(run_id, row): list(sources) for run_id, row, sources in
+                       (basis.get("row_estimates") or [] if row_estimates is None else row_estimates)},
         datasets=datasets, source_read_failures=draft.get("source_read_failures") or [],
     )

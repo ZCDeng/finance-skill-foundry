@@ -89,20 +89,37 @@ def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None)
     return shown
 
 
-def record_completion(analysis, draft, quality):
+def record_completion(analysis, draft, quality, *, allowed=None):
     """The receipt for one saved draft, or the one already filed for the same input.
 
     It counts its repair budget over every earlier receipt of its chain, whoever saved it. A session reads the
     budget its own saves would have spent (AnalysisStore.completion_in_view), and its completion operation settles
-    on that reading (FinanceStore._readable_receipt).
+    on that reading (FinanceStore._readable_receipt). ``allowed``, the saving session's snapshot ceiling (None: the
+    manager), reads the draft's runs as the session reads them (AnalysisStore.run_in_view): whether a run is bound to
+    the current requirements is judged on the version the session reads it pinned to.
     """
+    assessed = assess_completion(analysis, draft, quality, allowed=allowed)
+    with exclusive(analysis.task.lock_path, timeout=10):
+        history = [row for row in analysis._list('completions') if row.get('chain_key') == assessed['chain_key']]
+        same = next((row for row in history if row.get('input_key') == assessed['input_key']), None)
+        if same:
+            return same
+        record = _new(analysis.task, **receipt_fields(analysis, assessed, history))
+        return analysis._write_locked(analysis._object_path('completions', record['id']), record)
+
+
+def assess_completion(analysis, draft, quality, *, allowed=None, cache=None):
+    """What record_completion decides of a draft before it reads the earlier receipts of its chain. ``allowed`` as for
+    record_completion; ``cache`` as for AnalysisStore.run_in_view."""
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
     requirements = quality.get('requirements', {})
     requirements = with_input_gaps(analysis, requirements)
     requirement_id = requirements.get('requirements_id')
-    runs = {run_id: analysis.get_run(run_id) for run_id in draft.get('run_ids', [])}
+    cache = {} if cache is None else cache
+    runs = {run_id: analysis.run_in_view(analysis.get_run(run_id), allowed, cache=cache)
+            for run_id in draft.get('run_ids', [])}
     run_hashes = {run_id: run.get('output_hash') for run_id, run in runs.items()}
     requirement = analysis._get('requirements', requirement_id) if requirement_id else None
     from foundry.finance_requirement_semantics import (
@@ -164,50 +181,58 @@ def record_completion(analysis, draft, quality):
     input_key = _hash({'chain_key': chain_key, 'draft_id': draft['id'],
                        'draft_content_hash': draft['content_hash'], 'quality': keyed,
                        'completion_policy_version': COMPLETION_POLICY_VERSION})
-    with exclusive(analysis.task.lock_path, timeout=10):
-        history = [row for row in analysis._list('completions') if row.get('chain_key') == chain_key]
-        same = next((row for row in history if row.get('input_key') == input_key), None)
-        if same:
-            return same
-        repairs = min(len(history), MAX_REPAIRS)
-        unassessed = (not requirement_id
-                      or not analysis._get('requirements', requirement_id).get('items')
-                      or requirements.get('coverage', {}).get('status') in {None, 'not_assessed'})
-        complete = (quality['status'] == 'pass' and not unassessed
-                    and requirements.get('coverage', {}).get('status') in COVERAGE_COMPLETE
-                    and requirements.get('provenance', {}).get('status') in COVERAGE_COMPLETE
-                    and not stale_runs)
-        stalled = bool(history) and history[-1].get('issue_fingerprint') == issue_fingerprint and not complete
-        exhausted = len(history) >= MAX_REPAIRS
-        status = ('complete' if complete else 'awaiting_input' if awaiting_input
-                  else 'awaiting_manager' if awaiting_manager and not unassessed
-                  else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available')
-        stop_reason = ('complete' if complete else 'verified_input_gap' if awaiting_input
-                       else ('estimate_requires_acceptance' if 'estimate_requires_acceptance' in manager_reasons
-                             else 'manager_decision_required') if status == 'awaiting_manager'
-                       else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None)
-        actions = [{'code': issue.get('code'), 'message': issue.get('message'),
-                    **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
-                    **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {}),
-                    **({'fixups': issue['fixups']} if issue.get('fixups') else {})}
-                   for issue in issues]
-        if unassessed:
-            actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})
-        # A level the user asked for that a later version dropped: not a repair (the level is not a row field),
-        # but the reply must say the original requirement is not complete (original_requirements_completed).
-        actions.extend(_dropped_hierarchy_action(item) for item in requirements.get('items', [])
-                       if item.get('dropped_hierarchy'))
-        record = _new(analysis.task, draft_id=draft['id'], draft_content_hash=draft['content_hash'],
-                      completion_policy_version=COMPLETION_POLICY_VERSION,
-                      requirements_id=requirement_id, requirements_semantic_fingerprint=semantic_fingerprint,
-                      reused_run_ids=sorted(reused_runs), run_hashes=run_hashes, chain_key=chain_key,
-                      input_key=input_key, issue_fingerprint=issue_fingerprint,
-                      status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
-                      response_status=('ended_with_limitations' if awaiting_input or status == 'awaiting_manager'
-                                       else 'complete' if complete else 'needs_review'),
-                      original_requirements_completed=bool(requirements.get('original_requirements_completed')) and complete,
-                      repair_allowed=status in {'repair_available','needs_requirements'} and not exhausted and not stalled,
-                      stop_reason=stop_reason,
-                      **({'manager_reasons': manager_reasons} if status == 'awaiting_manager' else {}),
-                      actions=actions, checks=quality.get('checks', {}))
-        return analysis._write_locked(analysis._object_path('completions', record['id']), record)
+    return {'draft': draft, 'quality': quality, 'requirements': requirements, 'requirement_id': requirement_id,
+            'semantic_fingerprint': semantic_fingerprint, 'run_hashes': run_hashes, 'reused_runs': reused_runs,
+            'stale_runs': stale_runs, 'issues': issues, 'awaiting_input': awaiting_input,
+            'awaiting_manager': awaiting_manager, 'manager_reasons': manager_reasons, 'chain_key': chain_key,
+            'issue_fingerprint': issue_fingerprint, 'input_key': input_key}
+
+
+def receipt_fields(analysis, assessed, history):
+    """A receipt's fields (assess_completion's ``assessed``) in the order record_completion files them, counted over
+    ``history``, the earlier receipts of its chain."""
+    draft, quality, requirements = assessed['draft'], assessed['quality'], assessed['requirements']
+    requirement_id, stale_runs = assessed['requirement_id'], assessed['stale_runs']
+    awaiting_input, manager_reasons = assessed['awaiting_input'], assessed['manager_reasons']
+    issue_fingerprint = assessed['issue_fingerprint']
+    repairs = min(len(history), MAX_REPAIRS)
+    unassessed = (not requirement_id
+                  or not analysis._get('requirements', requirement_id).get('items')
+                  or requirements.get('coverage', {}).get('status') in {None, 'not_assessed'})
+    complete = (quality['status'] == 'pass' and not unassessed
+                and requirements.get('coverage', {}).get('status') in COVERAGE_COMPLETE
+                and requirements.get('provenance', {}).get('status') in COVERAGE_COMPLETE
+                and not stale_runs)
+    stalled = bool(history) and history[-1].get('issue_fingerprint') == issue_fingerprint and not complete
+    exhausted = len(history) >= MAX_REPAIRS
+    status = ('complete' if complete else 'awaiting_input' if awaiting_input
+              else 'awaiting_manager' if assessed['awaiting_manager'] and not unassessed
+              else 'needs_requirements' if unassessed else 'needs_review' if stalled or exhausted else 'repair_available')
+    stop_reason = ('complete' if complete else 'verified_input_gap' if awaiting_input
+                   else ('estimate_requires_acceptance' if 'estimate_requires_acceptance' in manager_reasons
+                         else 'manager_decision_required') if status == 'awaiting_manager'
+                   else 'no_progress' if stalled else 'repair_budget_exhausted' if exhausted else None)
+    actions = [{'code': issue.get('code'), 'message': issue.get('message'),
+                **({'requirement_item_id': issue['requirement_item_id']} if issue.get('requirement_item_id') else {}),
+                **({'run_ids': issue['run_ids']} if issue.get('run_ids') else {}),
+                **({'fixups': issue['fixups']} if issue.get('fixups') else {})}
+               for issue in assessed['issues']]
+    if unassessed:
+        actions.insert(0, {'code': 'requirements_not_defined', 'message': '请先登记用户问题、分析范围和必答指标，再复核这份文稿。'})
+    # A level the user asked for that a later version dropped: not a repair (the level is not a row field),
+    # but the reply must say the original requirement is not complete (original_requirements_completed).
+    actions.extend(_dropped_hierarchy_action(item) for item in requirements.get('items', [])
+                   if item.get('dropped_hierarchy'))
+    return dict(draft_id=draft['id'], draft_content_hash=draft['content_hash'],
+                completion_policy_version=COMPLETION_POLICY_VERSION,
+                requirements_id=requirement_id, requirements_semantic_fingerprint=assessed['semantic_fingerprint'],
+                reused_run_ids=sorted(assessed['reused_runs']), run_hashes=assessed['run_hashes'],
+                chain_key=assessed['chain_key'], input_key=assessed['input_key'], issue_fingerprint=issue_fingerprint,
+                status=status, repair_attempts=repairs, max_repairs=MAX_REPAIRS,
+                response_status=('ended_with_limitations' if awaiting_input or status == 'awaiting_manager'
+                                 else 'complete' if complete else 'needs_review'),
+                original_requirements_completed=bool(requirements.get('original_requirements_completed')) and complete,
+                repair_allowed=status in {'repair_available','needs_requirements'} and not exhausted and not stalled,
+                stop_reason=stop_reason,
+                **({'manager_reasons': manager_reasons} if status == 'awaiting_manager' else {}),
+                actions=actions, checks=quality.get('checks', {}))

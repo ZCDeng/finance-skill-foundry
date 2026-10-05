@@ -308,7 +308,9 @@ def dispatch(args) -> bool:
 
         result = read_method_resource(args.skill, args.resource)
     elif args.cmd == "analysis-state":
-        result = service.state(_ceiling(context))
+        # The task's versions and runs, read once for every run, draft and receipt the session reads (run_in_view).
+        cache: dict = {}
+        result = service.state(_ceiling(context), cache=cache)
         if context.session_id:
             allowed = set(context.snapshot_ids)
             result["datasets"] = [d for d in result["datasets"] if d["id"] in allowed]
@@ -334,10 +336,11 @@ def dispatch(args) -> bool:
         # A receipt reads the way its draft reads (AnalysisStore.completion_in_view).
         result["completions"] = [
             receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context),
-                                                               readable_ids=listed, versions=versions)
+                                                               readable_ids=listed, versions=versions, cache=cache)
             if receipt is not None
         ]
-        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed, versions=versions)
+        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed, versions=versions,
+                                                  cache=cache)
                             for d in result["drafts"]]
         result["context"] = {
             "session_id": context.session_id,

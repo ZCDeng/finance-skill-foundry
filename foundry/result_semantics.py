@@ -635,16 +635,32 @@ def redeclare(analysis, run: dict, requirements_cache: dict[str, dict | None] | 
     stored = run['row_declarations']
     requirements_id = stored.get('requirements_id')
     requirements = _pinned_requirements(analysis, requirements_id, {} if requirements_cache is None else requirements_cache)
-    archived = _archived_result(analysis, run)
-    result = run.get('result') or {}
-    columns, rows = archived or (result.get('columns') or [], result.get('rows') or [])
+    columns, rows, archived = _result_table(analysis, run)
     if requirements_id and requirements is None:
         complete, reason = False, 'requirements_unavailable'
     else:
-        complete, reason = archived is not None, None if archived is not None else 'result_file_unavailable'
+        complete, reason = archived, None if archived else 'result_file_unavailable'
     declaration = declare_rows(columns, rows, requirements, fingerprint=stored.get('requirements_fingerprint'),
                                complete=complete, incomplete_reason=reason)
     return {**declaration, 'requirements_id': requirements_id}
+
+
+def _result_table(analysis, run: dict) -> tuple[list, list[dict], bool]:
+    """The run's full result table from its archived output, else its stored preview (False: not the full table)."""
+    archived = _archived_result(analysis, run)
+    result = run.get('result') or {}
+    columns, rows = archived or (result.get('columns') or [], result.get('rows') or [])
+    return columns, rows, archived is not None
+
+
+def declare_against(analysis, run: dict, requirements: dict | None, fingerprint: str | None) -> dict:
+    """The declaration run_script saves for this run's result had it been pinned to `requirements` (None: no version),
+    `fingerprint` being that record's verified fingerprint. A reader that may not read the version a run was pinned
+    to reads its declaration so (AnalysisStore.run_in_view); without the full result file, the stored preview rows
+    are declared and the declaration is incomplete."""
+    columns, rows, archived = _result_table(analysis, run)
+    return declare_rows(columns, rows, requirements, fingerprint=fingerprint, complete=archived,
+                        incomplete_reason=None if archived else 'result_file_unavailable')
 
 
 def _latest_memo(latest: dict | None) -> dict:

@@ -919,7 +919,7 @@ class FinanceStore:
                 self._authorize_draft(previous)
                 receipt = self._settled_receipt(
                     self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
-                    record_completion(self.analysis, previous, previous["explanation_check"]))
+                    record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed))
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
                 return {**self._readable_draft(previous), "completion": receipt, "completion_operation": operation,
                         "replayed": True, "validation_basis": "saved_draft_version"}
@@ -1092,7 +1092,7 @@ class FinanceStore:
                 # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
                 self._parent_draft(spec.get("parent_id"))
                 self._authorize_draft(previous)
-                receipt = record_completion(self.analysis, previous, previous["explanation_check"])
+                receipt = record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed)
                 return {**self._readable_draft(previous), "completion": self._readable_receipt(receipt), "replayed": True,
                         "validation_basis": "saved_draft_version"}
             result = self._save_explanation_draft({**spec, "completion_request_key": key})
@@ -1274,7 +1274,8 @@ class FinanceStore:
 
         from foundry.finance_completion import record_completion
 
-        completion = record_completion(self.analysis, draft, draft["explanation_check"])
+        # A session judges the runs it cites on the versions it reads them pinned to (AnalysisStore.run_in_view).
+        completion = record_completion(self.analysis, draft, draft["explanation_check"], allowed=self.allowed)
         # The stored receipt: the public saves and a session's operation read it through _readable_receipt.
         return {**self._readable_draft(draft), "completion": completion}
 
