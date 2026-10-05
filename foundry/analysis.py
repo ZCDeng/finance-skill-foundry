@@ -516,13 +516,20 @@ class AnalysisStore:
 
     def state(self, allowed: set[str] | None = None) -> dict:
         """Every record of the task. ``allowed``, a session's snapshot ceiling, keeps the requirements versions it
-        may read, and runs are read against the latest of them (as analysis_requirements_list names its current
-        one); the caller filters the rest."""
+        may read, each as it reads it (finance_requirements.requirements_version_view), and runs are read against the
+        latest of them as stored (as analysis_requirements_list names its current one); the caller filters the rest."""
         from foundry.result_semantics import declared_runs
 
         requirements = self._list("requirements")
+        shown = requirements
         if allowed is not None:
+            from foundry.finance_requirements import requirements_version_view
+
+            versions = {row.get("id"): row for row in requirements}
             requirements = [row for row in requirements if set((row.get("bindings") or {}).values()) <= set(allowed)]
+            drafts: dict = {}
+            shown = [requirements_version_view(self, row, allowed, versions=versions, drafts=drafts)
+                     for row in requirements]
         return {
             "schema_version": 1,
             "task_id": self.task.id,
@@ -534,7 +541,7 @@ class AnalysisStore:
                 self, self._list("runs"), requirements[-1] if requirements else None
             ),
             "drafts": self._list("drafts"),
-            "requirements": requirements,
+            "requirements": shown,
             "evidence_checks": self._list("evidence_checks"),
             "completions": self._list("completions"),
             "methods": self._methods(),
@@ -1095,7 +1102,8 @@ class AnalysisStore:
             raise FoundryError(REQUIREMENTS_UNAVAILABLE)
         return record
 
-    def draft_in_view(self, draft: dict, allowed: set[str] | None, *, readable_ids: set[str] | None = None) -> dict:
+    def draft_in_view(self, draft: dict, allowed: set[str] | None, *, readable_ids: set[str] | None = None,
+                      versions: dict | None = None) -> dict:
         """A stored draft as a reader whose snapshot ceiling is ``allowed`` reads it; None is the full view.
 
         Whoever saved the draft read its evidence over the files and runs they could read. Every reader reads
@@ -1108,8 +1116,10 @@ class AnalysisStore:
         what its labels rested on: a session reads it without labels, posture or freshness, the full view as
         saved. A session that may not read a revision's parent reads it as saved with no parent; one reading a
         check saved before completion policy 13 reads no engine run it may not read
-        (finance_requirements.requirements_in_view). ``readable_ids``, when given, are the drafts this reader
-        may read (draft_readable), so a listing need not read every parent again.
+        (finance_requirements.requirements_in_view); and every session reads what a check took from its requirements
+        version's lineage as its own check would have (finance_requirements.check_lineage_in_view). ``readable_ids``,
+        when given, are the drafts this reader may read (draft_readable), so a listing need not read every parent
+        again; ``versions``, the requirements versions a listing has read (finance_requirements._version_record).
         """
         from foundry.evidence_labels import EVIDENCE_FIELDS, evidence_in_view
 
@@ -1138,6 +1148,12 @@ class AnalysisStore:
                     return False
 
             draft = {**draft, **{key: requirements_in_view(draft[key], readable_run)
+                                 for key in ("explanation_check", "quality") if isinstance(draft.get(key), dict)}}
+        if allowed is not None:
+            from foundry.finance_requirements import check_lineage_in_view
+
+            versions = {} if versions is None else versions
+            draft = {**draft, **{key: check_lineage_in_view(self, draft[key], allowed, versions=versions)
                                  for key in ("explanation_check", "quality") if isinstance(draft.get(key), dict)}}
 
         def runs() -> dict[str, dict]:
@@ -1240,13 +1256,16 @@ class AnalysisStore:
         return self.completions_in_view([receipt], allowed, readable_ids=readable_ids)[0]
 
     def completions_in_view(self, receipts: list[dict], allowed: set[str] | None, *,
-                            readable_ids: set[str] | None = None) -> list[dict | None]:
-        """completion_in_view of each receipt, reading every draft and earlier receipt once."""
+                            readable_ids: set[str] | None = None, versions: dict | None = None) -> list[dict | None]:
+        """completion_in_view of each receipt, reading every draft and earlier receipt once. ``versions`` as for
+        draft_in_view."""
         if allowed is None:
             return list(receipts)
+        from foundry.finance_completion import receipt_lineage_in_view
         from foundry.finance_requirements import OWN_FILES_POLICY
 
         allowed = set(allowed)
+        versions = {} if versions is None else versions
         readable = self.completion_reader(allowed, readable_ids=readable_ids)
         chain: list[dict] | None = None
 
@@ -1268,6 +1287,8 @@ class AnalysisStore:
             except FoundryError:
                 views.append(None)
                 continue
+            # The verdict reads the requirements version's lineage as the draft's check reads it to the session.
+            receipt = receipt_lineage_in_view(self, receipt, draft, allowed, versions=versions)
             if chain is None:
                 chain = self._list("completions")
             earlier = [row for row in chain if receipt.get("chain_key") is not None

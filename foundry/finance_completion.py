@@ -48,6 +48,47 @@ def _dropped_hierarchy_action(item):
                         '本稿没有按它逐一作答，原始要求记为未完成；答复须如实说明。')}
 
 
+def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None):
+    """A receipt on ``draft`` as a reader whose snapshot ceiling is ``allowed`` reads what it took from the requirements
+    version's lineage; None is the manager, who reads it as stored. ``versions`` as for
+    finance_requirements._version_record.
+
+    The receipt was judged on the draft's check (record_completion), so it reads the way that check reads to the
+    reader (finance_requirements.check_lineage_in_view): a hierarchy_dimension_dropped action names only the levels
+    the check keeps, and none when it keeps none, and the original requirement reads as completed when the receipt is
+    complete and the check reads as completed. Its input key is the one record_completion would have filed over the
+    check as read, so the key covers only what the reader is shown.
+    """
+    from foundry.evidence_labels import EVIDENCE_FIELDS
+    from foundry.finance_requirements import check_lineage_in_view
+
+    check = draft.get('explanation_check') if isinstance(draft, dict) else None
+    view = check_lineage_in_view(analysis, check, allowed, versions=versions)
+    if view is check:
+        return receipt
+    requirements = view['requirements']
+    items = {item.get('id'): item for item in requirements.get('items') or [] if isinstance(item, dict)}
+    actions = []
+    for action in receipt.get('actions') or []:
+        if isinstance(action, dict) and action.get('code') == 'hierarchy_dimension_dropped':
+            item = items.get(action.get('requirement_item_id')) or {}
+            if not item.get('dropped_hierarchy'):
+                continue
+            if item['dropped_hierarchy'] != action.get('keys'):
+                action = _dropped_hierarchy_action(item)
+        actions.append(action)
+    completed = bool(receipt.get('original_requirements_completed')) or (
+        receipt.get('status') == 'complete' and bool(requirements.get('original_requirements_completed')))
+    shown = {**receipt, 'actions': actions, 'original_requirements_completed': completed}
+    if 'input_key' in receipt:
+        keyed = ({key: value for key, value in view.items() if key not in EVIDENCE_FIELDS}
+                 if isinstance(draft.get('evidence_basis'), dict) else view)
+        shown['input_key'] = _hash({'chain_key': receipt.get('chain_key'), 'draft_id': draft['id'],
+                                    'draft_content_hash': draft['content_hash'], 'quality': keyed,
+                                    'completion_policy_version': receipt.get('completion_policy_version')})
+    return shown
+
+
 def record_completion(analysis, draft, quality):
     """The receipt for one saved draft, or the one already filed for the same input.
 

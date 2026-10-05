@@ -329,12 +329,16 @@ def dispatch(args) -> bool:
                 if set((c.get("bindings") or {}).values()) <= allowed and (c.get("location") or {}).get("run_id") in run_ids
             ]
         listed = {d["id"] for d in result["drafts"]} if context.session_id else None
+        # The requirements versions the drafts' checks and their receipts read, each read once for the listing.
+        versions: dict = {}
         # A receipt reads the way its draft reads (AnalysisStore.completion_in_view).
         result["completions"] = [
-            receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context), readable_ids=listed)
+            receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context),
+                                                               readable_ids=listed, versions=versions)
             if receipt is not None
         ]
-        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed) for d in result["drafts"]]
+        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed, versions=versions)
+                            for d in result["drafts"]]
         result["context"] = {
             "session_id": context.session_id,
             "context_revision": context.context_revision,

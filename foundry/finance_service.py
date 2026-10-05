@@ -852,7 +852,13 @@ class FinanceStore:
             # (the panel seeds from it), so save drops it instead of refusing it as newly written.
             context_scopes = [scope for scope in (context.get("scopes") or {}).values() if isinstance(scope, dict)]
         self._authorize(spec.get("bindings", {}))
-        return save_requirements(self.analysis, spec, _context_scopes=context_scopes, _allowed=self.allowed)
+        saved = save_requirements(self.analysis, spec, _context_scopes=context_scopes, _allowed=self.allowed)
+        if self.allowed is None:
+            return saved
+        from foundry.finance_requirements import requirements_version_view
+
+        # A session reads the version it saved as its listing reads it (circle-select returns it too).
+        return requirements_version_view(self.analysis, saved, self.allowed)
 
     def analysis_requirements_list(self, spec):
         records = self.analysis._list("requirements")
@@ -860,6 +866,13 @@ class FinanceStore:
         if spec.get("context_id"):
             self._read("contexts", spec["context_id"])
             visible = [r for r in visible if r.get("context_id") == spec["context_id"]]
+        if self.allowed is not None:
+            from foundry.finance_requirements import requirements_version_view
+
+            # Each as the session reads it, reading every version and every draft a selection names once.
+            versions, drafts = {r.get("id"): r for r in records}, {}
+            visible = [requirements_version_view(self.analysis, r, self.allowed, versions=versions, drafts=drafts)
+                       for r in visible]
         return {"requirements": visible, "current": visible[-1] if visible else None}
 
     def save_completion_draft(self, operation_id, call_id, spec):
