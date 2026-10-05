@@ -319,16 +319,20 @@ def _text_cells(data: bytes, sheet: str) -> set[str]:
         book.close()
 
 
-def refreshed_snapshots(task: Any) -> dict[str, str]:
-    """Each snapshot a published source refresh replaced, with the snapshot that replaced it."""
+def refreshed_snapshots(task: Any) -> dict[str, set[str]]:
+    """Each snapshot a published source refresh replaced, with every snapshot that replaced it.
+
+    A session refreshes against the latest batch it may read (SourceRefreshService.allowed), so two published
+    batches can name the same prior: each reader counts the replacements it may read.
+    """
     from foundry.source_refresh import SourceRefreshService
 
-    return {
-        row["prior_snapshot_id"]: row["dataset_id"]
-        for row in SourceRefreshService(task).batches()
-        if row.get("publication_status") == "published"
-        and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]
-    }
+    replaced: dict[str, set[str]] = {}
+    for row in SourceRefreshService(task).batches():
+        if (row.get("publication_status") == "published"
+                and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]):
+            replaced.setdefault(row["prior_snapshot_id"], set()).add(row["dataset_id"])
+    return replaced
 
 
 def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None, *,
@@ -346,7 +350,7 @@ def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None
     def visible(dataset_id: Any) -> bool:
         return allowed is None or dataset_id in allowed
 
-    replaced = {prior for prior, newer in refreshed_snapshots(task).items() if visible(newer)}
+    replaced = {prior for prior, newers in refreshed_snapshots(task).items() if any(visible(newer) for newer in newers)}
     rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:

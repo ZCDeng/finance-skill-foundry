@@ -119,7 +119,8 @@ def _refresh_source(context, spec, actor=None):
         raise FoundryError("source scope requires source/tenant/ledger/organization/period/currency/cutoff fields") from exc
     if not isinstance(spec.get("path"), str) or not spec["path"].strip():
         raise FoundryError("source refresh requires an uploaded file path")
-    result = SourceRefreshService(context.task).refresh_file(
+    # A session files the refresh it would have filed from the snapshots it may read (SourceRefreshService.allowed).
+    result = SourceRefreshService(context.task, allowed=set(context.snapshot_ids) if context.session_id else None).refresh_file(
         _uploaded_path(context, spec["path"]), scope=source_scope,
         product=spec.get("product", "file"), version=spec.get("version", "export"),
         name=spec.get("name"), metadata=spec.get("metadata"),

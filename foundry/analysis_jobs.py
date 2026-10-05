@@ -344,6 +344,7 @@ def _worker(var_root: Path, task_id: str, job_id: str) -> None:
             run = AnalysisStore(jobs.task).run_script(
                 record["spec"], session_id=child, context_revision=1,
                 cancel_check=lambda: jobs.get(job_id)["cancel_requested"],
+                allowed=set(record["snapshot_ids"]),
             )
             status = "completed" if run["execution_status"] == "succeeded" else ("cancelled" if run.get("runner_status") == "cancelled" else "failed")
             # Result rows that break the contract: the run still completed, and the assistant reads what to fix here.

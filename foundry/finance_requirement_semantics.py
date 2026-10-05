@@ -53,10 +53,11 @@ def verified_requirement_fingerprint(analysis, record):
                            and record.get('semantic_basis') == computed['semantic_basis']) else None
 
 
-def capture_requirements(analysis, authorize=None):
-    """Capture at execution start so a concurrent revision cannot relabel a run."""
+def capture_requirements(analysis, authorize=None, *, allowed=None):
+    """Capture at execution start so a concurrent revision cannot relabel a run. A session (``allowed``, its snapshot
+    ceiling) captures the newest version it may read, as it reads its current one; the manager the latest."""
     from foundry.finance_requirements import latest_requirements
-    record = latest_requirements(analysis)
+    record = latest_requirements(analysis, allowed)
     if record and authorize is not None:
         try:
             authorize(record.get('bindings', {}))

@@ -157,8 +157,12 @@ class SourceTransport(Protocol):
 
 
 class SourceRefreshService:
-    def __init__(self, task: Task):
+    def __init__(self, task: Task, *, allowed: set[str] | None = None):
+        """``allowed`` is a session's snapshot ceiling (FinanceStore.allowed): a refresh it files compares with,
+        dedupes against and replaces only batches whose snapshot it may read, so it files what it would have
+        filed had the others never been published. The manager (None) reads every batch."""
         self.task = task
+        self.allowed = None if allowed is None else set(allowed)
         self.store = AnalysisStore(task)
         self.root = self.store._inside(self.store.root / "source_batches")
         self.checkpoint_root = self.store._inside(self.store.root / "source_checkpoints")
@@ -295,6 +299,9 @@ class SourceRefreshService:
             identity_policy="business_key",
         )
 
+    def _readable(self, row: dict[str, Any]) -> bool:
+        return self.allowed is None or row.get("dataset_id") in self.allowed
+
     def batches(self) -> list[dict[str, Any]]:
         return sorted(
             [self.store._read(path) for path in self.root.glob("*.json")]
@@ -389,6 +396,7 @@ class SourceRefreshService:
             and row.get("duplicate_of") is None
             and _record_identity(row) == source_identity
             and row.get("dataset_id")
+            and self._readable(row)
         ]
         return candidates[-1] if candidates else None
 
@@ -416,6 +424,7 @@ class SourceRefreshService:
             and row.get("source_kind") == source_kind
             and row.get("source_hash") == source_hash
             and row.get("dataset_id")
+            and self._readable(row)
         ]
         return candidates[-1] if candidates else None
 
@@ -435,6 +444,7 @@ class SourceRefreshService:
             and _record_identity(row) == source_identity
             and row.get("data_hash") == data_hash
             and row.get("dataset_id")
+            and self._readable(row)
         ]
         return candidates[-1] if candidates else None
 

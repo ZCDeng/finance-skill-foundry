@@ -137,15 +137,22 @@ def _assess_requirement_support(analysis, spec):
     return assess_requirement_support(analysis, spec)
 
 
-def latest_requirements(analysis):
-    records = analysis._list('requirements')
+def requirements_readable(record, allowed):
+    """Whether a reader with snapshot ceiling ``allowed`` (None: the manager) may read this requirements version."""
+    return allowed is None or set((record.get('bindings') or {}).values()) <= set(allowed)
+
+
+def latest_requirements(analysis, allowed=None):
+    """The task's current requirements version; for a session (``allowed``, its snapshot ceiling) the newest one it
+    may read, as analysis_requirements_list names its current one."""
+    records = [record for record in analysis._list('requirements') if requirements_readable(record, allowed)]
     return records[-1] if records else None
 
 
-def save_requirements(analysis, spec, *, _context_scopes=None):
+def save_requirements(analysis, spec, *, _context_scopes=None, _allowed=None):
     """`_context_scopes` are the scopes of the finance context the caller loaded for spec['context_id']
     (finance_service); a spec cannot supply them."""
-    prepared = prepare_requirements(analysis, spec, _context_scopes=_context_scopes)
+    prepared = prepare_requirements(analysis, spec, _context_scopes=_context_scopes, _allowed=_allowed)
     question, scope, bindings = prepared['question'], prepared['scope'], prepared['bindings']
     normalized, selection = prepared['items'], prepared['selection']
     # Read before taking the task lock: scanning workbook text is slow and only ever warns.
@@ -164,7 +171,7 @@ def save_requirements(analysis, spec, *, _context_scopes=None):
         return analysis._write_locked(analysis._object_path('requirements', record['id']), record)
 
 
-def prepare_requirements(analysis, spec, *, _context_scopes=None):
+def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None):
     """Validate and normalize a requirements spec without writing anything; raises what save would refuse.
 
     circle-select calls it before writing its child context, so a refused save leaves nothing behind.
@@ -248,11 +255,11 @@ def prepare_requirements(analysis, spec, *, _context_scopes=None):
         if grain_basis:
             normalized_item['grain_basis'] = grain_basis
         normalized.append(normalized_item)
-    normalized, carried_over = _drop_carried_over_hierarchy(analysis, spec.get('parent_id'), normalized)
+    normalized, carried_over = _drop_carried_over_hierarchy(analysis, spec.get('parent_id'), normalized, _allowed)
     hierarchy = {item['id']: _hierarchy_dimensions(item) for item in normalized if _hierarchy_dimensions(item)}
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
-    scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope, _context_scopes)
+    scope, scope_dropped = _scope_hierarchy(analysis, spec.get('parent_id'), scope, _context_scopes, _allowed)
     _version_change(analysis, spec, normalized)
     return {'question': question, 'scope': scope, 'items': normalized, 'bindings': bindings,
             'selection': selection, 'warnings': [*carried_over, *scope_dropped]}
@@ -283,16 +290,19 @@ def _without_hierarchy(item):
     return {**item, 'dimensions': {key: value for key, value in item.get('dimensions', {}).items() if key not in keys}}
 
 
-def _parent_record(analysis, parent_id):
+def _parent_record(analysis, parent_id, allowed=None):
+    """A version a session (``allowed``) may not read is read as a missing one: it neither shows nor changes what
+    the session saves."""
     if not parent_id:
         return None
     try:
-        return analysis._get('requirements', parent_id)
+        record = analysis._get('requirements', parent_id)
     except FoundryError:
         return None  # the version check under the task lock reports a missing parent
+    return record if requirements_readable(record, allowed) else None
 
 
-def _drop_carried_over_hierarchy(analysis, parent_id, items):
+def _drop_carried_over_hierarchy(analysis, parent_id, items, allowed=None):
     """Drop a hierarchy level an item carries over unchanged from its parent record (saved before phase 1),
     and record every legacy level the new version no longer has.
 
@@ -302,7 +312,7 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items):
     pruned (a null value) or the writer removed does not turn the untouched one into a new level. A key the
     writer adds or changes is still refused, and only it is named.
     """
-    parent = _parent_record(analysis, parent_id)
+    parent = _parent_record(analysis, parent_id, allowed)
     previous = {item.get('id'): item for item in (parent or {}).get('items') or [] if isinstance(item, dict)}
     if not any(_hierarchy_dimensions(item) for item in previous.values()):
         return items, []
@@ -325,9 +335,9 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items):
     return kept, warnings
 
 
-def _dropped_hierarchy(analysis, latest):
+def _dropped_hierarchy(analysis, latest, allowed=None):
     """{item id: levels} an earlier version of this requirement held for an item the latest version still
-    lists without them.
+    lists without them. For a session (``allowed``), a version it may not read ends the walk as a missing one.
 
     A save refuses every newly written level, so any level an earlier version held is a legacy one (PR #17),
     and a version without it asks for less than the user did: like a removed item, the original requirement
@@ -336,7 +346,7 @@ def _dropped_hierarchy(analysis, latest):
     """
     current = {item['id']: _hierarchy_dimensions(item) for item in latest.get('items') or [] if isinstance(item, dict)}
     dropped, seen = {}, {latest.get('id')}
-    record = _parent_record(analysis, latest.get('parent_id'))
+    record = _parent_record(analysis, latest.get('parent_id'), allowed)
     while record and record.get('id') not in seen:
         seen.add(record.get('id'))
         for item in record.get('items') or []:
@@ -345,7 +355,7 @@ def _dropped_hierarchy(analysis, latest):
             for key, value in _hierarchy_dimensions(item).items():
                 if value not in (None, '') and current[item['id']].get(key) != value:
                     dropped.setdefault(item['id'], {}).setdefault(key, value)
-        record = _parent_record(analysis, record.get('parent_id'))
+        record = _parent_record(analysis, record.get('parent_id'), allowed)
     return dropped
 
 
@@ -359,7 +369,7 @@ def _scope_levels(values):
             if str(key).strip().lower() in SCOPE_REFUSED_HIERARCHY_KEYS} if isinstance(values, dict) else {}
 
 
-def _earlier_scope_levels(analysis, parent_id):
+def _earlier_scope_levels(analysis, parent_id, allowed=None):
     """Every (key, value) hierarchy level held by the parent version or any version before it.
 
     A client that loaded a legacy record (the scope card loads once) may resend a level that an earlier save
@@ -368,12 +378,12 @@ def _earlier_scope_levels(analysis, parent_id):
     import json
 
     seen, held = set(), set()
-    record = _parent_record(analysis, parent_id)
+    record = _parent_record(analysis, parent_id, allowed)
     while record and record.get('id') not in seen:
         seen.add(record.get('id'))
         held.update((key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
                     for key, value in _scope_levels(record.get('scope')).items())
-        record = _parent_record(analysis, record.get('parent_id'))
+        record = _parent_record(analysis, record.get('parent_id'), allowed)
     return held
 
 
@@ -383,7 +393,7 @@ def _level_key(key, value):
     return key, json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
-def _scope_hierarchy(analysis, parent_id, scope, context_scopes=None):
+def _scope_hierarchy(analysis, parent_id, scope, context_scopes=None, allowed=None):
     """Refuse a hierarchy level newly written into scope, as for dimensions; drop and record one carried
     over from the parent version, resent after an earlier version dropped it, or seeded from the finance
     context the requirement is saved with (RequirementsPanel seeds its scope from the context's scope and
@@ -391,8 +401,8 @@ def _scope_hierarchy(analysis, parent_id, scope, context_scopes=None):
     import json
 
     written = _scope_levels(scope)
-    legacy = _scope_levels((_parent_record(analysis, parent_id) or {}).get('scope'))
-    earlier = _earlier_scope_levels(analysis, parent_id) if written else set()
+    legacy = _scope_levels((_parent_record(analysis, parent_id, allowed) or {}).get('scope'))
+    earlier = _earlier_scope_levels(analysis, parent_id, allowed) if written else set()
     held = {_level_key(key, value) for context_scope in context_scopes or () for key, value in _scope_levels(context_scope).items()}
     from_context = {key: value for key, value in written.items()
                     if _level_key(key, value) in held and _level_key(key, value) not in earlier}
@@ -2443,7 +2453,7 @@ def _requirement_fixups(analysis, item, latest, runs, checks, evidence, claimed)
     ])
 
 
-def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_report=None):
+def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_report=None, _allowed=None):
     latest = _requirements_record or latest_requirements(analysis)
     if not latest:
         return {'requirements_id': None, 'items': [], 'coverage': {'status': 'not_assessed'},
@@ -2485,7 +2495,7 @@ def check_requirements(analysis, spec, *, _requirements_record=None, _recipe_rep
     source_failures = _source_read_failures(spec.get('source_read_failures', []))
     environment = _evidence_environment(analysis, latest, runs)
     acceptances = _estimate_acceptances(analysis, latest)
-    dropped_hierarchy = _dropped_hierarchy(analysis, latest)
+    dropped_hierarchy = _dropped_hierarchy(analysis, latest, _allowed)
     items = []
     for item in latest['items']:
         locations = []
@@ -3834,8 +3844,9 @@ def requirements_in_view(check, readable):
     return view
 
 
-def augment_quality(analysis, spec, quality, *, _recipe_report=None):
-    requirements = check_requirements(analysis, spec, _recipe_report=_recipe_report)
+def augment_quality(analysis, spec, quality, *, _recipe_report=None, _allowed=None):
+    """``_allowed``, a session's snapshot ceiling, is what the session's own check may read (_dropped_hierarchy)."""
+    requirements = check_requirements(analysis, spec, _recipe_report=_recipe_report, _allowed=_allowed)
     from foundry.finance_requirement_support import with_input_gaps
     requirements = with_input_gaps(analysis, requirements)
     issues = list(quality.get('issues', []))

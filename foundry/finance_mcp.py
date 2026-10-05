@@ -364,7 +364,7 @@ class FinanceMcpServer:
         if spec.get("scenario_id"):
             context_ids.add(service._read("scenarios", spec["scenario_id"])["context_id"])
         if spec.get("parent_id") and tool == "analysis_requirements_save":
-            parent = analysis._get("requirements", spec["parent_id"])
+            parent = _requirements_parent(analysis, grant, spec["parent_id"])
             if parent.get("context_id"):
                 context_ids.add(parent["context_id"])
             else:
@@ -375,7 +375,8 @@ class FinanceMcpServer:
             if run_id:
                 context_ids.add(_run_finance_context(analysis, run_id))
         if spec.get("draft_id") and tool == "validate_explanation":
-            draft = _draft(analysis, spec["draft_id"])
+            # A draft the grant may not read fails as an unknown one does, before its runs say anything.
+            draft = service._named_draft(spec["draft_id"])
             for run_id in draft.get("run_ids", []):
                 context_ids.add(_run_finance_context(analysis, run_id))
         if spec.get("parent_id") and tool in {"save_explanation_draft", "validate_explanation"}:
@@ -744,11 +745,16 @@ def _run_finance_context(analysis: Any, run_id: str) -> str:
     return context_id
 
 
-def _draft(analysis: Any, draft_id: str) -> dict[str, Any]:
+def _requirements_parent(analysis: Any, grant: dict[str, Any], parent_id: str) -> dict[str, Any]:
+    """A requirements parent the grant may read; a missing one is refused exactly as one outside the grant."""
     try:
-        return analysis.get_draft(draft_id)
+        parent = analysis._get("requirements", _assert_id(parent_id))
     except FoundryError as exc:
-        raise McpRefused("finance draft is outside this grant") from exc
+        raise McpRefused("requirements parent is outside this grant") from exc
+    bindings = parent.get("bindings") or {}
+    if not isinstance(bindings, dict) or not set(bindings.values()) <= set(grant.get("snapshot_ids") or []):
+        raise McpRefused("requirements parent is outside this grant")
+    return parent
 
 
 def _context_ids_matching_scope(

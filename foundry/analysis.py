@@ -44,6 +44,8 @@ PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
 # One answer for a parent draft a session may not read and for one that does not exist, so it cannot tell them apart.
 PARENT_UNAVAILABLE = "parent draft is unavailable or outside this session context"
+# The same for a draft a call names by id (validate, review, circle-select).
+DRAFT_UNAVAILABLE = "draft is unavailable or outside this session context"
 # What a revision takes over from its parent when the spec leaves it out (save_draft copies it): what the parent's
 # author wrote or the server generated from the parent's files. (The runs and requirements version it takes are read
 # as its own.) A revision records which of these it took (`inherited_fields`), and one that took any rests on
@@ -539,7 +541,10 @@ class AnalysisStore:
         name: str,
         metadata: dict | None = None,
         allow_duplicate: bool = False,
+        allowed: set[str] | None = None,
     ) -> dict:
+        """File these bytes as a dataset. ``allowed``, a session's snapshot ceiling, keeps the earlier uploads it
+        may read for the same-bytes answer (_same_source); None is the manager, who is answered from every upload."""
         path = Path(path)
         _safe_text(name, "dataset name", required=True, maximum=200)
         if metadata is not None and not isinstance(metadata, dict):
@@ -559,7 +564,7 @@ class AnalysisStore:
             raise FoundryError(f"cannot read dataset source: {exc}") from exc
         source_hash = _hash_bytes(data)
         if not allow_duplicate:
-            existing = self._same_source(source_hash)
+            existing = self._same_source(source_hash, allowed)
             if existing is not None:
                 # The manager already has these bytes. Hand back the copy she has,
                 # marked as the same upload, rather than filing a second one she
@@ -603,14 +608,18 @@ class AnalysisStore:
             write_json_atomic(folder / "meta.json", record)
         return record
 
-    def _same_source(self, source_hash: str) -> dict | None:
-        """An earlier upload of exactly these bytes, if the task has one.
+    def _same_source(self, source_hash: str, allowed: set[str] | None = None) -> dict | None:
+        """An earlier upload of exactly these bytes, if the task has one the caller may read.
 
         A table derived from a confirmed structure carries its original's bytes
         too, so it is skipped here: it is the same file seen through a structure,
-        not a second upload of it.
+        not a second upload of it. An upload outside ``allowed`` (a session's
+        snapshot ceiling) is no part of what the session reads: its bytes are
+        filed as the session's own, exactly as when no one holds them.
         """
         for row in self.state()["datasets"]:
+            if allowed is not None and row["id"] not in allowed:
+                continue
             if row.get("source_hash") != source_hash:
                 continue
             if (row.get("transformation") or {}).get("structure"):
@@ -844,9 +853,13 @@ class AnalysisStore:
         *,
         session_id: str | None = None,
         context_revision: int | None = None,
+        allowed: set[str] | None = None,
     ) -> dict:
+        """Execute a saved revision. ``allowed`` is the executing session's snapshot ceiling (None: the manager): the
+        run is saved as the session would have saved it from those files alone, against the newest requirements
+        version it may read and compared only with earlier runs it may read."""
         from foundry.finance_requirement_semantics import capture_requirements
-        requirements_snapshot = capture_requirements(self)
+        requirements_snapshot = capture_requirements(self, allowed=allowed)
         analysis = self.get_analysis(analysis_id)
         requirements_snapshot = {
             **requirements_snapshot,
@@ -856,7 +869,7 @@ class AnalysisStore:
             from foundry.finance_service import FinanceStore
 
             return FinanceStore(
-                self.task, session_id=session_id, context_revision=context_revision
+                self.task, snapshot_ids=allowed, session_id=session_id, context_revision=context_revision
             ).run_revision(analysis)
         if analysis.get("engine") in {"python", "shell"}:
             return self.run_script(
@@ -875,6 +888,7 @@ class AnalysisStore:
                 session_id=session_id,
                 context_revision=context_revision,
                 analysis_id=analysis_id,
+                allowed=allowed,
             )
         datasets = {
             alias: self.read_dataset(dataset_id)
@@ -927,6 +941,9 @@ class AnalysisStore:
             for r in self._list("runs")
             if r.get("fingerprint") == fingerprint
             and r["execution_status"] == "succeeded"
+            # The fingerprint keys inputs by their data, not their snapshot: a run on a file outside the session that
+            # holds the same rows decides nothing the session saves.
+            and (allowed is None or set((r.get("bindings") or {}).values()) <= allowed)
         ]
         reproducibility = "unverified"
         if succeeded and not result["deterministic"]:
@@ -1261,7 +1278,8 @@ class AnalysisStore:
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
         with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
-        `_allowed` is the calling session's snapshot ceiling, so evidence freshness reads only what it may.
+        `_allowed` is the calling session's snapshot ceiling, so evidence freshness and the requirement check read only
+        what it may.
         `_inherited` is the INHERITED_FIELDS an internal caller took from the parent itself before composing `spec`.
         """
         if not isinstance(spec, dict):
@@ -1458,7 +1476,7 @@ class AnalysisStore:
             "requirements_id": requirements_id,
             "source_read_failures": source_read_failures,
             "evidence_recipes": evidence_recipes,
-        }, explanation_check, _recipe_report=evidence_report)
+        }, explanation_check, _recipe_report=evidence_report, _allowed=_allowed)
         consistency_rules = spec.get("consistency_rules", parent.get("consistency_rules", []))
         consistency_sources = spec.get("consistency_sources", parent.get("consistency_sources", {}))
 
@@ -2115,6 +2133,7 @@ class AnalysisStore:
         context_revision: int | None = None,
         cancel_check=None,
         analysis_id: str | None = None,
+        allowed: set[str] | None = None,
     ) -> dict:
         """Broker explicit snapshots to one isolated workspace and archive outputs.
 
@@ -2124,7 +2143,7 @@ class AnalysisStore:
         """
         from foundry.runner import run_script
         from foundry.finance_requirement_semantics import capture_requirements
-        requirements_snapshot = capture_requirements(self)
+        requirements_snapshot = capture_requirements(self, allowed=allowed)
 
         if not isinstance(spec, dict):
             raise FoundryError("script spec must be an object")

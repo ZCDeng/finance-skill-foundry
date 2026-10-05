@@ -600,6 +600,7 @@ class ExcelBridgeApp:
                 "binding_address": binding["address"],
                 "worksheet": binding["worksheet"],
             },
+            allowed=set(context.snapshot_ids),
         )
         state = self._read_state(context.task)
         workbook = state["workbooks"].setdefault(workbook_id, self._default_workbook(workbook_id))
