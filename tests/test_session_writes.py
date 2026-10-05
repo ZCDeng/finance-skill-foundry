@@ -1517,9 +1517,21 @@ def test_a_session_names_a_hidden_unknown_or_malformed_requirements_version_alik
                for tool in ("validate_explanation", "save_explanation_draft")},
         }
     assert {answer for row in answers.values() for answer in row.values()} == {REQUIREMENTS_UNAVAILABLE}
-    # A saved analysis pinned to a version the session may not read runs as one pinned to an unknown version would.
-    assert cli("analysis-run", "--analysis", pinned["id"]) == REQUIREMENTS_UNAVAILABLE
     assert _stored(named) == stored
+    # A saved analysis pinned to a version the session may not read is no id the session named: it runs as
+    # analysis-state reads it, naming no version (none the session may read came before), so pinned to the newest it
+    # may read, as one the manager saved naming none.
+    alone = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a}})
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in (pinned["id"], alone["id"])] == [
+        None, None]
+    ran = {}
+    for analysis in (pinned, alone):
+        code, run = _cli(capsys, named.var, "analysis-run", "--analysis", analysis["id"])
+        assert code == 0, run
+        ran[analysis["id"]] = {key: value for key, value in run.items() if key.startswith("requirements")}
+    assert ran[pinned["id"]] == ran[alone["id"]]
+    assert ran[alone["id"]]["requirements_id"] == named.manager.analysis_requirements_list({})["current"]["id"]
     # A save the manager made of the very same request is no retry the session may replay: refused as a fresh save.
     same = {"body": "收入。", "run_ids": [named.run], "requirements_id": named.hidden_requirements}
     named.manager.save_explanation_draft(dict(same))

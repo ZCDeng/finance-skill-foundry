@@ -529,13 +529,17 @@ class AnalysisStore:
     def _get(self, kind: str, object_id: str) -> dict:
         return self._read(self._object_path(kind, object_id))
 
-    def _list(self, kind: str) -> list[dict]:
+    def _list(self, kind: str, *, read: dict[Path, dict] | None = None) -> list[dict]:
+        """Every record of ``kind`` in commit order. ``read``, when given, maps each path already read and checked to
+        its record and takes the ones read now: records are immutable, so listing again with it reads only those
+        committed since."""
         root = self._inside(self.root / kind)
         paths = root.glob("*.json") if root.exists() else []
-        return sorted(
-            [self._read(path) for path in paths],
-            key=lambda r: (r.get("seq", 0), r["created_at"], r["id"]),
-        )
+        read = {} if read is None else read
+        for path in paths:
+            if path not in read:
+                read[path] = self._read(path)
+        return sorted(read.values(), key=lambda r: (r.get("seq", 0), r["created_at"], r["id"]))
 
     def _get_method(self, method_id: str) -> dict:
         _assert_id(method_id)
@@ -1067,7 +1071,9 @@ class AnalysisStore:
         version it may read and compared only with earlier runs it may read."""
         from foundry.finance_requirement_semantics import capture_requirements
         requirements_snapshot = capture_requirements(self, allowed=allowed)
-        analysis = self.get_analysis(analysis_id)
+        # A session runs a saved analysis as it reads it: one naming a version it may not read names the version
+        # analysis_in_view reads it as naming, or none.
+        analysis = self.analysis_in_view(self.get_analysis(analysis_id), allowed)
         requirements_snapshot = {
             **requirements_snapshot,
             "requirements_id": analysis.get("requirements_id") or requirements_snapshot.get("requirements_id"),
@@ -1144,11 +1150,14 @@ class AnalysisStore:
         succeeded = "error" not in result
         output_hash = _hash(result["result"]) if succeeded else None
         # The earlier runs are read under the lock the run is committed under: none lands between the two, so a reader
-        # comparing by commit order (run_in_view) reads what was saved.
+        # comparing by commit order (run_in_view) reads what was saved. Those committed already are read and checked
+        # first, outside it, so the lock waits only on the runs committed since, not the task's whole run history.
+        read: dict[Path, dict] = {}
+        self._list("runs", read=read)
         with exclusive(self.task.lock_path, timeout=10):
             previous = [
                 r
-                for r in self._list("runs")
+                for r in self._list("runs", read=read)
                 if r.get("fingerprint") == fingerprint
                 and r["execution_status"] == "succeeded"
                 # The fingerprint keys inputs by their data, not their snapshot: a run on a file outside the session
@@ -2611,7 +2620,8 @@ class AnalysisStore:
             missing_inputs=[],
         )
         if analysis_id:
-            revision = self.get_analysis(analysis_id)
+            # Pinned as run_analysis runs it: to the version the session reads the saved analysis as naming.
+            revision = self.analysis_in_view(self.get_analysis(analysis_id), allowed)
             requirements_id = revision.get("requirements_id")
             result_role = revision.get("result_role", "business")
             scope = revision.get("scope", {})

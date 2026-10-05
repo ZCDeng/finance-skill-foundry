@@ -180,6 +180,32 @@ def test_a_session_reads_an_analysis_naming_a_version_it_may_not_read_as_its_run
     assert [row["requirements_id"] for row in managed["analyses"] if row["id"] == saved["id"]] == [world.hidden["id"]]
 
 
+def test_a_session_runs_an_analysis_naming_a_version_it_may_not_read_as_it_reads_it(tmp_path, capsys, fake_runner):
+    """A saved SQL analysis or script naming Hv reads to the session as naming V, and runs so: pinned to V, its rows
+    declared against V, as where the manager named V outright."""
+    ran = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys)
+        pin = (world.hidden or world.visible)["id"]
+        as_manager = {"session": None, "task": world.task.id}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}, "requirements_id": pin}), **as_manager)
+        assert code == 0, saved
+        code, script = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+            {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", "requirements_id": pin}),
+            **as_manager)
+        assert code == 0, script
+        runs = {}
+        for way, analysis_id in (("sql", saved["id"]), ("script", script["analysis_id"])):
+            code, runs[way] = _cli(capsys, world.var, "analysis-run", "--analysis", analysis_id)
+            assert code == 0, runs[way]
+        assert [run["requirements_id"] for run in runs.values()] == [world.visible["id"]] * 2
+        assert runs["script"]["row_declarations"]["rows"][0]["estimate"] is False
+        assert _shows(runs, world.secrets) == []
+        ran.append(_named(world, {way: {key: run.get(key) for key in PINNED} for way, run in runs.items()}))
+    assert ran[0] == ran[1]
+
+
 def test_a_session_reads_a_draft_and_receipt_citing_such_a_run_as_it_would_have_saved_them(tmp_path, capsys, fake_runner):
     read = []
     for name, hidden in (("plain", False), ("hidden", True)):
@@ -566,8 +592,10 @@ def test_a_wider_session_reads_a_narrower_session_s_run_by_the_runs_it_may_read(
 
 
 def test_a_run_committed_while_a_session_runs_reads_after_the_session_s(tmp_path, capsys, monkeypatch):
-    """The session lists the earlier runs of its fingerprint and commits its run under one task lock: a run the
-    manager commits meanwhile comes after it, so the session reads its run as it saved it."""
+    """The session compares its run with the earlier runs of its fingerprint and commits it under one task lock: a run
+    the manager commits meanwhile comes after it, so the session reads its run as it saved it."""
+    import foundry.analysis as module
+
     var = tmp_path / "var"
     task = TaskStore(var).create(title="复现")
     analysis = AnalysisStore(task)
@@ -576,26 +604,72 @@ def test_a_run_committed_while_a_session_runs_reads_after_the_session_s(tmp_path
     managed = analysis.save_analysis({"question": "q", "sql": SQL, "bindings": {"t": b["id"]}})["id"]
     code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps({"question": "q", "sql": SQL,
                                                                           "bindings": {"t": b["id"]}}))
-    listed = AnalysisStore._list
+    compared = module._snapshot_reproducibility
     meanwhile: dict = {}
 
-    def listing(self, kind):
-        rows = listed(self, kind)
-        if kind == "runs" and not meanwhile:
-            # The manager runs once the session has listed the earlier runs; it waits for the session's commit.
+    def comparing(*args):
+        if not meanwhile:
+            # The manager runs once the session has compared its run with the earlier runs, before the session
+            # commits it; it waits for the session's commit.
             meanwhile["thread"] = threading.Thread(target=lambda: meanwhile.update(run=analysis.run_analysis(managed)))
             meanwhile["thread"].start()
             meanwhile["thread"].join(timeout=2)
-        return rows
+        return compared(*args)
 
-    monkeypatch.setattr(AnalysisStore, "_list", listing)
+    monkeypatch.setattr(module, "_snapshot_reproducibility", comparing)
     run = AnalysisStore(task).run_analysis(saved["id"], session_id="sess", allowed={b["id"]})
     meanwhile["thread"].join()
-    monkeypatch.setattr(AnalysisStore, "_list", listed)
+    monkeypatch.setattr(module, "_snapshot_reproducibility", compared)
     assert meanwhile["run"]["seq"] > run["seq"]
     code, state = _cli(capsys, var, "analysis-state")
     assert [row["reproducibility_status"] for row in state["runs"] if row["id"] == run["id"]] == [
         run["reproducibility_status"]] == ["unverified"]
+
+
+def test_a_run_reads_the_earlier_runs_before_it_takes_the_task_lock(tmp_path, monkeypatch):
+    """A task's runs can be many, each holding its result rows: a run reads and checks the earlier ones before it takes
+    the task lock, so no other writer on the task waits on them, and under the lock only a run committed since, which
+    it still compares with."""
+    import contextlib
+
+    import foundry.analysis as module
+
+    task = TaskStore(tmp_path / "var").create(title="复现")
+    analysis = AnalysisStore(task)
+    b = analysis.add_dataset(_csv(tmp_path / "b.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="总账")
+    managed = analysis.save_analysis({"question": "q", "sql": SQL, "bindings": {"t": b["id"]}})["id"]
+    earlier = [analysis.run_analysis(managed) for _ in range(3)]
+    lock, read = module.exclusive, AnalysisStore._read
+    held, meanwhile, reads = [], [], []
+
+    @contextlib.contextmanager
+    def exclusive(path, **kwargs):
+        if not meanwhile:
+            # Once the run has read the earlier runs and before it takes the lock, a run of its fingerprint that gave
+            # another output is committed.
+            meanwhile.append(None)
+            fields = {key: value for key, value in earlier[0].items()
+                      if key not in ("id", "task_id", "schema_version", "created_at", "seq", "_integrity_hash")}
+            record = _new(task, **{**fields, "output_hash": "0" * 64})
+            meanwhile[0] = analysis._write(analysis._object_path("runs", record["id"]), record)
+        with lock(path, **kwargs):
+            held.append(path)
+            try:
+                yield
+            finally:
+                held.pop()
+
+    def reading(self, path):
+        if path.parent.name == "runs":
+            reads.append((bool(held), path.stem))
+        return read(self, path)
+
+    monkeypatch.setattr(module, "exclusive", exclusive)
+    monkeypatch.setattr(AnalysisStore, "_read", reading)
+    run = analysis.run_analysis(managed)
+    assert sorted(stem for locked, stem in reads if not locked) == sorted(row["id"] for row in earlier)
+    assert [stem for locked, stem in reads if locked] == [meanwhile[0]["id"]]
+    assert run["seq"] > meanwhile[0]["seq"] and run["reproducibility_status"] == "non_reproducible"
 
 
 def test_a_session_reads_a_revision_of_a_marked_document_as_saved_with_nothing_hidden(tmp_path, capsys):

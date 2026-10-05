@@ -417,7 +417,8 @@ def dispatch(args) -> bool:
         result = service.save_analysis(spec)
     elif args.cmd == "analysis-run":
         analysis = _named_analysis(context, service, args.analysis)
-        _bound_requirements(context, service, analysis)
+        # A session runs the analysis as analysis-state reads it (analysis_in_view): pinned to the version it reads.
+        _bound_requirements(context, service, service.analysis_in_view(analysis, _ceiling(context)))
         result = service.run_analysis(
             args.analysis,
             session_id=context.session_id,
