@@ -44,9 +44,12 @@ PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
 # One answer for a parent draft a session may not read and for one that does not exist, so it cannot tell them apart.
 PARENT_UNAVAILABLE = "parent draft is unavailable or outside this session context"
-# What a revision may keep of its parent's text (save_draft copies it when the spec leaves it out): the body, the
-# generated evidence appendix and the notes written from the parent's files.
-INHERITED_TEXT = ("body", "document", "body_template", "evidence_appendix", "source_read_failures", "limitations")
+# What a revision may take over from its parent when the spec leaves it out (save_draft copies it): text written or
+# generated from the parent's files. A revision records which of these it took (`inherited_text`), and one that took
+# any rests on everything its parent rests on (AnalysisStore.draft_snapshots).
+INHERITED_TEXT = ("title", "body", "claims", "limitations", "source_read_failures", "evidence_appendix",
+                  "evidence_appendix_meta")
+DEFAULT_DRAFT_TITLE = "分析报告"
 # What a session reads of a completion receipt whose messages or fixups name a run outside it: the verdict.
 COMPLETION_VERDICT = (
     "id", "task_id", "schema_version", "created_at", "seq", "draft_id", "draft_content_hash",
@@ -222,6 +225,32 @@ def _receipt_runs(receipt: dict) -> set[str]:
             runs |= {row["run_id"] for row in fixup.get("runs") or []
                      if isinstance(row, dict) and isinstance(row.get("run_id"), str)}
     return runs
+
+
+def _rests_on_parent(draft: dict) -> bool:
+    """Whether a revision took any of its parent's text (INHERITED_TEXT). One saved before revisions recorded what they
+    took cannot tell, so it is read as having taken it."""
+    inherited = draft.get("inherited_text")
+    return bool(draft.get("parent_id")) and (inherited is None or bool(inherited))
+
+
+def _inherited_text(spec: dict, parent: dict) -> set[str]:
+    """The INHERITED_TEXT a revision saved from ``spec`` takes from ``parent``: what the spec leaves out and the parent
+    carries. A parent's default title, or empty text, is what a draft saved with no parent carries too."""
+    if not parent:
+        return set()
+    inherited = set()
+    for key in INHERITED_TEXT:
+        if key == "body":
+            # The body goes with the document it is projected from.
+            taken = spec.get("document") is None and "body" not in spec and (
+                parent.get("document") is not None or bool(parent.get("body")))
+        else:
+            taken = key not in spec and parent.get(key) not in (None, "", [], {}) and not (
+                key == "title" and parent[key] == DEFAULT_DRAFT_TITLE)
+        if taken:
+            inherited.add(key)
+    return inherited
 
 
 def _engine_runs(draft: dict) -> set[str]:
@@ -930,54 +959,76 @@ class AnalysisStore:
     def get_draft(self, draft_id: str) -> dict:
         return self._get("drafts", draft_id)
 
-    def draft_snapshots(self, draft: dict) -> set[str]:
+    def draft_snapshots(self, draft: dict, *, cache: dict[str, frozenset[str]] | None = None) -> set[str]:
         """Every snapshot a saved draft rests on: its runs and claims, its evidence recipes and consistency
-        sources, the requirements versions it was pinned to and checked against, and, for a revision that kept
-        any of its parent's text (INHERITED_TEXT), everything the parent rests on: that text was written or
+        sources, the requirements versions it was pinned to and checked against, and, for a revision that took
+        any of its parent's text (_rests_on_parent), everything the parent rests on: that text was written or
         generated from the parent's files. A session may read the draft only if it may read all of them; a run or
-        record that no longer reads raises."""
+        record that no longer reads raises. ``cache`` (draft id to its snapshots), when given, is shared by the
+        drafts of one listing, so each draft of a revision chain is read once."""
         from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
 
-        snapshots: set[str] = set()
-        read: set[str] = set()
+        read: dict[Any, frozenset[str]] = {}
 
-        def run(run_id: Any) -> None:
-            if isinstance(run_id, str) and run_id in read:
-                return
-            snapshots.update((self.get_run(run_id).get("bindings") or {}).values())
-            read.add(run_id)
+        def run(run_id: Any) -> frozenset[str]:
+            if not (isinstance(run_id, str) and run_id in read):
+                read[run_id] = frozenset((self.get_run(run_id).get("bindings") or {}).values())
+            return read[run_id]
 
-        for run_id in draft.get("run_ids") or []:
-            run(run_id)
-        for claim in draft.get("claims") or []:
-            if isinstance(claim, dict):
-                if claim.get("dataset_id"):
-                    snapshots.add(claim["dataset_id"])
-                if claim.get("run_id"):
-                    run(claim["run_id"])
-        recipes = draft.get("evidence_recipes") or []
-        snapshots |= recipe_dataset_ids(recipes) | consistency_dataset_ids(draft.get("consistency_sources") or {})
-        for recipe in recipes:
-            claim = recipe.get("claim") if isinstance(recipe, dict) else None
-            if isinstance(claim, dict) and claim.get("run_id"):
-                run(claim["run_id"])
-        checked = [check["requirements"].get("requirements_id") for check in (draft.get("explanation_check"), draft.get("quality"))
-                   if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
-        for requirements_id in dict.fromkeys([draft.get("requirements_id"), *checked]):
-            if requirements_id:
-                snapshots.update((self._get("requirements", requirements_id).get("bindings") or {}).values())
-        if draft.get("parent_id"):
-            parent = self.get_draft(draft["parent_id"])
-            if any(draft.get(key) not in (None, "", [], {}) and draft.get(key) == parent.get(key) for key in INHERITED_TEXT):
-                snapshots |= self.draft_snapshots(parent)
-        return snapshots
+        def own(record: dict) -> set[str]:
+            snapshots: set[str] = set()
+            for run_id in record.get("run_ids") or []:
+                snapshots |= run(run_id)
+            for claim in record.get("claims") or []:
+                if isinstance(claim, dict):
+                    if claim.get("dataset_id"):
+                        snapshots.add(claim["dataset_id"])
+                    if claim.get("run_id"):
+                        snapshots |= run(claim["run_id"])
+            recipes = record.get("evidence_recipes") or []
+            snapshots |= recipe_dataset_ids(recipes) | consistency_dataset_ids(record.get("consistency_sources") or {})
+            for recipe in recipes:
+                claim = recipe.get("claim") if isinstance(recipe, dict) else None
+                if isinstance(claim, dict) and claim.get("run_id"):
+                    snapshots |= run(claim["run_id"])
+            checked = [check["requirements"].get("requirements_id")
+                       for check in (record.get("explanation_check"), record.get("quality"))
+                       if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
+            for requirements_id in dict.fromkeys([record.get("requirements_id"), *checked]):
+                if requirements_id:
+                    snapshots.update((self._get("requirements", requirements_id).get("bindings") or {}).values())
+            return snapshots
 
-    def draft_readable(self, draft: dict, allowed: set[str] | None) -> bool:
-        """Whether a reader whose snapshot ceiling is ``allowed`` (None: the manager) may read a saved draft."""
+        # Up the chain while each revision rests on its parent, then back down, each draft's own snapshots added once.
+        chain: list[dict] = []
+        seen: set[Any] = {draft.get("id")}
+        total: set[str] = set()
+        current = draft
+        while True:
+            if cache is not None and current.get("id") in cache:
+                total = set(cache[current["id"]])
+                break
+            chain.append(current)
+            if not _rests_on_parent(current):
+                break
+            if current["parent_id"] in seen:
+                raise FoundryError("draft revision chain is invalid")
+            seen.add(current["parent_id"])
+            current = self.get_draft(current["parent_id"])
+        for record in reversed(chain):
+            total |= own(record)
+            if cache is not None and isinstance(record.get("id"), str):
+                cache[record["id"]] = frozenset(total)
+        return total
+
+    def draft_readable(self, draft: dict, allowed: set[str] | None, *,
+                       cache: dict[str, frozenset[str]] | None = None) -> bool:
+        """Whether a reader whose snapshot ceiling is ``allowed`` (None: the manager) may read a saved draft.
+        ``cache`` as for draft_snapshots."""
         if allowed is None:
             return True
         try:
-            return self.draft_snapshots(draft) <= set(allowed)
+            return self.draft_snapshots(draft, cache=cache) <= set(allowed)
         except FoundryError:
             return False
 
@@ -1055,10 +1106,12 @@ class AnalysisStore:
                 continue
             if fields is not None:
                 views[key] = {**check, **fields}
+        # What a revision took from its parent decides who may read it, and is no part of what they read.
+        shown = {key: value for key, value in draft.items() if key != "inherited_text"}
         if allowed is None and not views:
-            return draft
+            return shown
         hidden = {"_integrity_hash"} if allowed is None else {"evidence_basis", "_integrity_hash"}
-        return {**{key: value for key, value in draft.items() if key not in hidden}, **views}
+        return {**{key: value for key, value in shown.items() if key not in hidden}, **views}
 
     def completion_reader(self, allowed: set[str], *, readable_ids: set[str] | None = None) -> Callable[[dict], bool]:
         """Whether a session whose snapshot ceiling is ``allowed`` may read a completion receipt at all, as a test that
@@ -1186,12 +1239,14 @@ class AnalysisStore:
                 sources[record["id"]] = self._report_source_public(record)
         return sources
 
-    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None) -> dict:
+    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None,
+                   _inherited: set[str] | frozenset[str] = frozenset()) -> dict:
         """Save an immutable draft version.
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
         with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
         `_allowed` is the calling session's snapshot ceiling, so evidence freshness reads only what it may.
+        `_inherited` is the INHERITED_TEXT an internal caller took from the parent itself before composing `spec`.
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
@@ -1204,8 +1259,9 @@ class AnalysisStore:
             if current and not set((current.get("bindings") or {}).values()) <= set(_allowed):
                 raise FoundryError("snapshots are outside this session context; use analysis-refresh to include task datasets")
         parent = self.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
+        inherited_text = sorted(_inherited_text(spec, parent) | set(_inherited)) if parent else None
         title = _safe_text(
-            spec.get("title", parent.get("title", "分析报告")),
+            spec.get("title", parent.get("title", DEFAULT_DRAFT_TITLE)),
             "draft title",
             required=True,
             maximum=1000,
@@ -1468,6 +1524,8 @@ class AnalysisStore:
             # The completion policy this check was computed under; a replay never reuses an older one.
             check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
+            # What this revision took from its parent, so it is read as resting on the parent's files (draft_snapshots).
+            **({"inherited_text": inherited_text} if inherited_text is not None else {}),
             execution_status=execution_status,
             reproducibility_status=reproducibility,
             review_status=review,

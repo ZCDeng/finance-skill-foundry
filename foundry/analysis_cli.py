@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore
+from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_text
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -143,9 +143,20 @@ def _bound(context, bindings):
             )
 
 
-def _bound_draft(context, service, draft):
-    """Report presentation cannot widen a session's source permissions (AnalysisStore.draft_snapshots)."""
-    _bound(context, {f"source{index}": dataset_id for index, dataset_id in enumerate(sorted(service.draft_snapshots(draft)))})
+def _bound_draft(context, service, draft, cache=None):
+    """Report presentation cannot widen a session's source permissions (AnalysisStore.draft_snapshots; ``cache`` as
+    there). The manager reads a draft whose own runs and records read."""
+    if context.session_id:
+        _bound(context, {f"source{index}": dataset_id
+                         for index, dataset_id in enumerate(sorted(service.draft_snapshots(draft, cache=cache)))})
+        return
+    for run_id in draft.get("run_ids", []):
+        service.get_run(run_id)
+    for claim in draft.get("claims", []):
+        if isinstance(claim, dict) and claim.get("run_id"):
+            service.get_run(claim["run_id"])
+    _bound_evidence(context, service, draft)
+    _bound_requirements(context, service, draft)
 
 
 def _parent_draft(context, service, parent_id):
@@ -184,9 +195,9 @@ def _ceiling(context):
     return set(context.snapshot_ids) if context.session_id else None
 
 
-def _draft_visible(context, service, draft):
+def _draft_visible(context, service, draft, cache=None):
     try:
-        _bound_draft(context, service, draft)
+        _bound_draft(context, service, draft, cache)
     except FoundryError:
         return False
     return True
@@ -275,9 +286,10 @@ def dispatch(args) -> bool:
                 r for r in result["runs"] if set(r["bindings"].values()) <= allowed
             ]
             run_ids = {r["id"] for r in result["runs"]}
+            read: dict = {}
             result["drafts"] = [
                 d for d in result["drafts"]
-                if set(d["run_ids"]) <= run_ids and _draft_visible(context, service, d)
+                if set(d["run_ids"]) <= run_ids and _draft_visible(context, service, d, read)
             ]
             result["evidence_checks"] = [
                 c for c in result["evidence_checks"]
@@ -371,6 +383,8 @@ def dispatch(args) -> bool:
         _bound_requirements(context, service, spec)
         from foundry.report_visuals import materialize_document
 
+        # A revision that takes its parent's document takes its prose (save_draft sees the document in the spec).
+        inherited = _inherited_text(spec, parent) & {"body"}
         visual_document = spec.get("document")
         if visual_document is None and "body" not in spec:
             visual_document = parent.get("document")
@@ -389,8 +403,12 @@ def dispatch(args) -> bool:
         for claim in [*parent.get("claims", []), *spec.get("claims", [])]:
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 _bound(context, {"source": claim["dataset_id"]})
+            if context.session_id and isinstance(claim, dict) and claim.get("run_id"):
+                # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
+                _bound(context, service.get_run(claim["run_id"])["bindings"])
         # Evidence freshness reads only the files this session may read, as the finance draft path does.
-        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context)), _ceiling(context))
+        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited),
+                                       _ceiling(context))
     elif args.cmd == "analysis-export":
         draft = service.get_draft(args.draft)
         _bound_draft(context, service, draft)

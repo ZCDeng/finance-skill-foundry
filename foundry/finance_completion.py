@@ -22,9 +22,9 @@ MAX_REPAIRS = 2
 # 12: review round 9 filters rows on dimensions named level/breakdown/group_by/hierarchy again (only drilldown is
 #     a hierarchy level), keeps the original requirement incomplete when a version dropped a legacy level, and
 #     compares a finance run converted with policies.target_unit in the unit the engine wrote.
-# 13: a requirement reads only the runs the draft cites, runs on no file but the requirement's and the cited runs'
-#     files, and finance contexts on the requirement's files alone: one that also read other files is neither named
-#     nor counted (finance_requirements._within_files), so the check reads the same for every reader of the draft.
+# 13: a requirement counts only the runs the draft cites and runs on no file but the requirement's and the cited
+#     runs' files: one that also read other files is neither named nor counted (finance_requirements._within_files),
+#     so the check reads the same for every reader of the draft.
 COMPLETION_POLICY_VERSION = 13
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}

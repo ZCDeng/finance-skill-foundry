@@ -7,7 +7,7 @@ import re
 from decimal import localcontext
 from time import perf_counter
 
-from foundry.analysis import PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _hash, _hash_bytes, _new, _safe_text
+from foundry.analysis import PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _hash, _hash_bytes, _inherited_text, _new, _safe_text
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -829,6 +829,9 @@ class FinanceStore:
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
+            if isinstance(claim, dict) and claim.get("run_id"):
+                # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
         for run_id in spec.get("run_ids", []):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
         self._parent_draft(spec.get("parent_id"))
@@ -845,7 +848,7 @@ class FinanceStore:
                                           if row.get("completion_request_key") == key], attempt)
             if previous:
                 self._authorize_draft(previous)
-                receipt = self._readable_receipt(
+                receipt = self._settled_receipt(
                     self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
                     record_completion(self.analysis, previous, previous["explanation_check"]))
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
@@ -889,7 +892,7 @@ class FinanceStore:
                 })
                 raise
             # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
-            receipt = self._readable_receipt(result["completion"])
+            receipt = self._settled_receipt(result["completion"])
             operation = operations.settle(operation_id, attempt["revision"], result, receipt)
             return {**result, "completion": receipt, "completion_operation": operation}
 
@@ -967,11 +970,13 @@ class FinanceStore:
             return {**result, "completion_operation": settled}
 
     def _operation_receipt(self, operation, receipt):
-        """A receipt as the session that owns a completion operation reads it, which its operation settles on; the
-        receipt as stored when that session may not read it at all."""
-        ceiling = operation.get("snapshot_ids")
-        if ceiling is None:
+        """A receipt as the session that owns a completion operation now reads it, which its operation settles on; the
+        receipt as stored when that session may not read it at all. A session's files only ever widen, so it reads by
+        its current ones, and by those it began with when it is no longer registered."""
+        if operation.get("snapshot_ids") is None:
             return receipt
+        owner = next((row for row in self.task.sessions() if row.get("session_id") == operation.get("session_id")), {})
+        ceiling = owner.get("snapshot_ids") if isinstance(owner.get("snapshot_ids"), list) else operation["snapshot_ids"]
         view = self.analysis.completion_in_view(receipt, set(ceiling))
         return receipt if view is None else view
 
@@ -1026,6 +1031,9 @@ class FinanceStore:
             raise FoundryError("run_ids must be an array")
         from foundry.report_visuals import materialize_document
 
+        # The parent's prose and claims this revision takes over before save_draft sees the spec (the appendix and the
+        # read failures are composed again from this revision's own runs).
+        inherited = _inherited_text(spec, parent) & {"body", "claims"}
         visual_claims = []
         visual_document = spec.get("document")
         if visual_document is None and "body" not in spec:
@@ -1089,6 +1097,9 @@ class FinanceStore:
             claim = dict(claim)
             if claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
+            if claim.get("run_id") and claim.get("basis") != "calculation" and self.allowed is not None:
+                # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
             if claim.get("basis") == "calculation" and claim.get("run_id"):
                 run = self.analysis.get_run(claim["run_id"])
                 self._authorize(run["bindings"])
@@ -1162,7 +1173,8 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed,
+                                         _inherited=inherited)
 
         from foundry.finance_completion import record_completion
 
@@ -1177,6 +1189,13 @@ class FinanceStore:
     def _readable_receipt(self, receipt):
         """A completion receipt as this store's session reads it (AnalysisStore.completion_in_view)."""
         return self.analysis.completion_in_view(receipt, self.allowed)
+
+    def _settled_receipt(self, receipt):
+        """The receipt this store's session settles its own completion operation on: as it reads it. Its saves cite only
+        what it may read, so it reads every receipt of its own; the receipt as stored if one ever does not, so the
+        operation never stops unsettled."""
+        view = self._readable_receipt(receipt)
+        return receipt if view is None else view
 
     def prepare_explanation(self, spec):
         if not isinstance(spec, dict):
@@ -1860,7 +1879,8 @@ class FinanceStore:
         drafts = sorted((row for row in state.get("drafts") or [] if row.get("publication_status") != "archived"),
                         key=lambda row: row.get("seq", 0), reverse=True)
         # The newest draft this reader may read (the manager: the newest), as this reader reads it.
-        draft = next((row for row in drafts if self.analysis.draft_readable(row, self.allowed)), None)
+        read: dict = {}
+        draft = next((row for row in drafts if self.analysis.draft_readable(row, self.allowed, cache=read)), None)
         runs = [row for row in state.get("runs") or [] if self.allowed is None or set((row.get("bindings") or {}).values()) <= self.allowed]
         readiness = self.finance_readiness({})
         organizations = [row for row in readiness.get("datasets") or [] if (row.get("scope") or {}).get("organization")]

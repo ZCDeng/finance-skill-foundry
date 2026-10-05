@@ -573,10 +573,11 @@ def _bound_files(bindings):
 
 
 def _within_files(files, bindings):
-    """A run or context that reads no file outside ``files``: the requirement's files, and for a draft's check the
-    files of the runs it cites too. Only such a record, or a run the draft cites, is read for a requirement; one
-    that also read other files is neither named nor counted, so the check reads the same for every reader that
-    may read the draft, and names nothing outside what that reader may read."""
+    """A run that reads no file outside ``files``: the requirement's files and the files of the runs a draft cites.
+    Only such a run, or a run the draft cites, is counted for a requirement; one that also read other files is
+    neither named nor counted, so the check reads the same for every reader that may read the draft, and names
+    nothing outside what that reader may read. Which evidence paths are open (_evidence_environment) names no run
+    or context, and is read from every one on the requirement's files."""
     return bool(files) and isinstance(bindings, dict) and set(bindings.values()) <= files
 
 
@@ -2948,8 +2949,7 @@ def _evidence_environment(analysis, latest, runs=None):
     dataset_ids = [value for value in bindings.values() if isinstance(value, str)]
     if runs is None:
         try:
-            runs = {run['id']: run for run in analysis._list('runs') if run.get('execution_status') == 'succeeded'
-                    and _within_files(_bound_files(bindings), run.get('bindings'))}
+            runs = {run['id']: run for run in analysis._list('runs') if run.get('execution_status') == 'succeeded'}
         except FoundryError:
             runs = {}
     # Only a run on the requirement's own bindings is ever counted (_bindings_match), so only such a run
@@ -2962,8 +2962,7 @@ def _evidence_environment(analysis, latest, runs=None):
 
         store = FinanceStore(analysis.task)
         contexts = [context for context in store._list('contexts')
-                    if _within_files(_bound_files(bindings), context.get('bindings'))
-                    and _bindings_match(bindings, context.get('bindings') or {})]
+                    if _bindings_match(bindings, context.get('bindings') or {})]
     except (FoundryError, OSError, ValueError, KeyError, TypeError):
         store = None
     workbooks, tables, rowless, readable, accounts, amount_columns = [], [], [], [], set(), {}
@@ -3782,7 +3781,7 @@ def _estimate_formula(evidence):
     return f'{dependent} × ({factor})' if factor else dependent
 
 
-# The completion policy from which a requirement reads only cited runs and records on its own files.
+# The completion policy from which a requirement counts only cited runs and runs on its own and the cited runs' files.
 OWN_FILES_POLICY = 13
 
 

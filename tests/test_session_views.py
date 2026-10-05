@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from foundry.analysis import PARENT_UNAVAILABLE, AnalysisStore
+from foundry.analysis import PARENT_UNAVAILABLE, AnalysisStore, _hash
 from foundry.cli import main
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
@@ -116,7 +116,10 @@ def test_a_session_reads_a_revision_without_a_parent_it_may_not_read(revision, c
     code, managed = _cli(capsys, revision.var, "report-draft-read", "--draft", revision.child["id"],
                          session=None, task=revision.task.id)
     assert code == 0
-    assert managed == revision.analysis.get_draft(revision.child["id"])
+    stored = revision.analysis.get_draft(revision.child["id"])
+    # It wrote its own text, so it rests on its own files only; the record of that is no part of what anyone reads.
+    assert stored["inherited_text"] == []
+    assert managed == {key: value for key, value in stored.items() if key != "inherited_text"}
     assert managed["parent_id"] == revision.parent["id"]
 
 
@@ -191,8 +194,8 @@ def test_a_context_grant_answers_a_hidden_parent_as_an_unknown_one(revision):
                                                 {"context_id": granted, "parent_id": revision.child["id"]})
 
 
-def test_a_revision_that_kept_its_parent_s_generated_appendix_rests_on_the_parent(revision, capsys):
-    manager = FinanceStore(revision.task)
+def _hidden_metric_run(revision, manager):
+    """A finance run on two ledgers outside the session, whose generated appendix shows 987,654."""
     hidden = {}
     for scenario, amounts in (("actual", [987654, 70, 20]), ("budget", [100, 60, 15])):
         hidden[scenario] = revision.analysis.add_dataset(_ledger(revision.var.parent / f"{scenario}.json", [
@@ -202,22 +205,140 @@ def test_a_revision_that_kept_its_parent_s_generated_appendix_rests_on_the_paren
     context = manager.save_context({"bindings": hidden, "scopes": {alias: {
         "ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "万元", "scenario": alias}
         for alias in hidden}})
-    run = manager.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
-    parent = manager.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
-    assert "987,654" in parent["evidence_appendix"]
-    # Edited in the desktop with a new body and runs: the generated appendix stays the parent's.
-    spec = {"parent_id": parent["id"], "title": "C", "body": "收入说明（修订）。", "run_ids": [revision.ra["id"]], "claims": []}
-    code, child = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False),
-                       session=None, task=revision.task.id)
-    assert code == 0 and child["evidence_appendix"] == parent["evidence_appendix"]
+    return manager.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+
+
+def _document(text: str) -> dict:
+    return {"schema_version": 1, "template_version": "annual-v1",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}
+
+
+def _unread(revision, capsys, draft_id: str) -> None:
+    """The session neither lists the draft nor reads it, and nothing it lists shows the parent's secrets."""
     code, state = _cli(capsys, revision.var, "analysis-state")
-    assert child["id"] not in [draft["id"] for draft in state["drafts"]] and "987,654" not in json.dumps(state, ensure_ascii=False)
-    assert _cli(capsys, revision.var, "report-draft-read", "--draft", child["id"])[0] != 0
-    # A revision with text of its own reads with no parent.
-    code, own = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(
-        {**spec, "evidence_appendix": "", "evidence_appendix_meta": {}}, ensure_ascii=False), session=None, task=revision.task.id)
-    code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", own["id"])
-    assert code == 0 and read["parent_id"] is None and "987,654" not in json.dumps(read, ensure_ascii=False)
+    assert code == 0 and draft_id not in [draft["id"] for draft in state["drafts"]]
+    assert _shows(state, ["987,654", SECRET]) == []
+    assert _cli(capsys, revision.var, "report-draft-read", "--draft", draft_id)[0] != 0
+
+
+def test_a_revision_that_took_its_parent_s_text_rests_on_the_parent(revision, capsys):
+    manager = FinanceStore(revision.task)
+    run = _hidden_metric_run(revision, manager)
+    parent = manager.save_explanation_draft({"title": f"薪酬 {SECRET} 专项", "body": "控制合计见计算依据。",
+                                             "run_ids": [run["id"]]})
+    assert "987,654" in parent["evidence_appendix"] and parent["evidence_appendix_meta"]
+
+    def cli_revision(**fields):
+        spec = {"parent_id": parent["id"], "title": "C", "body": "收入说明（修订）。", "run_ids": [revision.ra["id"]],
+                "claims": [], **fields}
+        code, child = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False),
+                           session=None, task=revision.task.id)
+        assert code == 0
+        return child
+
+    # Edited in the desktop with a new body and runs: the generated appendix stays the parent's.
+    kept = cli_revision()
+    assert kept["evidence_appendix"] == parent["evidence_appendix"]
+    _unread(revision, capsys, kept["id"])
+    # An emptied appendix whose digest stays the parent's.
+    meta = cli_revision(evidence_appendix="")
+    assert meta["evidence_appendix_meta"] == parent["evidence_appendix_meta"]
+    _unread(revision, capsys, meta["id"])
+    # Saved through the finance tools: the parent's title, or its prose (as text or as a document), taken over.
+    titled = manager.save_explanation_draft({"parent_id": parent["id"], "body": "收入说明（修订）。",
+                                             "run_ids": [revision.ra["id"]], "claims": []})
+    assert titled["title"] == parent["title"]
+    _unread(revision, capsys, titled["id"])
+    prose = manager.save_explanation_draft({"parent_id": parent["id"], "title": "收入", "run_ids": [revision.ra["id"]],
+                                            "claims": []})
+    assert prose["body"].startswith("控制合计见计算依据。") and prose["evidence_appendix"] != parent["evidence_appendix"]
+    _unread(revision, capsys, prose["id"])
+    documented = manager.save_explanation_draft({"title": "薪酬", "document": _document(f"薪酬 {SECRET}。"),
+                                                 "run_ids": [run["id"]]})
+    from_document = manager.save_explanation_draft({"parent_id": documented["id"], "title": "收入",
+                                                    "run_ids": [revision.ra["id"]], "claims": []})
+    assert SECRET in from_document["body"]
+    _unread(revision, capsys, from_document["id"])
+    code, cli_document = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(
+        {"parent_id": documented["id"], "title": "收入", "run_ids": [revision.ra["id"]], "claims": [],
+         "evidence_appendix": "", "evidence_appendix_meta": {}, "source_read_failures": []}, ensure_ascii=False),
+        session=None, task=revision.task.id)
+    assert code == 0 and SECRET in cli_document["body"]
+    _unread(revision, capsys, cli_document["id"])
+    # Revisions with text of their own read with no parent, whichever way they were saved; a default title is one a
+    # draft saved with no parent carries too.
+    own = cli_revision(evidence_appendix="", evidence_appendix_meta={})
+    rewritten = manager.save_explanation_draft({"parent_id": parent["id"], "title": "收入", "body": "收入说明（修订）。",
+                                                "run_ids": [revision.ra["id"]], "claims": []})
+    untitled = manager.save_explanation_draft({"body": "控制合计见计算依据。", "run_ids": [run["id"]]})
+    retitled = manager.save_explanation_draft({"parent_id": untitled["id"], "body": "收入说明（修订）。",
+                                               "run_ids": [revision.ra["id"]], "claims": []})
+    assert retitled["title"] == untitled["title"] == "分析报告"
+    for draft in (own, rewritten, retitled):
+        assert revision.analysis.get_draft(draft["id"])["inherited_text"] == []
+        code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", draft["id"])
+        assert code == 0 and read["parent_id"] is None and _shows(read, ["987,654", SECRET]) == []
+        assert "inherited_text" not in read
+
+
+def test_a_revision_whose_appendix_matches_its_parent_s_by_its_own_runs_reads_alone(revision, capsys):
+    """An appendix composed again from the revision's own runs is its own, even when it reads as the parent's did."""
+    manager = FinanceStore(revision.task)
+    parent = manager.save_explanation_draft({"title": "收入", "body": "收入说明。", "run_ids": [revision.ra["id"]],
+                                             "claims": [{"basis": "source_fact", "dataset_id": revision.h["id"]}]})
+    child = manager.save_explanation_draft({"parent_id": parent["id"], "title": "收入（修订）", "body": "收入说明（修订）。",
+                                            "run_ids": [revision.ra["id"]], "claims": []})
+    assert child["evidence_appendix"] == parent["evidence_appendix"]
+    code, state = _cli(capsys, revision.var, "analysis-state")
+    listed = [draft["id"] for draft in state["drafts"]]
+    assert code == 0 and child["id"] in listed and parent["id"] not in listed
+    code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", child["id"])
+    assert code == 0 and read["parent_id"] is None
+
+
+def _rewrite(analysis: AnalysisStore, kind: str, record_id: str, change) -> None:
+    """Change a stored record as an older version of the app would have written it."""
+    path = analysis._object_path(kind, record_id)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record.pop("_integrity_hash")
+    change(record)
+    record["_integrity_hash"] = _hash(record)
+    path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+
+
+def test_a_revision_saved_before_revisions_recorded_their_parent_s_text_rests_on_the_parent(revision, capsys):
+    assert _cli(capsys, revision.var, "report-draft-read", "--draft", revision.child["id"])[0] == 0
+    _rewrite(revision.analysis, "drafts", revision.child["id"], lambda record: record.pop("inherited_text"))
+    # It cannot tell what it took from its parent, so a session that may not read the parent does not read it.
+    code, state = _cli(capsys, revision.var, "analysis-state")
+    assert code == 0 and state["drafts"] == []
+    assert _cli(capsys, revision.var, "report-draft-read", "--draft", revision.child["id"])[0] != 0
+    code, managed = _cli(capsys, revision.var, "report-draft-read", "--draft", revision.child["id"],
+                         session=None, task=revision.task.id)
+    assert code == 0 and managed == revision.analysis.get_draft(revision.child["id"])
+
+
+def test_a_long_revision_chain_is_read_once_per_listing(revision, capsys, monkeypatch):
+    analysis = revision.analysis
+    draft = analysis.save_draft({"title": "收入", "body": "收入说明。", "run_ids": [revision.ra["id"]], "limitations": ["未经审计"]})
+    for index in range(30):
+        draft = analysis.save_draft({"parent_id": draft["id"], "body": f"收入说明（第 {index + 1} 版）。"})
+    assert draft["inherited_text"] == ["limitations", "title"]
+    reads = []
+    original = AnalysisStore.get_draft
+    monkeypatch.setattr(AnalysisStore, "get_draft", lambda self, draft_id: reads.append(draft_id) or original(self, draft_id))
+    code, state = _cli(capsys, revision.var, "analysis-state")
+    assert code == 0 and len(state["drafts"]) == 32
+    assert len(reads) <= 31
+    # However deep the chain, it is walked, never recursed into.
+    monkeypatch.setattr(AnalysisStore, "get_draft", original)
+    from foundry.analysis import _new
+
+    for _ in range(1500):
+        record = _new(analysis.task, run_ids=[revision.ra["id"]], parent_id=draft["id"], inherited_text=["body"])
+        draft = analysis._write(analysis._object_path("drafts", record["id"]), record)
+    assert analysis.draft_snapshots(draft) == {revision.a["id"]}
+    assert analysis.draft_readable(draft, {revision.a["id"]})
 
 
 def test_a_session_never_reads_a_revision_as_more_reviewed_than_it_was_saved(tmp_path, capsys):
@@ -274,8 +395,8 @@ def test_a_session_lists_the_receipts_of_the_drafts_it_may_read_and_nothing_else
     assert state["completions"][0] == {key: value for key, value in stored.items() if key != "_integrity_hash"}
     # A receipt of the revision whose parent the session may not read: the draft reads with no parent, the receipt
     # was judged with one, so it is not the session's to read.
-    revised = manager.save_explanation_draft({"parent_id": revision.parent["id"], "body": "收入说明（再修订）。",
-                                              "run_ids": [revision.ra["id"]]})
+    revised = manager.save_explanation_draft({"parent_id": revision.parent["id"], "title": "收入",
+                                              "body": "收入说明（再修订）。", "run_ids": [revision.ra["id"]]})
     code, state = _cli(capsys, revision.var, "analysis-state")
     assert revised["id"] in [draft["id"] for draft in state["drafts"]]
     assert revised["id"] not in [receipt["draft_id"] for receipt in state["completions"]]
@@ -367,6 +488,54 @@ def test_a_session_s_completion_operation_goes_on_by_the_budget_its_own_drafts_s
         assert wide._readable_receipt(stored)["repair_attempts"] == hidden
         assert sess._readable_receipt(stored)["repair_attempts"] == 0
     assert [row[1:] for row in settled if row[0] == 2] == [row[1:] for row in settled if row[0] == 0]
+
+
+def test_a_recovered_operation_settles_on_what_its_session_now_reads(tmp_path):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    sess, wide, _run = _chain(tmp_path, 2)
+    operations = CompletionOperationStore(sess.task, "sess", sess.allowed)
+    stopped = operations.begin("stopped", policy={"max_repairs": 2})
+    operations.reserve(stopped["id"], payload={"body": "恢复稿。"}, call_id="call-1")
+    operations.stop(stopped["id"], "timeout")
+    # The session was given the wider files after it began: it now reads the two drafts it could not.
+    sess.task.update_session_context("sess", snapshot_ids=sorted(wide.allowed))
+    recovered = FinanceStore(sess.task).recover_completion_draft({"operation_id": stopped["id"], "revision": 1,
+                                                                   "draft": {"body": "恢复稿。"}})
+    [revision] = recovered["completion_operation"]["revisions"]
+    widened = FinanceStore(sess.task, snapshot_ids=sorted(wide.allowed), session_id="sess")
+    read = widened._readable_receipt(sess.analysis._get("completions", revision["completion_id"]))
+    assert (read["repair_attempts"], read["status"], read["stop_reason"], read["repair_allowed"]) == (
+        2, "needs_review", "repair_budget_exhausted", False)
+    assert (revision["completion_status"], revision["completion_stop_reason"], revision["repair_allowed"]) == (
+        read["status"], read["stop_reason"], read["repair_allowed"])
+
+
+@pytest.mark.parametrize("basis", ["source_fact", "professional_judgment"])
+def test_a_session_cites_no_run_it_may_not_read_through_a_claim_of_any_basis(tmp_path, capsys, basis):
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    sess, _wide, run = _chain(tmp_path, 0)
+    operations = CompletionOperationStore(sess.task, "sess", sess.allowed)
+    stored = lambda: (len(sess.analysis._list("drafts")), len(sess.analysis._list("completions")))
+    for run_id in (run["id"], "0" * 32):
+        spec = {"body": "请查看计算依据。", "claims": [{"basis": basis, "run_id": run_id}]}
+        before = stored()
+        operation = operations.begin(f"request-{run_id}", policy={"max_repairs": 2})
+        for call in (lambda: sess.save_completion_draft(operation["id"], "call-1", spec),
+                     lambda: sess.save_explanation_draft(spec)):
+            with pytest.raises(FoundryError) as refused:
+                call()
+            assert _shows(str(refused.value), ["777"]) == []
+        assert _cli(capsys, tmp_path / "var0", "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))[0] != 0
+        assert stored() == before
+        # Refused before anything was reserved: the operation goes on.
+        saved = sess.save_completion_draft(operation["id"], "call-2", {"body": "请查看计算依据。"})
+        [revision] = saved["completion_operation"]["revisions"]
+        assert (revision["completion_id"], revision["completion_status"]) == (saved["completion"]["id"],
+                                                                             saved["completion"]["status"])
+        # The manager saves such a claim as before.
+        assert FinanceStore(sess.task).save_explanation_draft(spec)["claims"]
 
 
 @pytest.mark.parametrize("hidden", [0, 2])
@@ -477,6 +646,42 @@ def test_a_run_on_files_beyond_the_requirement_sets_no_bar_for_a_result_set(tmp_
                    for index, item in enumerate(rows)]})
     item = saved["explanation_check"]["requirements"]["items"][0]
     assert (item["status"], saved["explanation_check"]["requirements"]["coverage"]["status"]) == ("answered", "pass")
+
+
+@pytest.mark.parametrize("bound", [True, False])
+def test_a_finance_context_on_more_files_opens_the_engine_path_as_before(tmp_path, bound):
+    """Which evidence paths are open is read from every finance context on the requirement's files, one that binds
+    more files too: a run on it answers the requirement once cited (check_requirements counts cited runs)."""
+    task = TaskStore(tmp_path / "var").create(title="支撑")
+    analysis, manager = AnalysisStore(task), FinanceStore(task)
+    ids = {scenario: analysis.add_dataset(_ledger(tmp_path / f"{scenario}.json", [
+        {"account_code": code, "management_account": account, "amount": amount}
+        for code, account, amount in zip(("6001", "6401", "6601"), ("revenue", "cost", "expense"), amounts)]),
+        name=scenario)["id"] for scenario, amounts in (("actual", [1000, 700, 200]), ("budget", [900, 600, 150]))}
+
+    def save_requirements():
+        return manager.analysis_requirements_save({
+            "question": "九月收入利润", "scope": {"ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY"},
+            "bindings": {"actual": ids["actual"]} if bound else {},
+            "items": [{"id": "revenue", "metric": "revenue"}, {"id": "profit", "metric": "profit"}]})
+
+    if not bound:
+        save_requirements()  # as the desktop saves one before any finance context
+    context = manager.save_context({"bindings": ids, "scopes": {alias: {
+        "ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "万元", "scenario": alias}
+        for alias in ids}})
+    run = manager.explain_variance({"context_id": context["id"]})
+    if bound:
+        assert all(row["accepted_evidence"] == ["engine_closure"] for row in save_requirements()["support"]["items"])
+
+    def items(spec):
+        saved = manager.save_explanation_draft(spec)
+        assert "finance_context_save" not in json.dumps(saved, ensure_ascii=False)
+        return saved["explanation_check"]["requirements"]["items"]
+
+    assert all([path["path"] for path in item["evidence_paths"]["accepted"]] == ["engine_closure"]
+               for item in items({"body": "收入利润说明待补。"}))
+    assert {item["status"] for item in items({"body": "收入利润见计算。", "run_ids": [run["id"]]})} == {"answered"}
 
 
 def test_a_session_cannot_check_a_draft_against_requirements_it_may_not_read(tmp_path, capsys):
@@ -614,22 +819,30 @@ def test_a_session_cites_no_run_it_may_not_read_through_an_evidence_recipe(tmp_p
     assert len(analysis._list("drafts")) == before
 
 
-def test_the_manager_reads_a_recipe_citing_a_run_that_does_not_read_as_an_issue(tmp_path):
-    task = TaskStore(tmp_path / "var").create(title="配方")
+def test_the_manager_reads_a_recipe_citing_a_run_that_does_not_read_as_an_issue(tmp_path, capsys):
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="配方")
     pack = AnalysisStore(task).add_dataset(_ar_pack(tmp_path / "ar.xlsx", provisions=BROKEN, total=33780), name="月结")
     task.record_session("sess", role="analysis")
     recipe = {"id": "direct", "kind": "direct", "dataset_id": pack["id"], "source_hash": pack["source_hash"],
               "sheet": "08·AR", "range": "D11", "claim": {"run_id": "0" * 32, "row": 0, "column": "amount"}}
-    spec = {"body": "坏账合计。", "evidence_recipes": [recipe]}
+    spec = {"body": "坏账合计。", "evidence_recipes": [recipe], "limitations": ["坏账口径待确认"]}
     manager = FinanceStore(task)
     assert manager.validate_explanation(spec)["evidence_report"]["summary"]["status"] == "needs_attention"
     saved = manager.save_explanation_draft(spec)
     assert saved["evidence_report"]["summary"]["status"] == "needs_attention"
     # The manager still checks and revises that draft, keeping the recipe or dropping it.
     assert manager.validate_explanation({"draft_id": saved["id"]})["evidence_report"]["summary"]["status"] == "needs_attention"
-    for recipes in ([recipe], []):
-        assert manager.save_explanation_draft({"parent_id": saved["id"], "body": "坏账合计（修订）。",
-                                               "evidence_recipes": recipes})["parent_id"] == saved["id"]
+    revisions = [manager.save_explanation_draft({"parent_id": saved["id"], "body": "坏账合计（修订）。",
+                                                 "evidence_recipes": recipes}) for recipes in ([recipe], [])]
+    assert [draft["parent_id"] for draft in revisions] == [saved["id"]] * 2
+    # A revision that dropped the recipe and kept the notes reads to the manager as it always did, though its parent
+    # cites a run that does not read.
+    dropped = revisions[1]["id"]
+    for args in (("report-draft-read",), ("report-projection-read", "--mode", "audit"), ("analysis-export",)):
+        assert _cli(capsys, var, *args, "--draft", dropped, session=None, task=task.id)[0] == 0
+    further = json.dumps({"parent_id": dropped, "body": "坏账合计（再修订）。"}, ensure_ascii=False)
+    assert _cli(capsys, var, "analysis-draft", "--spec", further, session=None, task=task.id)[0] == 0
     # A session cites only a run it may read.
     with pytest.raises(FoundryError):
         FinanceStore(task, snapshot_ids=[pack["id"]], session_id="sess").validate_explanation(spec)
