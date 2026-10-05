@@ -1107,7 +1107,7 @@ class AnalysisStore:
             if fields is not None:
                 views[key] = {**check, **fields}
         # What a revision took from its parent decides who may read it, and is no part of what they read.
-        shown = {key: value for key, value in draft.items() if key != "inherited_text"}
+        shown = {key: value for key, value in draft.items() if key != "inherited_text"} if "inherited_text" in draft else draft
         if allowed is None and not views:
             return shown
         hidden = {"_integrity_hash"} if allowed is None else {"evidence_basis", "_integrity_hash"}
