@@ -67,7 +67,7 @@ COMPLETION_VERDICT = (
     "original_requirements_completed", "repair_allowed", "stop_reason", "manager_reasons", "checks",
 )
 # What a receipt decides from the runs it judged against the current requirements: a session reads them again when
-# it reads one of those runs pinned otherwise than stored (AnalysisStore._receipt_verdict_in_view).
+# it may read one of those runs otherwise than whoever filed it (AnalysisStore._receipt_verdict_in_view).
 RECEIPT_RUN_VERDICT = (
     "reused_run_ids", "issue_fingerprint", "status", "repair_attempts", "response_status",
     "original_requirements_completed", "repair_allowed", "stop_reason", "manager_reasons", "actions",
@@ -1500,34 +1500,74 @@ class AnalysisStore:
                 return stored
         return "reproducible"
 
+    def _judged_otherwise(self, draft: dict, allowed: set[str], cache: dict, *, rows: bool = False) -> bool:
+        """Whether a reader whose snapshot ceiling is ``allowed`` may judge ``draft``'s cited runs otherwise than its row
+        estimates (``rows``) or its receipts were judged, so that it judges them again.
+
+        A session saves a draft and files its receipts on the runs as it reads them (run_in_view), and whoever saved
+        them may read every file the draft rests on (draft_snapshots): at least those its cited runs and the versions
+        it was pinned to and checked against rest on. A run reads otherwise only where a version a reader may not read
+        decides it, so a reader that may read only those files reads a cited run otherwise wherever any reader of the
+        draft does. Where it and this reader read every cited run as stored, the draft was judged as this reader's own
+        save would have judged it, whoever saved it; otherwise this reader judges it again on its own reading. A run
+        reads otherwise pinned to another version (_pin_in_view) or, but for ``rows``, with another fingerprint, or
+        pinned to or checked against a version read with another (_semantics_in_view). Telling reads no run's outputs,
+        and no pin where every version rests on those files. ``cache`` as for run_in_view."""
+        from foundry.finance_requirements import requirements_readable
+
+        judged = cache.setdefault("judged", {})
+        key = (draft.get("id"), rows)
+        if key not in judged:
+            runs = [self._stored_run(run_id, cache) for run_id in dict.fromkeys(draft.get("run_ids") or [])]
+            checked = [check["requirements"].get("requirements_id")
+                       for check in (draft.get("explanation_check"), draft.get("quality"))
+                       if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
+            versions = [self._requirements_version(version_id, cache)
+                        for version_id in dict.fromkeys([draft.get("requirements_id"), *checked])]
+            files = {file for record in [*runs, *versions] if record
+                     for file in (record.get("bindings") or {}).values()}
+
+            def otherwise(ceiling: set[str], read: dict) -> bool:
+                for run in runs:
+                    pin = self._pin_in_view(run, ceiling, read)
+                    if pin is not None and (not rows or "requirements_id" in pin[0]):
+                        return True
+                if rows:
+                    return False
+                deciding = [*versions, *(self._requirements_version(run.get("requirements_id"), read) for run in runs)]
+                return any(version is not None and requirements_readable(version, ceiling)
+                           and self._semantics_in_view(version, ceiling, read) is not version for version in deciding)
+
+            if all(requirements_readable(row, files) for row in self._requirements_versions(cache)):
+                judged[key] = False
+            else:
+                # The narrowest reader reads fingerprints of its own: only the versions are shared.
+                narrowest = cache.setdefault("narrowest", {}).setdefault(frozenset(files), {
+                    "requirements": self._requirements_versions(cache), "versions": self._requirements_by_id(cache)})
+                judged[key] = otherwise(set(allowed), cache) or otherwise(files, narrowest)
+        return judged[key]
+
     def _row_estimates_in_view(self, draft: dict, allowed: set[str] | None, runs: Callable[[], dict[str, dict]],
                                cache: dict) -> list | None:
         """The basis's row estimates as a reader whose snapshot ceiling is ``allowed`` would have saved them, or None
         when they stand as saved (always, for the manager).
 
-        draft_evidence_basis read each cited run's row declarations against the version it was pinned to, with the
-        then-current version's estimates added. A reader may read the then-current version of every draft it reads
-        (draft_snapshots holds the version a check was made against), so only a cited run it reads pinned to another
-        version (run_in_view) reads otherwise: the rows are declared again as it reads the runs, with the estimates of
-        the newest version it may read that is older than the draft. Whether a run reads so is told from its stored
-        record, so a read where no version is hidden, or none pins a cited run, loads no run (``runs`` loads them, as
-        evidence_in_view does).
+        draft_evidence_basis read each cited run's row declarations, as its saver read the run, against the version it
+        was pinned to, with the then-current version's estimates added. A reader may read the then-current version of
+        every draft it reads (draft_snapshots holds the version a check was made against), so only a cited run it or
+        its saver may read pinned to another version reads otherwise (_judged_otherwise): the rows are declared again
+        as it reads the runs, with the estimates of the newest version it may read that is older than the draft.
+        Whether a run reads so is told from its stored record, so a read where no version rests on files other than
+        the draft's, or none pins a cited run otherwise, loads no run (``runs`` loads them, as evidence_in_view does).
         """
         if allowed is None:
             return None
         from foundry.evidence_labels import declared_row_estimates
         from foundry.finance_requirements import requirements_readable
 
+        if not self._judged_otherwise(draft, allowed, cache, rows=True):
+            return None
         versions = self._requirements_versions(cache)
-        if all(requirements_readable(row, allowed) for row in versions):
-            return None
-
-        def repinned(run_id: Any) -> bool:
-            pin = self._pin_in_view(self._stored_run(run_id, cache), allowed, cache)
-            return pin is not None and "requirements_id" in pin[0]
-
-        if not any(map(repinned, dict.fromkeys(draft.get("run_ids") or []))):
-            return None
         latest = next((row for row in reversed(versions)
                        if row.get("seq", 0) < draft.get("seq", 0) and requirements_readable(row, allowed)), None)
         estimates = declared_row_estimates(self, runs(), latest, set(allowed), cache=cache)
@@ -1596,8 +1636,8 @@ class AnalysisStore:
         those it may read (_repair_budget), so a draft it may not read neither spends nor shows through its budget,
         and its completion operation settles on that reading. A receipt's messages and fixups name runs and carry
         their values, as do the engine runs of a requirement checked before completion policy 13: when one is outside
-        the session, they and the digests over them are withheld, and the session reads the verdict. ``readable_ids``
-        as for draft_in_view.
+        the session, they and the digests over them are withheld, and the session reads the verdict, judged without
+        the engine runs it may not read. ``readable_ids`` as for draft_in_view.
         """
         return self.completions_in_view([receipt], allowed, readable_ids=readable_ids)[0]
 
@@ -1606,11 +1646,12 @@ class AnalysisStore:
         """completion_in_view of each receipt, reading every draft and earlier receipt once. ``versions`` as for
         draft_in_view, ``cache`` as for run_in_view.
 
-        A receipt judged the draft's runs on their stored pins: one that judged a run this reader reads pinned
-        otherwise reads with the verdict its own save would have filed (_receipt_verdict_in_view). A receipt filed under
-        the fingerprint stored for a version this reader reads with another reads as filed under that one, and so does
-        its chain (_chain_in_view). A stall is judged on the receipt before, so each earlier receipt of the chain the
-        reader may read counts as the reader reads it, in chain order."""
+        A receipt judged the draft's runs as whoever filed it read them: one this reader may judge otherwise
+        (_judged_otherwise), or that judged a check it reads without runs it may not read, reads with the verdict its
+        own save would have filed (_receipt_verdict_in_view). A receipt filed under the fingerprint stored for a version
+        this reader reads with another reads as filed under that one, and so does its chain (_chain_in_view). A stall is
+        judged on the receipt before, as the reader reads it, and the budget counts the earlier receipts of the chain
+        the reader may read."""
         if allowed is None:
             return list(receipts)
         from foundry.finance_completion import receipt_lineage_in_view
@@ -1621,7 +1662,7 @@ class AnalysisStore:
         cache = {} if cache is None else cache
         readable = self.completion_reader(allowed, readable_ids=readable_ids)
         chain: list[dict] | None = None
-        # Only a version this reader may not read makes a run, and so a verdict, read otherwise than stored.
+        # Only a version this reader may not read makes a receipt read filed under another fingerprint.
         hidden = not all(requirements_readable(row, allowed) for row in self._requirements_versions(cache))
         # Each receipt as this reader reads it, whole (None: it may not read it), and whether every run it names is
         # one the reader may read.
@@ -1636,6 +1677,18 @@ class AnalysisStore:
             if row.get("id") not in chains:
                 chains[row.get("id")] = self._chain_in_view(row, allowed, cache) if hidden else {}
             return chains[row.get("id")]
+
+        def last_read(row: dict) -> dict:
+            # The receipt before, with the issue_fingerprint this reader reads it with: a stall is judged on it alone,
+            # and its verdict on its own draft, whatever came before it, so none of those is read again.
+            if read.get(row.get("id")) is not None:
+                return read[row.get("id")][0]
+            try:
+                verdict = self._receipt_verdict_in_view(row, self.get_draft(row["draft_id"]), allowed, [],
+                                                        versions=versions, cache=cache)
+            except FoundryError:
+                return row
+            return row if verdict is None else {**row, "issue_fingerprint": verdict["issue_fingerprint"]}
 
         def view(receipt: dict) -> tuple[dict, bool] | None:
             nonlocal chain
@@ -1663,8 +1716,8 @@ class AnalysisStore:
                        and rekeyed(row).get("chain_key", row.get("chain_key")) == receipt["chain_key"]
                        and order(row) < order(receipt)]
             kept = [row for row in earlier if readable(row)]
-            # In chain order, so each earlier receipt is read once its own earlier ones are.
-            seen = [(view(row) or (row, True))[0] for row in kept] if hidden else kept
+            # A count reads how many receipts came before and the last of them, as the reader reads it.
+            seen = [*kept[:-1], last_read(kept[-1])] if kept else kept
             # Stored over every earlier receipt of the chain it was filed under: one the session may not read, one it
             # reads in another chain, or the one before reading otherwise than stored, is the only reason to count
             # again.
@@ -1672,8 +1725,7 @@ class AnalysisStore:
                        and row.get("chain_key") == filed["chain_key"] and order(row) < order(receipt)]
             moved = bool(kept) and seen[-1].get("issue_fingerprint") != kept[-1].get("issue_fingerprint")
             budget = {} if kept == counted and not moved else _repair_budget(receipt, seen)
-            verdict = self._receipt_verdict_in_view(filed, draft, allowed, seen, versions=versions,
-                                                    cache=cache) if hidden else None
+            verdict = self._receipt_verdict_in_view(filed, draft, allowed, seen, versions=versions, cache=cache)
             if verdict is not None:
                 # Keyed as a stored receipt reads back (write_json_atomic sorts keys), so the view reads as one.
                 receipt, budget = dict(sorted({**{key: value for key, value in receipt.items()
@@ -1695,27 +1747,22 @@ class AnalysisStore:
 
     def _receipt_verdict_in_view(self, receipt: dict, draft: dict, allowed: set[str], kept: list[dict], *,
                                  versions: dict, cache: dict) -> dict | None:
-        """The RECEIPT_RUN_VERDICT a session reads of a receipt that judged a run it reads pinned otherwise than stored
-        (_pin_in_view), or against the fingerprint stored for a version it reads with another (_captured_otherwise), or
-        None when it reads the stored one. Whether a run is bound to the current requirements was judged on the stored
-        pin and fingerprint: the session reads the verdict its own save of the draft would have filed
-        (finance_completion.assess_completion with its ceiling), over the check as it reads it (draft_in_view) and
-        counted over ``kept``, the earlier receipts of the chain as it reads them. Whether a run or version reads so is
-        told from its stored record, so a receipt whose runs and version all read as stored is assessed no further."""
+        """The RECEIPT_RUN_VERDICT a session reads of a receipt on runs it may judge otherwise than whoever filed it
+        (_judged_otherwise), or against the fingerprint stored for a version it reads with another (_captured_otherwise),
+        or on a check it reads without runs it may not read, or None when it reads the stored one. Whether a run is
+        bound to the current requirements was judged on the runs as the filer read them: the session reads the verdict
+        its own save of the draft would have filed (finance_completion.assess_completion with its ceiling), over the
+        check as it reads it (draft_in_view) and counted over ``kept``, the earlier receipts of the chain as it reads
+        them. A check read without such runs reads its issues, and so their digest, without them. Whether a run or
+        version reads so is told from its stored record, so a receipt whose runs, version and check all read as stored
+        is assessed no further."""
         from foundry.finance_completion import assess_completion, receipt_fields
         from foundry.finance_requirements import OWN_FILES_POLICY, check_lineage_in_view, requirements_in_view
 
         quality = draft.get("explanation_check")
         if receipt.get("draft_content_hash") != draft.get("content_hash") or not isinstance(quality, dict):
             return None
-        try:
-            if (all(self._pin_in_view(self._stored_run(run_id, cache), allowed, cache) is None
-                    for run_id in receipt.get("run_hashes") or {})
-                    and not self._captured_otherwise(self._requirements_version(receipt.get("requirements_id"), cache),
-                                                     receipt.get("requirements_semantic_fingerprint"), allowed, cache)):
-                return None
-        except FoundryError:
-            return None
+        shown = quality
         if (draft.get("check_policy_version") or 0) < OWN_FILES_POLICY:
             # As draft_in_view reads a check saved when a requirement still read runs on other files too.
             def readable_run(run_id: Any) -> bool:
@@ -1724,13 +1771,21 @@ class AnalysisStore:
                 except FoundryError:
                     return False
 
-            quality = requirements_in_view(quality, readable_run)
-        quality = check_lineage_in_view(self, quality, allowed, versions=versions)
-        assessed = assess_completion(self, draft, quality, allowed=allowed, cache=cache)
+            shown = requirements_in_view(quality, readable_run)
+        try:
+            if (shown is quality and not self._judged_otherwise(draft, allowed, cache)
+                    and not self._captured_otherwise(self._requirements_version(receipt.get("requirements_id"), cache),
+                                                     receipt.get("requirements_semantic_fingerprint"), allowed, cache)):
+                return None
+        except FoundryError:
+            return None
+        assessed = assess_completion(self, draft, check_lineage_in_view(self, shown, allowed, versions=versions),
+                                     allowed=allowed, cache=cache)
         stale = next((action.get("run_ids") or [] for action in receipt.get("actions") or []
                       if isinstance(action, dict) and action.get("code") == "requirements_run_outdated"), [])
         if (sorted(assessed["reused_runs"]) == sorted(receipt.get("reused_run_ids") or [])
-                and sorted(assessed["stale_runs"]) == sorted(stale)):
+                and sorted(assessed["stale_runs"]) == sorted(stale)
+                and (shown is quality or assessed["issue_fingerprint"] == receipt.get("issue_fingerprint"))):
             return None
         fields = receipt_fields(self, assessed, kept)
         return {key: fields[key] for key in RECEIPT_RUN_VERDICT if key in fields}

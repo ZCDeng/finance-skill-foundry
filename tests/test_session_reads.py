@@ -5,7 +5,8 @@ that version, and its reproducibility decided by the earlier runs of its fingerp
 session reads it as saved where the versions and runs outside its snapshot ceiling were never saved: pinned to the
 version current then among those it may read, with that version's fingerprint and rows, and reproducible by the runs
 it may read. So does every saved analysis, draft, completion receipt and export built on such a run, and so does
-what the session saves from it. No run a session reads carries the stored record's integrity hash. The manager (no
+what the session saves from it: a draft another session saved, which read its runs otherwise, reads judged as the
+session's own save would have judged it. No run a session reads carries the stored record's integrity hash. The manager (no
 session) reads every run as stored.
 
 So do the records a session's writes left before it saved only from the files it may read (main before #76), where
@@ -374,6 +375,93 @@ def test_a_session_reads_a_completion_chain_on_such_runs_as_where_the_version_wa
                        ("needs_review", 2, "no_progress", False, 3, ISSUES))
 
 
+def test_a_session_reads_a_receipt_judging_again_only_the_one_before_it(tmp_path, capsys, fake_runner, monkeypatch):
+    """A stall is judged on the receipt before alone: each receipt of a chain on such runs reads assessing it and the
+    one before it again, however many came before them."""
+    import foundry.finance_completion as completion
+
+    world = _pinned_world(tmp_path, True, capsys)
+    receipts = [_session_draft(world, f"会话稿{index}：Falcon 收入 100。")["completion"] for index in "甲乙丙丁戊"]
+    calls = []
+    assess = completion.assess_completion
+    monkeypatch.setattr(completion, "assess_completion",
+                        lambda *args, **kwargs: calls.append(args[1]["id"]) or assess(*args, **kwargs))
+    session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+    read = []
+    for receipt in receipts:
+        calls.clear()
+        shown = session._readable_receipt(world.analysis._get("completions", receipt["id"]))
+        read.append((len(calls), _verdict(shown)[:4]))
+    assert read == [(1, ("repair_available", 0, None, True)), (2, ("needs_review", 1, "no_progress", False)),
+                    *[(2, ("needs_review", 2, "no_progress", False))] * 3]
+
+
+def _legacy_chain(root: Path, hidden: bool, cites: tuple[str, str], capsys, monkeypatch) -> list[tuple]:
+    """The manager asks for control totals on D1, inside the session, runs an account total on it, then saves the same
+    version again and runs it once more (``stored``). Under policy 12 it saves two drafts citing one of the runs each,
+    the control totals left unanswered. With ``hidden``, Hv on H was current when the first run started (``pinned``),
+    and the manager ran control totals on D1 and D2 before Hv and again, scoped otherwise, between the drafts: each
+    draft's check names the ones then filed. What the session reads of each receipt."""
+    from foundry import finance_completion, finance_requirements
+
+    var = root / "var"
+    task = TaskStore(var).create(title="控制合计")
+    analysis = AnalysisStore(task)
+    manager = FinanceStore(task)
+    row = {"account_code": "6001", "management_account": "revenue", "amount": 100, "period": "2026-09",
+           "organization": "O1", "currency": "CNY"}
+    d1 = analysis.add_dataset(_ledger(root / "gl.json", [row]), name="gl")["id"]
+    task.record_session("sess", role="analysis")
+    spec = {"question": "九月控制合计", "scope": {"period": "2026-09", "organization": "O1", "currency": "CNY"},
+            "bindings": {"gl": d1}, "items": [{"id": "ct", "metric": "control_totals"}]}
+    head = manager.analysis_requirements_save(spec)
+    context = manager.save_context({"bindings": {"gl": d1}, "scopes": {"gl": spec["scope"]}})
+    secrets: list[str] = []
+    if hidden:
+        d2 = analysis.add_dataset(_ledger(root / "deal.json", [
+            {**row, "account_code": "9999", "management_account": "acquisition_payout", "amount": 7777777,
+             "period": "2026-07", "organization": "SECRET-SUBSIDIARY", "currency": "USD"}]), name="并购")["id"]
+        h = analysis.add_dataset(_ledger(root / "h.json", [{**row, "management_account": "expense", "amount": 999}]),
+                                 name="薪酬")["id"]
+
+        def control_totals(organization: str) -> str:
+            wider = manager.save_context({"bindings": {"gl": d1, "hidden": d2}, "scopes": {
+                "gl": spec["scope"], "hidden": {"organization": organization, "currency": "USD", "period": "2026-07"}}})
+            return manager.run_metric({"context_id": wider["id"], "metric": {"kind": "control_totals"}})["id"]
+
+        secrets += [d2, h, control_totals("SECRET-SUBSIDIARY"), "SECRET-SUBSIDIARY", "SECRET-OTHER", "7777777"]
+        head = manager.analysis_requirements_save({**spec, "question": "薪酬控制合计", "bindings": {"payroll": h},
+                                                   "parent_id": head["id"], "change_reason": "换薪酬"})
+    account_total = {"context_id": context["id"], "metric": {"kind": "account_total", "accounts": ["revenue"]}}
+    runs = {"pinned": manager.run_metric(account_total)["id"]}
+    manager.analysis_requirements_save({**spec, "parent_id": head["id"], "change_reason": "回到总账"})
+    runs["stored"] = manager.run_metric(account_total)["id"]
+    drafts = []
+    with monkeypatch.context() as old:
+        old.setattr(finance_requirements, "_within_files", lambda files, bindings: True)
+        old.setattr(finance_completion, "COMPLETION_POLICY_VERSION", 12)
+        for body, way in zip(("控制合计待核。", "控制合计待核。。"), cites):
+            if drafts and hidden:
+                secrets.append(control_totals("SECRET-OTHER"))
+            drafts.append(manager.save_explanation_draft({"body": body, "run_ids": [runs[way]]}))
+    code, state = _cli(capsys, var, "analysis-state")
+    assert code == 0, state
+    assert _shows(state, secrets) == []
+    receipts = {row["draft_id"]: row for row in state["completions"]}
+    return [_verdict(receipts[draft["id"]])[:4] for draft in drafts]
+
+
+@pytest.mark.parametrize("cites", [("pinned", "pinned"), ("stored", "pinned"), ("pinned", "stored"),
+                                   ("stored", "stored")])
+def test_a_session_judges_a_stall_on_checks_before_policy_13_without_runs_it_may_not_read(
+        tmp_path, capsys, monkeypatch, cites):
+    """Each receipt reads judged over its draft's check as the session reads it, its issues naming none of the runs it
+    may not read, whether or not the session reads its cited run as stored: the second stalls on the first, as where
+    neither those runs nor Hv were saved. The manager stored it otherwise, the second run's scope in its issues."""
+    read = [_legacy_chain(tmp_path / str(hidden), hidden, cites, capsys, monkeypatch) for hidden in (False, True)]
+    assert read[0] == read[1] == [("repair_available", 0, None, True), ("needs_review", 1, "no_progress", False)]
+
+
 def test_a_session_reads_its_operation_settled_before_it_read_such_runs_so_as_its_receipts(
         tmp_path, capsys, fake_runner, monkeypatch):
     """Saved as every reader then read runs, as stored: the operation settled on receipts judged on Hv. Read now, the
@@ -559,6 +647,114 @@ def test_a_session_reads_runs_drafts_and_receipts_with_no_version_hidden_at_no_m
     # The versions and runs are listed once for the whole read, and each record's pin is read once, by the listing:
     # no draft or receipt lists or reads them again.
     assert listed.count("requirements") == listed.count("runs") == 1 and len(pins) == len(set(pins))
+
+
+def test_a_session_judges_no_draft_again_whose_runs_every_reader_of_it_reads_as_stored(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """Hv is hidden from the session, not from W, which may read every file. A draft citing a run pinned to V2 rests
+    on A alone, and whoever may read A reads that run as stored: neither session assesses its receipt again, whoever
+    saved it."""
+    import foundry.evidence_labels as evidence_labels
+    import foundry.finance_completion as completion
+
+    world = _pinned_world(tmp_path, True, capsys)
+    as_manager = {"session": None, "task": world.task.id}
+    code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+        {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}}), **as_manager)
+    run = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], **as_manager)[1]
+    assert run["requirements_id"] == world.current["id"]
+    world.task.record_session("wide", role="analysis")
+    world.manager.save_explanation_draft({"body": "经理稿：收入 100。", "run_ids": [run["id"]]})
+    FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess").save_explanation_draft(
+        {"body": "会话稿：收入 100。", "run_ids": [run["id"]]})
+    for name in ("assess_completion", "declared_row_estimates"):
+        module = completion if name == "assess_completion" else evidence_labels
+        monkeypatch.setattr(module, name, lambda *args, name=name, **kwargs: pytest.fail(f"{name} read again"),
+                            raising=False)
+    for session in ("sess", "wide"):
+        code, state = _cli(capsys, world.var, "analysis-state", session=session)
+        assert code == 0 and len(state["drafts"]) == len(state["completions"]) == 2
+
+
+# --- a draft another session saved on such runs --------------------------------------------------------------------
+
+
+def _ceilings_world(root: Path, capsys, *, nested: bool, with_g: bool):
+    """W, the wider session, imports H. N, the narrower, may read A, and G where G was added before N (``with_g`` and
+    not ``nested``): either way W may not read G. The manager saves V on A, Gv on G (with ``with_g``) and Hv on H,
+    runs a script and SQL on A while Hv is the head, then saves V's items again (V2). N and W each save a draft citing
+    both runs: W reads them pinned to Hv, N pinned to Gv where it may read G, else to V."""
+    var = root / "var"
+    task = TaskStore(var).create(title="两个会话")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(root / "a.csv", [("revenue", "2026-08", "Falcon", "100", "CNY", "元")]), name="总账")["id"]
+    task.record_session("wide", role="analysis")
+    if nested:
+        task.record_session("narrow", role="analysis")
+    g = analysis.add_dataset(_csv(root / "g.csv", [("revenue", "2026-07", "Falcon", "100", "CNY", "元")]),
+                             name="项目")["id"] if with_g else None
+    if not nested:
+        task.record_session("narrow", role="analysis")
+    workspace = Path(next(row for row in task.sessions() if row["session_id"] == "wide")["workspace_path"])
+    (workspace / "uploads").mkdir(parents=True, exist_ok=True)
+    path = _csv(workspace / "uploads" / "h.csv", [("revenue", "2026-06", "Falcon", "100", "CNY", "元")])
+    code, h = _cli(capsys, var, "dataset-add", "--path", str(path), "--name", "薪酬", session="wide")
+    assert code == 0, h
+    manager = FinanceStore(task)
+    spec = {"question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": a}, "items": ITEMS}
+    head = manager.analysis_requirements_save(spec)
+    gv = None
+    if with_g:
+        head = gv = manager.analysis_requirements_save({
+            "question": "Falcon 项目", "scope": {"period": "2026-07"}, "bindings": {"project": g},
+            "items": HIDDEN_ITEMS, "parent_id": head["id"], "change_reason": "换项目"})
+    head = manager.analysis_requirements_save({"question": "薪酬", "scope": {"period": "2026-06"},
+                                               "bindings": {"payroll": h["id"]}, "items": ITEMS,
+                                               "parent_id": head["id"], "change_reason": "换薪酬"})
+    as_manager = {"session": None, "task": task.id}
+    code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps(
+        {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": a}}), **as_manager)
+    assert code == 0, saved
+    sql = _cli(capsys, var, "analysis-run", "--analysis", saved["id"], **as_manager)[1]
+    script = _cli(capsys, var, "analysis-script", "--spec", json.dumps(
+        {"code": "print(1)", "bindings": {"gl": a}, "result_file": "result.json"}), **as_manager)[1]
+    assert sql["requirements_id"] == script["requirements_id"] == head["id"]
+    manager.analysis_requirements_save({**spec, "parent_id": head["id"], "change_reason": "回到总账"})
+    ceilings = {row["session_id"]: row["snapshot_ids"] for row in task.sessions()}
+    assert (g in ceilings["narrow"]) == (with_g and not nested) and g not in ceilings["wide"]
+    assert h["id"] in ceilings["wide"] and h["id"] not in ceilings["narrow"]
+    draft = {"run_ids": [script["id"], sql["id"]],
+             "claims": [{"basis": "calculation", "run_id": script["id"], "row": 0, "column": "value", "value": "100"}]}
+    saved = {who: FinanceStore(task, snapshot_ids=ceilings[who], session_id=who).save_explanation_draft(
+        {**draft, "body": f"{who} 稿：Falcon 收入 100。"}) for who in ("narrow", "wide")}
+    secrets = [g, gv["id"], gv["semantic_fingerprint"], "Falcon 项目", "按人数分摊"] if with_g else []
+    return SimpleNamespace(var=var, script=script, saved=saved, secrets=secrets)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_a_session_reads_a_draft_another_session_saved_as_its_own_save_would_have_filed_it(
+        tmp_path, capsys, fake_runner, nested):
+    """W reads N's draft and receipt judged on the runs as W reads them, as its own save would have filed them, not
+    as N read them. Where N may read G it read them pinned to Gv, the revenue an estimate; W reads as where G was
+    never added, so as where N's ceiling lies inside its own and N read them pinned to V: there too it reads N's draft
+    as its own, and saves on it so."""
+    read = []
+    for with_g in (False, True):
+        world = _ceilings_world(tmp_path / str(with_g), capsys, nested=nested, with_g=with_g)
+        code, state = _cli(capsys, world.var, "analysis-state", session="wide")
+        assert code == 0, state
+        assert _shows([state, world.saved["wide"]], world.secrets) == []
+        drafts = {row["id"]: row for row in state["drafts"]}
+        receipts = {row["draft_id"]: row for row in state["completions"]}
+        shown = {who: (_labels_of(drafts[draft["id"]]["explanation_check"], world.script["id"]),
+                       _verdict(receipts[draft["id"]])[4:]) for who, draft in world.saved.items()}
+        read.append((shown, _verdict(world.saved["wide"]["completion"])))
+    assert read[0] == read[1]
+    issues = ["missing_required_fact", "requirement_unanswered", "requirements_run_outdated"]
+    shown, saved = read[0]
+    labels = [("claim", "unknown", ["run_script"]), ("fact", "unknown", ["run_script"])]
+    assert shown["narrow"] == shown["wide"] == (labels, (0, issues))
+    assert saved == ("needs_review", 1, "no_progress", False, 0, issues)
 
 
 # --- reproducibility of a run another reader saved -----------------------------------------------------------------
