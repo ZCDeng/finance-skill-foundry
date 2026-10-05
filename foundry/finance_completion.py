@@ -48,42 +48,45 @@ def _dropped_hierarchy_action(item):
                         '本稿没有按它逐一作答，原始要求记为未完成；答复须如实说明。')}
 
 
-def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None):
+def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None, chain=None):
     """A receipt on ``draft`` as a reader whose snapshot ceiling is ``allowed`` reads what it took from the requirements
     version's lineage; None is the manager, who reads it as stored. ``versions`` as for
-    finance_requirements._version_record.
+    finance_requirements._version_record; ``chain``, the requirements fingerprint and chain key the reader reads the
+    receipt filed under where it reads them otherwise (AnalysisStore._chain_in_view), stands for the stored ones.
 
     The receipt was judged on the draft's check (record_completion), so it reads the way that check reads to the
     reader (finance_requirements.check_lineage_in_view): a hierarchy_dimension_dropped action names only the levels
     the check keeps, and none when it keeps none, and the original requirement reads as completed when the receipt is
     complete and the check reads as completed. Its input key is the one record_completion would have filed over the
-    check as read, so the key covers only what the reader is shown.
+    check as read and the chain as read, so the key covers only what the reader is shown.
     """
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirements import check_lineage_in_view
 
     check = draft.get('explanation_check') if isinstance(draft, dict) else None
     view = check_lineage_in_view(analysis, check, allowed, versions=versions)
-    if view is check:
+    if view is check and not chain:
         return receipt
-    requirements = view['requirements']
-    items = {item.get('id'): item for item in requirements.get('items') or [] if isinstance(item, dict)}
-    actions = []
-    for action in receipt.get('actions') or []:
-        if isinstance(action, dict) and action.get('code') == 'hierarchy_dimension_dropped':
-            item = items.get(action.get('requirement_item_id')) or {}
-            if not item.get('dropped_hierarchy'):
-                continue
-            if item['dropped_hierarchy'] != action.get('keys'):
-                action = _dropped_hierarchy_action(item)
-        actions.append(action)
-    completed = bool(receipt.get('original_requirements_completed')) or (
-        receipt.get('status') == 'complete' and bool(requirements.get('original_requirements_completed')))
-    shown = {**receipt, 'actions': actions, 'original_requirements_completed': completed}
+    shown = {**receipt, **(chain or {})}
+    if view is not check:
+        requirements = view['requirements']
+        items = {item.get('id'): item for item in requirements.get('items') or [] if isinstance(item, dict)}
+        actions = []
+        for action in receipt.get('actions') or []:
+            if isinstance(action, dict) and action.get('code') == 'hierarchy_dimension_dropped':
+                item = items.get(action.get('requirement_item_id')) or {}
+                if not item.get('dropped_hierarchy'):
+                    continue
+                if item['dropped_hierarchy'] != action.get('keys'):
+                    action = _dropped_hierarchy_action(item)
+            actions.append(action)
+        completed = bool(receipt.get('original_requirements_completed')) or (
+            receipt.get('status') == 'complete' and bool(requirements.get('original_requirements_completed')))
+        shown.update({'actions': actions, 'original_requirements_completed': completed})
     if 'input_key' in receipt:
         keyed = ({key: value for key, value in view.items() if key not in EVIDENCE_FIELDS}
                  if isinstance(draft.get('evidence_basis'), dict) else view)
-        shown['input_key'] = _hash({'chain_key': receipt.get('chain_key'), 'draft_id': draft['id'],
+        shown['input_key'] = _hash({'chain_key': shown.get('chain_key'), 'draft_id': draft['id'],
                                     'draft_content_hash': draft['content_hash'], 'quality': keyed,
                                     'completion_policy_version': receipt.get('completion_policy_version')})
     return shown
@@ -122,16 +125,15 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None):
             for run_id in draft.get('run_ids', [])}
     run_hashes = {run_id: run.get('output_hash') for run_id, run in runs.items()}
     requirement = analysis._get('requirements', requirement_id) if requirement_id else None
-    from foundry.finance_requirement_semantics import (
-        run_has_equivalent_requirements, verified_requirement_fingerprint,
-    )
-    semantic_fingerprint = verified_requirement_fingerprint(analysis, requirement)
+    from foundry.finance_requirement_semantics import run_has_equivalent_requirements
+    # A session binds runs to the version, and chains its receipts, by the fingerprint it reads the version with.
+    semantic_fingerprint = analysis.fingerprint_in_view(requirement, allowed, cache=cache)
     candidates = {run_id: run for run_id, run in runs.items()
                   if requirement and (run.get('seq', -1) <= requirement['seq']
                       or run.get('requirements_id') != requirement_id
                       or (semantic_fingerprint and run.get('requirements_semantic_fingerprint') != semantic_fingerprint))}
     reused_runs = [run_id for run_id, run in candidates.items()
-                   if run_has_equivalent_requirements(analysis, run, requirement)]
+                   if run_has_equivalent_requirements(analysis, run, requirement, allowed=allowed, cache=cache)]
     stale_runs = [run_id for run_id in candidates if run_id not in reused_runs]
     issues = list(quality.get('issues', []))
     remaining = {item['id'] for item in requirements.get('items', []) if item['status'] != 'answered'}
@@ -169,9 +171,7 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None):
                        'message': '这些运行未绑定当前要求，且无法证明语义兼容。请按当前要求重新运行受影响的计算，再保存解释；已有草稿仍可编辑。'})
     # A new run or draft must not reset the repair budget for the same question.
     # A deliberate requirements revision starts a new completion scope.
-    chain_key = _hash({'requirements_semantic_fingerprint': semantic_fingerprint} if semantic_fingerprint else
-                      {'requirements_id': requirement_id} if requirement_id else
-                      {'unscoped_run_hashes': sorted(run_hashes.values(), key=str)})
+    chain_key = completion_chain_key(semantic_fingerprint, requirement_id, run_hashes)
     issue_fingerprint = _hash(issues)
     # Labels, posture and freshness read differently for each reader (AnalysisStore.draft_in_view) and never
     # decide completion; a receipt a session is handed must not carry a digest of the stored ones. A draft
@@ -186,6 +186,13 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None):
             'stale_runs': stale_runs, 'issues': issues, 'awaiting_input': awaiting_input,
             'awaiting_manager': awaiting_manager, 'manager_reasons': manager_reasons, 'chain_key': chain_key,
             'issue_fingerprint': issue_fingerprint, 'input_key': input_key}
+
+
+def completion_chain_key(semantic_fingerprint, requirement_id, run_hashes):
+    """The chain a receipt files under: its requirements version's fingerprint, else the version, else its runs."""
+    return _hash({'requirements_semantic_fingerprint': semantic_fingerprint} if semantic_fingerprint else
+                 {'requirements_id': requirement_id} if requirement_id else
+                 {'unscoped_run_hashes': sorted(run_hashes.values(), key=str)})
 
 
 def receipt_fields(analysis, assessed, history):

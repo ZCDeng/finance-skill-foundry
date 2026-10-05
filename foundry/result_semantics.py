@@ -583,18 +583,18 @@ def declare_rows(columns: list, rows: list[dict], requirements: dict | None, *, 
     }
 
 
-def declare_script_result(analysis, columns: list, rows: list[dict], requirements_id: str | None) -> dict:
-    """The declaration a script run saves: its full result rows read against its pinned requirements."""
-    from foundry.finance_requirement_semantics import verified_requirement_fingerprint
-
+def declare_script_result(analysis, columns: list, rows: list[dict], requirements_id: str | None, *,
+                          allowed: set[str] | None = None) -> dict:
+    """The declaration a script run saves: its full result rows read against its pinned requirements, with the
+    fingerprint the saver (``allowed``, a session's snapshot ceiling; None: the manager) reads them with
+    (AnalysisStore.fingerprint_in_view)."""
     try:
         requirements = analysis._get('requirements', requirements_id) if requirements_id else None
     except FoundryError:
         declaration = declare_rows(columns, rows, None, fingerprint=None, complete=False,
                                    incomplete_reason='requirements_unavailable')
         return {**declaration, 'requirements_id': requirements_id}
-    return declare_rows(columns, rows, requirements,
-                        fingerprint=verified_requirement_fingerprint(analysis, requirements))
+    return declare_rows(columns, rows, requirements, fingerprint=analysis.fingerprint_in_view(requirements, allowed))
 
 
 def _archived_result(analysis, run: dict) -> tuple[list, list[dict]] | None:

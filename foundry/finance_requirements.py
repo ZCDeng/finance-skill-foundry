@@ -484,10 +484,12 @@ def _lineage_in_view(analysis, record, allowed, versions=None):
     The session reads the version as saved after only the versions it may read (_readable_lineage), and each field
     read from the others narrows: parent_id is the nearest version it may read, or none. The first version it may read
     removed nothing, and each after it removed what its parent removed and the items it dropped, as _version_change
-    recorded them (never more than stored); semantic_basis carries the same ids. A hierarchy_dimension_dropped warning
-    stands only when the stored parent is one it may read (_drop_carried_over_hierarchy read the parent's items), and
-    a hierarchy_scope_dropped warning keeps the levels a version it may read held (_earlier_scope_levels). A level
-    dropped because the finance context held it stands, and nothing is added.
+    recorded them (never more than stored); semantic_basis carries the same ids, and where it holds fewer, the
+    semantic fingerprint is its hash, as the stored one is the stored basis's (requirement_semantics). A
+    hierarchy_dimension_dropped warning stands only when the stored parent is one it may read
+    (_drop_carried_over_hierarchy read the parent's items), and a hierarchy_scope_dropped warning keeps the levels a
+    version it may read held (_earlier_scope_levels). A level dropped because the finance context held it stands, and
+    nothing is added.
     """
     chain, hidden = _readable_lineage(analysis, record, allowed, versions)
     if not hidden:
@@ -517,7 +519,11 @@ def _lineage_in_view(analysis, record, allowed, versions=None):
                'authoring_warnings': warnings}
     basis = record.get('semantic_basis')
     if isinstance(basis, dict) and 'removed_item_ids' in basis:
-        lineage['semantic_basis'] = {**basis, 'removed_item_ids': sorted(kept)}
+        narrowed = {**basis, 'removed_item_ids': sorted(kept)}
+        lineage['semantic_basis'] = narrowed
+        # A basis that no longer hashes to the fingerprint beside it would tell that a hidden version removed an item.
+        if narrowed != basis and record.get('semantic_fingerprint') == _hash(basis):
+            lineage['semantic_fingerprint'] = _hash(narrowed)
     return lineage
 
 
@@ -526,6 +532,21 @@ def _removed_in_view(analysis, record, allowed, versions=None):
     ceiling is ``allowed`` reads them (_lineage_in_view); None is the manager, who reads them as stored."""
     lineage = None if allowed is None else _lineage_in_view(analysis, record, allowed, versions)
     return record.get('removed_item_ids') if lineage is None else lineage['removed_item_ids']
+
+
+def semantics_in_view(analysis, record, allowed, *, versions=None):
+    """Requirements version ``record`` as a reader whose snapshot ceiling is ``allowed`` reads what its semantic
+    fingerprint covers (requirements_version_view), or ``record`` itself when it reads the stored fingerprint (always,
+    for the manager): verified_requirement_fingerprint of what this returns is the fingerprint the reader reads.
+    ``versions`` as for _version_record.
+
+    Only a version whose removed ids hold an item only a version the reader may not read held reads with another
+    fingerprint (_lineage_in_view), so telling which reads no file.
+    """
+    lineage = None if allowed is None or not record else _lineage_in_view(analysis, record, allowed, versions)
+    if lineage is None or 'semantic_fingerprint' not in lineage:
+        return record
+    return {key: lineage.get(key, value) for key, value in record.items()}
 
 
 def _reject_hierarchy_dimensions(items, hierarchy):
@@ -658,11 +679,12 @@ def requirements_version_view(analysis, record, allowed, *, versions=None, draft
     reads it as stored. ``versions`` as for _version_record, ``drafts`` as for _selection_in_view.
 
     A session reads a version as if every version it may not read had never been saved: what the version took from
-    the versions before it (parent_id, removed ids, authoring warnings) reads as _lineage_in_view reads it, and a
-    selection naming a draft or workbook binding it may not read reads as none (_selection_in_view). The integrity
-    hash covers the stored record, so no version a session reads carries it: a view that differs from the record
-    would otherwise tell itself apart. The rest stands as saved, the semantic fingerprint runs and receipts captured
-    among it.
+    the versions before it (parent_id, removed ids and the semantic basis and fingerprint over them, authoring
+    warnings) reads as _lineage_in_view reads it, and a selection naming a draft or workbook binding it may not read
+    reads as none (_selection_in_view). The integrity hash covers the stored record, so no version a session reads
+    carries it: a view that differs from the record would otherwise tell itself apart. The rest stands as saved. A run
+    or receipt that captured the stored fingerprint reads to a session with the one it reads (semantics_in_view;
+    AnalysisStore.run_in_view, completions_in_view).
     """
     if allowed is None or not record:
         return record

@@ -870,9 +870,11 @@ def _lineage_world(root: Path, kind: str):
 
 
 def _lineage(record: dict, names: dict) -> dict:
-    """What a version took from the versions before it, its own id and its parent named by role."""
+    """What a version took from the versions before it, its own id and its parent named by role, and whether its
+    semantic basis hashes to its fingerprint."""
     return {"version": names.get(record["id"], "new"), "parent": names.get(record["parent_id"], record["parent_id"]),
             "removed": record["removed_item_ids"], "basis": (record.get("semantic_basis") or {}).get("removed_item_ids"),
+            "hashed": _hash(record.get("semantic_basis")) == record.get("semantic_fingerprint"),
             "warnings": [(warning["code"], warning["keys"]) for warning in record.get("authoring_warnings") or []]}
 
 

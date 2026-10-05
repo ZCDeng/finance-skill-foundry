@@ -90,7 +90,7 @@ def _pinned_world(root: Path, hidden: bool, capsys, *, extra_item: bool = False)
     cited = [runs[way]["id"] for way in ("script", "sql", "explicit")]
     draft = {"body": "Falcon 收入 100。", "run_ids": cited,
              "claims": [{"basis": "calculation", "run_id": cited[0], "row": 0, "column": "value", "value": "100"}]}
-    return SimpleNamespace(var=var, task=task, analysis=analysis, a=a, manager=manager, visible=visible,
+    return SimpleNamespace(var=var, task=task, analysis=analysis, a=a, h=h, manager=manager, visible=visible,
                            hidden=head if hidden else None, current=current, runs=runs, draft=draft,
                            secrets=[h, *([head["id"], head["semantic_fingerprint"], "Falcon 项目", "按人数分摊"]
                                          if hidden else [])])
@@ -206,6 +206,38 @@ def test_a_session_runs_an_analysis_naming_a_version_it_may_not_read_as_it_reads
     assert ran[0] == ran[1]
 
 
+def test_a_session_reads_a_run_of_an_analysis_naming_a_version_it_may_not_read_by_the_version_current_when_it_ran(
+        tmp_path, capsys, fake_runner):
+    """The manager runs SQL saved naming Hv (V where Hv was never saved) while V3, which asks otherwise, is current; V4
+    then asks what V asked. The session reads the run as captured under V3, not V: not bound to V4, its own draft's
+    receipt included."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys)
+        as_manager = {"session": None, "task": world.task.id}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a},
+             "requirements_id": (world.hidden or world.visible)["id"]}), **as_manager)
+        assert code == 0, saved
+        spec = {"scope": {"period": "2026-08"}, "bindings": {"gl": world.a}, "items": ITEMS, "change_reason": "复核"}
+        then = world.manager.analysis_requirements_save(
+            {**spec, "question": "收入（复核）", "parent_id": world.current["id"]})
+        code, run = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], **as_manager)
+        assert code == 0, run
+        again = world.manager.analysis_requirements_save({**spec, "question": "收入", "parent_id": then["id"]})
+        assert again["semantic_fingerprint"] == world.visible["semantic_fingerprint"] != then["semantic_fingerprint"]
+        code, state = _cli(capsys, world.var, "analysis-state")
+        assert code == 0
+        [listed] = [row for row in state["runs"] if row["id"] == run["id"]]
+        assert (listed["requirements_id"], listed["requirements_semantic_fingerprint"]) == (
+            world.visible["id"], then["semantic_fingerprint"])
+        receipt = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess").save_explanation_draft(
+            {"body": "会话稿：Falcon 收入 100。", "run_ids": [run["id"]]})["completion"]
+        assert _shows([state, receipt], world.secrets) == []
+        read.append(_verdict(receipt))
+    assert read[0] == read[1] and read[0][4] == 0 and "requirements_run_outdated" in read[0][5]
+
+
 def test_a_session_reads_a_draft_and_receipt_citing_such_a_run_as_it_would_have_saved_them(tmp_path, capsys, fake_runner):
     read = []
     for name, hidden in (("plain", False), ("hidden", True)):
@@ -296,12 +328,17 @@ def test_a_session_s_retry_files_the_receipt_its_save_would_have(tmp_path, capsy
 # --- a completion chain on such runs ----------------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("extra_item", [False, True])
 def test_a_session_reads_a_completion_chain_on_such_runs_as_where_the_version_was_never_saved(
-        tmp_path, capsys, fake_runner):
-    """Each receipt is judged a stall against the one before it: as the session reads that one, not as stored."""
+        tmp_path, capsys, fake_runner, extra_item):
+    """Each receipt is judged a stall against the one before it: as the session reads that one, not as stored. Where
+    Hv held an item more, V2's stored fingerprint covers it, and the manager's receipts are filed under it: the session
+    reads them, their key and their chain under V2's fingerprint as it reads it, and files its own receipt there."""
+    from foundry.evidence_labels import EVIDENCE_FIELDS
+
     read = []
     for name, hidden in (("plain", False), ("hidden", True)):
-        world = _pinned_world(tmp_path / name, hidden, capsys)
+        world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=extra_item)
         managed = [world.manager.save_explanation_draft({**world.draft, "body": f"经理稿{index}：Falcon 收入 100。"})
                    for index in "甲乙丙"]
         code, state = _cli(capsys, world.var, "analysis-state")
@@ -313,8 +350,24 @@ def test_a_session_reads_a_completion_chain_on_such_runs_as_where_the_version_wa
         own = _session_draft(world, "会话稿：Falcon 收入 100。")
         assert _shows([state, own], world.secrets) == []
         read.append((chain, _verdict(own["completion"])))
+        drafts = {row["id"]: row for row in state["drafts"]}
+        for receipt in [*receipts.values(), own["completion"]]:
+            draft = drafts.get(receipt["draft_id"]) or own
+            shown = {key: value for key, value in draft["explanation_check"].items() if key not in EVIDENCE_FIELDS}
+            assert receipt["requirements_semantic_fingerprint"] == world.visible["semantic_fingerprint"]
+            assert receipt["chain_key"] == _hash(
+                {"requirements_semantic_fingerprint": world.visible["semantic_fingerprint"]})
+            assert receipt["input_key"] == _hash({
+                "chain_key": receipt["chain_key"], "draft_id": draft["id"], "draft_content_hash": draft["content_hash"],
+                "quality": shown, "completion_policy_version": receipt["completion_policy_version"]})
+        # The session files its own receipt as it reads it.
+        stored = world.analysis._get("completions", own["completion"]["id"])
+        assert {key: stored[key] for key in ("requirements_semantic_fingerprint", "chain_key")} == {
+            key: own["completion"][key] for key in ("requirements_semantic_fingerprint", "chain_key")}
         if hidden:
             assert [_verdict(draft["completion"])[4] for draft in managed] == [0, 0, 0]
+            assert {draft["completion"]["requirements_semantic_fingerprint"] for draft in managed} == {
+                world.current["semantic_fingerprint"]}
     assert read[0] == read[1]
     assert read[0] == ([("repair_available", 0, None, True, 3, ISSUES), ("needs_review", 1, "no_progress", False, 3, ISSUES),
                         ("needs_review", 2, "no_progress", False, 3, ISSUES)],
@@ -348,16 +401,83 @@ def test_a_session_reads_its_operation_settled_before_it_read_such_runs_so_as_it
     assert read[0] == read[1] and [verdict[4] for verdict in read[0]] == [3, 3]
 
 
-@pytest.mark.xfail(strict=True, reason="V2's stored semantic fingerprint holds the item only Hv held, so the runs the "
-                                       "session reads pinned to V do not bind to it; the requirements lineage view "
-                                       "does not read fingerprints")
 def test_a_session_s_receipt_reuses_runs_pinned_where_a_version_it_may_not_read_held_an_item_more(
         tmp_path, capsys, fake_runner):
+    """V2's stored fingerprint covers the item it removed that only Hv held; the session reads V2 with the fingerprint
+    over what it reads V2 removed, V's, so the runs it reads pinned to V bind to it."""
     filed = []
     for name, hidden in (("plain", False), ("hidden", True)):
         world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=True)
         filed.append(_verdict(_session_draft(world, "会话稿：Falcon 收入 100。")["completion"]))
-    assert filed[0] == filed[1]
+    assert filed[0] == filed[1] and filed[0][4] == 3
+
+
+def test_a_session_reads_runs_captured_under_such_a_version_with_the_fingerprint_it_reads(
+        tmp_path, capsys, fake_runner):
+    """With V2 current, the manager runs a script and SQL, and the session runs its own; V3 then repeats V2. The
+    session saves and reads every run, the scripts' declarations, the current version beside them and the receipts on
+    them as where Hv was never saved: by V's fingerprint, which is V2's and V3's as it reads them, and its receipt
+    counts the manager's earlier ones of that chain. So does a script the manager runs under a later version on H,
+    which reads pinned to V3. The manager reads hers as stored, and the session's as the session saved them."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=True)
+        as_manager = {"session": None, "task": world.task.id}
+        script = {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json"}
+        sql = {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}}
+        runs = {"script": _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(script), **as_manager)[1]}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(sql), **as_manager)
+        runs["sql"] = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], **as_manager)[1]
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(sql))
+        runs["own"] = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"])[1]
+        runs["own script"] = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(script))[1]
+        assert [run["requirements_id"] for run in runs.values()] == [world.current["id"]] * 4
+        returned = {way: {key: runs[way].get(key) for key in PINNED} for way in ("own", "own script")}
+        world.manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"},
+                                                  "bindings": {"gl": world.a}, "items": ITEMS,
+                                                  "parent_id": world.current["id"]})
+        managed = world.manager.save_explanation_draft({"body": "经理稿：Falcon 收入 100。", "run_ids": [runs["own"]["id"]]})
+        for index in "甲乙":
+            world.manager.save_explanation_draft({"body": f"经理稿{index}：收入 100。", "run_ids": [runs["sql"]["id"]]})
+        own = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess").save_explanation_draft(
+            {"body": "会话稿：收入 100。", "run_ids": [runs["sql"]["id"]]})
+        if hidden:
+            world.manager.analysis_requirements_save({
+                "question": "Falcon 项目", "scope": {"period": "2026-07"}, "bindings": {"payroll": world.h},
+                "parent_id": world.manager.analysis_requirements_list({})["current"]["id"], "items": HIDDEN_ITEMS})
+        runs["later"] = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(script), **as_manager)[1]
+        code, state = _cli(capsys, world.var, "analysis-state")
+        assert code == 0
+        listed = {run["id"]: run for run in state["runs"]}
+        receipts = {row["draft_id"]: row for row in state["completions"]}
+        assert _shows(state, world.secrets) == []
+        assert {row["semantic_fingerprint"] for row in state["requirements"]} == {world.visible["semantic_fingerprint"]}
+        read.append(_named(world, {
+            "runs": {way: {key: listed[run["id"]].get(key) for key in PINNED} for way, run in runs.items()},
+            "returned": returned, "receipt": _verdict(receipts[managed["id"]]),
+            "own": [_verdict(own["completion"]), _verdict(receipts[own["id"]])]}))
+        if hidden:
+            # The manager reads her runs and V2 as stored, and the session's run as it was saved.
+            stored = world.current["semantic_fingerprint"]
+            assert stored != world.visible["semantic_fingerprint"]
+            code, managed_state = _cli(capsys, world.var, "analysis-state", session=None, task=world.task.id)
+            stored_runs = {run["id"]: run for run in managed_state["runs"]}
+            assert [stored_runs[run["id"]]["requirements_semantic_fingerprint"] for run in runs.values()][:4] == [
+                stored, stored, *[world.visible["semantic_fingerprint"]] * 2]
+            assert [stored_runs[runs[way]["id"]]["row_declarations"]["requirements_fingerprint"]
+                    for way in ("script", "own script")] == [stored, world.visible["semantic_fingerprint"]]
+    assert read[0] == read[1]
+    shown = json.loads(read[0])
+    pins = [*shown["runs"].values(), *shown["returned"].values()]
+    declarations = [pin["row_declarations"] for pin in pins if pin["row_declarations"]]
+    fingerprints = {pin["requirements_semantic_fingerprint"] for pin in pins}
+    fingerprints |= {declaration["requirements_fingerprint"] for declaration in declarations}
+    fingerprints |= {declaration["current_requirements"]["fingerprint"] for declaration in declarations
+                     if "current_requirements" in declaration}
+    assert len(declarations) == 4 and fingerprints == {"<fingerprint>"}
+    # The manager's receipt on the session's run reads as the session's own save would have filed it: bound to V3.
+    assert shown["receipt"][4] == 1 and "requirements_run_outdated" not in shown["receipt"][5]
+    assert shown["own"][0] == shown["own"][1] and shown["own"][0][1:5] == [2, "repair_budget_exhausted", False, 1]
 
 
 def test_a_session_reads_a_receipt_on_such_a_run_by_the_lineage_it_reads(tmp_path, capsys):
