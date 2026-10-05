@@ -677,7 +677,8 @@ class _MappingSources:
             if analysis._dataset_published(record := analysis._read(path))
         ]
         self.published = {row["id"]: row for row in rows}
-        self.superseded = superseded_snapshots(files.task, rows)
+        # A newer file outside a session replaces nothing it reads (superseded_snapshots).
+        self.superseded = superseded_snapshots(files.task, rows, allowed=files.allowed)
         self.books: dict[str, Any] = {}
         self.sheets: dict[tuple[str, str], Any] = {}
 

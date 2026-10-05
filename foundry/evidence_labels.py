@@ -877,7 +877,7 @@ def _evidence_fields(check: dict[str, Any], *, claims, fact_ids, runs, recipe_re
 
 
 def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[str] | None, *,
-                     runs: Callable[[], dict[str, dict]]) -> dict[str, Any] | None:
+                     runs: Callable[[], dict[str, dict]], force: bool = False) -> dict[str, Any] | None:
     """A stored draft's labels, posture and freshness as a reader whose snapshot ceiling is ``allowed`` (None:
     every file) reads them, or None when they stand as saved.
 
@@ -888,7 +888,8 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     still counts. Whether a newer file replaces an older one, or a newer run reruns an older one, depends on
     the two alone, which is why counting by ceiling is enough. Everything else stands as saved (the task
     period, estimates, the check itself). ``draft`` must carry ``evidence_basis``; ``runs`` loads the draft's
-    runs, only when the fields are read again.
+    runs, only when the fields are read again. ``force`` reads them again even then: the check itself is not
+    the one saved (a revision read without the parent it may not read).
     """
     from foundry.finance_readiness import currency_freshness
 
@@ -901,7 +902,7 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     older = {run_id for run_id, readings in (basis.get("newer_runs") or {}).items()
              if any(readable(files) for files in readings)}
     saved = set(basis.get("superseded") or [])
-    if superseded == saved and older == set(basis.get("older_runs") or []):
+    if not force and superseded == saved and older == set(basis.get("older_runs") or []):
         return None
     datasets = {
         dataset_id: ({**info, "freshness": currency_freshness(info, task_period=basis.get("task_period") or "",

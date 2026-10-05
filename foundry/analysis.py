@@ -15,7 +15,7 @@ import sys
 import uuid
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import duckdb
 from openpyxl import Workbook
@@ -42,6 +42,22 @@ RESULT_ROLES = {"business", "activity", "probe", "preanalysis", "calculation", "
 REVIEW = {"unreviewed", "reviewed", "accepted"}
 PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
+# One answer for a parent draft a session may not read and for one that does not exist, so it cannot tell them apart.
+PARENT_UNAVAILABLE = "parent draft is unavailable or outside this session context"
+# What a revision takes over from its parent when the spec leaves it out (save_draft copies it): what the parent's
+# author wrote or the server generated from the parent's files. (The runs and requirements version it takes are read
+# as its own.) A revision records which of these it took (`inherited_fields`), and one that took any rests on
+# everything its parent rests on (AnalysisStore.draft_snapshots).
+INHERITED_FIELDS = ("title", "body", "claims", "fact_ids", "materiality", "limitations", "source_read_failures",
+                    "evidence_appendix", "evidence_appendix_meta", "evidence_recipes", "consistency_rules",
+                    "consistency_sources")
+DEFAULT_DRAFT_TITLE = "分析报告"
+# What a session reads of a completion receipt whose messages or fixups name a run outside it: the verdict.
+COMPLETION_VERDICT = (
+    "id", "task_id", "schema_version", "created_at", "seq", "draft_id", "draft_content_hash",
+    "completion_policy_version", "requirements_id", "status", "repair_attempts", "max_repairs", "response_status",
+    "original_requirements_completed", "repair_allowed", "stop_reason", "manager_reasons", "checks",
+)
 BASIS = {
     "source_fact",
     "calculation",
@@ -75,9 +91,19 @@ def _export_reader(mode: str | None, allowed: set[str] | None) -> str:
     An audit projection carries the evidence labels, which each reader reads by the files it may read
     (AnalysisStore.draft_in_view). Were a session's audit export filed under the manager's name whenever the
     two agree, getting the manager's file back would tell the session whether a newer file it may not read
-    exists. A management projection reads the same for everyone.
+    exists. A management projection reads the same for everyone, and export_draft renders it on the server,
+    so its file is the same whoever asks.
     """
-    return "" if allowed is None or mode != "audit" else f"-{_hash(sorted(allowed))[:12]}"
+    return "" if allowed is None or mode != "audit" else _registration_reader(allowed)
+
+
+def _registration_reader(allowed: set[str] | None) -> str:
+    """What keeps a session's registered export apart from every other reader's, in any mode.
+
+    A registration files bytes the caller rendered, not ones the server did: were they filed under a name
+    another reader also files under, whoever registered first would decide what the other gets back.
+    """
+    return "" if allowed is None else f"-{_hash(sorted(allowed))[:12]}"
 
 
 
@@ -160,6 +186,115 @@ def _revision_quality_issues(comparison: dict) -> list[dict]:
                 "message": item.get("message") or "修订比较口径发生变化，需要复核。",
             })
     return issues
+
+
+def _without_revision(check: Any) -> Any:
+    """A stored check as save_draft would have composed it with no parent: the same check less its revision issues.
+
+    Only issues set ``needs_attention``, on the check and on its numeric_citation dimension, and a revision
+    issue needs cited runs, so a check left with no issue reads ``pass`` (_quality_status_dimensions).
+    """
+    if not isinstance(check, dict):
+        return check
+
+    def kept(issues: Any) -> list:
+        return [issue for issue in issues or []
+                if not (isinstance(issue, dict) and str(issue.get("code", "")).startswith("revision_"))]
+
+    issues = kept(check.get("issues"))
+    masked = {**check, "issues": issues, **({"status": "pass"} if check.get("status") == "needs_attention" and not issues else {})}
+    dimensions = check.get("status_dimensions")
+    numeric = dimensions.get("numeric_citation") if isinstance(dimensions, dict) else None
+    if isinstance(numeric, dict):
+        left = kept(numeric.get("issues"))
+        masked["status_dimensions"] = {**dimensions, "numeric_citation": {
+            **numeric, "issues": left, **({"status": "pass"} if numeric.get("status") == "needs_attention" and not left else {})}}
+    return masked
+
+
+def _receipt_runs(receipt: dict) -> set[str]:
+    """Every run a completion receipt names: its hashes and reused runs, and its actions' runs and fixups."""
+    runs = set(receipt.get("run_hashes") or {}) | set(receipt.get("reused_run_ids") or [])
+    for action in receipt.get("actions") or []:
+        if not isinstance(action, dict):
+            continue
+        runs |= {run_id for run_id in action.get("run_ids") or [] if isinstance(run_id, str)}
+        for fixup in action.get("fixups") or []:
+            if not isinstance(fixup, dict):
+                continue
+            location = fixup.get("location") if isinstance(fixup.get("location"), dict) else {}
+            runs |= {run_id for run_id in (fixup.get("run_id"), location.get("run_id")) if isinstance(run_id, str)}
+            runs |= {row["run_id"] for row in fixup.get("runs") or []
+                     if isinstance(row, dict) and isinstance(row.get("run_id"), str)}
+    return runs
+
+
+def _rests_on_parent(draft: dict) -> bool:
+    """Whether a revision took anything of its parent (INHERITED_FIELDS). One saved before revisions recorded what they
+    took cannot tell, so it is read as having taken it."""
+    inherited = draft.get("inherited_fields")
+    return bool(draft.get("parent_id")) and (inherited is None or bool(inherited))
+
+
+def _default_materiality(value: Any) -> bool:
+    """Whether a draft's materiality is the one a draft given none is saved with (finance_explanations._materiality)."""
+    from foundry.finance_explanations import _materiality
+
+    try:
+        return value in (None, {}) or _materiality(value) == _materiality({})
+    except FoundryError:
+        return False
+
+
+def _inherited_fields(spec: dict, parent: dict) -> set[str]:
+    """The INHERITED_FIELDS a revision saved from ``spec`` takes from ``parent``: what the spec leaves out and the
+    parent carries. A parent's default title, or an empty value, is what a draft saved with no parent carries too."""
+    if not parent:
+        return set()
+    inherited = set()
+    for key in INHERITED_FIELDS:
+        if key == "body":
+            # The body goes with the document it is projected from.
+            taken = spec.get("document") is None and "body" not in spec and (
+                parent.get("document") is not None or bool(parent.get("body")))
+        elif key == "materiality":
+            taken = key not in spec and not _default_materiality(parent.get(key))
+        else:
+            taken = key not in spec and parent.get(key) not in (None, "", [], {}) and not (
+                key == "title" and parent[key] == DEFAULT_DRAFT_TITLE)
+        if taken:
+            inherited.add(key)
+    return inherited
+
+
+def _engine_runs(draft: dict) -> set[str]:
+    """The engine runs a draft's requirement items name (finance_requirements.requirements_in_view)."""
+    runs: set[str] = set()
+    for key in ("explanation_check", "quality"):
+        requirements = draft.get(key, {}).get("requirements") if isinstance(draft.get(key), dict) else None
+        for item in (requirements.get("items") or []) if isinstance(requirements, dict) else []:
+            for run in (item.get("engine_runs") or []) if isinstance(item, dict) else []:
+                if isinstance(run, dict) and isinstance(run.get("run_id"), str):
+                    runs.add(run["run_id"])
+    return runs
+
+
+def _repair_budget(receipt: dict, history: list[dict]) -> dict:
+    """What a receipt says of its repair budget, counted over ``history`` (the earlier receipts of its chain a reader
+    may read) by record_completion's rules: what that reader's own save of the draft would have spent."""
+    from foundry.finance_completion import MAX_REPAIRS
+
+    maximum = receipt["max_repairs"] if isinstance(receipt.get("max_repairs"), int) else MAX_REPAIRS
+    status = receipt.get("status")
+    stalled = bool(history) and history[-1].get("issue_fingerprint") == receipt.get("issue_fingerprint") and status != "complete"
+    exhausted = len(history) >= maximum
+    if status in {"needs_review", "repair_available"}:
+        status = "needs_review" if stalled or exhausted else "repair_available"
+    fields = {"repair_attempts": min(len(history), maximum), "status": status,
+              "repair_allowed": status in {"repair_available", "needs_requirements"} and not exhausted and not stalled}
+    if status not in {"complete", "awaiting_input", "awaiting_manager"}:
+        fields["stop_reason"] = "no_progress" if stalled else "repair_budget_exhausted" if exhausted else None
+    return fields
 
 
 def _new(task: Task, **fields) -> dict:
@@ -371,10 +506,15 @@ class AnalysisStore:
         )
         return sorted(datasets, key=lambda r: (r.get("seq", 0), r["created_at"], r["id"]))
 
-    def state(self) -> dict:
+    def state(self, allowed: set[str] | None = None) -> dict:
+        """Every record of the task. ``allowed``, a session's snapshot ceiling, keeps the requirements versions it
+        may read, and runs are read against the latest of them (as analysis_requirements_list names its current
+        one); the caller filters the rest."""
         from foundry.result_semantics import declared_runs
 
         requirements = self._list("requirements")
+        if allowed is not None:
+            requirements = [row for row in requirements if set((row.get("bindings") or {}).values()) <= set(allowed)]
         return {
             "schema_version": 1,
             "task_id": self.task.id,
@@ -833,7 +973,86 @@ class AnalysisStore:
     def get_draft(self, draft_id: str) -> dict:
         return self._get("drafts", draft_id)
 
-    def draft_in_view(self, draft: dict, allowed: set[str] | None) -> dict:
+    def draft_snapshots(self, draft: dict, *, cache: dict[str, frozenset[str]] | None = None) -> set[str]:
+        """Every snapshot a saved draft rests on: its runs and claims, its evidence recipes and consistency
+        sources, the requirements versions it was pinned to and checked against, and, for a revision that took
+        anything of its parent (_rests_on_parent), everything the parent rests on: that text was written or
+        generated from the parent's files. A session may read the draft only if it may read all of them; a run or
+        record that no longer reads raises. ``cache`` (draft id to its snapshots), when given, is shared by the
+        drafts of one listing, so each draft of a revision chain is read once."""
+        from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
+
+        read: dict[Any, frozenset[str]] = {}
+
+        def run(run_id: Any) -> frozenset[str]:
+            if not (isinstance(run_id, str) and run_id in read):
+                read[run_id] = frozenset((self.get_run(run_id).get("bindings") or {}).values())
+            return read[run_id]
+
+        def own(record: dict) -> set[str]:
+            snapshots: set[str] = set()
+            for run_id in record.get("run_ids") or []:
+                snapshots |= run(run_id)
+            for claim in record.get("claims") or []:
+                if isinstance(claim, dict):
+                    if claim.get("dataset_id"):
+                        snapshots.add(claim["dataset_id"])
+                    if claim.get("run_id"):
+                        snapshots |= run(claim["run_id"])
+            recipes = record.get("evidence_recipes") or []
+            snapshots |= recipe_dataset_ids(recipes) | consistency_dataset_ids(record.get("consistency_sources") or {})
+            for recipe in recipes:
+                claim = recipe.get("claim") if isinstance(recipe, dict) else None
+                if isinstance(claim, dict) and claim.get("run_id"):
+                    snapshots |= run(claim["run_id"])
+            checked = [check["requirements"].get("requirements_id")
+                       for check in (record.get("explanation_check"), record.get("quality"))
+                       if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
+            for requirements_id in dict.fromkeys([record.get("requirements_id"), *checked]):
+                if requirements_id:
+                    snapshots.update((self._get("requirements", requirements_id).get("bindings") or {}).values())
+            return snapshots
+
+        # Up the chain while each revision rests on its parent, then back down, each draft's own snapshots added once.
+        chain: list[dict] = []
+        seen: set[Any] = {draft.get("id")}
+        total: set[str] = set()
+        current = draft
+        while True:
+            if cache is not None and current.get("id") in cache:
+                total = set(cache[current["id"]])
+                break
+            chain.append(current)
+            if not _rests_on_parent(current):
+                break
+            if current["parent_id"] in seen:
+                raise FoundryError("draft revision chain is invalid")
+            seen.add(current["parent_id"])
+            current = self.get_draft(current["parent_id"])
+        for record in reversed(chain):
+            total |= own(record)
+            if cache is not None and isinstance(record.get("id"), str):
+                cache[record["id"]] = frozenset(total)
+        return total
+
+    def draft_readable(self, draft: dict, allowed: set[str] | None, *,
+                       cache: dict[str, frozenset[str]] | None = None) -> bool:
+        """Whether a reader whose snapshot ceiling is ``allowed`` (None: the manager) may read a saved draft.
+        ``cache`` as for draft_snapshots."""
+        if allowed is None:
+            return True
+        try:
+            return self.draft_snapshots(draft, cache=cache) <= set(allowed)
+        except FoundryError:
+            return False
+
+    def _parent_readable(self, parent_id: str, allowed: set[str] | None) -> bool:
+        try:
+            return self.draft_readable(self.get_draft(parent_id), allowed)
+        except FoundryError:
+            return False
+
+    def draft_in_view(self, draft: dict, allowed: set[str] | None, *, readable_ids: set[str] | None = None) -> dict:
         """A stored draft as a reader whose snapshot ceiling is ``allowed`` reads it; None is the full view.
 
         Whoever saved the draft read its evidence over the files and runs they could read. Every reader reads
@@ -841,14 +1060,42 @@ class AnalysisStore:
         newer file outside a session decides nothing the session reads, and the manager reads a session's
         draft with the newer files the session could not read. The basis the labels were read from names
         every such file, so it never reaches a session; the integrity hash covers the stored record, so it
-        does not go with a view that differs from it. A draft saved before drafts kept a basis cannot tell
+        does not go with a view that differs from it (save that the manager reads a revision with its record's hash,
+        which also covers what the revision took from its parent, as it always read every draft). A draft saved before drafts kept a basis cannot tell
         what its labels rested on: a session reads it without labels, posture or freshness, the full view as
-        saved.
+        saved. A session that may not read a revision's parent reads it as saved with no parent; one reading a
+        check saved before completion policy 13 reads no engine run it may not read
+        (finance_requirements.requirements_in_view). ``readable_ids``, when given, are the drafts this reader
+        may read (draft_readable), so a listing need not read every parent again.
         """
         from foundry.evidence_labels import EVIDENCE_FIELDS, evidence_in_view
 
         views: dict[str, dict] = {}
         loaded: dict[str, dict] = {}
+        # A revision is compared with its parent's runs: a reader that may not read the parent reads the draft as
+        # it would have saved it, with no parent, and the labels read again from that check.
+        orphaned = (allowed is not None and bool(draft.get("parent_id"))
+                    and not (draft["parent_id"] in readable_ids if readable_ids is not None
+                             else self._parent_readable(draft["parent_id"], allowed)))
+        if orphaned:
+            from foundry.finance_revision import compare_draft_runs
+
+            # Review and reproducibility stay as stored: a change from the parent that nobody reviewed or verified
+            # never reads as reviewed or reproducible.
+            draft = {**draft, "parent_id": None, "revision_comparison": compare_draft_runs(self, {}, {}),
+                     **{key: _without_revision(draft[key]) for key in ("explanation_check", "quality") if key in draft}}
+        from foundry.finance_requirements import OWN_FILES_POLICY, requirements_in_view
+
+        if allowed is not None and (draft.get("check_policy_version") or 0) < OWN_FILES_POLICY:
+            # Saved when a requirement still read runs on other files too: a session reads none it may not read.
+            def readable_run(run_id: Any) -> bool:
+                try:
+                    return isinstance(run_id, str) and set((self.get_run(run_id).get("bindings") or {}).values()) <= set(allowed)
+                except FoundryError:
+                    return False
+
+            draft = {**draft, **{key: requirements_in_view(draft[key], readable_run)
+                                 for key in ("explanation_check", "quality") if isinstance(draft.get(key), dict)}}
 
         def runs() -> dict[str, dict]:
             if not loaded:
@@ -864,7 +1111,8 @@ class AnalysisStore:
                     views[key] = {name: value for name, value in check.items() if name not in EVIDENCE_FIELDS}
                 continue
             try:
-                fields = evidence_in_view(draft, check, None if allowed is None else set(allowed), runs=runs)
+                fields = evidence_in_view(draft, check, None if allowed is None else set(allowed), runs=runs,
+                                          force=orphaned)
             except FoundryError:
                 # A run it cites no longer reads, so they cannot be read again: a session reads the draft without
                 # them, the full view as saved.
@@ -873,10 +1121,124 @@ class AnalysisStore:
                 continue
             if fields is not None:
                 views[key] = {**check, **fields}
+        # What a revision took from its parent decides who may read it, and is no part of what they read. The manager
+        # reads a revision with the integrity hash of its stored record, as every other draft.
+        shown = {key: value for key, value in draft.items() if key != "inherited_fields"} if "inherited_fields" in draft else draft
         if allowed is None and not views:
-            return draft
+            return shown
         hidden = {"_integrity_hash"} if allowed is None else {"evidence_basis", "_integrity_hash"}
-        return {**{key: value for key, value in draft.items() if key not in hidden}, **views}
+        return {**{key: value for key, value in shown.items() if key not in hidden}, **views}
+
+    def completion_reader(self, allowed: set[str], *, readable_ids: set[str] | None = None) -> Callable[[dict], bool]:
+        """Whether a session whose snapshot ceiling is ``allowed`` may read a completion receipt at all, as a test that
+        reads each draft and requirements version once however many receipts it is asked about.
+
+        A receipt is the verdict on one draft, so it reads the way its draft does: not for a draft the session may
+        not read, nor for a revision whose parent it may not read (the draft reads to it with no parent; the receipt
+        was judged with one), nor for a verdict judged against a requirements version it may not read. A record that
+        no longer reads counts as one it may not read. ``readable_ids`` as for draft_in_view.
+        """
+        allowed = set(allowed)
+        loaded: dict[str, dict | None] = {}
+        drafts: dict[str, bool] = {}
+        versions: dict[str, bool] = {}
+        receipts: dict[Any, bool] = {}
+
+        def load(draft_id: Any) -> dict | None:
+            if not isinstance(draft_id, str):
+                return None
+            if draft_id not in loaded:
+                try:
+                    loaded[draft_id] = self.get_draft(draft_id)
+                except FoundryError:
+                    loaded[draft_id] = None
+            return loaded[draft_id]
+
+        def draft(draft_id: str) -> bool:
+            if readable_ids is not None:
+                return draft_id in readable_ids
+            if draft_id not in drafts:
+                stored = load(draft_id)
+                drafts[draft_id] = stored is not None and self.draft_readable(stored, allowed)
+            return drafts[draft_id]
+
+        def version(requirements_id: str) -> bool:
+            if requirements_id not in versions:
+                try:
+                    versions[requirements_id] = set(
+                        (self._get("requirements", requirements_id).get("bindings") or {}).values()) <= allowed
+                except FoundryError:
+                    versions[requirements_id] = False
+            return versions[requirements_id]
+
+        def readable(receipt: dict) -> bool:
+            key = receipt.get("id")
+            if key not in receipts:
+                stored = load(receipt.get("draft_id"))
+                receipts[key] = (stored is not None and draft(stored["id"])
+                                 and (not stored.get("parent_id") or draft(stored["parent_id"]))
+                                 and (not receipt.get("requirements_id") or version(receipt["requirements_id"])))
+            return receipts[key]
+
+        return readable
+
+    def completion_in_view(self, receipt: dict, allowed: set[str] | None, *,
+                           readable_ids: set[str] | None = None) -> dict | None:
+        """A completion receipt as a reader whose snapshot ceiling is ``allowed`` reads it; None when it may not.
+
+        The manager reads it as stored. A session reads none it may not read (completion_reader). A receipt counts
+        its repair budget over every earlier receipt of its chain (record_completion); a session reads it counted over
+        those it may read (_repair_budget), so a draft it may not read neither spends nor shows through its budget,
+        and its completion operation settles on that reading. A receipt's messages and fixups name runs and carry
+        their values, as do the engine runs of a requirement checked before completion policy 13: when one is outside
+        the session, they and the digests over them are withheld, and the session reads the verdict. ``readable_ids``
+        as for draft_in_view.
+        """
+        return self.completions_in_view([receipt], allowed, readable_ids=readable_ids)[0]
+
+    def completions_in_view(self, receipts: list[dict], allowed: set[str] | None, *,
+                            readable_ids: set[str] | None = None) -> list[dict | None]:
+        """completion_in_view of each receipt, reading every draft and earlier receipt once."""
+        if allowed is None:
+            return list(receipts)
+        from foundry.finance_requirements import OWN_FILES_POLICY
+
+        allowed = set(allowed)
+        readable = self.completion_reader(allowed, readable_ids=readable_ids)
+        chain: list[dict] | None = None
+
+        def order(row: dict) -> tuple:
+            return (row.get("seq", 0), row.get("created_at", ""), row.get("id", ""))
+
+        views: list[dict | None] = []
+        for receipt in receipts:
+            if not readable(receipt):
+                views.append(None)
+                continue
+            try:
+                draft = self.get_draft(receipt["draft_id"])
+                named = _receipt_runs(receipt)
+                if (draft.get("check_policy_version") or 0) < OWN_FILES_POLICY:
+                    named |= _engine_runs(draft)
+                whole = all(set((self.get_run(run_id).get("bindings") or {}).values()) <= allowed
+                            for run_id in sorted(named))
+            except FoundryError:
+                views.append(None)
+                continue
+            if chain is None:
+                chain = self._list("completions")
+            earlier = [row for row in chain if receipt.get("chain_key") is not None
+                       and row.get("chain_key") == receipt["chain_key"] and order(row) < order(receipt)]
+            kept = [row for row in earlier if readable(row)]
+            # Stored over every earlier receipt: one the session may not read is the only reason to count again.
+            budget = {} if len(kept) == len(earlier) else _repair_budget(receipt, kept)
+            if whole:
+                views.append({**{key: value for key, value in receipt.items() if key != "_integrity_hash"}, **budget})
+                continue
+            views.append({**{key: receipt[key] for key in COMPLETION_VERDICT if key in receipt}, **budget,
+                          "actions": [{key: action[key] for key in ("code", "requirement_item_id") if key in action}
+                                      for action in receipt.get("actions") or [] if isinstance(action, dict)]})
+        return views
 
     def _registered_report_source_ids(self) -> set[str]:
         return set(self._registered_report_sources())
@@ -893,18 +1255,29 @@ class AnalysisStore:
                 sources[record["id"]] = self._report_source_public(record)
         return sources
 
-    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None) -> dict:
+    def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None,
+                   _inherited: set[str] | frozenset[str] = frozenset()) -> dict:
         """Save an immutable draft version.
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
         with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
         `_allowed` is the calling session's snapshot ceiling, so evidence freshness reads only what it may.
+        `_inherited` is the INHERITED_FIELDS an internal caller took from the parent itself before composing `spec`.
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
+        if _allowed is not None:
+            from foundry.finance_requirements import latest_requirements
+
+            # A draft is checked against the current requirements: a session may not check one against a version
+            # that rests on files it may not read (as the finance saves already refuse).
+            current = latest_requirements(self)
+            if current and not set((current.get("bindings") or {}).values()) <= set(_allowed):
+                raise FoundryError("snapshots are outside this session context; use analysis-refresh to include task datasets")
         parent = self.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
+        inherited = _inherited_fields(spec, parent) | set(_inherited) if parent else None
         title = _safe_text(
-            spec.get("title", parent.get("title", "分析报告")),
+            spec.get("title", parent.get("title", DEFAULT_DRAFT_TITLE)),
             "draft title",
             required=True,
             maximum=1000,
@@ -1167,6 +1540,10 @@ class AnalysisStore:
             # The completion policy this check was computed under; a replay never reuses an older one.
             check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
+            # What this revision took from its parent, so it is read as resting on the parent's files (draft_snapshots).
+            # The parent's facts it no longer cites are not taken.
+            **({"inherited_fields": sorted(inherited - (set() if fact_ids else {"fact_ids"}))}
+               if inherited is not None else {}),
             execution_status=execution_status,
             reproducibility_status=reproducibility,
             review_status=review,
@@ -1278,6 +1655,13 @@ class AnalysisStore:
         elif content_mode not in {"management", "audit"}:
             raise FoundryError("report export mode must be management or audit")
         template_version = (draft.get("document") or {}).get("template_version")
+        projection = None
+        if projection_hash is not None and allowed is not None:
+            # A session's receipt names a projection the server reads for it, never one it only asserts: an asserted
+            # hash could take the archive name of another export and break it. (The CLI files only the desktop's.)
+            projection = self.projection_for_draft(draft_id, content_mode, allowed=allowed)
+            if projection["projection_hash"] != projection_hash:
+                raise FoundryError("report export projection_hash is not this draft's projection; read the projection again")
         source = Path(path).expanduser()
         if not source.is_file() or source.is_symlink():
             raise FoundryError("report export source must be a regular file")
@@ -1286,16 +1670,16 @@ class AnalysisStore:
         if len(data) > limit and projection_hash is not None:
             # The estimate declaration and labels bring their own room (issue #32): a file that fits the limit
             # without them still registers.
-            projection = self.projection_for_draft(draft_id, content_mode, allowed=allowed)
+            projection = projection or self.projection_for_draft(draft_id, content_mode, allowed=allowed)
             if projection["projection_hash"] == projection_hash:
                 limit += int((projection.get("estimate_headroom") or {}).get("bytes") or 0)
         if len(data) > limit:
             raise FoundryError("report export exceeds 32 MiB limit")
         digest = _hash_bytes(data)
         filename = (
-            f"{draft_id}-{content_mode}-{projection_hash[:12]}{_export_reader(content_mode, allowed)}.{format}"
+            f"{draft_id}-{content_mode}-{projection_hash[:12]}{_registration_reader(allowed)}.{format}"
             if content_mode and projection_hash
-            else f"{draft_id}.{format}"
+            else f"{draft_id}{_registration_reader(allowed)}.{format}"
         )
         target = self._inside(self.root / "exports" / "registered" / filename)
         manifest_path = self._inside(target.with_suffix(target.suffix + ".meta.json"))

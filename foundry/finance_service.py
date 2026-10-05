@@ -7,7 +7,8 @@ import re
 from decimal import localcontext
 from time import perf_counter
 
-from foundry.analysis import AnalysisStore, _assert_id, _hash, _hash_bytes, _new, _safe_text
+from foundry.analysis import (PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality, _hash, _hash_bytes, _new,
+                             _safe_text)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -206,10 +207,15 @@ class FinanceStore:
             _assert_id(dataset_id)
 
     def _authorize_evidence_recipes(self, recipes):
-        from foundry.financial_evidence import recipe_dataset_ids
+        from foundry.financial_evidence import recipe_dataset_ids, recipe_run_ids
 
         for dataset_id in recipe_dataset_ids(recipes):
             self._authorize({"evidence": dataset_id})
+        # A recipe's claim cites a run cell, whose value the recipe's result shows: a session may cite only a run it
+        # may read (analysis_cli._bound_evidence). The manager's recipes report a run that does not read as an issue.
+        if self.allowed is not None:
+            for run_id in recipe_run_ids(recipes):
+                self._authorize(self.analysis.get_run(run_id)["bindings"])
 
     def _authorize_consistency_sources(self, sources):
         from foundry.financial_evidence import consistency_dataset_ids
@@ -218,7 +224,12 @@ class FinanceStore:
             self._authorize({"consistency": dataset_id})
 
     def _authorize_draft(self, draft):
-        """Every snapshot a saved draft was built from, as analysis_cli._bound_draft checks it."""
+        """Every snapshot a saved draft rests on (AnalysisStore.draft_snapshots), as analysis_cli._bound_draft checks it.
+        The manager reads a draft whose own runs and records read."""
+        if self.allowed is not None:
+            self._authorize({f"source{index}": dataset_id
+                             for index, dataset_id in enumerate(sorted(self.analysis.draft_snapshots(draft)))})
+            return
         for run_id in draft.get("run_ids", []):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
         for claim in draft.get("claims", []):
@@ -236,6 +247,19 @@ class FinanceStore:
         self._authorize_consistency_sources(draft.get("consistency_sources", {}))
         if draft.get("requirements_id"):
             self._authorize(self.analysis._get("requirements", draft["requirements_id"]).get("bindings", {}))
+
+    def _parent_draft(self, parent_id):
+        """The draft a revision names as its parent. A session is refused one it may not read exactly as an unknown id."""
+        if not parent_id:
+            return {}
+        if self.allowed is None:
+            return self.analysis.get_draft(parent_id)
+        try:
+            parent = self.analysis.get_draft(parent_id)
+            self._authorize_draft(parent)
+        except FoundryError:
+            raise FoundryError(PARENT_UNAVAILABLE) from None
+        return parent
 
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
@@ -823,17 +847,14 @@ class FinanceStore:
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
+            if isinstance(claim, dict) and claim.get("run_id"):
+                # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
         for run_id in spec.get("run_ids", []):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
-        if spec.get("parent_id"):
-            parent = self.analysis.get_draft(spec["parent_id"])
-            if parent.get("requirements_id"):
-                self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
-            for claim in parent.get("claims", []):
-                if isinstance(claim, dict) and claim.get("dataset_id"):
-                    self._authorize({"source": claim["dataset_id"]})
-            for run_id in parent.get("run_ids", []):
-                self._authorize(self.analysis.get_run(run_id)["bindings"])
+        self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
+        self._authorize_consistency_sources(spec.get("consistency_sources", {}))
+        self._parent_draft(spec.get("parent_id"))
         operations = CompletionOperationStore(self.task, self.session_id, self.allowed)
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             reserved = operations.reserve(operation_id, payload=spec, call_id=call_id)
@@ -846,11 +867,10 @@ class FinanceStore:
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
                                           if row.get("completion_request_key") == key], attempt)
             if previous:
-                for run_id in previous.get("run_ids", []):
-                    self._authorize(self.analysis.get_run(run_id)["bindings"])
-                receipt = (self.analysis._get("completions", attempt["completion_id"])
-                           if attempt.get("completion_id") else
-                           record_completion(self.analysis, previous, previous["explanation_check"]))
+                self._authorize_draft(previous)
+                receipt = self._settled_receipt(
+                    self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
+                    record_completion(self.analysis, previous, previous["explanation_check"]))
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
                 return {**self._readable_draft(previous), "completion": receipt, "completion_operation": operation,
                         "replayed": True, "validation_basis": "saved_draft_version"}
@@ -891,11 +911,16 @@ class FinanceStore:
                     "primary_detail": primary_detail,
                 })
                 raise
-            operation = operations.settle(operation_id, attempt["revision"], result, result["completion"])
-            return {**result, "completion_operation": operation}
+            # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
+            receipt = self._settled_receipt(result["completion"])
+            operation = operations.settle(operation_id, attempt["revision"], result, receipt)
+            return {**result, "completion": receipt, "completion_operation": operation}
 
     def recover_completion_draft(self, spec):
-        """Manager-owned recovery of an explicitly selected completion attempt."""
+        """Manager-owned recovery of an explicitly selected completion attempt.
+
+        The receipt returned is the one stored; a session's operation settles on that receipt as the session reads it
+        (_operation_receipt), so where earlier drafts it may not read spent repairs the two can differ."""
         from foundry.analysis import _hash
         from foundry.finance_completion import record_completion
         from foundry.finance_completion_operations import (
@@ -949,7 +974,8 @@ class FinanceStore:
                 receipt = (self.analysis._get("completions", attempt["completion_id"])
                            if attempt.get("completion_id") else
                            record_completion(self.analysis, previous_by_revision, previous_by_revision["explanation_check"]))
-                settled = operations.settle(operation["id"], revision, previous_by_revision, receipt)
+                settled = operations.settle(operation["id"], revision, previous_by_revision,
+                                            self._operation_receipt(operation, receipt))
                 return {**self._readable_draft(previous_by_revision), "completion": receipt, "completion_operation": settled,
                         "replayed": True, "validation_basis": "saved_draft_version"}
             if int(operation.get("current_revision", 0)) != revision:
@@ -963,8 +989,19 @@ class FinanceStore:
                 "completion_operation_revision": revision,
             }
             result = self._save_explanation_draft(save_spec)
-            settled = operations.settle(operation["id"], revision, result, result["completion"])
+            settled = operations.settle(operation["id"], revision, result, self._operation_receipt(operation, result["completion"]))
             return {**result, "completion_operation": settled}
+
+    def _operation_receipt(self, operation, receipt):
+        """A receipt as the session that owns a completion operation now reads it, which its operation settles on; the
+        receipt as stored when that session may not read it at all. A session's files only ever widen, so it reads by
+        its current ones, and by those it began with when it is no longer registered."""
+        if operation.get("snapshot_ids") is None:
+            return receipt
+        owner = next((row for row in self.task.sessions() if row.get("session_id") == operation.get("session_id")), {})
+        ceiling = owner.get("snapshot_ids") if isinstance(owner.get("snapshot_ids"), list) else operation["snapshot_ids"]
+        view = self.analysis.completion_in_view(receipt, set(ceiling))
+        return receipt if view is None else view
 
     @staticmethod
     def _reject_completion_authority(spec):
@@ -991,27 +1028,18 @@ class FinanceStore:
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
                                           if row.get("completion_request_key") == key])
             if previous:
-                self._authorize_evidence_recipes(previous.get("evidence_recipes", []))
-                self._authorize_consistency_sources(previous.get("consistency_sources", {}))
-                if previous.get("requirements_id"):
-                    self._authorize(self.analysis._get("requirements", previous["requirements_id"]).get("bindings", {}))
-                for run_id in previous.get("run_ids", []):
-                    self._authorize(self.analysis.get_run(run_id)["bindings"])
-                for claim in previous.get("claims", []):
-                    if claim.get("run_id"):
-                        self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
-                    if claim.get("dataset_id"):
-                        self._authorize({"source": claim["dataset_id"]})
+                # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
+                self._parent_draft(spec.get("parent_id"))
+                self._authorize_draft(previous)
                 receipt = record_completion(self.analysis, previous, previous["explanation_check"])
-                return {**self._readable_draft(previous), "completion": receipt, "replayed": True,
+                return {**self._readable_draft(previous), "completion": self._readable_receipt(receipt), "replayed": True,
                         "validation_basis": "saved_draft_version"}
-            return self._save_explanation_draft({**spec, "completion_request_key": key})
+            result = self._save_explanation_draft({**spec, "completion_request_key": key})
+            return {**result, "completion": self._readable_receipt(result["completion"])}
 
     def _save_explanation_draft(self, spec, *, check_deadline=lambda: None):
         check_deadline()
-        parent = (
-            self.analysis.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
-        )
+        parent = self._parent_draft(spec.get("parent_id"))
         self._authorize_evidence_recipes(spec.get("evidence_recipes", parent.get("evidence_recipes", [])))
         self._authorize_consistency_sources(spec.get("consistency_sources", parent.get("consistency_sources", {})))
         if self.session_id and spec.get("review_status", parent.get("review_status", "unreviewed")) != "unreviewed":
@@ -1026,6 +1054,11 @@ class FinanceStore:
             raise FoundryError("run_ids must be an array")
         from foundry.report_visuals import materialize_document
 
+        # What this revision takes over from its parent before save_draft sees the spec, decided as each is composed
+        # (the appendix and the read failures are composed again from this revision's own runs).
+        inherited = set()
+        parent_prose = bool(parent) and "body" not in spec and spec.get("document") is None
+        took_document = parent_prose and parent.get("document") is not None
         visual_claims = []
         visual_document = spec.get("document")
         if visual_document is None and "body" not in spec:
@@ -1058,6 +1091,10 @@ class FinanceStore:
         previous_appendix = parent.get("evidence_appendix", "")
         if previous_appendix and body.endswith(previous_appendix):
             body = body[:-len(previous_appendix)].rstrip()
+        if took_document or (parent_prose and body.strip()):
+            inherited.add("body")
+        if parent and "materiality" not in spec and not _default_materiality(parent.get("materiality")):
+            inherited.add("materiality")
         if document is not None:
             from foundry.report_documents import report_document_markdown
 
@@ -1076,10 +1113,17 @@ class FinanceStore:
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
+        generated = [*template_fact_ids, *appendix["fact_ids"]]
+        if parent and "fact_ids" not in spec and any(fact_id not in generated for fact_id in explicit_fact_ids):
+            inherited.add("fact_ids")
         auto_claims = claims_for_facts(prepared["facts"], fact_ids)
         for visual_claim in visual_claims:
             if not any(all(claim.get(key) == visual_claim[key] for key in ("run_id", "row", "column")) for claim in auto_claims):
                 auto_claims.append(visual_claim)
+        # A parent claim the revision would cite on its own (one of its runs' generated claims) is not taken over.
+        if parent and "claims" not in spec and parent.get("claims") and _dedupe_explanation_claims(
+                copy.deepcopy([*auto_claims, *parent["claims"]])) != _dedupe_explanation_claims(copy.deepcopy(auto_claims)):
+            inherited.add("claims")
         claims = []
         for claim in _dedupe_explanation_claims(
             [*auto_claims, *spec.get("claims", parent.get("claims", []))]
@@ -1089,6 +1133,9 @@ class FinanceStore:
             claim = dict(claim)
             if claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
+            if claim.get("run_id") and claim.get("basis") != "calculation" and self.allowed is not None:
+                # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
             if claim.get("basis") == "calculation" and claim.get("run_id"):
                 run = self.analysis.get_run(claim["run_id"])
                 self._authorize(run["bindings"])
@@ -1162,16 +1209,29 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
-        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed)
+        draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed,
+                                         _inherited=inherited)
 
         from foundry.finance_completion import record_completion
 
         completion = record_completion(self.analysis, draft, draft["explanation_check"])
+        # The stored receipt: the public saves and a session's operation read it through _readable_receipt.
         return {**self._readable_draft(draft), "completion": completion}
 
     def _readable_draft(self, draft):
         """A stored draft as this store's session reads it (AnalysisStore.draft_in_view)."""
         return self.analysis.draft_in_view(draft, self.allowed)
+
+    def _readable_receipt(self, receipt):
+        """A completion receipt as this store's session reads it (AnalysisStore.completion_in_view)."""
+        return self.analysis.completion_in_view(receipt, self.allowed)
+
+    def _settled_receipt(self, receipt):
+        """The receipt this store's session settles its own completion operation on: as it reads it. Its saves cite only
+        what it may read, so it reads every receipt of its own; the receipt as stored if one ever does not, so the
+        operation never stops unsettled."""
+        view = self._readable_receipt(receipt)
+        return receipt if view is None else view
 
     def prepare_explanation(self, spec):
         if not isinstance(spec, dict):
@@ -1222,13 +1282,24 @@ class FinanceStore:
         draft = (
             self.analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
         )
+        if self.allowed is not None:
+            if draft:
+                self._authorize_draft(draft)
+            if spec.get("requirements_id"):
+                self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            # A revision is compared with its parent's runs: a parent named here must be one this session may read,
+            # and a stored draft's parent it may not read is left out, as the draft reads to it (draft_in_view).
+            self._parent_draft(spec.get("parent_id"))
+        orphaned = (not spec.get("parent_id") and bool(draft.get("parent_id")) and self.allowed is not None
+                    and not self.analysis._parent_readable(draft["parent_id"], self.allowed))
         run_ids = spec.get("run_ids", draft.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
         for run_id in dict.fromkeys(run_ids):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
-        for run_id in draft.get("run_ids", []):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        if self.allowed is None:
+            for run_id in draft.get("run_ids", []):
+                self._authorize(self.analysis.get_run(run_id)["bindings"])
         for claim in spec.get("claims", draft.get("claims", [])):
             if isinstance(claim, dict):
                 if claim.get("run_id"):
@@ -1245,6 +1316,8 @@ class FinanceStore:
         # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
         # evaluated again by validate_explanation and only that fresh report reaches coverage.
         merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
+        if orphaned:
+            merged["parent_id"] = None
         quality = validate_explanation_payload(self.analysis, merged)
         checked = augment_quality(self.analysis, merged, quality, _recipe_report=quality["evidence_report"])
         from foundry.analysis_data import json_value
@@ -1450,7 +1523,7 @@ class FinanceStore:
         from foundry.finance_readiness import _is_workbook_shell
 
         rows = self.analysis.state()["datasets"]
-        replaced = superseded_snapshots(self.task, rows)
+        replaced = superseded_snapshots(self.task, rows, allowed=self.allowed)
         by_bytes = {}
         for dataset in rows:
             if dataset["id"] in replaced:
@@ -1483,7 +1556,7 @@ class FinanceStore:
                 control = clean_control(raw)
                 suggestions.append({
                     "control": control,
-                    "preview": evaluate_control(self.analysis, control, cache=cache),
+                    "preview": evaluate_control(self.analysis, control, cache=cache, allowed=self.allowed),
                     **({"saved_id": saved[control_key(control)]} if control_key(control) in saved else {}),
                 })
         return {"schema_version": 1, "suggestions": suggestions}
@@ -1513,7 +1586,8 @@ class FinanceStore:
         ids = dataset_ids(control)
         self._authorize({f"source{index}": dataset_id for index, dataset_id in enumerate(ids)})
         self._assert_current_snapshots(ids)
-        return {"schema_version": 1, "control": control, "preview": evaluate_control(self.analysis, control)}
+        return {"schema_version": 1, "control": control,
+                "preview": evaluate_control(self.analysis, control, allowed=self.allowed)}
 
     def _assert_current_snapshots(self, ids):
         """A control is declared on the task's current files: one on a replaced snapshot would be stale from birth."""
@@ -1523,7 +1597,7 @@ class FinanceStore:
         published = {row["id"] for row in rows}
         if any(dataset_id not in published for dataset_id in ids):
             raise FoundryError("control refers to a snapshot that is not in this task")
-        if set(ids) & superseded_snapshots(self.task, rows):
+        if set(ids) & superseded_snapshots(self.task, rows, allowed=self.allowed):
             raise FoundryError("control refers to a snapshot a newer upload has replaced")
 
     def finance_controls_save(self, spec):
@@ -1630,7 +1704,7 @@ class FinanceStore:
                 "control_id": row["id"],
                 "label": row["control"]["label"],
                 "state": row.get("state"),
-                **evaluate_control(self.analysis, row["control"], cache=cache),
+                **evaluate_control(self.analysis, row["control"], cache=cache, allowed=self.allowed),
             }
             for row in heads
         ]
@@ -1640,20 +1714,39 @@ class FinanceStore:
 
     def finance_controls_list(self, spec):
         """Live controls, each with its latest result; a result read from a snapshot that changed since is stale."""
+        import json
+
+        from foundry.analysis_data import json_value
+        from foundry.finance_controls import STALE, evaluate_control, superseded_snapshots
+
         spec = spec if isinstance(spec, dict) else {}
         heads = self._control_heads(include_retired=spec.get("include_retired") is True)
+        visible = {head["id"] for head in heads}
         latest = {}
-        for run in self._list("control_runs"):
+        # A run keeps one result per control, read from that control's own files: a session reads the result of
+        # every control it may read, whatever else the run read (_list would drop the run as a whole).
+        root = self.analysis._inside(self.analysis.root / self._folder("control_runs"))
+        for run in sorted((self.analysis._read(path) for path in root.glob("*.json")), key=lambda r: r["seq"]):
             for result in run.get("results") or []:
-                latest[result["control_id"]] = {**result, "run_id": run["id"], "run_at": run["created_at"]}
-        from foundry.finance_controls import superseded_snapshots
+                if result.get("control_id") in visible:
+                    latest[result["control_id"]] = {**result, "run_id": run["id"], "run_at": run["created_at"]}
 
         current = {row["id"]: row.get("source_hash") for row in self.analysis.state()["datasets"]}
-        replaced = superseded_snapshots(self.task)
+        replaced = superseded_snapshots(self.task, allowed=self.allowed)
+        cache: dict = {}
         rows = []
         for head in heads:
             result = latest.get(head["id"])
             hashes = (result or {}).get("source_hashes") or {}
+            if (self.allowed is not None and result and result.get("status") == STALE
+                    and result.get("reason") == "资料已有更新的版本" and not set(hashes) & replaced):
+                # Judged stale by a newer file this session may not read: judge it by the files it may read, and read
+                # the result as a stored one reads (keys sorted as written, then the run it came with).
+                fresh = {**{key: result[key] for key in ("control_id", "label", "state") if key in result},
+                         **evaluate_control(self.analysis, head["control"], cache=cache, allowed=self.allowed)}
+                result = {**json.loads(json.dumps(json_value(fresh), sort_keys=True)),
+                          **{key: result[key] for key in ("run_id", "run_at") if key in result}}
+                hashes = result.get("source_hashes") or {}
             if result and any(current.get(dataset_id) != digest or dataset_id in replaced for dataset_id, digest in hashes.items()):
                 result = {**result, "status": "stale", "reason": "资料快照在这次运行之后已变化"}
             rows.append({**head, "result": result})
@@ -1802,14 +1895,15 @@ class FinanceStore:
         """The month-close control center's six blocks and its one headline (finance_close_status)."""
         from foundry.finance_close_status import close_status
         from foundry.finance_controls import superseded_snapshots
-        from foundry.finance_requirements import latest_requirements
         from foundry.structure_records import PENDING_ACKNOWLEDGEMENT, PENDING_CONFIRMATION
 
-        state = self.analysis.state()
+        state = self.analysis.state(self.allowed)
         rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
-        replaced = superseded_snapshots(self.task, state["datasets"])
+        # A session's close status is the one its own files give: a newer file outside it replaces nothing here.
+        replaced = superseded_snapshots(self.task, state["datasets"], allowed=self.allowed)
         current = [row for row in rows if row["id"] not in replaced]
-        requirements = latest_requirements(self.analysis)
+        # The newest requirements version this reader may read, as analysis_requirements_list names its current one.
+        requirements = state["requirements"][-1] if state["requirements"] else None
         other_months = _other_month_workbooks(rows, current, ((requirements or {}).get("scope") or {}).get("period"))
         from foundry.finance_readiness import _is_workbook_shell
         from foundry.structure_records import NO_TABLE, WITHDRAWN
@@ -1822,7 +1916,11 @@ class FinanceStore:
             # The readiness report's rules: a workbook nothing was derived from, or a withdrawn table, is not confirmed.
             if structure in {PENDING_CONFIRMATION, PENDING_ACKNOWLEDGEMENT, WITHDRAWN} or (structure == NO_TABLE and _is_workbook_shell(row)):
                 pending.append(row.get("name") or "资料")
-        drafts = [row for row in state.get("drafts") or [] if row.get("publication_status") != "archived"]
+        drafts = sorted((row for row in state.get("drafts") or [] if row.get("publication_status") != "archived"),
+                        key=lambda row: row.get("seq", 0), reverse=True)
+        # The newest draft this reader may read (the manager: the newest), as this reader reads it.
+        read: dict = {}
+        draft = next((row for row in drafts if self.analysis.draft_readable(row, self.allowed, cache=read)), None)
         runs = [row for row in state.get("runs") or [] if self.allowed is None or set((row.get("bindings") or {}).values()) <= self.allowed]
         readiness = self.finance_readiness({})
         organizations = [row for row in readiness.get("datasets") or [] if (row.get("scope") or {}).get("organization")]
@@ -1838,7 +1936,7 @@ class FinanceStore:
             pending_structures=pending,
             controls=self.finance_controls_list({})["controls"],
             runs=runs,
-            draft=max(drafts, key=lambda row: row.get("seq", 0)) if drafts else None,
+            draft=draft if draft is None or self.allowed is None else self._readable_draft(draft),
         )
 
     def finance_control_confirmation_sheet(self, spec):

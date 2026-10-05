@@ -891,7 +891,7 @@ def test_retry_recovers_after_draft_committed_before_receipt(finance, monkeypatc
     run = service.explain_variance({'context_id': context['id']})
     spec = {'body': '查看计算依据。', 'run_ids': [run['id']]}
     original = completion.record_completion
-    def interrupted(*args):
+    def interrupted(*args, **kwargs):
         raise FoundryError('interrupted before receipt')
     monkeypatch.setattr(completion, 'record_completion', interrupted)
     with pytest.raises(FoundryError, match='interrupted'):
@@ -986,7 +986,7 @@ def test_completion_requests_fresh_run_after_requirements_revision(finance):
     assert stopped['status'] == 'repair_available'
     assert stopped['actions'][0]['code'] == 'requirements_run_outdated'
     assert stopped['actions'][0]['run_ids'] == [old_run['id']]
-    assert stopped['completion_policy_version'] == 12
+    assert stopped['completion_policy_version'] == 13
     assert record_completion(service.analysis, draft, quality)['id'] == stopped['id']
 
     fresh_run = service.explain_variance({'context_id': context['id']})

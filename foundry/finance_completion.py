@@ -22,7 +22,10 @@ MAX_REPAIRS = 2
 # 12: review round 9 filters rows on dimensions named level/breakdown/group_by/hierarchy again (only drilldown is
 #     a hierarchy level), keeps the original requirement incomplete when a version dropped a legacy level, and
 #     compares a finance run converted with policies.target_unit in the unit the engine wrote.
-COMPLETION_POLICY_VERSION = 12
+# 13: a requirement counts only the runs the draft cites and runs on no file but the requirement's and the cited
+#     runs' files: one that also read other files is neither named nor counted (finance_requirements._within_files),
+#     so the check reads the same for every reader of the draft.
+COMPLETION_POLICY_VERSION = 13
 # Issues that may remain while the draft waits for the manager (estimates, declared gaps, structure).
 MANAGER_WAIT_ISSUES = {'requirement_unanswered', 'requirement_estimated', 'requested_source_missing'}
 COVERAGE_COMPLETE = {'pass', 'pass_with_accepted_estimates'}
@@ -46,6 +49,12 @@ def _dropped_hierarchy_action(item):
 
 
 def record_completion(analysis, draft, quality):
+    """The receipt for one saved draft, or the one already filed for the same input.
+
+    It counts its repair budget over every earlier receipt of its chain, whoever saved it. A session reads the
+    budget its own saves would have spent (AnalysisStore.completion_in_view), and its completion operation settles
+    on that reading (FinanceStore._readable_receipt).
+    """
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
