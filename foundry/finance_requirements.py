@@ -139,7 +139,12 @@ def _assess_requirement_support(analysis, spec):
 
 def requirements_readable(record, allowed):
     """Whether a reader with snapshot ceiling ``allowed`` (None: the manager) may read this requirements version."""
-    return allowed is None or set((record.get('bindings') or {}).values()) <= set(allowed)
+    if allowed is None:
+        return True
+    bindings = record.get('bindings') or {}
+    # Bindings map aliases to snapshot ids; a version holding anything else no session reads.
+    return (isinstance(bindings, dict) and all(isinstance(value, str) for value in bindings.values())
+            and set(bindings.values()) <= set(allowed))
 
 
 def latest_requirements(analysis, allowed=None):

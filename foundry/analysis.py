@@ -589,13 +589,13 @@ class AnalysisStore:
         shown = requirements
         analyses, runs = self._list("revisions"), self._list("runs")
         if allowed is not None:
-            from foundry.finance_requirements import requirements_version_view
+            from foundry.finance_requirements import requirements_readable, requirements_version_view
 
             cache = {} if cache is None else cache
             cache.setdefault("requirements", requirements)
             cache.setdefault("runs", {run["id"]: run for run in runs})
             versions = {row.get("id"): row for row in requirements}
-            requirements = [row for row in requirements if set((row.get("bindings") or {}).values()) <= set(allowed)]
+            requirements = [row for row in requirements if requirements_readable(row, allowed)]
             drafts: dict = {}
             shown = [requirements_version_view(self, row, allowed, versions=versions, drafts=drafts)
                      for row in requirements]
@@ -1362,10 +1362,7 @@ class AnalysisStore:
             record = self._get("requirements", requirements_id)
         except FoundryError:
             raise FoundryError(REQUIREMENTS_UNAVAILABLE) from None
-        bindings = record.get("bindings") or {}
-        # requirements_readable reads a map of snapshot ids; a version holding anything else no session reads.
-        if (not isinstance(bindings, dict) or any(not isinstance(value, str) for value in bindings.values())
-                or not requirements_readable(record, allowed)):
+        if not requirements_readable(record, allowed):
             raise FoundryError(REQUIREMENTS_UNAVAILABLE)
         return record
 

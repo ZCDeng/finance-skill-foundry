@@ -752,12 +752,13 @@ def _run_finance_context(analysis: Any, grant: dict[str, Any], run_id: str) -> s
 
 def _requirements_parent(analysis: Any, grant: dict[str, Any], parent_id: str) -> dict[str, Any]:
     """A requirements parent the grant may read; a missing one is refused exactly as one outside the grant."""
+    from foundry.finance_requirements import requirements_readable
+
     try:
         parent = analysis._get("requirements", _assert_id(parent_id))
     except FoundryError as exc:
         raise McpRefused("requirements parent is outside this grant") from exc
-    bindings = parent.get("bindings") or {}
-    if not isinstance(bindings, dict) or not set(bindings.values()) <= set(grant.get("snapshot_ids") or []):
+    if not requirements_readable(parent, set(grant.get("snapshot_ids") or [])):
         raise McpRefused("requirements parent is outside this grant")
     return parent
 

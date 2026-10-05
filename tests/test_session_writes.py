@@ -1443,6 +1443,19 @@ def test_a_session_reads_a_selection_naming_a_record_it_may_not_read_as_one_nami
         {**selection, "range": "A:A"} for selection in selections]
 
 
+def test_a_session_reads_a_selection_stored_as_no_object_as_none(circled, capsys):
+    """No save stores a selection that is no object, so the version is written as a damaged store would hold it."""
+    record = _new(circled.task, question="解释费用", scope={}, bindings={"gl": circled.a["id"]}, context_id=None,
+                  items=[{"id": "expense", "metric": "expense"}], parent_id=circled.requirements["id"],
+                  removed_item_ids=[], change_reason="", selection="draft_HIDDEN!A1:B2")
+    version = circled.analysis._write(circled.analysis._object_path("requirements", record["id"]), record)
+    for rows in _session_requirements(circled, capsys).values():
+        assert [row["selection"] for row in rows if row["id"] == version["id"]] == [None]
+        assert _shows(rows, ["draft_HIDDEN"]) == []
+    # The manager reads it as stored.
+    assert circled.manager.analysis_requirements_list({})["current"] == version
+
+
 def test_no_requirements_version_a_session_reads_carries_the_stored_record_s_hash(circled, capsys):
     """Whatever its selection or lineage, and however the session reads it: listed, or returned by its own save."""
     base = {"context_id": circled.context["id"], "question": "解释费用", "items": [{"id": "expense", "metric": "expense"}]}
@@ -1614,6 +1627,62 @@ def test_a_session_names_a_hidden_unknown_or_malformed_requirements_version_alik
                      ("validate-explanation", "--spec", json.dumps({"body": "收入。", "requirements_id": requirements_id}))):
             code, error = _cli(capsys, named.var, *args, session=None, task=named.task.id)
             assert (code, error.strip()) == (3, message)
+
+
+def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_as_one_it_may_not_read(named, capsys):
+    """No save stores bindings that are no map of snapshot ids, so each version is written as a damaged store would
+    hold it, ordered before the current one (seq 0), which still rests on A."""
+    from foundry.analysis import REQUIREMENTS_UNAVAILABLE
+
+    def written(bindings) -> str:
+        record = _new(named.task, question="收入", scope={}, bindings=bindings, context_id=None, items=ITEMS,
+                      parent_id=None, removed_item_ids=[], change_reason="", selection=None, seq=0)
+        record["_integrity_hash"] = _hash(record)
+        named.analysis._object_path("requirements", record["id"]).write_text(json.dumps(record), encoding="utf-8")
+        return record["id"]
+
+    def listed() -> dict[str, list[dict]]:
+        code, cli = _cli(capsys, named.var, "analysis-requirements-list", "--spec", "{}")
+        code_state, state = _cli(capsys, named.var, "analysis-state")
+        assert (code, code_state) == (0, 0)
+        return {"service": named.session.analysis_requirements_list({})["requirements"], "cli": cli["requirements"],
+                "state": state["requirements"],
+                "mcp": _mcp_requirements(named.var, named.task, _snapshots(named.task))["requirements"]}
+
+    def as_parent(requirements_id) -> dict[str, str]:
+        spec = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS, "parent_id": requirements_id}
+        code, error = _cli(capsys, named.var, "analysis-requirements-save", "--spec", json.dumps(spec))
+        return {"cli": f"{code}: {error.strip()}",
+                **{grant: _mcp(server, "analysis_requirements_save", spec) for grant, server in named.grants.items()}}
+
+    before = listed()
+    malformed = [written([named.a]), written({"gl": [named.a]})]
+    stored = _stored(named)
+    for requirements_id in malformed:
+        code, error = _cli(capsys, named.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "requirements_id": requirements_id}))
+        assert (code, error.strip()) == (3, REQUIREMENTS_UNAVAILABLE)
+        explanation = {"body": "收入。", "run_ids": [named.run], "requirements_id": requirements_id}
+        assert _refusal(lambda: named.session.validate_explanation(explanation)) == REQUIREMENTS_UNAVAILABLE
+        assert _refusal(lambda: named.analysis.named_requirements(requirements_id, {named.a})) == REQUIREMENTS_UNAVAILABLE
+        # Named as the parent of a revision, it is refused as a version on a file outside the session or none saved.
+        assert as_parent(requirements_id) == as_parent(named.hidden_requirements) == as_parent("e" * 32)
+    assert _stored(named) == stored
+    # It lists as one never saved; the manager reads it as stored.
+    assert listed() == before
+    assert set(malformed) <= {row["id"] for row in named.manager.analysis_requirements_list({})["requirements"]}
+    # A saved analysis pinned to it reads and runs as one naming none.
+    pinned = [named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                            "requirements_id": requirements_id})["id"] for requirements_id in malformed]
+    alone = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a}})["id"]
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in [*pinned, alone]] == [None] * 3
+    ran = []
+    for analysis_id in [*pinned, alone]:
+        code, run = _cli(capsys, named.var, "analysis-run", "--analysis", analysis_id)
+        assert code == 0, run
+        ran.append({key: value for key, value in run.items() if key.startswith("requirements")})
+    assert ran == [ran[-1]] * 3
 
 
 def test_a_session_names_a_hidden_unknown_or_malformed_run_alike(named, capsys):

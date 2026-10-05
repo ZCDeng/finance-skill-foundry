@@ -864,8 +864,10 @@ class FinanceStore:
         return requirements_version_view(self.analysis, saved, self.allowed)
 
     def analysis_requirements_list(self, spec):
+        from foundry.finance_requirements import requirements_readable
+
         records = self.analysis._list("requirements")
-        visible = [r for r in records if self.allowed is None or set(r.get("bindings", {}).values()) <= self.allowed]
+        visible = [r for r in records if requirements_readable(r, self.allowed)]
         if spec.get("context_id"):
             self._read("contexts", spec["context_id"])
             visible = [r for r in visible if r.get("context_id") == spec["context_id"]]
