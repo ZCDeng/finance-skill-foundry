@@ -562,16 +562,20 @@ class ExcelBridgeApp:
 
     def _authorized_finance_runs(self, task: Task, context) -> list[dict[str, Any]]:
         allowed = set(context.snapshot_ids)
-        runs = []
+        analysis = AnalysisStore(task)
+        cache: dict = {}
         # As the session reads them (AnalysisStore.run_in_view): a requirements version outside it pins none of them.
-        for run in AnalysisStore(task).state(allowed)["runs"]:
+        # Only the finance runs it may read are read so, never another run's result only to be left out; none carries
+        # row declarations for AnalysisStore.state to read against the current version.
+        return [
+            analysis.run_in_view(run, allowed, cache=cache)
+            for run in analysis._list("runs")
             if (
                 run.get("engine") == "finance"
                 and run.get("execution_status") == "succeeded"
                 and set((run.get("bindings") or {}).values()) <= allowed
-            ):
-                runs.append(run)
-        return runs
+            )
+        ]
 
     def _context_payload(self, context) -> dict[str, Any]:
         assert context.task is not None

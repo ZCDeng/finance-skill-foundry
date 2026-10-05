@@ -92,16 +92,16 @@ def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None,
     return shown
 
 
-def record_completion(analysis, draft, quality, *, allowed=None):
+def record_completion(analysis, draft, quality, *, allowed=None, cache=None):
     """The receipt for one saved draft, or the one already filed for the same input.
 
     It counts its repair budget over every earlier receipt of its chain, whoever saved it. A session reads the
     budget its own saves would have spent (AnalysisStore.completion_in_view), and its completion operation settles
     on that reading (FinanceStore._readable_receipt). ``allowed``, the saving session's snapshot ceiling (None: the
     manager), reads the draft's runs as the session reads them (AnalysisStore.run_in_view): whether a run is bound to
-    the current requirements is judged on the version the session reads it pinned to.
+    the current requirements is judged on the version the session reads it pinned to. ``cache`` as for run_in_view.
     """
-    assessed = assess_completion(analysis, draft, quality, allowed=allowed)
+    assessed = assess_completion(analysis, draft, quality, allowed=allowed, cache=cache)
     with exclusive(analysis.task.lock_path, timeout=10):
         history = [row for row in analysis._list('completions') if row.get('chain_key') == assessed['chain_key']]
         same = next((row for row in history if row.get('input_key') == assessed['input_key']), None)

@@ -756,10 +756,11 @@ def draft_evidence_basis(
     source_read_failures: Any = (),
     allowed: set[str] | None = None,
     basis: bool = True,
+    cache: dict | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """draft_evidence's fields, and the basis a draft keeps so a reader with another snapshot ceiling can read
     them (evidence_in_view); without ``basis`` (a preview) the basis is empty and no file outside ``allowed``
-    is read.
+    is read. ``cache`` as for AnalysisStore.run_in_view.
 
     This is the only function here that reads the store: the run history (for newer runs of the same
     calculation), the latest requirements scope (the task period), dataset freshness and row declarations.
@@ -818,7 +819,7 @@ def draft_evidence_basis(
     periods: dict[str, str] = {}
     datasets = dataset_currency(analysis, sorted(dataset_ids), task_period=task_period, allowed=allowed, periods=periods)
 
-    row_estimates = declared_row_estimates(analysis, runs, latest, allowed)
+    row_estimates = declared_row_estimates(analysis, runs, latest, allowed, cache=cache)
 
     fields = _evidence_fields(check, claims=claims, fact_ids=fact_ids, runs=runs, recipe_results=recipe_results,
                               consistency_results=consistency_results, older=older, row_estimates=row_estimates,

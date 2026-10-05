@@ -924,7 +924,8 @@ class AnalysisStore:
         another, with that one (fingerprint_in_view), and its reproducibility as _reproducibility_in_view reads it. No
         run a session reads carries the integrity hash: it covers the stored record, which a view may not be, and its
         absence must not tell a view from a stored record. ``cache``, shared by the runs, drafts and receipts of one
-        read, holds the task's requirements versions, their fingerprints and its runs.
+        read, holds the task's requirements versions, their fingerprints, its runs and refresh batches, and the row
+        declarations read again.
         """
         if allowed is None:
             return run
@@ -936,9 +937,15 @@ class AnalysisStore:
         if "requirements_id" in fields and isinstance(declaration, dict):
             from foundry.result_semantics import declare_against
 
-            # Keyed as a stored declaration reads back (write_json_atomic sorts keys), so the view reads as one.
-            view["row_declarations"] = json.loads(json.dumps(json_value(declare_against(
-                self, run, substitute, self.fingerprint_in_view(substitute, allowed, cache=cache))), sort_keys=True))
+            # Runs and versions are immutable: a read declares each run's result again once, however many drafts and
+            # receipts cite the run, and hands each its own copy.
+            declarations = cache.setdefault("declarations", {})
+            key = (run["id"], (substitute or {}).get("id"))
+            if key not in declarations:
+                # Keyed as a stored declaration reads back (write_json_atomic sorts keys), so the view reads as one.
+                declarations[key] = json.dumps(json_value(declare_against(
+                    self, run, substitute, self.fingerprint_in_view(substitute, allowed, cache=cache))), sort_keys=True)
+            view["row_declarations"] = json.loads(declarations[key])
         elif isinstance(declaration, dict):
             declared = self._requirements_version(declaration.get("requirements_id"), cache)
             if self._captured_otherwise(declared, declaration.get("requirements_fingerprint"), allowed, cache):
@@ -1080,6 +1087,15 @@ class AnalysisStore:
     def _requirements_version(self, version_id: Any, cache: dict) -> dict | None:
         """The requirements version ``version_id`` names (_requirements_by_id), or None."""
         return self._requirements_by_id(cache).get(version_id) if isinstance(version_id, str) else None
+
+    def _batches_in_view(self, allowed: set[str], cache: dict) -> list[dict]:
+        """The task's refresh batches as a reader whose snapshot ceiling is ``allowed`` reads them
+        (SourceRefreshService.batches_in_view), read once per ``cache``."""
+        if "batches_in_view" not in cache:
+            from foundry.source_refresh import SourceRefreshService
+
+            cache["batches_in_view"] = SourceRefreshService(self.task, allowed=set(allowed)).batches_in_view()
+        return cache["batches_in_view"]
 
     def _stored_run(self, run_id: Any, cache: dict) -> dict:
         """A run record as stored, from ``cache``'s listing when it holds one, without reading its outputs (get_run)."""
@@ -1420,11 +1436,14 @@ class AnalysisStore:
         replaced: list[dict[str, set[str]]] = []
 
         def refreshed() -> dict[str, set[str]]:
-            # The refreshes filed before the draft, each against the prior this reader reads it with.
+            # The refreshes filed before the draft, each against the prior this reader reads it with, from batches
+            # listed once for every draft of the read.
             if not replaced:
                 from foundry.finance_controls import refreshed_snapshots
 
-                replaced.append(refreshed_snapshots(self.task, set(allowed), before=draft.get("seq")))
+                ceiling = set(allowed)
+                replaced.append(refreshed_snapshots(self.task, ceiling, before=draft.get("seq"),
+                                                    batches=self._batches_in_view(ceiling, cache)))
             return replaced[0]
 
         estimates: Any = False  # not read yet
@@ -1631,7 +1650,7 @@ class AnalysisStore:
         return readable
 
     def completion_in_view(self, receipt: dict, allowed: set[str] | None, *,
-                           readable_ids: set[str] | None = None) -> dict | None:
+                           readable_ids: set[str] | None = None, cache: dict | None = None) -> dict | None:
         """A completion receipt as a reader whose snapshot ceiling is ``allowed`` reads it; None when it may not.
 
         The manager reads it as stored. A session reads none it may not read (completion_reader). A receipt counts
@@ -1640,9 +1659,9 @@ class AnalysisStore:
         and its completion operation settles on that reading. A receipt's messages and fixups name runs and carry
         their values, as do the engine runs of a requirement checked before completion policy 13: when one is outside
         the session, they and the digests over them are withheld, and the session reads the verdict, judged without
-        the engine runs it may not read. ``readable_ids`` as for draft_in_view.
+        the engine runs it may not read. ``readable_ids`` as for draft_in_view, ``cache`` as for run_in_view.
         """
-        return self.completions_in_view([receipt], allowed, readable_ids=readable_ids)[0]
+        return self.completions_in_view([receipt], allowed, readable_ids=readable_ids, cache=cache)[0]
 
     def completions_in_view(self, receipts: list[dict], allowed: set[str] | None, *, readable_ids: set[str] | None = None,
                             versions: dict | None = None, cache: dict | None = None) -> list[dict | None]:
@@ -1825,7 +1844,7 @@ class AnalysisStore:
         return sources
 
     def save_draft(self, spec: dict, *, _recipe_report: dict | None = None, _allowed: set[str] | None = None,
-                   _inherited: set[str] | frozenset[str] = frozenset()) -> dict:
+                   _inherited: set[str] | frozenset[str] = frozenset(), _cache: dict | None = None) -> dict:
         """Save an immutable draft version.
 
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
@@ -1833,6 +1852,8 @@ class AnalysisStore:
         `_allowed` is the calling session's snapshot ceiling, so evidence freshness and the requirement check read only
         what it may.
         `_inherited` is the INHERITED_FIELDS an internal caller took from the parent itself before composing `spec`.
+        `_cache` is the read cache (run_in_view) of the caller's request, which reads the saved draft with it: a save
+        writes no run, requirements version or refresh batch, so what it holds stays true.
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
@@ -1971,7 +1992,7 @@ class AnalysisStore:
         if changed:
             review = "unreviewed"
         # A session reads each run's reproducibility by the runs it may read (run_in_view); the manager as stored.
-        cache: dict = {}
+        cache: dict = {} if _cache is None else _cache
         reproducibility = (
             "reproducible"
             if claims
@@ -2073,7 +2094,7 @@ class AnalysisStore:
         evidence, evidence_basis = draft_evidence_basis(
             self, explanation_check, claims=claims, fact_ids=fact_ids, runs=runs,
             evidence_report=evidence_report, consistency_report=consistency_report,
-            source_read_failures=source_read_failures, allowed=_allowed,
+            source_read_failures=source_read_failures, allowed=_allowed, cache=cache,
         )
         explanation_check = {**explanation_check, **evidence}
         if document is not None:
@@ -2302,12 +2323,14 @@ class AnalysisStore:
             "publication_status": draft["publication_status"],
         }
 
-    def projection_for_draft(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None) -> dict:
-        """The draft as a report projects it, for a reader whose snapshot ceiling is ``allowed`` (draft_in_view)."""
+    def projection_for_draft(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None,
+                             cache: dict | None = None) -> dict:
+        """The draft as a report projects it, for a reader whose snapshot ceiling is ``allowed`` (draft_in_view;
+        ``cache`` as for run_in_view)."""
         from foundry.financial_evidence import consistency_dataset_ids, recipe_dataset_ids
         from foundry.report_projection import build_report_projection
 
-        draft = self.draft_in_view(self.get_draft(draft_id), allowed)
+        draft = self.draft_in_view(self.get_draft(draft_id), allowed, cache=cache)
         dataset_ids: set[str] = set()
         runs: dict[str, dict] = {}
         for run_id in draft.get("run_ids", []) or []:
@@ -2349,17 +2372,19 @@ class AnalysisStore:
             })
         return build_report_projection(draft, mode=mode, resolved_datasets=resolved, runs=runs)
 
-    def report_projection(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None) -> dict:
-        return self.projection_for_draft(draft_id, mode, allowed=allowed)
+    def report_projection(self, draft_id: str, mode: str = "management", *, allowed: set[str] | None = None,
+                          cache: dict | None = None) -> dict:
+        return self.projection_for_draft(draft_id, mode, allowed=allowed, cache=cache)
 
     def export_draft(self, draft_id: str, format: str = "md", *, mode: str = "management",
                      allowed: set[str] | None = None) -> dict:
-        draft = self.draft_in_view(self.get_draft(draft_id), allowed)
+        # The draft, its projection and its run lines are one read, of the versions and runs listed once (run_in_view).
+        cache: dict = {}
+        draft = self.draft_in_view(self.get_draft(draft_id), allowed, cache=cache)
         if format not in {"md", "xlsx"}:
             raise FoundryError("draft export format must be md or xlsx")
-        projection = self.report_projection(draft_id, mode=mode, allowed=allowed)
+        projection = self.report_projection(draft_id, mode=mode, allowed=allowed, cache=cache)
         # Each run line reads the run as this reader reads it (run_in_view).
-        cache: dict = {}
         runs = [self.run_in_view(self.get_run(run_id), allowed, cache=cache) for run_id in draft["run_ids"]]
         path = self._inside(self.root / "exports" / (
             f"{draft_id}-{mode}-{projection['projection_hash'][:12]}{_export_reader(mode, allowed, runs)}.{format}"))

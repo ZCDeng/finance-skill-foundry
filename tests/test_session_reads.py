@@ -649,6 +649,46 @@ def test_a_session_reads_runs_drafts_and_receipts_with_no_version_hidden_at_no_m
     assert listed.count("requirements") == listed.count("runs") == 1 and len(pins) == len(set(pins))
 
 
+def test_a_session_declares_a_run_pinned_to_a_version_it_may_not_read_again_once_a_read(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """The script run, pinned to Hv, reads to the session with its rows declared again from its archived result
+    against V. That result is read once for a listing however many drafts and receipts cite the run, once for a save
+    or its retry and the draft and receipt it returns, and not at all for the Excel add-in, which lists only finance
+    runs."""
+    import foundry.result_semantics as result_semantics
+    from foundry.excel_bridge import BridgeTokenAuthority, ExcelBridgeApp
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    world = _pinned_world(tmp_path, True, capsys)
+    for index in "甲乙丙":
+        _session_draft(world, f"会话稿{index}：Falcon 收入 100。")
+    session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+    operation = CompletionOperationStore(world.task, "sess", session.allowed).begin(
+        "request-1", policy={"max_repairs": 2})
+    parsed = []
+    archived = result_semantics._archived_result
+    monkeypatch.setattr(result_semantics, "_archived_result",
+                        lambda analysis, run: parsed.append(run["id"]) or archived(analysis, run))
+    authority = BridgeTokenAuthority(b"local-test-secret-local-test-secret")
+    token = authority.issue(task_id=world.task.id, session_id="sess", ttl_seconds=60)
+    app = ExcelBridgeApp(var_root=world.var, token_authority=authority)
+    requests = {
+        "state": lambda: _cli(capsys, world.var, "analysis-state")[0] == 0,
+        "save": lambda: bool(_session_draft(world, "会话稿丁：Falcon 收入 100。")["completion"]),
+        "retry": lambda: _session_draft(world, "会话稿丁：Falcon 收入 100。")["replayed"],
+        "operation": lambda: "replayed" not in session.save_completion_draft(operation["id"], "call-1", world.draft),
+        "operation retry": lambda: session.save_completion_draft(operation["id"], "call-1", world.draft)["replayed"],
+        "excel": lambda: app.handle("GET", "/api/context", {"Authorization": f"Bearer {token}"}, b"{}")[0] == 200,
+    }
+    read = {}
+    for name, request in requests.items():
+        parsed.clear()
+        assert request()
+        read[name] = list(parsed)
+    script = world.runs["script"]["id"]
+    assert read == {**dict.fromkeys(requests, [script]), "excel": []}
+
+
 def test_a_session_judges_no_draft_again_whose_runs_every_reader_of_it_reads_as_stored(
         tmp_path, capsys, fake_runner, monkeypatch):
     """Hv is hidden from the session, not from W, which may read every file. A draft citing a run pinned to V2 rests
@@ -988,6 +1028,45 @@ def test_a_run_reads_the_earlier_runs_before_it_takes_the_task_lock(tmp_path, mo
     assert run["seq"] > meanwhile[0]["seq"] and run["reproducibility_status"] == "non_reproducible"
 
 
+def test_a_session_lists_the_task_s_runs_once_a_request_to_read_a_run_s_reproducibility(tmp_path, capsys, monkeypatch):
+    """A session reads a SQL run's reproducibility by the earlier runs of its fingerprint it may read, from a listing
+    of the task's runs. An export (its draft, projection and run lines) and a save or its retry (the draft, its
+    receipt and what it returns) are each one read, and list them once; a close status reads its draft with the runs
+    its listing read, so it lists them no more often than the manager's."""
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="复现")
+    analysis = AnalysisStore(task)
+    b = analysis.add_dataset(_csv(tmp_path / "b.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="总账")
+    task.record_session("sess", role="analysis")
+    revision = analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": b["id"]}})["id"]
+    run = [analysis.run_analysis(revision) for _ in range(2)][-1]
+    spec = {"title": "收入", "body": "收入 100。", "run_ids": [run["id"]], "claims": [_claim(run)]}
+    code, saved = _cli(capsys, var, "analysis-draft", "--spec", json.dumps(spec))
+    assert code == 0, saved
+    session = FinanceStore(task, snapshot_ids=[b["id"]], session_id="sess")
+    finance = {"body": "收入 100。", "run_ids": [run["id"]], "claims": [_claim(run)]}
+    listed = []
+    list_kind = AnalysisStore._list
+    monkeypatch.setattr(AnalysisStore, "_list",
+                        lambda self, kind, **kwargs: listed.append(kind) or list_kind(self, kind, **kwargs))
+    requests = {
+        "export": lambda: _cli(capsys, var, "analysis-export", "--draft", saved["id"], "--format", "md",
+                               "--mode", "audit")[0] == 0,
+        "draft": lambda: _cli(capsys, var, "analysis-draft", "--spec", json.dumps({**spec, "body": "收入 100。。"}))[0] == 0,
+        "save": lambda: "replayed" not in session.save_explanation_draft(finance),
+        "retry": lambda: session.save_explanation_draft(finance)["replayed"],
+        "close": lambda: bool(session.finance_close_status({})),
+        "managed close": lambda: bool(FinanceStore(task).finance_close_status({})),
+    }
+    counts = {}
+    for name, request in requests.items():
+        listed.clear()
+        assert request()
+        counts[name] = listed.count("runs")
+    managed = counts.pop("managed close")
+    assert counts == {**dict.fromkeys(("export", "draft", "save", "retry"), 1), "close": managed}
+
+
 def test_a_session_reads_a_revision_of_a_marked_document_as_saved_with_nothing_hidden(tmp_path, capsys):
     """Nothing is hidden from the session. save_draft compares a revision of a document with an estimate notice before
     adding the notice, so a revision that takes its parent's document is stored unverified; the session reads it,
@@ -1201,6 +1280,24 @@ def test_a_draft_on_a_file_a_hidden_batch_replaced_reads_as_saved_without_it(tmp
                              for freshness in (record["explanation_check"]["dataset_freshness"][world.p["dataset_id"]]
                                                ["freshness"] for record in (saved, shown))]
     assert read[True] == read[False] == [("unknown", ["no_task_period"])] * 2 + [("source_stale", ["superseded"])] * 2
+
+
+def test_a_session_lists_the_refresh_batches_once_for_every_draft_it_reads(tmp_path, capsys, monkeypatch):
+    """Each draft on P reads P by the refreshes filed before it, as the session reads them, and S's record names the
+    prior its batch reads with: the batches are listed once for the read, however many drafts there are."""
+    world = _refreshed_world(tmp_path, capsys, legacy=True, drafts=True)
+    world.drafts.append(_draft_on(world.task, world.p["dataset_id"]))
+    listed = []
+    batches = SourceRefreshService.batches
+    monkeypatch.setattr(SourceRefreshService, "batches", lambda self: listed.append(None) or batches(self))
+    code, state = _cli(capsys, world.var, "analysis-state")
+    assert code == 0 and len(listed) == 1
+    drafts = {row["id"]: row for row in state["drafts"]}
+    assert [(freshness["state"], [reason["code"] for reason in freshness["reasons"]]) for freshness in (
+        drafts[saved["id"]]["explanation_check"]["dataset_freshness"][world.p["dataset_id"]]["freshness"]
+        for saved in world.drafts)] == [("unknown", ["no_task_period"])] + [("source_stale", ["superseded"])] * 2
+    assert [row["metadata"]["source_refresh"]["prior_snapshot_id"] for row in state["datasets"]
+            if row["id"] == world.s["dataset_id"]] == [world.p["dataset_id"]]
 
 
 def _operations(reads: list) -> list[dict]:

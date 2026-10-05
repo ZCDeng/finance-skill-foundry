@@ -308,7 +308,8 @@ def dispatch(args) -> bool:
 
         result = read_method_resource(args.skill, args.resource)
     elif args.cmd == "analysis-state":
-        # The task's versions and runs, read once for every run, draft and receipt the session reads (run_in_view).
+        # The task's versions, runs and refresh batches, read once for every run, draft and receipt the session reads
+        # (run_in_view).
         cache: dict = {}
         result = service.state(_ceiling(context), cache=cache)
         if context.session_id:
@@ -317,7 +318,7 @@ def dispatch(args) -> bool:
             allowed = set(context.snapshot_ids)
             # A refreshed snapshot names the prior its batch reads with (SourceRefreshService.batches_in_view).
             result["datasets"] = snapshots_in_view(service, [d for d in result["datasets"] if d["id"] in allowed],
-                                                   allowed)
+                                                   allowed, cache=cache)
             result["analyses"] = [
                 a for a in result["analyses"] if set(a["bindings"].values()) <= allowed
             ]
@@ -457,9 +458,11 @@ def dispatch(args) -> bool:
             if context.session_id and isinstance(claim, dict) and claim.get("run_id"):
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
                 _bound(context, service.get_run(claim["run_id"])["bindings"])
-        # Evidence freshness reads only the files this session may read, as the finance draft path does.
-        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited),
-                                       _ceiling(context))
+        # Evidence freshness reads only the files this session may read, as the finance draft path does. The save and
+        # the draft it returns are one read (AnalysisStore.save_draft).
+        cache = {}
+        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited,
+                                                          _cache=cache), _ceiling(context), cache=cache)
     elif args.cmd == "analysis-export":
         _named_draft(context, service, args.draft)
         result = service.export_draft(args.draft, args.format, mode=args.mode, allowed=_ceiling(context))

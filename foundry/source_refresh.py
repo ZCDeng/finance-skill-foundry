@@ -761,11 +761,12 @@ class SourceRefreshService:
 
 
 def snapshots_in_view(store: AnalysisStore, records: list[dict[str, Any]],
-                      allowed: set[str] | None) -> list[dict[str, Any]]:
+                      allowed: set[str] | None, *, cache: dict | None = None) -> list[dict[str, Any]]:
     """Snapshot records as a reader whose snapshot ceiling is ``allowed`` reads them; the manager (None) reads them as
     stored. A refreshed snapshot records its batch's prior (metadata.source_refresh.prior_snapshot_id) and reads with
     the prior its batch reads with (SourceRefreshService.batches_in_view), under the integrity hash of its record
-    (meta.json) so read. Its rows and counts stay as filed."""
+    (meta.json) so read. Its rows and counts stay as filed. ``cache`` as for AnalysisStore.run_in_view, so the drafts
+    of the same read list the batches no more."""
     if allowed is None:
         return records
     batches: dict[str, dict[str, Any]] | None = None
@@ -777,7 +778,7 @@ def snapshots_in_view(store: AnalysisStore, records: list[dict[str, Any]],
             shown.append(record)
             continue
         if batches is None:
-            batches = {row["id"]: row for row in SourceRefreshService(store.task, allowed=allowed).batches_in_view()}
+            batches = {row["id"]: row for row in store._batches_in_view(allowed, {} if cache is None else cache)}
         batch = batches.get(refresh.get("source_batch_id")) or {}
         # A dataset read carries its rows too: the hash is over the record alone, as it was filed.
         meta = store._read(store._inside(store.root / "datasets" / record["id"] / "meta.json"))
