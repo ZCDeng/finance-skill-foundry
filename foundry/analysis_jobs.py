@@ -209,14 +209,9 @@ class JobStore:
             if requirements_id:
                 from foundry.analysis import AnalysisStore
 
-                requirements = AnalysisStore(self.task)._get("requirements", requirements_id)
-                requirement_bindings = requirements.get("bindings", {})
-                if (
-                    not isinstance(requirement_bindings, dict)
-                    or any(not isinstance(value, str) for value in requirement_bindings.values())
-                    or not set(requirement_bindings.values()).issubset(set(frozen["snapshot_ids"]))
-                ):
-                    raise FoundryError("script requirements are outside the frozen session context")
+                # Refused as the session's own analysis-script refuses it: a version outside the frozen context
+                # reads as an unknown or malformed id.
+                AnalysisStore(self.task).named_requirements(requirements_id, set(frozen["snapshot_ids"]))
             if not isinstance(spec.get("code"), str) or not spec["code"].strip() or len(spec["code"].encode()) > 256 * 1024:
                 raise FoundryError("script code must contain 1 to 256 KiB of text")
         runtime_identity = _runtime_identity(runtime_pid) if kind == "child" else None

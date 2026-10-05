@@ -46,6 +46,12 @@ SCRIPT_RESULT_PREVIEW_ROWS = 1000
 PARENT_UNAVAILABLE = "parent draft is unavailable or outside this session context"
 # The same for a draft a call names by id (validate, review, circle-select).
 DRAFT_UNAVAILABLE = "draft is unavailable or outside this session context"
+# The same for a requirements version a call names by id (a spec's requirements_id): AnalysisStore.named_requirements.
+REQUIREMENTS_UNAVAILABLE = "requirements version is unavailable or outside this session context"
+# The same for a run an explanation names (its run_ids, a claim's or a recipe's run): FinanceStore._named_run.
+RUN_UNAVAILABLE = "run is unavailable or outside this session context"
+# The same for a saved analysis a command names (to run it, to save it as a method, or as a revision's parent).
+ANALYSIS_UNAVAILABLE = "saved analysis is unavailable or outside this session context"
 # What a revision takes over from its parent when the spec leaves it out (save_draft copies it): what the parent's
 # author wrote or the server generated from the parent's files. (The runs and requirements version it takes are read
 # as its own.) A revision records which of these it took (`inherited_fields`), and one that took any rests on
@@ -1068,6 +1074,26 @@ class AnalysisStore:
             return self.draft_readable(self.get_draft(parent_id), allowed)
         except FoundryError:
             return False
+
+    def named_requirements(self, requirements_id: Any, allowed: set[str] | None) -> dict:
+        """A requirements version a call names by id (a spec's requirements_id, a saved analysis's pin). A reader whose
+        snapshot ceiling is ``allowed`` is refused one it may not read (finance_requirements.requirements_readable)
+        exactly as an unknown or malformed id (REQUIREMENTS_UNAVAILABLE). The manager (None) reads it, or is refused,
+        as stored; its callers check the bindings as before."""
+        if allowed is None:
+            return self._get("requirements", requirements_id)
+        from foundry.finance_requirements import requirements_readable
+
+        try:
+            record = self._get("requirements", requirements_id)
+        except FoundryError:
+            raise FoundryError(REQUIREMENTS_UNAVAILABLE) from None
+        bindings = record.get("bindings") or {}
+        # requirements_readable reads a map of snapshot ids; a version holding anything else no session reads.
+        if (not isinstance(bindings, dict) or any(not isinstance(value, str) for value in bindings.values())
+                or not requirements_readable(record, allowed)):
+            raise FoundryError(REQUIREMENTS_UNAVAILABLE)
+        return record
 
     def draft_in_view(self, draft: dict, allowed: set[str] | None, *, readable_ids: set[str] | None = None) -> dict:
         """A stored draft as a reader whose snapshot ceiling is ``allowed`` reads it; None is the full view.

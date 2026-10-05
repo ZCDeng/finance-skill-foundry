@@ -6,7 +6,8 @@ neither shows nor changes what the session saves: not a source batch a refresh c
 same bytes, a requirements version, an earlier run of the same fingerprint, a draft named by id or a draft a
 recovery files for it. The Excel bridge's record of a workbook is the session's own: what another session bound,
 imported, previewed or logged in the same file is no part of it. A record the session may not read is refused
-exactly as one that does not exist. The manager (no session) saves and is answered as before.
+exactly as one that does not exist: a draft, requirements version, run or saved analysis it names by id is answered
+as an id never saved or no id at all. The manager (no session) saves and is answered as before.
 """
 
 from __future__ import annotations
@@ -794,13 +795,13 @@ def test_mcp_refuses_a_hidden_requirements_parent_as_a_missing_one(tmp_path):
     server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
     server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
     refused = []
-    for parent_id in (hidden["id"], "e" * 32):
+    for parent_id in (hidden["id"], "e" * 32, "zz"):
         with pytest.raises(McpRefused) as error:
             server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
                 "name": "analysis_requirements_save",
                 "arguments": {"context_id": context["id"], "question": "收入", "items": ITEMS, "parent_id": parent_id}}})
         refused.append(str(error.value))
-    assert refused[0] == refused[1]
+    assert len(set(refused)) == 1
 
 
 # --- reproducibility ------------------------------------------------------------------------------------------------
@@ -1018,6 +1019,214 @@ def test_a_session_circles_no_table_a_revision_took_from_a_parent_it_may_not_rea
                                                 "context_id": circled.context["id"], "draft_id": child["id"],
                                                 "block_id": "nope"})
     assert str(refused.value) == DRAFT_UNAVAILABLE
+
+
+# --- requirements versions, runs and saved analyses named by id -----------------------------------------------------
+
+
+@pytest.fixture
+def named(tmp_path):
+    """The manager saved a requirements version, a finance run and an analysis on files outside the session (H, LH).
+    The current requirements version rests on A, so a session is refused for the id it names, not by #75's rule."""
+    from foundry.finance_mcp import FinanceMcpServer, create_stdio_grant
+
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="按编号")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(tmp_path / "a.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="A")["id"]
+    ledger = analysis.add_dataset(_entry(tmp_path / "l.json", "revenue", "100"), name="L")["id"]
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_csv(tmp_path / "h.csv", [("revenue", "2026-08", "集团", SECRET, "CNY", "元")]), name="H")["id"]
+    hidden_ledger = analysis.add_dataset(_entry(tmp_path / "lh.json", "revenue", SECRET), name="LH")["id"]
+    manager = FinanceStore(task)
+    context = manager.save_context({"bindings": {"ledger": ledger}, "scopes": {"ledger": SCOPE}})
+    hidden_context = manager.save_context({"bindings": {"ledger": hidden_ledger}, "scopes": {"ledger": SCOPE}})
+    requirements = manager.analysis_requirements_save({"question": "Falcon", "bindings": {"payroll": h}, "items": ITEMS})
+    manager.analysis_requirements_save({"question": "收入", "bindings": {"gl": a}, "items": ITEMS,
+                                        "parent_id": requirements["id"]})
+    session = FinanceStore(task, snapshot_ids=_snapshots(task), session_id="sess")
+    total = {"kind": "account_total", "accounts": ["revenue"]}
+
+    def server(context_ids):
+        grant = create_stdio_grant(var, task_id=task.id, session_id="sess", snapshot_ids=_snapshots(task),
+                                   context_ids=context_ids)
+        served = FinanceMcpServer(var_root=var, grant_id=grant["grant_id"], token=grant["token"])
+        served.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+        served.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return served
+
+    return SimpleNamespace(
+        var=var, task=task, analysis=analysis, a=a, manager=manager, session=session,
+        run=session.run_metric({"context_id": context["id"], "metric": total})["id"], hidden_requirements=requirements["id"],
+        hidden_run=manager.run_metric({"context_id": hidden_context["id"], "metric": total})["id"],
+        hidden_analysis=analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": h}})["id"],
+        # A grant on snapshots alone leaves every id to the service; a grant on a context checks a run's first.
+        grants={"snapshot grant": server(None), "context grant": server([context["id"]])})
+
+
+def _mcp(server, tool: str, spec: dict) -> str:
+    """What a session reads of a refused tool call: the tool's error, or the grant's refusal."""
+    from foundry.finance_mcp import McpRefused
+
+    try:
+        response = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                  "params": {"name": tool, "arguments": spec}})
+    except McpRefused as refused:
+        return f"grant refused: {refused}"
+    assert response["result"]["isError"], response
+    return json.loads(response["result"]["content"][0]["text"])["message"]
+
+
+def _refusal(call) -> str:
+    with pytest.raises(FoundryError) as refused:
+        call()
+    return str(refused.value)
+
+
+def _stored(world) -> dict[str, int]:
+    """Every record a refused call could have written."""
+    from foundry.analysis_jobs import JobStore
+
+    return {**{kind: len(world.analysis._list(kind))
+               for kind in ("revisions", "runs", "drafts", "requirements", "methods", "completions")},
+            "jobs": len(JobStore(world.task).list())}
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_requirements_version_alike(named, capsys):
+    from foundry.analysis import REQUIREMENTS_UNAVAILABLE
+
+    def cli(*args):
+        code, error = _cli(capsys, named.var, *args)
+        assert code == 3
+        return error.strip()
+
+    pinned = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                           "requirements_id": named.hidden_requirements})
+    stored = _stored(named)
+    answers = {}
+    # A version on a file outside the session, one never saved, one that is no id and one that is no text.
+    for requirements_id in (named.hidden_requirements, "e" * 32, "zz", 5):
+        script = json.dumps({"code": "print(1)", "bindings": {"t": named.a}, "requirements_id": requirements_id})
+        explanation = {"body": "收入。", "run_ids": [named.run], "requirements_id": requirements_id}
+        answers[requirements_id] = {
+            "analysis-save": cli("analysis-save", "--spec", json.dumps(
+                {"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "requirements_id": requirements_id})),
+            "analysis-script": cli("analysis-script", "--spec", script),
+            "analysis-script-start": cli("analysis-script-start", "--spec", script),
+            "analysis-draft": cli("analysis-draft", "--spec", json.dumps(
+                {"title": "T", "body": "收入。", "requirements_id": requirements_id})),
+            "validate-explanation": cli("validate-explanation", "--spec", json.dumps(explanation)),
+            "save-explanation-draft": cli("save-explanation-draft", "--spec", json.dumps(explanation)),
+            "completion save": _refusal(lambda: named.session.save_completion_draft("op", "call", explanation)),
+            **{f"{tool} ({grant})": _mcp(server, tool, explanation) for grant, server in named.grants.items()
+               for tool in ("validate_explanation", "save_explanation_draft")},
+        }
+    assert {answer for row in answers.values() for answer in row.values()} == {REQUIREMENTS_UNAVAILABLE}
+    # A saved analysis pinned to a version the session may not read runs as one pinned to an unknown version would.
+    assert cli("analysis-run", "--analysis", pinned["id"]) == REQUIREMENTS_UNAVAILABLE
+    assert _stored(named) == stored
+    # A save the manager made of the very same request is no retry the session may replay: refused as a fresh save.
+    same = {"body": "收入。", "run_ids": [named.run], "requirements_id": named.hidden_requirements}
+    named.manager.save_explanation_draft(dict(same))
+    assert _refusal(lambda: named.session.save_explanation_draft(dict(same))) == REQUIREMENTS_UNAVAILABLE
+    # The manager is answered as before.
+    for requirements_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                                     ("zz", "invalid analysis object id: zz")):
+        for args in (("analysis-save", "--spec", json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                                               "requirements_id": requirements_id})),
+                     ("validate-explanation", "--spec", json.dumps({"body": "收入。", "requirements_id": requirements_id}))):
+            code, error = _cli(capsys, named.var, *args, session=None, task=named.task.id)
+            assert (code, error.strip()) == (3, message)
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_run_alike(named, capsys):
+    from foundry.analysis import RUN_UNAVAILABLE
+
+    def cli(*args):
+        code, error = _cli(capsys, named.var, *args)
+        assert code == 3
+        return error.strip()
+
+    stored = _stored(named)
+    answers = {}
+    for run_id in (named.hidden_run, "e" * 32, "zz", 5):
+        runs = {"body": "收入。", "run_ids": [run_id]}
+        cited = {"body": "收入。", "claims": [{"basis": "source_fact", "run_id": run_id, "text": "收入"}]}
+        calculated = {"body": "收入。", "claims": [{"basis": "calculation", "run_id": run_id, "row": 0, "column": "amount"}]}
+        answers[run_id] = {
+            "prepare-explanation": cli("prepare-explanation", "--spec", json.dumps({"run_ids": [run_id]})),
+            "validate-explanation": cli("validate-explanation", "--spec", json.dumps(runs)),
+            "save-explanation-draft": cli("save-explanation-draft", "--spec", json.dumps(runs)),
+            "validate a claim": _refusal(lambda: named.session.validate_explanation(cited)),
+            "save a claim": _refusal(lambda: named.session.save_explanation_draft(cited)),
+            "save a calculation": _refusal(lambda: named.session.save_explanation_draft(calculated)),
+            "completion run_ids": _refusal(lambda: named.session.save_completion_draft("op", "call", runs)),
+            "completion claim": _refusal(lambda: named.session.save_completion_draft("op", "call", cited)),
+            **{f"{tool} ({grant})": _mcp(server, tool, runs) for grant, server in named.grants.items()
+               for tool in ("prepare_explanation", "validate_explanation", "save_explanation_draft")},
+        }
+        if isinstance(run_id, str):  # a recipe naming its run by anything but text is refused for its shape
+            recipe = {"kind": "direct", "dataset_id": named.a, "source_hash": "0" * 64, "sheet": "S", "range": "A1",
+                      "claim": {"run_id": run_id, "row": 0, "column": "amount"}}
+            answers[run_id]["validate a recipe"] = _refusal(
+                lambda: named.session.validate_explanation({"evidence_recipes": [recipe]}))
+    # The service answers alike; a context grant refuses each run before the service reads it, alike too.
+    refused = "grant refused: finance run is outside this grant"
+    assert {entry: {row[entry] for row in answers.values() if entry in row} for entry in answers["e" * 32]} == {
+        entry: {refused if "context grant" in entry else RUN_UNAVAILABLE} for entry in answers["e" * 32]}
+    assert _stored(named) == stored
+    # A save the manager made of the very same request is no retry the session may replay: refused as a fresh save.
+    same = {"body": "收入。", "run_ids": [named.hidden_run]}
+    named.manager.save_explanation_draft(dict(same))
+    assert _refusal(lambda: named.session.save_explanation_draft(dict(same))) == RUN_UNAVAILABLE
+    # A run the session may read is read as before.
+    mine = {"body": "收入。", "run_ids": [named.run]}
+    assert _cli(capsys, named.var, "validate-explanation", "--spec", json.dumps(mine))[0] == 0
+    # The manager reads every run, and is answered as before for an unknown or malformed one.
+    manager = {"session": None, "task": named.task.id}
+    assert _cli(capsys, named.var, "validate-explanation", "--spec", json.dumps(same), **manager)[0] == 0
+    for run_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                            ("zz", "invalid analysis object id: zz")):
+        for command in ("prepare-explanation", "validate-explanation", "save-explanation-draft"):
+            code, error = _cli(capsys, named.var, command, "--spec", json.dumps({"body": "收入。", "run_ids": [run_id]}),
+                               **manager)
+            assert (code, error.strip()) == (3, message)
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_saved_analysis_alike(named, capsys):
+    from foundry.analysis import ANALYSIS_UNAVAILABLE
+
+    def revision(parent_id) -> str:
+        return json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "parent_id": parent_id})
+
+    stored = _stored(named)
+    answers = set()
+    for analysis_id in (named.hidden_analysis, "e" * 32, "zz"):
+        for args in (("analysis-run", "--analysis", analysis_id),
+                     ("analysis-method-save", "--analysis", analysis_id, "--name", "收入"),
+                     ("analysis-save", "--spec", revision(analysis_id))):
+            code, error = _cli(capsys, named.var, *args)
+            answers.add((code, str(error).strip()))
+    code, error = _cli(capsys, named.var, "analysis-save", "--spec", revision(5))
+    answers.add((code, str(error).strip()))
+    # Neither run nor saved as a method, nor kept as a revision's parent.
+    assert answers == {(3, ANALYSIS_UNAVAILABLE)}
+    assert _stored(named) == stored
+    # A parent the session may read is kept as before.
+    code, mine = _cli(capsys, named.var, "analysis-save", "--spec", json.dumps(
+        {"question": "收入", "sql": SQL, "bindings": {"t": named.a}}))
+    code, revised = _cli(capsys, named.var, "analysis-save", "--spec", revision(mine["id"]))
+    assert code == 0 and revised["parent_id"] == mine["id"]
+    # The manager runs and revises any analysis, and is answered as before for an unknown or malformed one.
+    manager = {"session": None, "task": named.task.id}
+    assert _cli(capsys, named.var, "analysis-run", "--analysis", named.hidden_analysis, **manager)[0] == 0
+    code, managed = _cli(capsys, named.var, "analysis-save", "--spec", revision(named.hidden_analysis), **manager)
+    assert code == 0 and managed["parent_id"] == named.hidden_analysis
+    for analysis_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                                 ("zz", "invalid analysis object id: zz")):
+        for args in (("analysis-run", "--analysis", analysis_id), ("analysis-save", "--spec", revision(analysis_id))):
+            code, error = _cli(capsys, named.var, *args, **manager)
+            assert (code, error.strip()) == (3, message)
 
 
 # --- recovering a session's completion operation --------------------------------------------------------------------

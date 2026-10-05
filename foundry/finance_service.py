@@ -7,8 +7,8 @@ import re
 from decimal import localcontext
 from time import perf_counter
 
-from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality, _hash, _hash_bytes, _new,
-                             _safe_text)
+from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, RUN_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality,
+                             _hash, _hash_bytes, _new, _safe_text)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -215,7 +215,7 @@ class FinanceStore:
         # may read (analysis_cli._bound_evidence). The manager's recipes report a run that does not read as an issue.
         if self.allowed is not None:
             for run_id in recipe_run_ids(recipes):
-                self._authorize(self.analysis.get_run(run_id)["bindings"])
+                self._named_run(run_id)
 
     def _authorize_consistency_sources(self, sources):
         from foundry.financial_evidence import consistency_dataset_ids
@@ -272,6 +272,28 @@ class FinanceStore:
         except FoundryError:
             raise FoundryError(PARENT_UNAVAILABLE) from None
         return parent
+
+    def _named_requirements(self, requirements_id):
+        """A requirements version a call names by id. A session is refused one it may not read exactly as an unknown
+        or malformed id (AnalysisStore.named_requirements); the manager reads it as stored."""
+        if self.allowed is None:
+            self._authorize(self.analysis._get("requirements", requirements_id).get("bindings", {}))
+            return
+        self.analysis.named_requirements(requirements_id, self.allowed)
+
+    def _named_run(self, run_id):
+        """A run a call names by id (an explanation's run_ids, a claim's or a recipe's run). A session is refused one it
+        may not read exactly as an unknown or malformed id; the manager reads it as stored."""
+        if self.allowed is None:
+            run = self.analysis.get_run(run_id)
+            self._authorize(run["bindings"])
+            return run
+        try:
+            run = self.analysis.get_run(run_id)
+            self._authorize(run["bindings"])
+        except FoundryError:
+            raise FoundryError(RUN_UNAVAILABLE) from None
+        return run
 
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
@@ -857,15 +879,15 @@ class FinanceStore:
         if requirements:
             self._authorize(requirements.get("bindings", {}))
         if spec.get("requirements_id"):
-            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            self._named_requirements(spec["requirements_id"])
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
             if isinstance(claim, dict) and claim.get("run_id"):
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
-                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                self._named_run(claim["run_id"])
         for run_id in spec.get("run_ids", []):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
         self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         self._parent_draft(spec.get("parent_id"))
@@ -1049,8 +1071,10 @@ class FinanceStore:
             if requirements:
                 self._authorize(requirements.get("bindings", {}))
             key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
+            # A session replays only a save it may read: one it may not read is refused as a fresh save would be.
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
-                                          if row.get("completion_request_key") == key])
+                                          if row.get("completion_request_key") == key
+                                          and self.analysis.draft_readable(row, self.allowed)])
             if previous:
                 # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
                 self._parent_draft(spec.get("parent_id"))
@@ -1072,7 +1096,7 @@ class FinanceStore:
             self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
         if spec.get("requirements_id"):
             # The tools expose requirements_id so a revision can name the current version (repin_requirements).
-            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            self._named_requirements(spec["requirements_id"])
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
@@ -1093,7 +1117,7 @@ class FinanceStore:
             run_ids = list(dict.fromkeys([*run_ids, *visual_runs]))
             spec = {**spec, "document": visual_document, "run_ids": run_ids}
         for run_id in [*parent.get("run_ids", []), *run_ids]:
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         prepared = (
             self.prepare_explanation({"run_ids": run_ids,
                                       "materiality": spec.get("materiality", parent.get("materiality", {}))})
@@ -1159,10 +1183,9 @@ class FinanceStore:
                 self._authorize({"source": claim["dataset_id"]})
             if claim.get("run_id") and claim.get("basis") != "calculation" and self.allowed is not None:
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
-                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                self._named_run(claim["run_id"])
             if claim.get("basis") == "calculation" and claim.get("run_id"):
-                run = self.analysis.get_run(claim["run_id"])
-                self._authorize(run["bindings"])
+                run = self._named_run(claim["run_id"])
                 if run.get("engine") == "finance":
                     claim.update(
                         finance_context_id=run["finance_context_id"],
@@ -1265,9 +1288,7 @@ class FinanceStore:
             raise FoundryError("prepare explanation requires run_ids")
         runs = []
         for run_id in dict.fromkeys(run_ids):
-            run = self.analysis.get_run(run_id)
-            self._authorize(run["bindings"])
-            runs.append(run)
+            runs.append(self._named_run(run_id))
         self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
         self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         backgrounds = self._backgrounds_for_runs(runs)
@@ -1307,7 +1328,7 @@ class FinanceStore:
         draft = self._named_draft(spec["draft_id"]) if spec.get("draft_id") else {}
         if self.allowed is not None:
             if spec.get("requirements_id"):
-                self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+                self._named_requirements(spec["requirements_id"])
             # A revision is compared with its parent's runs: a parent named here must be one this session may read,
             # and a stored draft's parent it may not read is left out, as the draft reads to it (draft_in_view).
             self._parent_draft(spec.get("parent_id"))
@@ -1317,14 +1338,14 @@ class FinanceStore:
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
         for run_id in dict.fromkeys(run_ids):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         if self.allowed is None:
             for run_id in draft.get("run_ids", []):
                 self._authorize(self.analysis.get_run(run_id)["bindings"])
         for claim in spec.get("claims", draft.get("claims", [])):
             if isinstance(claim, dict):
                 if claim.get("run_id"):
-                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                    self._named_run(claim["run_id"])
                 if claim.get("dataset_id"):
                     self._authorize({"source": claim["dataset_id"]})
         self._authorize_evidence_recipes(spec.get("evidence_recipes", draft.get("evidence_recipes", [])))

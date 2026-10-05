@@ -106,12 +106,18 @@ def test_script_rejects_requirements_outside_frozen_context(tmp_path: Path):
         "items": [{"id": "profit", "metric": "profit"}],
     })
 
-    with pytest.raises(FoundryError, match="requirements are outside"):
-        JobStore(task).create(context, "script", {
-            "code": "print(1)",
-            "bindings": {"actual": allowed["id"]},
-            "requirements_id": requirement["id"],
-        })
+    from foundry.analysis import REQUIREMENTS_UNAVAILABLE
+
+    # A version outside the frozen context is refused exactly as an unknown or malformed id.
+    for requirements_id in (requirement["id"], "e" * 32, "zz", 5):
+        with pytest.raises(FoundryError) as refused:
+            JobStore(task).create(context, "script", {
+                "code": "print(1)",
+                "bindings": {"actual": allowed["id"]},
+                "requirements_id": requirements_id,
+            })
+        assert str(refused.value) == REQUIREMENTS_UNAVAILABLE
+    assert not (task.root / "analysis" / "jobs").exists()
 
 
 @pytest.mark.skipif(not runner_capabilities()["available"], reason="requires macOS isolated runner")

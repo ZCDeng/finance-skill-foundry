@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_fields
+from foundry.analysis import (ANALYSIS_UNAVAILABLE, DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS,
+                              AnalysisStore, _inherited_fields)
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -186,9 +187,28 @@ def _named_draft(context, service, draft_id):
     return draft
 
 
+def _named_analysis(context, service, analysis_id):
+    """A saved analysis a command names by id. A session is refused one bound to a file it may not read exactly as an
+    unknown or malformed id, as analysis-state leaves it out; the manager as before."""
+    try:
+        analysis = service.get_analysis(analysis_id)
+        _bound(context, analysis["bindings"])
+    except FoundryError:
+        if not context.session_id:
+            raise
+        raise FoundryError(ANALYSIS_UNAVAILABLE) from None
+    return analysis
+
+
 def _bound_requirements(context, service, spec):
-    if spec.get("requirements_id"):
-        _bound(context, service._get("requirements", spec["requirements_id"]).get("bindings", {}))
+    """The requirements version a spec or a saved analysis names. A session is refused one it may not read exactly as
+    an unknown or malformed id (AnalysisStore.named_requirements); the manager as before."""
+    if not spec.get("requirements_id"):
+        return
+    if context.session_id:
+        service.named_requirements(spec["requirements_id"], _ceiling(context))
+        return
+    _bound(context, service._get("requirements", spec["requirements_id"]).get("bindings", {}))
 
 
 def _bound_evidence(context, service, spec):
@@ -378,10 +398,12 @@ def dispatch(args) -> bool:
         spec = _json(args.spec, "analysis spec")
         _bound(context, spec.get("bindings", {}))
         _bound_requirements(context, service, spec)
+        if context.session_id and spec.get("parent_id"):
+            # A parent the session may not read is refused as an unknown one, not saved as the revision's parent.
+            _named_analysis(context, service, spec["parent_id"])
         result = service.save_analysis(spec)
     elif args.cmd == "analysis-run":
-        analysis = service.get_analysis(args.analysis)
-        _bound(context, analysis["bindings"])
+        analysis = _named_analysis(context, service, args.analysis)
         _bound_requirements(context, service, analysis)
         result = service.run_analysis(
             args.analysis,
@@ -464,8 +486,7 @@ def dispatch(args) -> bool:
         _bound(context, run["bindings"])
         result = service.output_path(args.run, args.output)
     elif args.cmd == "analysis-method-save":
-        analysis = service.get_analysis(args.analysis)
-        _bound(context, analysis["bindings"])
+        _named_analysis(context, service, args.analysis)
         result = service.save_method(args.analysis, args.name)
     elif args.cmd == "analysis-method-apply":
         bindings = _json(args.bindings, "bindings")

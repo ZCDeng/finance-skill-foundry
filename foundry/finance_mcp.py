@@ -373,20 +373,20 @@ class FinanceMcpServer:
             context_ids.add(service._read("scenarios", spec["parent_id"])["context_id"])
         for run_id in [spec.get("run_id"), *spec.get("run_ids", [])]:
             if run_id:
-                context_ids.add(_run_finance_context(analysis, run_id))
+                context_ids.add(_run_finance_context(analysis, grant, run_id))
         if spec.get("draft_id") and tool == "validate_explanation":
             # A draft the grant may not read fails as an unknown one does, before its runs say anything.
             draft = service._named_draft(spec["draft_id"])
             for run_id in draft.get("run_ids", []):
-                context_ids.add(_run_finance_context(analysis, run_id))
+                context_ids.add(_run_finance_context(analysis, grant, run_id))
         if spec.get("parent_id") and tool in {"save_explanation_draft", "validate_explanation"}:
             # A parent the grant may not read fails as an unknown one does, before its runs say anything.
             draft = service._parent_draft(spec["parent_id"])
             for run_id in draft.get("run_ids", []):
-                context_ids.add(_run_finance_context(analysis, run_id))
+                context_ids.add(_run_finance_context(analysis, grant, run_id))
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("run_id"):
-                context_ids.add(_run_finance_context(analysis, claim["run_id"]))
+                context_ids.add(_run_finance_context(analysis, grant, claim["run_id"]))
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 dataset_id = _assert_id(claim["dataset_id"])
                 if dataset_id not in set(grant.get("snapshot_ids") or []):
@@ -734,11 +734,16 @@ def _tools() -> list[dict[str, Any]]:
     ]
 
 
-def _run_finance_context(analysis: Any, run_id: str) -> str:
+def _run_finance_context(analysis: Any, grant: dict[str, Any], run_id: str) -> str:
+    """The finance context of a run a call names; a run on a file outside the grant is refused exactly as a missing
+    one, not by the context it was run in."""
     try:
         run = analysis.get_run(run_id)
     except FoundryError as exc:
         raise McpRefused("finance run is outside this grant") from exc
+    bindings = run.get("bindings") or {}
+    if not isinstance(bindings, dict) or not set(bindings.values()) <= set(grant.get("snapshot_ids") or []):
+        raise McpRefused("finance run is outside this grant")
     context_id = run.get("finance_context_id")
     if not context_id:
         raise McpRefused("finance run is outside this grant")
