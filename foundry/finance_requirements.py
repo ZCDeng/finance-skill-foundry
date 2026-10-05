@@ -255,7 +255,8 @@ def prepare_requirements(analysis, spec, *, _context_scopes=None, _allowed=None)
         if grain_basis:
             normalized_item['grain_basis'] = grain_basis
         normalized.append(normalized_item)
-    normalized, carried_over = _drop_carried_over_hierarchy(analysis, spec.get('parent_id'), normalized, _allowed)
+    parent = _parent_record(analysis, spec.get('parent_id'), _allowed)
+    normalized, carried_over = _drop_carried_over_hierarchy(parent, normalized)
     hierarchy = {item['id']: _hierarchy_dimensions(item) for item in normalized if _hierarchy_dimensions(item)}
     if hierarchy:
         _reject_hierarchy_dimensions(normalized, hierarchy)
@@ -339,9 +340,9 @@ def _readable_lineage(analysis, record, allowed, versions=None):
     return chain, hidden
 
 
-def _drop_carried_over_hierarchy(analysis, parent_id, items, allowed=None):
-    """Drop a hierarchy level an item carries over unchanged from its parent record (saved before phase 1),
-    and record every legacy level the new version no longer has.
+def _drop_carried_over_hierarchy(parent, items):
+    """Drop a hierarchy level an item carries over unchanged from its parent record ``parent`` (saved before phase 1;
+    None for none), and record every legacy level the new version no longer has.
 
     The scope card carries items over unchanged and cannot edit them; circle-select and a resubmitted
     refusal's suggested_items arrive already without the level. Either way the dropped level is recorded
@@ -349,7 +350,6 @@ def _drop_carried_over_hierarchy(analysis, parent_id, items, allowed=None):
     pruned (a null value) or the writer removed does not turn the untouched one into a new level. A key the
     writer adds or changes is still refused, and only it is named.
     """
-    parent = _parent_record(analysis, parent_id, allowed)
     previous = {item.get('id'): item for item in (parent or {}).get('items') or [] if isinstance(item, dict)}
     if not any(_hierarchy_dimensions(item) for item in previous.values()):
         return items, []
@@ -485,11 +485,12 @@ def _lineage_in_view(analysis, record, allowed, versions=None):
     read from the others narrows: parent_id is the nearest version it may read, or none. The first version it may read
     removed nothing, and each after it removed what its parent removed and the items it dropped, as _version_change
     recorded them (never more than stored); semantic_basis carries the same ids, and where it holds fewer, the
-    semantic fingerprint is its hash, as the stored one is the stored basis's (requirement_semantics). A
-    hierarchy_dimension_dropped warning stands only when the stored parent is one it may read
-    (_drop_carried_over_hierarchy read the parent's items), and a hierarchy_scope_dropped warning keeps the levels a
-    version it may read held (_earlier_scope_levels). A level dropped because the finance context held it stands, and
-    nothing is added.
+    semantic fingerprint is its hash, as the stored one is the stored basis's (requirement_semantics). Authoring
+    warnings read as a save naming that parent would have recorded them. A hierarchy_dimension_dropped warning stands
+    only when the stored parent is one it may read (_drop_carried_over_hierarchy read the parent's items); past one it
+    may not read, the version records the levels the parent it reads held in its items. A hierarchy_scope_dropped
+    warning keeps the levels a version it may read held (_earlier_scope_levels), and past such a parent the levels the
+    parent it reads held in its scope (_scope_hierarchy). A level dropped because the finance context held it stands.
     """
     chain, hidden = _readable_lineage(analysis, record, allowed, versions)
     if not hidden:
@@ -502,19 +503,38 @@ def _lineage_in_view(analysis, record, allowed, versions=None):
     kept = [item_id for item_id in record.get('removed_item_ids') or [] if item_id in removed]
     earlier = {_level_key(key, value) for version in chain
                for key, value in _scope_levels(version.get('scope')).items()}
+    named = bool(chain) and chain[0].get('id') == record.get('parent_id')
+    stored = record.get('authoring_warnings') or []
+    carried, legacy = [], {}
+    if chain and not named:
+        # The save compared the version with its stored parent; one naming the parent the session reads would have
+        # dropped and recorded the levels that one held. A version whose items or scope still hold a level was saved
+        # before saves dropped them and recorded none; a scope key the finance context held has its own warning.
+        items = [item for item in record.get('items') or []
+                 if isinstance(item, dict) and isinstance(item.get('id'), str)]
+        if not any(_hierarchy_dimensions(item) for item in items):
+            carried = [dict(sorted(warning.items()))  # as stored (_bytes sorts keys)
+                       for warning in _drop_carried_over_hierarchy(chain[0], items)[1]]
+        if not _scope_levels(record.get('scope')):
+            context = {key for warning in stored if isinstance(warning, dict)
+                       and warning.get('source') == 'finance_context' for key in warning.get('keys') or {}}
+            legacy = {key: value for key, value in _scope_levels(chain[0].get('scope')).items() if key not in context}
     warnings = []
-    for warning in record.get('authoring_warnings') or []:
+    for warning in stored:
         code = warning.get('code') if isinstance(warning, dict) else None
-        if code == 'hierarchy_dimension_dropped' and not (chain and chain[0].get('id') == record.get('parent_id')):
+        if code == 'hierarchy_dimension_dropped' and not named:
             continue
         if code == 'hierarchy_scope_dropped' and warning.get('source') != 'finance_context':
-            levels = {key: value for key, value in (warning.get('keys') or {}).items()
-                      if _level_key(key, value) in earlier}
+            # The parent's levels, then those the save wrote (_scope_hierarchy).
+            levels = {**legacy, **{key: value for key, value in (warning.get('keys') or {}).items()
+                                   if _level_key(key, value) in earlier}}
+            legacy = {}
             if not levels:
                 continue
             if levels != warning.get('keys'):
-                warning = _scope_dropped_warning(levels)
+                warning = {**_scope_dropped_warning(levels), 'keys': dict(sorted(levels.items()))}  # as stored
         warnings.append(warning)
+    warnings = [*carried, *([_scope_dropped_warning(legacy)] if legacy else []), *warnings]
     lineage = {'parent_id': chain[0].get('id') if chain else None, 'removed_item_ids': kept,
                'authoring_warnings': warnings}
     basis = record.get('semantic_basis')
@@ -691,6 +711,9 @@ def requirements_version_view(analysis, record, allowed, *, versions=None, draft
     lineage = _lineage_in_view(analysis, record, allowed, versions) or {}
     view = {key: lineage.get(key, value) for key, value in record.items()
             if key != '_integrity_hash' and not (key == 'authoring_warnings' and lineage.get(key) == [])}
+    # A save that recorded no warning stored no authoring_warnings.
+    if lineage.get('authoring_warnings') and 'authoring_warnings' not in view:
+        view = dict(sorted({**view, 'authoring_warnings': lineage['authoring_warnings']}.items()))
     return _selection_in_view(analysis, view, allowed, drafts)
 
 

@@ -871,11 +871,11 @@ def _lineage_world(root: Path, kind: str):
 
 def _lineage(record: dict, names: dict) -> dict:
     """What a version took from the versions before it, its own id and its parent named by role, and whether its
-    semantic basis hashes to its fingerprint."""
+    semantic basis hashes to its fingerprint. The warnings as written out, key order and all."""
     return {"version": names.get(record["id"], "new"), "parent": names.get(record["parent_id"], record["parent_id"]),
             "removed": record["removed_item_ids"], "basis": (record.get("semantic_basis") or {}).get("removed_item_ids"),
             "hashed": _hash(record.get("semantic_basis")) == record.get("semantic_fingerprint"),
-            "warnings": [(warning["code"], warning["keys"]) for warning in record.get("authoring_warnings") or []]}
+            "warnings": json.dumps(record.get("authoring_warnings"), ensure_ascii=False)}
 
 
 def _mcp_requirements(var: Path, task, snapshot_ids: list[str]) -> dict:
@@ -891,7 +891,8 @@ def _mcp_requirements(var: Path, task, snapshot_ids: list[str]) -> dict:
     return reply["result"]["structuredContent"]
 
 
-@pytest.mark.parametrize("kind, twin", [("removed", "twin"), ("legacy", "twin"), ("above", "parent"), ("gap", "parent")])
+@pytest.mark.parametrize("kind, twin", [("removed", "twin"), ("legacy", "twin"), ("above", "parent"), ("gap", "parent"),
+                                        ("legacy gap", "legacy parent")])
 def test_a_requirements_version_reads_as_if_versions_outside_the_session_were_never_saved(tmp_path, capsys, kind, twin):
     read = {}
     for name in (twin, kind):
@@ -911,15 +912,22 @@ def test_a_requirements_version_reads_as_if_versions_outside_the_session_were_ne
         assert not any("_integrity_hash" in row for row in [*listed["requirements"], revised])
         read[name] = [_lineage(row, world.names) for row in [*listed["requirements"], revised]]
     # As in a world where the versions outside the session were never saved: V's parent is the nearest version the
-    # session may read, and only what those versions removed or held stays.
+    # session may read, and only what those versions removed or held stays. Past a version outside the session, V
+    # records the levels P held, as when saved after P (legacy gap).
     assert read[kind] == read[twin]
     # The manager reads every version as stored; a session's revision stores what V removed, as before.
     stored = {row["id"]: row for row in AnalysisStore(world.task)._list("requirements")}
     assert FinanceStore(world.task).analysis_requirements_list({})["requirements"] == list(stored.values())
     removed = {"removed": ["falcon_payroll"], "legacy": [], "above": ["cost", "falcon_payroll"],
-               "gap": ["cost", "falcon_payroll"]}[kind]
+               "gap": ["cost", "falcon_payroll"], "legacy gap": ["falcon_payroll"]}[kind]
     assert stored[world.current]["removed_item_ids"] == stored[revised["id"]]["removed_item_ids"] == removed
     assert (stored[world.current]["parent_id"] in world.hidden) == (kind != "above")
+    if kind == "legacy gap":
+        # V was saved after a version that had dropped P's level, so it stores no warning; the session reads both.
+        assert "authoring_warnings" not in stored[world.current]
+        [current] = [row for row in read[kind] if row["version"] == "V"]
+        assert [(warning["code"], warning["keys"]) for warning in json.loads(current["warnings"])] == [
+            ("hierarchy_dimension_dropped", {"drilldown": "Hawk"}), ("hierarchy_scope_dropped", {"drilldown": "Hawk"})]
 
 
 @pytest.mark.parametrize("kind", ["removed", "legacy"])
@@ -1088,6 +1096,66 @@ def test_a_version_keeps_the_levels_a_version_the_session_may_read_held(tmp_path
                          {"requirements_id": saved["id"], "items": [item]}):
         check = {"status": "pass", "requirements": requirements}
         assert check_lineage_in_view(analysis, check, {a}) is check_lineage_in_view(analysis, check, None) is check
+
+
+@pytest.mark.parametrize("case", ["resent", "context", "legacy"])
+def test_a_version_past_one_the_session_may_not_read_records_the_levels_the_version_before_held(tmp_path, case):
+    """Past a parent outside the session, a version reads with the warnings a save naming the version before it would
+    have recorded: that version's levels, then a level the save resent; no scope level under a key the finance context
+    held, which has its own warning; and none on a version saved before saves dropped levels."""
+    from foundry.finance_requirements import requirements_version_view
+
+    seen = {}
+    for name in ("twin", "hidden"):
+        task = TaskStore(tmp_path / name / "var").create(title="层级")
+        analysis = AnalysisStore(task)
+        a = analysis.add_dataset(_entry(tmp_path / name / "a.json", "revenue", "100"), name="A")["id"]
+        task.record_session("sess", role="analysis")
+        h = analysis.add_dataset(_entry(tmp_path / name / "h.json", "revenue", "999"), name="H")["id"]
+        manager = FinanceStore(task)
+
+        def legacy(bindings, level, parent):
+            record = _new(task, question="旧版", scope={"period": "2026-08", **level}, bindings=bindings, context_id=None,
+                          parent_id=parent, removed_item_ids=[], change_reason="", selection=None,
+                          items=[{**ITEMS[0], "dimensions": level, "requires_drilldown": False}])
+            return analysis._write(analysis._object_path("requirements", record["id"]), record)["id"]
+
+        readable = legacy({"gl": a}, {"drilldown": "Hawk"},
+                          legacy({"gl": a}, {"drill_down": "Eagle"}, None) if case == "resent" else None)
+        parent = readable
+        if name == "hidden" and case == "legacy":
+            parent = legacy({"payroll": h}, {"drilldown": "Hawk"}, readable)
+        elif name == "hidden":
+            # It drops and records Hawk, so the version saved after it records none.
+            parent = manager.analysis_requirements_save({"question": "Falcon 项目", "bindings": {"payroll": h},
+                                                         "items": ITEMS, "parent_id": readable})["id"]
+        if case == "legacy":
+            current = legacy({"gl": a}, {"drilldown": "Hawk"}, parent)
+        else:
+            spec = {"question": "收入", "items": ITEMS, "parent_id": parent}
+            if case == "resent":
+                # Resent from a scope card that loaded the version before Hawk's.
+                spec.update(bindings={"gl": a}, scope={"period": "2026-08", "drill_down": "Eagle"})
+            else:
+                spec["context_id"] = manager.save_context({"bindings": {"actual": a},
+                                                           "scopes": {"actual": {**SCOPE, "drilldown": "Kite"}}})["id"]
+            current = manager.analysis_requirements_save(spec)["id"]
+        record = analysis._get("requirements", current)
+        view = requirements_version_view(analysis, record, {a})
+        assert view["parent_id"] == readable
+        assert _shows(view, [h, *([parent] if name == "hidden" else []), "Falcon"]) == []
+        assert requirements_version_view(analysis, record, None) is record
+        if name == "hidden":
+            assert _shows(record.get("authoring_warnings"), ["Hawk"]) == []
+        seen[name] = json.dumps(view.get("authoring_warnings"), ensure_ascii=False)
+    # As written out, key order and all.
+    assert seen["hidden"] == seen["twin"]
+    assert [(warning["code"], warning["keys"], warning.get("source")) for warning in json.loads(seen["twin"]) or []] == {
+        "resent": [("hierarchy_dimension_dropped", {"drilldown": "Hawk"}, None),
+                   ("hierarchy_scope_dropped", {"drill_down": "Eagle", "drilldown": "Hawk"}, None)],
+        "context": [("hierarchy_dimension_dropped", {"drilldown": "Hawk"}, None),
+                    ("hierarchy_scope_dropped", {"drilldown": "Kite"}, "finance_context")],
+        "legacy": []}[case]
 
 
 # --- reproducibility ------------------------------------------------------------------------------------------------
