@@ -924,8 +924,8 @@ class AnalysisStore:
         another, with that one (fingerprint_in_view), and its reproducibility as _reproducibility_in_view reads it. No
         run a session reads carries the integrity hash: it covers the stored record, which a view may not be, and its
         absence must not tell a view from a stored record. ``cache``, shared by the runs, drafts and receipts of one
-        read, holds the task's requirements versions, their fingerprints, its runs and refresh batches, and the row
-        declarations read again.
+        read, holds the task's requirements versions, their fingerprints, its runs, sessions and refresh batches, and
+        the row declarations read again.
         """
         if allowed is None:
             return run
@@ -973,14 +973,16 @@ class AnalysisStore:
         read otherwise than stored, and the version it reads as pinned to; None when it reads as stored.
 
         A run is pinned to the version current when it started (capture_requirements), or to the one its saved analysis
-        names, with the verified fingerprint of the version current when it started. A reader that may not read the
-        pinned version reads the record as saved where that version was never written: pinned to the newest version
-        older than the pinned one it may read, or none, with the fingerprint of the newest version before the run it
-        may read, which capture_requirements would have taken then. So does one that may read the pin but not the
-        version current when the run started (an analysis naming an older version). One that may read that version
-        reads a fingerprint captured as stored with the one it reads that version with (_captured_otherwise). Each
-        fingerprint is the one the reader reads (fingerprint_in_view), and nothing of a version it may not read shows
-        or decides anything.
+        names, with the verified fingerprint of the version current when it started (_versions_at_start). Of a run a
+        session saved, only the versions that session may read count (_author_ceiling): it captured the newest of those
+        and named no other. A reader that may not read the pinned version reads the record as saved where that version
+        was never written: pinned to the newest version older than the pinned one it may read, with the fingerprint of
+        the newest it may read of those saved when the run started, which capture_requirements would have taken then;
+        a run with no older one is pinned to that one, as a run of an analysis read as naming none is. So does one that
+        may read the pin but not the version current when the run started (an analysis naming an older version). One
+        that may read that version reads a fingerprint captured as stored with the one it reads that version with
+        (_captured_otherwise). Each fingerprint is the one the reader reads (fingerprint_in_view), and nothing of a
+        version it may not read shows or decides anything.
         """
         from foundry.finance_requirements import requirements_readable
 
@@ -991,10 +993,13 @@ class AnalysisStore:
         version = next((row for row in versions if row.get("id") == pinned), None)
         if version is None:
             return None
+        author = self._author_ceiling(record, cache)
+        if author is not None:
+            versions = [row for row in versions if requirements_readable(row, author)]
         if requirements_readable(version, allowed):
             if "requirements_semantic_fingerprint" not in record:
                 return None
-            before = [row for row in versions if row.get("seq", 0) < record.get("seq", 0)]
+            before = self._versions_at_start(record, versions, author, cache)
             if not before:
                 return None
             if before[-1].get("id") == pinned or requirements_readable(before[-1], allowed):
@@ -1009,10 +1014,54 @@ class AnalysisStore:
             return {"requirements_semantic_fingerprint": fingerprint}, version
         substitute = next((row for row in reversed(versions)
                            if row.get("seq", 0) < version.get("seq", 0) and requirements_readable(row, allowed)), None)
-        then = next((row for row in reversed(versions)
-                     if row.get("seq", 0) < record.get("seq", 0) and requirements_readable(row, allowed)), None)
+        then = next((row for row in reversed(self._versions_at_start(record, versions, author, cache))
+                     if requirements_readable(row, allowed)), None)
+        if substitute is None and "requirements_semantic_fingerprint" in record:
+            # Where the pin was never saved, the run's analysis named none to whoever ran it (analysis_in_view), and the
+            # run took the version current then.
+            substitute = then
         return ({"requirements_id": substitute["id"] if substitute else None,
                  "requirements_semantic_fingerprint": self.fingerprint_in_view(then, allowed, cache=cache)}, substitute)
+
+    def _versions_at_start(self, record: dict, versions: list[dict], author: set[str] | None,
+                           cache: dict) -> list[dict]:
+        """Of ``versions``, oldest first, those saved before run ``record`` started. A run captures its version when it
+        starts (capture_requirements) but takes its seq when it commits, and versions may be saved while it runs: the
+        one it started under is the newest saved before it whose fingerprint, as stored or as the session that saved
+        the run (``author``, its snapshot ceiling) reads it, is the one it captured. Without one, every one saved
+        before it."""
+        before = [row for row in versions if row.get("seq", 0) < record.get("seq", 0)]
+        captured = record.get("requirements_semantic_fingerprint")
+        if captured:
+            # The session reads fingerprints of its own: only the versions are shared.
+            read = None if author is None else cache.setdefault("authors", {}).setdefault(frozenset(author), {
+                "requirements": self._requirements_versions(cache), "versions": self._requirements_by_id(cache)})
+            for index in range(len(before) - 1, -1, -1):
+                if before[index].get("semantic_fingerprint") == captured or (
+                        read is not None and self.fingerprint_in_view(before[index], author, cache=read) == captured):
+                    return before[:index + 1]
+        return before
+
+    def _author_ceiling(self, record: dict, cache: dict) -> set[str] | None:
+        """The snapshot ceiling of the session that saved run ``record``, at the context revision it saved it under
+        (Task.update_session_context keeps each earlier one), or None: the manager's, a session's the task does not
+        know, or one whose recorded ceiling does not hold the run's files. A run filed under an MCP grant reads by its
+        session's ceiling, which holds the grant's. The task's sessions are read once per ``cache``."""
+        session_id = record.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return None
+        sessions = cache.setdefault("sessions", {})
+        if session_id not in sessions:
+            sessions.update((row.get("session_id"), row) for row in self.task.sessions())
+            sessions.setdefault(session_id, None)
+        row = sessions[session_id]
+        if row is None:
+            return None
+        state = next((past for past in row.get("context_history") or []
+                      if past.get("context_revision") == record.get("context_revision")), row)
+        ceiling = set(state.get("snapshot_ids") or [])
+        # A session runs only on files it may read: one recorded before sessions had a ceiling ran under none.
+        return ceiling if set((record.get("bindings") or {}).values()) <= ceiling else None
 
     def fingerprint_in_view(self, record: dict | None, allowed: set[str] | None, *,
                             cache: dict | None = None) -> str | None:
@@ -1560,9 +1609,10 @@ class AnalysisStore:
             if all(requirements_readable(row, files) for row in self._requirements_versions(cache)):
                 judged[key] = False
             else:
-                # The narrowest reader reads fingerprints of its own: only the versions are shared.
+                # The narrowest reader reads fingerprints of its own: only the versions and sessions are shared.
                 narrowest = cache.setdefault("narrowest", {}).setdefault(frozenset(files), {
-                    "requirements": self._requirements_versions(cache), "versions": self._requirements_by_id(cache)})
+                    "requirements": self._requirements_versions(cache), "versions": self._requirements_by_id(cache),
+                    "sessions": cache.setdefault("sessions", {})})
                 judged[key] = otherwise(set(allowed), cache) or otherwise(files, narrowest)
         return judged[key]
 

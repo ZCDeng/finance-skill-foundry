@@ -1,13 +1,13 @@
 """A session reads every run as it would have saved it from the files it may read.
 
 A run another reader saved is pinned to the requirements version current when it started, its rows declared against
-that version, and its reproducibility decided by the earlier runs of its fingerprint that reader could read. A
-session reads it as saved where the versions and runs outside its snapshot ceiling were never saved: pinned to the
-version current then among those it may read, with that version's fingerprint and rows, and reproducible by the runs
-it may read. So does every saved analysis, draft, completion receipt and export built on such a run, and so does
-what the session saves from it: a draft another session saved, which read its runs otherwise, reads judged as the
-session's own save would have judged it. No run a session reads carries the stored record's integrity hash. The manager (no
-session) reads every run as stored.
+that version, and its reproducibility decided by the earlier runs of its fingerprint that reader could read. A session
+reads it as saved where the versions and runs outside its snapshot ceiling were never saved: pinned to the version
+current then among those it, and a session that saved the run, may read, not one saved while the run ran, with that
+version's fingerprint and rows, and reproducible by the runs it may read. So does every saved analysis, draft,
+completion receipt and export built on such a run, and so does what the session saves from it: a draft another session
+saved, which read its runs otherwise, reads judged as the session's own save would have judged it. No run a session
+reads carries the stored record's integrity hash. The manager (no session) reads every run as stored.
 
 So do the records a session's writes left before it saved only from the files it may read (main before #76), where
 what it read can still be told from what was stored. A source refresh it filed against a batch it may not read reads
@@ -117,6 +117,20 @@ def _verdict(receipt: dict) -> tuple:
 def _session_draft(world, body: str) -> dict:
     return FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess").save_explanation_draft(
         {**world.draft, "body": body})
+
+
+def _pins(versions: dict[str, dict], runs: list[dict]) -> list[tuple]:
+    """Each run's pin and fingerprint, and its row declaration's, by the names of ``versions``: a fingerprint by every
+    version saved with it, so that two worlds read alike where they pin alike."""
+    ids = {row["id"]: name for name, row in versions.items()}
+    prints: dict[str, list[str]] = {}
+    for name, row in versions.items():
+        prints.setdefault(row["semantic_fingerprint"], []).append(name)
+    names = {**ids, **{fingerprint: "=".join(shared) for fingerprint, shared in prints.items()}}
+    return [tuple(names.get(value, value) for value in (
+        run["requirements_id"], run["requirements_semantic_fingerprint"],
+        *((run["row_declarations"]["requirements_id"], run["row_declarations"]["requirements_fingerprint"])
+          if run.get("row_declarations") else ()))) for run in runs]
 
 
 def test_a_session_reads_a_run_pinned_to_a_version_it_may_not_read_as_pinned_where_that_version_was_never_saved(
@@ -238,6 +252,52 @@ def test_a_session_reads_a_run_of_an_analysis_naming_a_version_it_may_not_read_b
         assert _shows([state, receipt], world.secrets) == []
         read.append(_verdict(receipt))
     assert read[0] == read[1] and read[0][4] == 0 and "requirements_run_outdated" in read[0][5]
+
+
+def test_a_session_reads_a_run_of_an_analysis_naming_a_first_version_it_may_not_read_as_its_own_run_of_it(
+        tmp_path, capsys, fake_runner):
+    """Hv, on H, is the first version, and V2 on A its child. The manager saves SQL and a script naming Hv (where Hv
+    was never saved, naming none) and runs them while V2 is current. No version the session may read is older than Hv:
+    it reads the runs, as its own run of the SQL, pinned to V2, which they ran under, the script's rows declared
+    against V2, and files its receipt on them so."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        root = tmp_path / name
+        var = root / "var"
+        task = TaskStore(var).create(title="首个要求版本")
+        analysis = AnalysisStore(task)
+        a = analysis.add_dataset(_csv(root / "a.csv", [("revenue", "2026-08", "Falcon", "100", "CNY", "元")]), name="总账")["id"]
+        task.record_session("sess", role="analysis")
+        h = analysis.add_dataset(_csv(root / "h.csv", [("revenue", "2026-07", "Falcon", "100", "CNY", "元")]), name="薪酬")["id"]
+        manager = FinanceStore(task)
+        first = manager.analysis_requirements_save({
+            "question": "Falcon 项目", "scope": {"period": "2026-07"}, "bindings": {"payroll": h},
+            "items": HIDDEN_ITEMS}) if hidden else None
+        current = manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"},
+                                                      "bindings": {"gl": a}, "items": ITEMS,
+                                                      **({"parent_id": first["id"]} if first else {})})
+        named = {"requirements_id": first["id"]} if first else {}
+        as_manager = {"session": None, "task": task.id}
+        code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": a}, **named}), **as_manager)
+        assert code == 0, saved
+        runs = [_cli(capsys, var, "analysis-run", "--analysis", saved["id"], **as_manager)[1],
+                _cli(capsys, var, "analysis-script", "--spec", json.dumps(
+                    {"code": "print(1)", "bindings": {"gl": a}, "result_file": "result.json", **named}),
+                    **as_manager)[1]]
+        assert [run["requirements_id"] for run in runs] == [(first or current)["id"]] * 2
+        code, own = _cli(capsys, var, "analysis-run", "--analysis", saved["id"])
+        assert code == 0, own
+        code, state = _cli(capsys, var, "analysis-state")
+        assert code == 0
+        listed = {run["id"]: run for run in state["runs"]}
+        receipt = FinanceStore(task, snapshot_ids=[a], session_id="sess").save_explanation_draft(
+            {"body": "会话稿：Falcon 收入 100。", "run_ids": [run["id"] for run in runs]})["completion"]
+        assert _shows([state, receipt], [h, *([first["id"], first["semantic_fingerprint"]] if first else [])]) == []
+        read.append((_pins({"V2": current}, [listed[run["id"]] for run in [*runs, own]]), _verdict(receipt)))
+    assert read[0] == read[1]
+    assert read[0][0] == [("V2", "V2"), ("V2", "V2", "V2", "V2"), ("V2", "V2")]
+    assert "requirements_run_outdated" not in read[0][1][5]
 
 
 def test_a_session_reads_a_draft_and_receipt_citing_such_a_run_as_it_would_have_saved_them(tmp_path, capsys, fake_runner):
@@ -715,6 +775,281 @@ def test_a_session_judges_no_draft_again_whose_runs_every_reader_of_it_reads_as_
     for session in ("sess", "wide"):
         code, state = _cli(capsys, world.var, "analysis-state", session=session)
         assert code == 0 and len(state["drafts"]) == len(state["completions"]) == 2
+
+
+# --- the version a run started under, among those the session that ran it may read ---------------------------------
+
+
+def _meanwhile(monkeypatch) -> list:
+    """The saves to make while the next SQL query or script runs: after its run captured its version, before it
+    commits. Each runs once."""
+    import foundry.analysis as module
+    import foundry.runner as runner
+
+    pending: list = []
+
+    def saving(execute):
+        def run(*args, **kwargs):
+            while pending:
+                pending.pop(0)()
+            return execute(*args, **kwargs)
+        return run
+
+    monkeypatch.setattr(module, "execute_sql", saving(module.execute_sql))
+    monkeypatch.setattr(runner, "run_script", saving(runner.run_script))
+    return pending
+
+
+@pytest.mark.parametrize("engine", ["sql", "script"])
+def test_a_session_reads_a_run_by_the_version_it_started_under_not_one_saved_while_it_ran(
+        tmp_path, capsys, fake_runner, monkeypatch, engine):
+    """A run captures the version current when it starts, and takes its place among the versions when it commits. The
+    manager saves a version on A while each of three runs: hers naming V, started while Hv on H was the head, hers
+    naming none, started under Hv2 on H, and the session's, started under V5, while V6 and then Hv3 on H follow. The
+    session reads each, and files its receipt on each, as where no version on H was ever saved: started under V, V3
+    and V5, bound to a later version that asks the same."""
+    pending = _meanwhile(monkeypatch)
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        root = tmp_path / name
+        var = root / "var"
+        task = TaskStore(var).create(title="运行时保存的版本")
+        analysis = AnalysisStore(task)
+        a = analysis.add_dataset(_csv(root / "a.csv", [("revenue", "2026-08", "Falcon", "100", "CNY", "元")]), name="总账")["id"]
+        task.record_session("sess", role="analysis")
+        h = analysis.add_dataset(_csv(root / "h.csv", [("revenue", "2026-07", "Falcon", "100", "CNY", "元")]), name="薪酬")["id"]
+        manager = FinanceStore(task)
+        versions: dict[str, dict] = {}
+
+        def save(label: str, question: str, *, on_h: bool = False) -> None:
+            parent = {"parent_id": list(versions.values())[-1]["id"], "change_reason": "复核"} if versions else {}
+            versions[label] = manager.analysis_requirements_save({
+                "question": question, "scope": {"period": "2026-08"}, **parent,
+                "bindings": {"payroll": h} if on_h else {"gl": a}, "items": HIDDEN_ITEMS if on_h else ITEMS})
+
+        def run(session: str | None, **named) -> dict:
+            who = {"session": session, "task": None if session else task.id}
+            if engine == "script":
+                code, ran = _cli(capsys, var, "analysis-script", "--spec", json.dumps(
+                    {"code": "print(1)", "bindings": {"gl": a}, "result_file": "result.json", **named}), **who)
+            else:
+                code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps(
+                    {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": a}, **named}), **who)
+                assert code == 0, saved
+                code, ran = _cli(capsys, var, "analysis-run", "--analysis", saved["id"], **who)
+            assert code == 0, ran
+            return ran
+
+        save("V", "收入")
+        if hidden:
+            save("Hv", "Falcon 项目", on_h=True)
+        pending.append(lambda: save("V3", "收入（复核）"))
+        runs = [run(None, requirements_id=versions["V"]["id"])]
+        if hidden:
+            save("Hv2", "Falcon 薪酬", on_h=True)
+        pending.append(lambda: save("V5", "收入（再复核）"))
+        runs.append(run(None))
+        pending.extend([lambda: save("V6", "收入（三复核）"), *([lambda: save("Hv3", "Falcon 奖金", on_h=True)]
+                                                            if hidden else [])])
+        runs.append(run("sess"))
+        assert not pending and [run["requirements_id"] for run in runs] == [
+            versions[label]["id"] for label in (("V", "Hv2", "V5") if hidden else ("V", "V3", "V5"))]
+        code, state = _cli(capsys, var, "analysis-state")
+        assert code == 0
+        listed = {row["id"]: row for row in state["runs"]}
+        receipts = []
+        for index, (ran, question) in enumerate(zip(runs, ("收入", "收入（复核）", "收入（再复核）"))):
+            save(f"again{index}", question)
+            receipts.append(_verdict(FinanceStore(task, snapshot_ids=[a], session_id="sess").save_explanation_draft(
+                {"body": f"会话稿{index}：Falcon 收入 100。", "run_ids": [ran["id"]]})["completion"]))
+        secrets = [value for label, row in versions.items() if label.startswith("Hv")
+                   for value in (row["id"], row["semantic_fingerprint"])]
+        assert _shows(state, [h, *secrets]) == []
+        read.append((_pins({label: row for label, row in versions.items() if not label.startswith("Hv")},
+                           [listed[ran["id"]] for ran in runs]), receipts))
+    assert read[0] == read[1]
+    pins, receipts = read[0]
+    started = [("V", "V=again0"), ("V3", "V3=again1"), ("V5", "V5=again2")]
+    assert [pin[:2] for pin in pins] == started
+    if engine == "script":
+        assert [pin[2:] for pin in pins] == started
+    assert [receipt[4] for receipt in receipts] == [1] * 3
+    assert not any("requirements_run_outdated" in receipt[5] for receipt in receipts)
+
+
+def _apart_world(root: Path):
+    """S1 may read A and H1, S2 A and H2: neither may read the other's file. S2 came to read H2 by a context
+    revision."""
+    var = root / "var"
+    task = TaskStore(var).create(title="互不包含的会话")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(root / "a.csv", [("revenue", "2026-08", "Falcon", "100", "CNY", "元")]), name="总账")["id"]
+    task.record_session("s2", role="analysis")
+    h1 = analysis.add_dataset(_csv(root / "h1.csv", [("revenue", "2026-07", "Falcon", "100", "CNY", "元")]), name="项目")["id"]
+    task.record_session("s1", role="analysis")
+    h2 = analysis.add_dataset(_csv(root / "h2.csv", [("revenue", "2026-06", "Falcon", "100", "CNY", "元")]), name="薪酬")["id"]
+    task.update_session_context("s2", snapshot_ids=[h2])
+    assert {row["session_id"]: set(row["snapshot_ids"]) for row in task.sessions()} == {"s1": {a, h1}, "s2": {a, h2}}
+    return SimpleNamespace(var=var, task=task, a=a, h1=h1, h2=h2, manager=FinanceStore(task), versions={})
+
+
+def _save_on(world, label: str, question: str, binding: dict, items: list) -> dict:
+    """The manager saves the next requirements version, on ``binding``."""
+    parent = {"parent_id": list(world.versions.values())[-1]["id"], "change_reason": "换"} if world.versions else {}
+    world.versions[label] = world.manager.analysis_requirements_save(
+        {"question": question, "scope": {"period": "2026-08"}, "bindings": binding, "items": items, **parent})
+    return world.versions[label]
+
+
+def _apart_reads(world, capsys, runs: list[dict]) -> tuple:
+    """S2 may read H1 too by now. What S1 reads of S2's runs, by the names of the versions on A, and its receipt."""
+    world.task.update_session_context("s2", snapshot_ids=[world.h1])
+    code, state = _cli(capsys, world.var, "analysis-state", session="s1")
+    assert code == 0, state
+    listed = {row["id"]: row for row in state["runs"]}
+    s1 = next(row for row in world.task.sessions() if row["session_id"] == "s1")["snapshot_ids"]
+    receipt = FinanceStore(world.task, snapshot_ids=s1, session_id="s1").save_explanation_draft(
+        {"body": "S1 稿：Falcon 收入 100。", "run_ids": [run["id"] for run in runs]})["completion"]
+    hidden = [value for label, row in world.versions.items() if label == "Hv2"
+              for value in (row["id"], row["semantic_fingerprint"])]
+    assert _shows([state, receipt], [world.h2, *hidden]) == []
+    return (_pins({label: row for label, row in world.versions.items() if label != "Hv2"},
+                  [listed[run["id"]] for run in runs]), _verdict(receipt))
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_a_session_reads_another_session_s_run_by_the_versions_that_session_may_read(
+        tmp_path, capsys, fake_runner, named):
+    """The manager saves P on A, then Hv1 on H1 and, but where S1 reads, Hv2 on H2. S2 runs SQL and a script on A,
+    naming P with ``named``, and later comes to read H1 too. Where Hv2 was never saved, S2's runs started under P, the
+    newest version S2 could read: S1 reads them so, never pinned to or by Hv1, which S2 could not read when they ran,
+    and its receipt reuses them under C, which asks what P asked."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1}, HIDDEN_ITEMS)
+        if hidden:
+            _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2}, ITEMS)
+        pin = {"requirements_id": world.versions["P"]["id"]} if named else {}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}, **pin}), session="s2")
+        assert code == 0, saved
+        runs = [_cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], session="s2")[1],
+                _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+                    {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", **pin}),
+                    session="s2")[1]]
+        started = world.versions["P" if named or not hidden else "Hv2"]
+        assert [run["requirements_id"] for run in runs] == [started["id"]] * 2
+        _save_on(world, "C", "收入", {"gl": world.a}, ITEMS)
+        read.append(_apart_reads(world, capsys, runs))
+    assert read[0] == read[1]
+    assert read[0][0] == [("P", "P=C"), ("P", "P=C", "P", "P=C")]
+    assert read[0][1][4] == 2 and "requirements_run_outdated" not in read[0][1][5]
+
+
+def test_a_session_reads_another_session_s_run_of_an_analysis_naming_a_version_neither_may_read_alike(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """Hv1 on H1 is the first version, then, but where S1 reads, Hv2 on H2, then P on A. The manager saves SQL and a
+    script naming Hv2, which S1 reads as naming Hv1 (and where Hv2 was never saved, they name Hv1). S2 runs them while
+    P is current, and the manager saves P2 and then P3 on A while they run. S2 could read no version older than Hv2:
+    S1 reads its runs as S2 ran them where Hv2 was never saved, naming none, so pinned to the version each started
+    under, P and P2."""
+    pending = _meanwhile(monkeypatch)
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1}, HIDDEN_ITEMS)
+        if hidden:
+            _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2}, ITEMS)
+        _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        pin = {"requirements_id": world.versions["Hv2" if hidden else "Hv1"]["id"]}
+        as_manager = {"session": None, "task": world.task.id}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}, **pin}), **as_manager)
+        assert code == 0, saved
+        code, script = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+            {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", **pin}), **as_manager)
+        assert code == 0, script
+        code, state = _cli(capsys, world.var, "analysis-state", session="s1")
+        named = {row["id"]: row["requirements_id"] for row in state["analyses"]}
+        assert named[saved["id"]] == named[script["analysis_id"]] == world.versions["Hv1"]["id"]
+        runs = []
+        for analysis_id, label, question in ((saved["id"], "P2", "收入（复核）"),
+                                             (script["analysis_id"], "P3", "收入（再复核）")):
+            pending.append(lambda label=label, question=question: _save_on(
+                world, label, question, {"gl": world.a}, ITEMS))
+            code, run = _cli(capsys, world.var, "analysis-run", "--analysis", analysis_id, session="s2")
+            assert code == 0, run
+            runs.append(run)
+        assert [run["requirements_id"] for run in runs] == (
+            [world.versions["Hv2"]["id"]] * 2 if hidden else [world.versions["P"]["id"], world.versions["P2"]["id"]])
+        read.append(_apart_reads(world, capsys, runs))
+    assert read[0] == read[1]
+    assert read[0][0] == [("P", "P"), ("P2", "P2", "P2", "P2")]
+
+
+@pytest.mark.parametrize("engine", ["sql", "script"])
+def test_a_session_reads_another_session_s_run_started_under_a_version_that_session_read_otherwise(
+        tmp_path, capsys, fake_runner, monkeypatch, engine):
+    """Hv1 on H1 holds an item more than P on A, and Hv2 on H2, saved but where S1 reads, drops it: S2, which may not
+    read Hv1, reads Hv2 with a fingerprint of its own, and its run started under Hv2 captured that one. The manager
+    saves P2 on A while the run runs. S1 reads the run as started under P, which S2 read as current where Hv2 was
+    never saved, not under P2."""
+    pending = _meanwhile(monkeypatch)
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1},
+                 [*HIDDEN_ITEMS, {"id": "falcon_payroll", "metric": "expense", "label": "Falcon 薪酬"}])
+        if hidden:
+            dropped = _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2}, ITEMS)
+            # S2 reads Hv2 by a fingerprint no version is stored with.
+            assert AnalysisStore(world.task).fingerprint_in_view(dropped, {world.a, world.h2}) not in {
+                row["semantic_fingerprint"] for row in world.versions.values()}
+        pending.append(lambda: _save_on(world, "P2", "收入（复核）", {"gl": world.a}, ITEMS))
+        if engine == "script":
+            code, run = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+                {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json"}), session="s2")
+        else:
+            code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+                {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}}), session="s2")
+            assert code == 0, saved
+            code, run = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], session="s2")
+        assert code == 0, run
+        assert run["requirements_id"] == world.versions["Hv2" if hidden else "P"]["id"]
+        read.append(_apart_reads(world, capsys, [run]))
+    assert read[0] == read[1]
+    assert read[0][0] == [("P", "P", "P", "P") if engine == "script" else ("P", "P")]
+
+
+def test_a_run_a_session_filed_before_sessions_had_a_ceiling_reads_as_the_manager_s(tmp_path, capsys):
+    """A session recorded before sessions had a snapshot ceiling ran as the manager does: its run reads to a session
+    as the manager's run of the same analysis does, pinned where the version on H it ran under was never saved."""
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="没有上限的会话")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(tmp_path / "a.csv", [("revenue", "2026-08", "Falcon", "100", "CNY", "元")]), name="总账")["id"]
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_csv(tmp_path / "h.csv", [("revenue", "2026-07", "Falcon", "100", "CNY", "元")]), name="薪酬")["id"]
+    task.record_session("old", role="analysis")
+    rows = [{key: value for key, value in row.items() if not (row["session_id"] == "old" and key == "snapshot_ids")}
+            for row in task.sessions()]
+    task._write_sessions(rows)
+    manager = FinanceStore(task)
+    visible = manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"},
+                                                  "bindings": {"gl": a}, "items": ITEMS})
+    head = manager.analysis_requirements_save({"question": "Falcon 项目", "scope": {"period": "2026-07"},
+                                               "bindings": {"payroll": h}, "items": HIDDEN_ITEMS,
+                                               "parent_id": visible["id"], "change_reason": "换项目"})
+    saved = analysis.save_analysis({"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": a}})["id"]
+    runs = [analysis.run_analysis(saved, session_id="old", context_revision=1), analysis.run_analysis(saved)]
+    assert [run["requirements_id"] for run in runs] == [head["id"]] * 2
+    code, state = _cli(capsys, var, "analysis-state")
+    assert code == 0
+    listed = {row["id"]: row for row in state["runs"]}
+    assert _pins({"V": visible}, [listed[run["id"]] for run in runs]) == [("V", "V")] * 2
 
 
 # --- a draft another session saved on such runs --------------------------------------------------------------------
