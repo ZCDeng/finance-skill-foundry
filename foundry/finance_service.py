@@ -297,15 +297,18 @@ class FinanceStore:
 
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
+        from foundry.source_refresh import snapshots_in_view
 
         state = self.analysis.state()
         return {
             "task_id": self.task.id,
             "domain": "foundry.finance.context.v1",
+            # A refreshed snapshot names the prior its batch reads with to this reader (snapshots_in_view).
             "datasets": [
                 {**r, "structure_state": self.dataset_structure_state(r["id"])}
-                for r in state["datasets"]
-                if self.allowed is None or r["id"] in self.allowed
+                for r in snapshots_in_view(self.analysis, [r for r in state["datasets"]
+                                                           if self.allowed is None or r["id"] in self.allowed],
+                                           self.allowed)
             ],
             "contexts": self._list("contexts"),
             "account_maps": self._list("account_maps"),

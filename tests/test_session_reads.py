@@ -7,6 +7,13 @@ version current then among those it may read, with that version's fingerprint an
 it may read. So does every saved analysis, draft, completion receipt and export built on such a run, and so does
 what the session saves from it. No run a session reads carries the stored record's integrity hash. The manager (no
 session) reads every run as stored.
+
+So do the records a session's writes left before it saved only from the files it may read (main before #76), where
+what it read can still be told from what was stored. A source refresh it filed against a batch it may not read reads
+as filed against the nearest one back it may read, as does a refresh the manager filed past such batches, and so do
+the files it replaced and the drafts citing them. A manager recovery that settled its completion operation on a draft
+it may not read reads as never filed. Neither record is rewritten, and the manager reads both as stored. The rows a
+business_key refresh carried over from the hidden batch are the session's own snapshot's, and stay there.
 """
 
 from __future__ import annotations
@@ -14,17 +21,20 @@ from __future__ import annotations
 import copy
 import json
 import threading
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from foundry.analysis import AnalysisStore, _new
+from foundry.analysis import AnalysisStore, _hash, _new
 from foundry.finance_service import FinanceStore
+from foundry.source_refresh import SourceRefreshService, SourceScope
 from foundry.task import TaskStore
 
-from test_session_views import SQL, _cli, _csv, _ledger, _normalized, _shows
-from test_session_writes import ITEMS, PROFIT, SCOPE, _entry, fake_runner  # noqa: F401 (fixture)
+from test_session_views import SECRET, SQL, _chain, _cli, _csv, _ledger, _normalized, _shows
+from test_session_writes import ITEMS, PROFIT, SCOPE, SOURCE_SCOPE, _entry, _normalized_operation, _snapshots
+from test_session_writes import fake_runner  # noqa: F401 (fixture)
 
 # --- a run pinned to a requirements version outside the session -----------------------------------------------------
 
@@ -629,3 +639,350 @@ def test_a_session_reads_a_revision_of_a_marked_document_as_saved_with_nothing_h
     code, own = _cli(capsys, var, "analysis-draft", "--spec", json.dumps({"title": "预算", "parent_id": draft["id"]}))
     assert code == 0, own
     assert own["reproducibility_status"] == analysis.get_draft(own["id"])["reproducibility_status"] == "unverified"
+
+
+# --- records filed before a session saved only from the files it may read ------------------------------------------
+
+
+def _refreshed_world(root: Path, capsys, *, legacy: bool, policy: str = "snapshot_only", mode: str = "full_period",
+                     drafts: bool = False):
+    """The session refreshes P, the manager publishes H (with ``legacy``), and the session refreshes S: with ``legacy``
+    as main before #76 filed it, against the latest batch of all (H); without H, as it files it now. With ``drafts``,
+    the session saves a draft on P before S and another after it."""
+    var = root / "var"
+    task = TaskStore(var).create(title="刷新")
+    task.record_session("sess", role="analysis")
+    uploads = task.root / "analysis" / "uploads"
+    uploads.mkdir(parents=True)
+
+    def upload(name: str, body: str) -> Path:
+        (uploads / name).write_text("document_id,line_id,management_account,amount\n" + body)
+        return uploads / name
+
+    def refresh(name: str, body: str, label: str, session: str | None = "sess") -> dict:
+        spec = {"path": str(upload(name, body)), "scope": {**SOURCE_SCOPE, "mode": mode},
+                "file_identity_policy": policy, "name": label}
+        code, result = _cli(capsys, var, "finance-source-refresh", "--spec", json.dumps(spec),
+                            session=session, task=None if session else task.id)
+        assert code == 0, result
+        return result
+
+    p = refresh("p.csv", "P1,1,revenue,100\n", "总账8月")
+    h = refresh("h.csv", f"H1,1,revenue,{SECRET}\n", "薪酬", None) if legacy else None
+    saved = [_draft_on(task, p["dataset_id"])] if drafts else []
+    body = "P1,1,revenue,100\nS1,1,revenue,200\n"
+    if legacy:
+        # What main's finance-source-refresh filed for the session: the manager's comparison, then the widening.
+        s = SourceRefreshService(task).refresh_file(upload("s.csv", body), scope=SourceScope(**SOURCE_SCOPE, mode=mode),
+                                                    name="总账9月", file_identity_policy=policy)
+        task.update_session_context("sess", snapshot_ids=[*_snapshots(task), s["dataset_id"]])
+        assert s["prior_snapshot_id"] == h["dataset_id"]
+    else:
+        s = refresh("s.csv", body, "总账9月")
+    if drafts:
+        saved.append(_draft_on(task, p["dataset_id"]))
+    return SimpleNamespace(var=var, task=task, p=p, h=h, s=s, refresh=refresh, drafts=saved)
+
+
+def _draft_on(task, dataset_id: str) -> dict:
+    """A finance draft the session saves on a run of ``dataset_id``."""
+    sess = FinanceStore(task, snapshot_ids=_snapshots(task), session_id="sess")
+    scope = {"ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "元",
+             "scenario": "actual"}
+    context = sess.save_context({"bindings": {"ledger": dataset_id}, "scopes": {"ledger": scope}})
+    run = sess.run_metric({"context_id": context["id"], "metric": {"kind": "account_total", "accounts": ["revenue"]}})
+    return sess.save_explanation_draft({"body": "收入见计算。", "run_ids": [run["id"]]})
+
+
+def _refresh_reads(world, capsys, session: str = "sess") -> dict:
+    """What ``session`` reads of the refreshes: the batches it lists, S's recorded prior wherever it reads S's record,
+    each file's freshness, the files it reads as replaced, and whether each batch and record it lists verifies under
+    its integrity hash, as a stored one does."""
+    from foundry.finance_controls import superseded_snapshots
+
+    allowed = _snapshots(world.task, session)
+    s = world.s["dataset_id"]
+    code, listing = _cli(capsys, world.var, "finance-source-list", session=session)
+    assert code == 0
+    code, read = _cli(capsys, world.var, "dataset-read", "--dataset", s, session=session)
+    assert code == 0
+    code, ready = _cli(capsys, world.var, "finance-readiness", session=session)
+    assert code == 0
+    code, state = _cli(capsys, world.var, "analysis-state", session=session)
+    assert code == 0
+    context = FinanceStore(world.task, snapshot_ids=allowed, session_id=session).list_finance_context()
+    listed = [*listing["batches"], *state["datasets"]]
+    return {
+        "batches": [{key: row.get(key) for key in ("prior_snapshot_id", "dataset_id")} for row in listing["batches"]],
+        "priors": [record["metadata"]["source_refresh"]["prior_snapshot_id"] for record in
+                   (read, *[row for row in (*state["datasets"], *context["datasets"]) if row["id"] == s])],
+        "freshness": {row["name"]: row["freshness"] for row in ready["datasets"]},
+        "superseded": sorted({world.p["dataset_id"]: "P", s: "S"}.get(snapshot, "another")
+                             for snapshot in superseded_snapshots(world.task, allowed=set(allowed))),
+        "verified": [_hash({key: value for key, value in row.items() if key != "_integrity_hash"})
+                     == row["_integrity_hash"] for row in listed],
+    }
+
+
+@pytest.mark.parametrize(("policy", "mode"), [("snapshot_only", "full_period"), ("business_key", "incremental"),
+                                              ("business_key", "full_period")])
+def test_a_refresh_filed_against_a_batch_the_session_may_not_read_reads_as_filed_against_its_own(
+        tmp_path, capsys, policy, mode):
+    from foundry.finance_controls import refreshed_snapshots
+
+    legacy = _refreshed_world(tmp_path / "legacy", capsys, legacy=True, policy=policy, mode=mode)
+    twin = _refreshed_world(tmp_path / "twin", capsys, legacy=False, policy=policy, mode=mode)
+    read = _refresh_reads(legacy, capsys)
+    # The batch, its snapshot's record and every freshness the session reads name P as S's prior, as without H.
+    assert _normalized(read) == _normalized(_refresh_reads(twin, capsys))
+    p, h, s = (record["dataset_id"] for record in (legacy.p, legacy.h, legacy.s))
+    assert read["priors"] == [p] * 3 and read["superseded"] == ["P"] and all(read["verified"])
+    assert _shows(read, [legacy.h["id"], h]) == []
+    # The manager reads every batch as stored: S was filed against H, which replaced P.
+    assert refreshed_snapshots(legacy.task) == {p: {h}, h: {s}}
+    code, managed = _cli(capsys, legacy.var, "finance-source-list", session=None, task=legacy.task.id)
+    assert managed["batches"] == SourceRefreshService(legacy.task).batches()
+    assert [row["prior_snapshot_id"] for row in managed["batches"]] == [None, p, h]
+    if policy == "business_key":
+        # Not read again: S merged its upload with H's rows (incremental) or wrote them off as deleted (full_period),
+        # and the two are not kept apart; its counts and changes were taken against H though it reads filed against
+        # P. The session's later refreshes compare with S and carry H's rows on.
+        code, listing = _cli(capsys, legacy.var, "finance-source-list")
+        assert ([{key: row[key] for key in ("change_counts", "changes")} for row in listing["batches"]]
+                == [{key: row[key] for key in ("change_counts", "changes")} for row in managed["batches"]
+                    if row["dataset_id"] != h])
+        later = legacy.refresh("s2.csv", "P1,1,revenue,100\nS1,1,revenue,200\nS2,1,revenue,300\n", "总账10月")
+        for snapshot in (s, later["dataset_id"]):
+            code, rows = _cli(capsys, legacy.var, "dataset-read", "--dataset", snapshot)
+            assert ["H1", SECRET, "active" if mode == "incremental" else "deleted"] in [
+                [row["document_id"], row["amount"], row["_source_row_state"]] for row in rows["rows"]]
+
+
+def test_a_narrower_session_reads_a_refresh_chain_past_batches_it_may_not_read_as_filed_without_them(tmp_path, capsys):
+    """Since #76 too: the manager refreshes P, H1, H2 and S in turn, and a session may read only P and S. It reads S as
+    filed against P, and P as replaced, as where H1 and H2 were never published; one that may read only S reads S as
+    its source's first refresh."""
+    def world(root: Path, hidden: int):
+        var = root / "var"
+        task = TaskStore(var).create(title="刷新")
+        for session in ("sess", "only"):
+            task.record_session(session, role="analysis")
+        uploads = task.root / "analysis" / "uploads"
+        uploads.mkdir(parents=True)
+
+        def refresh(name: str, body: str, label: str) -> dict:
+            (uploads / name).write_text("document_id,line_id,management_account,amount\n" + body)
+            return SourceRefreshService(task).refresh_file(uploads / name, scope=SourceScope(**SOURCE_SCOPE),
+                                                           name=label, file_identity_policy="snapshot_only")
+
+        p = refresh("p.csv", "P1,1,revenue,100\n", "总账8月")
+        h = [refresh(f"h{index}.csv", f"H{index},1,revenue,{SECRET}\n", "薪酬") for index in range(hidden)]
+        s = refresh("s.csv", "P1,1,revenue,100\nS1,1,revenue,200\n", "总账9月")
+        for session, snapshots in (("sess", [p, s]), ("only", [s])):
+            task.update_session_context(session, snapshot_ids=[row["dataset_id"] for row in snapshots])
+        return SimpleNamespace(var=var, task=task, p=p, h=h, s=s)
+
+    chained, alone = world(tmp_path / "chained", 2), world(tmp_path / "alone", 0)
+    assert chained.s["prior_snapshot_id"] == chained.h[-1]["dataset_id"]
+    reads = {name: [_refresh_reads(built, capsys, session) for session in ("sess", "only")]
+             for name, built in (("chained", chained), ("alone", alone))}
+    assert _normalized(reads["chained"]) == _normalized(reads["alone"])
+    p, s = chained.p["dataset_id"], chained.s["dataset_id"]
+    narrow, only = reads["chained"]
+    assert narrow["batches"] == [{"prior_snapshot_id": None, "dataset_id": p},
+                                 {"prior_snapshot_id": p, "dataset_id": s}]
+    assert narrow["superseded"] == ["P"] and "superseded" in [reason["code"] for reason in
+                                                              narrow["freshness"]["总账8月"]["reasons"]]
+    assert only["batches"] == [{"prior_snapshot_id": None, "dataset_id": s}] and only["priors"] == [None] * 3
+    assert _shows(reads["chained"], [token for row in chained.h for token in (row["id"], row["dataset_id"])]) == []
+
+
+def test_a_draft_on_a_file_a_hidden_batch_replaced_reads_as_saved_without_it(tmp_path, capsys):
+    """A session's draft on P saved after its refresh S reads P as replaced, though S was filed against H, as where H
+    was never published; one saved before S reads P as it read when saved, S filed since replacing nothing."""
+    read = {}
+    for legacy in (True, False):
+        world = _refreshed_world(tmp_path / str(legacy), capsys, legacy=legacy, drafts=True)
+        read[legacy] = []
+        for saved in world.drafts:
+            code, shown = _cli(capsys, world.var, "report-draft-read", "--draft", saved["id"])
+            assert code == 0
+            read[legacy] += [(freshness["state"], [reason["code"] for reason in freshness["reasons"]])
+                             for freshness in (record["explanation_check"]["dataset_freshness"][world.p["dataset_id"]]
+                                               ["freshness"] for record in (saved, shown))]
+    assert read[True] == read[False] == [("unknown", ["no_task_period"])] * 2 + [("source_stale", ["superseded"])] * 2
+
+
+def _operations(reads: list) -> list[dict]:
+    """The completion operations among ``reads``, however each was returned."""
+    found = []
+    for value in reads:
+        if isinstance(value, dict) and "events" in value:
+            found.append(value)
+        elif isinstance(value, (list, tuple)):
+            found += _operations(list(value))
+    return found
+
+
+def _settled_operation(root: Path, capsys, *, live: bool, legacy: bool, spent: int = 2):
+    """A session's revision 1, rejected (``live``) or timed out; with ``legacy``, settled as main before #76 settled a
+    manager recovery on a draft the session may not read, after ``spent`` drafts it may not read (2: the recovery's
+    verdict exhausts the repairs; 0: it leaves one)."""
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    root.mkdir()
+    sess, _wide, run = _chain(root, spent)
+    var = root / f"var{spent}"
+    code, operation = _cli(capsys, var, "finance-completion-begin",
+                           "--spec", json.dumps({"request_key": "request-1", "policy": {"max_repairs": 2}}))
+    assert code == 0
+    operations = CompletionOperationStore(sess.task, "sess", sess.allowed)
+    operations.reserve(operation["id"], payload={"body": "会话稿。"}, call_id="call-1")
+    if live:
+        operations.reject_attempt(operation["id"], 1, {"code": "claim_value_mismatch", "message": "bad"})
+    else:
+        operations.stop(operation["id"], "timeout")
+    hidden = []
+    if legacy:
+        manager = FinanceStore(sess.task)
+        recovered = manager.recover_completion_draft({"operation_id": operation["id"], "revision": 1,
+                                                      "draft": {"body": "宽口径恢复稿。", "run_ids": [run["id"]]}})
+        receipt = manager.analysis._get("completions", recovered["completion"]["id"])
+        # What main's recovery settled: the session's revision, on the receipt as the manager reads it.
+        CompletionOperationStore(sess.task, "sess").settle(operation["id"], 1, recovered, receipt)
+        hidden = [recovered["id"], receipt["id"], recovered["content_hash"]]
+    return SimpleNamespace(sess=sess, var=var, operation=operation["id"], hidden=hidden)
+
+
+@pytest.mark.parametrize("live", [False, True])
+@pytest.mark.parametrize("late", [False, True])
+def test_a_settlement_on_a_draft_the_session_may_not_read_reads_as_never_filed(tmp_path, capsys, monkeypatch, live,
+                                                                              late):
+    import foundry.finance_completion_operations as module
+    from foundry.errors import FoundryError
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    worlds = {legacy: _settled_operation(tmp_path / str(legacy), capsys, live=live, legacy=legacy)
+              for legacy in (True, False)}
+    stored = CompletionOperationStore(worlds[True].sess.task, "sess").get(worlds[True].operation)
+    if late:  # read after every deadline, as every operation filed before #76 is by now
+        clock = module._utc_now
+        monkeypatch.setattr(module, "_utc_now", lambda value=None: clock(value) + timedelta(hours=2))
+    reads = {}
+    for legacy, world in worlds.items():
+        spec = json.dumps({"operation_id": world.operation})
+        # Read twice: a first read past the deadline files the expiry, as the stored record then reads back.
+        statuses = [_cli(capsys, world.var, "finance-completion-status", "--spec", spec) for _ in range(2)]
+        code, begun = _cli(capsys, world.var, "finance-completion-begin", "--spec",
+                           json.dumps({"request_key": "request-1"}))
+        assert code == 0 and all(code == 0 for code, _ in statuses)
+        operations = CompletionOperationStore(world.sess.task, "sess", world.sess.allowed)
+        read = [statuses[-1][1], begun, operations.get(world.operation)]
+        try:  # revision 1 again, by number
+            read.append(operations.reserve(world.operation, 1, payload={"body": "会话稿。"}))
+        except FoundryError as exc:
+            read.append(["refused", str(exc)])
+        # The session's revision 1 again, then revision 2 and a stop. Before its deadline the session's next save
+        # and stop still go by the stored verdict (needs_review): every operation filed before #76 is past it.
+        for call, body in (("call-1", "会话稿。"), *([("call-2", "会话修订稿。")] if late or not live else [])):
+            try:
+                read.append(["saved", world.sess.save_completion_draft(world.operation, call, {"body": body})])
+            except FoundryError as exc:
+                read.append(["refused", str(exc)])
+        if late or not live:
+            read.append(_cli(capsys, world.var, "finance-completion-stop", "--spec", json.dumps(
+                {"operation_id": world.operation, "reason": "用户取消"})))
+        assert _shows(read, world.hidden) == []
+        # Last updated by its last event, as every stored operation is: no later moment of the settlement shows.
+        assert all(row["updated_at"] == row["events"][-1]["at"] for row in _operations(read))
+        reads[legacy] = _normalized_operation(read)
+    assert reads[True] == reads[False]
+    # The manager reads the settlement as stored.
+    assert stored["revisions"][0]["completion_id"] == worlds[True].hidden[1]
+    assert CompletionOperationStore(worlds[True].sess.task, "sess").get(worlds[True].operation)["revisions"][0][
+        "completion_id"] == worlds[True].hidden[1]
+
+
+def test_a_session_goes_on_past_a_settlement_on_a_draft_it_may_not_read_as_past_its_own_rejection(tmp_path, capsys):
+    """The recovery's verdict left a repair, so the operation goes on: the session reserves revision 2, has it
+    rejected, and saves revision 3, each again as a replay, reading revision 1 throughout as it rejected it."""
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    reads = {}
+    for legacy in (True, False):
+        world = _settled_operation(tmp_path / str(legacy), capsys, live=True, legacy=legacy, spent=0)
+        operations = CompletionOperationStore(world.sess.task, "sess", world.sess.allowed)
+        reserved = operations.reserve(world.operation, payload={"body": "会话修订稿。"}, call_id="call-2")
+        rejected = [operations.reject_attempt(world.operation, 2, {"code": "claim_value_mismatch", "message": "bad"})
+                    for _ in range(2)]
+        saved = [world.sess.save_completion_draft(world.operation, "call-3", {"body": "会话第三稿。"})
+                 ["completion_operation"] for _ in range(2)]
+        read = [reserved, *rejected, *saved, operations.get(world.operation)]
+        assert _shows(read, world.hidden) == []
+        assert all(row["updated_at"] == row["events"][-1]["at"] for row in _operations(read))
+        reads[legacy] = _normalized_operation(read)
+    assert reads[True] == reads[False]
+    assert [row["status"] for row in json.loads(reads[True])[-1]["revisions"]] == [
+        "rejected_validation", "rejected_validation", "settled"]
+
+
+def test_a_run_a_session_filed_on_a_hidden_run_and_version_reads_as_its_run_without_them(tmp_path, capsys, monkeypatch):
+    """Main before #76 compared a session's run with every earlier run of its fingerprint and pinned it to the head
+    requirements version of all, and the session's draft read the run's reproducibility as stored. A, B's rows filed
+    again outside the session, had a run of the same SQL, and Hv on A was the head: the session reads its run, and the
+    draft citing it, as where neither was ever saved (AnalysisStore.run_in_view)."""
+    def world(root: Path, legacy: bool) -> dict:
+        var = root / "var"
+        task = TaskStore(var).create(title="复现")
+        analysis = AnalysisStore(task)
+        path = _csv(root / "b.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")])
+        b = analysis.add_dataset(path, name="总账")["id"]
+        task.record_session("sess", role="analysis")
+        manager = FinanceStore(task)
+        visible = manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"},
+                                                      "bindings": {"t": b}, "items": ITEMS})
+        head = visible
+        if legacy:
+            a = analysis.add_dataset(path, name="薪酬", allow_duplicate=True)["id"]
+            head = manager.analysis_requirements_save({
+                "question": "Falcon 项目", "scope": {"period": "2026-07"}, "bindings": {"payroll": a},
+                "parent_id": visible["id"], "change_reason": "换项目", "items": HIDDEN_ITEMS})
+            analysis.run_analysis(analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": a}})["id"])
+        code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": SQL, "bindings": {"t": b}}))
+        assert code == 0, saved
+        if legacy:  # what main's analysis-run filed for the session
+            revision = next(row for row in task.sessions() if row["session_id"] == "sess")["context_revision"]
+            run = analysis.run_analysis(saved["id"], session_id="sess", context_revision=revision)
+        else:
+            code, run = _cli(capsys, var, "analysis-run", "--analysis", saved["id"])
+            assert code == 0, run
+        manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"}, "bindings": {"t": b},
+                                            "items": ITEMS, "parent_id": head["id"], "change_reason": "回到总账"})
+        with monkeypatch.context() as main:
+            if legacy:  # main's draft save read the run as stored
+                main.setattr(AnalysisStore, "run_in_view", lambda self, run, allowed, *, cache=None: run,
+                             raising=False)
+            code, draft = _cli(capsys, var, "analysis-draft", "--spec", json.dumps(
+                {"title": "收入", "body": "收入 100。", "run_ids": [run["id"]], "claims": [_claim(run)]}))
+        assert code == 0, draft
+        stored = [run["reproducibility_status"], run["requirements_id"] == head["id"],
+                  analysis.get_draft(draft["id"])["reproducibility_status"]]
+        code, state = _cli(capsys, var, "analysis-state")
+        code, shown = _cli(capsys, var, "report-draft-read", "--draft", draft["id"])
+        listed = next(row for row in state["runs"] if row["id"] == run["id"])
+        read = {"run": {key: listed.get(key) for key in ("reproducibility_status", "requirements_id",
+                                                         "requirements_semantic_fingerprint")},
+                "drafts": [next(row for row in state["drafts"] if row["id"] == draft["id"])["reproducibility_status"],
+                           shown["reproducibility_status"]]}
+        assert _shows([state, shown], [head["id"], head["semantic_fingerprint"]] if legacy else []) == []
+        return {"stored": stored, "read": _normalized(json.loads(json.dumps(read).replace(
+            visible["semantic_fingerprint"], "<fingerprint>")))}
+
+    legacy, alone = world(tmp_path / "legacy", True), world(tmp_path / "alone", False)
+    assert legacy["stored"] == ["reproducible", True, "reproducible"]
+    assert alone["stored"] == ["unverified", True, "unverified"]
+    assert legacy["read"] == alone["read"]
+    assert json.loads(alone["read"]) == {"run": {"reproducibility_status": "unverified", "requirements_id": "<id0>",
+                                                 "requirements_semantic_fingerprint": "<fingerprint>"},
+                                         "drafts": ["unverified", "unverified"]}

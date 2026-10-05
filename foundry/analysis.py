@@ -1299,7 +1299,8 @@ class AnalysisStore:
 
         Whoever saved the draft read its evidence over the files and runs they could read. Every reader reads
         the labels, posture and freshness as it would have saved them (evidence_labels.evidence_in_view): a
-        newer file outside a session decides nothing the session reads, and the manager reads a session's
+        newer file outside a session decides nothing the session reads, save that a refresh it may read filed against
+        one replaces what that one replaced (finance_controls.refreshed_snapshots), and the manager reads a session's
         draft with the newer files the session could not read. The basis the labels were read from names
         every such file, so it never reaches a session; the integrity hash covers the stored record, so it
         does not go with a view that differs from it (save that the manager reads a revision with its record's hash,
@@ -1357,6 +1358,16 @@ class AnalysisStore:
                 loaded.update({run_id: self.get_run(run_id) for run_id in dict.fromkeys(draft.get("run_ids") or [])})
             return loaded
 
+        replaced: list[dict[str, set[str]]] = []
+
+        def refreshed() -> dict[str, set[str]]:
+            # The refreshes filed before the draft, each against the prior this reader reads it with.
+            if not replaced:
+                from foundry.finance_controls import refreshed_snapshots
+
+                replaced.append(refreshed_snapshots(self.task, set(allowed), before=draft.get("seq")))
+            return replaced[0]
+
         estimates: Any = False  # not read yet
         for key in ("explanation_check", "quality"):
             check = draft.get(key)
@@ -1370,7 +1381,8 @@ class AnalysisStore:
                 if estimates is False:
                     estimates = self._row_estimates_in_view(draft, allowed, runs, cache)
                 fields = evidence_in_view(draft, check, None if allowed is None else set(allowed), runs=runs,
-                                          force=orphaned, row_estimates=estimates)
+                                          force=orphaned, row_estimates=estimates,
+                                          refreshed=None if allowed is None else refreshed)
             except FoundryError:
                 # A run it cites no longer reads, so they cannot be read again: a session reads the draft without
                 # them, the full view as saved.

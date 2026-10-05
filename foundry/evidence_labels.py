@@ -892,7 +892,8 @@ def _evidence_fields(check: dict[str, Any], *, claims, fact_ids, runs, recipe_re
 
 def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[str] | None, *,
                      runs: Callable[[], dict[str, dict]], force: bool = False,
-                     row_estimates: list | None = None) -> dict[str, Any] | None:
+                     row_estimates: list | None = None,
+                     refreshed: Callable[[], dict[str, set[str]]] | None = None) -> dict[str, Any] | None:
     """A stored draft's labels, posture and freshness as a reader whose snapshot ceiling is ``allowed`` (None:
     every file) reads them, or None when they stand as saved.
 
@@ -901,12 +902,16 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     counts the ones it may read: the draft reads as that reader would have saved it at the time, so a newer
     file outside a session decides nothing it reads, and one the saver could not read but the reader can
     still counts. Whether a newer file replaces an older one, or a newer run reruns an older one, depends on
-    the two alone, which is why counting by ceiling is enough. Everything else stands as saved (the task
-    period, estimates, the check itself), save the row estimates of a cited run that reads pinned to another
-    requirements version (AnalysisStore._row_estimates_in_view): ``row_estimates``, when given, replace the
-    basis's and the fields are read again. ``draft`` must carry ``evidence_basis``; ``runs`` loads the draft's
-    runs, only when the fields are read again. ``force`` reads them again even then: the check itself is not
-    the one saved (a revision read without the parent it may not read).
+    the two alone (save a refresh filed against a third file, below), which is why counting by ceiling is enough.
+    Everything else stands as saved (the task period, estimates, the check itself), save the row estimates of a
+    cited run that reads pinned to another requirements version (AnalysisStore._row_estimates_in_view):
+    ``row_estimates``, when given, replace the basis's and the fields are read again. ``draft`` must carry
+    ``evidence_basis``; ``runs`` loads the draft's runs, only when the fields are read again. ``force`` reads them
+    again even then: the check itself is not the one saved (a revision read without the parent it may not read).
+    A refresh the reader may read can have replaced a cited file through a batch it may not read (P, then H
+    outside the reader, then S filed against H): ``refreshed``, given for a session, loads the refreshes filed
+    before the draft as the reader reads them (finance_controls.refreshed_snapshots), so S replaces P for it as it
+    would had H never been published.
     """
     from foundry.finance_readiness import currency_freshness
 
@@ -916,6 +921,14 @@ def evidence_in_view(draft: dict[str, Any], check: dict[str, Any], allowed: set[
     basis = draft["evidence_basis"]
     superseded = {dataset_id for dataset_id, newer in (basis.get("replaced_by") or {}).items()
                   if any(readable([file]) for file in newer)}
+    # Read along the batches only where every newer file is one the reader may not read: S, filed against such an H,
+    # replaces P as the reader would have saved it.
+    through = [dataset_id for dataset_id, newer in (basis.get("replaced_by") or {}).items()
+               if newer and dataset_id not in superseded] if refreshed is not None and allowed is not None else []
+    if through:
+        replaced = refreshed()
+        superseded |= {dataset_id for dataset_id in through
+                       if any(readable([file]) for file in replaced.get(dataset_id, ()))}
     older = {run_id for run_id, readings in (basis.get("newer_runs") or {}).items()
              if any(readable(files) for files in readings)}
     saved = set(basis.get("superseded") or [])

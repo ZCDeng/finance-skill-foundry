@@ -197,7 +197,9 @@ def dispatch(args):
     elif args.cmd == "finance-close-status":
         result = service.finance_close_status({})
     elif args.cmd == "finance-source-list":
-        batches = SourceRefreshService(context.task).batches()
+        # A session reads each batch with the prior it reads it with (SourceRefreshService.batches_in_view).
+        batches = SourceRefreshService(context.task, allowed=set(context.snapshot_ids) if context.session_id else None
+                                       ).batches_in_view()
         if context.session_id:
             batches = [row for row in batches if (row.get("dataset_id") or row.get("prior_snapshot_id")) in context.snapshot_ids]
         result = {"batches": batches}

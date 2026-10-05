@@ -312,8 +312,12 @@ def dispatch(args) -> bool:
         cache: dict = {}
         result = service.state(_ceiling(context), cache=cache)
         if context.session_id:
+            from foundry.source_refresh import snapshots_in_view
+
             allowed = set(context.snapshot_ids)
-            result["datasets"] = [d for d in result["datasets"] if d["id"] in allowed]
+            # A refreshed snapshot names the prior its batch reads with (SourceRefreshService.batches_in_view).
+            result["datasets"] = snapshots_in_view(service, [d for d in result["datasets"] if d["id"] in allowed],
+                                                   allowed)
             result["analyses"] = [
                 a for a in result["analyses"] if set(a["bindings"].values()) <= allowed
             ]
@@ -399,8 +403,10 @@ def dispatch(args) -> bool:
                 ),
             }
     elif args.cmd == "dataset-read":
+        from foundry.source_refresh import snapshots_in_view
+
         _bound(context, {"dataset": args.dataset})
-        result = service.read_dataset(args.dataset)
+        [result] = snapshots_in_view(service, [service.read_dataset(args.dataset)], _ceiling(context))
     elif args.cmd == "analysis-save":
         spec = _json(args.spec, "analysis spec")
         _bound(context, spec.get("bindings", {}))
