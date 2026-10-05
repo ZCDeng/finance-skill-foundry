@@ -534,15 +534,40 @@ class ExcelBridgeApp:
             "host": _require_object(payload.get("host") or {}, "host"),
             "details": _require_object(payload.get("details") or {}, "telemetry details"),
         }
-        state = self._read_state(context.task)
-        state.setdefault("telemetry", []).append(event)
-        # Each session keeps its own latest events: another session's never push them out. Events written before
-        # they named their session stay for the operator's tools, bounded as they were.
-        mine = [row for row in state["telemetry"] if row.get("session_id") == context.session_id]
-        dropped = {row["id"] for row in mine[:-MAX_TELEMETRY]}
-        state["telemetry"] = [row for row in state["telemetry"] if row.get("id") not in dropped]
-        self._write_state(context.task, state)
+        # Each session keeps its own latest events in a file of its own: another session's never push them out, and
+        # the state every bridge call reads and rewrites does not grow with the sessions that log. Events the state
+        # holds from before they named their session stay there for the operator's tools, bounded as they were.
+        with exclusive(context.task.lock_path, timeout=10):
+            events = [*self._session_telemetry(context.task, context.session_id), event][-MAX_TELEMETRY:]
+            record = json_value({"schema_version": BRIDGE_SCHEMA, "task_id": context.task.id,
+                                 "session_id": context.session_id, "events": events})
+            write_json_atomic(self._telemetry_path(context.task, context.session_id),
+                              {**record, "_integrity_hash": _hash(record)})
         return event
+
+    def _telemetry_path(self, task: Task, session_id: str) -> Path:
+        # A session id may hold any character, so its file is named by a digest of it.
+        name = sha256(session_id.encode("utf8")).hexdigest()
+        path = task.root / "analysis" / "excel_bridge" / "telemetry" / f"{name}.json"
+        if not path.resolve().is_relative_to(task.root.resolve()):
+            raise FoundryError("bridge telemetry path escapes task")
+        return path
+
+    def _session_telemetry(self, task: Task, session_id: str) -> list[dict[str, Any]]:
+        """The session's own latest host events (_record_telemetry), oldest first."""
+        path = self._telemetry_path(task, session_id)
+        if not path.exists():
+            return []
+        try:
+            record = json.loads(path.read_text(encoding="utf8"))
+        except ValueError as exc:
+            raise FoundryError("bridge telemetry is invalid") from exc
+        if not isinstance(record, dict) or record.get("schema_version") != BRIDGE_SCHEMA:
+            raise FoundryError("bridge telemetry version is unsupported")
+        digest = record.pop("_integrity_hash", None)
+        if (record.get("task_id"), record.get("session_id")) != (task.id, session_id) or digest != _hash(record):
+            raise FoundryError("bridge telemetry integrity check failed")
+        return record.get("events") or []
 
     def _register_workbook(self, context, payload: dict[str, Any]) -> dict[str, Any]:
         assert context.task is not None
@@ -588,7 +613,7 @@ class ExcelBridgeApp:
             "context_revision": context.context_revision,
             "snapshot_ids": list(context.snapshot_ids),
             "workbooks": self._session_workbooks(state, context),
-            "telemetry": [event for event in state.get("telemetry", []) if event.get("session_id") == context.session_id][-50:],
+            "telemetry": self._session_telemetry(context.task, context.session_id)[-50:],
             "finance": finance,
         }
 

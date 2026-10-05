@@ -80,7 +80,10 @@ def verify(path: Path, bridge_state: Path) -> dict:
     values = load_workbook(path, data_only=True)["经营分析"]
     formulas = load_workbook(path, data_only=False)["经营分析"]
     state = json.loads(bridge_state.read_text())
-    events = state.get("telemetry", [])
+    events = list(state.get("telemetry", []))
+    # Each session keeps its host events in a file of its own beside the state; the state holds those logged before.
+    for log in sorted((bridge_state.parent / "telemetry").glob("*.json")):
+        events += json.loads(log.read_text()).get("events", [])
     counts = {name: sum(event.get("event") == name for event in events) for name in (
         "input_imported", "metric_run", "output_previewed", "output_applied", "full_recalc", "workbook_saved")}
     checks = {"modified_input": values["B2"].value == 130,

@@ -454,7 +454,7 @@ def test_a_child_session_sees_and_uses_none_of_its_parent_s_workbooks(tmp_path):
 
 def test_another_session_s_host_events_never_push_a_session_s_own_out(tmp_path, monkeypatch):
     """Each session reads and keeps its own latest host events. Events logged before they named their session stay
-    in the file for the operator's tools and show to no session."""
+    in the bridge state for the operator's tools and show to no session."""
     import foundry.excel_bridge
 
     monkeypatch.setattr(foundry.excel_bridge, "MAX_TELEMETRY", 3)
@@ -466,6 +466,7 @@ def test_another_session_s_host_events_never_push_a_session_s_own_out(tmp_path, 
         return out["telemetry"]
 
     mine = logged("s1", "input_imported")
+    assert call("s1", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
     old = {"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "ready", "workbook_id": "wb_shared", "host": {},
            "details": {}}
     _rewrite_bridge_state(task, telemetry=[old, *_bridge_state(task)["telemetry"]])
@@ -474,8 +475,89 @@ def test_another_session_s_host_events_never_push_a_session_s_own_out(tmp_path, 
     assert call("s1", "/api/context")[1]["telemetry"] == [mine]
     assert [event["event"] for event in call("s2", "/api/context")[1]["telemetry"]] == [
         "metric_run_1", "metric_run_2", "metric_run_3"]
-    assert [event["event"] for event in _bridge_state(task)["telemetry"]] == [
-        "ready", "input_imported", "metric_run_1", "metric_run_2", "metric_run_3"]
+    assert [event["event"] for event in _bridge_state(task)["telemetry"]] == ["ready"]
+
+
+def test_the_bridge_state_does_not_grow_with_the_sessions_that_log_host_events(tmp_path, monkeypatch):
+    """Every bridge call reads the state, and most rewrite it. Each session's latest host events are kept in a file of
+    its own, so however many sessions log, the state stays as it was and each keeps its own latest."""
+    import foundry.excel_bridge
+
+    monkeypatch.setattr(foundry.excel_bridge, "MAX_TELEMETRY", 3)
+    sessions = [f"s{number}" for number in range(12)]
+    task, call = _bridge(tmp_path, sessions=sessions)
+    assert call("s0", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
+    stored = (task.root / "analysis" / "excel_bridge" / "state.json").read_bytes()
+    for session in sessions:
+        for number in range(5):
+            assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": f"run_{number}"})[0] == 200
+    assert (task.root / "analysis" / "excel_bridge" / "state.json").read_bytes() == stored
+    for session in sessions:
+        assert [event["event"] for event in call(session, "/api/context")[1]["telemetry"]] == [
+            "run_2", "run_3", "run_4"]
+
+
+def test_a_session_s_host_events_are_filed_inside_the_task_whatever_its_id(tmp_path):
+    """A session id may hold any character: its events are filed under a digest of it in the bridge's folder. A
+    telemetry folder that leads out of the task is refused, and nothing is written through it."""
+    session = "../../../../../escaped"
+    task, call = _bridge(tmp_path, sessions=(session,))
+    status, out = call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"})
+    assert status == 200, out
+    folder = task.root / "analysis" / "excel_bridge" / "telemetry"
+    assert [path.name for path in folder.iterdir()] == [f"{hashlib.sha256(session.encode()).hexdigest()}.json"]
+    assert call(session, "/api/context")[1]["telemetry"] == [out["telemetry"]]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for path in folder.iterdir():
+        path.unlink()
+    folder.rmdir()
+    folder.symlink_to(outside, target_is_directory=True)
+    assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"}) == (
+        400, {"error": {"code": "refused", "message": "bridge telemetry path escapes task"}})
+    assert list(outside.iterdir()) == []
+
+
+def test_a_session_s_host_events_changed_outside_the_bridge_are_refused(tmp_path):
+    """A session's events file names its task and session under an integrity hash, as the state does: one edited
+    outside the bridge, or another session's copied over it, is refused rather than read as the session's own."""
+    task, call = _bridge(tmp_path)
+    for session in ("s1", "s2"):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"})[0] == 200
+    folder = task.root / "analysis" / "excel_bridge" / "telemetry"
+    s1, s2 = (folder / f"{hashlib.sha256(session.encode()).hexdigest()}.json" for session in ("s1", "s2"))
+    refused = (400, {"error": {"code": "refused", "message": "bridge telemetry integrity check failed"}})
+    s2.write_bytes(s1.read_bytes())
+    assert call("s2", "/api/context") == refused
+    raw = json.loads(s1.read_text(encoding="utf8"))
+    raw["events"][0]["event"] = "workbook_saved"
+    s1.write_text(json.dumps(raw), encoding="utf8")
+    assert call("s1", "/api/context") == refused
+
+
+def test_the_operator_s_host_check_counts_every_session_s_host_events(tmp_path):
+    """tools/verify_excel_host.py reads the bridge's record as the operator, as before: it counts the host events
+    every session logged, each in a file of its own, with those the state holds from before they named a session."""
+    import importlib.util
+
+    from openpyxl import Workbook
+
+    spec = importlib.util.spec_from_file_location(
+        "verify_excel_host", Path(__file__).resolve().parents[1] / "tools" / "verify_excel_host.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    task, call = _bridge(tmp_path)
+    assert call("s1", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
+    _rewrite_bridge_state(task, telemetry=[{"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "full_recalc",
+                                            "workbook_id": "wb_shared", "host": {}, "details": {}}])
+    for session, event in (("s1", "input_imported"), ("s2", "input_imported"), ("s2", "metric_run")):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})[0] == 200
+    book = Workbook()
+    book.active.title = "经营分析"
+    book.save(tmp_path / "host.xlsx")
+    result = tool.verify(tmp_path / "host.xlsx", task.root / "analysis" / "excel_bridge" / "state.json")
+    assert result["host_event_counts"] == {"input_imported": 2, "metric_run": 1, "output_previewed": 0,
+                                           "output_applied": 0, "full_recalc": 1, "workbook_saved": 0}
 
 
 def test_a_workbook_saved_before_per_session_records_goes_only_to_the_session_that_filed_its_imports(tmp_path):
