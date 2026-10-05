@@ -577,7 +577,7 @@ def test_bridge_state_integrity_and_body_boundaries(tmp_path):
     app, task, token = _app(tmp_path)
     state_path = task.root / "analysis" / "excel_bridge" / "state.json"
     raw = json.loads(state_path.read_text(encoding="utf8"))
-    raw["workbooks"][WORKBOOK]["name"] = "tampered.xlsx"
+    raw["workbooks"][f"excel/{WORKBOOK}"]["name"] = "tampered.xlsx"
     state_path.write_text(json.dumps(raw), encoding="utf8")
     status, payload = _call(app, token, "GET", "/api/context")
     assert status == 400

@@ -4,8 +4,9 @@ A session's snapshot ceiling (context.snapshot_ids; FinanceStore.allowed; an MCP
 it may build on, as it decides what it may read (test_session_views). A record that rests on a file outside it
 neither shows nor changes what the session saves: not a source batch a refresh compares with, an upload of the
 same bytes, a requirements version, an earlier run of the same fingerprint, a draft named by id or a draft a
-recovery files for it. A record the session may not read is refused exactly as one that does not
-exist. The manager (no session) saves and is answered as before.
+recovery files for it. The Excel bridge's record of a workbook is the session's own: what another session bound,
+imported, previewed or logged in the same file is no part of it. A record the session may not read is refused
+exactly as one that does not exist. The manager (no session) saves and is answered as before.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from foundry.analysis import AnalysisStore, _new
+from foundry.analysis import AnalysisStore, _hash, _new
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.source_refresh import SourcePage, SourceRefreshService, SourceScope
@@ -307,6 +308,268 @@ def test_an_excel_import_is_not_answered_with_another_session_s_snapshot(tmp_pat
     assert second["finance_context"]["bindings"] == {"actual": second["dataset"]["id"]}
     # The same session importing the same values again is answered with its own snapshot.
     assert imported("s2", "S2 再导入")["dataset"]["duplicate_of"] == second["dataset"]["id"]
+
+
+# --- a workbook another session opened ------------------------------------------------------------------------------
+
+
+BRIDGE_FIELDS = ["management_account", "amount", "organization", "period", "currency", "unit", "scenario"]
+BRIDGE_OUTPUT = {"id": "out", "name": "out", "role": "output", "writable": True, "dedicated_area": True,
+                 "worksheet": "Model", "address": "Model!J1:J2", "headers": ["amount"], "header": True,
+                 "fields": [{"name": "amount", "policy": "amount"}]}
+BLANK_J2 = {"J2": {"address": "J2", "value": ""}}
+NOT_REGISTERED = (400, {"error": {"code": "refused", "message": "workbook is not registered"}})
+
+
+def _bridge(root: Path, sessions=("s1", "s2")):
+    """A task whose sessions, recorded before anything is imported, call the Excel bridge; ``call(session, path,
+    payload)`` answers (status, body)."""
+    from foundry.excel_bridge import BridgeTokenAuthority, ExcelBridgeApp
+
+    task = TaskStore(root / "var").create(title="Excel")
+    for session in sessions:
+        task.record_session(session, role="analysis")
+    authority = BridgeTokenAuthority(b"local-test-secret-local-test-secret")
+    app = ExcelBridgeApp(var_root=root / "var", token_authority=authority)
+
+    def call(session, path, payload=None):
+        headers = {"Authorization": f"Bearer {authority.issue(task_id=task.id, session_id=session, ttl_seconds=60)}"}
+        status, _, body = app.handle("GET" if path == "/api/context" else "POST", path, headers,
+                                     json.dumps(payload or {}).encode())
+        return status, json.loads(body)
+
+    return task, call
+
+
+def _bridge_import(call, session, binding_id, amount, workbook="wb_shared"):
+    """``session`` imports one revenue row of ``amount`` through input binding ``binding_id`` of ``workbook``."""
+    binding = {"id": binding_id, "name": binding_id, "role": "input", "worksheet": "Model",
+               "address": {"actual": "Model!A1:G2", "budget": "Model!L1:R2"}.get(binding_id, "Model!T1:Z2"),
+               "headers": BRIDGE_FIELDS,
+               "fields": [{"name": name, "policy": "amount" if name == "amount" else "text"} for name in BRIDGE_FIELDS]}
+    status, out = call(session, "/api/import-binding", {
+        "workbook_id": workbook, "binding": binding, "alias": binding_id,
+        "values": [BRIDGE_FIELDS, ["revenue", amount, "HQ", "2026-08", "CNY", "yuan", binding_id]]})
+    assert status == 200, out
+    return out
+
+
+def _bridge_preview(call, session, workbook="wb_shared") -> dict:
+    """``session`` binds the output area of ``workbook`` and previews SECRET onto it."""
+    status, out = call(session, "/api/register-bindings", {"workbook_id": workbook, "bindings": [BRIDGE_OUTPUT]})
+    assert status == 200, out
+    status, out = call(session, "/api/preview-output", {
+        "workbook_id": workbook, "binding_id": "out", "current_cells": BLANK_J2,
+        "writes": [{"address": "J2", "field": "amount", "value": SECRET}]})
+    assert status == 200, out
+    return out["preview"]
+
+
+def _s1_works_in_the_shared_workbook(call):
+    """s1 imports SECRET into wb_shared from its Mac, previews it onto an output area and logs the import."""
+    call("s1", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx",
+                                          "url": "https://files.test/s1/m.xlsx", "host": {"platform": "Mac"}})
+    first = _bridge_import(call, "s1", "actual", SECRET)
+    preview = _bridge_preview(call, "s1")
+    call("s1", "/api/telemetry", {"workbook_id": "wb_shared", "event": "input_imported",
+                                  "details": {"dataset_id": first["dataset"]["id"]}})
+    return first, preview
+
+
+def _bridge_state(task) -> dict:
+    return json.loads((task.root / "analysis" / "excel_bridge" / "state.json").read_text(encoding="utf8"))
+
+
+def _records_of(task, workbook_id: str) -> list[dict]:
+    """The bridge's records of ``workbook_id``, whichever session keeps them."""
+    return [book for key, book in _bridge_state(task)["workbooks"].items() if key.rpartition("/")[2] == workbook_id]
+
+
+def _rewrite_bridge_state(task, **fields) -> None:
+    """Store ``fields`` in the bridge's state as an older bridge left them, under a valid integrity hash."""
+    state = {key: value for key, value in _bridge_state(task).items() if key != "_integrity_hash"}
+    state.update(fields)
+    (task.root / "analysis" / "excel_bridge" / "state.json").write_text(
+        json.dumps({**state, "_integrity_hash": _hash(state)}), encoding="utf8")
+
+
+def test_a_session_opening_another_session_s_workbook_works_in_it_as_if_alone(tmp_path):
+    """The workbook id lives in the workbook's document settings, so a second session opening the same file sends
+    s1's id. s2 neither takes up s1's imports nor sees or uses s1's bindings, previews or events, and s1's record of
+    the file stays as s1 left it."""
+    answers = {}
+    for name in ("alone", "shared"):
+        task, call = _bridge(tmp_path / name)
+        first, preview = _s1_works_in_the_shared_workbook(call) if name == "shared" else (None, None)
+        registered = call("s2", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx",
+                                                           "host": {"platform": "Win"}})
+        second = _bridge_import(call, "s2", "budget", "100")
+        bound = call("s2", "/api/register-bindings", {"workbook_id": "wb_shared", "bindings": [BRIDGE_OUTPUT]})
+        context = call("s2", "/api/context")
+        assert _snapshots(task, "s2") == [second["dataset"]["id"]]
+        assert second["finance_context"]["bindings"] == {"budget": second["dataset"]["id"]}
+        ran = call("s2", "/api/run-metric", {"workbook_id": "wb_shared", "spec": {"metric": {
+            "kind": "account_total", "dimensions": ["organization", "period"], "accounts": ["revenue"]}}})
+        assert ran[0] == 200 and ran[1]["run"]["bindings"] == {"budget": second["dataset"]["id"]}
+        answers[name] = [registered, {key: second[key] for key in ("finance_context", "workbook")}, bound, context]
+        if name == "shared":
+            assert _shows([answers[name], ran], [SECRET, first["dataset"]["id"], preview["id"]]) == []
+            # s1's preview is refused to s2 as one that never existed, to apply and to acknowledge.
+            for path, payload in (("/api/apply-output", {"current_cells": BLANK_J2}),
+                                  ("/api/ack-output", {"cells": []})):
+                refusals = [call("s2", path, {"workbook_id": "wb_shared", "preview_id": preview_id, **payload})
+                            for preview_id in (preview["id"], "f" * 32)]
+                assert refusals[0] == refusals[1] == (400, {"error": {"code": "refused",
+                                                                      "message": "preview is unavailable"}})
+            # s1's record keeps its own host, bindings and preview; its next import takes up nothing s2 imported.
+            books = call("s1", "/api/context")[1]["workbooks"]
+            assert [(book["host"], sorted(book["bindings"]), list(book["previews"])) for book in books] == [
+                ({"platform": "Mac"}, ["actual", "out"], [preview["id"]])]
+            third = _bridge_import(call, "s1", "plan", "5")
+            assert third["finance_context"]["bindings"] == {"actual": first["dataset"]["id"],
+                                                            "plan": third["dataset"]["id"]}
+            assert _snapshots(task, "s1") == [first["dataset"]["id"], third["dataset"]["id"]]
+    # Equal to the answers where s1 never worked in the file (seq counts every record of the task; an upload's
+    # name carries a digest of its import time).
+    same = [re.sub(r'"seq": \d+|\b[0-9a-f]{16}\b', "<n>", _normalized(answers[name])) for name in ("shared", "alone")]
+    assert same[0] == same[1]
+
+
+def test_a_child_session_sees_and_uses_none_of_its_parent_s_workbooks(tmp_path):
+    """A child begins with what its parent could read then. The workbook its parent goes on to import into, preview
+    from and log is the parent's record: the child neither sees it nor applies the parent's preview."""
+    task, call = _bridge(tmp_path, sessions=("s1",))
+    task.record_session("child", role="analysis", parent_session_id="s1")
+    first, preview = _s1_works_in_the_shared_workbook(call)
+    status, context = call("child", "/api/context")
+    assert status == 200 and (context["snapshot_ids"], context["workbooks"], context["telemetry"]) == ([], [], [])
+    assert _shows(context, [SECRET, first["dataset"]["id"], preview["id"]]) == []
+    refusals = [call("child", "/api/apply-output", {"workbook_id": workbook, "preview_id": preview["id"],
+                                                    "current_cells": BLANK_J2}) for workbook in ("wb_shared", "wb_new")]
+    assert refusals[0] == refusals[1] == NOT_REGISTERED
+
+
+def test_another_session_s_host_events_never_push_a_session_s_own_out(tmp_path, monkeypatch):
+    """Each session reads and keeps its own latest host events. Events logged before they named their session stay
+    in the file for the operator's tools and show to no session."""
+    import foundry.excel_bridge
+
+    monkeypatch.setattr(foundry.excel_bridge, "MAX_TELEMETRY", 3)
+    task, call = _bridge(tmp_path)
+
+    def logged(session, event):
+        status, out = call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})
+        assert status == 200, out
+        return out["telemetry"]
+
+    mine = logged("s1", "input_imported")
+    old = {"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "ready", "workbook_id": "wb_shared", "host": {},
+           "details": {}}
+    _rewrite_bridge_state(task, telemetry=[old, *_bridge_state(task)["telemetry"]])
+    for number in range(4):
+        logged("s2", f"metric_run_{number}")
+    assert call("s1", "/api/context")[1]["telemetry"] == [mine]
+    assert [event["event"] for event in call("s2", "/api/context")[1]["telemetry"]] == [
+        "metric_run_1", "metric_run_2", "metric_run_3"]
+    assert [event["event"] for event in _bridge_state(task)["telemetry"]] == [
+        "ready", "input_imported", "metric_run_1", "metric_run_2", "metric_run_3"]
+
+
+def test_a_workbook_saved_before_per_session_records_goes_only_to_the_session_that_filed_its_imports(tmp_path):
+    """A record stored under the bare workbook id names no owner. The session that filed an import there takes up
+    that import with its input binding, while the output area, the preview and what the last session to open the
+    file registered stay behind. A session that filed nothing there finds no such workbook, even one whose context
+    holds the import."""
+    task, call = _bridge(tmp_path, sessions=("excel", "other"))
+    call("excel", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx", "host": {}})
+    first = _bridge_import(call, "excel", "actual", SECRET)
+    _bridge_preview(call, "excel")
+    task.record_session("late", role="analysis")  # a root session begins with every dataset of the task
+    assert _snapshots(task, "late") == [first["dataset"]["id"]]
+    [record] = _records_of(task, "wb_shared")
+    # 'other' opened the file last, and the shared record took its name, address and host.
+    record = {**record, "name": "other.xlsx", "url_hash": "a" * 64, "host": {"platform": "Win"}}
+    _rewrite_bridge_state(task, workbooks={"wb_shared": record})
+
+    status, context = call("excel", "/api/context")
+    assert status == 200 and [book["id"] for book in context["workbooks"]] == ["wb_shared"]
+    book = context["workbooks"][0]
+    assert (sorted(book["bindings"]), book["input_snapshots"]["actual"]["dataset_id"]) == (["actual"],
+                                                                                          first["dataset"]["id"])
+    assert (book["preauthorized_areas"], book["previews"]) == ({}, {})
+    assert (book["name"], book["url_hash"], book["host"]) == ("", "", {})
+    budget = _bridge_import(call, "excel", "budget", "100")
+    assert budget["finance_context"]["bindings"] == {"actual": first["dataset"]["id"],
+                                                     "budget": budget["dataset"]["id"]}
+    for session, amount, held in (("other", "200", []), ("late", "300", [first["dataset"]["id"]])):
+        status, context = call(session, "/api/context")
+        assert status == 200 and context["workbooks"] == []
+        refusals = [call(session, "/api/preview-output", {"workbook_id": workbook, "binding_id": "out", "writes": [],
+                                                          "current_cells": {}}) for workbook in ("wb_shared", "wb_new")]
+        assert refusals[0] == refusals[1] == NOT_REGISTERED
+        own = _bridge_import(call, session, "budget", amount)
+        assert own["finance_context"]["bindings"] == {"budget": own["dataset"]["id"]}
+        assert _snapshots(task, session) == [*held, own["dataset"]["id"]]
+    assert _shows(call("other", "/api/context")[1], [SECRET, first["dataset"]["id"]]) == []
+    # Each session's share is written under its own key; the bare record stays as it was stored.
+    assert _bridge_state(task)["workbooks"]["wb_shared"] == record
+
+
+def test_a_workbook_two_sessions_shared_before_per_session_records_splits_by_who_imported(tmp_path):
+    """The pre-fix bug case itself: s1 and s2 both imported into one bare record, and s2's context took in s1's
+    import. Each takes up only the imports it filed; neither binds or names the other's again."""
+    task, call = _bridge(tmp_path)
+    first = _bridge_import(call, "s1", "actual", SECRET)
+    second = _bridge_import(call, "s2", "budget", "100")
+    task.update_session_context("s2", snapshot_ids=[first["dataset"]["id"]])  # what the shared record did to s2
+    records = _records_of(task, "wb_shared")
+    _rewrite_bridge_state(task, workbooks={"wb_shared": {
+        **records[0], **{key: {name: row for record in records for name, row in record[key].items()}
+                         for key in ("bindings", "input_snapshots")}}})
+
+    for session, own in (("s1", first), ("s2", second)):
+        books = call(session, "/api/context")[1]["workbooks"]
+        assert [(sorted(book["bindings"]), [row["dataset_id"] for row in book["input_snapshots"].values()])
+                for book in books] == [([own["binding"]["id"]], [own["dataset"]["id"]])]
+    s1 = _bridge_import(call, "s1", "plan", "5")
+    assert s1["finance_context"]["bindings"] == {"actual": first["dataset"]["id"], "plan": s1["dataset"]["id"]}
+    s2 = _bridge_import(call, "s2", "plan", "6")
+    assert s2["finance_context"]["bindings"] == {"budget": second["dataset"]["id"], "plan": s2["dataset"]["id"]}
+    assert _shows(call("s2", "/api/context")[1]["workbooks"], [first["dataset"]["id"]]) == []
+
+
+def test_a_workbook_saved_before_per_session_records_with_no_import_is_no_session_s(tmp_path):
+    """A bare record holding only an output area and its preview names no owner: no session takes it up, not the one
+    that made it, another, or a child that may read nothing."""
+    task, call = _bridge(tmp_path)
+    task.record_session("child", role="analysis", parent_session_id="s1")
+    call("s1", "/api/register-workbook", {"workbook_id": "wb_noimp", "name": "m.xlsx", "host": {}})
+    preview = _bridge_preview(call, "s1", workbook="wb_noimp")
+    [record] = _records_of(task, "wb_noimp")
+    _rewrite_bridge_state(task, workbooks={"wb_noimp": record})
+    for session in ("s1", "s2", "child"):
+        status, context = call(session, "/api/context")
+        assert status == 200 and context["workbooks"] == []
+        assert call(session, "/api/preview-output", {
+            "workbook_id": "wb_noimp", "binding_id": "out", "current_cells": BLANK_J2,
+            "writes": [{"address": "J2", "field": "amount", "value": SECRET}]}) == NOT_REGISTERED
+        assert call(session, "/api/apply-output", {"workbook_id": "wb_noimp", "preview_id": preview["id"],
+                                                   "current_cells": BLANK_J2}) == NOT_REGISTERED
+
+
+def test_a_session_takes_up_no_import_its_context_does_not_hold(tmp_path):
+    """Filing an import there is not enough: a session takes up only what it may read. No call narrows a context;
+    this stands in for a sessions file that holds one without the session's own import."""
+    task, call = _bridge(tmp_path, sessions=("s1",))
+    _bridge_import(call, "s1", "actual", SECRET)
+    [record] = _records_of(task, "wb_shared")
+    _rewrite_bridge_state(task, workbooks={"wb_shared": record})
+    task._write_sessions([{**row, "snapshot_ids": []} for row in task.sessions()])
+    status, context = call("s1", "/api/context")
+    assert status == 200 and context["workbooks"] == []
+    plan = _bridge_import(call, "s1", "plan", "5")
+    assert plan["finance_context"]["bindings"] == {"plan": plan["dataset"]["id"]}
+    assert _snapshots(task, "s1") == [plan["dataset"]["id"]]
 
 
 # --- the requirements version a session runs and saves against ---------------------------------------------------
