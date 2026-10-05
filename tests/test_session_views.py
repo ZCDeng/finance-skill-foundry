@@ -443,15 +443,73 @@ def test_a_session_never_reads_a_revision_as_more_reviewed_than_it_was_saved(tmp
     code, shown = _cli(capsys, var, "report-draft-read", "--draft", child["id"])
     assert code == 0 and shown["parent_id"] is None
     assert _shows(shown, [parent["id"], rh["id"], h["id"], SECRET]) == []
-    for key in ("review_status", "reproducibility_status"):
-        assert shown[key] == child[key]
+    assert shown["review_status"] == child["review_status"]
+    # Its reproducibility it reads as it would have saved it with no parent: by its one cited run, which reads reproducible.
+    assert shown["reproducibility_status"] == "reproducible"
     for key in ("explanation_check", "quality"):
         assert shown[key]["status_dimensions"]["professional_review"]["status"] == "unreviewed"
-    # A management projection, which an export is rendered from, reads the same review for the session as for the manager.
+    # A management projection, which an export is rendered from, reads the same review for the session as for the manager,
+    # and the reproducibility each would have saved.
     command = ("report-projection-read", "--draft", child["id"], "--mode", "management")
     projections = [_cli(capsys, var, *command)[1], _cli(capsys, var, *command, session=None, task=task.id)[1]]
     assert projections[0]["review_status"] == projections[1]["review_status"] == "unreviewed"
-    assert projections[0]["projection_hash"] == projections[1]["projection_hash"]
+    assert (projections[0]["reproducibility_status"], projections[1]["reproducibility_status"]) == ("reproducible", "unverified")
+
+
+def _reproducible_world(root: Path, capsys, *, engine: str, parent: bool) -> dict:
+    """The session may read A. The manager runs a calculation on A twice, so it reads reproducible, and saves C, with
+    a body of its own, and S on it; with ``parent``, as revisions of P, which has S's body and cites a run on H, a file
+    outside the session, too. What the session reads of C and S."""
+    var = root / "var"
+    task = TaskStore(var).create(title="复现")
+    analysis = AnalysisStore(task)
+    if engine == "sql":
+        a = analysis.add_dataset(_csv(root / "a.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="A")
+        analysis_id = analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": a["id"]}})["id"]
+        run = [analysis.run_analysis(analysis_id) for _ in range(2)][-1]
+    else:
+        a = analysis.add_dataset(_ledger(root / "a.json", [{"account_code": "6001", "management_account": "revenue",
+                                                             "amount": 100}]), name="A")
+        manager = FinanceStore(task)
+        context = manager.save_context({"bindings": {"actual": a["id"]}, "scopes": {"actual": {
+            "ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "万元",
+            "scenario": "actual"}}})
+        run = [manager.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}}) for _ in range(2)][-1]
+    task.record_session("sess", role="analysis")
+    claims = [{"basis": "calculation", "run_id": run["id"], "row": 0, "column": "amount",
+               "value": run["result"]["rows"][0]["amount"]}]
+    spec = {"title": "收入", "run_ids": [run["id"]], "claims": claims}
+    if parent:
+        h = analysis.add_dataset(_csv(root / "h.csv", [("revenue", "2026-08", "集团", SECRET, "CNY", "元")]), name="H")
+        rh = analysis.run_analysis(analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": h["id"]}})["id"])
+        spec["parent_id"] = analysis.save_draft({**spec, "body": "收入 100 元。", "run_ids": [rh["id"], run["id"]]})["id"]
+    drafts = [analysis.save_draft({**spec, "body": body}) for body in ("收入 100 元（修订）。", "收入 100 元。")]
+    read = {"stored": [draft["reproducibility_status"] for draft in drafts]}
+    keys = ("parent_id", "revision_comparison", "review_status", "reproducibility_status")
+    code, state = _cli(capsys, var, "analysis-state")
+    assert code == 0
+    read["listed"] = [{key: draft[key] for key in keys} for draft in state["drafts"]]
+    for draft in drafts:
+        code, shown = _cli(capsys, var, "report-draft-read", "--draft", draft["id"])
+        assert code == 0
+        read.setdefault("read", []).append({key: shown[key] for key in keys})
+        code, projection = _cli(capsys, var, "report-projection-read", "--draft", draft["id"], "--mode", "management")
+        assert code == 0
+        read.setdefault("projected", []).append(projection["reproducibility_status"])
+    return read
+
+
+@pytest.mark.parametrize("engine", ["sql", "finance"])
+def test_a_session_reads_a_revision_s_reproducibility_as_saved_with_no_parent_it_may_not_read(tmp_path, capsys, engine):
+    """C changed the body of a parent the session may not read and S kept it: the session reads both as it would have
+    saved them with no parent, so that parent's body decides nothing. A finance run reads as stored to every reader."""
+    hidden = _reproducible_world(tmp_path / "hidden", capsys, engine=engine, parent=True)
+    alone = _reproducible_world(tmp_path / "alone", capsys, engine=engine, parent=False)
+    # The manager saved C unverified only because it changed P's body.
+    assert hidden.pop("stored") == ["unverified", "reproducible"]
+    assert alone.pop("stored") == ["reproducible", "reproducible"]
+    assert hidden == alone
+    assert alone["projected"] == [row["reproducibility_status"] for row in alone["read"]] == ["reproducible"] * 2
 
 
 # --- completion receipts -------------------------------------------------------------------------------------------

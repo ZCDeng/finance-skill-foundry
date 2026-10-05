@@ -1380,18 +1380,17 @@ class AnalysisStore:
         views: dict[str, dict] = {}
         loaded: dict[str, dict] = {}
         cache = {} if cache is None else cache
-        # Read before a parent it may not read is cut off: save_draft decided it with that parent.
-        reproducibility = self._draft_reproducibility_in_view(draft, allowed, cache)
         # A revision is compared with its parent's runs: a reader that may not read the parent reads the draft as
         # it would have saved it, with no parent, and the labels read again from that check.
         orphaned = (allowed is not None and bool(draft.get("parent_id"))
                     and not (draft["parent_id"] in readable_ids if readable_ids is not None
                              else self._parent_readable(draft["parent_id"], allowed)))
+        # Its reproducibility too, as saved with no parent: a body changed from that parent decides nothing.
+        reproducibility = self._draft_reproducibility_in_view(draft, allowed, cache, orphaned=orphaned)
         if orphaned:
             from foundry.finance_revision import compare_draft_runs
 
-            # Review and reproducibility stay as stored: a change from the parent that nobody reviewed or verified
-            # never reads as reviewed or reproducible.
+            # Review stays as stored: a change from the parent that nobody reviewed never reads as reviewed.
             draft = {**draft, "parent_id": None, "revision_comparison": compare_draft_runs(self, {}, {}),
                      **{key: _without_revision(draft[key]) for key in ("explanation_check", "quality") if key in draft}}
         from foundry.finance_requirements import OWN_FILES_POLICY, requirements_in_view
@@ -1461,7 +1460,8 @@ class AnalysisStore:
             views["reproducibility_status"] = reproducibility
         return {**{key: value for key, value in shown.items() if key not in hidden}, **views}
 
-    def _draft_reproducibility_in_view(self, draft: dict, allowed: set[str] | None, cache: dict) -> Any:
+    def _draft_reproducibility_in_view(self, draft: dict, allowed: set[str] | None, cache: dict, *,
+                                       orphaned: bool = False) -> Any:
         """A draft's reproducibility as a session whose ceiling is ``allowed`` would have saved it (save_draft): by its
         own conditions, and its runs' reproducibility as the session reads them (_reproducibility_in_view). The manager
         reads it as stored.
@@ -1470,7 +1470,9 @@ class AnalysisStore:
         the same body and claims as its parent) and every cited run read reproducible to its saver. A stored
         reproducible draft therefore keeps its conditions. A stored unverified one may have failed only on a run as its
         saver read it, so its conditions are read again from the record and its parent: the body before its estimate
-        notices (_body_before_marks), as save_draft compared it.
+        notices (_body_before_marks), as save_draft compared it. A revision whose parent the session may not read
+        (``orphaned``, draft_in_view) it would have saved with no parent: its conditions are read again from the record
+        alone, however its runs read, and the parent is never read.
         """
         stored = draft.get("reproducibility_status")
         run_ids = list(dict.fromkeys(draft.get("run_ids") or []))
@@ -1480,7 +1482,8 @@ class AnalysisStore:
             runs = [self._stored_run(run_id, cache) for run_id in run_ids]
         except FoundryError:
             return stored
-        if not any(_snapshot_run(run) for run in runs):
+        # Every reader reads these runs as stored, so the draft too, unless a parent it may not read decided it.
+        if not orphaned and not any(_snapshot_run(run) for run in runs):
             return stored
         if not all(self._reproducibility_in_view(run, allowed, cache) == "reproducible" for run in runs):
             return "unverified"
@@ -1489,7 +1492,7 @@ class AnalysisStore:
         claims = draft.get("claims") or []
         if not claims or not all(isinstance(claim, dict) and claim.get("basis") == "calculation" for claim in claims):
             return stored
-        if draft.get("parent_id"):
+        if draft.get("parent_id") and not orphaned:
             # A revision is reproducible only with its parent's body and claims; a parent that no longer reads cannot
             # show that it kept them.
             try:
