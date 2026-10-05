@@ -335,12 +335,14 @@ class CompletionOperationStore:
         self.clock = clock
         self.root = self._inside(task.root / "analysis" / "completion_operations")
         # Whether this store's session may read a receipt (_in_view), read once for the store: receipts are immutable
-        # and its ceiling is fixed.
+        # and its ceiling is fixed. By receipt id (_readable), read before the task lock is taken (_prime).
         self._receipt_readable: Callable[[dict], bool] | None = None
+        self._readable_receipts: dict[str, bool] = {}
 
     def begin(self, request_key: str, policy: dict[str, Any] | None = None) -> dict[str, Any]:
         request_key = _safe_text(request_key, "request_key")
         effective_policy = _policy(policy)
+        self._prime(request_key=request_key)
         with exclusive(self.task.lock_path, timeout=10):
             for record in self._list_locked():
                 if record.get("request_key") != request_key:
@@ -378,6 +380,7 @@ class CompletionOperationStore:
             return _public(record)
 
     def get(self, operation_id: str) -> dict[str, Any]:
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(_operation_id(operation_id))
             self._authorize(record)
@@ -400,6 +403,7 @@ class CompletionOperationStore:
         clean_payload = _json({} if payload is None else payload, "payload")
         payload_hash = _hash(clean_payload)
         self._authorize_snapshots(clean_payload)
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -470,6 +474,7 @@ class CompletionOperationStore:
         operation_id = _operation_id(operation_id)
         revision = _revision(revision)
         clean_error = _json(error, "attempt error")
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -514,6 +519,7 @@ class CompletionOperationStore:
         clean_completion = _json(completion, "completion")
         self._validate_settlement_pair(clean_draft, clean_completion)
         self._authorize_snapshots({"draft": clean_draft, "completion": clean_completion})
+        self._prime(operation_id, clean_completion.get("id"))
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -563,6 +569,7 @@ class CompletionOperationStore:
 
     def stop(self, operation_id: str, reason: str) -> dict[str, Any]:
         reason = _safe_text(reason, "stop reason", maximum=500)
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(_operation_id(operation_id))
             self._authorize(record)
@@ -592,20 +599,8 @@ class CompletionOperationStore:
         """
         if self.snapshot_ids is None:
             return record
-        analysis, hidden = None, set()
-        for attempt in record.get("revisions", []):
-            if not attempt.get("completion_id"):
-                continue
-            if analysis is None:
-                analysis = AnalysisStore(self.task)
-            if self._receipt_readable is None:
-                self._receipt_readable = analysis.completion_reader(set(self.snapshot_ids))
-            try:
-                readable = self._receipt_readable(analysis._get("completions", attempt["completion_id"]))
-            except FoundryError:
-                readable = False
-            if not readable:
-                hidden.add(attempt.get("revision"))
+        hidden = {attempt.get("revision") for attempt in record.get("revisions", [])
+                  if attempt.get("completion_id") and not self._readable(attempt["completion_id"])}
         if not hidden:
             return record
         record = deepcopy(record)
@@ -644,6 +639,42 @@ class CompletionOperationStore:
                                                  if row.get("status") in ATTEMPT_TERMINAL)]),
         })
         return record
+
+    def _readable(self, completion_id: Any) -> bool:
+        """Whether this store's session may read the receipt ``completion_id`` names (AnalysisStore.completion_reader),
+        read once for the store. One that does not read, or an id naming none, counts as one it may not read."""
+        if not isinstance(completion_id, str):
+            return False
+        if completion_id not in self._readable_receipts:
+            analysis = AnalysisStore(self.task)
+            if self._receipt_readable is None:
+                self._receipt_readable = analysis.completion_reader(set(self.snapshot_ids))
+            try:
+                readable = self._receipt_readable(analysis._get("completions", completion_id))
+            except FoundryError:
+                readable = False
+            self._readable_receipts[completion_id] = readable
+        return self._readable_receipts[completion_id]
+
+    def _prime(self, operation_id: Any = None, completion_id: Any = None, *, request_key: str | None = None) -> None:
+        """Read, before the task lock, whether this store's session may read each receipt its operation is settled on
+        (by id, or each begun as ``request_key``) and ``completion_id``: _in_view under the lock then reads no receipt,
+        draft or run. Operation records are written atomically, so they read without the lock. The call still decides
+        on the record it reads under the lock; a revision settled in between is read there (_readable)."""
+        if self.snapshot_ids is None:
+            return
+        try:
+            if request_key is not None:
+                records = [row for row in self._list_locked() if row.get("request_key") == request_key]
+            else:
+                records = [self._read_locked(_operation_id(operation_id))]
+        except FoundryError:
+            records = []  # refused under the lock, as before
+        for record in records:
+            if record.get("session_id") == self.session_id:
+                for attempt in record.get("revisions", []):
+                    self._readable(attempt.get("completion_id"))
+        self._readable(completion_id)
 
     def _finished_as_read(self, record: dict[str, Any], attempt: dict[str, Any]) -> bool:
         """Whether this store's session reads ``attempt`` as finished (_in_view), so its replay is answered with it: a

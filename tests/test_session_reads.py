@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import json
 import threading
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1411,6 +1412,88 @@ def test_a_session_goes_on_past_a_settlement_on_a_draft_it_may_not_read_as_past_
     assert reads[True] == reads[False]
     assert [row["status"] for row in json.loads(reads[True])[-1]["revisions"]] == [
         "rejected_validation", "rejected_validation", "settled"]
+
+
+def test_a_session_reads_the_receipts_its_operation_settled_on_before_it_takes_the_task_lock(tmp_path, capsys,
+                                                                                             monkeypatch):
+    """Which revisions the session reads as settled rests on their receipts, drafts and runs (_in_view): each is read
+    before the operation takes the task lock, so a save, a status poll or a begun-again request holds it no longer
+    than the manager's. Each call is a store of its own, as each CLI call is, reading none of them before."""
+    import foundry.finance_completion_operations as module
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    world = _settled_operation(tmp_path / "legacy", capsys, live=True, legacy=True, spent=0)
+
+    def store():
+        return CompletionOperationStore(world.sess.task, "sess", world.sess.allowed)
+
+    def cli(command, **spec):
+        code, shown = _cli(capsys, world.var, command, "--spec", json.dumps(spec))
+        assert code == 0, shown
+        return shown
+
+    locking, load = module.exclusive, AnalysisStore._read
+    held, reads = [False], {False: [], True: []}
+
+    @contextmanager
+    def holding(path, **kwargs):
+        with locking(path, **kwargs):
+            held[0] = True
+            try:
+                yield
+            finally:
+                held[0] = False
+
+    def reading(self, path):
+        if path.parent.name in {"completions", "drafts", "runs", "requirements"}:
+            reads[held[0]].append(path.parent.name)
+        return load(self, path)
+
+    monkeypatch.setattr(module, "exclusive", holding)
+    monkeypatch.setattr(AnalysisStore, "_read", reading)
+    # Revision 2 settled, then settled again as a replay; revision 3 reserved and rejected; then a stop.
+    read = [world.sess.save_completion_draft(world.operation, "call-2", {"body": "会话修订稿。"})["completion_operation"]
+            for _ in range(2)]
+    read += [store().reserve(world.operation, payload={"body": "会话第三稿。"}, call_id="call-3"),
+             store().reject_attempt(world.operation, 3, {"code": "claim_value_mismatch", "message": "bad"}),
+             cli("finance-completion-begin", request_key="request-1"),
+             cli("finance-completion-status", operation_id=world.operation),
+             cli("finance-completion-stop", operation_id=world.operation, reason="用户取消")]
+    assert reads[True] == [] and {"completions", "drafts", "runs"} <= set(reads[False])
+    assert [operation.get("replayed", False) for operation in read] == [False, True, False, False, True, False, False]
+    assert [[row["status"] for row in operation["revisions"]] for operation in read] == [
+        ["rejected_validation", "settled"]] * 2 + [["rejected_validation", "settled", "reserved"]] + [
+        ["rejected_validation", "settled", "rejected_validation"]] * 4
+    assert _shows(read, world.hidden) == []
+
+
+def test_a_session_s_operation_answers_by_the_record_it_reads_under_the_task_lock(tmp_path, capsys, monkeypatch):
+    """What the operation reads before it takes the task lock (_prime) decides nothing: a revision the session settles
+    in between reads as settled, as it does after, and a settlement refused under the lock is refused as before."""
+    from foundry.errors import FoundryError
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    world = _settled_operation(tmp_path / "live", capsys, live=True, legacy=False, spent=0)
+    spec = {"body": "会话修订稿。"}
+
+    def store():
+        return CompletionOperationStore(world.sess.task, "sess", world.sess.allowed)
+
+    store().reserve(world.operation, payload=spec, call_id="call-2")
+    prime, saved = CompletionOperationStore._prime, []
+
+    def meanwhile(self, *args, **kwargs):
+        prime(self, *args, **kwargs)
+        monkeypatch.setattr(CompletionOperationStore, "_prime", prime)
+        saved.append(world.sess.save_completion_draft(world.operation, "call-2", spec))
+
+    monkeypatch.setattr(CompletionOperationStore, "_prime", meanwhile)
+    raced = store().reserve(world.operation, payload=spec, call_id="call-2")
+    assert raced == store().reserve(world.operation, payload=spec, call_id="call-2")
+    receipt = saved[0]["completion"]
+    assert (raced["attempt"]["status"], raced["attempt"]["completion_id"]) == ("settled", receipt["id"])
+    with pytest.raises(FoundryError, match="completion id must be"):
+        store().settle(world.operation, 2, saved[0], {**receipt, "id": [receipt["id"]]})
 
 
 def test_a_run_a_session_filed_on_a_hidden_run_and_version_reads_as_its_run_without_them(tmp_path, capsys, monkeypatch):
