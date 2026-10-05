@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_fields
+from foundry.analysis import DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_fields
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -171,6 +171,19 @@ def _parent_draft(context, service, parent_id):
             raise
         raise FoundryError(PARENT_UNAVAILABLE) from None
     return parent
+
+
+def _named_draft(context, service, draft_id):
+    """A draft a command names by id. A session is refused one it may not read exactly as an unknown id, as
+    FinanceStore._named_draft refuses it."""
+    try:
+        draft = service.get_draft(draft_id)
+        _bound_draft(context, service, draft)
+    except FoundryError:
+        if not context.session_id:
+            raise
+        raise FoundryError(DRAFT_UNAVAILABLE) from None
+    return draft
 
 
 def _bound_requirements(context, service, spec):
@@ -341,6 +354,7 @@ def dispatch(args) -> bool:
             name=args.name,
             metadata=_json(args.meta, "metadata"),
             allow_duplicate=getattr(args, "allow_duplicate", False),
+            allowed=_ceiling(context),
         )
         if result.get("duplicate_of"):
             # Same bytes already filed; nothing was written, so nothing widens.
@@ -373,6 +387,7 @@ def dispatch(args) -> bool:
             args.analysis,
             session_id=context.session_id,
             context_revision=context.context_revision,
+            allowed=_ceiling(context),
         )
     elif args.cmd == "analysis-draft":
         spec = _json_spec(args, "draft spec")
@@ -410,12 +425,10 @@ def dispatch(args) -> bool:
         result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited),
                                        _ceiling(context))
     elif args.cmd == "analysis-export":
-        draft = service.get_draft(args.draft)
-        _bound_draft(context, service, draft)
+        _named_draft(context, service, args.draft)
         result = service.export_draft(args.draft, args.format, mode=args.mode, allowed=_ceiling(context))
     elif args.cmd in {"report-draft-read", "report-projection-read"}:
-        draft = service.get_draft(args.draft)
-        _bound_draft(context, service, draft)
+        draft = _named_draft(context, service, args.draft)
         result = (service.projection_for_draft(args.draft, args.mode, allowed=_ceiling(context))
                   if args.cmd == "report-projection-read" else service.draft_in_view(draft, _ceiling(context)))
     elif args.cmd == "report-source-add":
@@ -471,6 +484,7 @@ def dispatch(args) -> bool:
             spec,
             session_id=context.session_id,
             context_revision=context.context_revision,
+            allowed=_ceiling(context),
         )
     print(json.dumps(result, ensure_ascii=False, allow_nan=False))
     return True

@@ -104,7 +104,7 @@ def build_readiness_report(store, spec: dict | None = None) -> dict[str, Any]:
         for group in _by_dataset(probes)
     ]
     # As of when, for which period, and whether that still speaks for the task's period.
-    task_period = _task_period(store.analysis)
+    task_period = _task_period(store.analysis, store.allowed)
     superseded = _superseded_for_freshness(
         store.analysis, every_dataset,
         {entry["dataset_id"]: entry["scope"]["period"] for entry in per_dataset if entry["scope"].get("period")},
@@ -358,11 +358,12 @@ def _declared_hints(dataset: dict) -> dict[str, str]:
     return {key: str(hints.get(key) or "") for key in keys}
 
 
-def _task_period(analysis) -> str:
-    """The period the task was confirmed for: the latest requirements scope. Never the clock."""
+def _task_period(analysis, allowed=None) -> str:
+    """The period the task was confirmed for: the latest requirements scope (for a session, ``allowed``, the newest
+    one it may read). Never the clock."""
     from foundry.finance_requirements import latest_requirements
 
-    period = ((latest_requirements(analysis) or {}).get("scope") or {}).get("period")
+    period = ((latest_requirements(analysis, allowed) or {}).get("scope") or {}).get("period")
     return period.strip() if isinstance(period, str) else ""
 
 
@@ -456,9 +457,10 @@ def _supersessions(analysis, datasets: list[dict], known_periods: dict[str, str]
         return allowed is None or dataset_id in allowed
 
     replaced: dict[str, set[str]] = {}
-    for prior, newer in refreshed_snapshots(analysis.task).items():
-        if visible(newer):
-            replaced.setdefault(prior, set()).add(newer)
+    for prior, newers in refreshed_snapshots(analysis.task).items():
+        for newer in newers:
+            if visible(newer):
+                replaced.setdefault(prior, set()).add(newer)
     datasets = [record for record in datasets if visible(record.get("id"))]
     periods = known_periods
 
