@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from foundry.analysis import AnalysisStore, _hash, _new
+from foundry.finance_completion import completion_chain_key
 from foundry.finance_service import FinanceStore
 from foundry.source_refresh import SourceRefreshService, SourceScope
 from foundry.task import TaskStore
@@ -457,6 +458,32 @@ def test_a_session_reads_a_receipt_judging_again_only_the_one_before_it(tmp_path
                     *[(2, ("needs_review", 2, "no_progress", False))] * 3]
 
 
+def test_a_session_judging_receipts_again_reads_a_version_s_support_once_a_read(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """Every receipt on such runs reads judged again, each on the support of V2, its version: which paths V2's files,
+    contexts and runs leave open (with_input_gaps). None of them changes within one read, so a listing assesses that
+    support, and lists the runs for it, once however many receipts it judges again."""
+    import foundry.finance_completion as completion
+    import foundry.finance_requirement_support as support
+
+    world = _pinned_world(tmp_path, True, capsys)
+    for index in "甲乙丙丁":
+        _session_draft(world, f"会话稿{index}：Falcon 收入 100。")
+    assessed, supported, listed = [], [], []
+    assess, list_kind, assess_support = (completion.assess_completion, AnalysisStore._list,
+                                         support.assess_requirement_support)
+    monkeypatch.setattr(completion, "assess_completion",
+                        lambda *args, **kwargs: assessed.append(args[1]["id"]) or assess(*args, **kwargs))
+    monkeypatch.setattr(support, "assess_requirement_support",
+                        lambda analysis, spec: supported.append(spec["id"]) or assess_support(analysis, spec))
+    monkeypatch.setattr(AnalysisStore, "_list", lambda self, kind: listed.append(kind) or list_kind(self, kind))
+    code, state = _cli(capsys, world.var, "analysis-state")
+    assert code == 0 and len(state["completions"]) == 4
+    assert len(assessed) == 4 and supported == [world.current["id"]]
+    # Once for the read, once for the support.
+    assert listed.count("runs") == 2
+
+
 def _legacy_chain(root: Path, hidden: bool, cites: tuple[str, str], capsys, monkeypatch) -> list[tuple]:
     """The manager asks for control totals on D1, inside the session, runs an account total on it, then saves the same
     version again and runs it once more (``stored``). Under policy 12 it saves two drafts citing one of the runs each,
@@ -708,6 +735,30 @@ def test_a_session_reads_runs_drafts_and_receipts_with_no_version_hidden_at_no_m
     # The versions and runs are listed once for the whole read, and each record's pin is read once, by the listing:
     # no draft or receipt lists or reads them again.
     assert listed.count("requirements") == listed.count("runs") == 1 and len(pins) == len(set(pins))
+
+
+def test_a_session_save_with_no_version_hidden_assesses_its_draft_once(tmp_path, capsys, fake_runner, monkeypatch):
+    """A save assesses its draft once, to file the receipt, and returns that receipt and the one before it as filed:
+    with every version readable, neither is judged again, whichever copy of the version the assessment read first."""
+    import foundry.finance_completion as completion
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    world = _pinned_world(tmp_path, False, capsys)
+    session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+    operation = CompletionOperationStore(world.task, "sess", session.allowed).begin(
+        "request-1", policy={"max_repairs": 2})
+    assessed = []
+    assess = completion.assess_completion
+    monkeypatch.setattr(completion, "assess_completion",
+                        lambda *args, **kwargs: assessed.append(args[1]["id"]) or assess(*args, **kwargs))
+    saves = [lambda index=index: _session_draft(world, f"会话稿{index}：Falcon 收入 100。") for index in "甲乙丙"]
+    saves.append(lambda: session.save_completion_draft(operation["id"], "call-1", world.draft))
+    counts = []
+    for save in saves:
+        assessed.clear()
+        assert save()["completion"]
+        counts.append(len(assessed))
+    assert counts == [1] * 4
 
 
 def test_a_session_declares_a_run_pinned_to_a_version_it_may_not_read_again_once_a_read(
@@ -1022,6 +1073,126 @@ def test_a_session_reads_another_session_s_run_started_under_a_version_that_sess
         read.append(_apart_reads(world, capsys, [run]))
     assert read[0] == read[1]
     assert read[0][0] == [("P", "P", "P", "P") if engine == "script" else ("P", "P")]
+
+
+# An item a version on H1 holds more than P, and one only a version on H2 holds.
+H1_ITEM = {"id": "project_cost", "metric": "expense", "label": "项目费用"}
+H2_ITEM = {"id": "falcon_bonus", "metric": "expense", "label": "Falcon 奖金"}
+
+
+@pytest.mark.parametrize("scenario", ["swapped", "kept", "named"])
+def test_a_session_reads_the_fingerprint_another_session_filed_for_a_version_as_its_own(
+        tmp_path, capsys, fake_runner, scenario):
+    """The manager saves P on A, Hv1 on H1 with an item more, and, but where S1 reads, Hv2 on H2, which swaps that item
+    for one of its own (``swapped``, ``named``) or keeps it (``kept``), then C on A, which drops them. Each session
+    reads C as dropping only what the versions it may read held, so S2 reads it with a fingerprint other than S1's
+    but where Hv2 kept the item. S2 runs SQL and a script on A, naming P with ``named``, and files a receipt on them,
+    each with the fingerprint it read C with. S1 reads every one of those as its own fingerprint of C in both worlds:
+    nothing S2 read of Hv2 shows, or decides S1's receipt on the runs."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1}, [*ITEMS, H1_ITEM])
+        if hidden:
+            _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2},
+                     [*ITEMS, H1_ITEM if scenario == "kept" else H2_ITEM])
+        current = _save_on(world, "C", "收入", {"gl": world.a}, ITEMS)
+        ceilings = {row["session_id"]: set(row["snapshot_ids"]) for row in world.task.sessions()}
+        pin = {"requirements_id": world.versions["P"]["id"]} if scenario == "named" else {}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}, **pin}), session="s2")
+        assert code == 0, saved
+        runs = [_cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], session="s2")[1],
+                _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+                    {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", **pin}),
+                    session="s2")[1]]
+        filed = FinanceStore(world.task, snapshot_ids=ceilings["s2"], session_id="s2").save_explanation_draft(
+            {"body": "S2 稿：Falcon 收入 100。", "run_ids": [run["id"] for run in runs]})["completion"]
+        analysis = AnalysisStore(world.task)
+        s2_reads = analysis.fingerprint_in_view(current, ceilings["s2"])
+        assert [run["requirements_semantic_fingerprint"] for run in runs] == [s2_reads] * 2
+        assert filed["requirements_semantic_fingerprint"] == s2_reads
+        code, state = _cli(capsys, world.var, "analysis-state", session="s1")
+        assert code == 0, state
+        receipt = FinanceStore(world.task, snapshot_ids=ceilings["s1"], session_id="s1").save_explanation_draft(
+            {"body": "S1 稿：Falcon 收入 100。", "run_ids": [run["id"] for run in runs]})["completion"]
+        # Each fingerprint by the versions S1 reads with it.
+        versions = {label: {**row, "semantic_fingerprint": analysis.fingerprint_in_view(row, ceilings["s1"])}
+                    for label, row in world.versions.items() if label != "Hv2"}
+        listed = {row["id"]: row for row in state["runs"]}
+        shown = next(row for row in state["completions"] if row["id"] == filed["id"])
+        if hidden:
+            unread = {current["semantic_fingerprint"], s2_reads} - {versions["C"]["semantic_fingerprint"]}
+            assert _shows([state, receipt], [world.h2, H2_ITEM["id"], *unread, *(
+                world.versions["Hv2"][key] for key in ("id", "semantic_fingerprint"))]) == []
+        read.append((_pins(versions, [*(listed[run["id"]] for run in runs), shown, receipt]),
+                     [row["chain_key"] == completion_chain_key(row["requirements_semantic_fingerprint"],
+                                                               row["requirements_id"], row["run_hashes"])
+                      for row in (shown, receipt)], _verdict(receipt)))
+    assert read[0] == read[1]
+    pins, chained, verdict = read[0]
+    named = "P" if scenario == "named" else "C"
+    assert pins == [(named, "C"), (named, "C", named, named), ("C", "C"), ("C", "C")]
+    assert chained == [True, True]
+    # S2's receipt was the first on C's chain as S1 reads it.
+    assert verdict[1] == 1
+    assert ("requirements_run_outdated" in verdict[5]) == (scenario == "named")
+
+
+def test_a_session_reads_a_receipt_on_a_run_another_session_captured_otherwise_as_its_own_save_would_file_it(
+        tmp_path, capsys, fake_runner):
+    """The manager saves P on A, Hv1 on B with an item more, and C on A, which drops it. N, which may read A alone,
+    reads C as dropping nothing, and runs SQL on A under it; W, which may read A and B, reads C as stored. The manager
+    saves a draft citing N's run and hers on B, and files its receipt on N's run as captured: not bound to C. Every
+    version rests on the draft's files, and, but where W reads, so does none saved since on X. W reads the receipt as
+    its own save of the draft would have filed it, in both worlds: N's run bound to C, as W reads it."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        root = tmp_path / name
+        var = root / "var"
+        task = TaskStore(var).create(title="另一会话的捕获")
+        analysis = AnalysisStore(task)
+        files = {}
+        # Each session may read the files added before it.
+        for label, organization, session in (("A", "Falcon", "n"), ("B", "Hawk", "w"), ("X", "Owl", None)):
+            files[label] = analysis.add_dataset(_csv(root / f"{label}.csv", [
+                ("revenue", "2026-08", organization, "100", "CNY", "元")]), name=label)["id"]
+            if session:
+                task.record_session(session, role="analysis")
+        ceilings = {row["session_id"]: set(row["snapshot_ids"]) for row in task.sessions()}
+        assert ceilings == {"n": {files["A"]}, "w": {files["A"], files["B"]}}
+        manager = FinanceStore(task)
+        versions: dict[str, dict] = {}
+        for label, binding, items in (("P", "A", ITEMS), ("Hv1", "B", [*ITEMS, H1_ITEM]), ("C", "A", ITEMS)):
+            parent = {"parent_id": versions[list(versions)[-1]]["id"], "change_reason": "换"} if versions else {}
+            versions[label] = manager.analysis_requirements_save({
+                "question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": files[binding]}, "items": items,
+                **parent})
+        runs = []
+        for session, binding in (("n", "A"), (None, "B")):
+            who = {"session": session, "task": None if session else task.id}
+            code, saved = _cli(capsys, var, "analysis-save", "--spec", json.dumps(
+                {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": files[binding]}}), **who)
+            assert code == 0, saved
+            runs.append(_cli(capsys, var, "analysis-run", "--analysis", saved["id"], **who)[1])
+        assert runs[0]["requirements_semantic_fingerprint"] != versions["C"]["semantic_fingerprint"]
+        draft = {"body": "收入 100。", "run_ids": [run["id"] for run in runs]}
+        filed = manager.save_explanation_draft({**draft, "body": "经理稿：收入 100。"})["completion"]
+        if hidden:
+            manager.analysis_requirements_save({
+                "question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": files["X"]}, "items": ITEMS,
+                "parent_id": versions["C"]["id"], "change_reason": "换"})
+        w = FinanceStore(task, snapshot_ids=ceilings["w"], session_id="w")
+        shown = w._readable_receipt(analysis._get("completions", filed["id"]))
+        assert manager._readable_receipt(analysis._get("completions", filed["id"])) == filed
+        read.append(_verdict(shown))
+        if not hidden:
+            own = _verdict(w.save_explanation_draft({**draft, "body": "W 稿：收入 100。"})["completion"])
+    assert read[0] == read[1]
+    assert "requirements_run_outdated" in _verdict(filed)[5] and "requirements_run_outdated" not in read[0][5]
+    # W's own save is the next on the chain.
+    assert own[4:] == read[0][4:]
 
 
 def test_a_run_a_session_filed_before_sessions_had_a_ceiling_reads_as_the_manager_s(tmp_path, capsys):

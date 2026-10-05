@@ -1,6 +1,8 @@
 """Server-derived requirement support and snapshot-bound input gaps."""
 from __future__ import annotations
 
+import copy
+
 from foundry.errors import FoundryError
 
 ALIASES = {
@@ -191,13 +193,21 @@ def assess_requirement_support(analysis, spec):
     return {"version": 1, "supported_metrics": metric_catalog(), "items": reports}
 
 
-def with_input_gaps(analysis, requirements):
-    """Attach independently verified gaps without turning coverage green."""
+def with_input_gaps(analysis, requirements, supports=None):
+    """Attach independently verified gaps without turning coverage green. ``supports``, when given, holds the support
+    already assessed for each requirements id within one read: it reads the version, its files, contexts and runs alike
+    for every reader, and none of them changes within the read."""
     requirement_id = requirements.get("requirements_id")
     if not requirement_id:
         return requirements
-    record = analysis._get("requirements", requirement_id)
-    support = assess_requirement_support(analysis, record)
+    if supports is not None and requirement_id in supports:
+        support = copy.deepcopy(supports[requirement_id])
+    else:
+        record = analysis._get("requirements", requirement_id)
+        support = assess_requirement_support(analysis, record)
+        if supports is not None:
+            # Each caller its own copy, as one assessed for it alone would be.
+            supports[requirement_id] = copy.deepcopy(support)
     gaps = {item["requirement_item_id"]: item for item in support["items"]
             if item["status"] == "requires_input"}
     items = []

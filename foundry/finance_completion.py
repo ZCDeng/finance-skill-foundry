@@ -111,14 +111,14 @@ def record_completion(analysis, draft, quality, *, allowed=None, cache=None):
         return analysis._write_locked(analysis._object_path('completions', record['id']), record)
 
 
-def assess_completion(analysis, draft, quality, *, allowed=None, cache=None):
+def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, supports=None):
     """What record_completion decides of a draft before it reads the earlier receipts of its chain. ``allowed`` as for
-    record_completion; ``cache`` as for AnalysisStore.run_in_view."""
+    record_completion; ``cache`` as for AnalysisStore.run_in_view; ``supports`` as for with_input_gaps."""
     from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
     requirements = quality.get('requirements', {})
-    requirements = with_input_gaps(analysis, requirements)
+    requirements = with_input_gaps(analysis, requirements, supports)
     requirement_id = requirements.get('requirements_id')
     cache = {} if cache is None else cache
     runs = {run_id: analysis.run_in_view(analysis.get_run(run_id), allowed, cache=cache)
