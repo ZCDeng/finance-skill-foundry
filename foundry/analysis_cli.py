@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_text
+from foundry.analysis import PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_fields
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -384,7 +384,7 @@ def dispatch(args) -> bool:
         from foundry.report_visuals import materialize_document
 
         # A revision that takes its parent's document takes its prose (save_draft sees the document in the spec).
-        inherited = _inherited_text(spec, parent) & {"body"}
+        inherited = _inherited_fields(spec, parent) & {"body"}
         visual_document = spec.get("document")
         if visual_document is None and "body" not in spec:
             visual_document = parent.get("document")

@@ -118,8 +118,8 @@ def test_a_session_reads_a_revision_without_a_parent_it_may_not_read(revision, c
     assert code == 0
     stored = revision.analysis.get_draft(revision.child["id"])
     # It wrote its own text, so it rests on its own files only; the record of that is no part of what anyone reads.
-    assert stored["inherited_text"] == []
-    assert managed == {key: value for key, value in stored.items() if key != "inherited_text"}
+    assert stored["inherited_fields"] == []
+    assert managed == {key: value for key, value in stored.items() if key != "inherited_fields"}
     assert managed["parent_id"] == revision.parent["id"]
 
 
@@ -275,10 +275,60 @@ def test_a_revision_that_took_its_parent_s_text_rests_on_the_parent(revision, ca
                                                "run_ids": [revision.ra["id"]], "claims": []})
     assert retitled["title"] == untitled["title"] == "分析报告"
     for draft in (own, rewritten, retitled):
-        assert revision.analysis.get_draft(draft["id"])["inherited_text"] == []
+        assert revision.analysis.get_draft(draft["id"])["inherited_fields"] == []
         code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", draft["id"])
         assert code == 0 and read["parent_id"] is None and _shows(read, ["987,654", SECRET]) == []
-        assert "inherited_text" not in read
+        assert "inherited_fields" not in read
+
+
+def _workbook(path: Path) -> Path:
+    from openpyxl import Workbook
+
+    book = Workbook()
+    book.active.title = "差异"
+    book.active["A1"], book.active["A2"] = 100, "收入均已入账。"
+    book.save(path)
+    book.close()
+    return path
+
+
+@pytest.mark.parametrize("taken", ["materiality", "fact_ids", "evidence_recipes", "consistency"])
+def test_a_revision_that_took_its_parent_s_settings_rests_on_the_parent(revision, capsys, taken):
+    """Recipes, consistency rules and sources, materiality and facts are written by the parent's author as well."""
+    book = revision.analysis.add_dataset(_workbook(revision.var.parent / "w.xlsx"), name="差异",
+                                         metadata={"mode": "workbook"})
+    revision.task.update_session_context("sess", snapshot_ids=[book["id"]])
+    source = {"dataset_id": book["id"], "source_hash": book["source_hash"], "sheet": "差异"}
+    fields = {
+        "materiality": {"materiality": {"absolute": SECRET}},
+        "fact_ids": {"fact_ids": [{"note": f"薪酬 {SECRET}"}]},
+        "evidence_recipes": {"evidence_recipes": [{
+            "id": "direct", "kind": "direct", **source, "range": "A1", "label": f"薪酬 {SECRET}",
+            "claim": {"run_id": revision.ra["id"], "row": 0, "column": "amount"}}]},
+        "consistency": {
+            "consistency_sources": {"n": {"kind": "number", **source, "range": "A1", "label": f"源 {SECRET}"},
+                                    "t": {"kind": "text", **source, "range": "A2"}},
+            "consistency_rules": [{"id": "r", "kind": "all_absolute_exceed", "label": f"规则 {SECRET}", "threshold": "10",
+                                   "asserted_result": True, "assertion_source_id": "t",
+                                   "values": [{"id": "n", "source_id": "n"}]}]},
+    }[taken]
+    parent = revision.analysis.save_draft({"title": "P", "body": "薪酬。", "run_ids": [revision.rh["id"]], **fields})
+    own = {"title": "C", "body": "收入说明（修订）。", "run_ids": [revision.ra["id"]], "claims": [], "limitations": [],
+           "evidence_appendix": "", "evidence_appendix_meta": {}, "source_read_failures": [], "materiality": {},
+           "fact_ids": [], "evidence_recipes": [], "consistency_rules": [], "consistency_sources": {}}
+
+    def revise(spec):
+        code, child = _cli(capsys, revision.var, "analysis-draft", "--spec", json.dumps(
+            {"parent_id": parent["id"], **spec}, ensure_ascii=False), session=None, task=revision.task.id)
+        assert code == 0
+        return child
+
+    took = revise({key: value for key, value in own.items() if key not in fields})
+    assert SECRET in json.dumps(took, ensure_ascii=False)
+    _unread(revision, capsys, took["id"])
+    alone = revise(own)
+    code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", alone["id"])
+    assert code == 0 and read["parent_id"] is None and SECRET not in json.dumps(read, ensure_ascii=False)
 
 
 def test_a_revision_whose_appendix_matches_its_parent_s_by_its_own_runs_reads_alone(revision, capsys):
@@ -296,6 +346,30 @@ def test_a_revision_whose_appendix_matches_its_parent_s_by_its_own_runs_reads_al
     assert code == 0 and read["parent_id"] is None
 
 
+def test_a_finance_revision_that_composed_its_own_claims_and_prose_reads_alone(revision, capsys):
+    manager = FinanceStore(revision.task)
+    ledger = revision.analysis.add_dataset(_ledger(revision.var.parent / "ledger.json", [
+        {"account_code": code, "management_account": account, "amount": amount}
+        for code, account, amount in (("6001", "revenue", 120), ("6401", "cost", 70))]), name="总账二")["id"]
+    revision.task.update_session_context("sess", snapshot_ids=[ledger])
+    context = manager.save_context({"bindings": {"actual": ledger}, "scopes": {"actual": {
+        "ledger": "L1", "organization": "O1", "period": "2026-09", "currency": "CNY", "unit": "万元", "scenario": "actual"}}})
+    run = manager.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    # The parent's claims are its run's generated ones, which the revision generates again.
+    parent = manager.save_explanation_draft({"title": "P", "body": "说明。", "run_ids": [run["id"], revision.rh["id"]]})
+    assert parent["claims"] and {claim["run_id"] for claim in parent["claims"]} == {run["id"]}
+    claimed = manager.save_explanation_draft({"parent_id": parent["id"], "title": "C", "body": "说明（修订）。",
+                                              "run_ids": [run["id"]]})
+    # The parent's body was only its generated appendix: the revision keeps none of it.
+    bare = manager.save_explanation_draft({"title": "P2", "body": "", "run_ids": [revision.rh["id"]]})
+    unwritten = manager.save_explanation_draft({"parent_id": bare["id"], "title": "C2", "run_ids": [revision.ra["id"]],
+                                                "claims": []})
+    for draft in (claimed, unwritten):
+        assert revision.analysis.get_draft(draft["id"])["inherited_fields"] == []
+        code, read = _cli(capsys, revision.var, "report-draft-read", "--draft", draft["id"])
+        assert code == 0 and read["parent_id"] is None and _shows(read, revision.hidden) == []
+
+
 def _rewrite(analysis: AnalysisStore, kind: str, record_id: str, change) -> None:
     """Change a stored record as an older version of the app would have written it."""
     path = analysis._object_path(kind, record_id)
@@ -308,7 +382,7 @@ def _rewrite(analysis: AnalysisStore, kind: str, record_id: str, change) -> None
 
 def test_a_revision_saved_before_revisions_recorded_their_parent_s_text_rests_on_the_parent(revision, capsys):
     assert _cli(capsys, revision.var, "report-draft-read", "--draft", revision.child["id"])[0] == 0
-    _rewrite(revision.analysis, "drafts", revision.child["id"], lambda record: record.pop("inherited_text"))
+    _rewrite(revision.analysis, "drafts", revision.child["id"], lambda record: record.pop("inherited_fields"))
     # It cannot tell what it took from its parent, so a session that may not read the parent does not read it.
     code, state = _cli(capsys, revision.var, "analysis-state")
     assert code == 0 and state["drafts"] == []
@@ -323,7 +397,7 @@ def test_a_long_revision_chain_is_read_once_per_listing(revision, capsys, monkey
     draft = analysis.save_draft({"title": "收入", "body": "收入说明。", "run_ids": [revision.ra["id"]], "limitations": ["未经审计"]})
     for index in range(30):
         draft = analysis.save_draft({"parent_id": draft["id"], "body": f"收入说明（第 {index + 1} 版）。"})
-    assert draft["inherited_text"] == ["limitations", "title"]
+    assert draft["inherited_fields"] == ["limitations", "title"]
     reads = []
     original = AnalysisStore.get_draft
     monkeypatch.setattr(AnalysisStore, "get_draft", lambda self, draft_id: reads.append(draft_id) or original(self, draft_id))
@@ -335,7 +409,7 @@ def test_a_long_revision_chain_is_read_once_per_listing(revision, capsys, monkey
     from foundry.analysis import _new
 
     for _ in range(1500):
-        record = _new(analysis.task, run_ids=[revision.ra["id"]], parent_id=draft["id"], inherited_text=["body"])
+        record = _new(analysis.task, run_ids=[revision.ra["id"]], parent_id=draft["id"], inherited_fields=["body"])
         draft = analysis._write(analysis._object_path("drafts", record["id"]), record)
     assert analysis.draft_snapshots(draft) == {revision.a["id"]}
     assert analysis.draft_readable(draft, {revision.a["id"]})
@@ -808,12 +882,19 @@ def test_a_session_cites_no_run_it_may_not_read_through_an_evidence_recipe(tmp_p
     # The recipe's result shows the cited run's value.
     assert SECRET in json.dumps(FinanceStore(task).validate_explanation(spec)["evidence_report"], ensure_ascii=False)
     session = FinanceStore(task, snapshot_ids=[pack["id"]], session_id="sess")
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    operations = CompletionOperationStore(task, "sess", session.allowed)
+    operation = operations.begin("recipe", policy={"max_repairs": 0})
     before = len(analysis._list("drafts"))
     for call in (session.validate_explanation, session.save_explanation_draft,
-                 lambda spec: session.prepare_explanation({**spec, "run_ids": [rh["id"]]})):
+                 lambda spec: session.prepare_explanation({**spec, "run_ids": [rh["id"]]}),
+                 lambda spec: session.save_completion_draft(operation["id"], "call-1", spec)):
         with pytest.raises(FoundryError) as refused:
             call(spec)
         assert _shows(str(refused.value), hidden) == []
+    # Refused before anything was reserved, so the operation has spent nothing.
+    assert operations.get(operation["id"])["revisions"] == []
     code, error = _cli(capsys, var, "analysis-draft", "--spec", json.dumps(spec, ensure_ascii=False))
     assert code != 0 and _shows(error, hidden) == []
     assert len(analysis._list("drafts")) == before
@@ -846,6 +927,22 @@ def test_the_manager_reads_a_recipe_citing_a_run_that_does_not_read_as_an_issue(
     # A session cites only a run it may read.
     with pytest.raises(FoundryError):
         FinanceStore(task, snapshot_ids=[pack["id"]], session_id="sess").validate_explanation(spec)
+
+
+def test_the_manager_validates_and_reviews_a_draft_as_before(revision):
+    """The checks that keep a session to its files read nothing more for the manager."""
+    manager = FinanceStore(revision.task)
+    # A requirements version named while there is none is not read, as before.
+    assert manager.validate_explanation({"requirements_id": "e" * 32, "body": "收入。", "run_ids": [revision.ra["id"]]})
+    # A draft whose run no longer reads is refused, as before.
+    analysis = revision.analysis
+    gone = analysis.run_analysis(analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": revision.a["id"]}})["id"])
+    draft = analysis.save_draft({"title": "收入", "document": _document("收入。"), "run_ids": [gone["id"]]})
+    analysis._object_path("runs", gone["id"]).unlink()
+    for call in (lambda: manager.validate_explanation({"draft_id": draft["id"], "run_ids": [revision.ra["id"]]}),
+                 lambda: manager.report_review({"draft_id": draft["id"]})):
+        with pytest.raises(FoundryError, match="unavailable"):
+            call()
 
 
 # --- month close and controls ---------------------------------------------------------------------------------------
@@ -977,8 +1074,11 @@ def test_only_the_desktop_registers_an_export_and_only_of_the_projection_it_read
                "--mode", "management", "--projection-hash", projection["projection_hash"])
     code, error = _cli(capsys, revision.var, *command)
     assert code != 0 and "does not take a session" in error
+    # A session's receipt would name only the projection the server reads for it; the desktop's files as before.
     with pytest.raises(FoundryError, match="projection_hash"):
         revision.analysis.register_report_export(revision.child["id"], "html", path, content_mode="management",
-                                                 projection_hash="0" * 64)
+                                                 projection_hash="0" * 64, allowed={revision.a["id"]})
+    assert revision.analysis.register_report_export(revision.child["id"], "html", path, content_mode="management",
+                                                    projection_hash="0" * 64)["projection_hash"] == "0" * 64
     code, receipt = _cli(capsys, revision.var, *command, session=None, task=revision.task.id)
     assert code == 0 and receipt["projection_hash"] == projection["projection_hash"]

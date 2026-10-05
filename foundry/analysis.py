@@ -44,11 +44,13 @@ PUBLICATION = {"draft", "archived"}
 SCRIPT_RESULT_PREVIEW_ROWS = 1000
 # One answer for a parent draft a session may not read and for one that does not exist, so it cannot tell them apart.
 PARENT_UNAVAILABLE = "parent draft is unavailable or outside this session context"
-# What a revision may take over from its parent when the spec leaves it out (save_draft copies it): text written or
-# generated from the parent's files. A revision records which of these it took (`inherited_text`), and one that took
-# any rests on everything its parent rests on (AnalysisStore.draft_snapshots).
-INHERITED_TEXT = ("title", "body", "claims", "limitations", "source_read_failures", "evidence_appendix",
-                  "evidence_appendix_meta")
+# What a revision takes over from its parent when the spec leaves it out (save_draft copies it): what the parent's
+# author wrote or the server generated from the parent's files. (The runs and requirements version it takes are read
+# as its own.) A revision records which of these it took (`inherited_fields`), and one that took any rests on
+# everything its parent rests on (AnalysisStore.draft_snapshots).
+INHERITED_FIELDS = ("title", "body", "claims", "fact_ids", "materiality", "limitations", "source_read_failures",
+                    "evidence_appendix", "evidence_appendix_meta", "evidence_recipes", "consistency_rules",
+                    "consistency_sources")
 DEFAULT_DRAFT_TITLE = "分析报告"
 # What a session reads of a completion receipt whose messages or fixups name a run outside it: the verdict.
 COMPLETION_VERDICT = (
@@ -228,23 +230,35 @@ def _receipt_runs(receipt: dict) -> set[str]:
 
 
 def _rests_on_parent(draft: dict) -> bool:
-    """Whether a revision took any of its parent's text (INHERITED_TEXT). One saved before revisions recorded what they
+    """Whether a revision took anything of its parent (INHERITED_FIELDS). One saved before revisions recorded what they
     took cannot tell, so it is read as having taken it."""
-    inherited = draft.get("inherited_text")
+    inherited = draft.get("inherited_fields")
     return bool(draft.get("parent_id")) and (inherited is None or bool(inherited))
 
 
-def _inherited_text(spec: dict, parent: dict) -> set[str]:
-    """The INHERITED_TEXT a revision saved from ``spec`` takes from ``parent``: what the spec leaves out and the parent
-    carries. A parent's default title, or empty text, is what a draft saved with no parent carries too."""
+def _default_materiality(value: Any) -> bool:
+    """Whether a draft's materiality is the one a draft given none is saved with (finance_explanations._materiality)."""
+    from foundry.finance_explanations import _materiality
+
+    try:
+        return value in (None, {}) or _materiality(value) == _materiality({})
+    except FoundryError:
+        return False
+
+
+def _inherited_fields(spec: dict, parent: dict) -> set[str]:
+    """The INHERITED_FIELDS a revision saved from ``spec`` takes from ``parent``: what the spec leaves out and the
+    parent carries. A parent's default title, or an empty value, is what a draft saved with no parent carries too."""
     if not parent:
         return set()
     inherited = set()
-    for key in INHERITED_TEXT:
+    for key in INHERITED_FIELDS:
         if key == "body":
             # The body goes with the document it is projected from.
             taken = spec.get("document") is None and "body" not in spec and (
                 parent.get("document") is not None or bool(parent.get("body")))
+        elif key == "materiality":
+            taken = key not in spec and not _default_materiality(parent.get(key))
         else:
             taken = key not in spec and parent.get(key) not in (None, "", [], {}) and not (
                 key == "title" and parent[key] == DEFAULT_DRAFT_TITLE)
@@ -962,7 +976,7 @@ class AnalysisStore:
     def draft_snapshots(self, draft: dict, *, cache: dict[str, frozenset[str]] | None = None) -> set[str]:
         """Every snapshot a saved draft rests on: its runs and claims, its evidence recipes and consistency
         sources, the requirements versions it was pinned to and checked against, and, for a revision that took
-        any of its parent's text (_rests_on_parent), everything the parent rests on: that text was written or
+        anything of its parent (_rests_on_parent), everything the parent rests on: that text was written or
         generated from the parent's files. A session may read the draft only if it may read all of them; a run or
         record that no longer reads raises. ``cache`` (draft id to its snapshots), when given, is shared by the
         drafts of one listing, so each draft of a revision chain is read once."""
@@ -1046,7 +1060,8 @@ class AnalysisStore:
         newer file outside a session decides nothing the session reads, and the manager reads a session's
         draft with the newer files the session could not read. The basis the labels were read from names
         every such file, so it never reaches a session; the integrity hash covers the stored record, so it
-        does not go with a view that differs from it. A draft saved before drafts kept a basis cannot tell
+        does not go with a view that differs from it (save that the manager reads a revision with its record's hash,
+        which also covers what the revision took from its parent, as it always read every draft). A draft saved before drafts kept a basis cannot tell
         what its labels rested on: a session reads it without labels, posture or freshness, the full view as
         saved. A session that may not read a revision's parent reads it as saved with no parent; one reading a
         check saved before completion policy 13 reads no engine run it may not read
@@ -1106,8 +1121,9 @@ class AnalysisStore:
                 continue
             if fields is not None:
                 views[key] = {**check, **fields}
-        # What a revision took from its parent decides who may read it, and is no part of what they read.
-        shown = {key: value for key, value in draft.items() if key != "inherited_text"} if "inherited_text" in draft else draft
+        # What a revision took from its parent decides who may read it, and is no part of what they read. The manager
+        # reads a revision with the integrity hash of its stored record, as every other draft.
+        shown = {key: value for key, value in draft.items() if key != "inherited_fields"} if "inherited_fields" in draft else draft
         if allowed is None and not views:
             return shown
         hidden = {"_integrity_hash"} if allowed is None else {"evidence_basis", "_integrity_hash"}
@@ -1246,7 +1262,7 @@ class AnalysisStore:
         `_recipe_report` is for internal callers that already evaluated this draft's evidence_recipes
         with evaluate_evidence_recipes in the same call; a report inside `spec` is never read.
         `_allowed` is the calling session's snapshot ceiling, so evidence freshness reads only what it may.
-        `_inherited` is the INHERITED_TEXT an internal caller took from the parent itself before composing `spec`.
+        `_inherited` is the INHERITED_FIELDS an internal caller took from the parent itself before composing `spec`.
         """
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
@@ -1259,7 +1275,7 @@ class AnalysisStore:
             if current and not set((current.get("bindings") or {}).values()) <= set(_allowed):
                 raise FoundryError("snapshots are outside this session context; use analysis-refresh to include task datasets")
         parent = self.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
-        inherited_text = sorted(_inherited_text(spec, parent) | set(_inherited)) if parent else None
+        inherited = _inherited_fields(spec, parent) | set(_inherited) if parent else None
         title = _safe_text(
             spec.get("title", parent.get("title", DEFAULT_DRAFT_TITLE)),
             "draft title",
@@ -1525,7 +1541,9 @@ class AnalysisStore:
             check_policy_version=COMPLETION_POLICY_VERSION,
             parent_id=parent.get("id"),
             # What this revision took from its parent, so it is read as resting on the parent's files (draft_snapshots).
-            **({"inherited_text": inherited_text} if inherited_text is not None else {}),
+            # The parent's facts it no longer cites are not taken.
+            **({"inherited_fields": sorted(inherited - (set() if fact_ids else {"fact_ids"}))}
+               if inherited is not None else {}),
             execution_status=execution_status,
             reproducibility_status=reproducibility,
             review_status=review,
@@ -1638,9 +1656,9 @@ class AnalysisStore:
             raise FoundryError("report export mode must be management or audit")
         template_version = (draft.get("document") or {}).get("template_version")
         projection = None
-        if projection_hash is not None:
-            # A receipt names a projection the server reads for this reader, never one the caller only asserts:
-            # an asserted hash could take the archive name of another export and break it.
+        if projection_hash is not None and allowed is not None:
+            # A session's receipt names a projection the server reads for it, never one it only asserts: an asserted
+            # hash could take the archive name of another export and break it. (The CLI files only the desktop's.)
             projection = self.projection_for_draft(draft_id, content_mode, allowed=allowed)
             if projection["projection_hash"] != projection_hash:
                 raise FoundryError("report export projection_hash is not this draft's projection; read the projection again")
@@ -1649,10 +1667,12 @@ class AnalysisStore:
             raise FoundryError("report export source must be a regular file")
         data = source.read_bytes()
         limit = MAX_SOURCE_BYTES
-        if len(data) > limit and projection is not None:
+        if len(data) > limit and projection_hash is not None:
             # The estimate declaration and labels bring their own room (issue #32): a file that fits the limit
             # without them still registers.
-            limit += int((projection.get("estimate_headroom") or {}).get("bytes") or 0)
+            projection = projection or self.projection_for_draft(draft_id, content_mode, allowed=allowed)
+            if projection["projection_hash"] == projection_hash:
+                limit += int((projection.get("estimate_headroom") or {}).get("bytes") or 0)
         if len(data) > limit:
             raise FoundryError("report export exceeds 32 MiB limit")
         digest = _hash_bytes(data)

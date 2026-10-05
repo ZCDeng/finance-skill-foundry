@@ -7,7 +7,8 @@ import re
 from decimal import localcontext
 from time import perf_counter
 
-from foundry.analysis import PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _hash, _hash_bytes, _inherited_text, _new, _safe_text
+from foundry.analysis import (PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality, _hash, _hash_bytes, _new,
+                             _safe_text)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -224,22 +225,39 @@ class FinanceStore:
 
     def _authorize_draft(self, draft):
         """Every snapshot a saved draft rests on (AnalysisStore.draft_snapshots), as analysis_cli._bound_draft checks it.
-        The manager reads every draft."""
-        if self.allowed is None:
+        The manager reads a draft whose own runs and records read."""
+        if self.allowed is not None:
+            self._authorize({f"source{index}": dataset_id
+                             for index, dataset_id in enumerate(sorted(self.analysis.draft_snapshots(draft)))})
             return
-        self._authorize({f"source{index}": dataset_id
-                         for index, dataset_id in enumerate(sorted(self.analysis.draft_snapshots(draft)))})
+        for run_id in draft.get("run_ids", []):
+            self._authorize(self.analysis.get_run(run_id)["bindings"])
+        for claim in draft.get("claims", []):
+            if isinstance(claim, dict):
+                if claim.get("dataset_id"):
+                    self._authorize({"source": claim["dataset_id"]})
+                if claim.get("run_id"):
+                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        recipes = draft.get("evidence_recipes", [])
+        self._authorize_evidence_recipes(recipes)
+        for recipe in recipes:
+            claim = recipe.get("claim") if isinstance(recipe, dict) else None
+            if isinstance(claim, dict) and claim.get("run_id"):
+                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+        self._authorize_consistency_sources(draft.get("consistency_sources", {}))
+        if draft.get("requirements_id"):
+            self._authorize(self.analysis._get("requirements", draft["requirements_id"]).get("bindings", {}))
 
     def _parent_draft(self, parent_id):
         """The draft a revision names as its parent. A session is refused one it may not read exactly as an unknown id."""
         if not parent_id:
             return {}
+        if self.allowed is None:
+            return self.analysis.get_draft(parent_id)
         try:
             parent = self.analysis.get_draft(parent_id)
             self._authorize_draft(parent)
         except FoundryError:
-            if self.allowed is None:
-                raise
             raise FoundryError(PARENT_UNAVAILABLE) from None
         return parent
 
@@ -834,6 +852,8 @@ class FinanceStore:
                 self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
         for run_id in spec.get("run_ids", []):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
+        self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
+        self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         self._parent_draft(spec.get("parent_id"))
         operations = CompletionOperationStore(self.task, self.session_id, self.allowed)
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
@@ -897,7 +917,10 @@ class FinanceStore:
             return {**result, "completion": receipt, "completion_operation": operation}
 
     def recover_completion_draft(self, spec):
-        """Manager-owned recovery of an explicitly selected completion attempt."""
+        """Manager-owned recovery of an explicitly selected completion attempt.
+
+        The receipt returned is the one stored; a session's operation settles on that receipt as the session reads it
+        (_operation_receipt), so where earlier drafts it may not read spent repairs the two can differ."""
         from foundry.analysis import _hash
         from foundry.finance_completion import record_completion
         from foundry.finance_completion_operations import (
@@ -1031,9 +1054,11 @@ class FinanceStore:
             raise FoundryError("run_ids must be an array")
         from foundry.report_visuals import materialize_document
 
-        # The parent's prose and claims this revision takes over before save_draft sees the spec (the appendix and the
-        # read failures are composed again from this revision's own runs).
-        inherited = _inherited_text(spec, parent) & {"body", "claims"}
+        # What this revision takes over from its parent before save_draft sees the spec, decided as each is composed
+        # (the appendix and the read failures are composed again from this revision's own runs).
+        inherited = set()
+        parent_prose = bool(parent) and "body" not in spec and spec.get("document") is None
+        took_document = parent_prose and parent.get("document") is not None
         visual_claims = []
         visual_document = spec.get("document")
         if visual_document is None and "body" not in spec:
@@ -1066,6 +1091,10 @@ class FinanceStore:
         previous_appendix = parent.get("evidence_appendix", "")
         if previous_appendix and body.endswith(previous_appendix):
             body = body[:-len(previous_appendix)].rstrip()
+        if took_document or (parent_prose and body.strip()):
+            inherited.add("body")
+        if parent and "materiality" not in spec and not _default_materiality(parent.get("materiality")):
+            inherited.add("materiality")
         if document is not None:
             from foundry.report_documents import report_document_markdown
 
@@ -1084,10 +1113,17 @@ class FinanceStore:
         appendix = render_evidence_appendix(prepared)
         appendix_base_body = appendix["body"]
         fact_ids = list(dict.fromkeys([*explicit_fact_ids, *template_fact_ids, *appendix["fact_ids"]]))
+        generated = [*template_fact_ids, *appendix["fact_ids"]]
+        if parent and "fact_ids" not in spec and any(fact_id not in generated for fact_id in explicit_fact_ids):
+            inherited.add("fact_ids")
         auto_claims = claims_for_facts(prepared["facts"], fact_ids)
         for visual_claim in visual_claims:
             if not any(all(claim.get(key) == visual_claim[key] for key in ("run_id", "row", "column")) for claim in auto_claims):
                 auto_claims.append(visual_claim)
+        # A parent claim the revision would cite on its own (one of its runs' generated claims) is not taken over.
+        if parent and "claims" not in spec and parent.get("claims") and _dedupe_explanation_claims(
+                copy.deepcopy([*auto_claims, *parent["claims"]])) != _dedupe_explanation_claims(copy.deepcopy(auto_claims)):
+            inherited.add("claims")
         claims = []
         for claim in _dedupe_explanation_claims(
             [*auto_claims, *spec.get("claims", parent.get("claims", []))]
@@ -1246,13 +1282,14 @@ class FinanceStore:
         draft = (
             self.analysis.get_draft(spec["draft_id"]) if spec.get("draft_id") else {}
         )
-        if draft:
-            self._authorize_draft(draft)
-        if spec.get("requirements_id"):
-            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
-        # A revision is compared with its parent's runs: a parent named here must be one this reader may read, and
-        # a stored draft's parent it may not read is left out, as the draft reads to it (AnalysisStore.draft_in_view).
-        self._parent_draft(spec.get("parent_id"))
+        if self.allowed is not None:
+            if draft:
+                self._authorize_draft(draft)
+            if spec.get("requirements_id"):
+                self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            # A revision is compared with its parent's runs: a parent named here must be one this session may read,
+            # and a stored draft's parent it may not read is left out, as the draft reads to it (draft_in_view).
+            self._parent_draft(spec.get("parent_id"))
         orphaned = (not spec.get("parent_id") and bool(draft.get("parent_id")) and self.allowed is not None
                     and not self.analysis._parent_readable(draft["parent_id"], self.allowed))
         run_ids = spec.get("run_ids", draft.get("run_ids", []))
@@ -1260,6 +1297,9 @@ class FinanceStore:
             raise FoundryError("run_ids must be an array")
         for run_id in dict.fromkeys(run_ids):
             self._authorize(self.analysis.get_run(run_id)["bindings"])
+        if self.allowed is None:
+            for run_id in draft.get("run_ids", []):
+                self._authorize(self.analysis.get_run(run_id)["bindings"])
         for claim in spec.get("claims", draft.get("claims", [])):
             if isinstance(claim, dict):
                 if claim.get("run_id"):
