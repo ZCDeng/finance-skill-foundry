@@ -535,9 +535,38 @@ def test_a_session_s_host_events_changed_outside_the_bridge_are_refused(tmp_path
     assert call("s1", "/api/context") == refused
 
 
-def test_the_operator_s_host_check_counts_every_session_s_host_events(tmp_path):
-    """tools/verify_excel_host.py reads the bridge's record as the operator, as before: it counts the host events
-    every session logged, each in a file of its own, with those the state holds from before they named a session."""
+def test_host_events_a_session_posts_at_once_are_all_kept(tmp_path, monkeypatch):
+    """The bridge serves each request on a thread of its own, and a session may post host events at once (two
+    actions of its task pane, or two windows on one token). Each post reads the session's events and writes them back
+    under the task lock, so none is lost to another read before it was written."""
+    import threading
+    import time
+
+    from foundry.excel_bridge import ExcelBridgeApp
+
+    _, call = _bridge(tmp_path)
+    read = ExcelBridgeApp._session_telemetry
+
+    def slow(self, *args):
+        events = read(self, *args)
+        time.sleep(0.2)  # long enough for every other post to read the same events, were it not for the lock
+        return events
+
+    monkeypatch.setattr(ExcelBridgeApp, "_session_telemetry", slow)
+    answers = []
+    posts = [threading.Thread(target=lambda number=number: answers.append(call(
+        "s1", "/api/telemetry", {"workbook_id": "wb_shared", "event": f"run_{number}"})[0])) for number in range(4)]
+    for post in posts:
+        post.start()
+    for post in posts:
+        post.join()
+    assert answers == [200] * 4
+    assert sorted(event["event"] for event in call("s1", "/api/context")[1]["telemetry"]) == [
+        "run_0", "run_1", "run_2", "run_3"]
+
+
+def _host_check(root: Path, task) -> dict:
+    """What tools/verify_excel_host.py reports, as the operator, of a blank host workbook and ``task``'s bridge."""
     import importlib.util
 
     from openpyxl import Workbook
@@ -546,18 +575,40 @@ def test_the_operator_s_host_check_counts_every_session_s_host_events(tmp_path):
         "verify_excel_host", Path(__file__).resolve().parents[1] / "tools" / "verify_excel_host.py")
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
+    book = Workbook()
+    book.active.title = "经营分析"
+    book.save(root / "host.xlsx")
+    return tool.verify(root / "host.xlsx", task.root / "analysis" / "excel_bridge" / "state.json")
+
+
+def test_the_operator_s_host_check_counts_every_session_s_host_events(tmp_path):
+    """tools/verify_excel_host.py reads the bridge's record as the operator, as before: it counts the host events
+    every session logged, each in a file of its own, with those the state holds from before they named a session."""
     task, call = _bridge(tmp_path)
     assert call("s1", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
     _rewrite_bridge_state(task, telemetry=[{"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "full_recalc",
                                             "workbook_id": "wb_shared", "host": {}, "details": {}}])
     for session, event in (("s1", "input_imported"), ("s2", "input_imported"), ("s2", "metric_run")):
         assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})[0] == 200
-    book = Workbook()
-    book.active.title = "经营分析"
-    book.save(tmp_path / "host.xlsx")
-    result = tool.verify(tmp_path / "host.xlsx", task.root / "analysis" / "excel_bridge" / "state.json")
-    assert result["host_event_counts"] == {"input_imported": 2, "metric_run": 1, "output_previewed": 0,
-                                           "output_applied": 0, "full_recalc": 1, "workbook_saved": 0}
+    assert _host_check(tmp_path, task)["host_event_counts"] == {
+        "input_imported": 2, "metric_run": 1, "output_previewed": 0, "output_applied": 0, "full_recalc": 1,
+        "workbook_saved": 0}
+
+
+def test_the_operator_s_host_check_counts_host_events_logged_before_any_workbook_was_registered(tmp_path):
+    """A session may log host events before it registers a workbook, or after a register that failed. Those events
+    leave no bridge state behind, only the session's own file: the host check still reports them, with no host, as it
+    did when every event went into the state. A bridge no session has used is still an error."""
+    task, call = _bridge(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        _host_check(tmp_path, task)
+    for session, event in (("s1", "full_recalc"), ("s2", "workbook_saved")):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})[0] == 200
+    assert not (task.root / "analysis" / "excel_bridge" / "state.json").exists()
+    result = _host_check(tmp_path, task)
+    assert (result["status"], result["hosts"], result["host_event_counts"]) == ("failed", [], {
+        "input_imported": 0, "metric_run": 0, "output_previewed": 0, "output_applied": 0, "full_recalc": 1,
+        "workbook_saved": 1})
 
 
 def test_a_workbook_saved_before_per_session_records_goes_only_to_the_session_that_filed_its_imports(tmp_path):
