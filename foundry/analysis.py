@@ -926,6 +926,17 @@ class AnalysisStore:
                 raise FoundryError("run output integrity check failed")
         return run
 
+    def verified_run(self, run_id: str, allowed: set[str] | None, cache: dict) -> dict:
+        """get_run, the run's outputs verified once a session read (``cache``, as for run_in_view), however many drafts
+        and receipts citing it the read judges again as its twin would: a session's completion save does so under
+        completion.lock. The manager verifies them on every call, as it always did."""
+        if allowed is None:
+            return self.get_run(run_id)
+        verified = cache.setdefault("verified_runs", {})
+        if run_id not in verified:
+            verified[run_id] = self.get_run(run_id)
+        return verified[run_id]
+
     def run_in_view(self, run: dict, allowed: set[str] | None, *, cache: dict | None = None) -> dict:
         """A stored run as a reader whose snapshot ceiling is ``allowed`` reads it; None (the manager) reads it as stored.
 
@@ -935,8 +946,9 @@ class AnalysisStore:
         its own (_captured_otherwise), and its reproducibility as _reproducibility_in_view reads it. No
         run a session reads carries the integrity hash: it covers the stored record, which a view may not be, and its
         absence must not tell a view from a stored record. ``cache``, shared by the runs, drafts and receipts of one
-        read, holds the task's requirements versions, their fingerprints, its runs, saved analyses, sessions and refresh
-        batches, the row declarations read again and the requirement support of the receipts judged again.
+        read, holds the task's requirements versions, their fingerprints, its runs as listed and as verified
+        (verified_run), saved analyses, sessions and refresh batches, the row declarations read again and the
+        requirement support of the receipts judged again.
         """
         if allowed is None:
             return run
@@ -1523,7 +1535,8 @@ class AnalysisStore:
 
         def runs() -> dict[str, dict]:
             if not loaded:
-                loaded.update({run_id: self.get_run(run_id) for run_id in dict.fromkeys(draft.get("run_ids") or [])})
+                loaded.update({run_id: self.verified_run(run_id, allowed, cache)
+                               for run_id in dict.fromkeys(draft.get("run_ids") or [])})
             return loaded
 
         replaced: list[dict[str, set[str]]] = []
@@ -1834,7 +1847,7 @@ class AnalysisStore:
                 named = _receipt_runs(receipt)
                 if (draft.get("check_policy_version") or 0) < OWN_FILES_POLICY:
                     named |= _engine_runs(draft)
-                whole = all(set((self.get_run(run_id).get("bindings") or {}).values()) <= allowed
+                whole = all(set((self.verified_run(run_id, allowed, cache).get("bindings") or {}).values()) <= allowed
                             for run_id in sorted(named))
             except FoundryError:
                 return None

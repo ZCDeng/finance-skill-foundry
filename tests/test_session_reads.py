@@ -754,8 +754,9 @@ def test_a_session_reads_runs_drafts_and_receipts_with_no_version_hidden_at_no_m
                             raising=False)
     code, state = _cli(capsys, world.var, "analysis-state")
     assert code == 0 and len(state["drafts"]) == len(state["completions"]) == 4
-    # Each cited run once for whether the session may read the draft, once for whether it may read the receipt whole.
-    assert len(calls) == 2 * 4 * len(world.draft["run_ids"])
+    # Each cited run once for whether the session may read each draft, and once in the read for whether it may read the
+    # receipts whole.
+    assert len(calls) == (4 + 1) * len(world.draft["run_ids"])
     # The versions and runs are listed once for the whole read, and each record's pin is read once, by the listing:
     # no draft or receipt lists or reads them again.
     assert listed.count("requirements") == listed.count("runs") == 1 and len(pins) == len(set(pins))
@@ -2065,14 +2066,19 @@ def test_a_session_reads_the_receipts_its_operation_settled_on_before_it_takes_t
     assert _shows(read, world.hidden) == []
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
 def test_a_session_s_completion_save_reads_its_receipts_before_it_takes_completion_lock(tmp_path, capsys,
-                                                                                        monkeypatch):
+                                                                                        monkeypatch, interrupted):
     """The manager's saves wait on completion.lock, which a session's completion save holds while its operation reserves
     and settles: whether the session may read each receipt the operation is settled on, and the one the save settles
-    it on, is read before the save takes that lock, so the operation reads no run under it, on a save or a replay."""
+    it on, is read before the save takes that lock, so the operation reads no run under it, on a save or a replay.
+    With ``interrupted`` the first save stopped after its draft was saved and before its receipt was filed, so the
+    replay files the receipt under the lock: the save tells the operation the session reads it (_settled_receipt)."""
     import traceback
 
+    import foundry.finance_completion as completion
     import foundry.locking as locking
+    from foundry.finance_completion_operations import CompletionOperationStore
 
     world = _settled_operation(tmp_path / "legacy", capsys, live=True, legacy=True, spent=0)
     [a] = world.sess.allowed
@@ -2098,16 +2104,76 @@ def test_a_session_s_completion_save_reads_its_receipts_before_it_takes_completi
 
     monkeypatch.setattr(locking, "exclusive", holding)
     monkeypatch.setattr(AnalysisStore, "get_run", reading)
-    # Revision 2 settled on a draft citing the session's run, then settled again as a replay.
-    for _ in range(2):
+    spec = {"body": "会话修订稿。", "run_ids": [run["id"]]}
+    if interrupted:
+        original = completion.record_completion
+
+        def failing(*args, **kwargs):
+            raise RuntimeError("interrupted before receipt")
+
+        monkeypatch.setattr(completion, "record_completion", failing)
         reads.append([])
-        read.append(world.sess.save_completion_draft(world.operation, "call-2",
-                                                     {"body": "会话修订稿。", "run_ids": [run["id"]]}))
-    assert [(False in by_save, True in by_save) for by_save in reads] == [(True, False)] * 2
-    assert [shown.get("replayed", False) for shown in read] == [False, True]
+        with pytest.raises(RuntimeError):
+            world.sess.save_completion_draft(world.operation, "call-2", spec)
+        monkeypatch.setattr(completion, "record_completion", original)
+        reads.clear()
+        # Revision 2 is left reserved, on no receipt the operation could read before the replay's lock.
+        assert [row["status"] for row in CompletionOperationStore(world.sess.task, "sess", world.sess.allowed).get(
+            world.operation)["revisions"]] == ["rejected_validation", "reserved"]
+    # Revision 2 settled on a draft citing the session's run, then settled again as a replay (interrupted: the replay
+    # alone, settling it).
+    for _ in range(1 if interrupted else 2):
+        reads.append([])
+        read.append(world.sess.save_completion_draft(world.operation, "call-2", spec))
+    assert [(False in by_save, True in by_save) for by_save in reads] == [(True, False)] * len(read)
+    assert [shown.get("replayed", False) for shown in read] == ([True] if interrupted else [False, True])
     assert [[row["status"] for row in shown["completion_operation"]["revisions"]] for shown in read] == [
-        ["rejected_validation", "settled"]] * 2
+        ["rejected_validation", "settled"]] * len(read)
     assert _shows(read, world.hidden) == []
+
+
+def test_a_session_s_completion_save_verifies_its_runs_under_completion_lock_as_where_no_version_was_hidden(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """The manager's saves wait on completion.lock, which a session's completion save holds while it saves, files and
+    reads its receipt. Where Hv held an item more, the session reads its draft and receipts again as its twin would,
+    but verifies each cited run's outputs (get_run) under the lock no more often than where Hv was never saved: on a
+    save, a revision and a replay."""
+    import foundry.locking as locking
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    exclusive, get_run = locking.exclusive, AnalysisStore.get_run
+    held, counts, verdicts = [False], [], []
+
+    @contextmanager
+    def holding(path, **kwargs):
+        with exclusive(path, **kwargs):
+            before, held[0] = held[0], held[0] or Path(path).name == "completion.lock"
+            try:
+                yield
+            finally:
+                held[0] = before
+
+    def reading(self, run_id):
+        if held[0]:
+            counts[-1][-1] += 1
+        return get_run(self, run_id)
+
+    monkeypatch.setattr(locking, "exclusive", holding)
+    monkeypatch.setattr(AnalysisStore, "get_run", reading)
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=True)
+        session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+        operation = CompletionOperationStore(world.task, "sess", session.allowed).begin(
+            "request-1", policy={"max_repairs": 2})
+        counts.append([])
+        shown = []
+        for call, body in (("call-1", "会话稿甲：Falcon 收入 100。"), ("call-2", "会话稿乙：Falcon 收入 100。"),
+                           ("call-2", "会话稿乙：Falcon 收入 100。")):
+            counts[-1].append(0)
+            shown.append(session.save_completion_draft(operation["id"], call, {**world.draft, "body": body}))
+        verdicts.append([(_verdict(row["completion"]), row.get("replayed", False)) for row in shown])
+    assert verdicts[0] == verdicts[1] and [replayed for _, replayed in verdicts[0]] == [False, False, True]
+    assert counts[1] == counts[0], counts
 
 
 def test_a_session_s_operation_answers_by_the_record_it_reads_under_the_task_lock(tmp_path, capsys, monkeypatch):

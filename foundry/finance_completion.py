@@ -124,7 +124,7 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, sup
     requirements = with_input_gaps(analysis, requirements, supports)
     requirement_id = requirements.get('requirements_id')
     cache = {} if cache is None else cache
-    runs = {run_id: analysis.run_in_view(analysis.get_run(run_id), allowed, cache=cache)
+    runs = {run_id: analysis.run_in_view(analysis.verified_run(run_id, allowed, cache), allowed, cache=cache)
             for run_id in draft.get('run_ids', [])}
     run_hashes = {run_id: run.get('output_hash') for run_id, run in runs.items()}
     requirement = analysis._get('requirements', requirement_id) if requirement_id else None
