@@ -1520,7 +1520,8 @@ class AnalysisStore:
             # Saved when a requirement still read runs on other files too: a session reads none it may not read.
             def readable_run(run_id: Any) -> bool:
                 try:
-                    return isinstance(run_id, str) and set((self.get_run(run_id).get("bindings") or {}).values()) <= set(allowed)
+                    return isinstance(run_id, str) and set(
+                        (self.verified_run(run_id, allowed, cache).get("bindings") or {}).values()) <= set(allowed)
                 except FoundryError:
                     return False
 
@@ -1529,7 +1530,8 @@ class AnalysisStore:
         if allowed is not None:
             from foundry.finance_requirements import check_lineage_in_view
 
-            versions = {} if versions is None else versions
+            # The versions this read has listed (_requirements_by_id), so each lineage walk reads none again.
+            versions = self._requirements_by_id(cache) if versions is None else versions
             draft = {**draft, **{key: check_lineage_in_view(self, draft[key], allowed, versions=versions)
                                  for key in ("explanation_check", "quality") if isinstance(draft.get(key), dict)}}
 
@@ -1815,8 +1817,8 @@ class AnalysisStore:
         from foundry.finance_requirements import OWN_FILES_POLICY
 
         allowed = set(allowed)
-        versions = {} if versions is None else versions
         cache = {} if cache is None else cache
+        versions = self._requirements_by_id(cache) if versions is None else versions
         readable = self.completion_reader(allowed, readable_ids=readable_ids)
         chain: list[dict] | None = None
         # Each receipt as this reader reads it, whole (None: it may not read it), and whether every run it names is
@@ -1922,7 +1924,8 @@ class AnalysisStore:
             # As draft_in_view reads a check saved when a requirement still read runs on other files too.
             def readable_run(run_id: Any) -> bool:
                 try:
-                    return isinstance(run_id, str) and set((self.get_run(run_id).get("bindings") or {}).values()) <= allowed
+                    return isinstance(run_id, str) and set(
+                        (self.verified_run(run_id, allowed, cache).get("bindings") or {}).values()) <= allowed
                 except FoundryError:
                     return False
 

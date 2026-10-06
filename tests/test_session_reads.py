@@ -574,6 +574,21 @@ def test_a_session_judges_a_stall_on_checks_before_policy_13_without_runs_it_may
     assert read[0] == read[1] == [("repair_available", 0, None, True), ("needs_review", 1, "no_progress", False)]
 
 
+def test_a_session_verifies_the_runs_a_check_before_policy_13_names_once_a_read(tmp_path, capsys, monkeypatch):
+    """A check before policy 13 named engine runs on files the session may not read, and the session reads it without
+    them (finance_requirements.requirements_in_view) on every draft and receipt it reads it on: it reads each such run,
+    its outputs verified, once a read (verified_run)."""
+    _legacy_chain(tmp_path, True, ("pinned", "pinned"), capsys, monkeypatch)
+    calls = []
+    get_run = AnalysisStore.get_run
+    monkeypatch.setattr(AnalysisStore, "get_run", lambda self, run_id: calls.append(run_id) or get_run(self, run_id))
+    code, state = _cli(capsys, tmp_path / "var", "analysis-state")
+    assert code == 0 and len(state["drafts"]) == len(state["completions"]) == 2
+    # The control totals the manager ran on the hidden files, which neither draft cites.
+    hidden = set(calls) - {run["id"] for run in state["runs"]}
+    assert len(hidden) == 2 and [calls.count(run_id) for run_id in hidden] == [1, 1]
+
+
 def test_a_session_reads_its_operation_settled_before_it_read_such_runs_so_as_its_receipts(
         tmp_path, capsys, fake_runner, monkeypatch):
     """Saved as every reader then read runs, as stored: the operation settled on receipts judged on Hv. Read now, the
@@ -953,15 +968,15 @@ def test_a_session_reads_a_run_by_the_version_it_started_under_not_one_saved_whi
     assert not any("requirements_run_outdated" in receipt[5] for receipt in receipts)
 
 
-@pytest.mark.parametrize("saved_after", [None, "check", "basis"])
+@pytest.mark.parametrize("saved_after", [None, "before", "check", "basis"])
 @pytest.mark.parametrize("saver", ["manager", "session"])
 def test_a_session_reads_a_draft_by_the_version_it_was_checked_against_not_one_saved_while_it_was_saved(
         tmp_path, capsys, fake_runner, monkeypatch, saver, saved_after):
     """A draft save checks the draft against the current version, reads its basis, then takes its seq, and no
-    requirements save waits on it. While the manager or the session saves a draft citing the runs, the manager saves W
-    on A, a child of V2 that declares the Falcon revenue an estimate: after the check, or after the basis was read. The
-    session reads the draft as where Hv was never saved, by V2 either way: the version the draft was checked
-    against."""
+    requirements save waits on it. The manager saves W on A, a child of V2 that declares the Falcon revenue an estimate,
+    before the manager or the session saves a draft citing the runs, or while it does: after the check, or after the
+    basis was read. The session reads the draft as where Hv was never saved, by the version it was checked against: W,
+    which declares the script row an estimate, where W came first, and V2 either other way."""
     import foundry.evidence_labels as evidence_labels
 
     basis = evidence_labels.draft_evidence_basis
@@ -989,11 +1004,14 @@ def test_a_session_reads_a_draft_by_the_version_it_was_checked_against_not_one_s
                 save_w()
             return fields
 
+        if saved_after == "before":
+            save_w()
         monkeypatch.setattr(evidence_labels, "draft_evidence_basis", reading)
         saved = (world.manager.save_explanation_draft(world.draft) if saver == "manager"
                  else _session_draft(world, world.draft["body"]))
         monkeypatch.setattr(evidence_labels, "draft_evidence_basis", basis)
-        assert saved["explanation_check"]["requirements"]["requirements_id"] == world.current["id"]
+        assert saved["explanation_check"]["requirements"]["requirements_id"] == (
+            meanwhile[0]["id"] if saved_after == "before" else world.current["id"])
         assert [row["seq"] < saved["seq"] for row in meanwhile] == ([True] if saved_after else [])
         script = world.runs["script"]["id"]
         code, state = _cli(capsys, world.var, "analysis-state")
@@ -1004,7 +1022,8 @@ def test_a_session_reads_a_draft_by_the_version_it_was_checked_against_not_one_s
         read.append((_labels_of(draft["explanation_check"], script), _labels_of(report["explanation_check"], script),
                      draft["explanation_check"]["evidence_posture"]))
     assert read[0] == read[1]
-    assert read[0][0] == read[0][1] and read[0][0][0][1:] == ("unknown", ["run_script"])
+    assert read[0][0] == read[0][1] and read[0][0][0][1:] == (
+        ("estimate", ["row_declared_estimate"]) if saved_after == "before" else ("unknown", ["run_script"]))
 
 
 def _apart_world(root: Path):
@@ -1126,7 +1145,8 @@ def test_a_session_reads_an_analysis_another_session_saved_naming_a_version_it_m
     saves SQL and a script on A naming Hv2, and S2 and the manager run the SQL. Where Hv2 was never saved, S2, which
     could read neither H1 nor Hv1, named the newest older version it could read: P, or none. S1 reads the analyses and
     their runs so, never naming or pinned to Hv1, though S2 has since come to read H1 too, and runs, declares and
-    files its receipt on them so."""
+    files its receipt on them so. The manager also runs SQL S2 saved naming none: that run is pinned to the head it
+    captured, not to a version S2 named, so S1 reads it as the manager's capture where Hv2 was never saved, Hv1 or P."""
     get_analysis = AnalysisStore.get_analysis
     read = []
     for name, hidden in (("plain", False), ("hidden", True)):
@@ -1147,8 +1167,12 @@ def test_a_session_reads_an_analysis_another_session_saved_naming_a_version_it_m
             {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", **pin}), session="s2")
         assert code == 0, script
         analyses = [saved["id"], script["analysis_id"]]
-        others = [_cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], **who)[1]
-                  for who in ({"session": "s2"}, {"session": None, "task": world.task.id})]
+        code, unnamed = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}}), session="s2")
+        assert code == 0, unnamed
+        manager = {"session": None, "task": world.task.id}
+        others = [_cli(capsys, world.var, "analysis-run", "--analysis", analysis_id, **who)[1] for analysis_id, who in (
+            (saved["id"], {"session": "s2"}), (saved["id"], manager), (unnamed["id"], manager))]
         _save_on(world, "C", "收入", {"gl": world.a}, ITEMS)
         world.task.update_session_context("s2", snapshot_ids=[world.h1])
         loaded = []
@@ -1180,11 +1204,54 @@ def test_a_session_reads_an_analysis_another_session_saved_naming_a_version_it_m
     named, pins, verdict = read[0]
     if lineage == "middle":
         assert named == [("P", "s2", 2)] * 2
-        assert pins == [("P", "P=C"), ("P", "Hv1"), ("P", "P=C"), ("P", "P=C", "P", "P=C")]
+        assert pins == [("P", "P=C"), ("P", "Hv1"), ("Hv1", "Hv1"), ("P", "P=C"), ("P", "P=C", "P", "P=C")]
     else:
         assert named == [(None, "s2", 2)] * 2
-        assert pins == [("P", "P=C"), ("P", "P=C"), ("C", "P=C"), ("C", "P=C", "C", "P=C")]
+        assert pins == [("P", "P=C"), ("P", "P=C"), ("P", "P=C"), ("C", "P=C"), ("C", "P=C", "C", "P=C")]
     assert verdict[4] == (2 if lineage == "middle" else 0) and "requirements_run_outdated" not in verdict[5]
+
+
+def test_a_session_reads_a_run_of_another_session_s_analysis_by_a_version_its_runner_may_read_too(
+        tmp_path, capsys, fake_runner):
+    """S1 may read A and H1, S2 A and H2, and S3 all three. Hv1 on H1 follows P on A and then, but where S1 reads, Hv2
+    on H2. S3 saves SQL on A naming Hv2 and S2 runs it. Where Hv2 was never saved, S3 named Hv1, as S1 reads its
+    analysis, and S2, which may not read Hv1, ran it as naming P. S1 reads S2's run so, pinned to P and not to Hv1,
+    which S3 may read but S2 never could, and files its receipt on it so."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        world.task.record_session("s3", role="analysis")
+        assert set(next(row for row in world.task.sessions() if row["session_id"] == "s3")["snapshot_ids"]) == {
+            world.a, world.h1, world.h2}
+        _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1}, HIDDEN_ITEMS)
+        if hidden:
+            _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2}, ITEMS)
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a},
+             "requirements_id": world.versions["Hv2" if hidden else "Hv1"]["id"]}), session="s3")
+        assert code == 0, saved
+        code, run = _cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], session="s2")
+        assert code == 0, run
+        assert run["requirements_id"] == world.versions["Hv2" if hidden else "P"]["id"]
+        _save_on(world, "C", "收入", {"gl": world.a}, ITEMS)
+        code, state = _cli(capsys, world.var, "analysis-state", session="s1")
+        assert code == 0, state
+        listed = {row["id"]: row for row in [*state["analyses"], *state["runs"]]}
+        s1 = next(row for row in world.task.sessions() if row["session_id"] == "s1")["snapshot_ids"]
+        receipt = FinanceStore(world.task, snapshot_ids=s1, session_id="s1").save_explanation_draft(
+            {"body": "S1 稿：Falcon 收入 100。", "run_ids": [run["id"]]})["completion"]
+        hidden_values = [value for label, row in world.versions.items() if label == "Hv2"
+                         for value in (row["id"], row["semantic_fingerprint"])]
+        assert _shows([state, receipt], [world.h2, *hidden_values]) == []
+        versions = {label: row for label, row in world.versions.items() if label != "Hv2"}
+        ids = {row["id"]: label for label, row in versions.items()}
+        read.append((ids.get(listed[saved["id"]].get("requirements_id")), _pins(versions, [listed[run["id"]]]),
+                     _verdict(receipt)))
+    assert read[0] == read[1]
+    named, pins, verdict = read[0]
+    assert named == "Hv1" and pins == [("P", "P=C")]
+    assert verdict[4] == 1 and "requirements_run_outdated" not in verdict[5]
 
 
 @pytest.mark.parametrize("engine", ["sql", "script"])
@@ -2228,6 +2295,60 @@ def test_a_session_s_completion_save_verifies_its_runs_under_completion_lock_as_
         verdicts.append([(_verdict(row["completion"]), row.get("replayed", False)) for row in shown])
     assert verdicts[0] == verdicts[1] and [replayed for _, replayed in verdicts[0]] == [False, False, True]
     assert counts[1] == counts[0], counts
+
+
+def test_a_session_s_completion_save_reads_each_lineage_from_its_listed_versions_under_completion_lock(
+        tmp_path, capsys, fake_runner, monkeypatch):
+    """A session reads its draft's check and each receipt by their version's lineage as its own check would have read
+    it (finance_requirements.check_lineage_in_view), and its completion save does so under completion.lock, which the
+    manager's saves wait on. Each walk takes the versions from those the save has listed
+    (AnalysisStore._requirements_by_id), so it reads none again under the lock: on a save, a revision and a replay,
+    with Hv or without."""
+    import foundry.finance_requirements as finance_requirements
+    import foundry.locking as locking
+    from foundry.finance_completion_operations import CompletionOperationStore
+
+    exclusive, get, walk = locking.exclusive, AnalysisStore._get, finance_requirements.check_lineage_in_view
+    held, walking, counts = [False], [False], []
+
+    @contextmanager
+    def holding(path, **kwargs):
+        with exclusive(path, **kwargs):
+            before, held[0] = held[0], held[0] or Path(path).name == "completion.lock"
+            try:
+                yield
+            finally:
+                held[0] = before
+
+    def walked(*args, **kwargs):
+        if held[0]:
+            counts[-1][-1][0] += 1
+        walking[0] = True
+        try:
+            return walk(*args, **kwargs)
+        finally:
+            walking[0] = False
+
+    def reading(self, kind, record_id):
+        if held[0] and walking[0] and kind == "requirements":
+            counts[-1][-1][1] += 1
+        return get(self, kind, record_id)
+
+    monkeypatch.setattr(locking, "exclusive", holding)
+    monkeypatch.setattr(finance_requirements, "check_lineage_in_view", walked)
+    monkeypatch.setattr(AnalysisStore, "_get", reading)
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=True)
+        session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+        operation = CompletionOperationStore(world.task, "sess", session.allowed).begin(
+            "request-1", policy={"max_repairs": 2})
+        counts.append([])
+        for call, body in (("call-1", "会话稿甲：Falcon 收入 100。"), ("call-2", "会话稿乙：Falcon 收入 100。"),
+                           ("call-2", "会话稿乙：Falcon 收入 100。")):
+            counts[-1].append([0, 0])
+            session.save_completion_draft(operation["id"], call, {**world.draft, "body": body})
+    # Every save walks the lineage under the lock, and reads no version to do so.
+    assert all(walks and not reads for by_world in counts for walks, reads in by_world), counts
 
 
 def test_a_session_s_operation_answers_by_the_record_it_reads_under_the_task_lock(tmp_path, capsys, monkeypatch):
