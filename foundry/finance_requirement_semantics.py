@@ -55,7 +55,8 @@ def verified_requirement_fingerprint(analysis, record):
 
 def capture_requirements(analysis, authorize=None, *, allowed=None):
     """Capture at execution start so a concurrent revision cannot relabel a run. A session (``allowed``, its snapshot
-    ceiling) captures the newest version it may read, as it reads its current one; the manager the latest."""
+    ceiling) captures the newest version it may read, as it reads its current one, with the fingerprint it reads it
+    with (AnalysisStore.fingerprint_in_view); the manager the latest."""
     from foundry.finance_requirements import latest_requirements
     record = latest_requirements(analysis, allowed)
     if record and authorize is not None:
@@ -64,11 +65,14 @@ def capture_requirements(analysis, authorize=None, *, allowed=None):
         except FoundryError:
             record = None
     return {'requirements_id': record['id'] if record else None,
-            'requirements_semantic_fingerprint': verified_requirement_fingerprint(analysis, record)}
+            'requirements_semantic_fingerprint': analysis.fingerprint_in_view(record, allowed)}
 
 
-def run_has_equivalent_requirements(analysis, run, current):
-    fingerprint = verified_requirement_fingerprint(analysis, current)
+def run_has_equivalent_requirements(analysis, run, current, *, allowed=None, cache=None):
+    """Whether ``run``, captured under an older version, answers what ``current`` asks. A session (``allowed``, its
+    snapshot ceiling; None: the manager) compares the fingerprints it reads the versions with
+    (AnalysisStore.fingerprint_in_view; ``cache`` as for AnalysisStore.run_in_view)."""
+    fingerprint = analysis.fingerprint_in_view(current, allowed, cache=cache)
     if not fingerprint or run.get('requirements_semantic_fingerprint') != fingerprint:
         return False
     try:
@@ -77,7 +81,7 @@ def run_has_equivalent_requirements(analysis, run, current):
         return False
     if original.get('seq', -1) >= run.get('seq', -1):
         return False
-    if verified_requirement_fingerprint(analysis, original) != fingerprint:
+    if analysis.fingerprint_in_view(original, allowed, cache=cache) != fingerprint:
         return False
     if run.get('bindings', {}) != original.get('bindings', {}):
         return False

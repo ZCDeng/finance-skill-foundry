@@ -4,8 +4,12 @@ A session's snapshot ceiling (context.snapshot_ids; FinanceStore.allowed; an MCP
 it may build on, as it decides what it may read (test_session_views). A record that rests on a file outside it
 neither shows nor changes what the session saves: not a source batch a refresh compares with, an upload of the
 same bytes, a requirements version, an earlier run of the same fingerprint, a draft named by id or a draft a
-recovery files for it. A record the session may not read is refused exactly as one that does not
-exist. The manager (no session) saves and is answered as before.
+recovery files for it. A requirements version, and a check or receipt on one, reads and is revised as if every
+version outside it had never been saved, and a selection naming a record outside it reads as none. The Excel
+bridge's record of a workbook is the session's own: what another session bound, imported, previewed or logged in
+the same file is no part of it. A record the session may not read is refused exactly as one that does not exist: a
+draft, requirements version, run or saved analysis it names by id is answered as an id never saved or no id at all.
+The manager (no session) saves and is answered as before.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from foundry.analysis import AnalysisStore, _new
+from foundry.analysis import AnalysisStore, _hash, _new
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
 from foundry.source_refresh import SourcePage, SourceRefreshService, SourceScope
@@ -309,6 +313,401 @@ def test_an_excel_import_is_not_answered_with_another_session_s_snapshot(tmp_pat
     assert imported("s2", "S2 再导入")["dataset"]["duplicate_of"] == second["dataset"]["id"]
 
 
+# --- a workbook another session opened ------------------------------------------------------------------------------
+
+
+BRIDGE_FIELDS = ["management_account", "amount", "organization", "period", "currency", "unit", "scenario"]
+BRIDGE_OUTPUT = {"id": "out", "name": "out", "role": "output", "writable": True, "dedicated_area": True,
+                 "worksheet": "Model", "address": "Model!J1:J2", "headers": ["amount"], "header": True,
+                 "fields": [{"name": "amount", "policy": "amount"}]}
+BLANK_J2 = {"J2": {"address": "J2", "value": ""}}
+NOT_REGISTERED = (400, {"error": {"code": "refused", "message": "workbook is not registered"}})
+
+
+def _bridge(root: Path, sessions=("s1", "s2")):
+    """A task whose sessions, recorded before anything is imported, call the Excel bridge; ``call(session, path,
+    payload)`` answers (status, body)."""
+    from foundry.excel_bridge import BridgeTokenAuthority, ExcelBridgeApp
+
+    task = TaskStore(root / "var").create(title="Excel")
+    for session in sessions:
+        task.record_session(session, role="analysis")
+    authority = BridgeTokenAuthority(b"local-test-secret-local-test-secret")
+    app = ExcelBridgeApp(var_root=root / "var", token_authority=authority)
+
+    def call(session, path, payload=None):
+        headers = {"Authorization": f"Bearer {authority.issue(task_id=task.id, session_id=session, ttl_seconds=60)}"}
+        status, _, body = app.handle("GET" if path == "/api/context" else "POST", path, headers,
+                                     json.dumps(payload or {}).encode())
+        return status, json.loads(body)
+
+    return task, call
+
+
+def _bridge_import(call, session, binding_id, amount, workbook="wb_shared"):
+    """``session`` imports one revenue row of ``amount`` through input binding ``binding_id`` of ``workbook``."""
+    binding = {"id": binding_id, "name": binding_id, "role": "input", "worksheet": "Model",
+               "address": {"actual": "Model!A1:G2", "budget": "Model!L1:R2"}.get(binding_id, "Model!T1:Z2"),
+               "headers": BRIDGE_FIELDS,
+               "fields": [{"name": name, "policy": "amount" if name == "amount" else "text"} for name in BRIDGE_FIELDS]}
+    status, out = call(session, "/api/import-binding", {
+        "workbook_id": workbook, "binding": binding, "alias": binding_id,
+        "values": [BRIDGE_FIELDS, ["revenue", amount, "HQ", "2026-08", "CNY", "yuan", binding_id]]})
+    assert status == 200, out
+    return out
+
+
+def _bridge_preview(call, session, workbook="wb_shared") -> dict:
+    """``session`` binds the output area of ``workbook`` and previews SECRET onto it."""
+    status, out = call(session, "/api/register-bindings", {"workbook_id": workbook, "bindings": [BRIDGE_OUTPUT]})
+    assert status == 200, out
+    status, out = call(session, "/api/preview-output", {
+        "workbook_id": workbook, "binding_id": "out", "current_cells": BLANK_J2,
+        "writes": [{"address": "J2", "field": "amount", "value": SECRET}]})
+    assert status == 200, out
+    return out["preview"]
+
+
+def _s1_works_in_the_shared_workbook(call):
+    """s1 imports SECRET into wb_shared from its Mac, previews it onto an output area and logs the import."""
+    call("s1", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx",
+                                          "url": "https://files.test/s1/m.xlsx", "host": {"platform": "Mac"}})
+    first = _bridge_import(call, "s1", "actual", SECRET)
+    preview = _bridge_preview(call, "s1")
+    call("s1", "/api/telemetry", {"workbook_id": "wb_shared", "event": "input_imported",
+                                  "details": {"dataset_id": first["dataset"]["id"]}})
+    return first, preview
+
+
+def _bridge_state(task) -> dict:
+    return json.loads((task.root / "analysis" / "excel_bridge" / "state.json").read_text(encoding="utf8"))
+
+
+def _records_of(task, workbook_id: str) -> list[dict]:
+    """The bridge's records of ``workbook_id``, whichever session keeps them."""
+    return [book for key, book in _bridge_state(task)["workbooks"].items() if key.rpartition("/")[2] == workbook_id]
+
+
+def _rewrite_bridge_state(task, **fields) -> None:
+    """Store ``fields`` in the bridge's state as an older bridge left them, under a valid integrity hash."""
+    state = {key: value for key, value in _bridge_state(task).items() if key != "_integrity_hash"}
+    state.update(fields)
+    (task.root / "analysis" / "excel_bridge" / "state.json").write_text(
+        json.dumps({**state, "_integrity_hash": _hash(state)}), encoding="utf8")
+
+
+def test_a_session_opening_another_session_s_workbook_works_in_it_as_if_alone(tmp_path):
+    """The workbook id lives in the workbook's document settings, so a second session opening the same file sends
+    s1's id. s2 neither takes up s1's imports nor sees or uses s1's bindings, previews or events, and s1's record of
+    the file stays as s1 left it."""
+    answers = {}
+    for name in ("alone", "shared"):
+        task, call = _bridge(tmp_path / name)
+        first, preview = _s1_works_in_the_shared_workbook(call) if name == "shared" else (None, None)
+        registered = call("s2", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx",
+                                                           "host": {"platform": "Win"}})
+        second = _bridge_import(call, "s2", "budget", "100")
+        bound = call("s2", "/api/register-bindings", {"workbook_id": "wb_shared", "bindings": [BRIDGE_OUTPUT]})
+        context = call("s2", "/api/context")
+        assert _snapshots(task, "s2") == [second["dataset"]["id"]]
+        assert second["finance_context"]["bindings"] == {"budget": second["dataset"]["id"]}
+        ran = call("s2", "/api/run-metric", {"workbook_id": "wb_shared", "spec": {"metric": {
+            "kind": "account_total", "dimensions": ["organization", "period"], "accounts": ["revenue"]}}})
+        assert ran[0] == 200 and ran[1]["run"]["bindings"] == {"budget": second["dataset"]["id"]}
+        answers[name] = [registered, {key: second[key] for key in ("finance_context", "workbook")}, bound, context]
+        if name == "shared":
+            assert _shows([answers[name], ran], [SECRET, first["dataset"]["id"], preview["id"]]) == []
+            # s1's preview is refused to s2 as one that never existed, to apply and to acknowledge.
+            for path, payload in (("/api/apply-output", {"current_cells": BLANK_J2}),
+                                  ("/api/ack-output", {"cells": []})):
+                refusals = [call("s2", path, {"workbook_id": "wb_shared", "preview_id": preview_id, **payload})
+                            for preview_id in (preview["id"], "f" * 32)]
+                assert refusals[0] == refusals[1] == (400, {"error": {"code": "refused",
+                                                                      "message": "preview is unavailable"}})
+            # s1's record keeps its own host, bindings and preview; its next import takes up nothing s2 imported.
+            books = call("s1", "/api/context")[1]["workbooks"]
+            assert [(book["host"], sorted(book["bindings"]), list(book["previews"])) for book in books] == [
+                ({"platform": "Mac"}, ["actual", "out"], [preview["id"]])]
+            third = _bridge_import(call, "s1", "plan", "5")
+            assert third["finance_context"]["bindings"] == {"actual": first["dataset"]["id"],
+                                                            "plan": third["dataset"]["id"]}
+            assert _snapshots(task, "s1") == [first["dataset"]["id"], third["dataset"]["id"]]
+    # Equal to the answers where s1 never worked in the file (seq counts every record of the task; an upload's
+    # name carries a digest of its import time).
+    same = [re.sub(r'"seq": \d+|\b[0-9a-f]{16}\b', "<n>", _normalized(answers[name])) for name in ("shared", "alone")]
+    assert same[0] == same[1]
+
+
+def test_a_child_session_sees_and_uses_none_of_its_parent_s_workbooks(tmp_path):
+    """A child begins with what its parent could read then. The workbook its parent goes on to import into, preview
+    from and log is the parent's record: the child neither sees it nor applies the parent's preview."""
+    task, call = _bridge(tmp_path, sessions=("s1",))
+    task.record_session("child", role="analysis", parent_session_id="s1")
+    first, preview = _s1_works_in_the_shared_workbook(call)
+    status, context = call("child", "/api/context")
+    assert status == 200 and (context["snapshot_ids"], context["workbooks"], context["telemetry"]) == ([], [], [])
+    assert _shows(context, [SECRET, first["dataset"]["id"], preview["id"]]) == []
+    refusals = [call("child", "/api/apply-output", {"workbook_id": workbook, "preview_id": preview["id"],
+                                                    "current_cells": BLANK_J2}) for workbook in ("wb_shared", "wb_new")]
+    assert refusals[0] == refusals[1] == NOT_REGISTERED
+
+
+def test_another_session_s_host_events_never_push_a_session_s_own_out(tmp_path, monkeypatch):
+    """Each session reads and keeps its own latest host events. Events logged before they named their session stay
+    in the bridge state for the operator's tools and show to no session."""
+    import foundry.excel_bridge
+
+    monkeypatch.setattr(foundry.excel_bridge, "MAX_TELEMETRY", 3)
+    task, call = _bridge(tmp_path)
+
+    def logged(session, event):
+        status, out = call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})
+        assert status == 200, out
+        return out["telemetry"]
+
+    mine = logged("s1", "input_imported")
+    assert call("s1", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
+    old = {"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "ready", "workbook_id": "wb_shared", "host": {},
+           "details": {}}
+    _rewrite_bridge_state(task, telemetry=[old, *_bridge_state(task)["telemetry"]])
+    for number in range(4):
+        logged("s2", f"metric_run_{number}")
+    assert call("s1", "/api/context")[1]["telemetry"] == [mine]
+    assert [event["event"] for event in call("s2", "/api/context")[1]["telemetry"]] == [
+        "metric_run_1", "metric_run_2", "metric_run_3"]
+    assert [event["event"] for event in _bridge_state(task)["telemetry"]] == ["ready"]
+
+
+def test_the_bridge_state_does_not_grow_with_the_sessions_that_log_host_events(tmp_path, monkeypatch):
+    """Every bridge call reads the state, and most rewrite it. Each session's latest host events are kept in a file of
+    its own, so however many sessions log, the state stays as it was and each keeps its own latest."""
+    import foundry.excel_bridge
+
+    monkeypatch.setattr(foundry.excel_bridge, "MAX_TELEMETRY", 3)
+    sessions = [f"s{number}" for number in range(12)]
+    task, call = _bridge(tmp_path, sessions=sessions)
+    assert call("s0", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
+    stored = (task.root / "analysis" / "excel_bridge" / "state.json").read_bytes()
+    for session in sessions:
+        for number in range(5):
+            assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": f"run_{number}"})[0] == 200
+    assert (task.root / "analysis" / "excel_bridge" / "state.json").read_bytes() == stored
+    for session in sessions:
+        assert [event["event"] for event in call(session, "/api/context")[1]["telemetry"]] == [
+            "run_2", "run_3", "run_4"]
+
+
+def test_a_session_s_host_events_are_filed_inside_the_task_whatever_its_id(tmp_path):
+    """A session id may hold any character: its events are filed under a digest of it in the bridge's folder. A
+    telemetry folder that leads out of the task is refused, and nothing is written through it."""
+    session = "../../../../../escaped"
+    task, call = _bridge(tmp_path, sessions=(session,))
+    status, out = call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"})
+    assert status == 200, out
+    folder = task.root / "analysis" / "excel_bridge" / "telemetry"
+    assert [path.name for path in folder.iterdir()] == [f"{hashlib.sha256(session.encode()).hexdigest()}.json"]
+    assert call(session, "/api/context")[1]["telemetry"] == [out["telemetry"]]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for path in folder.iterdir():
+        path.unlink()
+    folder.rmdir()
+    folder.symlink_to(outside, target_is_directory=True)
+    assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"}) == (
+        400, {"error": {"code": "refused", "message": "bridge telemetry path escapes task"}})
+    assert list(outside.iterdir()) == []
+
+
+def test_a_session_s_host_events_changed_outside_the_bridge_are_refused(tmp_path):
+    """A session's events file names its task and session under an integrity hash, as the state does: one edited
+    outside the bridge, or another session's copied over it, is refused rather than read as the session's own."""
+    task, call = _bridge(tmp_path)
+    for session in ("s1", "s2"):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": "ready"})[0] == 200
+    folder = task.root / "analysis" / "excel_bridge" / "telemetry"
+    s1, s2 = (folder / f"{hashlib.sha256(session.encode()).hexdigest()}.json" for session in ("s1", "s2"))
+    refused = (400, {"error": {"code": "refused", "message": "bridge telemetry integrity check failed"}})
+    s2.write_bytes(s1.read_bytes())
+    assert call("s2", "/api/context") == refused
+    raw = json.loads(s1.read_text(encoding="utf8"))
+    raw["events"][0]["event"] = "workbook_saved"
+    s1.write_text(json.dumps(raw), encoding="utf8")
+    assert call("s1", "/api/context") == refused
+
+
+def test_host_events_a_session_posts_at_once_are_all_kept(tmp_path, monkeypatch):
+    """The bridge serves each request on a thread of its own, and a session may post host events at once (two
+    actions of its task pane, or two windows on one token). Each post reads the session's events and writes them back
+    under the task lock, so none is lost to another read before it was written."""
+    import threading
+    import time
+
+    from foundry.excel_bridge import ExcelBridgeApp
+
+    _, call = _bridge(tmp_path)
+    read = ExcelBridgeApp._session_telemetry
+
+    def slow(self, *args):
+        events = read(self, *args)
+        time.sleep(0.2)  # long enough for every other post to read the same events, were it not for the lock
+        return events
+
+    monkeypatch.setattr(ExcelBridgeApp, "_session_telemetry", slow)
+    answers = []
+    posts = [threading.Thread(target=lambda number=number: answers.append(call(
+        "s1", "/api/telemetry", {"workbook_id": "wb_shared", "event": f"run_{number}"})[0])) for number in range(4)]
+    for post in posts:
+        post.start()
+    for post in posts:
+        post.join()
+    assert answers == [200] * 4
+    assert sorted(event["event"] for event in call("s1", "/api/context")[1]["telemetry"]) == [
+        "run_0", "run_1", "run_2", "run_3"]
+
+
+def _host_check(root: Path, task) -> dict:
+    """What tools/verify_excel_host.py reports, as the operator, of a blank host workbook and ``task``'s bridge."""
+    import importlib.util
+
+    from openpyxl import Workbook
+
+    spec = importlib.util.spec_from_file_location(
+        "verify_excel_host", Path(__file__).resolve().parents[1] / "tools" / "verify_excel_host.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    book = Workbook()
+    book.active.title = "经营分析"
+    book.save(root / "host.xlsx")
+    return tool.verify(root / "host.xlsx", task.root / "analysis" / "excel_bridge" / "state.json")
+
+
+def test_the_operator_s_host_check_counts_every_session_s_host_events(tmp_path):
+    """tools/verify_excel_host.py reads the bridge's record as the operator, as before: it counts the host events
+    every session logged, each in a file of its own, with those the state holds from before they named a session."""
+    task, call = _bridge(tmp_path)
+    assert call("s1", "/api/register-workbook", {"workbook_id": "wb_shared"})[0] == 200
+    _rewrite_bridge_state(task, telemetry=[{"id": "0" * 32, "at": "2026-08-01T00:00:00Z", "event": "full_recalc",
+                                            "workbook_id": "wb_shared", "host": {}, "details": {}}])
+    for session, event in (("s1", "input_imported"), ("s2", "input_imported"), ("s2", "metric_run")):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})[0] == 200
+    assert _host_check(tmp_path, task)["host_event_counts"] == {
+        "input_imported": 2, "metric_run": 1, "output_previewed": 0, "output_applied": 0, "full_recalc": 1,
+        "workbook_saved": 0}
+
+
+def test_the_operator_s_host_check_counts_host_events_logged_before_any_workbook_was_registered(tmp_path):
+    """A session may log host events before it registers a workbook, or after a register that failed. Those events
+    leave no bridge state behind, only the session's own file: the host check still reports them, with no host, as it
+    did when every event went into the state. A bridge no session has used is still an error."""
+    task, call = _bridge(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        _host_check(tmp_path, task)
+    for session, event in (("s1", "full_recalc"), ("s2", "workbook_saved")):
+        assert call(session, "/api/telemetry", {"workbook_id": "wb_shared", "event": event})[0] == 200
+    assert not (task.root / "analysis" / "excel_bridge" / "state.json").exists()
+    result = _host_check(tmp_path, task)
+    assert (result["status"], result["hosts"], result["host_event_counts"]) == ("failed", [], {
+        "input_imported": 0, "metric_run": 0, "output_previewed": 0, "output_applied": 0, "full_recalc": 1,
+        "workbook_saved": 1})
+
+
+def test_a_workbook_saved_before_per_session_records_goes_only_to_the_session_that_filed_its_imports(tmp_path):
+    """A record stored under the bare workbook id names no owner. The session that filed an import there takes up
+    that import with its input binding, while the output area, the preview and what the last session to open the
+    file registered stay behind. A session that filed nothing there finds no such workbook, even one whose context
+    holds the import."""
+    task, call = _bridge(tmp_path, sessions=("excel", "other"))
+    call("excel", "/api/register-workbook", {"workbook_id": "wb_shared", "name": "m.xlsx", "host": {}})
+    first = _bridge_import(call, "excel", "actual", SECRET)
+    _bridge_preview(call, "excel")
+    task.record_session("late", role="analysis")  # a root session begins with every dataset of the task
+    assert _snapshots(task, "late") == [first["dataset"]["id"]]
+    [record] = _records_of(task, "wb_shared")
+    # 'other' opened the file last, and the shared record took its name, address and host.
+    record = {**record, "name": "other.xlsx", "url_hash": "a" * 64, "host": {"platform": "Win"}}
+    _rewrite_bridge_state(task, workbooks={"wb_shared": record})
+
+    status, context = call("excel", "/api/context")
+    assert status == 200 and [book["id"] for book in context["workbooks"]] == ["wb_shared"]
+    book = context["workbooks"][0]
+    assert (sorted(book["bindings"]), book["input_snapshots"]["actual"]["dataset_id"]) == (["actual"],
+                                                                                          first["dataset"]["id"])
+    assert (book["preauthorized_areas"], book["previews"]) == ({}, {})
+    assert (book["name"], book["url_hash"], book["host"]) == ("", "", {})
+    budget = _bridge_import(call, "excel", "budget", "100")
+    assert budget["finance_context"]["bindings"] == {"actual": first["dataset"]["id"],
+                                                     "budget": budget["dataset"]["id"]}
+    for session, amount, held in (("other", "200", []), ("late", "300", [first["dataset"]["id"]])):
+        status, context = call(session, "/api/context")
+        assert status == 200 and context["workbooks"] == []
+        refusals = [call(session, "/api/preview-output", {"workbook_id": workbook, "binding_id": "out", "writes": [],
+                                                          "current_cells": {}}) for workbook in ("wb_shared", "wb_new")]
+        assert refusals[0] == refusals[1] == NOT_REGISTERED
+        own = _bridge_import(call, session, "budget", amount)
+        assert own["finance_context"]["bindings"] == {"budget": own["dataset"]["id"]}
+        assert _snapshots(task, session) == [*held, own["dataset"]["id"]]
+    assert _shows(call("other", "/api/context")[1], [SECRET, first["dataset"]["id"]]) == []
+    # Each session's share is written under its own key; the bare record stays as it was stored.
+    assert _bridge_state(task)["workbooks"]["wb_shared"] == record
+
+
+def test_a_workbook_two_sessions_shared_before_per_session_records_splits_by_who_imported(tmp_path):
+    """The pre-fix bug case itself: s1 and s2 both imported into one bare record, and s2's context took in s1's
+    import. Each takes up only the imports it filed; neither binds or names the other's again."""
+    task, call = _bridge(tmp_path)
+    first = _bridge_import(call, "s1", "actual", SECRET)
+    second = _bridge_import(call, "s2", "budget", "100")
+    task.update_session_context("s2", snapshot_ids=[first["dataset"]["id"]])  # what the shared record did to s2
+    records = _records_of(task, "wb_shared")
+    _rewrite_bridge_state(task, workbooks={"wb_shared": {
+        **records[0], **{key: {name: row for record in records for name, row in record[key].items()}
+                         for key in ("bindings", "input_snapshots")}}})
+
+    for session, own in (("s1", first), ("s2", second)):
+        books = call(session, "/api/context")[1]["workbooks"]
+        assert [(sorted(book["bindings"]), [row["dataset_id"] for row in book["input_snapshots"].values()])
+                for book in books] == [([own["binding"]["id"]], [own["dataset"]["id"]])]
+    s1 = _bridge_import(call, "s1", "plan", "5")
+    assert s1["finance_context"]["bindings"] == {"actual": first["dataset"]["id"], "plan": s1["dataset"]["id"]}
+    s2 = _bridge_import(call, "s2", "plan", "6")
+    assert s2["finance_context"]["bindings"] == {"budget": second["dataset"]["id"], "plan": s2["dataset"]["id"]}
+    assert _shows(call("s2", "/api/context")[1]["workbooks"], [first["dataset"]["id"]]) == []
+
+
+def test_a_workbook_saved_before_per_session_records_with_no_import_is_no_session_s(tmp_path):
+    """A bare record holding only an output area and its preview names no owner: no session takes it up, not the one
+    that made it, another, or a child that may read nothing."""
+    task, call = _bridge(tmp_path)
+    task.record_session("child", role="analysis", parent_session_id="s1")
+    call("s1", "/api/register-workbook", {"workbook_id": "wb_noimp", "name": "m.xlsx", "host": {}})
+    preview = _bridge_preview(call, "s1", workbook="wb_noimp")
+    [record] = _records_of(task, "wb_noimp")
+    _rewrite_bridge_state(task, workbooks={"wb_noimp": record})
+    for session in ("s1", "s2", "child"):
+        status, context = call(session, "/api/context")
+        assert status == 200 and context["workbooks"] == []
+        assert call(session, "/api/preview-output", {
+            "workbook_id": "wb_noimp", "binding_id": "out", "current_cells": BLANK_J2,
+            "writes": [{"address": "J2", "field": "amount", "value": SECRET}]}) == NOT_REGISTERED
+        assert call(session, "/api/apply-output", {"workbook_id": "wb_noimp", "preview_id": preview["id"],
+                                                   "current_cells": BLANK_J2}) == NOT_REGISTERED
+
+
+def test_a_session_takes_up_no_import_its_context_does_not_hold(tmp_path):
+    """Filing an import there is not enough: a session takes up only what it may read. No call narrows a context;
+    this stands in for a sessions file that holds one without the session's own import."""
+    task, call = _bridge(tmp_path, sessions=("s1",))
+    _bridge_import(call, "s1", "actual", SECRET)
+    [record] = _records_of(task, "wb_shared")
+    _rewrite_bridge_state(task, workbooks={"wb_shared": record})
+    task._write_sessions([{**row, "snapshot_ids": []} for row in task.sessions()])
+    status, context = call("s1", "/api/context")
+    assert status == 200 and context["workbooks"] == []
+    plan = _bridge_import(call, "s1", "plan", "5")
+    assert plan["finance_context"]["bindings"] == {"plan": plan["dataset"]["id"]}
+    assert _snapshots(task, "s1") == [plan["dataset"]["id"]]
+
+
 # --- the requirements version a session runs and saves against ---------------------------------------------------
 
 
@@ -402,6 +801,60 @@ def test_a_session_s_runs_capture_the_newest_requirements_version_it_may_read(tm
     code, managed = _cli(capsys, world.var, "analysis-run", "--analysis", runs["sql"]["analysis_id"],
                          session=None, task=world.task.id)
     assert code == 0 and managed["requirements_id"] == world.newer["id"]
+
+
+def test_a_session_s_saved_analyses_name_it_as_its_runs_do(tmp_path, capsys, fake_runner, monkeypatch):
+    """Each analysis a session saves names the session and the context revision it saved it under, as its runs do,
+    whichever way it saves it: SQL, a script, a job's script, a method applied, or the finance engine, from the CLI, an
+    MCP grant or the Excel add-in. The manager's are saved as before, naming neither."""
+    from foundry.excel_bridge import BridgeTokenAuthority, ExcelBridgeApp
+    from foundry.finance_mcp import FinanceMcpServer, create_stdio_grant
+
+    world = _version_world(tmp_path, False)
+    analysis = AnalysisStore(world.task)
+    b = analysis.add_dataset(_csv(tmp_path / "b.csv", [("revenue", "2026-08", "Hawk", "100", "CNY", "元")]), name="B")["id"]
+    assert world.task.update_session_context("sess", snapshot_ids=[b])["context_revision"] == 2
+    runs = _session_runs(world, capsys, monkeypatch)
+    code, method = _cli(capsys, world.var, "analysis-method-save", "--analysis", runs["sql"]["analysis_id"],
+                        "--name", "收入")
+    assert code == 0, method
+    code, applied = _cli(capsys, world.var, "analysis-method-apply", "--method", method["id"],
+                         "--bindings", json.dumps({"t": world.a}))
+    assert code == 0, applied
+    context = FinanceStore(world.task).save_context({"bindings": {"ledger": world.a}, "scopes": {}})
+    metric = {"context_id": context["id"], "metric": {"kind": "account_total", "accounts": ["revenue"]}}
+    grant = create_stdio_grant(world.var, task_id=world.task.id, session_id="sess", snapshot_ids=_snapshots(world.task))
+    server = FinanceMcpServer(var_root=world.var, grant_id=grant["grant_id"], token=grant["token"])
+    server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    runs["mcp"] = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                 "params": {"name": "run_metric", "arguments": metric}})["result"]["structuredContent"]
+    authority = BridgeTokenAuthority(b"local-test-secret-local-test-secret")
+    token = authority.issue(task_id=world.task.id, session_id="sess", ttl_seconds=60)
+    status, _, body = ExcelBridgeApp(var_root=world.var, token_authority=authority).handle(
+        "POST", "/api/run-metric", {"Authorization": f"Bearer {token}"}, json.dumps({"spec": metric}).encode())
+    assert status == 200, body
+    runs["excel"] = json.loads(body)["run"]
+    # Each analysis as saved for the run that first ran it, and the method's.
+    saved = {way: analysis.get_analysis(run["analysis_id"]) for way, run in runs.items() if "again" not in way}
+    saved["method"] = analysis.get_analysis(applied["id"])
+    authors = {way: (row.get("session_id"), row.get("context_revision")) for way, row in saved.items()}
+    assert authors == {**{way: (runs[way]["session_id"], runs[way]["context_revision"]) for way in saved
+                          if way != "method"}, "method": ("sess", 2)}
+    assert [authors[way] for way in ("sql", "script", "mcp", "excel", "method")] == [("sess", 2)] * 5
+    # A job's script is saved by the child session the job runs it as.
+    assert authors["job"] == (runs["job"]["session_id"], 1) and runs["job"]["session_id"] != "sess"
+    # The manager's saves name no session, as before.
+    as_manager = {"session": None, "task": world.task.id}
+    managed = [_cli(capsys, world.var, *args, **as_manager) for args in (
+        ("analysis-save", "--spec", json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": world.a}})),
+        ("analysis-script", "--spec", json.dumps({"code": "print(1)", "bindings": {"t": world.a},
+                                                  "result_file": "result.json"})),
+        ("analysis-method-apply", "--method", method["id"], "--bindings", json.dumps({"t": world.a})))]
+    assert [code for code, _ in managed] == [0] * 3, managed
+    for analysis_id in (managed[0][1]["id"], managed[1][1]["analysis_id"], managed[2][1]["id"],
+                        FinanceStore(world.task).run_metric(metric)["analysis_id"]):
+        assert {"session_id", "context_revision"} & set(analysis.get_analysis(analysis_id)) == set()
 
 
 def test_a_session_s_readiness_reads_the_period_of_the_newest_requirements_version_it_may_read(tmp_path, capsys):
@@ -531,13 +984,365 @@ def test_mcp_refuses_a_hidden_requirements_parent_as_a_missing_one(tmp_path):
     server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
     server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
     refused = []
-    for parent_id in (hidden["id"], "e" * 32):
+    for parent_id in (hidden["id"], "e" * 32, "zz"):
         with pytest.raises(McpRefused) as error:
             server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
                 "name": "analysis_requirements_save",
                 "arguments": {"context_id": context["id"], "question": "收入", "items": ITEMS, "parent_id": parent_id}}})
         refused.append(str(error.value))
-    assert refused[0] == refused[1]
+    assert len(set(refused)) == 1
+
+
+# --- a requirements version's lineage --------------------------------------------------------------------------------
+
+
+PROFIT = {"id": "profit", "metric": "profit", "label": "利润", "requires_drilldown": False}
+COST = {"id": "cost", "metric": "cost", "label": "成本", "requires_drilldown": False}
+FALCON = {"id": "falcon_payroll", "metric": "expense", "label": "Falcon 薪酬"}
+
+
+def _lineage_world(root: Path, kind: str):
+    """V, the current version, rests on the session's actual and budget files. ``kind`` names the versions before it.
+    On a file H outside the session: one with an item more that V removed (removed), or one saved before phase 1 whose
+    scope and item held the drilldown level Falcon (legacy). On the session's files: P with the cost item (parent),
+    after a version on H with one more (above), or before a version on H that V names (gap). A legacy P holds the level
+    Hawk, alone (legacy parent) or before a version on H (legacy gap). None: twin."""
+    root.mkdir(parents=True)
+    task = TaskStore(root / "var").create(title="要求沿革")
+    analysis = AnalysisStore(task)
+    bindings = {}
+    for scenario, amounts in (("actual", ("120", "70", "20")), ("budget", ("100", "60", "15"))):
+        bindings[scenario] = analysis.add_dataset(_ledger(root / f"{scenario}.json", [
+            {"account_code": code, "management_account": account, "amount": amount}
+            for code, account, amount in zip(("001", "002", "003"), ("revenue", "cost", "expense"), amounts)]),
+            name=scenario)["id"]
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_entry(root / "h.json", "expense", "999"), name="H")["id"]
+    manager = FinanceStore(task)
+    context = manager.save_context({"bindings": bindings, "scopes": {
+        scenario: {**SCOPE, "period": "2026-09", "scenario": scenario} for scenario in bindings}})
+
+    def save(items, parent=None, *, hidden=False):
+        return manager.analysis_requirements_save({
+            "question": "Falcon 项目" if hidden else "利润", "items": items, "change_reason": "改口径",
+            **({"bindings": {"payroll": h}} if hidden else {"context_id": context["id"]}),
+            **({"parent_id": parent} if parent else {})})["id"]
+
+    def legacy(level, version_bindings):
+        record = _new(task, question="旧版", scope={"period": "2026-09", "drilldown": level}, bindings=version_bindings,
+                      context_id=None, parent_id=None, removed_item_ids=[], change_reason="", selection=None,
+                      items=[{**PROFIT, "dimensions": {"drilldown": level}}])
+        return analysis._write(analysis._object_path("requirements", record["id"]), record)["id"]
+
+    parent = names = None
+    if kind == "removed":
+        parent = save([PROFIT, FALCON], hidden=True)
+    elif kind == "legacy":
+        parent = legacy("Falcon", {"payroll": h})
+    elif kind in ("parent", "above", "gap"):
+        parent = save([PROFIT, COST], save([PROFIT, COST, FALCON], hidden=True) if kind == "above" else None)
+        names = {parent: "P"}
+        if kind == "gap":
+            parent = save([PROFIT, COST, FALCON], parent, hidden=True)
+    elif kind in ("legacy parent", "legacy gap"):
+        parent = legacy("Hawk", bindings)
+        names = {parent: "P"}
+        if kind == "legacy gap":
+            parent = save([PROFIT, FALCON], parent, hidden=True)
+    current = save([PROFIT], parent)
+    hidden = [row["id"] for row in analysis._list("requirements") if h in row["bindings"].values()]
+    return SimpleNamespace(var=root / "var", task=task, analysis=analysis, bindings=bindings, context=context,
+                           current=current, hidden=hidden, names={**(names or {}), current: "V"}, manager=manager,
+                           session=FinanceStore(task, snapshot_ids=list(bindings.values()), session_id="sess"))
+
+
+def _lineage(record: dict, names: dict) -> dict:
+    """What a version took from the versions before it, its own id and its parent named by role, and whether its
+    semantic basis hashes to its fingerprint. The warnings as written out, key order and all."""
+    return {"version": names.get(record["id"], "new"), "parent": names.get(record["parent_id"], record["parent_id"]),
+            "removed": record["removed_item_ids"], "basis": (record.get("semantic_basis") or {}).get("removed_item_ids"),
+            "hashed": _hash(record.get("semantic_basis")) == record.get("semantic_fingerprint"),
+            "warnings": json.dumps(record.get("authoring_warnings"), ensure_ascii=False)}
+
+
+def _mcp_requirements(var: Path, task, snapshot_ids: list[str]) -> dict:
+    """The session's analysis_requirements_list through an MCP grant on its snapshots."""
+    from foundry.finance_mcp import FinanceMcpServer, create_stdio_grant
+
+    grant = create_stdio_grant(var, task_id=task.id, session_id="sess", snapshot_ids=snapshot_ids)
+    server = FinanceMcpServer(var_root=var, grant_id=grant["grant_id"], token=grant["token"])
+    server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    reply = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                           "params": {"name": "analysis_requirements_list", "arguments": {}}})
+    return reply["result"]["structuredContent"]
+
+
+@pytest.mark.parametrize("kind, twin", [("removed", "twin"), ("legacy", "twin"), ("above", "parent"), ("gap", "parent"),
+                                        ("legacy gap", "legacy parent")])
+def test_a_requirements_version_reads_as_if_versions_outside_the_session_were_never_saved(tmp_path, capsys, kind, twin):
+    read = {}
+    for name in (twin, kind):
+        world = _lineage_world(tmp_path / name, name)
+        code, listed = _cli(capsys, world.var, "analysis-requirements-list", "--spec", "{}")
+        code_state, state = _cli(capsys, world.var, "analysis-state")
+        assert (code, code_state) == (0, 0)
+        mcp = _mcp_requirements(world.var, world.task, list(world.bindings.values()))
+        assert (listed["requirements"] == state["requirements"] == mcp["requirements"]
+                == world.session.analysis_requirements_list({})["requirements"])
+        # The session revises V as before, and reads its revision as it reads V.
+        code, revised = _cli(capsys, world.var, "analysis-requirements-save", "--spec", json.dumps({
+            "question": "利润（修订）", "context_id": world.context["id"], "parent_id": world.current, "items": [PROFIT]}))
+        assert code == 0, revised
+        assert revised == world.session.analysis_requirements_list({})["current"]
+        assert _shows([listed, state["requirements"], mcp, revised], [*world.hidden, "falcon_payroll", "Falcon"]) == []
+        assert not any("_integrity_hash" in row for row in [*listed["requirements"], revised])
+        read[name] = [_lineage(row, world.names) for row in [*listed["requirements"], revised]]
+    # As in a world where the versions outside the session were never saved: V's parent is the nearest version the
+    # session may read, and only what those versions removed or held stays. Past a version outside the session, V
+    # records the levels P held, as when saved after P (legacy gap).
+    assert read[kind] == read[twin]
+    # The manager reads every version as stored; a session's revision stores what V removed, as before.
+    stored = {row["id"]: row for row in AnalysisStore(world.task)._list("requirements")}
+    assert FinanceStore(world.task).analysis_requirements_list({})["requirements"] == list(stored.values())
+    removed = {"removed": ["falcon_payroll"], "legacy": [], "above": ["cost", "falcon_payroll"],
+               "gap": ["cost", "falcon_payroll"], "legacy gap": ["falcon_payroll"]}[kind]
+    assert stored[world.current]["removed_item_ids"] == stored[revised["id"]]["removed_item_ids"] == removed
+    assert (stored[world.current]["parent_id"] in world.hidden) == (kind != "above")
+    if kind == "legacy gap":
+        # V was saved after a version that had dropped P's level, so it stores no warning; the session reads both.
+        assert "authoring_warnings" not in stored[world.current]
+        [current] = [row for row in read[kind] if row["version"] == "V"]
+        assert [(warning["code"], warning["keys"]) for warning in json.loads(current["warnings"])] == [
+            ("hierarchy_dimension_dropped", {"drilldown": "Hawk"}), ("hierarchy_scope_dropped", {"drilldown": "Hawk"})]
+
+
+@pytest.mark.parametrize("kind", ["removed", "legacy"])
+def test_a_check_and_receipt_read_to_a_session_without_what_versions_outside_it_decided(tmp_path, capsys, kind):
+    from foundry.evidence_labels import EVIDENCE_FIELDS
+
+    seen = {}
+    for name in ("twin", kind):
+        world = _lineage_world(tmp_path / name, name)
+        run = world.manager.explain_variance({"context_id": world.context["id"]})
+        managed = world.manager.save_explanation_draft({"body": "经理稿：请查看计算依据。", "run_ids": [run["id"]]})
+        code, read = _cli(capsys, world.var, "report-draft-read", "--draft", managed["id"])
+        code_state, state = _cli(capsys, world.var, "analysis-state")
+        assert (code, code_state) == (0, 0)
+        [listed] = [row for row in state["drafts"] if row["id"] == managed["id"]]
+        [receipt] = [row for row in state["completions"] if row["draft_id"] == managed["id"]]
+        own_run = world.session.explain_variance({"context_id": world.context["id"]})
+        own = world.session.save_explanation_draft({"body": "会话稿：请查看计算依据。", "run_ids": [own_run["id"]]})
+        assert _shows([read, listed, receipt, own], [*world.hidden, "Falcon"]) == []
+        # The key of the receipt covers only what the session is shown of the check it was judged on.
+        shown = {key: value for key, value in listed["explanation_check"].items() if key not in EVIDENCE_FIELDS}
+        assert receipt["input_key"] == _hash({
+            "chain_key": receipt["chain_key"], "draft_id": managed["id"], "draft_content_hash": managed["content_hash"],
+            "quality": shown, "completion_policy_version": receipt["completion_policy_version"]})
+        # The session's own draft and receipt as it saved them, not only as it reads them.
+        saved, filed = world.analysis.get_draft(own["id"]), world.analysis._get("completions", own["completion"]["id"])
+        checks = [draft[key]["requirements"] for draft in (read, listed, own, saved)
+                  for key in ("explanation_check", "quality")]
+        seen[name] = ([(check["original_requirements_completed"], check["items"][0].get("dropped_hierarchy"))
+                       for check in checks],
+                      [(row["status"], row["original_requirements_completed"], [action["code"] for action in row["actions"]])
+                       for row in (receipt, own["completion"], filed)])
+    assert seen[kind] == seen["twin"] == ([(True, None)] * 8, [("complete", True, [])] * 3)
+    # The manager reads her draft and receipt as stored: the original requirement is not complete.
+    assert managed["explanation_check"]["requirements"]["original_requirements_completed"] is False
+    code, managed_state = _cli(capsys, world.var, "analysis-state", session=None, task=world.task.id)
+    [stored_receipt] = [row for row in managed_state["completions"] if row["draft_id"] == managed["id"]]
+    assert stored_receipt == world.analysis._get("completions", managed["completion"]["id"])
+    assert stored_receipt["original_requirements_completed"] is False
+    if kind == "legacy":
+        assert managed["explanation_check"]["requirements"]["items"][0]["dropped_hierarchy"] == {"drilldown": "Falcon"}
+        assert [action["code"] for action in stored_receipt["actions"]] == ["hierarchy_dimension_dropped"]
+
+
+def test_a_session_s_revision_keeps_the_runs_and_completion_chain_of_the_version_it_revises(tmp_path, capsys):
+    def outcome(draft):
+        receipt = draft["completion"]
+        return (receipt["status"], bool(receipt["reused_run_ids"]), [action["code"] for action in receipt["actions"]],
+                receipt["original_requirements_completed"])
+
+    seen = {}
+    for name in ("twin", "removed"):
+        world = _lineage_world(tmp_path / name, name)
+        runs = {store: store.explain_variance({"context_id": world.context["id"]})
+                for store in (world.manager, world.session)}
+        before = world.manager.save_explanation_draft({"body": "经理稿：请查看计算依据。", "run_ids": [runs[world.manager]["id"]]})
+        # The session revises V without changing what it asks: only an item's label.
+        code, revised = _cli(capsys, world.var, "analysis-requirements-save", "--spec", json.dumps({
+            "question": "利润", "context_id": world.context["id"], "parent_id": world.current, "change_reason": "改标签",
+            "items": [{**PROFIT, "label": "利润（本月）"}]}, ensure_ascii=False))
+        assert code == 0, revised
+        stored = world.analysis._get("requirements", revised["id"])
+        assert stored["semantic_fingerprint"] == world.analysis._get("requirements", world.current)["semantic_fingerprint"]
+        # Runs made on V answer the revision, for the manager and the session alike, in the same completion chain.
+        managed = world.manager.save_explanation_draft({"body": "经理稿：请查看计算依据。", "run_ids": [runs[world.manager]["id"]]})
+        own = world.session.save_explanation_draft({"body": "会话稿：请查看计算依据。", "run_ids": [runs[world.session]["id"]]})
+        assert managed["completion"]["chain_key"] == before["completion"]["chain_key"]
+        assert managed["completion"]["repair_attempts"] == before["completion"]["repair_attempts"] + 1
+        seen[name] = (outcome(managed), outcome(own), revised["removed_item_ids"], stored["removed_item_ids"])
+    assert seen["twin"] == (("complete", True, [], True), ("complete", True, [], True), [], [])
+    # The session reads and judges the revision as the twin does; the manager reads it as stored, as before.
+    assert seen["removed"] == (("complete", True, [], False), ("complete", True, [], True), [], ["falcon_payroll"])
+    # Her next revision still carries the item removed before the session's, and the session reads it without it.
+    again = world.manager.analysis_requirements_save({"question": "利润（经理再修订）", "context_id": world.context["id"],
+                                                      "parent_id": revised["id"], "items": [PROFIT]})
+    assert again["removed_item_ids"] == again["semantic_basis"]["removed_item_ids"] == ["falcon_payroll"]
+    code, listed = _cli(capsys, world.var, "analysis-requirements-list", "--spec", "{}")
+    assert code == 0 and listed["current"]["id"] == again["id"]
+    assert listed["current"]["removed_item_ids"] == [] and _shows(listed, [*world.hidden, "falcon_payroll"]) == []
+
+
+def test_a_session_reads_the_levels_of_a_version_past_one_it_may_not_read(tmp_path, capsys):
+    """A level a version the session may read held, before a version it may not read: the session's own check and
+    save read it as in a world where that version was never saved (the walk passes over it)."""
+    seen = {}
+    for name in ("legacy parent", "legacy gap"):
+        world = _lineage_world(tmp_path / name, name)
+        own = world.session.save_explanation_draft({"body": "会话稿：利润待核。"})
+        validated = world.session.validate_explanation({"body": "会话稿：利润待核。"})
+        checks = [own["explanation_check"]["requirements"], validated["requirements"]]
+        # Resent from the scope card that loaded P: the same legacy level, dropped and recorded, not refused.
+        code, revised = _cli(capsys, world.var, "analysis-requirements-save", "--spec", json.dumps({
+            "question": "利润（修订）", "context_id": world.context["id"], "parent_id": world.current, "items": [PROFIT],
+            "scope": {**SCOPE, "period": "2026-09", "scenario": "actual", "drilldown": "Hawk"}}))
+        assert code == 0, revised
+        assert _shows([own, validated, revised], [*world.hidden, "Falcon"]) == []
+        seen[name] = ([(check["original_requirements_completed"], check["items"][0].get("dropped_hierarchy"))
+                       for check in checks], own["completion"]["original_requirements_completed"],
+                      [action["code"] for action in own["completion"]["actions"]], revised["scope"],
+                      [(warning["code"], warning["keys"]) for warning in revised["authoring_warnings"]])
+    assert seen["legacy gap"] == seen["legacy parent"]
+    assert seen["legacy gap"][0] == [(False, {"drilldown": "Hawk"})] * 2
+    assert seen["legacy gap"][4] == [("hierarchy_scope_dropped", {"drilldown": "Hawk"})]
+
+
+def test_a_version_keeps_the_levels_a_version_the_session_may_read_held(tmp_path):
+    """A legacy version the session may read keeps its levels in the warnings of the version after it, and in a check
+    and receipt on it; a level only a version before it outside the session held is left out. The manager reads them
+    as stored."""
+    from foundry.finance_requirements import check_lineage_in_view, requirements_version_view
+
+    task = TaskStore(tmp_path / "var").create(title="层级")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_entry(tmp_path / "a.json", "revenue", "100"), name="A")["id"]
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_entry(tmp_path / "h.json", "revenue", "999"), name="H")["id"]
+
+    def legacy(bindings, level, parent):
+        record = _new(task, question="旧版", scope={"period": "2026-08", **level}, bindings=bindings, context_id=None,
+                      parent_id=parent, removed_item_ids=[], change_reason="", selection=None,
+                      items=[{**ITEMS[0], "dimensions": level, "requires_drilldown": False}])
+        return analysis._write(analysis._object_path("requirements", record["id"]), record)["id"]
+
+    readable = legacy({"gl": a}, {"drilldown": "Hawk"}, legacy({"payroll": h}, {"drill_down": "Falcon"}, None))
+    # The manager resends the level the version outside the session held: an earlier level, so it is dropped.
+    manager = FinanceStore(task)
+    saved = manager.analysis_requirements_save({
+        "question": "收入", "scope": {"period": "2026-08", "drill_down": "Falcon"}, "bindings": {"gl": a},
+        "items": ITEMS, "parent_id": readable})
+    assert [(w["code"], w["keys"]) for w in saved["authoring_warnings"]] == [
+        ("hierarchy_dimension_dropped", {"drilldown": "Hawk"}),
+        ("hierarchy_scope_dropped", {"drilldown": "Hawk", "drill_down": "Falcon"})]
+    view = requirements_version_view(analysis, saved, {a})
+    assert view["parent_id"] == readable
+    assert [(w["code"], w["keys"]) for w in view["authoring_warnings"]] == [
+        ("hierarchy_dimension_dropped", {"drilldown": "Hawk"}), ("hierarchy_scope_dropped", {"drilldown": "Hawk"})]
+    assert "Falcon" not in json.dumps(view, ensure_ascii=False)
+    assert requirements_version_view(analysis, saved, None) is saved
+    assert requirements_version_view(analysis, saved, {a, h}) == {k: v for k, v in saved.items() if k != "_integrity_hash"}
+    # The manager's check and receipt name both levels; the session reads the one a version it may read held.
+    managed = manager.save_explanation_draft({"body": "经理稿：收入待核。"})
+    both = {"drilldown": "Hawk", "drill_down": "Falcon"}
+    assert managed["explanation_check"]["requirements"]["items"][0]["dropped_hierarchy"] == both
+    assert [action["keys"] for action in managed["completion"]["actions"]
+            if action["code"] == "hierarchy_dimension_dropped"] == [both]
+    draft = analysis.draft_in_view(analysis.get_draft(managed["id"]), {a})
+    receipt = analysis.completion_in_view(managed["completion"], {a})
+    assert draft["explanation_check"]["requirements"]["items"][0]["dropped_hierarchy"] == {"drilldown": "Hawk"}
+    assert [action["keys"] for action in receipt["actions"]
+            if action["code"] == "hierarchy_dimension_dropped"] == [{"drilldown": "Hawk"}]
+    assert _shows([draft, receipt], ["Falcon"]) == []
+    assert analysis.completion_in_view(managed["completion"], None) == managed["completion"]
+    # A level only a parent outside the session held is no part of the version after it, though the session reads
+    # that version as the child of the one before the parent.
+    later = manager.analysis_requirements_save({"question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": a},
+                                                "items": ITEMS, "parent_id": legacy({"payroll": h}, {"drilldown": "Falcon"},
+                                                                                    saved["id"])})
+    assert [(w["code"], w["keys"]) for w in later["authoring_warnings"]] == [
+        ("hierarchy_dimension_dropped", {"drilldown": "Falcon"}), ("hierarchy_scope_dropped", {"drilldown": "Falcon"})]
+    view = requirements_version_view(analysis, later, {a})
+    assert view["parent_id"] == saved["id"] and "authoring_warnings" not in view
+    assert "Falcon" not in json.dumps(view, ensure_ascii=False)
+    # A check reads no wider than saved: a level or a completion it never recorded is not added.
+    item = {**ITEMS[0], "status": "answered"}
+    for requirements in ({"requirements_id": saved["id"], "items": [item], "original_requirements_completed": True},
+                         {"requirements_id": saved["id"], "items": [item]}):
+        check = {"status": "pass", "requirements": requirements}
+        assert check_lineage_in_view(analysis, check, {a}) is check_lineage_in_view(analysis, check, None) is check
+
+
+@pytest.mark.parametrize("case", ["resent", "context", "legacy"])
+def test_a_version_past_one_the_session_may_not_read_records_the_levels_the_version_before_held(tmp_path, case):
+    """Past a parent outside the session, a version reads with the warnings a save naming the version before it would
+    have recorded: that version's levels, then a level the save resent; no scope level under a key the finance context
+    held, which has its own warning; and none on a version saved before saves dropped levels."""
+    from foundry.finance_requirements import requirements_version_view
+
+    seen = {}
+    for name in ("twin", "hidden"):
+        task = TaskStore(tmp_path / name / "var").create(title="层级")
+        analysis = AnalysisStore(task)
+        a = analysis.add_dataset(_entry(tmp_path / name / "a.json", "revenue", "100"), name="A")["id"]
+        task.record_session("sess", role="analysis")
+        h = analysis.add_dataset(_entry(tmp_path / name / "h.json", "revenue", "999"), name="H")["id"]
+        manager = FinanceStore(task)
+
+        def legacy(bindings, level, parent):
+            record = _new(task, question="旧版", scope={"period": "2026-08", **level}, bindings=bindings, context_id=None,
+                          parent_id=parent, removed_item_ids=[], change_reason="", selection=None,
+                          items=[{**ITEMS[0], "dimensions": level, "requires_drilldown": False}])
+            return analysis._write(analysis._object_path("requirements", record["id"]), record)["id"]
+
+        readable = legacy({"gl": a}, {"drilldown": "Hawk"},
+                          legacy({"gl": a}, {"drill_down": "Eagle"}, None) if case == "resent" else None)
+        parent = readable
+        if name == "hidden" and case == "legacy":
+            parent = legacy({"payroll": h}, {"drilldown": "Hawk"}, readable)
+        elif name == "hidden":
+            # It drops and records Hawk, so the version saved after it records none.
+            parent = manager.analysis_requirements_save({"question": "Falcon 项目", "bindings": {"payroll": h},
+                                                         "items": ITEMS, "parent_id": readable})["id"]
+        if case == "legacy":
+            current = legacy({"gl": a}, {"drilldown": "Hawk"}, parent)
+        else:
+            spec = {"question": "收入", "items": ITEMS, "parent_id": parent}
+            if case == "resent":
+                # Resent from a scope card that loaded the version before Hawk's.
+                spec.update(bindings={"gl": a}, scope={"period": "2026-08", "drill_down": "Eagle"})
+            else:
+                spec["context_id"] = manager.save_context({"bindings": {"actual": a},
+                                                           "scopes": {"actual": {**SCOPE, "drilldown": "Kite"}}})["id"]
+            current = manager.analysis_requirements_save(spec)["id"]
+        record = analysis._get("requirements", current)
+        view = requirements_version_view(analysis, record, {a})
+        assert view["parent_id"] == readable
+        assert _shows(view, [h, *([parent] if name == "hidden" else []), "Falcon"]) == []
+        assert requirements_version_view(analysis, record, None) is record
+        if name == "hidden":
+            assert _shows(record.get("authoring_warnings"), ["Hawk"]) == []
+        seen[name] = json.dumps(view.get("authoring_warnings"), ensure_ascii=False)
+    # As written out, key order and all.
+    assert seen["hidden"] == seen["twin"]
+    assert [(warning["code"], warning["keys"], warning.get("source")) for warning in json.loads(seen["twin"]) or []] == {
+        "resent": [("hierarchy_dimension_dropped", {"drilldown": "Hawk"}, None),
+                   ("hierarchy_scope_dropped", {"drill_down": "Eagle", "drilldown": "Hawk"}, None)],
+        "context": [("hierarchy_dimension_dropped", {"drilldown": "Hawk"}, None),
+                    ("hierarchy_scope_dropped", {"drilldown": "Kite"}, "finance_context")],
+        "legacy": []}[case]
 
 
 # --- reproducibility ------------------------------------------------------------------------------------------------
@@ -755,6 +1560,485 @@ def test_a_session_circles_no_table_a_revision_took_from_a_parent_it_may_not_rea
                                                 "context_id": circled.context["id"], "draft_id": child["id"],
                                                 "block_id": "nope"})
     assert str(refused.value) == DRAFT_UNAVAILABLE
+
+
+def _session_requirements(world, capsys) -> dict[str, list[dict]]:
+    """Every list of requirements versions the session reads: the service, the CLI, analysis-state and MCP."""
+    code, listed = _cli(capsys, world.var, "analysis-requirements-list", "--spec", "{}")
+    code_state, state = _cli(capsys, world.var, "analysis-state")
+    assert (code, code_state) == (0, 0)
+    return {"service": world.session.analysis_requirements_list({})["requirements"], "cli": listed["requirements"],
+            "state": state["requirements"], "mcp": _mcp_requirements(world.var, world.task, [world.a["id"]])["requirements"]}
+
+
+def test_a_session_reads_the_manager_s_circle_select_of_a_draft_it_may_not_read_as_saved_with_no_selection(circled, capsys):
+    base = {"kind": "draft_table", "range": "selection", "instruction": "改成开票口径", "context_id": circled.context["id"]}
+    # The desktop circles the hidden draft's table while the analysis scope rests on the session's file.
+    code, circled_out = _cli(capsys, circled.var, "analysis-circle-select", "--spec",
+                             json.dumps({**base, "draft_id": circled.hidden["id"], "block_id": CAPTION}, ensure_ascii=False),
+                             session=None, task=circled.task.id)
+    assert code == 0
+    stored = circled.analysis._get("requirements", circled_out["requirements"]["id"])
+    assert stored["selection"]["draft_id"] == circled.hidden["id"] and set(stored["bindings"].values()) == {circled.a["id"]}
+    # The session reads it as the same revision saved with no selection, wherever it reads requirements.
+    as_saved_alone = {**{key: value for key, value in stored.items() if key != "_integrity_hash"}, "selection": None}
+    lists = _session_requirements(circled, capsys)
+    assert [rows[-1] for rows in lists.values()] == [as_saved_alone] * 4
+    assert _shows(lists, [circled.hidden["id"], CAPTION]) == []
+    # It may read the version, so it revises it as before: the #75 refusal is only for a version it may not read.
+    revised = circled.session.analysis_circle_select({**base, "draft_id": circled.shown["id"], "block_id": "tbl-expense"})
+    assert revised["requirements"]["parent_id"] == stored["id"]
+    assert revised["requirements"] == circled.session.analysis_requirements_list({})["current"]
+    assert revised["requirements"]["selection"]["draft_id"] == circled.shown["id"]
+    # The manager reads every version as stored.
+    records = sorted(circled.analysis._list("requirements"), key=lambda row: row["seq"])
+    assert circled.manager.analysis_requirements_list({})["requirements"] == records
+    assert _cli(capsys, circled.var, "analysis-state", session=None, task=circled.task.id)[1]["requirements"] == records
+
+
+def test_a_session_reads_a_selection_naming_a_record_it_may_not_read_as_one_naming_an_unknown_id(circled, tmp_path, capsys):
+    from openpyxl import Workbook
+
+    from foundry.finance_files import FinanceFiles
+
+    book = Workbook()
+    book.active.title = "薪酬"
+    book.active["A1"], book.active["A2"] = "费用", 987654
+    book.save(tmp_path / "h.xlsx")
+    workbook = circled.analysis.add_dataset(tmp_path / "h.xlsx", name="薪酬簿")
+    binding = FinanceFiles(circled.task).bind({"dataset_id": workbook["id"], "source": {"kind": "range", "sheet": "薪酬",
+                                               "range": "A1:A2"}, "fields": [{"name": "amount", "policy": "amount"}],
+                                               "role": "output"})
+    selections = [{"kind": "draft_table", "draft_id": circled.hidden["id"], "block_id": CAPTION},
+                  {"kind": "draft_table", "draft_id": "f" * 32, "block_id": CAPTION},
+                  {"kind": "draft_table", "draft_id": "zz", "block_id": CAPTION},
+                  {"kind": "workbook", "binding_id": binding["id"]},
+                  {"kind": "workbook", "binding_id": "e" * 32},
+                  {"kind": "draft_table", "draft_id": circled.shown["id"], "block_id": "tbl-expense"}]
+    parent = circled.requirements["id"]
+    saved = []
+    for index, selection in enumerate(selections):
+        store = circled.manager if index % 2 == 0 else circled.session
+        parent = store.analysis_requirements_save({"context_id": circled.context["id"], "question": "解释费用",
+                                                   "parent_id": parent, "items": [{"id": "expense", "metric": "expense"}],
+                                                   "selection": {**selection, "range": "A:A"}})["id"]
+        saved.append(parent)
+    for rows in _session_requirements(circled, capsys).values():
+        read = {row["id"]: row["selection"] for row in rows}
+        assert [read[version] for version in saved] == [None] * 5 + [{**selections[-1], "range": "A:A"}]
+    assert [row["selection"] for row in circled.manager.analysis_requirements_list({})["requirements"][-6:]] == [
+        {**selection, "range": "A:A"} for selection in selections]
+
+
+def test_a_session_reads_a_selection_stored_as_no_object_as_none(circled, capsys):
+    """No save stores a selection that is no object, so the version is written as a damaged store would hold it."""
+    record = _new(circled.task, question="解释费用", scope={}, bindings={"gl": circled.a["id"]}, context_id=None,
+                  items=[{"id": "expense", "metric": "expense"}], parent_id=circled.requirements["id"],
+                  removed_item_ids=[], change_reason="", selection="draft_HIDDEN!A1:B2")
+    version = circled.analysis._write(circled.analysis._object_path("requirements", record["id"]), record)
+    for rows in _session_requirements(circled, capsys).values():
+        assert [row["selection"] for row in rows if row["id"] == version["id"]] == [None]
+        assert _shows(rows, ["draft_HIDDEN"]) == []
+    # The manager reads it as stored.
+    assert circled.manager.analysis_requirements_list({})["current"] == version
+
+
+def test_no_requirements_version_a_session_reads_carries_the_stored_record_s_hash(circled, capsys):
+    """Whatever its selection or lineage, and however the session reads it: listed, or returned by its own save."""
+    base = {"context_id": circled.context["id"], "question": "解释费用", "items": [{"id": "expense", "metric": "expense"}]}
+    own = circled.session.analysis_requirements_save({**base, "parent_id": circled.requirements["id"]})
+    circled_out = circled.session.analysis_circle_select({
+        "kind": "draft_table", "range": "A:A", "instruction": "改成开票口径", "context_id": circled.context["id"],
+        "draft_id": circled.shown["id"], "block_id": "tbl-expense"})
+    code, cli_own = _cli(capsys, circled.var, "analysis-requirements-save", "--spec", json.dumps(
+        {**base, "parent_id": circled_out["requirements"]["id"]}, ensure_ascii=False))
+    assert code == 0
+    returned = [own, circled_out["requirements"], cli_own]
+    lists = _session_requirements(circled, capsys)
+    for rows in lists.values():
+        assert [row["id"] for row in rows] == [circled.requirements["id"], *[row["id"] for row in returned]]
+        assert rows[1:] == returned
+        assert not any("_integrity_hash" in row for row in rows)
+    assert all("_integrity_hash" in row for row in circled.manager.analysis_requirements_list({})["requirements"])
+
+
+def test_a_circled_version_whose_parent_a_session_may_not_read_reads_as_saved_after_the_one_it_may(circled, capsys):
+    """The manager's version names the hidden draft and revises a version on the hidden file. The session reads it as
+    in a world where neither was ever saved: a revision of the version before them, removing nothing, with no
+    selection."""
+    expense = {"id": "expense", "metric": "expense"}
+    hidden = circled.manager.analysis_requirements_save({
+        "context_id": circled.hidden_context["id"], "question": "Falcon 项目薪酬", "parent_id": circled.requirements["id"],
+        "change_reason": "换项目", "items": [expense, {"id": "falcon", "metric": "expense", "label": "Falcon 薪酬"}]})
+    version = circled.manager.analysis_requirements_save({
+        "context_id": circled.context["id"], "question": "解释费用", "items": [expense], "change_reason": "改成开票口径",
+        "parent_id": hidden["id"],
+        "selection": {"kind": "draft_table", "draft_id": circled.hidden["id"], "block_id": CAPTION, "range": "A:A"}})
+    for rows in _session_requirements(circled, capsys).values():
+        [read] = [row for row in rows if row["id"] == version["id"]]
+        assert _shows(read, [hidden["id"], circled.hidden["id"], CAPTION, "falcon"]) == []
+        assert "_integrity_hash" not in read
+        assert {key: read[key] for key in ("parent_id", "removed_item_ids", "selection")} == {
+            "parent_id": circled.requirements["id"], "removed_item_ids": [], "selection": None}
+        assert read["semantic_basis"]["removed_item_ids"] == []
+    # The manager reads it as stored.
+    assert circled.manager.analysis_requirements_list({})["current"] == circled.analysis._get("requirements", version["id"])
+    assert version["removed_item_ids"] == ["falcon"] and version["parent_id"] == hidden["id"]
+
+
+# --- requirements versions, runs and saved analyses named by id -----------------------------------------------------
+
+
+@pytest.fixture
+def named(tmp_path):
+    """The manager saved a requirements version, a finance run and an analysis on files outside the session (H, LH).
+    The current requirements version rests on A, so a session is refused for the id it names, not by #75's rule."""
+    from foundry.finance_mcp import FinanceMcpServer, create_stdio_grant
+
+    var = tmp_path / "var"
+    task = TaskStore(var).create(title="按编号")
+    analysis = AnalysisStore(task)
+    a = analysis.add_dataset(_csv(tmp_path / "a.csv", [("revenue", "2026-08", "集团", "100", "CNY", "元")]), name="A")["id"]
+    ledger = analysis.add_dataset(_entry(tmp_path / "l.json", "revenue", "100"), name="L")["id"]
+    task.record_session("sess", role="analysis")
+    h = analysis.add_dataset(_csv(tmp_path / "h.csv", [("revenue", "2026-08", "集团", SECRET, "CNY", "元")]), name="H")["id"]
+    hidden_ledger = analysis.add_dataset(_entry(tmp_path / "lh.json", "revenue", SECRET), name="LH")["id"]
+    manager = FinanceStore(task)
+    context = manager.save_context({"bindings": {"ledger": ledger}, "scopes": {"ledger": SCOPE}})
+    hidden_context = manager.save_context({"bindings": {"ledger": hidden_ledger}, "scopes": {"ledger": SCOPE}})
+    requirements = manager.analysis_requirements_save({"question": "Falcon", "bindings": {"payroll": h}, "items": ITEMS})
+    manager.analysis_requirements_save({"question": "收入", "bindings": {"gl": a}, "items": ITEMS,
+                                        "parent_id": requirements["id"]})
+    session = FinanceStore(task, snapshot_ids=_snapshots(task), session_id="sess")
+    total = {"kind": "account_total", "accounts": ["revenue"]}
+
+    def server(context_ids):
+        grant = create_stdio_grant(var, task_id=task.id, session_id="sess", snapshot_ids=_snapshots(task),
+                                   context_ids=context_ids)
+        served = FinanceMcpServer(var_root=var, grant_id=grant["grant_id"], token=grant["token"])
+        served.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+        served.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return served
+
+    return SimpleNamespace(
+        var=var, task=task, analysis=analysis, a=a, manager=manager, session=session, context=context["id"],
+        run=session.run_metric({"context_id": context["id"], "metric": total})["id"], hidden_requirements=requirements["id"],
+        hidden_run=manager.run_metric({"context_id": hidden_context["id"], "metric": total})["id"],
+        hidden_analysis=analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": h}})["id"],
+        # A grant on snapshots alone leaves every id to the service; a grant on a context checks a run's first.
+        grants={"snapshot grant": server(None), "context grant": server([context["id"]])})
+
+
+def _mcp(server, tool: str, spec: dict) -> str:
+    """What a session reads of a refused tool call: the tool's error, or the grant's refusal."""
+    from foundry.finance_mcp import McpRefused
+
+    try:
+        response = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                  "params": {"name": tool, "arguments": spec}})
+    except McpRefused as refused:
+        return f"grant refused: {refused}"
+    assert response["result"]["isError"], response
+    return json.loads(response["result"]["content"][0]["text"])["message"]
+
+
+def _refusal(call) -> str:
+    with pytest.raises(FoundryError) as refused:
+        call()
+    return str(refused.value)
+
+
+def _stored(world) -> dict[str, int]:
+    """Every record a refused call could have written."""
+    from foundry.analysis_jobs import JobStore
+
+    return {**{kind: len(world.analysis._list(kind))
+               for kind in ("revisions", "runs", "drafts", "requirements", "methods", "completions")},
+            "jobs": len(JobStore(world.task).list())}
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_requirements_version_alike(named, capsys):
+    from foundry.analysis import REQUIREMENTS_UNAVAILABLE
+
+    def cli(*args):
+        code, error = _cli(capsys, named.var, *args)
+        assert code == 3
+        return error.strip()
+
+    pinned = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                           "requirements_id": named.hidden_requirements})
+    stored = _stored(named)
+    answers = {}
+    # A version on a file outside the session, one never saved, one that is no id and one that is no text.
+    for requirements_id in (named.hidden_requirements, "e" * 32, "zz", 5):
+        script = json.dumps({"code": "print(1)", "bindings": {"t": named.a}, "requirements_id": requirements_id})
+        explanation = {"body": "收入。", "run_ids": [named.run], "requirements_id": requirements_id}
+        answers[requirements_id] = {
+            "analysis-save": cli("analysis-save", "--spec", json.dumps(
+                {"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "requirements_id": requirements_id})),
+            "analysis-script": cli("analysis-script", "--spec", script),
+            "analysis-script-start": cli("analysis-script-start", "--spec", script),
+            "analysis-draft": cli("analysis-draft", "--spec", json.dumps(
+                {"title": "T", "body": "收入。", "requirements_id": requirements_id})),
+            "validate-explanation": cli("validate-explanation", "--spec", json.dumps(explanation)),
+            "save-explanation-draft": cli("save-explanation-draft", "--spec", json.dumps(explanation)),
+            "completion save": _refusal(lambda: named.session.save_completion_draft("op", "call", explanation)),
+            **{f"{tool} ({grant})": _mcp(server, tool, explanation) for grant, server in named.grants.items()
+               for tool in ("validate_explanation", "save_explanation_draft")},
+        }
+    assert {answer for row in answers.values() for answer in row.values()} == {REQUIREMENTS_UNAVAILABLE}
+    assert _stored(named) == stored
+    # A saved analysis pinned to a version the session may not read is no id the session named: it runs as
+    # analysis-state reads it, naming no version (none the session may read came before), so pinned to the newest it
+    # may read, as one the manager saved naming none.
+    alone = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a}})
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in (pinned["id"], alone["id"])] == [
+        None, None]
+    ran = {}
+    for analysis in (pinned, alone):
+        code, run = _cli(capsys, named.var, "analysis-run", "--analysis", analysis["id"])
+        assert code == 0, run
+        ran[analysis["id"]] = {key: value for key, value in run.items() if key.startswith("requirements")}
+    assert ran[pinned["id"]] == ran[alone["id"]]
+    assert ran[alone["id"]]["requirements_id"] == named.manager.analysis_requirements_list({})["current"]["id"]
+    # A save the manager made of the very same request is no retry the session may replay: refused as a fresh save.
+    same = {"body": "收入。", "run_ids": [named.run], "requirements_id": named.hidden_requirements}
+    named.manager.save_explanation_draft(dict(same))
+    assert _refusal(lambda: named.session.save_explanation_draft(dict(same))) == REQUIREMENTS_UNAVAILABLE
+    # The manager is answered as before.
+    for requirements_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                                     ("zz", "invalid analysis object id: zz")):
+        for args in (("analysis-save", "--spec", json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                                               "requirements_id": requirements_id})),
+                     ("validate-explanation", "--spec", json.dumps({"body": "收入。", "requirements_id": requirements_id}))):
+            code, error = _cli(capsys, named.var, *args, session=None, task=named.task.id)
+            assert (code, error.strip()) == (3, message)
+
+
+def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_as_one_it_may_not_read(named, capsys):
+    """No save stores bindings that are no map of snapshot ids, so each version is written as a damaged store would
+    hold it, ordered before the current one (seq 0), which still rests on A; and then as the current one."""
+    import uuid
+
+    from foundry.analysis import DRAFT_UNAVAILABLE, REQUIREMENTS_UNAVAILABLE
+
+    def written(bindings, seq: int = 0) -> str:
+        record = _new(named.task, question="收入", scope={}, bindings=bindings, context_id=None, items=ITEMS,
+                      parent_id=None, removed_item_ids=[], change_reason="", selection=None, seq=seq)
+        record["_integrity_hash"] = _hash(record)
+        named.analysis._object_path("requirements", record["id"]).write_text(json.dumps(record), encoding="utf-8")
+        return record["id"]
+
+    def listed() -> dict[str, list[dict]]:
+        code, cli = _cli(capsys, named.var, "analysis-requirements-list", "--spec", "{}")
+        code_state, state = _cli(capsys, named.var, "analysis-state")
+        assert (code, code_state) == (0, 0)
+        return {"service": named.session.analysis_requirements_list({})["requirements"], "cli": cli["requirements"],
+                "state": state["requirements"],
+                "mcp": _mcp_requirements(named.var, named.task, _snapshots(named.task))["requirements"]}
+
+    def as_parent(requirements_id) -> dict[str, str]:
+        spec = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS, "parent_id": requirements_id}
+        code, error = _cli(capsys, named.var, "analysis-requirements-save", "--spec", json.dumps(spec))
+        return {"cli": f"{code}: {error.strip()}",
+                **{grant: _mcp(server, "analysis_requirements_save", spec) for grant, server in named.grants.items()}}
+
+    before = listed()
+    # Falsy ones too: a version stored with an empty list, string or false is no map either.
+    malformed = [written([named.a]), written({"gl": [named.a]}), written([]), written(""), written(False)]
+    stored = _stored(named)
+    for requirements_id in malformed:
+        code, error = _cli(capsys, named.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "requirements_id": requirements_id}))
+        assert (code, error.strip()) == (3, REQUIREMENTS_UNAVAILABLE)
+        explanation = {"body": "收入。", "run_ids": [named.run], "requirements_id": requirements_id}
+        assert _refusal(lambda: named.session.validate_explanation(explanation)) == REQUIREMENTS_UNAVAILABLE
+        assert _refusal(lambda: named.analysis.named_requirements(requirements_id, {named.a})) == REQUIREMENTS_UNAVAILABLE
+        # Named as the parent of a revision, it is refused as a version on a file outside the session or none saved.
+        assert as_parent(requirements_id) == as_parent(named.hidden_requirements) == as_parent("e" * 32)
+    assert _stored(named) == stored
+    # It lists as one never saved; the manager reads it as stored.
+    assert listed() == before
+    assert set(malformed) <= {row["id"] for row in named.manager.analysis_requirements_list({})["requirements"]}
+    # A saved analysis pinned to it reads and runs as one naming none.
+    pinned = [named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
+                                            "requirements_id": requirements_id})["id"] for requirements_id in malformed]
+    alone = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a}})["id"]
+    analyses = [*pinned, alone]
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in analyses] == [None] * len(analyses)
+    ran = []
+    for analysis_id in analyses:
+        code, run = _cli(capsys, named.var, "analysis-run", "--analysis", analysis_id)
+        assert code == 0, run
+        ran.append({key: value for key, value in run.items() if key.startswith("requirements")})
+    assert ran == [ran[-1]] * len(ran)
+    # A draft or receipt pinned to it, written as a damaged store would hold it, reads as one pinned to a version on a
+    # file outside the session: left out, or refused by id.
+    saved = named.session.save_explanation_draft({"body": "收入 100。", "run_ids": [named.run]})
+
+    def pinned(kind: str, record_id: str, requirements_id: str) -> str:
+        record = {key: value for key, value in named.analysis._get(kind, record_id).items() if key != "_integrity_hash"}
+        record.update(id=uuid.uuid4().hex, requirements_id=requirements_id)
+        record["_integrity_hash"] = _hash(record)
+        named.analysis._object_path(kind, record["id"]).write_text(json.dumps(record), encoding="utf-8")
+        return record["id"]
+
+    versions = [named.hidden_requirements, *malformed]
+    drafts = [pinned("drafts", saved["id"], requirements_id) for requirements_id in versions]
+    receipts = [pinned("completions", saved["completion"]["id"], requirements_id) for requirements_id in versions]
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert code == 0
+    assert {row["id"] for row in state["drafts"]} & {saved["id"], *drafts} == {saved["id"]}
+    assert {row["id"] for row in state["completions"]} & {saved["completion"]["id"], *receipts} == {
+        saved["completion"]["id"]}
+    for draft_id in drafts:
+        code, error = _cli(capsys, named.var, "report-draft-read", "--draft", draft_id)
+        assert (code, error.strip()) == (3, DRAFT_UNAVAILABLE)
+
+    def cli(command: str, spec: dict) -> str:
+        code, error = _cli(capsys, named.var, command, "--spec", json.dumps(spec))
+        return f"{code}: {error.strip()}"
+
+    def saves() -> dict[str, str]:
+        """What each save the session checks against the task's current version answers, naming as the parent the
+        version the session reads as current, on A."""
+        current = named.session.analysis_requirements_list({})["current"]["id"]
+        revision = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS, "parent_id": current}
+        explanation = {"body": "收入。", "run_ids": [named.run]}
+        circled = {"kind": "draft_table", "range": "A1:B2", "context_id": named.context, "draft_id": saved["id"],
+                   "instruction": "改"}
+        return {
+            "analysis-draft": cli("analysis-draft", {"title": "T", "body": "收入。", "run_ids": [named.run]}),
+            "analysis-requirements-save": cli("analysis-requirements-save", revision),
+            "requirements save": _refusal(lambda: named.session.analysis_requirements_save(revision)),
+            "explanation save": _refusal(lambda: named.session.save_explanation_draft(explanation)),
+            "validation": _refusal(lambda: named.session.validate_explanation(explanation)),
+            "completion save": _refusal(lambda: named.session.save_completion_draft("op", "call", explanation)),
+            "circle-select": _refusal(lambda: named.session.analysis_circle_select(circled)),
+            **{f"requirements save ({grant})": _mcp(server, "analysis_requirements_save", revision)
+               for grant, server in named.grants.items()},
+        }
+
+    # As the current version, it is refused as a current version on a file outside the session is (#75).
+    named.manager.analysis_requirements_save({
+        "question": "Falcon", "bindings": named.analysis._get("requirements", named.hidden_requirements)["bindings"],
+        "items": ITEMS, "parent_id": named.manager.analysis_requirements_list({})["current"]["id"]})
+    hidden = saves()
+    assert set(hidden.values()) == {
+        "3: snapshots are outside this session context; use analysis-refresh to include task datasets",
+        "3: finance snapshots are outside this session context", "finance snapshots are outside this session context",
+        "grant refused: requirements parent has no grant-verifiable context"}
+    for seq, bindings in enumerate(([named.a], {"gl": [named.a]}, {"gl": 7}), 10_000):
+        written(bindings, seq)
+        stored = _stored(named)
+        assert saves() == hidden
+        # The manager is answered as before.
+        revision = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS,
+                    "parent_id": named.manager.analysis_requirements_list({})["current"]["id"]}
+        explanation = {"body": "收入。", "run_ids": [named.run]}
+        assert {_refusal(lambda: named.manager.analysis_requirements_save(revision)),
+                _refusal(lambda: named.manager.save_explanation_draft(explanation)),
+                _refusal(lambda: named.manager.validate_explanation(explanation))} == {
+            "finance bindings must map aliases to snapshot IDs"}
+        assert _stored(named) == stored
+    # Falsy ones as the current version are refused alike.
+    for seq, bindings in enumerate(([], "", False), 10_100):
+        written(bindings, seq)
+        stored = _stored(named)
+        assert saves() == hidden
+        assert _stored(named) == stored
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_run_alike(named, capsys):
+    from foundry.analysis import RUN_UNAVAILABLE
+
+    def cli(*args):
+        code, error = _cli(capsys, named.var, *args)
+        assert code == 3
+        return error.strip()
+
+    stored = _stored(named)
+    answers = {}
+    for run_id in (named.hidden_run, "e" * 32, "zz", 5):
+        runs = {"body": "收入。", "run_ids": [run_id]}
+        cited = {"body": "收入。", "claims": [{"basis": "source_fact", "run_id": run_id, "text": "收入"}]}
+        calculated = {"body": "收入。", "claims": [{"basis": "calculation", "run_id": run_id, "row": 0, "column": "amount"}]}
+        answers[run_id] = {
+            "prepare-explanation": cli("prepare-explanation", "--spec", json.dumps({"run_ids": [run_id]})),
+            "validate-explanation": cli("validate-explanation", "--spec", json.dumps(runs)),
+            "save-explanation-draft": cli("save-explanation-draft", "--spec", json.dumps(runs)),
+            "validate a claim": _refusal(lambda: named.session.validate_explanation(cited)),
+            "save a claim": _refusal(lambda: named.session.save_explanation_draft(cited)),
+            "save a calculation": _refusal(lambda: named.session.save_explanation_draft(calculated)),
+            "completion run_ids": _refusal(lambda: named.session.save_completion_draft("op", "call", runs)),
+            "completion claim": _refusal(lambda: named.session.save_completion_draft("op", "call", cited)),
+            **{f"{tool} ({grant})": _mcp(server, tool, runs) for grant, server in named.grants.items()
+               for tool in ("prepare_explanation", "validate_explanation", "save_explanation_draft")},
+        }
+        if isinstance(run_id, str):  # a recipe naming its run by anything but text is refused for its shape
+            recipe = {"kind": "direct", "dataset_id": named.a, "source_hash": "0" * 64, "sheet": "S", "range": "A1",
+                      "claim": {"run_id": run_id, "row": 0, "column": "amount"}}
+            answers[run_id]["validate a recipe"] = _refusal(
+                lambda: named.session.validate_explanation({"evidence_recipes": [recipe]}))
+    # The service answers alike; a context grant refuses each run before the service reads it, alike too.
+    refused = "grant refused: finance run is outside this grant"
+    assert {entry: {row[entry] for row in answers.values() if entry in row} for entry in answers["e" * 32]} == {
+        entry: {refused if "context grant" in entry else RUN_UNAVAILABLE} for entry in answers["e" * 32]}
+    assert _stored(named) == stored
+    # A save the manager made of the very same request is no retry the session may replay: refused as a fresh save.
+    same = {"body": "收入。", "run_ids": [named.hidden_run]}
+    named.manager.save_explanation_draft(dict(same))
+    assert _refusal(lambda: named.session.save_explanation_draft(dict(same))) == RUN_UNAVAILABLE
+    # A run the session may read is read as before.
+    mine = {"body": "收入。", "run_ids": [named.run]}
+    assert _cli(capsys, named.var, "validate-explanation", "--spec", json.dumps(mine))[0] == 0
+    # The manager reads every run, and is answered as before for an unknown or malformed one.
+    manager = {"session": None, "task": named.task.id}
+    assert _cli(capsys, named.var, "validate-explanation", "--spec", json.dumps(same), **manager)[0] == 0
+    for run_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                            ("zz", "invalid analysis object id: zz")):
+        for command in ("prepare-explanation", "validate-explanation", "save-explanation-draft"):
+            code, error = _cli(capsys, named.var, command, "--spec", json.dumps({"body": "收入。", "run_ids": [run_id]}),
+                               **manager)
+            assert (code, error.strip()) == (3, message)
+
+
+def test_a_session_names_a_hidden_unknown_or_malformed_saved_analysis_alike(named, capsys):
+    from foundry.analysis import ANALYSIS_UNAVAILABLE
+
+    def revision(parent_id) -> str:
+        return json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": named.a}, "parent_id": parent_id})
+
+    stored = _stored(named)
+    answers = set()
+    for analysis_id in (named.hidden_analysis, "e" * 32, "zz"):
+        for args in (("analysis-run", "--analysis", analysis_id),
+                     ("analysis-method-save", "--analysis", analysis_id, "--name", "收入"),
+                     ("analysis-save", "--spec", revision(analysis_id))):
+            code, error = _cli(capsys, named.var, *args)
+            answers.add((code, str(error).strip()))
+    code, error = _cli(capsys, named.var, "analysis-save", "--spec", revision(5))
+    answers.add((code, str(error).strip()))
+    # Neither run nor saved as a method, nor kept as a revision's parent.
+    assert answers == {(3, ANALYSIS_UNAVAILABLE)}
+    assert _stored(named) == stored
+    # A parent the session may read is kept as before.
+    code, mine = _cli(capsys, named.var, "analysis-save", "--spec", json.dumps(
+        {"question": "收入", "sql": SQL, "bindings": {"t": named.a}}))
+    code, revised = _cli(capsys, named.var, "analysis-save", "--spec", revision(mine["id"]))
+    assert code == 0 and revised["parent_id"] == mine["id"]
+    # The manager runs and revises any analysis, and is answered as before for an unknown or malformed one.
+    manager = {"session": None, "task": named.task.id}
+    assert _cli(capsys, named.var, "analysis-run", "--analysis", named.hidden_analysis, **manager)[0] == 0
+    code, managed = _cli(capsys, named.var, "analysis-save", "--spec", revision(named.hidden_analysis), **manager)
+    assert code == 0 and managed["parent_id"] == named.hidden_analysis
+    for analysis_id, message in (("e" * 32, f"analysis object is unavailable: {'e' * 32}.json"),
+                                 ("zz", "invalid analysis object id: zz")):
+        for args in (("analysis-run", "--analysis", analysis_id), ("analysis-save", "--spec", revision(analysis_id))):
+            code, error = _cli(capsys, named.var, *args, **manager)
+            assert (code, error.strip()) == (3, message)
 
 
 # --- recovering a session's completion operation --------------------------------------------------------------------

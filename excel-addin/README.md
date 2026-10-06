@@ -62,13 +62,13 @@ The expected host acceptance proof is workbook-level, not just bridge API health
 
 ## API contract used by `taskpane.js`
 
-All API requests use a bearer token issued by `excel-bridge-token`. Every POST body includes `workbook_id`; the workbook id is created and persisted by Office document settings in the host workbook.
+All API requests use a bearer token issued by `excel-bridge-token`. Every POST body includes `workbook_id`; the workbook id is created and persisted by Office document settings in the host workbook. Each session keeps its own record of a workbook: a session that opens a workbook another session used sees none of that session's bindings, imports, previews or telemetry, and its imports never join the other session's context. A record saved before records were kept per session gives each session only the imports it filed there, with their input bindings; output areas are bound and previews made again.
 
-- `GET /api/context` returns the task/session context, workbook buckets, recent host telemetry, finance datasets/contexts, and authorized successful finance runs for the current session snapshots.
+- `GET /api/context` returns the task/session context, this session's workbook buckets and recent host telemetry, finance datasets/contexts, and authorized successful finance runs for the current session snapshots.
 - `POST /api/register-workbook` records workbook identity and host/API support telemetry metadata. Workbook URL is stored only as a hash.
-- `POST /api/telemetry` records bounded host operation events such as ready, register, import, run, preview, apply, recalc, and save.
+- `POST /api/telemetry` records bounded host operation events, the latest 500 per session, such as ready, register, import, run, preview, apply, recalc, and save.
 - `POST /api/register-bindings` registers real Office.js binding metadata and server-computed baseline hashes from the current cells. Output bindings marked `dedicated_area` become preauthorized write areas. The manager-facing management template adapts to the selected table headers, so a normal two-column `management_account`/`amount` range imports with organization, period, currency, unit, and scenario supplied by scope fields.
-- `POST /api/import-binding` imports only an input binding matrix into a new immutable snapshot. It preserves existing session snapshots and all latest distinct input bindings for the workbook finance context. Child sessions cannot import new Excel snapshots.
+- `POST /api/import-binding` imports only an input binding matrix into a new immutable snapshot. It preserves existing session snapshots and the latest distinct input bindings this session imported into the workbook for its finance context. Child sessions cannot import new Excel snapshots.
 - `POST /api/run-metric` delegates to the existing `FinanceStore` metrics path with the current session context.
 - `POST /api/preview-output` accepts selected output writes and current cell snapshots. The bridge ignores caller-supplied baselines, uses the registered baseline including formulas, and returns conflicts plus exact typed cell values.
 - `POST /api/apply-output` requires the same workbook, binding, range, preview id, current cell hashes, and explicit conflict resolutions. It returns only selected cells to write; Office.js applies them one cell at a time so nonselected formulas, styles, charts, and manual cells remain untouched.

@@ -7,8 +7,8 @@ import re
 from decimal import localcontext
 from time import perf_counter
 
-from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality, _hash, _hash_bytes, _new,
-                             _safe_text)
+from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, RUN_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality,
+                             _hash, _hash_bytes, _new, _safe_text, _saved_by)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -206,6 +206,19 @@ class FinanceStore:
         for dataset_id in bindings.values():
             _assert_id(dataset_id)
 
+    def _authorize_current(self, current):
+        """The task's current requirements version, which a save is checked against. A session is refused one it may
+        not read (finance_requirements.requirements_readable), one with malformed bindings as one on files outside it;
+        the manager as before (_authorize)."""
+        if not current:
+            return
+        if self.allowed is not None:
+            from foundry.finance_requirements import requirements_readable
+
+            if not requirements_readable(current, self.allowed):
+                raise FoundryError("finance snapshots are outside this session context")
+        self._authorize(current.get("bindings", {}))
+
     def _authorize_evidence_recipes(self, recipes):
         from foundry.financial_evidence import recipe_dataset_ids, recipe_run_ids
 
@@ -215,7 +228,7 @@ class FinanceStore:
         # may read (analysis_cli._bound_evidence). The manager's recipes report a run that does not read as an issue.
         if self.allowed is not None:
             for run_id in recipe_run_ids(recipes):
-                self._authorize(self.analysis.get_run(run_id)["bindings"])
+                self._named_run(run_id)
 
     def _authorize_consistency_sources(self, sources):
         from foundry.financial_evidence import consistency_dataset_ids
@@ -273,17 +286,42 @@ class FinanceStore:
             raise FoundryError(PARENT_UNAVAILABLE) from None
         return parent
 
+    def _named_requirements(self, requirements_id):
+        """A requirements version a call names by id. A session is refused one it may not read exactly as an unknown
+        or malformed id (AnalysisStore.named_requirements); the manager reads it as stored."""
+        if self.allowed is None:
+            self._authorize(self.analysis._get("requirements", requirements_id).get("bindings", {}))
+            return
+        self.analysis.named_requirements(requirements_id, self.allowed)
+
+    def _named_run(self, run_id):
+        """A run a call names by id (an explanation's run_ids, a claim's or a recipe's run). A session is refused one it
+        may not read exactly as an unknown or malformed id; the manager reads it as stored."""
+        if self.allowed is None:
+            run = self.analysis.get_run(run_id)
+            self._authorize(run["bindings"])
+            return run
+        try:
+            run = self.analysis.get_run(run_id)
+            self._authorize(run["bindings"])
+        except FoundryError:
+            raise FoundryError(RUN_UNAVAILABLE) from None
+        return run
+
     def list_finance_context(self):
         from foundry.finance_requirement_support import metric_catalog
+        from foundry.source_refresh import snapshots_in_view
 
         state = self.analysis.state()
         return {
             "task_id": self.task.id,
             "domain": "foundry.finance.context.v1",
+            # A refreshed snapshot names the prior its batch reads with to this reader (snapshots_in_view).
             "datasets": [
                 {**r, "structure_state": self.dataset_structure_state(r["id"])}
-                for r in state["datasets"]
-                if self.allowed is None or r["id"] in self.allowed
+                for r in snapshots_in_view(self.analysis, [r for r in state["datasets"]
+                                                           if self.allowed is None or r["id"] in self.allowed],
+                                           self.allowed)
             ],
             "contexts": self._list("contexts"),
             "account_maps": self._list("account_maps"),
@@ -454,6 +492,7 @@ class FinanceStore:
             grain=[],
             max_rows=10000,
             timeout_seconds=30,
+            **_saved_by(self.session_id, self.context_revision),
         )
         return self.analysis._write(
             self.analysis._object_path("revisions", record["id"]), record
@@ -819,8 +858,7 @@ class FinanceStore:
         if not isinstance(spec, dict):
             raise FoundryError("analysis requirements spec must be an object")
         parent = latest_requirements(self.analysis)
-        if parent:
-            self._authorize(parent.get("bindings", {}))
+        self._authorize_current(parent)
         context_scopes = None
         if spec.get("context_id"):
             context = self._read("contexts", spec["context_id"])
@@ -830,14 +868,29 @@ class FinanceStore:
             # (the panel seeds from it), so save drops it instead of refusing it as newly written.
             context_scopes = [scope for scope in (context.get("scopes") or {}).values() if isinstance(scope, dict)]
         self._authorize(spec.get("bindings", {}))
-        return save_requirements(self.analysis, spec, _context_scopes=context_scopes, _allowed=self.allowed)
+        saved = save_requirements(self.analysis, spec, _context_scopes=context_scopes, _allowed=self.allowed)
+        if self.allowed is None:
+            return saved
+        from foundry.finance_requirements import requirements_version_view
+
+        # A session reads the version it saved as its listing reads it (circle-select returns it too).
+        return requirements_version_view(self.analysis, saved, self.allowed)
 
     def analysis_requirements_list(self, spec):
+        from foundry.finance_requirements import requirements_readable
+
         records = self.analysis._list("requirements")
-        visible = [r for r in records if self.allowed is None or set(r.get("bindings", {}).values()) <= self.allowed]
+        visible = [r for r in records if requirements_readable(r, self.allowed)]
         if spec.get("context_id"):
             self._read("contexts", spec["context_id"])
             visible = [r for r in visible if r.get("context_id") == spec["context_id"]]
+        if self.allowed is not None:
+            from foundry.finance_requirements import requirements_version_view
+
+            # Each as the session reads it, reading every version and every draft a selection names once.
+            versions, drafts = {r.get("id"): r for r in records}, {}
+            visible = [requirements_version_view(self.analysis, r, self.allowed, versions=versions, drafts=drafts)
+                       for r in visible]
         return {"requirements": visible, "current": visible[-1] if visible else None}
 
     def save_completion_draft(self, operation_id, call_id, spec):
@@ -854,22 +907,24 @@ class FinanceStore:
         # Authorize referenced records before persisting a recoverable payload.
         from foundry.finance_requirements import latest_requirements
         requirements = latest_requirements(self.analysis)
-        if requirements:
-            self._authorize(requirements.get("bindings", {}))
+        self._authorize_current(requirements)
         if spec.get("requirements_id"):
-            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            self._named_requirements(spec["requirements_id"])
         for claim in spec.get("claims", []):
             if isinstance(claim, dict) and claim.get("dataset_id"):
                 self._authorize({"source": claim["dataset_id"]})
             if isinstance(claim, dict) and claim.get("run_id"):
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
-                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                self._named_run(claim["run_id"])
         for run_id in spec.get("run_ids", []):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
         self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         self._parent_draft(spec.get("parent_id"))
         operations = CompletionOperationStore(self.task, self.session_id, self.allowed)
+        # Whether the session may read each receipt its operation is settled on is read before completion.lock, as
+        # before the task lock (CompletionOperationStore._prime): reserve, get and settle under it only look it up.
+        operations._prime(operation_id)
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             reserved = operations.reserve(operation_id, payload=spec, call_id=call_id)
             attempt = reserved["attempt"]
@@ -880,14 +935,17 @@ class FinanceStore:
             key = _hash({"operation_id": operation_id, "call_id": call_id})
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
                                           if row.get("completion_request_key") == key], attempt)
+            # The save, its receipt and the draft and receipt it returns are one read (AnalysisStore.save_draft).
+            cache: dict = {}
             if previous:
                 self._authorize_draft(previous)
                 receipt = self._settled_receipt(
                     self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
-                    record_completion(self.analysis, previous, previous["explanation_check"]))
+                    record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed,
+                                      cache=cache), cache=cache, operations=operations)
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
-                return {**self._readable_draft(previous), "completion": receipt, "completion_operation": operation,
-                        "replayed": True, "validation_basis": "saved_draft_version"}
+                return {**self._readable_draft(previous, cache=cache), "completion": receipt,
+                        "completion_operation": operation, "replayed": True, "validation_basis": "saved_draft_version"}
 
             def check_deadline():
                 operation = operations.get(operation_id)
@@ -902,7 +960,7 @@ class FinanceStore:
                 "completion_operation_revision": attempt["revision"],
             }
             try:
-                result = self._save_explanation_draft(save_spec, check_deadline=check_deadline)
+                result = self._save_explanation_draft(save_spec, check_deadline=check_deadline, cache=cache)
             except FoundryError as exc:
                 saved_after_error = next((row for row in self.analysis._list("drafts")
                                           if row.get("completion_request_key") == key), None)
@@ -926,7 +984,7 @@ class FinanceStore:
                 })
                 raise
             # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
-            receipt = self._settled_receipt(result["completion"])
+            receipt = self._settled_receipt(result["completion"], cache=cache, operations=operations)
             operation = operations.settle(operation_id, attempt["revision"], result, receipt)
             return {**result, "completion": receipt, "completion_operation": operation}
 
@@ -1046,22 +1104,27 @@ class FinanceStore:
         # A committed draft also acts as recovery evidence if receipt writing fails.
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             requirements = latest_requirements(self.analysis)
-            if requirements:
-                self._authorize(requirements.get("bindings", {}))
+            self._authorize_current(requirements)
             key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
+            # A session replays only a save it may read: one it may not read is refused as a fresh save would be.
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
-                                          if row.get("completion_request_key") == key])
+                                          if row.get("completion_request_key") == key
+                                          and self.analysis.draft_readable(row, self.allowed)])
+            # The save, its receipt and the draft and receipt it returns are one read (AnalysisStore.save_draft).
+            cache: dict = {}
             if previous:
                 # A retry is refused whatever the fresh save would refuse: the stored draft and the parent it names.
                 self._parent_draft(spec.get("parent_id"))
                 self._authorize_draft(previous)
-                receipt = record_completion(self.analysis, previous, previous["explanation_check"])
-                return {**self._readable_draft(previous), "completion": self._readable_receipt(receipt), "replayed": True,
+                receipt = record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed,
+                                            cache=cache)
+                return {**self._readable_draft(previous, cache=cache),
+                        "completion": self._readable_receipt(receipt, cache=cache), "replayed": True,
                         "validation_basis": "saved_draft_version"}
-            result = self._save_explanation_draft({**spec, "completion_request_key": key})
-            return {**result, "completion": self._readable_receipt(result["completion"])}
+            result = self._save_explanation_draft({**spec, "completion_request_key": key}, cache=cache)
+            return {**result, "completion": self._readable_receipt(result["completion"], cache=cache)}
 
-    def _save_explanation_draft(self, spec, *, check_deadline=lambda: None):
+    def _save_explanation_draft(self, spec, *, check_deadline=lambda: None, cache=None):
         check_deadline()
         parent = self._parent_draft(spec.get("parent_id"))
         self._authorize_evidence_recipes(spec.get("evidence_recipes", parent.get("evidence_recipes", [])))
@@ -1072,7 +1135,7 @@ class FinanceStore:
             self._authorize(self.analysis._get("requirements", parent["requirements_id"]).get("bindings", {}))
         if spec.get("requirements_id"):
             # The tools expose requirements_id so a revision can name the current version (repin_requirements).
-            self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+            self._named_requirements(spec["requirements_id"])
         run_ids = spec.get("run_ids", parent.get("run_ids", []))
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
@@ -1093,7 +1156,7 @@ class FinanceStore:
             run_ids = list(dict.fromkeys([*run_ids, *visual_runs]))
             spec = {**spec, "document": visual_document, "run_ids": run_ids}
         for run_id in [*parent.get("run_ids", []), *run_ids]:
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         prepared = (
             self.prepare_explanation({"run_ids": run_ids,
                                       "materiality": spec.get("materiality", parent.get("materiality", {}))})
@@ -1159,10 +1222,9 @@ class FinanceStore:
                 self._authorize({"source": claim["dataset_id"]})
             if claim.get("run_id") and claim.get("basis") != "calculation" and self.allowed is not None:
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
-                self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                self._named_run(claim["run_id"])
             if claim.get("basis") == "calculation" and claim.get("run_id"):
-                run = self.analysis.get_run(claim["run_id"])
-                self._authorize(run["bindings"])
+                run = self._named_run(claim["run_id"])
                 if run.get("engine") == "finance":
                     claim.update(
                         finance_context_id=run["finance_context_id"],
@@ -1233,28 +1295,36 @@ class FinanceStore:
             "fact_ids": fact_ids,
             "claims": claims,
         }
+        # The draft, its receipt and the draft returned are one read, and the caller's (AnalysisStore.save_draft).
+        cache = {} if cache is None else cache
         draft = self.analysis.save_draft(save_spec, _recipe_report=recipe_report, _allowed=self.allowed,
-                                         _inherited=inherited)
+                                         _inherited=inherited, _cache=cache)
 
         from foundry.finance_completion import record_completion
 
-        completion = record_completion(self.analysis, draft, draft["explanation_check"])
+        # A session judges the runs it cites on the versions it reads them pinned to (AnalysisStore.run_in_view).
+        completion = record_completion(self.analysis, draft, draft["explanation_check"], allowed=self.allowed,
+                                       cache=cache)
         # The stored receipt: the public saves and a session's operation read it through _readable_receipt.
-        return {**self._readable_draft(draft), "completion": completion}
+        return {**self._readable_draft(draft, cache=cache), "completion": completion}
 
-    def _readable_draft(self, draft):
-        """A stored draft as this store's session reads it (AnalysisStore.draft_in_view)."""
-        return self.analysis.draft_in_view(draft, self.allowed)
+    def _readable_draft(self, draft, *, cache=None):
+        """A stored draft as this store's session reads it (AnalysisStore.draft_in_view; ``cache`` as for run_in_view)."""
+        return self.analysis.draft_in_view(draft, self.allowed, cache=cache)
 
-    def _readable_receipt(self, receipt):
-        """A completion receipt as this store's session reads it (AnalysisStore.completion_in_view)."""
-        return self.analysis.completion_in_view(receipt, self.allowed)
+    def _readable_receipt(self, receipt, *, cache=None):
+        """A completion receipt as this store's session reads it (AnalysisStore.completion_in_view; ``cache`` as for
+        run_in_view)."""
+        return self.analysis.completion_in_view(receipt, self.allowed, cache=cache)
 
-    def _settled_receipt(self, receipt):
+    def _settled_receipt(self, receipt, *, cache=None, operations=None):
         """The receipt this store's session settles its own completion operation on: as it reads it. Its saves cite only
         what it may read, so it reads every receipt of its own; the receipt as stored if one ever does not, so the
-        operation never stops unsettled."""
-        view = self._readable_receipt(receipt)
+        operation never stops unsettled. ``operations``, the store that settles it, is told the session reads it, so
+        settle reads it no more under completion.lock (CompletionOperationStore._readable)."""
+        view = self._readable_receipt(receipt, cache=cache)
+        if view is not None and operations is not None and isinstance(receipt.get("id"), str):
+            operations._readable_receipts[receipt["id"]] = True
         return receipt if view is None else view
 
     def prepare_explanation(self, spec):
@@ -1265,9 +1335,7 @@ class FinanceStore:
             raise FoundryError("prepare explanation requires run_ids")
         runs = []
         for run_id in dict.fromkeys(run_ids):
-            run = self.analysis.get_run(run_id)
-            self._authorize(run["bindings"])
-            runs.append(run)
+            runs.append(self._named_run(run_id))
         self._authorize_evidence_recipes(spec.get("evidence_recipes", []))
         self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         backgrounds = self._backgrounds_for_runs(runs)
@@ -1307,7 +1375,7 @@ class FinanceStore:
         draft = self._named_draft(spec["draft_id"]) if spec.get("draft_id") else {}
         if self.allowed is not None:
             if spec.get("requirements_id"):
-                self._authorize(self.analysis._get("requirements", spec["requirements_id"]).get("bindings", {}))
+                self._named_requirements(spec["requirements_id"])
             # A revision is compared with its parent's runs: a parent named here must be one this session may read,
             # and a stored draft's parent it may not read is left out, as the draft reads to it (draft_in_view).
             self._parent_draft(spec.get("parent_id"))
@@ -1317,14 +1385,14 @@ class FinanceStore:
         if not isinstance(run_ids, list):
             raise FoundryError("run_ids must be an array")
         for run_id in dict.fromkeys(run_ids):
-            self._authorize(self.analysis.get_run(run_id)["bindings"])
+            self._named_run(run_id)
         if self.allowed is None:
             for run_id in draft.get("run_ids", []):
                 self._authorize(self.analysis.get_run(run_id)["bindings"])
         for claim in spec.get("claims", draft.get("claims", [])):
             if isinstance(claim, dict):
                 if claim.get("run_id"):
-                    self._authorize(self.analysis.get_run(claim["run_id"])["bindings"])
+                    self._named_run(claim["run_id"])
                 if claim.get("dataset_id"):
                     self._authorize({"source": claim["dataset_id"]})
         self._authorize_evidence_recipes(spec.get("evidence_recipes", draft.get("evidence_recipes", [])))
@@ -1332,8 +1400,7 @@ class FinanceStore:
         from foundry.finance_requirements import augment_quality, latest_requirements
 
         current = latest_requirements(self.analysis)
-        if current:
-            self._authorize(current.get("bindings", {}))
+        self._authorize_current(current)
         # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
         # evaluated again by validate_explanation and only that fresh report reaches coverage.
         merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
@@ -1919,7 +1986,9 @@ class FinanceStore:
         from foundry.finance_controls import superseded_snapshots
         from foundry.structure_records import PENDING_ACKNOWLEDGEMENT, PENDING_CONFIRMATION
 
-        state = self.analysis.state(self.allowed)
+        # The versions and runs the listing reads, read once for the draft it shows too (AnalysisStore.run_in_view).
+        cache: dict = {}
+        state = self.analysis.state(self.allowed, cache=cache)
         rows = [row for row in state["datasets"] if self.allowed is None or row["id"] in self.allowed]
         # A session's close status is the one its own files give: a newer file outside it replaces nothing here.
         replaced = superseded_snapshots(self.task, state["datasets"], allowed=self.allowed)
@@ -1958,7 +2027,7 @@ class FinanceStore:
             pending_structures=pending,
             controls=self.finance_controls_list({})["controls"],
             runs=runs,
-            draft=draft if draft is None or self.allowed is None else self._readable_draft(draft),
+            draft=draft if draft is None or self.allowed is None else self._readable_draft(draft, cache=cache),
         )
 
     def finance_control_confirmation_sheet(self, spec):
@@ -2454,10 +2523,12 @@ class FinanceStore:
                 },
                 registered_source_ids={source["id"]},
             )
+        # The save and the draft it returns are one read (AnalysisStore.save_draft).
+        cache: dict = {}
         draft = self.analysis.save_draft({"title": record.get("label") or template_id, "document": document},
-                                         _allowed=self.allowed)
+                                         _allowed=self.allowed, _cache=cache)
         return {
-            "draft": self._readable_draft(draft),
+            "draft": self._readable_draft(draft, cache=cache),
             "template_id": template_id,
             "kind": record.get("kind"),
             "filled_named_ranges": filled,
@@ -2566,10 +2637,10 @@ class FinanceStore:
             raise FoundryError("circle-select requires context_id")
         context = self._read("contexts", spec["context_id"])
         latest = latest_requirements(self.analysis)
-        if self.allowed is not None and latest:
+        if self.allowed is not None:
             # A session revises only a current version it may read, refused as analysis_requirements_save refuses it:
             # before anything is taken from that version or a child context is written.
-            self._authorize(latest.get("bindings", {}))
+            self._authorize_current(latest)
         if spec.get("parent_id") and (not latest or spec["parent_id"] != latest["id"]):
             raise FoundryError("circle-select parent_id must be the latest requirements version")
         if kind == "draft_table":

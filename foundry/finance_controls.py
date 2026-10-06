@@ -319,16 +319,23 @@ def _text_cells(data: bytes, sheet: str) -> set[str]:
         book.close()
 
 
-def refreshed_snapshots(task: Any) -> dict[str, set[str]]:
+def refreshed_snapshots(task: Any, allowed: set[str] | None = None, *, before: Any = None,
+                        batches: list[dict[str, Any]] | None = None) -> dict[str, set[str]]:
     """Each snapshot a published source refresh replaced, with every snapshot that replaced it.
 
     A session refreshes against the latest batch it may read (SourceRefreshService.allowed), so two published
-    batches can name the same prior: each reader counts the replacements it may read.
+    batches can name the same prior: each reader counts the replacements it may read. ``allowed``, a reader's
+    snapshot ceiling, reads each batch with the prior it reads it with (SourceRefreshService.batches_in_view), so a
+    refresh filed against a batch outside the reader replaces what that batch replaced. ``before``, a record's seq,
+    keeps the batches filed before it. ``batches``, when given, are those batches as that reader reads them, listed
+    once for a read of many records.
     """
     from foundry.source_refresh import SourceRefreshService
 
     replaced: dict[str, set[str]] = {}
-    for row in SourceRefreshService(task).batches():
+    for row in SourceRefreshService(task, allowed=allowed).batches_in_view() if batches is None else batches:
+        if isinstance(before, int) and row.get("seq", 0) >= before:
+            continue
         if (row.get("publication_status") == "published"
                 and row.get("prior_snapshot_id") and row.get("dataset_id") and row["dataset_id"] != row["prior_snapshot_id"]):
             replaced.setdefault(row["prior_snapshot_id"], set()).add(row["dataset_id"])
@@ -343,14 +350,16 @@ def superseded_snapshots(task: Any, datasets: list[dict[str, Any]] | None = None
     the task for runs that read it, but a control on it no longer speaks for the pack.
 
     ``allowed`` is a session's snapshot ceiling: only the replacements it may read count, as in
-    finance_readiness._supersessions, so a newer file outside the session replaces nothing it reads.
+    finance_readiness._supersessions, so a newer file outside the session replaces nothing it reads, and a refresh
+    it may read replaces the prior it reads it with (refreshed_snapshots).
     """
     from foundry.analysis import AnalysisStore
 
     def visible(dataset_id: Any) -> bool:
         return allowed is None or dataset_id in allowed
 
-    replaced = {prior for prior, newers in refreshed_snapshots(task).items() if any(visible(newer) for newer in newers)}
+    replaced = {prior for prior, newers in refreshed_snapshots(task, allowed).items()
+                if any(visible(newer) for newer in newers)}
     rows = AnalysisStore(task).state()["datasets"] if datasets is None else datasets
     latest: dict[str, dict[str, Any]] = {}
     for row in rows:

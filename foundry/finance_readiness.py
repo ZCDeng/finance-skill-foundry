@@ -448,7 +448,8 @@ def _supersessions(analysis, datasets: list[dict], known_periods: dict[str, str]
     of this month's. Controls keep their own rule (finance_controls.superseded_snapshots).
 
     In a session only the snapshots it may read count, as replacements and as files to compare: a newer
-    file outside the session is neither opened nor allowed to make one inside it look stale. ``known_periods``
+    file outside the session is neither opened nor allowed to make one inside it look stale, and a refresh it may
+    read replaces the prior it reads it with (finance_controls.refreshed_snapshots). ``known_periods``
     holds periods already read and gains the ones read here.
     """
     from foundry.finance_controls import refreshed_snapshots
@@ -457,7 +458,7 @@ def _supersessions(analysis, datasets: list[dict], known_periods: dict[str, str]
         return allowed is None or dataset_id in allowed
 
     replaced: dict[str, set[str]] = {}
-    for prior, newers in refreshed_snapshots(analysis.task).items():
+    for prior, newers in refreshed_snapshots(analysis.task, allowed).items():
         for newer in newers:
             if visible(newer):
                 replaced.setdefault(prior, set()).add(newer)

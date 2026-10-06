@@ -310,6 +310,38 @@ class SourceRefreshService:
             key=lambda row: (row.get("seq", 0), row["created_at"], row["id"]),
         )
 
+    def batches_in_view(self) -> list[dict[str, Any]]:
+        """Every batch as a reader whose snapshot ceiling is ``allowed`` reads it; the manager (None) reads them as
+        stored.
+
+        A refresh compares with the latest batch of its source its filer may read (_latest_published_for_identity).
+        One a session filed before that rule, or one filed by a reader that may read more (the manager's P, H, S read
+        by a session granted P and S), can name a prior this reader may not read. It reads with the prior it would
+        have named had no batch outside the reader been published: the nearest snapshot back along the batches'
+        priors that the reader may read, or none, under the integrity hash of the record so read. Its counts, its
+        changes and its snapshot's rows stay as filed: a business_key refresh merged its upload with the prior's rows
+        (incremental) or wrote off those it lacked (full_period) without keeping the two apart, so it reads with
+        counts taken against a prior it no longer names. A batch whose prior the reader may read, and a duplicate,
+        read as stored.
+        """
+        rows = self.batches()
+        if self.allowed is None:
+            return rows
+        filed = {row["dataset_id"]: row for row in rows if row.get("dataset_id") and row.get("duplicate_of") is None}
+        shown = []
+        for row in rows:
+            prior = row.get("prior_snapshot_id")
+            if row.get("dataset_id") and row.get("duplicate_of") is None and prior and prior not in self.allowed:
+                seen = set()
+                while prior and prior not in self.allowed and prior not in seen:
+                    seen.add(prior)
+                    prior = (filed.get(prior) or {}).get("prior_snapshot_id")
+                # Keyed as the stored record reads back, so the view reads as one.
+                row = {**row, "prior_snapshot_id": prior if prior in self.allowed else None}
+                row["_integrity_hash"] = _hash({key: value for key, value in row.items() if key != "_integrity_hash"})
+            shown.append(row)
+        return shown
+
     def _pull_pages(
         self,
         transport: SourceTransport,
@@ -726,6 +758,35 @@ class SourceRefreshService:
         record["seq"] = self.store._next_seq()
         record["_integrity_hash"] = _hash(record)
         write_json_atomic(self._checkpoint_path(scope_record), record)
+
+
+def snapshots_in_view(store: AnalysisStore, records: list[dict[str, Any]],
+                      allowed: set[str] | None, *, cache: dict | None = None) -> list[dict[str, Any]]:
+    """Snapshot records as a reader whose snapshot ceiling is ``allowed`` reads them; the manager (None) reads them as
+    stored. A refreshed snapshot records its batch's prior (metadata.source_refresh.prior_snapshot_id) and reads with
+    the prior its batch reads with (SourceRefreshService.batches_in_view), under the integrity hash of its record
+    (meta.json) so read. Its rows and counts stay as filed. ``cache`` as for AnalysisStore.run_in_view, so the drafts
+    of the same read list the batches no more."""
+    if allowed is None:
+        return records
+    batches: dict[str, dict[str, Any]] | None = None
+    shown = []
+    for record in records:
+        refresh = (record.get("metadata") or {}).get("source_refresh")
+        prior = refresh.get("prior_snapshot_id") if isinstance(refresh, dict) else None
+        if not prior or prior in allowed:
+            shown.append(record)
+            continue
+        if batches is None:
+            batches = {row["id"]: row for row in store._batches_in_view(allowed, {} if cache is None else cache)}
+        batch = batches.get(refresh.get("source_batch_id")) or {}
+        # A dataset read carries its rows too: the hash is over the record alone, as it was filed.
+        meta = store._read(store._inside(store.root / "datasets" / record["id"] / "meta.json"))
+        meta["metadata"] = {**meta["metadata"], "source_refresh": {
+            **meta["metadata"]["source_refresh"], "prior_snapshot_id": batch.get("prior_snapshot_id")}}
+        meta.pop("_integrity_hash", None)
+        shown.append({**record, "metadata": meta["metadata"], "_integrity_hash": _hash(meta)})
+    return shown
 
 
 def _prepare_batch(

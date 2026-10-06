@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import hmac
 import json
 import mimetypes
@@ -354,7 +355,7 @@ class ExcelBridgeApp:
             return self._register_workbook(context, payload)
         if method == "POST" and path == "/api/telemetry":
             assert context.task is not None
-            return {"telemetry": self._record_telemetry(context.task, payload)}
+            return {"telemetry": self._record_telemetry(context, payload)}
         if method == "POST" and path == "/api/register-bindings":
             return self._register_bindings(context, payload)
         if method == "POST" and path == "/api/import-binding":
@@ -464,39 +465,115 @@ class ExcelBridgeApp:
             return "unbound"
         return _safe_id(value, "workbook id")
 
-    def _workbook(self, task: Task, workbook_id: str) -> dict[str, Any]:
-        state = self._read_state(task)
+    def _workbook(self, state: dict[str, Any], context, workbook_id: str, *, create: bool = False) -> dict[str, Any]:
+        """The calling session's record of this workbook, placed in ``state`` so that writing ``state`` keeps it.
+
+        The workbook id lives in the workbook's own document settings, so every session that opens one file sends
+        the same id. Each session keeps its own record, under "<session id>/<workbook id>" (a workbook id never
+        holds "/"), and a workbook it has no record of is refused as one never registered. A record under the bare
+        workbook id was written before records were kept per session (_unowned_workbook)."""
+        key = self._workbook_key(context, workbook_id)
+        workbook = state["workbooks"].get(key) or self._unowned_workbook(state, context, workbook_id)
+        if not workbook:
+            if not create:
+                raise FoundryError("workbook is not registered")
+            workbook = self._default_workbook(workbook_id)
+        state["workbooks"][key] = workbook
+        return workbook
+
+    def _workbook_key(self, context, workbook_id: str) -> str:
+        return f"{context.session_id}/{workbook_id}"
+
+    def _unowned_workbook(self, state: dict[str, Any], context, workbook_id: str) -> dict[str, Any] | None:
+        """The calling session's share of the record under the bare workbook id, which every session that opened the
+        file wrote into before records were kept per session: the imports it filed there itself and may read, with
+        their input bindings, in a record of its own. The rest names no owner and stays behind: the name, address
+        and host the last session registered, output bindings with their areas and baselines, and previews. A
+        record holding none of the session's imports is none of its own. The share is a copy and the bare record is
+        never rewritten, so each session that filed into it takes up its own."""
         workbook = state["workbooks"].get(workbook_id)
         if not workbook:
-            raise FoundryError("workbook is not registered")
-        return workbook
+            return None
+        allowed = set(context.snapshot_ids)
+        inputs = {key: row for key, row in (workbook.get("input_snapshots") or {}).items()
+                  if row.get("dataset_id") in allowed and self._filed_by_session(context, row.get("dataset_id"))}
+        if not inputs:
+            return None
+        bindings = {key: row for key, row in (workbook.get("bindings") or {}).items()
+                    if key in inputs and row.get("role") == "input"}
+        return copy.deepcopy({**self._default_workbook(workbook_id), "bindings": bindings, "input_snapshots": inputs})
 
-    def _put_workbook(self, task: Task, workbook_id: str, workbook: dict[str, Any]) -> dict[str, Any]:
-        state = self._read_state(task)
-        state["workbooks"][workbook_id] = workbook
-        self._write_state(task, state)
-        return workbook
+    def _filed_by_session(self, context, dataset_id: Any) -> bool:
+        """Whether the calling session's own import filed this dataset: each import writes its upload into the
+        session's folder (_upload_path) and the dataset keeps that file's name as its source_name."""
+        try:
+            analysis = AnalysisStore(context.task)
+            meta = analysis._read(analysis.root / "datasets" / _safe_id(dataset_id, "dataset id") / "meta.json")
+            upload = self._upload_path(context.task, context.session_id, Path(str(meta.get("source_name") or "")).stem)
+        except FoundryError:
+            return False
+        return upload.is_file()
 
-    def _record_telemetry(self, task: Task, payload: dict[str, Any]) -> dict[str, Any]:
+    def _session_workbooks(self, state: dict[str, Any], context) -> list[dict[str, Any]]:
+        """Every workbook the calling session has a record of (_workbook), by id."""
+        found = []
+        for workbook_id in {key.rpartition("/")[2] for key in state["workbooks"]}:
+            workbook = state["workbooks"].get(self._workbook_key(context, workbook_id)) or self._unowned_workbook(
+                state, context, workbook_id)
+            if workbook:
+                found.append(workbook)
+        return sorted(found, key=lambda row: row["id"])
+
+    def _record_telemetry(self, context, payload: dict[str, Any]) -> dict[str, Any]:
         event = {
             "id": uuid.uuid4().hex,
             "at": now_iso(),
+            "session_id": context.session_id,
             "event": _require_text(payload.get("event"), "telemetry event", maximum=100),
             "workbook_id": str(payload.get("workbook_id") or ""),
             "host": _require_object(payload.get("host") or {}, "host"),
             "details": _require_object(payload.get("details") or {}, "telemetry details"),
         }
-        state = self._read_state(task)
-        state.setdefault("telemetry", []).append(event)
-        state["telemetry"] = state["telemetry"][-MAX_TELEMETRY:]
-        self._write_state(task, state)
+        # Each session keeps its own latest events in a file of its own: another session's never push them out, and
+        # the state every bridge call reads and rewrites does not grow with the sessions that log. Events the state
+        # holds from before they named their session stay there for the operator's tools, bounded as they were.
+        with exclusive(context.task.lock_path, timeout=10):
+            events = [*self._session_telemetry(context.task, context.session_id), event][-MAX_TELEMETRY:]
+            record = json_value({"schema_version": BRIDGE_SCHEMA, "task_id": context.task.id,
+                                 "session_id": context.session_id, "events": events})
+            write_json_atomic(self._telemetry_path(context.task, context.session_id),
+                              {**record, "_integrity_hash": _hash(record)})
         return event
+
+    def _telemetry_path(self, task: Task, session_id: str) -> Path:
+        # A session id may hold any character, so its file is named by a digest of it.
+        name = sha256(session_id.encode("utf8")).hexdigest()
+        path = task.root / "analysis" / "excel_bridge" / "telemetry" / f"{name}.json"
+        if not path.resolve().is_relative_to(task.root.resolve()):
+            raise FoundryError("bridge telemetry path escapes task")
+        return path
+
+    def _session_telemetry(self, task: Task, session_id: str) -> list[dict[str, Any]]:
+        """The session's own latest host events (_record_telemetry), oldest first."""
+        path = self._telemetry_path(task, session_id)
+        if not path.exists():
+            return []
+        try:
+            record = json.loads(path.read_text(encoding="utf8"))
+        except ValueError as exc:
+            raise FoundryError("bridge telemetry is invalid") from exc
+        if not isinstance(record, dict) or record.get("schema_version") != BRIDGE_SCHEMA:
+            raise FoundryError("bridge telemetry version is unsupported")
+        digest = record.pop("_integrity_hash", None)
+        if (record.get("task_id"), record.get("session_id")) != (task.id, session_id) or digest != _hash(record):
+            raise FoundryError("bridge telemetry integrity check failed")
+        return record.get("events") or []
 
     def _register_workbook(self, context, payload: dict[str, Any]) -> dict[str, Any]:
         assert context.task is not None
         workbook_id = self._workbook_id(payload)
         state = self._read_state(context.task)
-        workbook = state["workbooks"].setdefault(workbook_id, self._default_workbook(workbook_id))
+        workbook = self._workbook(state, context, workbook_id, create=True)
         workbook["name"] = str(payload.get("name") or workbook.get("name") or "")
         if payload.get("url"):
             workbook["url_hash"] = sha256(str(payload.get("url") or "").encode("utf8")).hexdigest()
@@ -510,15 +587,20 @@ class ExcelBridgeApp:
 
     def _authorized_finance_runs(self, task: Task, context) -> list[dict[str, Any]]:
         allowed = set(context.snapshot_ids)
-        runs = []
-        for run in AnalysisStore(task).state()["runs"]:
+        analysis = AnalysisStore(task)
+        cache: dict = {}
+        # As the session reads them (AnalysisStore.run_in_view): a requirements version outside it pins none of them.
+        # Only the finance runs it may read are read so, never another run's result only to be left out; none carries
+        # row declarations for AnalysisStore.state to read against the current version.
+        return [
+            analysis.run_in_view(run, allowed, cache=cache)
+            for run in analysis._list("runs")
             if (
                 run.get("engine") == "finance"
                 and run.get("execution_status") == "succeeded"
                 and set((run.get("bindings") or {}).values()) <= allowed
-            ):
-                runs.append(run)
-        return runs
+            )
+        ]
 
     def _context_payload(self, context) -> dict[str, Any]:
         assert context.task is not None
@@ -530,8 +612,8 @@ class ExcelBridgeApp:
             "session_id": context.session_id,
             "context_revision": context.context_revision,
             "snapshot_ids": list(context.snapshot_ids),
-            "workbooks": sorted(state["workbooks"].values(), key=lambda row: row["id"]),
-            "telemetry": state.get("telemetry", [])[-50:],
+            "workbooks": self._session_workbooks(state, context),
+            "telemetry": self._session_telemetry(context.task, context.session_id)[-50:],
             "finance": finance,
         }
 
@@ -542,7 +624,7 @@ class ExcelBridgeApp:
         if not isinstance(bindings, list) or not bindings or len(bindings) > MAX_BINDINGS:
             raise FoundryError("bindings must be a nonempty bounded array")
         state = self._read_state(context.task)
-        workbook = state["workbooks"].setdefault(workbook_id, self._default_workbook(workbook_id))
+        workbook = self._workbook(state, context, workbook_id, create=True)
         for raw in bindings:
             binding = _normalize_binding(raw)
             workbook["bindings"][binding["id"]] = binding
@@ -557,11 +639,8 @@ class ExcelBridgeApp:
         self._write_state(context.task, state)
         return {"workbook": workbook, "bindings": sorted(workbook["bindings"].values(), key=lambda row: row["id"])}
 
-    def _binding(self, task: Task, workbook_id: str, binding_id: str, *, role: str | None = None) -> dict[str, Any]:
-        state = self._read_state(task)
-        workbook = state["workbooks"].get(workbook_id)
-        if not workbook:
-            raise FoundryError("workbook is not registered")
+    def _binding(self, context, workbook_id: str, binding_id: str, *, role: str | None = None) -> dict[str, Any]:
+        workbook = self._workbook(self._read_state(context.task), context, workbook_id)
         binding = workbook.get("bindings", {}).get(_safe_id(binding_id, "binding id"))
         if not binding:
             raise FoundryError("binding is not registered")
@@ -581,7 +660,7 @@ class ExcelBridgeApp:
         if any(row.get("session_id") == context.session_id and row.get("parent_session_id") for row in context.task.sessions()):
             raise FoundryError("a child session cannot import new Excel snapshots")
         workbook_id = self._workbook_id(payload)
-        binding = _normalize_binding(payload["binding"]) if "binding" in payload else self._binding(context.task, workbook_id, payload.get("binding_id"), role="input")
+        binding = _normalize_binding(payload["binding"]) if "binding" in payload else self._binding(context, workbook_id, payload.get("binding_id"), role="input")
         if binding["role"] != "input":
             raise FoundryError("only input bindings can be imported")
         rows = _rows_from_grid(binding, payload.get("values"))
@@ -603,7 +682,7 @@ class ExcelBridgeApp:
             allowed=set(context.snapshot_ids),
         )
         state = self._read_state(context.task)
-        workbook = state["workbooks"].setdefault(workbook_id, self._default_workbook(workbook_id))
+        workbook = self._workbook(state, context, workbook_id, create=True)
         workbook["bindings"][binding["id"]] = binding
         alias = _safe_alias(payload.get("alias") or binding["id"], "actual")
         scope = _require_object(payload.get("scope") or {}, "scope")
@@ -616,6 +695,7 @@ class ExcelBridgeApp:
             "scope": scope,
             "policy": policy,
         }
+        # The session's own record holds only imports it filed: nothing another session imported joins its context.
         latest_snapshot_ids = [row["dataset_id"] for row in workbook["input_snapshots"].values()]
         merged_snapshot_ids = list(dict.fromkeys([*context.snapshot_ids, *latest_snapshot_ids]))
         updated = context.task.update_session_context(context.session_id, snapshot_ids=merged_snapshot_ids)
@@ -651,7 +731,7 @@ class ExcelBridgeApp:
     def _preview_output(self, context, payload: dict[str, Any]) -> dict[str, Any]:
         assert context.task is not None
         workbook_id = self._workbook_id(payload)
-        binding = self._binding(context.task, workbook_id, payload.get("binding_id"), role="output")
+        binding = self._binding(context, workbook_id, payload.get("binding_id"), role="output")
         if not binding.get("writable") or not binding.get("dedicated_area"):
             raise FoundryError("output binding must be a writable dedicated area")
         writes = payload.get("writes")
@@ -702,7 +782,7 @@ class ExcelBridgeApp:
             "output_hash": payload.get("output_hash"),
         }
         state = self._read_state(context.task)
-        state["workbooks"][workbook_id]["previews"][preview["id"]] = preview
+        self._workbook(state, context, workbook_id)["previews"][preview["id"]] = preview
         self._write_state(context.task, state)
         return {"preview": preview}
 
@@ -714,15 +794,13 @@ class ExcelBridgeApp:
         if not isinstance(current, dict):
             raise FoundryError("current_cells must map addresses to cell snapshots")
         preview_id = _safe_id(payload.get("preview_id"), "preview id")
-        workbook = state["workbooks"].get(workbook_id)
-        if not workbook:
-            raise FoundryError("workbook is not registered")
+        workbook = self._workbook(state, context, workbook_id)
         preview = workbook.get("previews", {}).get(preview_id)
         if not preview:
             raise FoundryError("preview is unavailable")
         if payload.get("binding_id") and payload.get("binding_id") != preview["binding_id"]:
             raise FoundryError("binding changed since preview")
-        binding = self._binding(context.task, workbook_id, preview["binding_id"], role="output")
+        binding = self._binding(context, workbook_id, preview["binding_id"], role="output")
         if binding["address"] != preview.get("binding_address"):
             raise FoundryError("binding range changed since preview")
         if binding["id"] not in workbook.get("preauthorized_areas", {}):
@@ -787,15 +865,13 @@ class ExcelBridgeApp:
         state = self._read_state(context.task)
         workbook_id = self._workbook_id(payload)
         preview_id = _safe_id(payload.get("preview_id"), "preview id")
-        workbook = state["workbooks"].get(workbook_id)
-        if not workbook:
-            raise FoundryError("workbook is not registered")
+        workbook = self._workbook(state, context, workbook_id)
         preview = workbook.get("previews", {}).get(preview_id)
         if not preview:
             raise FoundryError("preview is unavailable")
         if payload.get("binding_id") and payload.get("binding_id") != preview["binding_id"]:
             raise FoundryError("binding changed since preview")
-        binding = self._binding(context.task, workbook_id, preview["binding_id"], role="output")
+        binding = self._binding(context, workbook_id, preview["binding_id"], role="output")
         if binding["address"] != preview.get("binding_address"):
             raise FoundryError("binding range changed since preview")
         cells = payload.get("cells")

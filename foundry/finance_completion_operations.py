@@ -29,6 +29,9 @@ MAX_REPAIRS_CAP = 2
 POLICY_KEYS = {"max_repairs", "timeout_seconds"}
 TERMINAL = {"complete", "awaiting_input", "needs_review", "timed_out", "cancelled", "failed"}
 ATTEMPT_TERMINAL = {"settled", "rejected_validation", "failed_execution"}
+# What settle() writes onto a revision, besides its status.
+SETTLEMENT_FIELDS = ("draft_id", "draft_content_hash", "completion_id", "completion_status", "completion_stop_reason",
+                     "repair_allowed", "settled_at")
 
 Clock = Callable[[], datetime | int | float]
 
@@ -331,10 +334,15 @@ class CompletionOperationStore:
         self.snapshot_ids = None if snapshot_ids is None else set(snapshot_ids)
         self.clock = clock
         self.root = self._inside(task.root / "analysis" / "completion_operations")
+        # Whether this store's session may read a receipt (_in_view), read once for the store: receipts are immutable
+        # and its ceiling is fixed. By receipt id (_readable), read before the task lock is taken (_prime).
+        self._receipt_readable: Callable[[dict], bool] | None = None
+        self._readable_receipts: dict[str, bool] = {}
 
     def begin(self, request_key: str, policy: dict[str, Any] | None = None) -> dict[str, Any]:
         request_key = _safe_text(request_key, "request_key")
         effective_policy = _policy(policy)
+        self._prime(request_key=request_key)
         with exclusive(self.task.lock_path, timeout=10):
             for record in self._list_locked():
                 if record.get("request_key") != request_key:
@@ -343,7 +351,7 @@ class CompletionOperationStore:
                 if policy is not None and record.get("policy") != effective_policy:
                     raise FoundryError("completion operation policy conflict")
                 record = self._expire_locked(record)
-                return _public(record, replayed=True)
+                return self._shown(record, replayed=True)
             now = _utc_now(self.clock)
             operation_id = uuid.uuid4().hex
             record = _new(
@@ -372,11 +380,12 @@ class CompletionOperationStore:
             return _public(record)
 
     def get(self, operation_id: str) -> dict[str, Any]:
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(_operation_id(operation_id))
             self._authorize(record)
             record = self._expire_locked(record)
-            return _public(record)
+            return self._shown(record)
 
     def reserve(
         self,
@@ -394,6 +403,7 @@ class CompletionOperationStore:
         clean_payload = _json({} if payload is None else payload, "payload")
         payload_hash = _hash(clean_payload)
         self._authorize_snapshots(clean_payload)
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -404,7 +414,7 @@ class CompletionOperationStore:
                     raise FoundryError("operation call id revision conflict")
                 if existing.get("payload_hash") != payload_hash:
                     raise FoundryError("operation payload conflict")
-                if self._attempt_finished(existing):
+                if self._finished_as_read(record, existing):
                     return self._public_with_attempt(record, existing, reservation_replayed=True)
             existing_by_revision = self._revision_record(record, revision) if revision is not None else None
             if existing_by_revision:
@@ -412,7 +422,7 @@ class CompletionOperationStore:
                     raise FoundryError("operation payload conflict")
                 if call_id and existing_by_revision.get("call_id") not in (None, call_id):
                     raise FoundryError("operation call id conflict")
-                if self._attempt_finished(existing_by_revision):
+                if self._finished_as_read(record, existing_by_revision):
                     return self._public_with_attempt(record, existing_by_revision, reservation_replayed=True)
             if record["status"] in TERMINAL:
                 raise FoundryError("completion operation is terminal")
@@ -464,6 +474,7 @@ class CompletionOperationStore:
         operation_id = _operation_id(operation_id)
         revision = _revision(revision)
         clean_error = _json(error, "attempt error")
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -473,7 +484,7 @@ class CompletionOperationStore:
             if target.get("draft_id") or target.get("completion_id"):
                 raise FoundryError("operation revision already saved")
             if target.get("status") in ATTEMPT_TERMINAL:
-                return _public(record, replayed=True)
+                return self._shown(record, replayed=True)
             now = _iso(_utc_now(self.clock))
             target.update({
                 "status": "rejected_validation",
@@ -497,7 +508,7 @@ class CompletionOperationStore:
                 record["finished_at"] = None
                 record["events"].append({"type": "operation_status", "status": "repair_available", "at": now})
             self._write_locked(record)
-            return _public(record)
+            return self._shown(record)
 
     def settle(self, operation_id: str, revision: int, draft: dict[str, Any], completion: dict[str, Any]) -> dict[str, Any]:
         operation_id = _operation_id(operation_id)
@@ -508,6 +519,7 @@ class CompletionOperationStore:
         clean_completion = _json(completion, "completion")
         self._validate_settlement_pair(clean_draft, clean_completion)
         self._authorize_snapshots({"draft": clean_draft, "completion": clean_completion})
+        self._prime(operation_id, clean_completion.get("id"))
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(operation_id)
             self._authorize(record)
@@ -520,7 +532,7 @@ class CompletionOperationStore:
             if prior != (None, None):
                 if prior != (draft_id, completion_id):
                     raise FoundryError("operation settlement conflict")
-                return _public(record, replayed=True)
+                return self._shown(record, replayed=True)
             prior_terminal = record["status"] in TERMINAL
             prior_status = record["status"]
             prior_reason = record.get("stop_reason")
@@ -553,10 +565,11 @@ class CompletionOperationStore:
             else:
                 self._apply_completion_locked(record, clean_completion)
             self._write_locked(record)
-            return _public(record)
+            return self._shown(record)
 
     def stop(self, operation_id: str, reason: str) -> dict[str, Any]:
         reason = _safe_text(reason, "stop reason", maximum=500)
+        self._prime(operation_id)
         with exclusive(self.task.lock_path, timeout=10):
             record = self._read_locked(_operation_id(operation_id))
             self._authorize(record)
@@ -564,10 +577,112 @@ class CompletionOperationStore:
                 status = "timed_out" if reason == "timeout" else "cancelled"
                 self._mark_locked(record, status, reason)
                 self._write_locked(record)
-            return _public(record)
+            return self._shown(record)
 
     def _inside(self, path: Path) -> Path:
         return _task_inside(self.task, path)
+
+    def _shown(self, record: dict[str, Any], **flags: bool) -> dict[str, Any]:
+        """_public, of the record as this store's session reads it (_in_view)."""
+        return _public(self._in_view(record), **flags)
+
+    def _in_view(self, record: dict[str, Any]) -> dict[str, Any]:
+        """The record as the session it belongs to (``snapshot_ids``) reads it; the manager (None) reads it as stored.
+
+        A manager recovery settles a session's revision only on a receipt that session may read
+        (FinanceStore._operation_receipt), and a session's files only widen, so it reads every settlement since as
+        stored. One filed before that rule may have settled a revision on a receipt it may not read
+        (AnalysisStore.completion_reader): the revision then reads as the session left it, reserved or rejected,
+        without the settlement's event or the status the receipt's verdict set, and the operation's status is replayed
+        from the events left, an operation so left open past its deadline reading timed out at it. Neither the
+        receipt's ids, the draft's hash nor the verdict reach the session.
+        """
+        if self.snapshot_ids is None:
+            return record
+        hidden = {attempt.get("revision") for attempt in record.get("revisions", [])
+                  if attempt.get("completion_id") and not self._readable(attempt["completion_id"])}
+        if not hidden:
+            return record
+        record = deepcopy(record)
+        for attempt in record["revisions"]:
+            if attempt.get("revision") in hidden:
+                for key in SETTLEMENT_FIELDS:
+                    attempt.pop(key, None)
+                attempt["status"] = "rejected_validation" if "rejected_at" in attempt else "reserved"
+        events, verdict = [], False
+        for event in record.get("events", []):
+            if verdict and event.get("type") == "operation_status":
+                verdict = False
+                continue  # the status the hidden verdict set (_apply_completion_locked)
+            verdict = False
+            if event.get("type") == "revision_settled" and event.get("revision") in hidden:
+                # A settlement on an operation already stopped set no status (settle's late_terminal).
+                verdict = not event.get("late_terminal")
+                continue
+            events.append(event)
+        status, reason, finished = "running", None, None
+        for event in events:
+            if event.get("type") in {"operation_started", "revision_reserved"}:
+                status, reason, finished = "running", None, None
+            elif event.get("type") == "operation_status":
+                status, reason = event.get("status"), event.get("reason")
+                finished = event.get("at") if status in TERMINAL else None
+        if status not in TERMINAL and self._expired(record):
+            # Keyed as a stored event reads back (write_json_atomic sorts keys).
+            events.append({"at": record["deadline_at"], "reason": "timeout", "status": "timed_out",
+                           "type": "operation_status"})
+            status, reason, finished = "timed_out", "timeout", record["deadline_at"]
+        record.update({
+            "status": status, "stop_reason": reason, "finished_at": finished, "events": events,
+            "updated_at": events[-1].get("at", record.get("updated_at")) if events else record.get("updated_at"),
+            "repair_attempts_settled": max([0, *(int(row.get("revision", 0)) - 1 for row in record["revisions"]
+                                                 if row.get("status") in ATTEMPT_TERMINAL)]),
+        })
+        return record
+
+    def _readable(self, completion_id: Any) -> bool:
+        """Whether this store's session may read the receipt ``completion_id`` names (AnalysisStore.completion_reader),
+        read once for the store. One that does not read, or an id naming none, counts as one it may not read."""
+        if not isinstance(completion_id, str):
+            return False
+        if completion_id not in self._readable_receipts:
+            analysis = AnalysisStore(self.task)
+            if self._receipt_readable is None:
+                self._receipt_readable = analysis.completion_reader(set(self.snapshot_ids))
+            try:
+                readable = self._receipt_readable(analysis._get("completions", completion_id))
+            except FoundryError:
+                readable = False
+            self._readable_receipts[completion_id] = readable
+        return self._readable_receipts[completion_id]
+
+    def _prime(self, operation_id: Any = None, completion_id: Any = None, *, request_key: str | None = None) -> None:
+        """Read, before the task lock, whether this store's session may read each receipt its operation is settled on
+        (by id, or each begun as ``request_key``) and ``completion_id``: _in_view under the lock then reads no receipt,
+        draft or run. Operation records are written atomically, so they read without the lock. The call still decides
+        on the record it reads under the lock; a revision settled in between is read there (_readable)."""
+        if self.snapshot_ids is None:
+            return
+        try:
+            if request_key is not None:
+                records = [row for row in self._list_locked() if row.get("request_key") == request_key]
+            else:
+                records = [self._read_locked(_operation_id(operation_id))]
+        except FoundryError:
+            records = []  # refused under the lock, as before
+        for record in records:
+            if record.get("session_id") == self.session_id:
+                for attempt in record.get("revisions", []):
+                    self._readable(attempt.get("completion_id"))
+        self._readable(completion_id)
+
+    def _finished_as_read(self, record: dict[str, Any], attempt: dict[str, Any]) -> bool:
+        """Whether this store's session reads ``attempt`` as finished (_in_view), so its replay is answered with it: a
+        revision settled on a receipt the session may not read is one it left reserved or rejected, as it reads it."""
+        if not self._attempt_finished(attempt):
+            return False
+        shown = self._revision_record(self._in_view(record), attempt.get("revision"))
+        return self._attempt_finished(attempt if shown is None else shown)
 
     def _path(self, operation_id: str) -> Path:
         return self._inside(self.root / f"{_operation_id(operation_id)}.json")
@@ -635,7 +750,10 @@ class CompletionOperationStore:
         *,
         reservation_replayed: bool = False,
     ) -> dict[str, Any]:
-        result = _public(record, reservation_replayed=reservation_replayed)
+        result = self._shown(record, reservation_replayed=reservation_replayed)
+        # The attempt as the record so read holds it.
+        attempt = next((row for row in result.get("revisions", []) if row.get("revision") == attempt.get("revision")),
+                       attempt)
         result["attempt"] = deepcopy(attempt)
         result["attempt"]["replayed"] = reservation_replayed
         return result

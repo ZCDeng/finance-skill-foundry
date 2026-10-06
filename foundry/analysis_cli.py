@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from foundry.analysis import DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS, AnalysisStore, _inherited_fields
+from foundry.analysis import (ANALYSIS_UNAVAILABLE, DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, REPORT_EXPORT_FORMATS,
+                              AnalysisStore, _inherited_fields)
 from foundry.analysis_data import json_value, load_json
 from foundry.context import resolve_context
 from foundry.errors import FoundryError
@@ -186,9 +187,28 @@ def _named_draft(context, service, draft_id):
     return draft
 
 
+def _named_analysis(context, service, analysis_id):
+    """A saved analysis a command names by id. A session is refused one bound to a file it may not read exactly as an
+    unknown or malformed id, as analysis-state leaves it out; the manager as before."""
+    try:
+        analysis = service.get_analysis(analysis_id)
+        _bound(context, analysis["bindings"])
+    except FoundryError:
+        if not context.session_id:
+            raise
+        raise FoundryError(ANALYSIS_UNAVAILABLE) from None
+    return analysis
+
+
 def _bound_requirements(context, service, spec):
-    if spec.get("requirements_id"):
-        _bound(context, service._get("requirements", spec["requirements_id"]).get("bindings", {}))
+    """The requirements version a spec or a saved analysis names. A session is refused one it may not read exactly as
+    an unknown or malformed id (AnalysisStore.named_requirements); the manager as before."""
+    if not spec.get("requirements_id"):
+        return
+    if context.session_id:
+        service.named_requirements(spec["requirements_id"], _ceiling(context))
+        return
+    _bound(context, service._get("requirements", spec["requirements_id"]).get("bindings", {}))
 
 
 def _bound_evidence(context, service, spec):
@@ -288,10 +308,17 @@ def dispatch(args) -> bool:
 
         result = read_method_resource(args.skill, args.resource)
     elif args.cmd == "analysis-state":
-        result = service.state(_ceiling(context))
+        # The task's versions, runs and refresh batches, read once for every run, draft and receipt the session reads
+        # (run_in_view).
+        cache: dict = {}
+        result = service.state(_ceiling(context), cache=cache)
         if context.session_id:
+            from foundry.source_refresh import snapshots_in_view
+
             allowed = set(context.snapshot_ids)
-            result["datasets"] = [d for d in result["datasets"] if d["id"] in allowed]
+            # A refreshed snapshot names the prior its batch reads with (SourceRefreshService.batches_in_view).
+            result["datasets"] = snapshots_in_view(service, [d for d in result["datasets"] if d["id"] in allowed],
+                                                   allowed, cache=cache)
             result["analyses"] = [
                 a for a in result["analyses"] if set(a["bindings"].values()) <= allowed
             ]
@@ -309,12 +336,17 @@ def dispatch(args) -> bool:
                 if set((c.get("bindings") or {}).values()) <= allowed and (c.get("location") or {}).get("run_id") in run_ids
             ]
         listed = {d["id"] for d in result["drafts"]} if context.session_id else None
+        # The requirements versions the drafts' checks and their receipts read, each read once for the listing.
+        versions: dict = {}
         # A receipt reads the way its draft reads (AnalysisStore.completion_in_view).
         result["completions"] = [
-            receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context), readable_ids=listed)
+            receipt for receipt in service.completions_in_view(result["completions"], _ceiling(context),
+                                                               readable_ids=listed, versions=versions, cache=cache)
             if receipt is not None
         ]
-        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed) for d in result["drafts"]]
+        result["drafts"] = [service.draft_in_view(d, _ceiling(context), readable_ids=listed, versions=versions,
+                                                  cache=cache)
+                            for d in result["drafts"]]
         result["context"] = {
             "session_id": context.session_id,
             "context_revision": context.context_revision,
@@ -372,17 +404,22 @@ def dispatch(args) -> bool:
                 ),
             }
     elif args.cmd == "dataset-read":
+        from foundry.source_refresh import snapshots_in_view
+
         _bound(context, {"dataset": args.dataset})
-        result = service.read_dataset(args.dataset)
+        [result] = snapshots_in_view(service, [service.read_dataset(args.dataset)], _ceiling(context))
     elif args.cmd == "analysis-save":
         spec = _json(args.spec, "analysis spec")
         _bound(context, spec.get("bindings", {}))
         _bound_requirements(context, service, spec)
-        result = service.save_analysis(spec)
+        if context.session_id and spec.get("parent_id"):
+            # A parent the session may not read is refused as an unknown one, not saved as the revision's parent.
+            _named_analysis(context, service, spec["parent_id"])
+        result = service.save_analysis(spec, session_id=context.session_id, context_revision=context.context_revision)
     elif args.cmd == "analysis-run":
-        analysis = service.get_analysis(args.analysis)
-        _bound(context, analysis["bindings"])
-        _bound_requirements(context, service, analysis)
+        analysis = _named_analysis(context, service, args.analysis)
+        # A session runs the analysis as analysis-state reads it (analysis_in_view): pinned to the version it reads.
+        _bound_requirements(context, service, service.analysis_in_view(analysis, _ceiling(context)))
         result = service.run_analysis(
             args.analysis,
             session_id=context.session_id,
@@ -421,9 +458,11 @@ def dispatch(args) -> bool:
             if context.session_id and isinstance(claim, dict) and claim.get("run_id"):
                 # Whatever its basis, the draft rests on the run a claim names (AnalysisStore.draft_snapshots).
                 _bound(context, service.get_run(claim["run_id"])["bindings"])
-        # Evidence freshness reads only the files this session may read, as the finance draft path does.
-        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited),
-                                       _ceiling(context))
+        # Evidence freshness reads only the files this session may read, as the finance draft path does. The save and
+        # the draft it returns are one read (AnalysisStore.save_draft).
+        cache = {}
+        result = service.draft_in_view(service.save_draft(spec, _allowed=_ceiling(context), _inherited=inherited,
+                                                          _cache=cache), _ceiling(context), cache=cache)
     elif args.cmd == "analysis-export":
         _named_draft(context, service, args.draft)
         result = service.export_draft(args.draft, args.format, mode=args.mode, allowed=_ceiling(context))
@@ -464,8 +503,7 @@ def dispatch(args) -> bool:
         _bound(context, run["bindings"])
         result = service.output_path(args.run, args.output)
     elif args.cmd == "analysis-method-save":
-        analysis = service.get_analysis(args.analysis)
-        _bound(context, analysis["bindings"])
+        _named_analysis(context, service, args.analysis)
         result = service.save_method(args.analysis, args.name)
     elif args.cmd == "analysis-method-apply":
         bindings = _json(args.bindings, "bindings")
@@ -475,6 +513,8 @@ def dispatch(args) -> bool:
             bindings,
             question=args.question,
             parameters=json_value(load_json(args.parameters)),
+            session_id=context.session_id,
+            context_revision=context.context_revision,
         )
     else:
         spec = _json(args.spec, "script spec")
