@@ -1698,10 +1698,11 @@ class AnalysisStore:
         when they stand as saved (always, for the manager).
 
         draft_evidence_basis read each cited run's row declarations, as its saver read the run, against the version it
-        was pinned to, with the then-current version's estimates added. A reader may read the then-current version of
-        every draft it reads (draft_snapshots holds the version a check was made against), so only a cited run it or
-        its saver may read pinned to another version reads otherwise (_judged_otherwise): the rows are declared again
-        as it reads the runs, with the estimates of the newest version it may read that is older than the draft.
+        was pinned to, with the estimates of the version the draft was checked against added. A reader may read that
+        version of every draft it reads (draft_snapshots holds it), so only a cited run it or its saver may read pinned
+        to another version reads otherwise (_judged_otherwise): the rows are declared again as it reads the runs, with
+        that version's estimates (for a check that files no requirements, those of the newest version it may read that
+        is older than the draft).
         Whether a run reads so is told from its stored record, so a read where no version rests on files other than
         the draft's, or none pins a cited run otherwise, loads no run (``runs`` loads them, as evidence_in_view does).
         """
@@ -1713,8 +1714,17 @@ class AnalysisStore:
         if not self._judged_otherwise(draft, allowed, cache, rows=True):
             return None
         versions = self._requirements_versions(cache)
+        # The version the draft was checked against, as draft_evidence_basis read it, not the newest one before the
+        # draft's seq: a version may be saved while the draft is saved, after its check.
+        check = draft.get("explanation_check")
+        requirements = check.get("requirements") if isinstance(check, dict) else None
+        if isinstance(requirements, dict) and "requirements_id" in requirements:
+            checked = self._requirements_version(requirements["requirements_id"], cache)
+            limit = checked.get("seq", 0) + 1 if checked else 0
+        else:
+            limit = draft.get("seq", 0)
         latest = next((row for row in reversed(versions)
-                       if row.get("seq", 0) < draft.get("seq", 0) and requirements_readable(row, allowed)), None)
+                       if row.get("seq", 0) < limit and requirements_readable(row, allowed)), None)
         estimates = declared_row_estimates(self, runs(), latest, set(allowed), cache=cache)
         listed = [[run_id, row, sources] for (run_id, row), sources in sorted(estimates.items())]
         return None if listed == (draft["evidence_basis"].get("row_estimates") or []) else listed

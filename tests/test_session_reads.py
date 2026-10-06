@@ -953,6 +953,60 @@ def test_a_session_reads_a_run_by_the_version_it_started_under_not_one_saved_whi
     assert not any("requirements_run_outdated" in receipt[5] for receipt in receipts)
 
 
+@pytest.mark.parametrize("saved_after", [None, "check", "basis"])
+@pytest.mark.parametrize("saver", ["manager", "session"])
+def test_a_session_reads_a_draft_by_the_version_it_was_checked_against_not_one_saved_while_it_was_saved(
+        tmp_path, capsys, fake_runner, monkeypatch, saver, saved_after):
+    """A draft save checks the draft against the current version, reads its basis, then takes its seq, and no
+    requirements save waits on it. While the manager or the session saves a draft citing the runs, the manager saves W
+    on A, a child of V2 that declares the Falcon revenue an estimate: after the check, or after the basis was read. The
+    session reads the draft as where Hv was never saved, by V2 either way: the version the draft was checked
+    against."""
+    import foundry.evidence_labels as evidence_labels
+
+    basis = evidence_labels.draft_evidence_basis
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys)
+        meanwhile: list[dict] = []
+
+        def save_w() -> None:
+            spec = {"question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": world.a}, "items": [
+                {"id": "rev", "metric": "revenue", "label": "收入", "organizations": ["Falcon"],
+                 "grain_basis": [{"basis": "estimate", "method": "按收入分摊", "organizations": ["Falcon"]}]}],
+                "parent_id": world.current["id"], "change_reason": "估计"}
+            # Another writer: the draft save holds completion.lock, which a requirements save never takes.
+            thread = threading.Thread(target=lambda: meanwhile.append(
+                FinanceStore(world.task).analysis_requirements_save(spec)))
+            thread.start()
+            thread.join(timeout=30)
+
+        def reading(*args, **kwargs):
+            if saved_after == "check" and not meanwhile:
+                save_w()
+            fields = basis(*args, **kwargs)
+            if saved_after == "basis" and not meanwhile:
+                save_w()
+            return fields
+
+        monkeypatch.setattr(evidence_labels, "draft_evidence_basis", reading)
+        saved = (world.manager.save_explanation_draft(world.draft) if saver == "manager"
+                 else _session_draft(world, world.draft["body"]))
+        monkeypatch.setattr(evidence_labels, "draft_evidence_basis", basis)
+        assert saved["explanation_check"]["requirements"]["requirements_id"] == world.current["id"]
+        assert [row["seq"] < saved["seq"] for row in meanwhile] == ([True] if saved_after else [])
+        script = world.runs["script"]["id"]
+        code, state = _cli(capsys, world.var, "analysis-state")
+        assert code == 0, state
+        [draft] = [row for row in state["drafts"] if row["id"] == saved["id"]]
+        code, report = _cli(capsys, world.var, "report-draft-read", "--draft", saved["id"])
+        assert code == 0, report
+        read.append((_labels_of(draft["explanation_check"], script), _labels_of(report["explanation_check"], script),
+                     draft["explanation_check"]["evidence_posture"]))
+    assert read[0] == read[1]
+    assert read[0][0] == read[0][1] and read[0][0][0][1:] == ("unknown", ["run_script"])
+
+
 def _apart_world(root: Path):
     """S1 may read A and H1, S2 A and H2: neither may read the other's file. S2 came to read H2 by a context
     revision."""

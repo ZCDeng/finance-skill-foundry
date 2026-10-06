@@ -763,7 +763,8 @@ def draft_evidence_basis(
     is read. ``cache`` as for AnalysisStore.run_in_view.
 
     This is the only function here that reads the store: the run history (for newer runs of the same
-    calculation), the latest requirements scope (the task period), dataset freshness and row declarations.
+    calculation), the requirements version the check was made against (its scope is the task period), dataset
+    freshness and row declarations.
     Everything it decides is decided by the pure functions above, from what the basis holds and the draft's
     own records.
     """
@@ -771,7 +772,14 @@ def draft_evidence_basis(
     from foundry.finance_readiness import dataset_currency, dataset_replacements
     from foundry.finance_requirements import latest_requirements
 
-    latest = latest_requirements(analysis)
+    # The version the check was made against (check_requirements files it), not one saved since: a reader that reads
+    # a cited run otherwise declares its rows again by that version (AnalysisStore._row_estimates_in_view).
+    requirements = check.get("requirements")
+    if isinstance(requirements, dict) and "requirements_id" in requirements:
+        checked_id = requirements["requirements_id"]
+        latest = analysis._get("requirements", checked_id) if isinstance(checked_id, str) else None
+    else:
+        latest = latest_requirements(analysis)
     task_period = ((latest or {}).get("scope") or {}).get("period")
     newest: dict[str, tuple] = {}
     every: dict[str, list[tuple]] = {}
