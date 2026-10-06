@@ -1419,7 +1419,8 @@ class AnalysisStore:
                        if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
             for requirements_id in dict.fromkeys([record.get("requirements_id"), *checked]):
                 if requirements_id:
-                    bindings = self._get("requirements", requirements_id).get("bindings") or {}
+                    bindings = self._get("requirements", requirements_id).get("bindings")
+                    bindings = {} if bindings is None else bindings
                     # Bindings that are no map of snapshot ids no session reads (requirements_readable): the version
                     # raises as one that no longer reads.
                     if not isinstance(bindings, dict) or any(not isinstance(value, str) for value in bindings.values()):

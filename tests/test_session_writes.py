@@ -1845,7 +1845,8 @@ def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_a
                 **{grant: _mcp(server, "analysis_requirements_save", spec) for grant, server in named.grants.items()}}
 
     before = listed()
-    malformed = [written([named.a]), written({"gl": [named.a]})]
+    # Falsy ones too: a version stored with an empty list, string or false is no map either.
+    malformed = [written([named.a]), written({"gl": [named.a]}), written([]), written(""), written(False)]
     stored = _stored(named)
     for requirements_id in malformed:
         code, error = _cli(capsys, named.var, "analysis-save", "--spec", json.dumps(
@@ -1864,14 +1865,15 @@ def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_a
     pinned = [named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a},
                                             "requirements_id": requirements_id})["id"] for requirements_id in malformed]
     alone = named.analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": named.a}})["id"]
+    analyses = [*pinned, alone]
     code, state = _cli(capsys, named.var, "analysis-state")
-    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in [*pinned, alone]] == [None] * 3
+    assert [row.get("requirements_id") for row in state["analyses"] if row["id"] in analyses] == [None] * len(analyses)
     ran = []
-    for analysis_id in [*pinned, alone]:
+    for analysis_id in analyses:
         code, run = _cli(capsys, named.var, "analysis-run", "--analysis", analysis_id)
         assert code == 0, run
         ran.append({key: value for key, value in run.items() if key.startswith("requirements")})
-    assert ran == [ran[-1]] * 3
+    assert ran == [ran[-1]] * len(ran)
     # A draft or receipt pinned to it, written as a damaged store would hold it, reads as one pinned to a version on a
     # file outside the session: left out, or refused by id.
     saved = named.session.save_explanation_draft({"body": "收入 100。", "run_ids": [named.run]})
@@ -1940,6 +1942,12 @@ def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_a
                 _refusal(lambda: named.manager.save_explanation_draft(explanation)),
                 _refusal(lambda: named.manager.validate_explanation(explanation))} == {
             "finance bindings must map aliases to snapshot IDs"}
+        assert _stored(named) == stored
+    # Falsy ones as the current version are refused alike.
+    for seq, bindings in enumerate(([], "", False), 10_100):
+        written(bindings, seq)
+        stored = _stored(named)
+        assert saves() == hidden
         assert _stored(named) == stored
 
 

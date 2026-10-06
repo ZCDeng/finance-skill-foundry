@@ -141,8 +141,9 @@ def requirements_readable(record, allowed):
     """Whether a reader with snapshot ceiling ``allowed`` (None: the manager) may read this requirements version."""
     if allowed is None:
         return True
-    bindings = record.get('bindings') or {}
-    # Bindings map aliases to snapshot ids; a version holding anything else no session reads.
+    bindings = record.get('bindings')
+    bindings = {} if bindings is None else bindings
+    # Bindings map aliases to snapshot ids; a version holding anything else (an empty list included) no session reads.
     return (isinstance(bindings, dict) and all(isinstance(value, str) for value in bindings.values())
             and set(bindings.values()) <= set(allowed))
 
