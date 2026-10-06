@@ -2302,7 +2302,7 @@ def test_a_session_s_completion_save_reads_each_lineage_from_its_listed_versions
     """A session reads its draft's check and each receipt by their version's lineage as its own check would have read
     it (finance_requirements.check_lineage_in_view), and its completion save does so under completion.lock, which the
     manager's saves wait on. Each walk takes the versions from those the save has listed
-    (AnalysisStore._requirements_by_id), so it reads none again under the lock: on a save, a revision and a replay,
+    (AnalysisStore._listed_versions), so it reads none again under the lock: on a save, a revision and a replay,
     with Hv or without."""
     import foundry.finance_requirements as finance_requirements
     import foundry.locking as locking
@@ -2349,6 +2349,25 @@ def test_a_session_s_completion_save_reads_each_lineage_from_its_listed_versions
             session.save_completion_draft(operation["id"], call, {**world.draft, "body": body})
     # Every save walks the lineage under the lock, and reads no version to do so.
     assert all(walks and not reads for by_world in counts for walks, reads in by_world), counts
+
+
+def test_a_session_reads_its_draft_when_a_version_outside_its_lineage_no_longer_reads(tmp_path, capsys, fake_runner):
+    """A lineage walk takes the versions the read has listed, but a version file that no longer reads fails that
+    listing. The walk then reads each version it needs on its own, as before, so a damaged version the draft's check
+    never walked fails no read of the draft."""
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys)
+        saved = _session_draft(world, "会话稿：Falcon 收入 100。")
+        child = world.manager.analysis_requirements_save({
+            "question": "收入", "scope": {"period": "2026-08"}, "bindings": {"gl": world.a}, "items": ITEMS,
+            "parent_id": world.current["id"], "change_reason": "再存一版"})
+        path = world.analysis._object_path("requirements", child["id"])
+        record = json.loads(path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps({**record, "question": "改过"}, ensure_ascii=False), encoding="utf-8")
+        for command in ("report-draft-read", "report-projection-read"):
+            code, shown = _cli(capsys, world.var, command, "--draft", saved["id"])
+            assert code == 0, (name, command, shown)
+            assert _shows(shown, world.secrets) == []
 
 
 def test_a_session_s_operation_answers_by_the_record_it_reads_under_the_task_lock(tmp_path, capsys, monkeypatch):

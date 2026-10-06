@@ -1187,6 +1187,15 @@ class AnalysisStore:
             cache["versions"] = {row.get("id"): row for row in self._requirements_versions(cache)}
         return cache["versions"]
 
+    def _listed_versions(self, cache: dict) -> dict:
+        """_requirements_by_id for a lineage walk (finance_requirements._version_record). Where a version does not
+        read, an empty map: the walk then reads each version it needs by _get and passes over one that does not read,
+        so a damaged version outside a draft's lineage fails no read of it."""
+        try:
+            return self._requirements_by_id(cache)
+        except FoundryError:
+            return {}
+
     def _requirements_version(self, version_id: Any, cache: dict) -> dict | None:
         """The requirements version ``version_id`` names (_requirements_by_id), or None."""
         return self._requirements_by_id(cache).get(version_id) if isinstance(version_id, str) else None
@@ -1530,8 +1539,8 @@ class AnalysisStore:
         if allowed is not None:
             from foundry.finance_requirements import check_lineage_in_view
 
-            # The versions this read has listed (_requirements_by_id), so each lineage walk reads none again.
-            versions = self._requirements_by_id(cache) if versions is None else versions
+            # The versions this read has listed (_listed_versions), so each lineage walk reads none again.
+            versions = self._listed_versions(cache) if versions is None else versions
             draft = {**draft, **{key: check_lineage_in_view(self, draft[key], allowed, versions=versions)
                                  for key in ("explanation_check", "quality") if isinstance(draft.get(key), dict)}}
 
@@ -1818,7 +1827,7 @@ class AnalysisStore:
 
         allowed = set(allowed)
         cache = {} if cache is None else cache
-        versions = self._requirements_by_id(cache) if versions is None else versions
+        versions = self._listed_versions(cache) if versions is None else versions
         readable = self.completion_reader(allowed, readable_ids=readable_ids)
         chain: list[dict] | None = None
         # Each receipt as this reader reads it, whole (None: it may not read it), and whether every run it names is
