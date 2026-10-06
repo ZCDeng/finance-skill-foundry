@@ -393,6 +393,43 @@ def test_the_period_preset_masks_the_office_tools():
     assert {"univer_execute", "univer_import"} <= set(declared)
 
 
+def test_the_period_scope_masks_every_office_tool_not_only_the_listed_ones(tmp_path):
+    """A companion release can add a `univer_*` tool the manifest does not list.
+
+    0.2.14 added `univer_print_pdf`. The listed thirteen are the floor; any
+    `univer_*` name registered when the scope applies is masked as well, and a
+    guard refuses one that registers afterwards.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is unavailable")
+    scope = Path(__file__).resolve().parents[1] / "dsh-plugin" / "period-scope.js"
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        f'import {{ apply }} from "{scope.as_uri()}";\n'
+        """
+const restrictions = [], guards = [];
+apply({tools: {
+  schemas: () => [{name: 'univer_execute'}, {name: 'univer_print_pdf'}, {name: 'query-locked'}],
+  restrict: (r) => restrictions.push(r), guard: (g) => guards.push(g)}});
+process.stdout.write(JSON.stringify({deny: restrictions[0].deny,
+  guards: [guards[0]({name: 'univer_later_tool'}), guards[0]({name: 'query-locked'}) ?? null]}));
+"""
+    )
+    result = subprocess.run([node, str(driver)], text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+
+    from foundry.harness import office_companion
+
+    assert set(office_companion()["omitTools"]) | {"univer_print_pdf"} == set(out["deny"])
+    assert "query-locked" not in out["deny"]
+    assert out["guards"] == ["period cannot execute univer_later_tool", None]
+
+
 def test_the_office_companion_names_where_it_can_reach():
     """A tool that fetches has to say what it fetches from.
 
