@@ -620,6 +620,10 @@ def test_the_office_tools_reach_the_authoring_seat_and_not_the_close_seat(web_pr
     for seat in ("period", "f3"):
         offered = set(web_presets[seat])
         assert not (declared & offered), f"{seat} still sees: {sorted(declared & offered)}"
+        assert not any(name.startswith("univer_") for name in offered), (
+            f"{seat} sees an office tool the manifest does not list: "
+            f"{sorted(name for name in offered if name.startswith('univer_'))}"
+        )
 
 
 @needs_dsh

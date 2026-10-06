@@ -33,6 +33,27 @@ import { officeDenied } from "./index.js";
 export const name = "finance-skill-foundry-period-scope";
 export const inject = ["tools"];
 
+/*
+ * The manifest list is the floor, not the whole fence. A later companion
+ * release can register a fourteenth `univer_*` tool (0.2.14 added
+ * `univer_print_pdf`), and a name the list does not carry would stand on the
+ * close seat with nothing in its way. So every `univer_*` name registered when
+ * the scope applies is masked too, and a guard refuses any `univer_*` call that
+ * registers later -- the mask hides, the guard is what holds.
+ */
+const OFFICE_PREFIX = "univer_";
+
+export function periodOfficeDenied(registered, declared = officeDenied()) {
+  const late = registered.filter((name) => name.startsWith(OFFICE_PREFIX));
+  return [...new Set([...declared, ...late])];
+}
+
 export function apply(ctx) {
-  ctx.tools.restrict({ deny: officeDenied() });
+  const registered = (ctx.tools.schemas?.() ?? []).map((tool) => tool.name);
+  ctx.tools.restrict({ deny: periodOfficeDenied(registered) });
+  ctx.tools.guard((exec) =>
+    String(exec?.name ?? "").startsWith(OFFICE_PREFIX)
+      ? `period cannot execute ${exec.name}`
+      : undefined,
+  );
 }

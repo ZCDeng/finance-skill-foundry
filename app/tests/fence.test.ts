@@ -163,6 +163,10 @@ describe('the fence on a session', () => {
   });
 });
 
+// Only a staged runtime can prove the names; CI has none and skips.
+const runtimeStaged = () =>
+  existsSync(fileURLToPath(new URL('../extra/dsh/PIN', import.meta.url)));
+
 describe('the calls this fence names', () => {
   /*
    * Coupling to method names upstream owns. A rename there has to become a red
@@ -173,7 +177,10 @@ describe('the calls this fence names', () => {
     const registry = fileURLToPath(
       new URL('../extra/dsh/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js', import.meta.url),
     );
-    if (!existsSync(registry)) return;
+    if (!runtimeStaged()) return;
+    // A staged runtime without this module means upstream moved the RPC
+    // layer: fail rather than skip, or the fence stops covering anything.
+    expect(existsSync(registry), 'staged runtime has no dsh-host-apiproxy').toBe(true);
     const source = readFileSync(registry, 'utf8');
     for (const method of FENCED_METHODS) {
       expect(source).toContain(`"${method}"`);
@@ -187,7 +194,8 @@ describe('the calls this fence names', () => {
     const client = fileURLToPath(
       new URL('../extra/dsh/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js', import.meta.url),
     );
-    if (!existsSync(client)) return;
+    if (!runtimeStaged()) return;
+    expect(existsSync(client), 'staged runtime has no dsh-host-apiproxy').toBe(true);
     expect(readFileSync(client, 'utf8')).toContain('/api/${method}');
   });
 });
