@@ -803,6 +803,60 @@ def test_a_session_s_runs_capture_the_newest_requirements_version_it_may_read(tm
     assert code == 0 and managed["requirements_id"] == world.newer["id"]
 
 
+def test_a_session_s_saved_analyses_name_it_as_its_runs_do(tmp_path, capsys, fake_runner, monkeypatch):
+    """Each analysis a session saves names the session and the context revision it saved it under, as its runs do,
+    whichever way it saves it: SQL, a script, a job's script, a method applied, or the finance engine, from the CLI, an
+    MCP grant or the Excel add-in. The manager's are saved as before, naming neither."""
+    from foundry.excel_bridge import BridgeTokenAuthority, ExcelBridgeApp
+    from foundry.finance_mcp import FinanceMcpServer, create_stdio_grant
+
+    world = _version_world(tmp_path, False)
+    analysis = AnalysisStore(world.task)
+    b = analysis.add_dataset(_csv(tmp_path / "b.csv", [("revenue", "2026-08", "Hawk", "100", "CNY", "元")]), name="B")["id"]
+    assert world.task.update_session_context("sess", snapshot_ids=[b])["context_revision"] == 2
+    runs = _session_runs(world, capsys, monkeypatch)
+    code, method = _cli(capsys, world.var, "analysis-method-save", "--analysis", runs["sql"]["analysis_id"],
+                        "--name", "收入")
+    assert code == 0, method
+    code, applied = _cli(capsys, world.var, "analysis-method-apply", "--method", method["id"],
+                         "--bindings", json.dumps({"t": world.a}))
+    assert code == 0, applied
+    context = FinanceStore(world.task).save_context({"bindings": {"ledger": world.a}, "scopes": {}})
+    metric = {"context_id": context["id"], "metric": {"kind": "account_total", "accounts": ["revenue"]}}
+    grant = create_stdio_grant(world.var, task_id=world.task.id, session_id="sess", snapshot_ids=_snapshots(world.task))
+    server = FinanceMcpServer(var_root=world.var, grant_id=grant["grant_id"], token=grant["token"])
+    server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    runs["mcp"] = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                 "params": {"name": "run_metric", "arguments": metric}})["result"]["structuredContent"]
+    authority = BridgeTokenAuthority(b"local-test-secret-local-test-secret")
+    token = authority.issue(task_id=world.task.id, session_id="sess", ttl_seconds=60)
+    status, _, body = ExcelBridgeApp(var_root=world.var, token_authority=authority).handle(
+        "POST", "/api/run-metric", {"Authorization": f"Bearer {token}"}, json.dumps({"spec": metric}).encode())
+    assert status == 200, body
+    runs["excel"] = json.loads(body)["run"]
+    # Each analysis as saved for the run that first ran it, and the method's.
+    saved = {way: analysis.get_analysis(run["analysis_id"]) for way, run in runs.items() if "again" not in way}
+    saved["method"] = analysis.get_analysis(applied["id"])
+    authors = {way: (row.get("session_id"), row.get("context_revision")) for way, row in saved.items()}
+    assert authors == {**{way: (runs[way]["session_id"], runs[way]["context_revision"]) for way in saved
+                          if way != "method"}, "method": ("sess", 2)}
+    assert [authors[way] for way in ("sql", "script", "mcp", "excel", "method")] == [("sess", 2)] * 5
+    # A job's script is saved by the child session the job runs it as.
+    assert authors["job"] == (runs["job"]["session_id"], 1) and runs["job"]["session_id"] != "sess"
+    # The manager's saves name no session, as before.
+    as_manager = {"session": None, "task": world.task.id}
+    managed = [_cli(capsys, world.var, *args, **as_manager) for args in (
+        ("analysis-save", "--spec", json.dumps({"question": "收入", "sql": SQL, "bindings": {"t": world.a}})),
+        ("analysis-script", "--spec", json.dumps({"code": "print(1)", "bindings": {"t": world.a},
+                                                  "result_file": "result.json"})),
+        ("analysis-method-apply", "--method", method["id"], "--bindings", json.dumps({"t": world.a})))]
+    assert [code for code, _ in managed] == [0] * 3, managed
+    for analysis_id in (managed[0][1]["id"], managed[1][1]["analysis_id"], managed[2][1]["id"],
+                        FinanceStore(world.task).run_metric(metric)["analysis_id"]):
+        assert {"session_id", "context_revision"} & set(analysis.get_analysis(analysis_id)) == set()
+
+
 def test_a_session_s_readiness_reads_the_period_of_the_newest_requirements_version_it_may_read(tmp_path, capsys):
     read = []
     for name, hidden in (("plain", False), ("hidden", True)):

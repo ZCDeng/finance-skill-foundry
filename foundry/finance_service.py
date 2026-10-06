@@ -8,7 +8,7 @@ from decimal import localcontext
 from time import perf_counter
 
 from foundry.analysis import (DRAFT_UNAVAILABLE, PARENT_UNAVAILABLE, RUN_UNAVAILABLE, AnalysisStore, _assert_id, _default_materiality,
-                             _hash, _hash_bytes, _new, _safe_text)
+                             _hash, _hash_bytes, _new, _safe_text, _saved_by)
 from foundry.errors import FoundryError
 from foundry.structure_records import (
     ACKNOWLEDGED,
@@ -492,6 +492,7 @@ class FinanceStore:
             grain=[],
             max_rows=10000,
             timeout_seconds=30,
+            **_saved_by(self.session_id, self.context_revision),
         )
         return self.analysis._write(
             self.analysis._object_path("revisions", record["id"]), record

@@ -1064,6 +1064,74 @@ def test_a_session_reads_another_session_s_run_of_an_analysis_naming_a_version_n
     assert read[0][0] == [("P", "P"), ("P2", "P2", "P2", "P2")]
 
 
+@pytest.mark.parametrize("lineage", ["middle", "first"])
+def test_a_session_reads_an_analysis_another_session_saved_naming_a_version_it_may_not_read_as_that_session_named(
+        tmp_path, capsys, fake_runner, monkeypatch, lineage):
+    """Hv1 on H1 follows P on A (``middle``) or comes first (``first``), and then, but where S1 reads, Hv2 on H2. S2
+    saves SQL and a script on A naming Hv2, and S2 and the manager run the SQL. Where Hv2 was never saved, S2, which
+    could read neither H1 nor Hv1, named the newest older version it could read: P, or none. S1 reads the analyses and
+    their runs so, never naming or pinned to Hv1, though S2 has since come to read H1 too, and runs, declares and
+    files its receipt on them so."""
+    get_analysis = AnalysisStore.get_analysis
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _apart_world(tmp_path / name)
+        if lineage == "middle":
+            _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        _save_on(world, "Hv1", "Falcon 项目", {"project": world.h1}, HIDDEN_ITEMS)
+        if hidden:
+            _save_on(world, "Hv2", "Falcon 薪酬", {"payroll": world.h2}, ITEMS)
+        if lineage == "first":
+            _save_on(world, "P", "收入", {"gl": world.a}, ITEMS)
+        naming = "Hv2" if hidden else "P" if lineage == "middle" else None
+        pin = {"requirements_id": world.versions[naming]["id"]} if naming else {}
+        code, saved = _cli(capsys, world.var, "analysis-save", "--spec", json.dumps(
+            {"question": "收入", "sql": PINNED_SQL, "bindings": {"gl": world.a}, **pin}), session="s2")
+        assert code == 0, saved
+        code, script = _cli(capsys, world.var, "analysis-script", "--spec", json.dumps(
+            {"code": "print(1)", "bindings": {"gl": world.a}, "result_file": "result.json", **pin}), session="s2")
+        assert code == 0, script
+        analyses = [saved["id"], script["analysis_id"]]
+        others = [_cli(capsys, world.var, "analysis-run", "--analysis", saved["id"], **who)[1]
+                  for who in ({"session": "s2"}, {"session": None, "task": world.task.id})]
+        _save_on(world, "C", "收入", {"gl": world.a}, ITEMS)
+        world.task.update_session_context("s2", snapshot_ids=[world.h1])
+        loaded = []
+        monkeypatch.setattr(AnalysisStore, "get_analysis",
+                            lambda self, analysis_id: loaded.append(analysis_id) or get_analysis(self, analysis_id))
+        code, state = _cli(capsys, world.var, "analysis-state", session="s1")
+        assert code == 0, state
+        # Each analysis is read once, in the listing, whichever runs of it read by what it names.
+        assert loaded == []
+        listed = {row["id"]: row for row in [*state["analyses"], *state["runs"]]}
+        own = []
+        for analysis_id in analyses:
+            code, run = _cli(capsys, world.var, "analysis-run", "--analysis", analysis_id, session="s1")
+            assert code == 0, run
+            own.append(run)
+        s1 = next(row for row in world.task.sessions() if row["session_id"] == "s1")["snapshot_ids"]
+        receipt = FinanceStore(world.task, snapshot_ids=s1, session_id="s1").save_explanation_draft(
+            {"body": "S1 稿：Falcon 收入 100。", "run_ids": [run["id"] for run in own]})["completion"]
+        hidden_values = [value for label, row in world.versions.items() if label == "Hv2"
+                         for value in (row["id"], row["semantic_fingerprint"])]
+        assert _shows([state, own, receipt], [world.h2, *hidden_values]) == []
+        versions = {label: row for label, row in world.versions.items() if label != "Hv2"}
+        ids = {row["id"]: label for label, row in versions.items()}
+        # Who saved each analysis shows as it does on a run, alike in both worlds.
+        read.append(([(ids.get(listed[analysis_id].get("requirements_id")), listed[analysis_id]["session_id"],
+                       listed[analysis_id]["context_revision"]) for analysis_id in analyses],
+                     _pins(versions, [*(listed[run["id"]] for run in others), *own]), _verdict(receipt)))
+    assert read[0] == read[1]
+    named, pins, verdict = read[0]
+    if lineage == "middle":
+        assert named == [("P", "s2", 2)] * 2
+        assert pins == [("P", "P=C"), ("P", "Hv1"), ("P", "P=C"), ("P", "P=C", "P", "P=C")]
+    else:
+        assert named == [(None, "s2", 2)] * 2
+        assert pins == [("P", "P=C"), ("P", "P=C"), ("C", "P=C"), ("C", "P=C", "C", "P=C")]
+    assert verdict[4] == (2 if lineage == "middle" else 0) and "requirements_run_outdated" not in verdict[5]
+
+
 @pytest.mark.parametrize("engine", ["sql", "script"])
 def test_a_session_reads_another_session_s_run_started_under_a_version_that_session_read_otherwise(
         tmp_path, capsys, fake_runner, monkeypatch, engine):

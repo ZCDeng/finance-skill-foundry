@@ -374,6 +374,12 @@ def _new(task: Task, **fields) -> dict:
     }
 
 
+def _saved_by(session_id: str | None, context_revision: int | None) -> dict:
+    """The fields of an analysis revision naming the session that saved it, as a run names its session
+    (AnalysisStore._author_ceiling): none for the manager's, saved as before."""
+    return {"session_id": session_id, "context_revision": context_revision} if session_id else {}
+
+
 def _assert_id(value: str) -> str:
     if not isinstance(value, str) or not ID.fullmatch(value):
         raise FoundryError(f"invalid analysis object id: {value}")
@@ -594,6 +600,7 @@ class AnalysisStore:
             cache = {} if cache is None else cache
             cache.setdefault("requirements", requirements)
             cache.setdefault("runs", {run["id"]: run for run in runs})
+            cache.setdefault("analyses", {row["id"]: row for row in analyses})
             versions = {row.get("id"): row for row in requirements}
             requirements = [row for row in requirements if requirements_readable(row, allowed)]
             drafts: dict = {}
@@ -805,7 +812,10 @@ class AnalysisStore:
             raise FoundryError("source batch publication does not match snapshot")
         return True
 
-    def save_analysis(self, spec: dict) -> dict:
+    def save_analysis(self, spec: dict, *, session_id: str | None = None,
+                      context_revision: int | None = None) -> dict:
+        """Save an analysis revision. A session's carries its ``session_id`` and ``context_revision``, as its runs do
+        (_author_ceiling); the manager's is saved as before."""
         if not isinstance(spec, dict):
             raise FoundryError("analysis spec must be an object")
         question = _safe_text(
@@ -898,6 +908,7 @@ class AnalysisStore:
             max_rows=max_rows,
             timeout_seconds=timeout,
             method_id=spec.get("method_id"),
+            **_saved_by(session_id, context_revision),
             **fields,
         )
         if record["method_id"]:
@@ -924,8 +935,8 @@ class AnalysisStore:
         its own (_captured_otherwise), and its reproducibility as _reproducibility_in_view reads it. No
         run a session reads carries the integrity hash: it covers the stored record, which a view may not be, and its
         absence must not tell a view from a stored record. ``cache``, shared by the runs, drafts and receipts of one
-        read, holds the task's requirements versions, their fingerprints, its runs, sessions and refresh batches, the
-        row declarations read again and the requirement support of the receipts judged again.
+        read, holds the task's requirements versions, their fingerprints, its runs, saved analyses, sessions and refresh
+        batches, the row declarations read again and the requirement support of the receipts judged again.
         """
         if allowed is None:
             return run
@@ -958,8 +969,8 @@ class AnalysisStore:
     def analysis_in_view(self, analysis: dict, allowed: set[str] | None, *, cache: dict | None = None) -> dict:
         """A saved analysis as a reader whose snapshot ceiling is ``allowed`` reads it; None (the manager) reads it as
         stored. A session reads one naming a requirements version it may not read as naming the version the runs made
-        from it read as pinned to (_pin_in_view), so a listing never shows both, and without the integrity hash, as it
-        reads runs."""
+        from it read as pinned to (_pin_in_view), one the session that saved it may read too, so a listing never shows
+        both, and without the integrity hash, as it reads runs."""
         if allowed is None:
             return analysis
         view = {key: value for key, value in analysis.items() if key != "_integrity_hash"}
@@ -982,7 +993,10 @@ class AnalysisStore:
         may read the pin but not the version current when the run started (an analysis naming an older version). One
         that may read that version reads the fingerprint captured, as stored or as the run's session read the version,
         as the one it reads that version with (_captured_otherwise). Each fingerprint is the one the reader reads
-        (fingerprint_in_view), and nothing of a version it may not read shows or decides anything.
+        (fingerprint_in_view), and nothing of a version it may not read shows or decides anything. Of an analysis a
+        session saved, too, only the versions that session may read count: it named no other. So, of a run pinned to the
+        version its analysis names, the version it reads as pinned to in that one's place is one the session that saved
+        the analysis may read too (_namer_ceiling), while its fingerprint is still the run's own.
         """
         from foundry.finance_requirements import requirements_readable
 
@@ -1012,7 +1026,10 @@ class AnalysisStore:
             if fingerprint == record.get("requirements_semantic_fingerprint"):
                 return None
             return {"requirements_semantic_fingerprint": fingerprint}, version
-        substitute = next((row for row in reversed(versions)
+        # Where the pin was never saved, a run of an analysis naming it ran what that analysis named instead.
+        namer = self._namer_ceiling(record, pinned, cache)
+        named = versions if namer is None else [row for row in versions if requirements_readable(row, namer)]
+        substitute = next((row for row in reversed(named)
                            if row.get("seq", 0) < version.get("seq", 0) and requirements_readable(row, allowed)), None)
         then = next((row for row in reversed(self._versions_at_start(record, versions, author, cache))
                      if requirements_readable(row, allowed)), None)
@@ -1042,11 +1059,30 @@ class AnalysisStore:
                     return before[:index + 1]
         return before
 
+    def _namer_ceiling(self, record: dict, pinned: str, cache: dict) -> set[str] | None:
+        """The snapshot ceiling of the session that saved the analysis run ``record`` ran (_author_ceiling) where that
+        analysis names ``pinned``, the run's pin: that session named only a version it may read. None for any other
+        record, a run pinned otherwise, or an analysis the manager saved or a session saved before analyses named their
+        session. Each analysis is read once per ``cache``."""
+        analysis_id = record.get("analysis_id")
+        if not isinstance(analysis_id, str):
+            return None
+        analyses = cache.setdefault("analyses", {})
+        if analysis_id not in analyses:
+            try:
+                analyses[analysis_id] = self.get_analysis(analysis_id)
+            except FoundryError:
+                analyses[analysis_id] = None
+        analysis = analyses[analysis_id]
+        if analysis is None or analysis.get("requirements_id") != pinned:
+            return None
+        return self._author_ceiling(analysis, cache)
+
     def _author_ceiling(self, record: dict, cache: dict) -> set[str] | None:
-        """The snapshot ceiling of the session that saved run ``record``, at the context revision it saved it under
-        (Task.update_session_context keeps each earlier one), or None: the manager's, a session's the task does not
-        know, or one whose recorded ceiling does not hold the run's files. A run filed under an MCP grant reads by its
-        session's ceiling, which holds the grant's. The task's sessions are read once per ``cache``."""
+        """The snapshot ceiling of the session that saved run or analysis ``record``, at the context revision it saved
+        it under (Task.update_session_context keeps each earlier one), or None: the manager's, a session's the task does
+        not know, or one whose recorded ceiling does not hold the record's files. A run filed under an MCP grant reads
+        by its session's ceiling, which holds the grant's. The task's sessions are read once per ``cache``."""
         session_id = record.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             return None
@@ -1636,10 +1672,10 @@ class AnalysisStore:
                     rows or all(captured_as_stored(run) for run in runs)):
                 judged[key] = False
             else:
-                # The narrowest reader reads fingerprints of its own: only the versions and sessions are shared.
+                # The narrowest reader reads fingerprints of its own: only versions, sessions and analyses are shared.
                 narrowest = cache.setdefault("narrowest", {}).setdefault(frozenset(files), {
                     "requirements": self._requirements_versions(cache), "versions": self._requirements_by_id(cache),
-                    "sessions": cache.setdefault("sessions", {})})
+                    "sessions": cache.setdefault("sessions", {}), "analyses": cache.setdefault("analyses", {})})
                 judged[key] = otherwise(set(allowed), cache) or otherwise(files, narrowest)
         return judged[key]
 
@@ -2750,6 +2786,8 @@ class AnalysisStore:
         *,
         question: str | None = None,
         parameters: Any = None,
+        session_id: str | None = None,
+        context_revision: int | None = None,
     ) -> dict:
         method = self._get_method(method_id)
         if not isinstance(bindings, dict) or set(bindings) != set(
@@ -2780,7 +2818,9 @@ class AnalysisStore:
                 "method_id": method_id,
                 "max_rows": method["max_rows"],
                 "timeout_seconds": method["timeout_seconds"],
-            }
+            },
+            session_id=session_id,
+            context_revision=context_revision,
         )
 
     def run_script(
@@ -2862,6 +2902,7 @@ class AnalysisStore:
             metrics=[],
             grain=[],
             missing_inputs=[],
+            **_saved_by(session_id, context_revision),
         )
         if analysis_id:
             # Pinned as run_analysis runs it: to the version the session reads the saved analysis as naming.

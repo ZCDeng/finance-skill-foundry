@@ -415,7 +415,7 @@ def dispatch(args) -> bool:
         if context.session_id and spec.get("parent_id"):
             # A parent the session may not read is refused as an unknown one, not saved as the revision's parent.
             _named_analysis(context, service, spec["parent_id"])
-        result = service.save_analysis(spec)
+        result = service.save_analysis(spec, session_id=context.session_id, context_revision=context.context_revision)
     elif args.cmd == "analysis-run":
         analysis = _named_analysis(context, service, args.analysis)
         # A session runs the analysis as analysis-state reads it (analysis_in_view): pinned to the version it reads.
@@ -513,6 +513,8 @@ def dispatch(args) -> bool:
             bindings,
             question=args.question,
             parameters=json_value(load_json(args.parameters)),
+            session_id=context.session_id,
+            context_revision=context.context_revision,
         )
     else:
         spec = _json(args.spec, "script spec")
