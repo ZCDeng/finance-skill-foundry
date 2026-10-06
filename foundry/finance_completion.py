@@ -60,7 +60,6 @@ def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None,
     complete and the check reads as completed. Its input key is the one record_completion would have filed over the
     check as read and the chain as read, so the key covers only what the reader is shown.
     """
-    from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirements import check_lineage_in_view
 
     check = draft.get('explanation_check') if isinstance(draft, dict) else None
@@ -84,11 +83,8 @@ def receipt_lineage_in_view(analysis, receipt, draft, allowed, *, versions=None,
             receipt.get('status') == 'complete' and bool(requirements.get('original_requirements_completed')))
         shown.update({'actions': actions, 'original_requirements_completed': completed})
     if 'input_key' in receipt:
-        keyed = ({key: value for key, value in view.items() if key not in EVIDENCE_FIELDS}
-                 if isinstance(draft.get('evidence_basis'), dict) else view)
-        shown['input_key'] = _hash({'chain_key': shown.get('chain_key'), 'draft_id': draft['id'],
-                                    'draft_content_hash': draft['content_hash'], 'quality': keyed,
-                                    'completion_policy_version': receipt.get('completion_policy_version')})
+        shown['input_key'] = completion_input_key(shown.get('chain_key'), draft, view,
+                                                  receipt.get('completion_policy_version'))
     return shown
 
 
@@ -103,8 +99,16 @@ def record_completion(analysis, draft, quality, *, allowed=None, cache=None):
     """
     assessed = assess_completion(analysis, draft, quality, allowed=allowed, cache=cache)
     with exclusive(analysis.task.lock_path, timeout=10):
-        history = [row for row in analysis._list('completions') if row.get('chain_key') == assessed['chain_key']]
+        receipts = analysis._list('completions')
+        history = [row for row in receipts if row.get('chain_key') == assessed['chain_key']]
         same = next((row for row in history if row.get('input_key') == assessed['input_key']), None)
+        # A reader who reads the version with another fingerprint (a session the one it reads, the manager the stored
+        # one) chains the same draft and check otherwise: its replay is answered with the receipt already filed for
+        # them, keyed under that receipt's own chain.
+        same = same or next((row for row in receipts if row.get('draft_id') == draft['id']
+                             and row.get('chain_key') != assessed['chain_key']
+                             and row.get('input_key') == completion_input_key(row.get('chain_key'), draft, quality,
+                                                                              COMPLETION_POLICY_VERSION)), None)
         if same:
             return same
         record = _new(analysis.task, **receipt_fields(analysis, assessed, history))
@@ -114,7 +118,6 @@ def record_completion(analysis, draft, quality, *, allowed=None, cache=None):
 def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, supports=None):
     """What record_completion decides of a draft before it reads the earlier receipts of its chain. ``allowed`` as for
     record_completion; ``cache`` as for AnalysisStore.run_in_view; ``supports`` as for with_input_gaps."""
-    from foundry.evidence_labels import EVIDENCE_FIELDS
     from foundry.finance_requirement_support import with_input_gaps
 
     requirements = quality.get('requirements', {})
@@ -173,19 +176,26 @@ def assess_completion(analysis, draft, quality, *, allowed=None, cache=None, sup
     # A deliberate requirements revision starts a new completion scope.
     chain_key = completion_chain_key(semantic_fingerprint, requirement_id, run_hashes)
     issue_fingerprint = _hash(issues)
-    # Labels, posture and freshness read differently for each reader (AnalysisStore.draft_in_view) and never
-    # decide completion; a receipt a session is handed must not carry a digest of the stored ones. A draft
-    # saved before drafts kept their evidence basis keeps the key its receipts were filed under.
-    keyed = ({key: value for key, value in quality.items() if key not in EVIDENCE_FIELDS}
-             if isinstance(draft.get('evidence_basis'), dict) else quality)
-    input_key = _hash({'chain_key': chain_key, 'draft_id': draft['id'],
-                       'draft_content_hash': draft['content_hash'], 'quality': keyed,
-                       'completion_policy_version': COMPLETION_POLICY_VERSION})
+    input_key = completion_input_key(chain_key, draft, quality, COMPLETION_POLICY_VERSION)
     return {'draft': draft, 'quality': quality, 'requirements': requirements, 'requirement_id': requirement_id,
             'semantic_fingerprint': semantic_fingerprint, 'run_hashes': run_hashes, 'reused_runs': reused_runs,
             'stale_runs': stale_runs, 'issues': issues, 'awaiting_input': awaiting_input,
             'awaiting_manager': awaiting_manager, 'manager_reasons': manager_reasons, 'chain_key': chain_key,
             'issue_fingerprint': issue_fingerprint, 'input_key': input_key}
+
+
+def completion_input_key(chain_key, draft, quality, policy_version):
+    """The input key a receipt on ``draft`` judged on ``quality`` files under ``chain_key`` with completion policy
+    ``policy_version``: the same input is answered with the receipt already filed for it (record_completion)."""
+    from foundry.evidence_labels import EVIDENCE_FIELDS
+
+    # Labels, posture and freshness read differently for each reader (AnalysisStore.draft_in_view) and never
+    # decide completion; a receipt a session is handed must not carry a digest of the stored ones. A draft
+    # saved before drafts kept their evidence basis keeps the key its receipts were filed under.
+    keyed = ({key: value for key, value in quality.items() if key not in EVIDENCE_FIELDS}
+             if isinstance(draft.get('evidence_basis'), dict) else quality)
+    return _hash({'chain_key': chain_key, 'draft_id': draft['id'], 'draft_content_hash': draft['content_hash'],
+                  'quality': keyed, 'completion_policy_version': policy_version})
 
 
 def completion_chain_key(semantic_fingerprint, requirement_id, run_hashes):

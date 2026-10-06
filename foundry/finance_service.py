@@ -206,6 +206,19 @@ class FinanceStore:
         for dataset_id in bindings.values():
             _assert_id(dataset_id)
 
+    def _authorize_current(self, current):
+        """The task's current requirements version, which a save is checked against. A session is refused one it may
+        not read (finance_requirements.requirements_readable), one with malformed bindings as one on files outside it;
+        the manager as before (_authorize)."""
+        if not current:
+            return
+        if self.allowed is not None:
+            from foundry.finance_requirements import requirements_readable
+
+            if not requirements_readable(current, self.allowed):
+                raise FoundryError("finance snapshots are outside this session context")
+        self._authorize(current.get("bindings", {}))
+
     def _authorize_evidence_recipes(self, recipes):
         from foundry.financial_evidence import recipe_dataset_ids, recipe_run_ids
 
@@ -844,8 +857,7 @@ class FinanceStore:
         if not isinstance(spec, dict):
             raise FoundryError("analysis requirements spec must be an object")
         parent = latest_requirements(self.analysis)
-        if parent:
-            self._authorize(parent.get("bindings", {}))
+        self._authorize_current(parent)
         context_scopes = None
         if spec.get("context_id"):
             context = self._read("contexts", spec["context_id"])
@@ -894,8 +906,7 @@ class FinanceStore:
         # Authorize referenced records before persisting a recoverable payload.
         from foundry.finance_requirements import latest_requirements
         requirements = latest_requirements(self.analysis)
-        if requirements:
-            self._authorize(requirements.get("bindings", {}))
+        self._authorize_current(requirements)
         if spec.get("requirements_id"):
             self._named_requirements(spec["requirements_id"])
         for claim in spec.get("claims", []):
@@ -910,6 +921,9 @@ class FinanceStore:
         self._authorize_consistency_sources(spec.get("consistency_sources", {}))
         self._parent_draft(spec.get("parent_id"))
         operations = CompletionOperationStore(self.task, self.session_id, self.allowed)
+        # Whether the session may read each receipt its operation is settled on is read before completion.lock, as
+        # before the task lock (CompletionOperationStore._prime): reserve, get and settle under it only look it up.
+        operations._prime(operation_id)
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             reserved = operations.reserve(operation_id, payload=spec, call_id=call_id)
             attempt = reserved["attempt"]
@@ -927,7 +941,7 @@ class FinanceStore:
                 receipt = self._settled_receipt(
                     self.analysis._get("completions", attempt["completion_id"]) if attempt.get("completion_id") else
                     record_completion(self.analysis, previous, previous["explanation_check"], allowed=self.allowed,
-                                      cache=cache), cache=cache)
+                                      cache=cache), cache=cache, operations=operations)
                 operation = operations.settle(operation_id, attempt["revision"], previous, receipt)
                 return {**self._readable_draft(previous, cache=cache), "completion": receipt,
                         "completion_operation": operation, "replayed": True, "validation_basis": "saved_draft_version"}
@@ -969,7 +983,7 @@ class FinanceStore:
                 })
                 raise
             # The session's operation goes on as its own saves would have spent the budget (completion_in_view).
-            receipt = self._settled_receipt(result["completion"], cache=cache)
+            receipt = self._settled_receipt(result["completion"], cache=cache, operations=operations)
             operation = operations.settle(operation_id, attempt["revision"], result, receipt)
             return {**result, "completion": receipt, "completion_operation": operation}
 
@@ -1089,8 +1103,7 @@ class FinanceStore:
         # A committed draft also acts as recovery evidence if receipt writing fails.
         with exclusive(self.analysis._inside(self.analysis.root / "completion.lock"), timeout=10):
             requirements = latest_requirements(self.analysis)
-            if requirements:
-                self._authorize(requirements.get("bindings", {}))
+            self._authorize_current(requirements)
             key = _hash({"request": spec, "requirements_id": (requirements or {}).get("id")})
             # A session replays only a save it may read: one it may not read is refused as a fresh save would be.
             previous = _replayable_draft([row for row in self.analysis._list("drafts")
@@ -1303,11 +1316,14 @@ class FinanceStore:
         run_in_view)."""
         return self.analysis.completion_in_view(receipt, self.allowed, cache=cache)
 
-    def _settled_receipt(self, receipt, *, cache=None):
+    def _settled_receipt(self, receipt, *, cache=None, operations=None):
         """The receipt this store's session settles its own completion operation on: as it reads it. Its saves cite only
         what it may read, so it reads every receipt of its own; the receipt as stored if one ever does not, so the
-        operation never stops unsettled."""
+        operation never stops unsettled. ``operations``, the store that settles it, is told the session reads it, so
+        settle reads it no more under completion.lock (CompletionOperationStore._readable)."""
         view = self._readable_receipt(receipt, cache=cache)
+        if view is not None and operations is not None and isinstance(receipt.get("id"), str):
+            operations._readable_receipts[receipt["id"]] = True
         return receipt if view is None else view
 
     def prepare_explanation(self, spec):
@@ -1383,8 +1399,7 @@ class FinanceStore:
         from foundry.finance_requirements import augment_quality, latest_requirements
 
         current = latest_requirements(self.analysis)
-        if current:
-            self._authorize(current.get("bindings", {}))
+        self._authorize_current(current)
         # A caller's evidence_report, or the one stored on the draft, is never evidence: the recipes are
         # evaluated again by validate_explanation and only that fresh report reaches coverage.
         merged = {key: value for key, value in {**draft, **spec, "run_ids": run_ids}.items() if key != "evidence_report"}
@@ -2621,10 +2636,10 @@ class FinanceStore:
             raise FoundryError("circle-select requires context_id")
         context = self._read("contexts", spec["context_id"])
         latest = latest_requirements(self.analysis)
-        if self.allowed is not None and latest:
+        if self.allowed is not None:
             # A session revises only a current version it may read, refused as analysis_requirements_save refuses it:
             # before anything is taken from that version or a child context is written.
-            self._authorize(latest.get("bindings", {}))
+            self._authorize_current(latest)
         if spec.get("parent_id") and (not latest or spec["parent_id"] != latest["id"]):
             raise FoundryError("circle-select parent_id must be the latest requirements version")
         if kind == "draft_table":

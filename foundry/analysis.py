@@ -1362,7 +1362,12 @@ class AnalysisStore:
                        if isinstance(check, dict) and isinstance(check.get("requirements"), dict)]
             for requirements_id in dict.fromkeys([record.get("requirements_id"), *checked]):
                 if requirements_id:
-                    snapshots.update((self._get("requirements", requirements_id).get("bindings") or {}).values())
+                    bindings = self._get("requirements", requirements_id).get("bindings") or {}
+                    # Bindings that are no map of snapshot ids no session reads (requirements_readable): the version
+                    # raises as one that no longer reads.
+                    if not isinstance(bindings, dict) or any(not isinstance(value, str) for value in bindings.values()):
+                        raise FoundryError(REQUIREMENTS_UNAVAILABLE)
+                    snapshots.update(bindings.values())
             return snapshots
 
         # Up the chain while each revision rests on its parent, then back down, each draft's own snapshots added once.
@@ -1674,6 +1679,8 @@ class AnalysisStore:
         was judged with one), nor for a verdict judged against a requirements version it may not read. A record that
         no longer reads counts as one it may not read. ``readable_ids`` as for draft_in_view.
         """
+        from foundry.finance_requirements import requirements_readable
+
         allowed = set(allowed)
         loaded: dict[str, dict | None] = {}
         drafts: dict[str, bool] = {}
@@ -1701,8 +1708,8 @@ class AnalysisStore:
         def version(requirements_id: str) -> bool:
             if requirements_id not in versions:
                 try:
-                    versions[requirements_id] = set(
-                        (self._get("requirements", requirements_id).get("bindings") or {}).values()) <= allowed
+                    versions[requirements_id] = requirements_readable(
+                        self._get("requirements", requirements_id), allowed)
                 except FoundryError:
                     versions[requirements_id] = False
             return versions[requirements_id]
@@ -1926,12 +1933,13 @@ class AnalysisStore:
         if not isinstance(spec, dict):
             raise FoundryError("draft spec must be an object")
         if _allowed is not None:
-            from foundry.finance_requirements import latest_requirements
+            from foundry.finance_requirements import latest_requirements, requirements_readable
 
-            # A draft is checked against the current requirements: a session may not check one against a version
-            # that rests on files it may not read (as the finance saves already refuse).
+            # A draft is checked against the current requirements: a session may not check one against a version it
+            # may not read (requirements_readable: on files it may not read, or with malformed bindings), as the
+            # finance saves refuse it.
             current = latest_requirements(self)
-            if current and not set((current.get("bindings") or {}).values()) <= set(_allowed):
+            if current and not requirements_readable(current, _allowed):
                 raise FoundryError("snapshots are outside this session context; use analysis-refresh to include task datasets")
         parent = self.get_draft(spec["parent_id"]) if spec.get("parent_id") else {}
         inherited = _inherited_fields(spec, parent) | set(_inherited) if parent else None

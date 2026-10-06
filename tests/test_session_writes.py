@@ -1616,7 +1616,7 @@ def named(tmp_path):
         return served
 
     return SimpleNamespace(
-        var=var, task=task, analysis=analysis, a=a, manager=manager, session=session,
+        var=var, task=task, analysis=analysis, a=a, manager=manager, session=session, context=context["id"],
         run=session.run_metric({"context_id": context["id"], "metric": total})["id"], hidden_requirements=requirements["id"],
         hidden_run=manager.run_metric({"context_id": hidden_context["id"], "metric": total})["id"],
         hidden_analysis=analysis.save_analysis({"question": "收入", "sql": SQL, "bindings": {"t": h}})["id"],
@@ -1713,12 +1713,14 @@ def test_a_session_names_a_hidden_unknown_or_malformed_requirements_version_alik
 
 def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_as_one_it_may_not_read(named, capsys):
     """No save stores bindings that are no map of snapshot ids, so each version is written as a damaged store would
-    hold it, ordered before the current one (seq 0), which still rests on A."""
-    from foundry.analysis import REQUIREMENTS_UNAVAILABLE
+    hold it, ordered before the current one (seq 0), which still rests on A; and then as the current one."""
+    import uuid
 
-    def written(bindings) -> str:
+    from foundry.analysis import DRAFT_UNAVAILABLE, REQUIREMENTS_UNAVAILABLE
+
+    def written(bindings, seq: int = 0) -> str:
         record = _new(named.task, question="收入", scope={}, bindings=bindings, context_id=None, items=ITEMS,
-                      parent_id=None, removed_item_ids=[], change_reason="", selection=None, seq=0)
+                      parent_id=None, removed_item_ids=[], change_reason="", selection=None, seq=seq)
         record["_integrity_hash"] = _hash(record)
         named.analysis._object_path("requirements", record["id"]).write_text(json.dumps(record), encoding="utf-8")
         return record["id"]
@@ -1765,6 +1767,75 @@ def test_a_session_reads_a_requirements_version_stored_with_malformed_bindings_a
         assert code == 0, run
         ran.append({key: value for key, value in run.items() if key.startswith("requirements")})
     assert ran == [ran[-1]] * 3
+    # A draft or receipt pinned to it, written as a damaged store would hold it, reads as one pinned to a version on a
+    # file outside the session: left out, or refused by id.
+    saved = named.session.save_explanation_draft({"body": "收入 100。", "run_ids": [named.run]})
+
+    def pinned(kind: str, record_id: str, requirements_id: str) -> str:
+        record = {key: value for key, value in named.analysis._get(kind, record_id).items() if key != "_integrity_hash"}
+        record.update(id=uuid.uuid4().hex, requirements_id=requirements_id)
+        record["_integrity_hash"] = _hash(record)
+        named.analysis._object_path(kind, record["id"]).write_text(json.dumps(record), encoding="utf-8")
+        return record["id"]
+
+    versions = [named.hidden_requirements, *malformed]
+    drafts = [pinned("drafts", saved["id"], requirements_id) for requirements_id in versions]
+    receipts = [pinned("completions", saved["completion"]["id"], requirements_id) for requirements_id in versions]
+    code, state = _cli(capsys, named.var, "analysis-state")
+    assert code == 0
+    assert {row["id"] for row in state["drafts"]} & {saved["id"], *drafts} == {saved["id"]}
+    assert {row["id"] for row in state["completions"]} & {saved["completion"]["id"], *receipts} == {
+        saved["completion"]["id"]}
+    for draft_id in drafts:
+        code, error = _cli(capsys, named.var, "report-draft-read", "--draft", draft_id)
+        assert (code, error.strip()) == (3, DRAFT_UNAVAILABLE)
+
+    def cli(command: str, spec: dict) -> str:
+        code, error = _cli(capsys, named.var, command, "--spec", json.dumps(spec))
+        return f"{code}: {error.strip()}"
+
+    def saves() -> dict[str, str]:
+        """What each save the session checks against the task's current version answers, naming as the parent the
+        version the session reads as current, on A."""
+        current = named.session.analysis_requirements_list({})["current"]["id"]
+        revision = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS, "parent_id": current}
+        explanation = {"body": "收入。", "run_ids": [named.run]}
+        circled = {"kind": "draft_table", "range": "A1:B2", "context_id": named.context, "draft_id": saved["id"],
+                   "instruction": "改"}
+        return {
+            "analysis-draft": cli("analysis-draft", {"title": "T", "body": "收入。", "run_ids": [named.run]}),
+            "analysis-requirements-save": cli("analysis-requirements-save", revision),
+            "requirements save": _refusal(lambda: named.session.analysis_requirements_save(revision)),
+            "explanation save": _refusal(lambda: named.session.save_explanation_draft(explanation)),
+            "validation": _refusal(lambda: named.session.validate_explanation(explanation)),
+            "completion save": _refusal(lambda: named.session.save_completion_draft("op", "call", explanation)),
+            "circle-select": _refusal(lambda: named.session.analysis_circle_select(circled)),
+            **{f"requirements save ({grant})": _mcp(server, "analysis_requirements_save", revision)
+               for grant, server in named.grants.items()},
+        }
+
+    # As the current version, it is refused as a current version on a file outside the session is (#75).
+    named.manager.analysis_requirements_save({
+        "question": "Falcon", "bindings": named.analysis._get("requirements", named.hidden_requirements)["bindings"],
+        "items": ITEMS, "parent_id": named.manager.analysis_requirements_list({})["current"]["id"]})
+    hidden = saves()
+    assert set(hidden.values()) == {
+        "3: snapshots are outside this session context; use analysis-refresh to include task datasets",
+        "3: finance snapshots are outside this session context", "finance snapshots are outside this session context",
+        "grant refused: requirements parent has no grant-verifiable context"}
+    for seq, bindings in enumerate(([named.a], {"gl": [named.a]}, {"gl": 7}), 10_000):
+        written(bindings, seq)
+        stored = _stored(named)
+        assert saves() == hidden
+        # The manager is answered as before.
+        revision = {"question": "收入", "bindings": {"gl": named.a}, "items": ITEMS,
+                    "parent_id": named.manager.analysis_requirements_list({})["current"]["id"]}
+        explanation = {"body": "收入。", "run_ids": [named.run]}
+        assert {_refusal(lambda: named.manager.analysis_requirements_save(revision)),
+                _refusal(lambda: named.manager.save_explanation_draft(explanation)),
+                _refusal(lambda: named.manager.validate_explanation(explanation))} == {
+            "finance bindings must map aliases to snapshot IDs"}
+        assert _stored(named) == stored
 
 
 def test_a_session_names_a_hidden_unknown_or_malformed_run_alike(named, capsys):

@@ -388,6 +388,30 @@ def test_a_session_s_retry_files_the_receipt_its_save_would_have(tmp_path, capsy
     assert filed[0] == filed[1] and filed[0][4] == 3
 
 
+def test_a_replay_of_another_reader_s_save_is_answered_with_the_receipt_already_filed(tmp_path, capsys, fake_runner):
+    """A save is replayed by its request and the current version, whoever sends it: the manager replays a session's
+    save, and a session the manager's. Where Hv held an item more, the session reads V2 with another fingerprint than
+    the stored one, so the two chain the same draft and check otherwise. Each is still handed the receipt already filed
+    and files none, as on main; the session reads it as where Hv was never saved."""
+    read = []
+    for name, hidden in (("plain", False), ("hidden", True)):
+        world = _pinned_world(tmp_path / name, hidden, capsys, extra_item=True)
+        session = FinanceStore(world.task, snapshot_ids=[world.a], session_id="sess")
+        replays = []
+        for first, then, body in ((session, world.manager, "会话稿：Falcon 收入 100。"),
+                                  (world.manager, session, "经理稿：Falcon 收入 100。")):
+            saved = first.save_explanation_draft({**world.draft, "body": body})
+            stored = world.analysis._list("completions")
+            replayed = then.save_explanation_draft({**world.draft, "body": body})
+            assert world.analysis._list("completions") == stored
+            assert (replayed["replayed"], replayed["id"], replayed["completion"]["id"]) == (
+                True, saved["id"], saved["completion"]["id"])
+            replays.append(replayed)
+        assert _shows(replays[1], world.secrets) == []
+        read.append(_verdict(replays[1]["completion"]))
+    assert read[0] == read[1] == ("needs_review", 1, "no_progress", False, 3, ISSUES)
+
+
 # --- a completion chain on such runs ----------------------------------------------------------------------------------
 
 
@@ -1970,6 +1994,51 @@ def test_a_session_reads_the_receipts_its_operation_settled_on_before_it_takes_t
     assert [[row["status"] for row in operation["revisions"]] for operation in read] == [
         ["rejected_validation", "settled"]] * 2 + [["rejected_validation", "settled", "reserved"]] + [
         ["rejected_validation", "settled", "rejected_validation"]] * 4
+    assert _shows(read, world.hidden) == []
+
+
+def test_a_session_s_completion_save_reads_its_receipts_before_it_takes_completion_lock(tmp_path, capsys,
+                                                                                        monkeypatch):
+    """The manager's saves wait on completion.lock, which a session's completion save holds while its operation reserves
+    and settles: whether the session may read each receipt the operation is settled on, and the one the save settles
+    it on, is read before the save takes that lock, so the operation reads no run under it, on a save or a replay."""
+    import traceback
+
+    import foundry.locking as locking
+
+    world = _settled_operation(tmp_path / "legacy", capsys, live=True, legacy=True, spent=0)
+    [a] = world.sess.allowed
+    context = world.sess.save_context({"bindings": {"ledger": a}, "scopes": {}})
+    run = world.sess.run_metric({"context_id": context["id"], "metric": {"kind": "control_totals"}})
+    exclusive, get_run = locking.exclusive, AnalysisStore.get_run
+    held, read, reads = [False], [], []
+
+    @contextmanager
+    def holding(path, **kwargs):
+        with exclusive(path, **kwargs):
+            before, held[0] = held[0], held[0] or Path(path).name == "completion.lock"
+            try:
+                yield
+            finally:
+                held[0] = before
+
+    def reading(self, run_id):
+        if held[0]:  # by the operation, or by the rest of the save, as on main
+            reads[-1].append(any(frame.filename.endswith("finance_completion_operations.py")
+                                 for frame in traceback.extract_stack()))
+        return get_run(self, run_id)
+
+    monkeypatch.setattr(locking, "exclusive", holding)
+    monkeypatch.setattr(AnalysisStore, "get_run", reading)
+    # Revision 2 settled on a draft citing the session's run, then settled again as a replay.
+    for _ in range(2):
+        reads.append([])
+        read.append(world.sess.save_completion_draft(world.operation, "call-2",
+                                                     {"body": "会话修订稿。", "run_ids": [run["id"]]}))
+    assert [(False in by_save, True in by_save) for by_save in reads] == [(True, False)] * 2
+    assert [shown.get("replayed", False) for shown in read] == [False, True]
+    assert [[row["status"] for row in shown["completion_operation"]["revisions"]] for shown in read] == [
+        ["rejected_validation", "settled"]] * 2
     assert _shows(read, world.hidden) == []
 
 
