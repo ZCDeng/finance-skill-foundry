@@ -442,7 +442,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       </div>
       {finance?.scenarios.filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).length ? <div className="analysis-history-list">{[...finance.scenarios].filter((scenario) => scenario.context_id === contextId && scenario.kind === scenarioKind).reverse().slice(0, 6).map((scenario) => <button type="button" className="analysis-history-row" key={String(scenario.id)} disabled={locked}
         aria-current={scenario.id === baselineScenarioId ? 'true' : undefined} onClick={() => setBaselineScenarioId(String(scenario.id ?? ''))}>
-        <span>{textValue(scenario.label ?? scenario.kind)}</span><span>{scenario.kind === 'cash_13_weeks' ? '13 周现金' : scenario.kind === 'receivables_aging' ? '应收账龄' : textValue(scenario.kind)}</span><time>{when(String(scenario.created_at ?? ''))}</time></button>)}</div> : null}
+        <span>{textValue(scenario.label ?? scenario.kind)}</span><span>{scenario.kind === 'cash_13_weeks' ? '13 周现金' : scenario.kind === 'receivables_aging' ? '应收账龄' : scenario.kind === 'collection_health' ? '回款健康' : textValue(scenario.kind)}</span><time>{when(String(scenario.created_at ?? ''))}</time></button>)}</div> : null}
     </details>}
     {finance?.contexts.length ? <details className="analysis-details"><DisclosureSummary>已保存的范围 · {finance.contexts.length} 个</DisclosureSummary>
       <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row" disabled={locked}

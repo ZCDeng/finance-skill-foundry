@@ -139,6 +139,29 @@ def calculate_scenario(scenario, context, datasets):
                     for k in ("ledger", "organization", "currency", "unit")
                 }
             )
+    elif kind == "collection_health":
+        from foundry.collection_metrics import (
+            evaluate_collection_health,
+            resolve_entities,
+            resolve_params,
+        )
+
+        # Cells are addressed one by one, so the scope does not filter rows: a KPI
+        # sheet keeps rates and amounts in one table, each row with its own unit.
+        cells = {
+            alias: scoped_source_rows(
+                dataset, {}, context.get("policies", {}).get(alias, {})
+            )
+            for alias, dataset in datasets.items()
+        }
+        units = {
+            alias: (context.get("scopes", {}).get(alias) or {}).get("unit")
+            for alias in cells
+        }
+        result = evaluate_collection_health(
+            resolve_entities(inputs, cells, units),
+            resolve_params(inputs.get("params")),
+        )
     elif kind == "driver_model":
         evaluated = validate_driver_model(
             inputs.get("drivers", []),

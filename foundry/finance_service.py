@@ -49,6 +49,7 @@ from before carry no version and read as 1. The fingerprint's "finance-v1"
 runner string stays, so a rerun still finds those runs; it compares strictly
 only with runs of its own version (see _reproducibility_status).
 """
+SCENARIO_KINDS = frozenset({"receivables_aging", "cash_13_weeks", "driver_model", "collection_health"})
 
 COLLECTIONS = {
     "contexts",
@@ -538,9 +539,9 @@ class FinanceStore:
             "contexts", spec.get("context_id") or (parent or {}).get("context_id")
         )
         kind = spec.get("kind", (parent or {}).get("kind"))
-        if kind not in {"receivables_aging", "cash_13_weeks", "driver_model"}:
+        if kind not in SCENARIO_KINDS:
             raise FoundryError(
-                "scenario kind must be receivables_aging, cash_13_weeks or driver_model"
+                "scenario kind must be receivables_aging, cash_13_weeks, driver_model or collection_health"
             )
         label = _safe_text(
             spec.get("label", "财务情景"), "scenario label", required=True, maximum=200
