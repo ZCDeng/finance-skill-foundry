@@ -365,19 +365,31 @@
   padding: 0;
 }
 
-.fnd-taskbar__technical .analysis-technical[open] .analysis-technical-list {
+/* The frame floats and draws the menu surface; the list inside scrolls, so its scroll fade dims the rows
+   and not the shadow (a mask would cut the shadow off with everything outside the box). */
+.fnd-taskbar__technical .analysis-technical[open] .analysis-technical-frame {
   position: fixed;
   z-index: 20;
   top: calc(var(--fnd-header-height) + 44px + 8px);
   right: 24px;
   max-width: min(640px, calc(100vw - 48px));
-  max-height: min(420px, calc(100vh - var(--fnd-header-height) - 44px - 24px));
-  overflow: auto;
-  padding: 12px;
+  margin-top: 8px;
+  display: flex;
+  overflow: hidden;
   border: 1px solid var(--fnd-line);
   border-radius: var(--fnd-radius-menu);
   background: var(--fnd-surface);
   box-shadow: var(--fnd-shadow-menu);
+}
+
+.fnd-taskbar__technical .analysis-technical[open] .analysis-technical-list {
+  max-height: min(420px, calc(100vh - var(--fnd-header-height) - 44px - 24px - 2px));
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* analysis.css keeps its 8px top margin on the list; 4px more makes the frame's 12px. */
+  padding: 4px 12px 12px;
   white-space: normal;
 }
 
@@ -671,13 +683,63 @@ textarea.fnd-field {
   padding: 96px 0;
 }
 
-/* The wait orb sits on a text line; the text beside it carries the status. */
-.fnd-wait-orb {
+/* The wait loop sits on a text line; the text beside it carries the status. */
+.fnd-wait-loop {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
   margin-right: 6px;
+  vertical-align: -3px;
+  overflow: visible;
 }
 
-.fnd-booting .fnd-wait-orb {
+.fnd-wait-loop path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: fnd-wait-loop 3s ease-in-out infinite;
+}
+
+/* Reduced motion keeps the still figure-eight drawn in the markup. */
+@media (prefers-reduced-motion: reduce) {
+  .fnd-wait-loop path { animation: none; }
+}
+
+.fnd-booting .fnd-wait-loop {
+  width: 20px;
+  height: 20px;
   margin-right: 0;
+}
+
+/*
+ * Scroll fade (after chanhdai.com's scroll-fade-effect, MIT; see WaitLoop.license.txt).
+ *
+ * A scroll area dims its last line while more lies below and, once scrolled, its first line too, so a list
+ * that is cut off reads as cut off. A scroll timeline drives it: no script and no clock, so it costs nothing
+ * while still. The mask also hides whatever the element paints itself, so it goes on an inner scroller with no
+ * border, background or shadow of its own; the frame around it keeps those. Without scroll timelines, or
+ * when nothing overflows, both strips stay 0px and nothing fades. Number tables never take it: a dimmed
+ * edge column would misread as a different figure.
+ */
+.fnd-scroll-fade {
+  --fnd-fade-size: 24px;
+  --fnd-fade-buffer: 2rem;
+  mask-image:
+    linear-gradient(to top, transparent, #000 90%),
+    linear-gradient(to bottom, transparent, #000),
+    linear-gradient(#000, #000);
+  mask-size: 100% var(--fnd-fade-top), 100% var(--fnd-fade-bottom), 100% 100%;
+  mask-position: 0 0, 0 100%, 0 0;
+  mask-repeat: no-repeat;
+  mask-composite: exclude;
+  animation-name: fnd-fade-top, fnd-fade-bottom;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self), scroll(self);
+  animation-range: 0 var(--fnd-fade-buffer), calc(100% - var(--fnd-fade-buffer)) 100%;
 }
 
 /* -- the guide ------------------------------------------------------------ */
@@ -1033,4 +1095,33 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 .fnd-checklist__state { color: var(--fnd-muted); }
 .fnd-checklist__step--todo .fnd-checklist__state { color: var(--fnd-warning); }
 .fnd-checklist__step--done .fnd-checklist__state { color: var(--fnd-selected); }
+}
+
+/* Outside any layer: these at-rules hold no style rules (stylesheet-cascade.test.ts). */
+@keyframes fnd-wait-loop {
+  0% { d: path('M12 4C16.42 4 20 7.58 20 12C20 16.42 16.42 20 12 20C7.58 20 4 16.42 4 12C4 7.58 7.58 4 12 4Z'); }
+  50% { d: path('M6 16C11 16 13 8 18 8C23.333 8 23.333 16 18 16C13 16 11 8 6 8C0.667 8 0.667 16 6 16Z'); }
+  100% { d: path('M12 20C16.42 20 20 16.42 20 12C20 7.58 16.42 4 12 4C7.58 4 4 7.58 4 12C4 16.42 7.58 20 12 20Z'); }
+}
+
+@property --fnd-fade-top {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fnd-fade-bottom {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes fnd-fade-top {
+  from { --fnd-fade-top: 0px; }
+  to { --fnd-fade-top: var(--fnd-fade-size); }
+}
+
+@keyframes fnd-fade-bottom {
+  from { --fnd-fade-bottom: var(--fnd-fade-size); }
+  to { --fnd-fade-bottom: 0px; }
 }

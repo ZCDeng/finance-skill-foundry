@@ -302,7 +302,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       {/* Once this version has run, its assumptions are in the result's 计算依据; before that, only here. */}
       {analysis.assumptions.length > 0 && !view?.runs.some((row) => row.analysis_id === analysis.id && isSuccessfulRun(row))
         && <p className="analysis-note">假设：{assumptionSummary(analysis.assumptions)}</p>}
-      <details className="analysis-details"><DisclosureSummary>{definitionCopy(analysis).detailSummary}</DisclosureSummary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
+      <details className="analysis-details"><DisclosureSummary>{definitionCopy(analysis).detailSummary}</DisclosureSummary><pre className="analysis-source-text fnd-scroll-fade">{definitionCopy(analysis).detail}</pre></details>
       <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button></div>
     </div>) : null;
   const financeWorkbench = task && view && view.datasets.length > 0

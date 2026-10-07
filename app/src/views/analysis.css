@@ -51,7 +51,7 @@
 .analysis-source-refresh:not([open]) { gap: 0; padding-bottom: 12px; }
 .analysis-source-refresh:not([open]) > summary .analysis-note::after { content: ' · 点击展开刷新'; }
 .analysis-source-refresh[open] > summary { margin-bottom: 2px; }
-.analysis-source-text { font: inherit; font-size: var(--fnd-size-small); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; }
+.analysis-source-text { font: inherit; font-size: var(--fnd-size-small); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; overscroll-behavior: contain; }
 .analysis-table { font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); min-width: 100%; border-collapse: collapse; border: 0; }
 .analysis-table caption { text-align: left; color: var(--fnd-muted); padding: 0 0 8px; }
 .analysis-table th:not([scope='rowgroup']), .analysis-table td { border-right: 0; border-left: 0; border-bottom: 1px solid var(--fnd-line); padding: 10px 12px; vertical-align: top; }
@@ -132,8 +132,11 @@
 .analysis-result-area[data-evidence-open='true'] > .analysis-result { margin-right: min(360px, 48%); }
 .analysis-evidence-anchor { position: sticky; top: 12px; grid-column: 1; grid-row: 1; height: 0; width: min(340px, 46%); justify-self: end; align-self: start; z-index: 3; }
 .analysis-result-area > .analysis-result { grid-column: 1; grid-row: 1; }
-.analysis-evidence { display: flex; flex-direction: column; gap: 18px; min-width: 0; max-height: min(640px, calc(100dvh - 180px)); padding: 0 18px 18px; border: 1px solid var(--fnd-line); border-radius: 12px; background: var(--fnd-surface); overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
-.analysis-evidence > .analysis-section-heading { position: sticky; top: 0; padding: 14px 0 10px; background: var(--fnd-surface); z-index: 1; }
+/* The frame keeps the border and the surface; only the body scrolls, so its scroll fade (components.css) dims
+   the text and never the frame or the result behind it. The heading stays put above the body. */
+.analysis-evidence { display: flex; flex-direction: column; min-width: 0; max-height: min(640px, calc(100dvh - 180px)); border: 1px solid var(--fnd-line); border-radius: 12px; background: var(--fnd-surface); overflow: hidden; overflow-wrap: anywhere; }
+.analysis-evidence > .analysis-section-heading { flex: none; padding: 14px 18px 10px; }
+.analysis-evidence-body { display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 8px 18px 18px; overflow: auto; overscroll-behavior: contain; }
 .analysis-evidence h3 { font-size: 16px; }
 .analysis-evidence-sources { display: flex; flex-direction: column; gap: 18px; }
 .analysis-evidence-sources > div { display: flex; flex-direction: column; gap: 6px; }

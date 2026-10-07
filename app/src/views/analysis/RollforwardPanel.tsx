@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Ban, ClipboardCopy, Download, Equal, FileSearch, FileSpreadsheet, Hand, ListPlus, PenLine, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
 import { bridge, type AnalysisRun, type Answer, type DatasetSnapshot } from '../../bridge.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { AccountingPeriodInput, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
@@ -289,7 +289,7 @@ export function RollforwardPanel({ taskId, datasets, runs, busy, onApplied }: {
       <Button variant="outline" type="button" disabled={locked || !datasetId || !periodReady || incomplete.length > 0} onClick={preview}><FileSearch size={14} aria-hidden />预览</Button>
       <Button type="button" disabled={locked || !plan?.plan_id || plan.workbook_supported === false || !counts.write || Boolean(applied)} onClick={apply}>
         <FileSpreadsheet size={14} aria-hidden />生成下月副本</Button>
-      {running && <span role="status" className="analysis-note"><WaitOrb state="working" />{running}</span>}
+      {running && <span role="status" className="analysis-note"><WaitLoop />{running}</span>}
     </div>
     {incomplete.length > 0 && <p className="analysis-note">还有 {incomplete.length} 行没填完（第 {incomplete.join('、')} 行），填完才能预览。</p>}
     {!datasetId || !periodReady ? <p className="analysis-note">先选上月套表、填新月份，再预览。</p> : null}

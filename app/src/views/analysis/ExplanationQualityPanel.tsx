@@ -1,7 +1,7 @@
 import type { FinanceDrilldown } from '../../bridge.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { STATUS, Table, textValue } from './presentation.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { dimensionGaps, dimensionStates, EvidenceDimensionList, EvidenceQuality, type EvidenceDimensions, type EvidenceIssue } from './EvidenceQuality.js';
 import { PdfComparison } from './ReportEditor.js';
 import { Button } from '../../components/ui/button.js';
@@ -76,7 +76,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
   const evidenceFor = (id: string) => labels.find((entry) => entry.key?.kind === 'fact' && entry.key.fact_id === id);
   const shownOnCard = new Set(facts.map((fact) => fact.id));
   return <section className="analysis-quality" aria-label="文稿质量检查">
-    <div className="analysis-section-heading"><div><span className="fnd-with-help"><h4>文稿质量检查</h4><HelpLink article="statuses" label="状态互不替代" /></span><p className="analysis-note">{state === 'checking' && <WaitOrb state="searching" />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
+    <div className="analysis-section-heading"><div><span className="fnd-with-help"><h4>文稿质量检查</h4><HelpLink article="statuses" label="状态互不替代" /></span><p className="analysis-note">{state === 'checking' && <WaitLoop />}{qualityLabel(state)}{coverage ? ` · ${coverage}` : ''}{citedFactIds.length ? ` · 已引用 ${citedFactIds.length} 条事实` : ''}</p></div>
       <Button variant="outline" type="button" disabled={busy || state === 'checking'} onClick={onRecheck}>重检当前正文</Button></div>
     {/* Never one merged "all passed": with nothing open, the four verification states are named one by one. */}
     {quality && <p className="analysis-quality-summary" aria-label="待处理核对">{gaps.length ? `待处理：${gaps.join(' · ')}` : dimensionStates(quality?.status_dimensions).join(' · ')}</p>}

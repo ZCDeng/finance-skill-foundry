@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Play } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState, type WaitKind } from '../../bridge.js';
 import { textValue } from './presentation.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { AccountMapEditor } from './AccountMapEditor.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
@@ -454,7 +454,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     </details>
   </SettingsPanel>
   {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
-  {running ? <p role="status" className="analysis-message"><WaitOrb state="solving" />{running}</p>
+  {running ? <p role="status" className="analysis-message"><WaitLoop />{running}</p>
     : outcome?.result === 'ok' ? <p role="status" className="analysis-message">{outcome.message}</p>
     : message ? <p role="status" className="analysis-message">{message}</p> : null}
   {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}

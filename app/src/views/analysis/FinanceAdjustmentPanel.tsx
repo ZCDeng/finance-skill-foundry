@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { bridge, type Answer } from '../../bridge.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
@@ -84,7 +84,7 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
       <p className="analysis-note">重算</p>
       {confirmed.map((row) => <label key={row.id}><Checkbox checked={selected[row.id] !== false}
         onCheckedChange={(state) => setSelected((value) => ({ ...value, [row.id]: state === true }))} />{row.label || row.id}</label>)}
-      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? <><WaitOrb state="solving" />重算中…</> : '重算'}</Button>
+      <Button type="button" disabled={locked} onClick={() => void rerun()}>{rerunning ? <><WaitLoop />重算中…</> : '重算'}</Button>
     </div> : null}
   </details>
     {/* Outside the fold: a failed list must not read as "nothing to confirm". */}

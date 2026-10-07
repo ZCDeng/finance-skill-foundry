@@ -11,7 +11,7 @@ export function TechnicalInfo({ rows = [], summary = '技术信息', children, o
   const shown = rows.filter(([, value]) => value != null && value !== '');
   if (!shown.length && !children) return null;
   return <details className="analysis-details analysis-technical" onToggle={(event) => onToggle?.(event.currentTarget.open)}><DisclosureSummary tone="quiet">{summary}</DisclosureSummary>
-    {shown.length > 0 && <dl className="analysis-technical-list">{shown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}</dl>}
+    {shown.length > 0 && <div className="analysis-technical-frame"><dl className="analysis-technical-list fnd-scroll-fade">{shown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}</dl></div>}
     {children}
   </details>;
 }

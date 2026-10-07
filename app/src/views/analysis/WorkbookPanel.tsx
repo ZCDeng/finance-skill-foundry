@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
 import { bridge, type AnalysisRun, type DatasetSnapshot } from '../../bridge.js';
 import { Table, textValue } from './presentation.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { FieldShell, SearchableSelect, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
@@ -165,7 +165,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在读取绑定区域…', read)}>读取区域</Button>
       <Button variant="outline" type="button" disabled={locked || !bindingId} onClick={() => track('正在生成写回预览…', previewPatch)}>预览写回</Button>
       <Button type="button" disabled={locked || !preview?.patch_id} onClick={() => track('正在生成工作簿…', applyPatch)}>生成工作簿</Button>
-      {running && <span role="status" className="analysis-note"><WaitOrb state="working" />{running}</span>}
+      {running && <span role="status" className="analysis-note"><WaitLoop />{running}</span>}
     </div>
     {inspection && <details className="analysis-details" open><DisclosureSummary>工作簿结构</DisclosureSummary>
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
