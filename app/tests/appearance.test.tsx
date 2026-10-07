@@ -59,6 +59,15 @@ describe('the appearance channels', () => {
     expect(readAppearance(dir)).toBe('light');
   });
 
+  it('leaves the window as it was when the choice cannot be saved', async () => {
+    const dir = path.join(folder(), 'file');
+    writeFileSync(dir, '');
+    const apply = vi.fn();
+    registerIpc({ varRoot: '/store' }, undefined, { folder: () => dir, apply });
+    expect((await invoke(CHANNELS.appearanceSet, 'dark')).ok).toBe(false);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it('answer, rather than hang, in a build that was not given a folder', async () => {
     registerIpc({ varRoot: '/store' });
     expect((await invoke(CHANNELS.appearanceGet)).ok).toBe(false);
@@ -91,6 +100,16 @@ describe('ThemeSwitch', () => {
     expect(screen.getByRole('radio', { name: '深色' }).getAttribute('aria-checked')).toBe('true');
     expect(radios.map((radio) => radio.tabIndex)).toEqual([-1, -1, 0]);
     expect(group.style.getPropertyValue('--fnd-theme-index')).toBe('2');
+  });
+
+  it('keeps a pick made before the saved choice arrives', async () => {
+    let answer!: (value: unknown) => void;
+    const api = install('dark');
+    api.appearanceGet.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    render(<ThemeSwitch />);
+    await act(async () => { fireEvent.click(screen.getByRole('radio', { name: '浅色' })); });
+    await act(async () => { answer({ ok: true, value: { appearance: 'dark' } }); });
+    expect(screen.getByRole('radio', { name: '浅色' }).getAttribute('aria-checked')).toBe('true');
   });
 
   it('applies a click at once, moves with the arrows, and goes back if main refuses', async () => {

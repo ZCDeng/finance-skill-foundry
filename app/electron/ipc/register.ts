@@ -531,8 +531,9 @@ export function registerIpc(
     answer(async () => {
       if (!appearance) throw new Error('appearance is not available in this build');
       const value = appearanceOf(raw);
-      appearance.apply(value);
+      // Saved first: a write that fails leaves the window, the file and the switch on the old choice together.
       writeAppearance(appearance.folder(), value);
+      appearance.apply(value);
       return { appearance: value };
     }));
 

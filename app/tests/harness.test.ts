@@ -253,14 +253,16 @@ describe('the environment the Univer gateway and its worker get', () => {
     expect(univerStaged({ bundleDir: '/nonexistent' })).toBe(false);
   });
 
-  it('tells every embedded page the scheme is dark, so the viewer comes up in it', () => {
+  it('tells every embedded page the scheme before any page is loaded', () => {
     // The viewer's appearance defaults to `system` and follows
     // `prefers-color-scheme`; on a light OS it drew a light sheet inside this
     // dark window. `nativeTheme.themeSource` is the one switch that reaches a
-    // page this app does not own, and it is set before any page is loaded.
+    // page this app does not own, and it is set -- to the saved header choice,
+    // 跟随系统 by default -- before any page is loaded.
     const source = read('../electron/main.ts');
-    expect(source).toContain("nativeTheme.themeSource = 'system'");
-    expect(source.indexOf("nativeTheme.themeSource = 'system'")).toBeLessThan(source.indexOf('createWindow();'));
+    const set = "nativeTheme.themeSource = readAppearance(app.getPath('userData'))";
+    expect(source).toContain(set);
+    expect(source.indexOf(set)).toBeLessThan(source.indexOf('createWindow();'));
   });
 
   it('closes the page when a pane is detached, not only the view', () => {

@@ -24,12 +24,14 @@ export function ThemeSwitch() {
   const available = Boolean(api?.appearanceGet && api.appearanceSet);
   const [value, setValue] = useState<Appearance | null>(null);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  // A pick made before the saved choice arrives wins over it: main already holds the newer one.
+  const picked = useRef(false);
 
   useEffect(() => {
     if (!available) return;
     let live = true;
     void api!.appearanceGet!().then((answer) => {
-      if (live && answer.ok) setValue(answer.value.appearance);
+      if (live && answer.ok && !picked.current) setValue(answer.value.appearance);
     }).catch(() => {});
     return () => { live = false; };
   }, [api, available]);
@@ -40,6 +42,7 @@ export function ThemeSwitch() {
 
   const pick = (next: Appearance) => {
     if (next === shown) return;
+    picked.current = true;
     const before = value;
     setValue(next);
     void api!.appearanceSet!(next).then((answer) => {
