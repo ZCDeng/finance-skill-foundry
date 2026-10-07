@@ -110,7 +110,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
     <section className="fnd-card analysis-controls-card" aria-label="勾稽控制">
       <div className="analysis-section-heading">
         <div>
-          <span className="fnd-with-help"><h4><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h4><HelpLink article="controls" label="勾稽控制与差异处置" /></span>
+          <span className="fnd-with-help"><h4 id="analysis-controls-heading" tabIndex={-1}><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h4><HelpLink article="controls" label="勾稽控制与差异处置" /></span>
           <p className="analysis-note">合计是否等于分项、两处取数是否一致。系统只指出差异，不替你选口径。</p>
         </div>
         <div className="analysis-actions">
