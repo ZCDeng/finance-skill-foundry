@@ -104,7 +104,11 @@ export function paragraphLocation(body: string, position: number): ParagraphLoca
   const block = blocks[blockAt(blocks, position)];
   if (!block) return undefined;
   const words = Array.from((plainText(block.text) || block.text.trim()).replace(/\s+/g, ' '));
-  const excerpt = words.length > 20 ? `${words.slice(0, 20).join('')}…` : words.join('');
+  let end = Math.min(words.length, 20);
+  // Never stop inside a number: run on to its end, so 325644.0000 is not shown as 325644.…
+  const inNumber = (char?: string) => Boolean(char && /[\d.,%]/.test(char));
+  while (end < words.length && inNumber(words[end - 1]) && inNumber(words[end])) end += 1;
+  const excerpt = end < words.length ? `${words.slice(0, end).join('')}…` : words.join('');
   return { ...(block.section ? { section: block.section } : {}), ordinal: block.ordinal, excerpt };
 }
 

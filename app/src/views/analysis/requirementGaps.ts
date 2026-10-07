@@ -30,9 +30,23 @@ function quotedLabel(message: unknown): string {
   return /“([^”]+)”/.exec(String(message ?? ''))?.[1] ?? '';
 }
 
-function grainScope(grain: RequirementGrain): string {
-  if (grain.organization) return grain.organization;
+function periodScenario(grain: RequirementGrain): string {
   return [formatPeriod(grain.period), grain.scenario ? scenarioLabel(grain.scenario) : ''].filter(Boolean).join(' · ');
+}
+
+/** Organizations grouped under the period and scenario they share: 华东区域、华南区域（2026 年 1–8 月 · 预算）. */
+function scopeTexts(grains: RequirementGrain[]): string[] {
+  const groups = new Map<string, string[]>();
+  for (const grain of grains) {
+    const when = periodScenario(grain);
+    const organizations = groups.get(when) ?? [];
+    if (grain.organization && !organizations.includes(grain.organization)) organizations.push(grain.organization);
+    groups.set(when, organizations);
+  }
+  return [...groups].flatMap(([when, organizations]) => {
+    if (!organizations.length) return when ? [when] : [];
+    return [when ? `${organizations.join('、')}（${when}）` : organizations.join('、')];
+  });
 }
 
 /**
@@ -40,15 +54,11 @@ function grainScope(grain: RequirementGrain): string {
  * and the organizations or periods involved. The server's full sentence stays with each raw issue.
  */
 export function requirementGapRows(issues: EvidenceIssue[], items: RequirementItemView[] = []): RequirementGapRow[] {
-  const rows = new Map<string, { requirements: string[]; scopes: string[]; grains: RequirementGrain[] }>();
+  const rows = new Map<string, { requirements: string[]; grains: RequirementGrain[] }>();
   const add = (reason: string, requirement: string, grains: RequirementGrain[]) => {
-    const row = rows.get(reason) ?? { requirements: [], scopes: [], grains: [] };
+    const row = rows.get(reason) ?? { requirements: [], grains: [] };
     if (requirement && !row.requirements.includes(requirement)) row.requirements.push(requirement);
-    for (const grain of grains) {
-      const scope = grainScope(grain);
-      if (scope && !row.scopes.includes(scope)) row.scopes.push(scope);
-      row.grains.push(grain);
-    }
+    row.grains.push(...grains);
     rows.set(reason, row);
   };
   for (const issue of issues) {
@@ -59,18 +69,19 @@ export function requirementGapRows(issues: EvidenceIssue[], items: RequirementIt
       continue;
     }
     if (issue.code !== 'requirement_unanswered') continue;
-    const waiting = (item?.awaiting_manager ?? []).filter((code) => MANAGER_REASONS[code]);
-    if (!waiting.length) {
-      add(UNANSWERED, label, [...(item?.missing_grains ?? []), ...(item?.uncounted_grains ?? [])]);
-      continue;
-    }
+    const waiting = item?.awaiting_manager ?? [];
+    const unbacked = [...(item?.missing_grains ?? []), ...(item?.uncounted_grains ?? [])];
+    // Grains with no counted value are open whether or not other grains wait for the manager.
+    if (!waiting.length || unbacked.length) add(UNANSWERED, label, unbacked);
     for (const code of waiting) {
-      add(MANAGER_REASONS[code], label, DECLARED.has(code) ? (item?.declared_grains ?? []).filter((grain) => grain.state === code) : []);
+      // A reason this view does not know yet is named by its code rather than folded into a general line.
+      add(MANAGER_REASONS[code] ?? `需要你处理（${code}）`, label,
+        DECLARED.has(code) ? (item?.declared_grains ?? []).filter((grain) => grain.state === code) : []);
     }
   }
   return [...rows].map(([reason, row]) => {
     const reasons = new Set(row.grains.map((grain) => grain.reason ?? ''));
     const detail = row.grains.length && reasons.size === 1 ? [...reasons][0] : '';
-    return { reason, ...(detail ? { detail } : {}), requirements: row.requirements, scopes: row.scopes };
+    return { reason, ...(detail ? { detail } : {}), requirements: row.requirements, scopes: scopeTexts(row.grains) };
   });
 }

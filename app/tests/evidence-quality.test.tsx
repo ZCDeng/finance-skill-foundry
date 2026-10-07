@@ -91,6 +91,17 @@ describe('EvidenceQuality', () => {
     expect(gaps.textContent).not.toContain('2026-01:2026-08');
     expect(gaps.textContent).not.toContain('budget_1_8');
   });
+  it('lists grains without counted values beside the manager reasons and names an unknown reason by its code', () => {
+    const items: RequirementItemView[] = [{ id: 'r1', label: '营业收入', status: 'missing', provenance_status: 'not_required',
+      awaiting_manager: ['structure_pending_confirmation', 'new_reason_code'],
+      missing_grains: [{ organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8' }, { organization: '华南区域', period: '2026-01:2026-08', scenario: 'budget_1_8' }] }];
+    render(<EvidenceQuality taskId="task" issues={[{ code: 'requirement_unanswered', severity: 'warning', message: '尚未提供“营业收入”的计算依据。', requirement_item_id: 'r1' }]} requirements={items} />);
+    const gaps = document.querySelector('.analysis-requirement-gaps') as HTMLElement;
+    const unanswered = within(gaps).getByText('还没有可计入的计算依据').closest('li') as HTMLElement;
+    expect(within(unanswered).getByText('涉及：华东区域、华南区域（2026 年 1–8 月 · 预算）')).toBeTruthy();
+    expect(within(gaps).getByText('工作簿结构待你确认')).toBeTruthy();
+    expect(within(gaps).getByText('需要你处理（new_reason_code）')).toBeTruthy();
+  });
   it('lists every requirement whose source check is missing, from the message when items are absent', () => {
     const issues = ['营业收入', '营业利润'].map((label, index) => ({ code: 'requested_source_missing', severity: 'warning', message: `尚未完成“${label}”的指定来源核查。`, requirement_item_id: `r${index}` }));
     render(<EvidenceQuality taskId="task" issues={issues} />);

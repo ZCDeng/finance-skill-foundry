@@ -59,6 +59,8 @@ describe('paragraph location', () => {
     expect(paragraphLocation(body, -1)).toBeUndefined();
     const long = '很长的一段'.repeat(10);
     expect(paragraphLocation(long, 0)?.excerpt).toBe(`${Array.from(long).slice(0, 20).join('')}…`);
+    // The excerpt runs on to the end of a number rather than stopping inside it.
+    expect(paragraphLocation('集团 1–8 月营业收入 325644.0000 万元，同期预算更高。', 0)?.excerpt).toBe('集团 1–8 月营业收入 325644.0000…');
   });
 });
 

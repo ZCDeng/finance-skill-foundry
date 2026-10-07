@@ -143,28 +143,35 @@ describe('report editor workspace', () => {
     expect(JSON.stringify(validated.document)).toContain('"range":"B2"');
   });
 
-  it('deduplicates an exact leading title from the reader body and outline', async () => {
+  it('deduplicates an exact leading title from the reader body and outline', () => {
     const document = documentFromMarkdown('# 经营分析\n\n## 管理摘要\n正文\n\n# 附录\n用户附录。');
     mount({ initialMode: 'read', title: '经营分析', document, body: documentToMarkdown(document) });
 
     const reading = screen.getByRole('article', { name: '文稿阅读' });
     expect(within(reading).getAllByRole('heading', { name: '经营分析' })).toHaveLength(1);
     expect(screen.queryByRole('link', { name: '经营分析' })).toBeNull();
-    const outline = screen.getByText('目录').closest('details') as HTMLDetailsElement;
-    const shell = outline.closest('.report-shell') as HTMLElement;
-    expect(outline.open).toBe(false);
+    const toolbar = screen.getByRole('group', { name: '文稿工具栏' });
+    const toggle = within(toolbar).getByRole('button', { name: '目录' });
+    const shell = toggle.closest('.report-shell') as HTMLElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
     expect(shell.hasAttribute('data-outline-expanded')).toBe(false);
-    fireEvent.click(within(outline).getByText('目录'));
-    expect(outline.open).toBe(true);
-    await waitFor(() => expect(shell.getAttribute('data-outline-expanded')).toBe('true'));
-    expect(screen.getByRole('link', { name: '管理摘要' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: '附录' })).toBeTruthy();
-    fireEvent.click(within(outline).getByText('目录'));
-    expect(outline.open).toBe(false);
-    await waitFor(() => expect(shell.hasAttribute('data-outline-expanded')).toBe(false));
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(shell.getAttribute('data-outline-expanded')).toBe('true');
+    const outline = screen.getByRole('complementary', { name: '文稿目录' });
+    expect(toggle.getAttribute('aria-controls')).toBe(outline.id);
+    expect(within(outline).getByRole('link', { name: '管理摘要' })).toBeTruthy();
+    expect(within(outline).getByRole('link', { name: '附录' })).toBeTruthy();
+    // Escape closes the outline and gives the focus back to 目录.
+    within(outline).getByRole('link', { name: '管理摘要' }).focus();
+    fireEvent.keyDown(outline, { key: 'Escape' });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(window.document.activeElement).toBe(toggle);
   });
 
-  it('marks reading-table cells by what they say and names the scrolling table by its caption', () => {
+  it('marks reading-table cells by what they say and makes only an overflowing table a named region', () => {
     const body = [
       '## 二、区域经营',
       '',
@@ -175,8 +182,13 @@ describe('report editor workspace', () => {
       '| 华东区域 | 325,644.00 万元 | -3.30% |',
       '| 华南区域 | -18,843.06 万元 | 预算为负，不作比率 |',
       '| 西南区域 | 117814.5625 万元（估算） | 12.5% |',
+      '| 华北区域 | — | 1.5% |',
     ].join('\n');
+    const widths = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.matches('figure.financial-table') ? 1200 : 0;
+    });
     mount({ initialMode: 'read', body });
+    widths.mockRestore();
     const main = screen.getByRole('article', { name: '文稿阅读' }).querySelector('.analysis-draft-main') as HTMLElement;
     const figure = within(main).getByRole('region', { name: '表 2-1 区域营业利润' });
     expect(figure.getAttribute('tabindex')).toBe('0');
@@ -186,11 +198,20 @@ describe('report editor workspace', () => {
     expect(cellClass('-18,843.06 万元')).toBe('num');
     expect(cellClass('117814.5625 万元（估算）')).toBe('num');
     expect(cellClass('-3.30%')).toBe('num');
-    expect(cellClass('预算为负，不作比率')).toBe('text');
+    // A dash or a note in a numeric column follows the column and does not vote on it.
+    expect(cellClass('预算为负，不作比率')).toBe('num note');
+    expect(cellClass('—')).toBe('num note');
     expect(cellClass('华东区域')).toBe('text');
     expect(cellClass('区域')).toBe('text');
     expect(cellClass('1 至 8 月实际')).toBe('num');
     expect(cellClass('营业利润差异率（同口径）')).toBe('num');
+  });
+
+  it('leaves a table that fits as a plain figure', () => {
+    mount({ initialMode: 'read', body: '| 区域 | 实际 |\n| --- | --- |\n| 华东 | 1,000.00 |' });
+    const figure = screen.getByRole('article', { name: '文稿阅读' }).querySelector('figure.financial-table') as HTMLElement;
+    expect(figure.hasAttribute('tabindex')).toBe(false);
+    expect(figure.getAttribute('role')).toBeNull();
   });
 
   it('puts the archive action in the document toolbar after the export menu', () => {

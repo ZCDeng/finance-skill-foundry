@@ -1,17 +1,19 @@
 @layer layout {
 .report-workspace { display: flex; flex-direction: column; gap: 18px; min-width: 0; container: report-workspace / inline-size; }
-.report-shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px 32px; align-items: start; min-width: 0; width: 100%; max-width: calc(200px + 32px + 56rem); margin-inline: auto; }
-.report-toolbar { grid-column: 1 / -1; display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 12px 32px; padding-bottom: 12px; border-bottom: 1px solid var(--fnd-line); min-width: 0; }
+.report-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 32px; align-items: start; min-width: 0; width: 100%; max-width: 56rem; margin-inline: auto; }
+.report-toolbar { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 12px 32px; padding-bottom: 12px; border-bottom: 1px solid var(--fnd-line); min-width: 0; }
 .report-context { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
 .report-context h3 { margin: 0; font-size: 16px; line-height: 24px; font-weight: var(--fnd-weight-strong); }
 .report-status { color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 22px; }
 .report-assistant-action { display: inline-flex; padding-left: 10px; border-left: 1px solid var(--fnd-line); }
-.report-outline { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; padding: 14px 0; min-width: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+/* Open, the outline is a drawer over the start of the text; the text column does not move. */
+.report-outline { position: absolute; grid-row: 2; grid-column: 1; top: 0; left: 0; z-index: 5; width: min(280px, 100%); max-height: min(70vh, 560px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-bg); box-shadow: var(--fnd-shadow-menu); color: var(--fnd-muted); font-size: var(--fnd-size-small); outline: none; }
 .report-outline nav { display: flex; flex-direction: column; gap: 2px; }
 .report-outline a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 5px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .report-outline a:hover, .report-outline a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
-.report-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.report-main { grid-column: -2 / -1; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .report-topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.report-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .report-modes { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-modes button { border: 0; border-radius: 6px; background: transparent; color: var(--fnd-muted); font: inherit; font-size: var(--fnd-size-small); padding: 7px 12px; cursor: pointer; }
 .report-modes button[aria-selected='true'] { background: var(--fnd-ink); color: var(--fnd-bg); }
@@ -111,7 +113,10 @@
 /* format.ts marks each cell num or text by what it says, and a header by its column: words read from the left, numbers from the right. */
 .report-reading .financial-table { margin: 18px 0 24px; overflow-x: auto; }
 .report-reading :is(td, th).num { text-align: right; }
-.report-reading td.num, .report-reading td.num p { white-space: nowrap; overflow-wrap: normal; }
+.report-reading td.num:not(.note), .report-reading td.num:not(.note) p { white-space: nowrap; overflow-wrap: normal; }
+/* A word column keeps a few characters together, and the first column keeps its names whole, so a narrow column scrolls the table instead of breaking every character. */
+.report-reading :is(td, th).text { min-width: 4em; }
+.report-reading :is(td, th):first-child { word-break: keep-all; }
 .report-reading p[data-located='true'] { background: var(--fnd-selection-surface); border-radius: var(--fnd-radius-mark); box-shadow: 0 0 0 6px var(--fnd-selection-surface); }
 .report-reading .report-page-break { display: none; }
 .report-print-frame { display: flex; justify-content: center; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: color-mix(in srgb, var(--fnd-surface) 90%, #fff 10%); overflow: auto; }
@@ -123,14 +128,12 @@
 .report-pdf-compare { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-pdf-compare h4 { margin: 0; font-size: 15px; }
 .report-pdf-compare canvas { max-width: 100%; align-self: center; background: white; }
-/* The outline starts folded; folded, it is one line above a centred text column instead of a 200px side column. */
-.report-shell:not([data-outline-expanded='true']) { grid-template-columns: minmax(0, 1fr); max-width: 56rem; }
-.report-shell:not([data-outline-expanded='true']) > .report-toolbar { grid-template-columns: minmax(0, 1fr); }
-.report-shell:not([data-outline-expanded='true']) > .report-outline { position: static; padding: 0; border-bottom: 0; }
+/* With room for a 200px column and the 56rem text column (896px + 232px), the open outline sits at the left instead. */
+@container report-workspace (min-width: 1128px) {
+  .report-shell[data-outline-expanded='true'] { grid-template-columns: 200px minmax(0, 1fr); max-width: calc(200px + 32px + 56rem); }
+  .report-shell[data-outline-expanded='true'] > .report-outline { position: sticky; top: 16px; z-index: auto; width: auto; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+}
 @container report-workspace (max-width: 960px) {
-  .report-shell, .report-toolbar { grid-template-columns: minmax(0, 1fr); }
-  .report-outline { position: static; border-bottom: 1px solid var(--fnd-line); padding-bottom: 14px; }
-  .report-outline nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }
 }
 @container report-workspace (max-width: 760px) {
@@ -151,7 +154,6 @@
 .report-source-preview .report-reading { padding: 0; }
 .report-reflow-preview { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px dashed var(--fnd-line); border-radius: 10px; background: var(--fnd-surface); }
 .report-reflow-preview .report-reading { padding: 0; }
-.report-outline__sections { display: flex; flex-direction: column; gap: 8px; }
 }
 @layer layout {
 .report-info-fields { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; background: var(--fnd-surface); }

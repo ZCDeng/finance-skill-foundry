@@ -392,12 +392,15 @@ describe('report document converters', () => {
       '| 预收账款 | 按合同 | 6,000.00 | 7,000.00 | 8,000.00 | 9,000.00 | 10,000.00 |',
     ].join('\n'));
     for (const html of [renderReportHtml(doc, '区域经营'), renderReportHtml(doc, '区域经营', { print: true })]) {
-      expect(html).toContain('<figure class="financial-table" tabindex="0" role="region" aria-label="表 2-1 区域营业利润">');
+      // The export names each table but makes no figure focusable; only the in-app reading view does, when it scrolls.
+      expect(html).toContain('<figure class="financial-table" aria-label="表 2-1 区域营业利润">');
+      expect(html).not.toContain('tabindex');
+      expect(html).not.toContain('role="region"');
       expect(html).toContain('<th class="text"><p>区域</p></th><th class="num"><p>1 至 8 月实际</p></th><th class="num"><p>差异率</p></th>');
       expect(html).toContain('<td class="num"><p>325,644.00 万元</p></td>');
       expect(html).toContain('<td class="num"><p>-18,843.06 万元</p></td>');
       expect(html).toContain('<td class="num"><p>117814.5625 万元（估算）</p></td>');
-      expect(html).toContain('<td class="text"><p>预算为负，不作比率</p></td>');
+      expect(html).toContain('<td class="num note"><p>预算为负，不作比率</p></td>');
       expect(html).toContain('<td class="text"><p>华东区域</p></td>');
       // Seven columns split into two groups; each group judges its own columns and names itself a continuation.
       const groups = html.match(/<div class="wide-table-group"[\s\S]*?<\/div>/)?.[0] ?? '';
@@ -414,6 +417,32 @@ describe('report document converters', () => {
       ] },
     ] };
     expect(renderReportHtml(spanned, '合并单元格')).toContain('<th class="text"><p>区域</p></th><th class="text"><p>实际</p></th>');
+  });
+
+  it('reads signed numbers with area and count units, and leaves broken brackets and loose commas as text', () => {
+    const doc = documentFromMarkdown([
+      '| 项目 | 值 |',
+      '| --- | --- |',
+      '| 差值 | −3.30 个百分点 |',
+      '| 增加 | +1,200.00 万元 |',
+      '| 面积 | 12,500 平方米 |',
+      '| 面积二 | 300 ㎡ |',
+      '| 户数 | 35 户 |',
+      '| 人数 | 120 人 |',
+      '| 笔数 | 8 笔 |',
+      '| 规模 | 3.5 亿 |',
+      '| 规模二 | 120 万 |',
+      '| 半括号 | (123 |',
+      '| 编号 | 1,2,3 |',
+      '| 缺值 | — |',
+    ].join('\n'));
+    const html = renderReportHtml(doc, '单位');
+    for (const text of ['−3.30 个百分点', '+1,200.00 万元', '12,500 平方米', '300 ㎡', '35 户', '120 人', '8 笔', '3.5 亿', '120 万']) {
+      expect(html).toContain(`<td class="num"><p>${text}</p></td>`);
+    }
+    expect(html).toContain('<td class="text"><p>(123</p></td>');
+    expect(html).toContain('<td class="text"><p>1,2,3</p></td>');
+    expect(html).toContain('<td class="num note"><p>—</p></td>');
   });
 
   it('exports merged cells, captions and PNG images to DOCX without silently segmenting the merge', async () => {

@@ -123,6 +123,8 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     } else setParagraphLocateNotice('阅读视图里没找到这一段，可能已经改过。重检当前正文后再试。');
     setLocating(null);
   }, [locating, reportMode, body]);
+  // A new check result is a new set of positions; a 「没找到」 from the old one no longer applies.
+  useEffect(() => { setParagraphLocateNotice(''); }, [quality]);
   function locateParagraph(position: number) {
     setReportMode('read');
     setLocating((value) => ({ position, seq: (value?.seq ?? 0) + 1 }));
