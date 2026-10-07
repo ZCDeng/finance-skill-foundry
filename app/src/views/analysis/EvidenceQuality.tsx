@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '../../components/ui/button.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { requirementGapRows, type RequirementItemView } from './requirementGaps.js';
 
 export type EvidenceDimension = { status?: string; message?: string; [key: string]: unknown };
 export type EvidenceDimensions = Partial<Record<'execution' | 'numeric_citation' | 'source_validation' | 'professional_review', EvidenceDimension>>;
@@ -24,7 +25,11 @@ const messages: Record<string, string> = {
   requirement_estimated: '估算：来源区域 × 系数区域推算，非源表直接数；经理确认前不计为已回答',
   // The server message also tells the assistant which requirements_id a revision must name.
   requirements_changed: '分析范围已更新，请按当前要求复核文稿。',
+  // The full server sentence for each requirement stays under 原始问题; the rows below name reason and scope.
+  requirement_unanswered: '分析要求还没有可计入的计算依据',
+  requested_source_missing: '指定来源还没有核查',
 };
+const REQUIREMENT_GAP_CODES = new Set(['requirement_unanswered', 'requested_source_missing']);
 function sources(value: unknown): SourceRange[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   const row = value as Record<string, unknown>;
@@ -62,10 +67,12 @@ export function EvidenceDimensionList({ dimensions: values, stale = false, cavea
     {caveat && <p className="analysis-note">计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>}
   </>;
 }
-export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false, showDimensions = true }: {
+export function EvidenceQuality({ taskId, dimensions: values, issues, stale = false, showDimensions = true, requirements }: {
   taskId: string; dimensions?: EvidenceDimensions; issues: EvidenceIssue[]; stale?: boolean;
   /** False when the caller already lists the dimensions in its own summary. */
   showDimensions?: boolean;
+  /** The checked requirement items; they name each open requirement and its organizations. */
+  requirements?: RequirementItemView[];
 }) {
   const [selected, setSelected] = useState<SourceRange | null>(null);
   const groups = new Map<string, { title: string; message: string; issues: EvidenceIssue[]; sources: Map<string, SourceRange> }>();
@@ -85,6 +92,7 @@ export function EvidenceQuality({ taskId, dimensions: values, issues, stale = fa
     {showDimensions && <EvidenceDimensionList dimensions={values} stale={stale} />}
     {[...groups].sort(([, a], [, b]) => priority(a.issues[0]) - priority(b.issues[0])).map(([key, group]) => <details className="analysis-details" key={key}>
       <DisclosureSummary>{group.title ? `${group.title}：` : ''}{group.issues[0].origin === 'claim_binding' ? '引用绑定 · ' : group.issues[0].origin === 'generated_appendix' ? '自动附表 · ' : ''}{group.issues[0].severity === 'error' ? '需修正 · ' : ''}{group.message} · {group.issues.length} 条原始问题</DisclosureSummary>
+      {REQUIREMENT_GAP_CODES.has(group.issues[0].code ?? '') && <RequirementGaps rows={requirementGapRows(group.issues, requirements)} />}
       <p className="analysis-note">{group.sources.size ? '先核对来源区域，再修正计算或引用并重检。' : '核对当前计算和引用；原始问题保留在下方，便于逐项处理。'}</p>
       {group.issues[0].old_value != null && group.issues[0].new_value != null && <p>原值 {String(group.issues[0].old_value)} → 新值 {String(group.issues[0].new_value)}</p>}
       {[...group.sources].map(([sourceKey, source]) => <Button variant="outline" key={sourceKey} type="button" onClick={() => setSelected(source)}>
@@ -101,6 +109,15 @@ export function EvidenceQuality({ taskId, dimensions: values, issues, stale = fa
       <WorkbookBrowser key={JSON.stringify(selected)} taskId={taskId} datasetId={selected.dataset_id} initialSheet={selected.sheet} initialRange={selected.range} showSheetPicker={false} />
     </section>}
   </div>;
+}
+function RequirementGaps({ rows }: { rows: ReturnType<typeof requirementGapRows> }) {
+  if (!rows.length) return null;
+  return <ul className="analysis-requirement-gaps">{rows.map((row) => <li key={row.reason}>
+    <span>{row.reason}</span>
+    {row.detail && <span className="analysis-note">{row.detail}</span>}
+    {row.requirements.length > 0 && <span>要求：{row.requirements.join('；')}</span>}
+    {row.scopes.length > 0 && <span>涉及：{row.scopes.join('、')}</span>}
+  </li>)}</ul>;
 }
 function priority(issue: EvidenceIssue): number {
   if (/^(evidence_recipe_|financial_consistency_|revision_numeric_)/.test(issue.code ?? '')) return 0;

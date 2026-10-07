@@ -387,6 +387,7 @@ export function ReportEditor({
   toolbarLabel = "文稿",
   status,
   assistantAction,
+  archiveAction,
   initialMode = "read",
   mode: controlledMode,
   onMode,
@@ -412,6 +413,8 @@ export function ReportEditor({
   toolbarLabel?: string;
   status?: string;
   assistantAction?: ReactNode;
+  /** The draft's own archive action, beside the export menu. */
+  archiveAction?: ReactNode;
   initialMode?: ReportMode;
   mode?: ReportMode;
   onMode?(value: ReportMode): void;
@@ -424,6 +427,7 @@ export function ReportEditor({
   onAppliedDraft?(draft: { id: string; title?: string; body?: string; document?: ReportDocument }): void;
 }) {
   const [localMode, setLocalMode] = useState<ReportMode>(initialMode);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const mode = controlledMode ?? localMode;
   const [templates, setTemplates] = useState<{ template_id: string; label: string; kind: string }[]>([]);
   const [templateError, setTemplateError] = useState('');
@@ -991,7 +995,7 @@ export function ReportEditor({
           </Button>
         </div>
       )}
-      <div className="report-shell">
+      <div className="report-shell" data-outline-expanded={outlineOpen ? 'true' : undefined}>
         <div className="report-toolbar" role="group" aria-label="文稿工具栏">
           <div className="report-context">
             <h3>{toolbarLabel}</h3>
@@ -1088,12 +1092,13 @@ export function ReportEditor({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              {archiveAction}
               {assistantAction && <span className="report-assistant-action">{assistantAction}</span>}
             </div>
           </div>
         </div>
         <aside className="report-outline" aria-label="文稿目录">
-          <details className="report-outline__sections">
+          <details className="report-outline__sections" open={outlineOpen} onToggle={(event) => setOutlineOpen(event.currentTarget.open)}>
             <DisclosureSummary>目录</DisclosureSummary>
             {headings.length ? (
               <nav>
@@ -1609,6 +1614,7 @@ export function ReportEditor({
               appendix={appendix}
               preserveStructured={Boolean(document)}
               appendixFolded={readingResult.folded}
+              main
             />
           )}
           {mode === "print" && (
@@ -1694,6 +1700,7 @@ function ReportReading({
   appendix,
   preserveStructured = true,
   appendixFolded,
+  main,
 }: {
   title: string;
   body: string;
@@ -1702,6 +1709,8 @@ function ReportReading({
   appendix?: string;
   preserveStructured?: boolean;
   appendixFolded?: boolean;
+  /** The draft's one reading view; previews leave it out so a paragraph is located here only. */
+  main?: boolean;
 }) {
   const appendixResult = useMemo(
     () => exactAppendixResult(document, body, appendix, preserveStructured),
@@ -1711,6 +1720,8 @@ function ReportReading({
     () => reportArticleFragment(renderReportHtml(appendixResult.document, title)),
     [appendixResult.document, title],
   );
+  // React rewrites innerHTML whenever this object changes, which would drop a located paragraph's mark.
+  const mainHtml = useMemo(() => ({ __html: html }), [html]);
   const appendixHtml = useMemo(
     () =>
       appendix
@@ -1724,11 +1735,11 @@ function ReportReading({
     [appendix],
   );
   return (
-    <article className="report-reading" aria-label="文稿阅读">
+    <article className="report-reading" aria-label="文稿阅读" data-reading-main={main ? "" : undefined}>
       <h2>{title}</h2>
       <div
         className="analysis-draft-main"
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={mainHtml}
       />
       {appendix && (appendixFolded ?? appendixResult.folded) && (
         <details className="analysis-details analysis-appendix-fold">

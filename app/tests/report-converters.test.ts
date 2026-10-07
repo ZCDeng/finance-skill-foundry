@@ -376,6 +376,46 @@ describe('report document converters', () => {
     expect(fontRels).toContain('font');
   });
 
+  it('marks table headers over numeric columns in HTML and print exports, per wide-table group', () => {
+    const doc = documentFromMarkdown([
+      '表题：表 2-1 区域营业利润',
+      '',
+      '| 区域 | 1 至 8 月实际 | 差异率 |',
+      '| --- | --- | --- |',
+      '| 华东区域 | 325,644.00 万元 | -3.30% |',
+      '| 华南区域 | -18,843.06 万元 | 预算为负，不作比率 |',
+      '| 西南区域 | 117814.5625 万元（估算） | 12.5% |',
+      '',
+      '| 项目 | 说明 | 一月 | 二月 | 三月 | 四月 | 五月 |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+      '| 应收账款 | 按账龄 | 1,000.00 | 2,000.00 | 3,000.00 | 4,000.00 | 5,000.00 |',
+      '| 预收账款 | 按合同 | 6,000.00 | 7,000.00 | 8,000.00 | 9,000.00 | 10,000.00 |',
+    ].join('\n'));
+    for (const html of [renderReportHtml(doc, '区域经营'), renderReportHtml(doc, '区域经营', { print: true })]) {
+      expect(html).toContain('<figure class="financial-table" tabindex="0" role="region" aria-label="表 2-1 区域营业利润">');
+      expect(html).toContain('<th class="text"><p>区域</p></th><th class="num"><p>1 至 8 月实际</p></th><th class="num"><p>差异率</p></th>');
+      expect(html).toContain('<td class="num"><p>325,644.00 万元</p></td>');
+      expect(html).toContain('<td class="num"><p>-18,843.06 万元</p></td>');
+      expect(html).toContain('<td class="num"><p>117814.5625 万元（估算）</p></td>');
+      expect(html).toContain('<td class="text"><p>预算为负，不作比率</p></td>');
+      expect(html).toContain('<td class="text"><p>华东区域</p></td>');
+      // Seven columns split into two groups; each group judges its own columns and names itself a continuation.
+      const groups = html.match(/<div class="wide-table-group"[\s\S]*?<\/div>/)?.[0] ?? '';
+      expect(groups).toContain('<th class="text"><p>项目</p></th><th class="text"><p>说明</p></th><th class="num"><p>一月</p></th>');
+      expect(groups).toContain('aria-label="财务表格（续表）"');
+      expect(groups).toContain('<th class="text"><p>项目</p></th><th class="num"><p>五月</p></th>');
+    }
+
+    const spanned: ReportDocument = { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [
+      { type: 'table', content: [
+        { type: 'tableRow', content: [cell('tableHeader', '区域'), cell('tableHeader', '实际')] },
+        { type: 'tableRow', content: [cell('tableCell', '华东', { rowspan: 2 }), cell('tableCell', '1,000.00')] },
+        { type: 'tableRow', content: [cell('tableCell', '2,000.00')] },
+      ] },
+    ] };
+    expect(renderReportHtml(spanned, '合并单元格')).toContain('<th class="text"><p>区域</p></th><th class="text"><p>实际</p></th>');
+  });
+
   it('exports merged cells, captions and PNG images to DOCX without silently segmenting the merge', async () => {
     const doc: ReportDocument = {
       schema_version: 1,

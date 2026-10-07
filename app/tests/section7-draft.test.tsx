@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AnalysisDraft, AnalysisRun, Bridge, Answer } from '../src/bridge.js';
-vi.mock('../src/views/analysis/ReportEditor.js', () => ({ ReportEditor: () => <div>文稿正文</div> }));
+vi.mock('../src/views/analysis/ReportEditor.js', () => ({ ReportEditor: ({ archiveAction }: { archiveAction?: ReactNode }) => <div>文稿正文{archiveAction}</div> }));
 import { CompletionRecoveriesPanel } from '../src/views/analysis/CompletionRecoveriesPanel.js';
 import { DraftEditor } from '../src/views/analysis/DraftEditor.js';
 
@@ -32,7 +33,7 @@ it('shows cited calculations by their reference order and preserves exact proven
   expect(technical.textContent).toContain(run.id);
   expect(technical.textContent).toContain('e'.repeat(32));
   expect(technical.textContent).toContain('900719925474099.99');
-  fireEvent.click(screen.getByRole('button', { name: '选定并归档此版' }));
+  fireEvent.click(screen.getByRole('button', { name: '归档此版' }));
   expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ run_ids: draft.run_ids, claims: draft.claims }));
 });
 

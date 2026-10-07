@@ -4,6 +4,10 @@ import { reportVisualEvidence } from './visual-evidence.js';
 
 const EMPTY_METADATA = { ledger: '', organization: '', company: '', period: '', currency: '', unit: '' };
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
+// A rendered table cell that reads as a number: NUMERIC_TEXT plus a trailing unit and a short note in brackets,
+// as in 「325,644.00 万元」「3.30 个百分点」「117814.5625 万元（估算）」. Only the HTML table markup reads it; the
+// editor's alignment (parseTable) and the DOCX export keep NUMERIC_TEXT.
+const NUMERIC_CELL = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?(?:\s*(?:个百分点|百万元|万元|亿元|千元|元|天|倍|%))?(?:\s*[（(][^（）()]{1,8}[)）])?$/;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
 
@@ -28,8 +32,8 @@ export function createReportDocument(content: ReportNode[] = []): ReportDocument
   return { schema_version: 1, template_version: 'annual-v1', metadata: { ...EMPTY_METADATA }, content };
 }
 
-const DOCUMENT_METADATA_LABELS = { ledger: '账套', organization: '组织', company: '企业', period: '期间', currency: '币种', unit: '单位' } as const;
-const TABLE_METADATA_LABELS = { caption: '表题', period: '期间', currency: '币种', unit: '单位' } as const;
+export const DOCUMENT_METADATA_LABELS = { ledger: '账套', organization: '组织', company: '企业', period: '期间', currency: '币种', unit: '单位' } as const;
+export const TABLE_METADATA_LABELS = { caption: '表题', period: '期间', currency: '币种', unit: '单位' } as const;
 
 export function documentFromMarkdown(body: string): ReportDocument {
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
@@ -256,7 +260,7 @@ function projectionLine(values: Record<string, unknown>, labels: Record<string, 
 }
 
 
-function parseProjectionLine<T extends Record<string, string>>(line: string, labels: T): Partial<Record<keyof T, string>> | undefined {
+export function parseProjectionLine<T extends Record<string, string>>(line: string, labels: T): Partial<Record<keyof T, string>> | undefined {
   const reverse = new Map(Object.entries(labels).map(([key, label]) => [label, key as keyof T]));
   const parsed: Partial<Record<keyof T, string>> = {};
   const text = line.trim();
@@ -324,7 +328,7 @@ function sameMarks(a?: ReportMark[], b?: ReportMark[]): boolean {
   return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 }
 
-function isTableStart(lines: string[], index: number): boolean {
+export function isTableStart(lines: string[], index: number): boolean {
   return /^\s*\|.*\|\s*$/.test(lines[index] ?? '') && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] ?? '');
 }
 
@@ -561,20 +565,56 @@ function tableRowsToHtml(table: ReportNode, rows: ReportNode[], continuation: bo
   const captionText = attrText(table.attrs?.caption, 300);
   const caption = captionText ? `<caption>${escapeHtml(captionText)}</caption>` : '';
   const unit = [table.attrs?.period, table.attrs?.currency, table.attrs?.unit].map((value) => attrText(value, 120)).filter(Boolean).join(' / ');
+  const numericColumns = numericTableColumns(rows);
   const renderedRows = rows.map((row, rowIndex) => {
+    let column = 0;
     const cells = (row.content ?? []).map((cell) => {
       const tag = cell.type === 'tableHeader' || rowIndex === 0 ? 'th' : 'td';
-      const textAlign = cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(textContent(cell).trim()) ? 'right' : 'left';
+      const span = cellSpan(cell);
+      // A body cell is judged by what it says; a header also sits over a column of numbers.
+      const numeric = isNumericCell(cell) || (rowIndex === 0 && span === 1 && numericColumns.has(column));
+      column += span;
       const colspan = numberAttr('colspan', cell.attrs?.colspan);
       const rowspan = numberAttr('rowspan', cell.attrs?.rowspan);
-      return `<${tag} class="${textAlign === 'right' ? 'num' : 'text'}"${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0, noteIds)).join('')}</${tag}>`;
+      return `<${tag} class="${numeric ? 'num' : 'text'}"${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0, noteIds)).join('')}</${tag}>`;
     }).join('');
     return `<tr>${cells}</tr>`;
   });
   const head = renderedRows.length > 0 ? `<thead>${renderedRows[0]}</thead>` : '';
   const body = renderedRows.length > 1 ? `<tbody>${renderedRows.slice(1).join('')}</tbody>` : '<tbody></tbody>';
   const marker = continuation ? '<p class="table-meta">续表</p>' : '';
-  return `<figure class="financial-table"${attrs}>${marker}${unit ? `<p class="table-meta">${escapeHtml(unit)}</p>` : ''}<table>${caption}${head}${body}</table></figure>`;
+  // The figure scrolls a table wider than the page, so it takes the keyboard and names itself by the table.
+  const label = `${captionText || '财务表格'}${continuation ? '（续表）' : ''}`;
+  return `<figure class="financial-table" tabindex="0" role="region" aria-label="${escapeAttribute(label)}"${attrs}>${marker}${unit ? `<p class="table-meta">${escapeHtml(unit)}</p>` : ''}<table>${caption}${head}${body}</table></figure>`;
+}
+
+function cellSpan(cell: ReportNode): number {
+  return Math.max(1, Math.min(20, Number(cell.attrs?.colspan ?? 1) || 1));
+}
+
+function isNumericCell(cell: ReportNode): boolean {
+  return cell.attrs?.textAlign === 'right' || NUMERIC_CELL.test(textContent(cell).trim());
+}
+
+/**
+ * Columns whose body cells are more often numbers than words. A header cell over one of them is set as a number,
+ * so 「1 至 8 月实际」 sits over its figures; a table with row spans keeps its headers as written.
+ */
+function numericTableColumns(rows: ReportNode[]): Set<number> {
+  const columns = new Set<number>();
+  if (rows.some((row) => (row.content ?? []).some((cell) => Number(cell.attrs?.rowspan ?? 1) > 1))) return columns;
+  const counts = new Map<number, { numbers: number; words: number }>();
+  for (const row of rows.slice(1)) {
+    expandRowCells(row).forEach((cell, index) => {
+      if (!textContent(cell).trim()) return;
+      const count = counts.get(index) ?? { numbers: 0, words: 0 };
+      if (isNumericCell(cell)) count.numbers += 1;
+      else count.words += 1;
+      counts.set(index, count);
+    });
+  }
+  for (const [index, count] of counts) if (count.numbers > count.words) columns.add(index);
+  return columns;
 }
 
 function splitWideRows(rows: ReportNode[]): ReportNode[][] {
@@ -591,7 +631,7 @@ function splitWideRows(rows: ReportNode[]): ReportNode[][] {
 function expandRowCells(row: ReportNode): ReportNode[] {
   const cells: ReportNode[] = [];
   for (const cell of row.content ?? []) {
-    const span = Math.max(1, Math.min(20, Number(cell.attrs?.colspan ?? 1) || 1));
+    const span = cellSpan(cell);
     const attrs = { ...(cell.attrs ?? {}) };
     delete attrs.colspan;
     delete attrs.rowspan;

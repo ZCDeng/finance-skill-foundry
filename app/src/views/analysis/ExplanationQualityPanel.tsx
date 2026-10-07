@@ -10,6 +10,8 @@ import { HelpLink } from '../guide/GuideHub.js';
 import { EvidenceLabelChip, EvidencePostureSummary } from './EvidencePosture.js';
 import type { DatasetFreshness, EvidenceLabelEntry, EvidencePosture } from './evidenceLabels.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import type { RequirementItemView } from './requirementGaps.js';
+import { paragraphLocation } from './readabilityLocation.js';
 
 export interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
@@ -19,7 +21,7 @@ export interface ExplanationQuality {
   status_dimensions?: EvidenceDimensions;
   readability?: { status: 'clear' | 'suggestions'; issues: { code: string; message: string; position?: number }[] };
   checks?: Partial<Record<'numbers' | 'coverage' | 'provenance', { status?: string }>>;
-  requirements?: { scope_changed?: boolean; items?: { id: string; label: string; status: string; provenance_status: string }[] };
+  requirements?: { scope_changed?: boolean; items?: RequirementItemView[] };
   /** What kind of evidence each claim and cited fact rests on; absent from older CLIs. */
   evidence_labels?: EvidenceLabelEntry[];
   /** How much the cited evidence can bear. A classification beside the checks, never one of them. */
@@ -53,9 +55,11 @@ function checkStateText(result: string | undefined): string {
   return result === 'needs_attention' ? '仍有缺口' : '尚未核对';
 }
 
-export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator }: {
+export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFactIds, factDetails, locatorNotice, locatorPdf, busy, onRecheck, onOpenFact, onOpenLocator, body, onLocateParagraph, paragraphLocateNotice }: {
   taskId: string; quality: ExplanationQuality | null; state: 'idle' | 'checking' | 'passed' | 'issues' | 'stale' | 'unavailable'; facts: ExplanationFact[]; citedFactIds: string[];
   factDetails: Record<string, FinanceDrilldown>; locatorNotice: Record<string, string>; locatorPdf: { factId: string; dataUrl: string; page?: number } | null; busy: boolean; onRecheck(): void; onOpenFact(fact: ExplanationFact): void; onOpenLocator(fact: ExplanationFact): void;
+  /** The checked body; with it each reading suggestion names its paragraph. */
+  body?: string; onLocateParagraph?(position: number): void; paragraphLocateNotice?: string;
 }) {
   const coverage = coverageSummary(quality?.coverage);
   const stale = state === 'stale';
@@ -93,9 +97,21 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     {quality?.readability?.issues.length && state !== 'stale' ? <section className="analysis-details" aria-label="正文阅读建议">
       <h4>正文阅读建议</h4>
       <p className="analysis-note">可用“整理段落”预览分段，再将比较数据、完整公式和来源附注分别组织。</p>
-      <ul>{quality.readability.issues.map((issue, index) => <li key={`${issue.code}-${issue.position ?? index}`}>{issue.message}</li>)}</ul>
+      <ul>{readabilityGroups(quality.readability.issues).map((group) => {
+        const located = body == null ? [] : group.positions.flatMap((position) => {
+          const location = paragraphLocation(body, position);
+          return location ? [{ position, text: `${location.section ? `「${location.section}」` : ''}第 ${location.ordinal} 段 · ${location.excerpt}` }] : [];
+        });
+        return <li key={group.code}>{group.message}{group.count > 1 ? ` · ${group.count} 段` : ''}
+          {located.length > 0 && <ul className="analysis-readability-locations">{located.map((row) => <li key={row.position}>
+            <span>{row.text}</span>
+            {onLocateParagraph && <Button type="button" variant="link" size="sm" aria-label={`定位到${row.text}`} onClick={() => onLocateParagraph(row.position)}>定位</Button>}
+          </li>)}</ul>}
+        </li>;
+      })}</ul>
+      {paragraphLocateNotice && <p className="analysis-note" role="status">{paragraphLocateNotice}</p>}
     </section> : null}
-    <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={stale} showDimensions={false} />
+    <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={stale} showDimensions={false} requirements={quality?.requirements?.items} />
     {!(quality?.issues?.length) && <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
     {facts.length > 0 && <details className="analysis-details"><DisclosureSummary>可引用事实 · {facts.length} 条</DisclosureSummary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
@@ -110,6 +126,18 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
       </article>)}</div></details>}
     {Boolean(quality?.coverage) && <details className="analysis-details"><DisclosureSummary>高级：检查覆盖明细</DisclosureSummary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
   </section>;
+}
+
+/** One line per kind of suggestion, in the order they first appear, with the paragraphs it names. */
+function readabilityGroups(issues: { code: string; message: string; position?: number }[]): { code: string; message: string; count: number; positions: number[] }[] {
+  const groups = new Map<string, { code: string; message: string; count: number; positions: number[] }>();
+  for (const issue of issues) {
+    const group = groups.get(issue.code) ?? { code: issue.code, message: issue.message, count: 0, positions: [] };
+    group.count += 1;
+    if (typeof issue.position === 'number' && !group.positions.includes(issue.position)) group.positions.push(issue.position);
+    groups.set(issue.code, group);
+  }
+  return [...groups.values()];
 }
 
 function FactDrilldown({ detail }: { detail: FinanceDrilldown }) {

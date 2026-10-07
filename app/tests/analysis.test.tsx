@@ -1996,24 +1996,53 @@ ${canonicalAppendix} 已改写`;
 
   it('shows paragraph advice separately from passed financial checks and clears it after edits', async () => {
     const financeRun: AnalysisRun = { ...run, engine: 'finance' };
+    const first = '收入同比增长主要来自华东区域的新项目；成本控制良好。';
+    const second = '利润率提升来自费用率下降；华南区域仍需关注回款。';
+    const body = ['账套：华宸物业；组织：华东区域', '', '## 一、结论', '', first, '', second].join('\n');
+    const position = (text: string) => Array.from(body.slice(0, body.indexOf(text))).length;
     const financeCall = vi.fn(async (_taskId: string, command: string) => {
       if (command === 'finance-completion-recoveries') return success({ recoveries: [] });
       if (command === 'prepare-explanation') return success({ facts: [] });
       if (command === 'validate-explanation') return success({ status: 'pass', issues: [],
         checks: { numbers: { status: 'pass' }, coverage: { status: 'pass' }, provenance: { status: 'pass' } },
-        readability: { status: 'suggestions', issues: [{ code: 'dense_paragraph', message: '这一段包含多个主题，建议分段。', position: 12 }] },
+        readability: { status: 'suggestions', issues: [
+          { code: 'dense_paragraph', message: '这一段包含多个主题，建议分段。', position: position(first) },
+          { code: 'dense_paragraph', message: '这一段包含多个主题，建议分段。', position: position(second) },
+        ] },
       });
       return success({});
     });
-    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, run_ids: [financeRun.id] }] }), financeCall });
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun], drafts: [{ ...draft, body, run_ids: [financeRun.id] }] }), financeCall });
     render(<Analysis {...props} embedded section="drafts" />);
     const advice = await screen.findByRole('region', { name: '正文阅读建议' });
-    expect(within(advice).getByText('这一段包含多个主题，建议分段。')).toBeTruthy();
+    expect(within(advice).getAllByText(/这一段包含多个主题，建议分段。/)).toHaveLength(1);
+    expect(within(advice).getByText(/· 2 段/)).toBeTruthy();
+    expect(within(advice).getByText(/^「一、结论」第 1 段 · 收入同比增长/)).toBeTruthy();
+    expect(within(advice).getByText(/^「一、结论」第 2 段 · 利润率提升/)).toBeTruthy();
     expect(screen.getByText('当前文稿数字、单位和引用未发现问题。')).toBeTruthy();
     expect(within(screen.getByLabelText('分项核对状态')).getAllByText('已核对')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('tab', { name: '打印预览' }));
+    fireEvent.click(within(advice).getByRole('button', { name: /^定位到「一、结论」第 2 段/ }));
+    expect(screen.getByRole('tab', { name: '阅读' }).getAttribute('aria-selected')).toBe('true');
+    const reading = screen.getByRole('article', { name: '文稿阅读' });
+    await waitFor(() => expect(reading.querySelector('p[data-located="true"]')?.textContent).toBe(second));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    scrollIntoView.mockRestore();
     fireEvent.click(screen.getByRole('tab', { name: /^编辑$/ }));
     fireEvent.change(screen.getByLabelText('文稿正文'), { target: { value: '修改后的短结论。' } });
     expect(screen.queryByRole('region', { name: '正文阅读建议' })).toBeNull();
+  });
+
+  it('archives the current version from the document toolbar', async () => {
+    const analysisDraft = vi.fn(async () => success({ ...draft, id: '3'.repeat(32), publication_status: 'archived' }));
+    mountBridge({ analysisState: async () => success({ ...initial, drafts: [{ ...draft, publication_status: 'draft' }] }), analysisDraft });
+    render(<Analysis {...props} embedded section="drafts" />);
+    const toolbar = await screen.findByRole('group', { name: '文稿工具栏' });
+    fireEvent.click(within(toolbar).getByRole('button', { name: '归档此版' }));
+    await waitFor(() => expect(analysisDraft).toHaveBeenCalledWith(task.id, expect.objectContaining({ publication_status: 'archived' })));
+    const prepublish = screen.getByRole('region', { name: '发布前检查' });
+    expect(within(prepublish).queryByRole('button', { name: /归档/ })).toBeNull();
   });
 
   it('groups duplicate quality issues while leaving every source detail expandable', async () => {

@@ -92,6 +92,8 @@
 .report-page-break { border: 0; border-top: 1px dashed var(--fnd-line); margin: 28px 0; }
 .report-page-break::after { content: '分页'; color: var(--fnd-muted); font-size: 12px; padding-left: 8px; }
 .report-reading { width: 100%; min-width: 0; padding: 16px 0 32px; font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); color: var(--fnd-ink); overflow-wrap: anywhere; }
+/* Prose may break anywhere; a table cell breaks only between words, so a narrow table scrolls instead of splitting a number. */
+.report-reading :is(td, th) { overflow-wrap: break-word; }
 .report-reading h1 { font-size: var(--fnd-doc-title); line-height: var(--fnd-doc-title-leading); font-weight: var(--fnd-doc-title-weight); margin: 0 0 28px; }
 .report-reading h2 { font-size: var(--fnd-doc-chapter); line-height: var(--fnd-doc-chapter-leading); font-weight: var(--fnd-doc-chapter-weight); margin: 34px 0 12px; padding-top: 2px; }
 /* The reading view renders the document title as its first h2; it takes the title scale, as h1 does in the export. */
@@ -103,10 +105,14 @@
 .report-reading td p + p, .report-reading th p + p, .report-reading li p + p { margin-top: 8px; }
 .report-reading ul, .report-reading ol { margin: 0 0 20px; padding-left: 24px; }
 .report-reading li + li { margin-top: 6px; }
-.report-reading table { width: 100%; border-collapse: collapse; margin: 18px 0 24px; font-size: 14px; line-height: 22px; font-variant-numeric: tabular-nums; }
+.report-reading table { width: 100%; border-collapse: collapse; margin: 0; font-size: 14px; line-height: 22px; font-variant-numeric: tabular-nums; }
 .report-reading th, .report-reading td { border: 0; border-bottom: 1px solid var(--fnd-line); padding: 10px 12px; vertical-align: top; }
 .report-reading th { color: var(--fnd-muted); font-weight: var(--fnd-weight-strong); text-align: left; }
-.report-reading td:not(:first-child), .report-reading th:not(:first-child) { text-align: right; }
+/* format.ts marks each cell num or text by what it says, and a header by its column: words read from the left, numbers from the right. */
+.report-reading .financial-table { margin: 18px 0 24px; overflow-x: auto; }
+.report-reading :is(td, th).num { text-align: right; }
+.report-reading td.num, .report-reading td.num p { white-space: nowrap; overflow-wrap: normal; }
+.report-reading p[data-located='true'] { background: var(--fnd-selection-surface); border-radius: var(--fnd-radius-mark); box-shadow: 0 0 0 6px var(--fnd-selection-surface); }
 .report-reading .report-page-break { display: none; }
 .report-print-frame { display: flex; justify-content: center; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: color-mix(in srgb, var(--fnd-surface) 90%, #fff 10%); overflow: auto; }
 .report-print-frame iframe { width: 210mm; min-height: 297mm; border: 0; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.22); }
@@ -117,6 +123,10 @@
 .report-pdf-compare { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-pdf-compare h4 { margin: 0; font-size: 15px; }
 .report-pdf-compare canvas { max-width: 100%; align-self: center; background: white; }
+/* The outline starts folded; folded, it is one line above a centred text column instead of a 200px side column. */
+.report-shell:not([data-outline-expanded='true']) { grid-template-columns: minmax(0, 1fr); max-width: 56rem; }
+.report-shell:not([data-outline-expanded='true']) > .report-toolbar { grid-template-columns: minmax(0, 1fr); }
+.report-shell:not([data-outline-expanded='true']) > .report-outline { position: static; padding: 0; border-bottom: 0; }
 @container report-workspace (max-width: 960px) {
   .report-shell, .report-toolbar { grid-template-columns: minmax(0, 1fr); }
   .report-outline { position: static; border-bottom: 1px solid var(--fnd-line); padding-bottom: 14px; }
