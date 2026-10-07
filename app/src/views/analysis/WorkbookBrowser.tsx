@@ -6,7 +6,7 @@ import { Input } from '../../components/ui/input.js';
 import './WorkbookBrowser.css';
 import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
-import { formatPeriod } from '../../lib/period.js';
+import { PeriodWords, joinParts } from '../../components/PeriodWords.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 
 export interface WorkbookCellPreview {
@@ -79,13 +79,13 @@ export function WorkbookBrowser({
   }, [sheetQuery, sheets]);
 
   const context = sheetContext[sheet] ?? {};
-  const contextText = [
-    context.period ? `期间 ${formatPeriod(context.period)}` : '',
+  const contextParts = [
+    context.period ? <>期间 <PeriodWords value={context.period} /></> : '',
     context.granularity ? `粒度 ${context.granularity}` : '',
     context.unit ? `单位 ${context.unit}` : '',
     context.currency ? `币种 ${context.currency}` : '',
     context.scenario ? `情景 ${scenarioLabel(context.scenario)}` : '',
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean);
 
   const rows = useMemo(() => {
     if (!preview) return [];
@@ -198,7 +198,7 @@ export function WorkbookBrowser({
           <Search size={15} strokeWidth={1.5} aria-hidden />预览区域
         </Button>
       </form>
-      {contextText && <p className="analysis-note">{contextText}</p>}
+      {contextParts.length > 0 && <p className="analysis-note">{joinParts(contextParts)}</p>}
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
       {preview?.header_context?.length ? <div className="analysis-workbook-context" aria-label="原表标题区">
         <span>原表标题区：</span>

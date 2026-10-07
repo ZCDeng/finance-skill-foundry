@@ -5,8 +5,9 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, UNIT_OPTIONS } from './glossary.js';
-import { datasetOptions, scopeSummary } from './shared.js';
-import { formatPeriod } from '../../lib/period.js';
+import { datasetOptions } from './shared.js';
+import { ScopeSummary } from './ScopeSummary.js';
+import { PeriodWords } from '../../components/PeriodWords.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
@@ -40,7 +41,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
       {(background.basis === 'external_reference') && <><TextField label="外部来源" ariaLabel="背景外部来源" value={background.source} onChange={(value) => onBackground({ ...background, source: value })} />
         <DateInput label="查询日期" ariaLabel="背景查询日期" value={background.retrieved_at} onChange={(value) => onBackground({ ...background, retrieved_at: value })} /></>}
     </div><label>背景正文<Textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
-    <details className="analysis-details"><DisclosureSummary>适用范围 · {scopeSummary(scope)}</DisclosureSummary>
+    <details className="analysis-details"><DisclosureSummary>适用范围 · <ScopeSummary scope={scope} /></DisclosureSummary>
       <p className="analysis-note">默认沿用这次计算的范围；只在这项背景另有适用范围时修改。</p>
       <div className="analysis-edit-grid">
         <AccountingPeriodInput label="期间" ariaLabel="背景期间" value={scope.period ?? ''} onChange={(value) => onScope({ ...scope, period: value })} />
@@ -58,7 +59,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
     {message && <p role="status" className="analysis-message">{message}</p>}
     {backgrounds.length > 0 && <div className="analysis-history-list">{backgrounds.map((item, index) => <div className="analysis-history-row analysis-history-row--static" key={item.id ?? index}>
       <span>{textValue(item.label ?? item.basis ?? '财务背景')}</span><span>{textValue(item.text ?? item.paragraph ?? '')}</span>
-      <span>{scopeSummary(item.scope ?? {})}</span><span>{formatPeriod(item.effective_from) || '未设期间'}{item.effective_to ? ` 至 ${formatPeriod(item.effective_to)}` : ''}</span>
+      <span><ScopeSummary scope={item.scope} /></span><span>{item.effective_from ? <PeriodWords value={item.effective_from} /> : '未设期间'}{item.effective_to ? <> 至 <PeriodWords value={item.effective_to} /></> : null}</span>
     </div>)}</div>}
   </details>;
 }

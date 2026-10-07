@@ -207,7 +207,7 @@ export function Deliverables({
           </div>
           <div className="fnd-doc__pair">
             <dt>期间</dt>
-            <dd>{open.task.period ? formatPeriod(open.task.period) : '未设期间'}</dd>
+            <dd>{open.task.period ? <span className="fnd-period">{formatPeriod(open.task.period)}</span> : '未设期间'}</dd>
           </div>
           <div className="fnd-doc__pair">
             <dt>成因</dt>
@@ -355,7 +355,7 @@ function DeliverablesList({
                 <tr>
                   <th scope="rowgroup" colSpan={4}>
                     <span>{task.title}</span>
-                    {task.period ? <span className="fnd-muted"> · {formatPeriod(task.period)}</span> : null}
+                    {task.period ? <span className="fnd-muted"> · <span className="fnd-period">{formatPeriod(task.period)}</span></span> : null}
                   </th>
                 </tr>
                 {lines.map((line) => line.kind === 'revision' ? (

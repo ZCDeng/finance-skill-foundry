@@ -126,6 +126,10 @@
   color: var(--fnd-muted);
   font-size: var(--fnd-size-small);
 }
+/* A worded period (2026 年 1–8 月) wraps as one piece; the line around it breaks at its separators. */
+.fnd-period {
+  white-space: nowrap;
+}
 
 .fnd-title {
   font-size: var(--fnd-size-body);

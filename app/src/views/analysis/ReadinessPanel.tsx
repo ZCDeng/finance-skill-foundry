@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { CircleCheck, CircleHelp, CircleSlash, ClipboardList, RefreshCw, TriangleAlert } from 'lucide-react';
 import { bridge, type Answer, type ReadinessDataset, type ReadinessReport } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
@@ -6,7 +6,7 @@ import { HelpLink } from '../guide/GuideHub.js';
 import { FRESHNESS_TEXT, reasonText } from './evidenceLabels.js';
 import { scenarioLabel } from './glossary.js';
 import { errorText } from './shared.js';
-import { formatPeriod } from '../../lib/period.js';
+import { PeriodWords, joinParts } from '../../components/PeriodWords.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -39,30 +39,30 @@ const label = (map: Record<string, string>, key: string) => map[key] ?? key;
 const fields = (names: string[]) => names.map((name) => label(FIELD_LABELS, name)).join('、');
 
 /** What the file declares, written the way she would say it. */
-function scopeLine(row: ReadinessDataset): string {
+function scopeLine(row: ReadinessDataset): ReactNode {
   const scope = row.scope ?? ({} as ReadinessDataset['scope']);
   const scenario = (scope as ReadinessDataset['scope'] & { scenario?: string }).scenario;
   const parts = [
-    scope.period && `期间 ${formatPeriod(scope.period)}`,
+    scope.period && <>期间 <PeriodWords value={scope.period} /></>,
     scope.unit && `单位 ${scope.unit}`,
     scope.currency && `币种 ${scope.currency}`,
     scope.organization && `组织 ${scope.organization}`,
     scenario && `情景 ${scenarioLabel(scenario)}`,
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : '标题里没读到范围';
+  return parts.length ? joinParts(parts) : '标题里没读到范围';
 }
 
 const PERIOD_KIND: Record<string, string> = { month: '月度', annual: '年度', as_of: '时点' };
 const AS_OF_SOURCE: Record<string, string> = { title: '来自标题', source_refresh: '刷新截止' };
 
 /** 截至日 and 期间 as the file declares them; 未声明 rather than a guess. */
-function asOfLine(row: ReadinessDataset): string {
+function asOfLine(row: ReadinessDataset): ReactNode {
   const parts = [
     row.as_of && `截至 ${row.as_of}${row.as_of_source && AS_OF_SOURCE[row.as_of_source] ? `（${AS_OF_SOURCE[row.as_of_source]}）` : ''}`,
-    (row.period || row.scope?.period) && `期间 ${formatPeriod(row.period || row.scope?.period)}`,
+    (row.period || row.scope?.period) && <>期间 <PeriodWords value={row.period || row.scope?.period} /></>,
     row.period_kind && PERIOD_KIND[row.period_kind],
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : '未声明';
+  return parts.length ? joinParts(parts) : '未声明';
 }
 
 /** Unknown because the analysis period is missing or unreadable, not because the file left something out. */

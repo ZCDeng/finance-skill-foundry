@@ -3,10 +3,31 @@ import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AccountingPeriodInput, DateInput, DateRangeInput, DecimalInput, MultiSelect, PeriodRangeInput, SearchableSelect } from '../src/components/FinancialControls.js';
+import { contextOptions } from '../src/views/analysis/shared.js';
+import type { FinanceContextState } from '../src/bridge.js';
 
 afterEach(() => cleanup());
 
 describe('financial web controls', () => {
+  it('finds a saved scope by its period as typed, as worded, or without the spaces', () => {
+    const finance = { contexts: [
+      { id: 'c-aug', name: '华东口径', scopes: { actual: { period: '2026-08', unit: '万元' } } },
+      { id: 'c-ytd', name: '集团口径', scopes: { actual: { period: '2026-01:2026-08', unit: '万元' } } },
+    ] } as unknown as FinanceContextState;
+    render(<SearchableSelect label="已保存的范围" value="" onChange={vi.fn()} options={contextOptions(finance)} placeholder="搜索范围名称或期间" />);
+    fireEvent.click(screen.getByRole('button', { name: '已保存的范围' }));
+    const search = screen.getByLabelText('已保存的范围搜索');
+    const shown = () => screen.queryAllByRole('option').map((option) => option.textContent ?? '');
+    fireEvent.change(search, { target: { value: '2026-08' } });
+    expect(shown().some((text) => text.includes('华东口径'))).toBe(true);
+    expect(shown().some((text) => text.includes('集团口径'))).toBe(true);
+    expect(shown().join('')).not.toContain('2026-08');
+    fireEvent.change(search, { target: { value: '2026年8月' } });
+    expect(shown().map((text) => text.includes('华东口径'))).toEqual([true]);
+    fireEvent.change(search, { target: { value: '1-8月' } });
+    expect(shown().map((text) => text.includes('集团口径'))).toEqual([true]);
+  });
+
   it('keeps accounting periods as YYYY-MM and supports base-period shortcuts', () => {
     const onChange = vi.fn();
     render(<AccountingPeriodInput label="对比期间" value="" onChange={onChange} shortcutBaseValue="2026-08" shortcutBaseLabel="实际期间" />);

@@ -5,6 +5,8 @@ import './workspace.css';
 import { Button } from './ui/button.js';
 import { Input } from './ui/input.js';
 import { formatPeriod } from '../lib/period.js';
+import { searchKey } from '../lib/search.js';
+import { PeriodWords, joinParts } from './PeriodWords.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -166,8 +168,8 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
     catch (error) { if (renamedTask.current === id) setTitleError(error instanceof Error ? error.message : '保存名称失败，请重试。'); }
     finally { if (renamedTask.current === id) setSavingTitle(false); }
   };
-  // The period is found both as written (2026-08) and as shown (2026 年 8 月).
-  const shownTasks = [...tasks].reverse().filter((row) => `${row.title} ${row.period ?? ''} ${formatPeriod(row.period)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  // The period is found both as written (2026-08) and as shown (2026 年 8 月, 2026年8月, 1-8月).
+  const shownTasks = [...tasks].reverse().filter((row) => searchKey(`${row.title} ${row.period ?? ''} ${formatPeriod(row.period)}`).includes(searchKey(query)));
 
   return (
     <div className="workspace" data-sidebar={sidebar ? 'open' : 'closed'} data-focus={task ? effective : 'empty'} data-dragging={dragging ? 'yes' : 'no'}
@@ -187,7 +189,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="workspace-tasklist">
           {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-label={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
-            onClick={() => pick(row.id)}><span>{row.title}</span><small>{[formatPeriod(row.period), lifecycleLabels[row.lifecycle_status ?? 'active']].filter(Boolean).join(' · ')}</small></button>)}
+            onClick={() => pick(row.id)}><span>{row.title}</span><small>{joinParts([row.period ? <PeriodWords value={row.period} /> : null, lifecycleLabels[row.lifecycle_status ?? 'active']])}</small></button>)}
           {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : '从一个问题开始第一项分析'}</p> : null}
         </div>
         <div className="workspace-sidebar-footer">
@@ -208,7 +210,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
             {titleError ? <span role="alert">{titleError}</span> : null}
           </form> : <h1 title={task?.title}>{task && onRename ? <button className="workspace-title-button" aria-label={`修改任务名称：${task.title}`}
             onClick={() => { setTitle(task.title); setTitleError(''); setRenaming(true); }}>{task.title}</button> : task?.title ?? '开始一项分析'}</h1>}
-          {task?.period && !renaming ? <span>{formatPeriod(task.period)}</span> : null}</div>
+          {task?.period && !renaming ? <span className="fnd-period">{formatPeriod(task.period)}</span> : null}</div>
           {task ? <div className="workspace-focus" role="group" aria-label="工作区布局">
             <Button size="icon" variant="ghost" hidden={narrow} aria-label="同时查看" title="同时查看" aria-pressed={effective === 'split'} onClick={() => setFocus(narrow ? 'conversation' : 'split')}><Columns2 size={17} aria-hidden /></Button>
             <Button size="icon" variant="ghost" aria-label="对话专注" title="对话专注" aria-pressed={effective === 'conversation'} onClick={() => setFocus('conversation')}><MessageSquare size={17} aria-hidden /></Button>

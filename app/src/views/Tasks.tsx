@@ -90,7 +90,7 @@ export function Tasks({
         <button key={task.id} type="button" className="fnd-card" onClick={() => onOpen(task.id)}>
           <span className="fnd-row">
             <span className="fnd-title">{task.title}</span>
-            {task.period ? <span className="fnd-muted">{formatPeriod(task.period)}</span> : null}
+            {task.period ? <span className="fnd-muted fnd-period">{formatPeriod(task.period)}</span> : null}
           </span>
           <span className="fnd-row" style={{ marginTop: 8 }}>
             <span className="fnd-muted">

@@ -54,6 +54,15 @@ export const aliasOptions = (aliases: string[], context?: FinanceContext, datase
   return { value: alias, label: scenarioLabel(alias), meta: bound ? datasets.find((source) => source.id === bound)?.name ?? '已绑定资料' : '' };
 });
 
+/** A scope's set fields in order, each as label and words; `period` marks the worded period, which must not break across lines. */
+export function scopeParts(scope: Record<string, unknown> = {}): { label: string; text: string; period: boolean }[] {
+  return scopeFields.filter(([key]) => scope[key]).map(([key, label]) => {
+    const period = key === 'period' && typeof scope[key] === 'string';
+    const text = key === 'scenario' ? scenarioLabel(scope[key]) : period ? formatPeriod(scope[key]) : textValue(scope[key]);
+    return { label, text, period };
+  });
+}
+
 export function scopeSummary(scope: Record<string, unknown> = {}): string {
-  return scopeFields.map(([key, label]) => scope[key] ? `${label} ${key === 'scenario' ? scenarioLabel(scope[key]) : key === 'period' && typeof scope[key] === 'string' ? formatPeriod(scope[key]) : textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
+  return scopeParts(scope).map(({ label, text }) => `${label} ${text}`).join(' · ') || '未限定';
 }

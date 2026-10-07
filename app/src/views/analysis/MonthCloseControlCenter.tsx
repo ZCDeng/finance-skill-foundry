@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CircleAlert, CircleCheck, CircleDashed, CircleSlash, RefreshCw } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
@@ -6,6 +6,7 @@ import { ControlsPanel } from './ControlsPanel.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { errorText } from './shared.js';
 import { formatPeriod } from '../../lib/period.js';
+import { joinParts } from '../../components/PeriodWords.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
@@ -119,13 +120,27 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
  * reads 2026 年 1–8 月; the text stays as stored for the assistant, and an older answer without
  * the values shows that text.
  */
-const itemWords = (item: CloseItem): string => item.scope
-  ? Object.entries(item.scope).map(([key, value]) => key === 'period' ? formatPeriod(value) : value).filter(Boolean).join(' · ')
-  : item.text;
+// The order the server writes the scope text in (SCOPE_REQUIRED), not the order the keys arrive in.
+const SCOPE_ORDER = ['period', 'organization', 'unit', 'currency'] as const;
+
+/** The scope segments in order, each with whether it is the worded period; null for any other item. */
+function scopeSegments(item: CloseItem): { text: string; period: boolean }[] | null {
+  if (!item.scope) return null;
+  const scope = item.scope;
+  return SCOPE_ORDER.filter((key) => scope[key]).map((key) => ({ text: key === 'period' ? formatPeriod(scope[key]) : scope[key], period: key === 'period' }));
+}
+
+const itemWords = (item: CloseItem): string => scopeSegments(item)?.map(({ text }) => text).join(' · ') ?? item.text;
+
+/** The same words on screen, the period kept on one line. */
+const itemNode = (item: CloseItem): ReactNode => {
+  const segments = scopeSegments(item);
+  return segments ? joinParts(segments.map(({ text, period }) => period ? <span className="fnd-period">{text}</span> : text)) : item.text;
+};
 
 /** An item's words; a hint (a file's digest) rides only in the tooltip: a hash read aloud tells nobody anything. */
 function ItemText({ item }: { item: CloseItem }) {
-  return item.hint ? <span title={item.hint}>{itemWords(item)}</span> : <>{itemWords(item)}</>;
+  return item.hint ? <span title={item.hint}>{itemNode(item)}</span> : <>{itemNode(item)}</>;
 }
 
 /**
@@ -169,7 +184,7 @@ function SettledLine({ words, Icon, blocks }: { words: string; Icon: typeof Circ
       const tucked = block.items.filter((item) => !inView(block, item));
       const title = tucked.map((item) => [itemWords(item), item.hint].filter(Boolean).join(' · ')).join('\n');
       return <span key={block.key}>{index ? '、' : ''}<span title={title || undefined}>{block.label}</span>
-        {shown.length ? <span className="analysis-close-settled-detail">（{shown.map(itemWords).join('；')}）</span> : null}
+        {shown.length ? <span className="analysis-close-settled-detail">（{joinParts(shown.map(itemNode), '；')}）</span> : null}
         {tucked.length ? <span className="sr-only">（{tucked.map(itemWords).join('；')}）</span> : null}</span>;
     })}</span>
   </p>;

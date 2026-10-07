@@ -159,7 +159,17 @@ it('words the confirmed period from the values the server gives, and shows an ol
   const { unmount } = render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
   await screen.findByRole('heading', { name: '可提交经理复核' });
   expect(visible(document.querySelector('.analysis-close-settled')!)).toBe('已就绪：范围（2026 年 1–8 月 · 华宸 · 万元 · CNY）');
+  // The worded period wraps as one piece; the line breaks at its separators.
+  expect(document.querySelector('.analysis-close-settled .fnd-period')!.textContent).toBe('2026 年 1–8 月');
   unmount();
+
+  // The values are written in the server's order whatever order the keys arrive in.
+  mount(withScope({ text: '2026-01:2026-08 · 华宸 · 万元 · CNY',
+    scope: { currency: 'CNY', unit: '万元', organization: '华宸', period: '2026-01:2026-08' } }));
+  const shuffled = render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '可提交经理复核' });
+  expect(visible(document.querySelector('.analysis-close-settled')!)).toBe('已就绪：范围（2026 年 1–8 月 · 华宸 · 万元 · CNY）');
+  shuffled.unmount();
 
   mount(withScope({ text: '2026-08 · 万元 · CNY' }));
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
