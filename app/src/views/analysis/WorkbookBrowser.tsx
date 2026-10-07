@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input.js';
 import './WorkbookBrowser.css';
 import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
+import { formatPeriod } from '../../lib/period.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 
 export interface WorkbookCellPreview {
@@ -79,7 +80,7 @@ export function WorkbookBrowser({
 
   const context = sheetContext[sheet] ?? {};
   const contextText = [
-    context.period ? `期间 ${context.period}` : '',
+    context.period ? `期间 ${formatPeriod(context.period)}` : '',
     context.granularity ? `粒度 ${context.granularity}` : '',
     context.unit ? `单位 ${context.unit}` : '',
     context.currency ? `币种 ${context.currency}` : '',

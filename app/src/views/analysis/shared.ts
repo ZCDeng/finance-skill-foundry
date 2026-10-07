@@ -2,6 +2,7 @@ import { when, type Answer, type AnalysisRun, type DatasetSnapshot, type Finance
 import { textValue } from './presentation.js';
 import type { SelectOption } from '../../components/FinancialControls.js';
 import { friendlyError, scenarioLabel } from './glossary.js';
+import { formatPeriod } from '../../lib/period.js';
 
 export { errorText, friendlyError } from './glossary.js';
 
@@ -41,6 +42,8 @@ export const contextOptions = (finance: FinanceContextState | null): SelectOptio
   value: context.id,
   label: context.name,
   meta: Object.entries(context.scopes ?? {}).map(([alias, item]) => `${scenarioLabel(alias)} ${scopeSummary(item)}`).join('；') || '未记录范围',
+  // 搜索范围名称或期间: the period as typed (2026-08) still finds the scope its meta words.
+  keywords: Object.values(context.scopes ?? {}).map((item) => item.period).filter((period) => typeof period === 'string').join(' '),
 })) ?? [];
 export const accountMapOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.account_maps.map((item) => ({
   value: String(item.id ?? ''),
@@ -52,5 +55,5 @@ export const aliasOptions = (aliases: string[], context?: FinanceContext, datase
 });
 
 export function scopeSummary(scope: Record<string, unknown> = {}): string {
-  return scopeFields.map(([key, label]) => scope[key] ? `${label} ${key === 'scenario' ? scenarioLabel(scope[key]) : textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
+  return scopeFields.map(([key, label]) => scope[key] ? `${label} ${key === 'scenario' ? scenarioLabel(scope[key]) : key === 'period' && typeof scope[key] === 'string' ? formatPeriod(scope[key]) : textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
 }

@@ -55,7 +55,7 @@ describe('readiness panel', () => {
     expect(budget.textContent).toContain('单位 万元');
     expect(budget.textContent).toContain('期间、币种');
     const ledger = screen.getByRole('row', { name: /02·GL科目余额表/ });
-    expect(ledger.textContent).toContain('期间 2026-08');
+    expect(ledger.textContent).toContain('期间 2026 年 8 月');
   });
 
   it('sits on the page as a section with a rule under it, not as a clickable card', async () => {

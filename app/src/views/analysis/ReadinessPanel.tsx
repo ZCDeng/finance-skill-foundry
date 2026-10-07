@@ -6,6 +6,7 @@ import { HelpLink } from '../guide/GuideHub.js';
 import { FRESHNESS_TEXT, reasonText } from './evidenceLabels.js';
 import { scenarioLabel } from './glossary.js';
 import { errorText } from './shared.js';
+import { formatPeriod } from '../../lib/period.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -42,7 +43,7 @@ function scopeLine(row: ReadinessDataset): string {
   const scope = row.scope ?? ({} as ReadinessDataset['scope']);
   const scenario = (scope as ReadinessDataset['scope'] & { scenario?: string }).scenario;
   const parts = [
-    scope.period && `期间 ${scope.period}`,
+    scope.period && `期间 ${formatPeriod(scope.period)}`,
     scope.unit && `单位 ${scope.unit}`,
     scope.currency && `币种 ${scope.currency}`,
     scope.organization && `组织 ${scope.organization}`,
@@ -58,7 +59,7 @@ const AS_OF_SOURCE: Record<string, string> = { title: '来自标题', source_ref
 function asOfLine(row: ReadinessDataset): string {
   const parts = [
     row.as_of && `截至 ${row.as_of}${row.as_of_source && AS_OF_SOURCE[row.as_of_source] ? `（${AS_OF_SOURCE[row.as_of_source]}）` : ''}`,
-    (row.period || row.scope?.period) && `期间 ${row.period || row.scope?.period}`,
+    (row.period || row.scope?.period) && `期间 ${formatPeriod(row.period || row.scope?.period)}`,
     row.period_kind && PERIOD_KIND[row.period_kind],
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : '未声明';

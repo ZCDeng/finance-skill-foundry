@@ -35,6 +35,20 @@ describe('one task workspace', () => {
     expect(props.onNew).not.toHaveBeenCalled();
   });
 
+  it('writes the period in words beside the title and in the list, and finds it either way', () => {
+    render(<Workspace {...props} />);
+    expect(document.querySelector('.workspace-title > span')!.textContent).toBe('2026 年 8 月');
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    const row = screen.getByRole('button', { name: '华东利润分析' });
+    expect(row.querySelector('small')!.textContent).toBe('2026 年 8 月 · 进行中');
+    const search = screen.getByRole('searchbox', { name: '搜索任务' });
+    for (const query of ['8 月', '2026-08']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getByRole('button', { name: '华东利润分析' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '西南回款' })).toBeNull();
+    }
+  });
+
   it('lets keyboard users resize and reset the dialogue width', () => {
     render(<Workspace {...props} />);
     const separator = screen.getByRole('separator', { name: '调整对话宽度' });
@@ -65,6 +79,7 @@ describe('one task workspace', () => {
       expect(icon.tagName.toLowerCase(), item.textContent!).toBe('svg');
       expect(icon.getAttribute('aria-hidden')).toBe('true');
       expect(icon.getAttribute('width')).toBe('15');
+      expect(icon.getAttribute('stroke-width'), item.textContent!).toBe('1.5');
     }
   });
 

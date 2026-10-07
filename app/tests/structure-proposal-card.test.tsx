@@ -332,7 +332,7 @@ describe('workbook browser', () => {
       dataset_id: 'shell-1',
       sheet: '04·合并利润表',
     }));
-    expect(screen.getByText(/期间 2026-08/)).toBeTruthy();
+    expect(screen.getByText(/期间 2026 年 8 月/)).toBeTruthy();
 
     financeCall.mockResolvedValue(preview('04·合并利润表', 'B36:I39'));
     fireEvent.change(screen.getByLabelText('区域'), { target: { value: 'B36:I39' } });

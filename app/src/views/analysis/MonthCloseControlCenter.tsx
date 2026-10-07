@@ -5,11 +5,12 @@ import { Button } from '../../components/ui/button.js';
 import { ControlsPanel } from './ControlsPanel.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { errorText } from './shared.js';
+import { formatPeriod } from '../../lib/period.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
 type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
-type CloseItem = { text: string; blocking: boolean; attention?: boolean; target?: CloseTarget; hint?: string };
+type CloseItem = { text: string; blocking: boolean; attention?: boolean; target?: CloseTarget; hint?: string; scope?: Record<string, string> };
 type CloseBlock = { key: string; label: string; state: BlockState; items: CloseItem[] };
 type ConclusionLevel = 'usable' | 'usable_with_caveats' | 'not_usable' | 'not_assessable';
 type ConclusionReason = { text: string; target?: CloseTarget };
@@ -113,9 +114,18 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   );
 }
 
+/**
+ * An item as the page writes it. The confirmed scope comes with its values by key, so its period
+ * reads 2026 年 1–8 月; the text stays as stored for the assistant, and an older answer without
+ * the values shows that text.
+ */
+const itemWords = (item: CloseItem): string => item.scope
+  ? Object.entries(item.scope).map(([key, value]) => key === 'period' ? formatPeriod(value) : value).filter(Boolean).join(' · ')
+  : item.text;
+
 /** An item's words; a hint (a file's digest) rides only in the tooltip: a hash read aloud tells nobody anything. */
 function ItemText({ item }: { item: CloseItem }) {
-  return item.hint ? <span title={item.hint}>{item.text}</span> : <>{item.text}</>;
+  return item.hint ? <span title={item.hint}>{itemWords(item)}</span> : <>{itemWords(item)}</>;
 }
 
 /**
@@ -157,10 +167,10 @@ function SettledLine({ words, Icon, blocks }: { words: string; Icon: typeof Circ
     <span>{words}：{blocks.map((block, index) => {
       const shown = block.items.filter((item) => inView(block, item));
       const tucked = block.items.filter((item) => !inView(block, item));
-      const title = tucked.map((item) => [item.text, item.hint].filter(Boolean).join(' · ')).join('\n');
+      const title = tucked.map((item) => [itemWords(item), item.hint].filter(Boolean).join(' · ')).join('\n');
       return <span key={block.key}>{index ? '、' : ''}<span title={title || undefined}>{block.label}</span>
-        {shown.length ? <span className="analysis-close-settled-detail">（{shown.map((item) => item.text).join('；')}）</span> : null}
-        {tucked.length ? <span className="sr-only">（{tucked.map((item) => item.text).join('；')}）</span> : null}</span>;
+        {shown.length ? <span className="analysis-close-settled-detail">（{shown.map(itemWords).join('；')}）</span> : null}
+        {tucked.length ? <span className="sr-only">（{tucked.map(itemWords).join('；')}）</span> : null}</span>;
     })}</span>
   </p>;
 }

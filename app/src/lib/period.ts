@@ -35,3 +35,12 @@ export function formatPeriod(value: unknown): string {
   if (startYear === endYear) return `${startYear} 年 ${Number(startMonth)}–${Number(endMonth)} 月`;
   return `${startYear} 年 ${Number(startMonth)} 月–${endYear} 年 ${Number(endMonth)} 月`;
 }
+
+/**
+ * A list of periods in words. Two stored values that read alike (2026-08 and
+ * 2026-08:2026-08) keep their stored values, so the list still tells them apart.
+ */
+export function formatPeriods(values: string[]): string[] {
+  const words = values.map((value) => formatPeriod(value));
+  return values.map((value, index) => words.indexOf(words[index]) !== words.lastIndexOf(words[index]) ? value : words[index]);
+}

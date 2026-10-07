@@ -44,7 +44,7 @@ describe('readiness: as-of, period and freshness per file', () => {
     expect(screen.getByRole('columnheader', { name: '时效' })).toBeTruthy();
 
     const current = screen.getByRole('row', { name: /8月总账/ });
-    expect(current.textContent).toContain('期间 2026-08 · 月度');
+    expect(current.textContent).toContain('期间 2026 年 8 月 · 月度');
     expect(current.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
 
     const july = screen.getByRole('row', { name: /7月总账/ });
@@ -61,7 +61,7 @@ describe('readiness: as-of, period and freshness per file', () => {
     expect(budget.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('未声明（资料没有声明期间或截至日）');
 
     const refreshed = screen.getByRole('row', { name: /ERP 刷新/ });
-    expect(refreshed.textContent).toContain('截至 2026-09-05（刷新截止） · 期间 2026-08 · 月度');
+    expect(refreshed.textContent).toContain('截至 2026-09-05（刷新截止） · 期间 2026 年 8 月 · 月度');
     expect(refreshed.querySelector('.analysis-readiness-freshness--current')?.textContent).toBe('当前');
     expect(screen.getByRole('button', { name: '使用指南：资料时效与证据标签' })).toBeTruthy();
   });
@@ -73,7 +73,7 @@ describe('readiness: as-of, period and freshness per file', () => {
     await screen.findByText('这批资料能算什么');
     const row = screen.getByRole('row', { name: /8月总账/ });
     expect(row.querySelector('.analysis-readiness-freshness--unknown')?.textContent).toBe('无法判断（分析期间还没确认，无法判断时效）');
-    expect(row.textContent).toContain('期间 2026-08 · 月度');
+    expect(row.textContent).toContain('期间 2026 年 8 月 · 月度');
   });
 
   it('shows a dash for a file an older CLI reported without freshness', async () => {
@@ -82,7 +82,7 @@ describe('readiness: as-of, period and freshness per file', () => {
     await screen.findByText('这批资料能算什么');
     const old = screen.getByRole('row', { name: /旧版报告/ });
     const cells = within(old).getAllByRole('cell');
-    expect(cells[1].textContent).toBe('期间 2026-08');
+    expect(cells[1].textContent).toBe('期间 2026 年 8 月');
     expect(cells[2].textContent).toBe('—');
   });
 });

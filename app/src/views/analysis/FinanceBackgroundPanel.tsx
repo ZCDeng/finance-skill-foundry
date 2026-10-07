@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, UNIT_OPTIONS } from './glossary.js';
 import { datasetOptions, scopeSummary } from './shared.js';
+import { formatPeriod } from '../../lib/period.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
@@ -57,7 +58,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
     {message && <p role="status" className="analysis-message">{message}</p>}
     {backgrounds.length > 0 && <div className="analysis-history-list">{backgrounds.map((item, index) => <div className="analysis-history-row analysis-history-row--static" key={item.id ?? index}>
       <span>{textValue(item.label ?? item.basis ?? '财务背景')}</span><span>{textValue(item.text ?? item.paragraph ?? '')}</span>
-      <span>{scopeSummary(item.scope ?? {})}</span><span>{textValue(item.effective_from ?? '未设期间')}{item.effective_to ? ` 至 ${textValue(item.effective_to)}` : ''}</span>
+      <span>{scopeSummary(item.scope ?? {})}</span><span>{formatPeriod(item.effective_from) || '未设期间'}{item.effective_to ? ` 至 ${formatPeriod(item.effective_to)}` : ''}</span>
     </div>)}</div>}
   </details>;
 }

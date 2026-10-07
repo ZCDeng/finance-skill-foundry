@@ -19,6 +19,7 @@ import {
   when,
 } from '../bridge.js';
 import { TechnicalInfo } from './analysis/TechnicalInfo.js';
+import { formatPeriod } from '../lib/period.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -122,7 +123,7 @@ export function TaskDetail({
           {detail.task.title}
         </h2>
         <p className="fnd-muted">
-          {[detail.task.period, `建于 ${when(detail.task.created_at)}`].filter(Boolean).join(' · ')}
+          {[formatPeriod(detail.task.period), `建于 ${when(detail.task.created_at)}`].filter(Boolean).join(' · ')}
         </p>
       </div>
 

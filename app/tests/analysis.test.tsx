@@ -1192,7 +1192,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [], runs: [], drafts: [] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     await waitForSettingsEntryOrDialog();
-    expect((await screen.findAllByText(/资料写的期间是 2026-08，但任务期间还没确认/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/资料写的期间是 2026 年 8 月，但任务期间还没确认/)).length).toBeGreaterThan(0);
     const calculate = screen.getByRole('button', { name: '计算损益表' }) as HTMLButtonElement;
     expect(calculate.disabled).toBe(true);
     // Both calculations wait on the same thing, so it is said once, under the buttons, without repeating the months.
@@ -2425,7 +2425,7 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-background-list', expect.objectContaining({ context_id: 'ctx-a' })));
     expect(await screen.findByText('季节性')).toBeTruthy();
     // The scope line appears twice: the folded 适用范围 summary and the applicability list.
-    expect(screen.getAllByText(/账簿 总账 · 组织 华东 · 期间 2026-09/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/账簿 总账 · 组织 华东 · 期间 2026 年 9 月/).length).toBeGreaterThanOrEqual(2);
   });
 
 

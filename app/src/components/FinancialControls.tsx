@@ -12,6 +12,8 @@ export type SelectOption = {
   value: string;
   label: string;
   meta?: string;
+  /** Also matched by the search, never shown: a stored value the meta writes in words (2026-08). */
+  keywords?: string;
   disabled?: boolean;
 };
 
@@ -391,7 +393,7 @@ function filterOptions(options: SelectOption[], query: string, allowEmptyLabel?:
   const score = (option: SelectOption) => {
     const label = option.label.toLowerCase();
     const value = option.value.toLowerCase();
-    const meta = (option.meta ?? '').toLowerCase();
+    const meta = `${option.meta ?? ''} ${option.keywords ?? ''}`.toLowerCase();
     if (!needle) return 0;
     if (label.includes(needle)) return 0;
     if (value.includes(needle)) return 1;

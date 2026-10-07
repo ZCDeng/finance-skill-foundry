@@ -122,9 +122,9 @@ def _block(key: str, label: str, items: list[dict[str, Any]], *, empty_state: st
 
 
 def _item(text: str, *, blocking: bool = False, attention: bool = False, target: str | None = None,
-          hint: str | None = None) -> dict[str, Any]:
+          hint: str | None = None, scope: dict[str, str] | None = None) -> dict[str, Any]:
     return {"text": text, "blocking": blocking, "attention": attention, **({"target": target} if target else {}),
-            **({"hint": hint} if hint else {})}
+            **({"hint": hint} if hint else {}), **({"scope": scope} if scope else {})}
 
 
 def _scope_value(value: Any) -> str:
@@ -144,7 +144,10 @@ def _scope_block(scope: dict[str, Any] | None, *, organization_required: bool = 
     required = [(key, label) for key, label in SCOPE_REQUIRED if key != "organization" or organization_required]
     items = [_item(f"{label}未确认", blocking=True, target="scope") for key, label in required if not _scope_value(scope.get(key))]
     if not items:
-        items.append(_item(" · ".join(_scope_value(scope.get(key)) for key, _ in required), target="scope"))
+        # The text stays as stored for the assistant, CLI and MCP; `scope` carries the same values by
+        # key, in the order of the text, so the page can write the period in words (DESIGN.md).
+        confirmed = {key: _scope_value(scope.get(key)) for key, _ in required}
+        items.append(_item(" · ".join(confirmed.values()), target="scope", scope=confirmed))
     return _block("scope", "范围", items)
 
 

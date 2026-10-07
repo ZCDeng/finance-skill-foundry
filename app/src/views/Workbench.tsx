@@ -9,6 +9,7 @@ import { APP_NAME } from '../components/Shell.js';
 import { WaitOrb } from '../components/WaitOrb.js';
 import type { HarnessStatus, TaskDetail, TaskRow } from '../bridge.js';
 import { NativeSelect } from '../components/ui/native-select.js';
+import { formatPeriod } from '../lib/period.js';
 
 export type Intent = 'author' | 'period' | 'followup' | 'analysis';
 
@@ -100,7 +101,7 @@ export function TaskBar({
         )}
         {tasks.map((row) => (
           <option key={row.id} value={row.id}>
-            {row.period ? `${row.title} · ${row.period}` : row.title}
+            {row.period ? `${row.title} · ${formatPeriod(row.period)}` : row.title}
           </option>
         ))}
         <option value={NEW_TASK}>＋ 新建任务…</option>
