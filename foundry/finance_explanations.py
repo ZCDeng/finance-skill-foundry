@@ -25,6 +25,9 @@ PERIOD_OR_DATE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 # A bare year, yyyymm or yyyymmdd written as a row's period.
 PERIOD_IDENTIFIER = re.compile(r"(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])?)?")
 EVIDENCE_APPENDIX_RENDER_VERSION = 1
+# A difference of two percentages and how its value reads (_points_display).
+POINTS_UNIT = "百分点"
+POINTS_SUFFIX = " 个百分点"
 WRITING_GUIDANCE = {
     "schema_version": 1,
     "summary": (
@@ -149,6 +152,9 @@ def render_fact_template(body: str, facts: list[dict]) -> tuple[str, list[str]]:
         # keeps it.
         if unit and display.endswith(f" {unit}") and _unit_follows(body, match.end(), unit):
             return display[: -len(unit)].rstrip()
+        # 「缺口 {{fact:…}} 个百分点」 or 「… 百分点」: the prose says the unit, so 「3.30 个百分点」 drops its own.
+        if display.endswith(POINTS_SUFFIX) and re.match(r"\s*个?百分点", body[match.end():]):
+            return display[: -len(POINTS_SUFFIX)]
         return display
 
     return FACT_TOKEN.sub(replace, body), used
@@ -1084,7 +1090,28 @@ def _fact_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict |
     return column_defs.get(column, {}).get("unit")
 
 
+def _is_points(column: Any, unit: Any) -> bool:
+    """A long-form value in 百分点 (result_semantics.POINT_UNITS): a difference of two percentages."""
+    return column == "value" and str(unit or "").strip() == POINTS_UNIT
+
+
+def _points_display(exact: str) -> str:
+    """3.3 as 「3.30 个百分点」, as the result area shows it (businessResults.ts decimalToFixed): written as it is,
+    never ×100, two places rounded half away from zero, thousands grouped, and never -0.00."""
+    try:
+        with localcontext() as context:
+            context.prec = 100
+            value = Decimal(exact).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return exact
+    if not value.is_finite():
+        return exact
+    return f"{value.copy_abs() if value == 0 else value:,f}{POINTS_SUFFIX}"
+
+
 def _display_value(exact: str, column: str, unit: Any) -> str:
+    if _is_points(column, unit):
+        return _points_display(exact)
     if _is_ratio_column(column):
         try:
             percent = (
@@ -2190,6 +2217,45 @@ def _trusted_generated_appendix_regions(
         return []
     if not isinstance(meta, dict):
         return []
+    # An appendix saved before 百分点 had its own display wrote 「3.3000 百分点」; it is the same evidence, so it is
+    # rebuilt that way too rather than under a new render version that would distrust every other appendix.
+    for candidate in (prepared, _legacy_points_prepared(prepared)):
+        if candidate is None:
+            continue
+        regions = _trusted_appendix_regions_as(analysis, body, spec, appendix, meta, candidate, recipe_report)
+        if regions:
+            return regions
+    return []
+
+
+def _legacy_points_prepared(prepared: dict) -> dict | None:
+    """`prepared` with each 百分点 fact displayed as before _points_display (exact value, a space, the unit as
+    written), or None when no fact is in 百分点."""
+    legacy = {
+        fact["id"]: f"{_grouped(fact['value'], 'value')} {fact['unit']}"
+        for fact in prepared.get("facts", [])
+        if isinstance(fact, dict) and isinstance(fact.get("value"), str)
+        and _is_points(fact.get("column"), fact.get("unit"))
+    }
+    if not legacy:
+        return None
+
+    def shown(item: Any, key: str) -> Any:
+        if isinstance(item, dict) and item.get(key) in legacy:
+            return {**item, "display_value": legacy[item[key]]}
+        return item
+
+    groups = [
+        {**group, "members": [shown(member, "fact_id") for member in group["members"]]}
+        if isinstance(group, dict) and isinstance(group.get("members"), list) else group
+        for group in prepared.get("evidence_groups", [])
+    ]
+    return {**prepared, "facts": [shown(fact, "id") for fact in prepared.get("facts", [])], "evidence_groups": groups}
+
+
+def _trusted_appendix_regions_as(
+    analysis, body: str, spec: dict, appendix: str, meta: dict, prepared: dict, recipe_report: dict | None
+) -> list[dict]:
     rebuilt_base = render_evidence_appendix(prepared).get("body", "")
     if not isinstance(rebuilt_base, str) or not rebuilt_base:
         return []
@@ -2474,6 +2540,15 @@ def _non_body_issue_origin(issue: dict) -> str:
 
 
 def _generated_appendix_heading_number_spans(body: str, prepared: dict) -> list[tuple[int, int]]:
+    # An appendix saved before 百分点 had its own display is found as it was written (_legacy_points_prepared).
+    for candidate in (prepared, _legacy_points_prepared(prepared)):
+        spans = _heading_number_spans_as(body, candidate) if candidate is not None else []
+        if spans:
+            return spans
+    return []
+
+
+def _heading_number_spans_as(body: str, prepared: dict) -> list[tuple[int, int]]:
     appendix = render_evidence_appendix(prepared).get("body", "")
     if not appendix:
         return []

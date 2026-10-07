@@ -45,8 +45,10 @@ from foundry.finance_requirements import (
 # Vocabulary 2: the vocabulary also decides the contract warnings.
 # Vocabulary 3: the vocabulary also pairs rows and words the conclusion sentences; an estimated budget has a span.
 # Vocabulary 4: a variance row that is not actual minus budget silences its pair's sentence and warns.
-VOCABULARY_VERSION = 4
-UNIT_TABLE_VERSION = 1
+# Vocabulary 5: rows sharing organization, period and metric_label under different metrics warn (label_ambiguous).
+# Unit table 2: 百分点 holds a difference of two percentages.
+VOCABULARY_VERSION = 5
+UNIT_TABLE_VERSION = 2
 ESTIMATE_WORDS_VERSION = 1
 # A declaration covers at most this many rows; a longer result is declared up to here and marked incomplete.
 MAX_DECLARED_ROWS = 5000
@@ -99,6 +101,8 @@ RESULT_METRIC_LABELS = {
 FRACTION_UNITS = frozenset({'比率', 'ratio'})
 PERCENT_UNITS = frozenset({'%', 'pct', '百分比'})
 UNMARKED_UNITS = frozenset({'-'})
+# 百分点 holds a difference of two percentages as written: 3.3 is 3.3 个百分点, never ×100. It fills no comparison.
+POINT_UNITS = frozenset({'百分点'})
 
 # The words an estimate goes by in these files, and the negations right before one that cancel it (非估算,
 # 不含估算调整). An unknown wording errs toward 估算.
@@ -171,6 +175,12 @@ def _text(value: Any) -> str:
     return '' if value is None else str(value)
 
 
+def _unit(row: dict) -> str:
+    """The row's unit as its facts read it (finance_explanations._row_unit): the first of unit, 单位 that is neither
+    null nor empty, so 「unit: ''」 beside 「单位: '百分点'」 is in 百分点 on every side."""
+    return _text(next((row[key] for key in ('unit', '单位') if row.get(key) not in (None, '')), None))
+
+
 def _scenario_measure(row: dict) -> dict | None:
     scenario = _text(_first(row, ('scenario', '情景'))).strip().lower()
     if not scenario:
@@ -186,6 +196,8 @@ def _scenario_measure(row: dict) -> dict | None:
 
 
 def _unit_kind(unit: str) -> str | None:
+    if unit in POINT_UNITS:
+        return 'points'
     if unit in FRACTION_UNITS:
         return 'decimal'
     if unit in PERCENT_UNITS:
@@ -206,7 +218,10 @@ def _comparison(row: dict) -> dict | None:
     if scenario is None:
         return None
     metric = _text(_first(row, METRIC_FIELDS))
-    unit_kind = _unit_kind(_text(_first(row, ('unit', '单位'))).strip().lower())
+    unit_kind = _unit_kind(_unit(row).strip().lower())
+    # A difference of two percentages is neither an amount nor a 达成率 (revenue_achievement_ratio in 百分点 included).
+    if unit_kind == 'points':
+        return None
     rate = RATE_METRIC.fullmatch(metric)
     if rate and unit_kind is not None:
         return {**scenario, 'measure': 'rate_pct' if unit_kind == 'percent' else 'rate', 'metric': rate.group(1)}
@@ -275,7 +290,7 @@ def _declare_row(index: int, row: dict, long_format: bool, requirements: dict | 
     row = json_value(row)
     comparison = _comparison(row) if long_format else None
     role = ROLES[comparison['measure']] if comparison else None
-    unit = _text(_first(row, ('unit', '单位'))).strip()
+    unit = _unit(row).strip()
     unit_kind = _unit_kind(unit.lower())
     if unit_kind is None and role is not None:
         unit_kind = 'unmarked' if role == 'ratio' else 'amount'
@@ -312,7 +327,7 @@ def _contract_message(code: str, count: int, names: list[str]) -> str:
     if code == 'unit_unmarked':
         return (f'{count} 行没有标明单位：单位写成「-」，或比率行没有写单位表里的单位。这些行不参与金额配对，'
                 '结果区原样显示并注明「未标单位」。比率写「比率」或 ratio（小数，0.945 即 94.5%），'
-                '百分数写 %、pct 或「百分比」，金额写实际单位。')
+                '百分数写 %、pct 或「百分比」，两个比率之差写「百分点」，金额写实际单位。')
     if code == 'scenario_undeclared':
         return (f'情景名 {_names(names)} 不在约定情景里，本次运行固定的需求版本也没有列出（共 {count} 行），'
                 '这些行不参与实际与预算配对。请改用约定情景名（actual、budget、variance，或带期间后缀的 '
@@ -324,8 +339,61 @@ def _contract_message(code: str, count: int, names: list[str]) -> str:
         return (f'{_names(names)} 的差异行不等于实际减预算（共 {count} 行），这些比较不写结论句，'
                 '以免结论与所引实际、预算的方向相反。差异行应写实际减预算，不写按利润影响取正负的数；'
                 '请核对实际、预算与差异是否取自同一口径，改好后重跑。')
+    if code == 'label_ambiguous':
+        return (f'{_names(names)} 在同一组织、同一期间里被 {count} 行没有进入配对的结果行共用，这些行的指标键不同，'
+                '结果区只能在名字后补中文名或指标键区分。请在 metric_label 写出对象（如「收入完成率」「营业利润完成率」），'
+                '改好后重跑。')
     return (f'{count} 行的文字写了估算用语，但依据列 basis 没有写 estimate。这些行仍按估算显示；'
             '请在这些行的 basis 列写 estimate，估算就不只靠文字识别。')
+
+
+def _shown_label(row: dict, entry: dict) -> str | None:
+    """A row's metric_label as the result table shows it (businessResults.ts formatBusinessCell): trimmed, with
+    「（估算）」 after it when the row is an estimate its label does not already name, else a metric code read as its
+    Chinese name. None when the row has no label to show."""
+    label = row.get('metric_label')
+    if not isinstance(label, str) or not label.strip():
+        return None
+    label = label.strip()
+    if entry['estimate'] and not mentions_estimate(label):
+        return f'{label}（估算）'
+    return RESULT_METRIC_LABELS.get(label, label).strip()
+
+
+def label_collisions(rows: list[dict], entries: list[dict], pairs: list[dict] = ()) -> list[dict]:
+    """Unpaired long-form rows of one organization and period whose shown names agree but whose metric keys differ.
+
+    The contract businessResults.ts labelCollisions keeps, field for field (app/tests/fixtures/label-collisions.json
+    is the sample both sides assert). Rows: those in no pair whose actual has a value, as the result area pairs them.
+    Organization: organization, region, 区域, the first not null, as a string. Period: period, else 期间, unformatted.
+    Label: _shown_label. Key: the row's own first METRIC_FIELDS value, never the base metric a pair reads it as. Two or
+    more keys under one name is a collision; groups and their keys keep first-appearance order.
+
+    The estimate a label is shown with is the declaration's own: the row's signals and the requirements version the
+    run is pinned to. Estimates the task's latest requirements add at read time (merge_latest) do not recompute the
+    warning, so where they give a row 「（估算）」 the result area may tell apart a group the warning still names, or
+    the other way round.
+    """
+    by_row = {entry['row']: entry for entry in entries}
+    used = {index for pair in pairs
+            if (by_row.get(pair['members'].get('actual')) or {}).get('value') not in (None, '')
+            for index in pair['members'].values()}
+    groups: dict[tuple[str, str, str], dict] = {}
+    for row, entry in zip(rows, entries):
+        if entry['row'] in used:
+            continue
+        label = _shown_label(row, entry)
+        if label is None:
+            continue
+        organization = _text(_first(row, ('organization', 'region', '区域')))
+        period = _text(_first(row, ('period', '期间')))
+        group = groups.setdefault((organization, period, label), {
+            'organization': organization, 'period': period, 'label': label, 'keys': [], 'rows': []})
+        key = _text(_first(row, METRIC_FIELDS))
+        if key not in group['keys']:
+            group['keys'].append(key)
+        group['rows'].append(entry['row'])
+    return [group for group in groups.values() if len(group['keys']) >= 2]
 
 
 def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, requirements: dict | None, *,
@@ -335,13 +403,15 @@ def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, 
     Scenario and metric names are checked in a long-form table only, and only when the pinned requirements could be
     read: a name they list is part of the vocabulary. A metric outside it warns only on a row that fills a
     comparison and has no metric_label to be shown by. A pair whose variance row is not its actual minus its budget
-    warns on that row, whether or not the pair would get a sentence: the rows disagree either way.
+    warns on that row, whether or not the pair would get a sentence: the rows disagree either way. Unpaired long-form
+    rows that share a shown name under different metric keys (label_collisions) warn too: on screen only a key added
+    after the name tells them apart.
     """
     names = vocabulary(requirements)
     scenarios = {name.lower() for name in names['scenarios']}
     hits: dict[str, list[tuple[int, str | None]]] = {
         'unit_unmarked': [], 'scenario_undeclared': [], 'metric_undeclared': [], 'estimate_basis_missing': [],
-        'variance_mismatch': []}
+        'variance_mismatch': [], 'label_ambiguous': []}
     for row, entry in zip(rows, entries):
         index = entry['row']
         if entry['unit_kind'] == 'unmarked':
@@ -361,6 +431,9 @@ def contract_warnings(rows: list[dict], entries: list[dict], long_format: bool, 
     by_row = {entry['row']: entry for entry in entries}
     hits['variance_mismatch'] = sorted((pair['members']['variance'], _subject(pair))
                                        for pair in pairs if _variance_mismatch(pair, by_row))
+    if long_format:
+        hits['label_ambiguous'] = sorted((index, group['label'])
+                                         for group in label_collisions(rows, entries, pairs) for index in group['rows'])
     warnings = []
     for code, found in hits.items():
         if not found:

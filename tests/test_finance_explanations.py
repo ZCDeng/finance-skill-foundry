@@ -1053,6 +1053,113 @@ def test_generic_value_column_uses_row_unit_without_relaxing_ratio_or_count(serv
     assert checked["status"] == "pass", checked["issues"]
 
 
+def test_a_value_in_百分点_reads_as_points_and_the_body_may_quote_it(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "99999999999999999999999999999998",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(18,4)"},
+                {"name": "unit", "type": "VARCHAR"},
+                {"name": "metric_label", "type": "VARCHAR"},
+            ],
+            "rows": [{"metric_key": "collection_rate_gap", "value": "3.3000", "unit": "百分点",
+                      "metric_label": "收缴率缺口"}],
+        },
+    })
+    fact = next(fact for fact in prepare_explanation(store.analysis, [run])["facts"] if fact["column"] == "value")
+
+    # Written as it is, never ×100 and never a percentage.
+    assert (fact["display_value"], fact["unit"], fact["value"]) == ("3.30 个百分点", "百分点", "3.3000")
+
+    checked = store.validate_explanation({
+        "body": "收缴率缺口 3.30 个百分点。",
+        "run_ids": [run["id"]],
+        "fact_ids": [fact["id"]],
+    })
+    codes = {issue["code"] for issue in checked["issues"]}
+    assert not codes & {"uncited_number", "fact_unit_mismatch"}, checked["issues"]
+
+
+def _points_run(store, value="3.3000", run_id="99999999999999999999999999999998"):
+    return _write_synthetic_run(store.analysis, {
+        "id": run_id,
+        "bindings": {},
+        "assumptions": {},
+        "reproducibility_status": "unverified",
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(18,4)"},
+                {"name": "unit", "type": "VARCHAR"},
+                {"name": "metric_label", "type": "VARCHAR"},
+            ],
+            "rows": [{"metric_key": "collection_rate_gap", "value": value, "unit": "百分点",
+                      "metric_label": "收缴率缺口"}],
+        },
+    })
+
+
+@pytest.mark.parametrize(("exact", "shown"), [
+    ("2.345", "2.35 个百分点"),
+    ("-2.345", "-2.35 个百分点"),
+    ("-0.001", "0.00 个百分点"),
+    ("-0.0000", "0.00 个百分点"),
+    ("1234.5", "1,234.50 个百分点"),
+    ("-1234567.125", "-1,234,567.13 个百分点"),
+])
+def test_points_read_as_the_result_area_shows_them(exact, shown):
+    from foundry.finance_explanations import _display_value
+
+    # businessResults.ts decimalToFixed: half away from zero, thousands grouped, never -0.00.
+    assert _display_value(exact, "value", "百分点") == shown
+    assert _display_value(exact, "value", " 百分点 ") == shown
+
+
+@pytest.mark.parametrize("prose", ["个百分点", "百分点"])
+def test_a_points_fact_followed_by_its_unit_in_prose_is_not_written_twice(service, prose):
+    from foundry.finance_explanations import prepare_explanation, render_fact_template
+
+    store, _ = service
+    run = _points_run(store)
+    fact = next(fact for fact in prepare_explanation(store.analysis, [run])["facts"] if fact["column"] == "value")
+    template = "收缴率缺口 {{fact:%s}} %s，较上月收窄。" % (fact["id"], prose)
+
+    assert render_fact_template(template, [fact]) == (f"收缴率缺口 3.30 {prose}，较上月收窄。", [fact["id"]])
+    # Without the unit in the prose the fact keeps its own.
+    assert render_fact_template("缺口 {{fact:%s}}。" % fact["id"], [fact])[0] == "缺口 3.30 个百分点。"
+    draft = store.save_explanation_draft({"body": template, "run_ids": [run["id"]], "fact_ids": [fact["id"]]})
+    assert draft["body"].startswith(f"收缴率缺口 3.30 {prose}，")
+
+
+def test_an_appendix_saved_before_points_had_their_own_display_stays_trusted(service, monkeypatch):
+    from foundry import finance_explanations
+
+    store, _ = service
+    run = _points_run(store)
+    # The display before 百分点 had its own: the exact value and the unit as written.
+    monkeypatch.setattr(finance_explanations, "_points_display", lambda exact: f"{exact} 百分点")
+    old = store.save_explanation_draft({"body": "收缴率缺口见计算依据。", "run_ids": [run["id"]]})
+    assert "3.3000 百分点" in old["body"] and old["explanation_check"]["status"] == "pass"
+    monkeypatch.undo()
+
+    checked = store.validate_explanation({"draft_id": old["id"]})
+    assert checked["status"] == "pass", checked["issues"]
+    assert finance_explanations.EVIDENCE_APPENDIX_RENDER_VERSION == 1
+    # Only the old display is accepted beside the new one: without it the appendix is the manager's, and its row
+    # heading counts as an uncited number.
+    monkeypatch.setattr(finance_explanations, "_legacy_points_prepared", lambda prepared: None)
+    assert store.validate_explanation({"draft_id": old["id"]})["status"] == "needs_attention"
+
+
 def test_chinese_wide_result_reads_row_unit_and_keeps_ratio_percent(service):
     from foundry.finance_explanations import prepare_explanation
 

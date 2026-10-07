@@ -258,7 +258,7 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
   if (value == null || value === '') return '—';
   if (semantics === 'ratio') return `${decimalToFixed(value, 2, 100)}%`;
   if (semantics === 'ratio_pct') return `${decimalToFixed(value, 2)}%`;
-  if (semantics === 'ratio_delta') return `${decimalToFixed(value, 2, 100)}个百分点`;
+  if (semantics === 'ratio_delta') return `${decimalToFixed(value, 2, 100)} 个百分点`;
   if (semantics === 'amount') return decimalToFixed(value, 2);
   if (typeof value === 'object') return JSON.stringify(value);
   const metric = metricLabel(value) ?? String(value);
@@ -267,10 +267,11 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
 
 /**
  * One value as every part of the result area shows it, by its declared unit alone (KTD9): a fraction reads ×100
- * as a percentage, a percent as written with %, an unmarked value as written and said to be so. Without a table
- * unit it keeps the semantics it was given.
+ * as a percentage, a percent as written with %, a 百分点 difference as written with 个百分点, an unmarked value as
+ * written and said to be so. Without a table unit it keeps the semantics it was given.
  */
 function formatUnitValue(value: unknown, kind: UnitKind | null | undefined, semantics: FieldSemantics = 'amount'): string {
+  if (kind === 'points') return value == null || value === '' ? '—' : `${decimalToFixed(value, 2)} 个百分点`;
   if (kind === 'decimal') return formatBusinessValue(value, 'ratio');
   if (kind === 'percent') return formatBusinessValue(value, 'ratio_pct');
   if (kind === 'unmarked') return value == null || value === '' ? '—' : `${typeof value === 'object' ? JSON.stringify(value) : String(value)}（未标单位）`;
@@ -285,12 +286,13 @@ export function formatBusinessCell(value: unknown, column: DisplayColumn, row: R
   if (column.name.toLowerCase() === 'period' || column.name === '期间') return value == null || value === '' ? '—' : formatPeriod(value);
   // A long-form value column mixes amounts and ratios; the row's own unit says which, as its declaration read it.
   if (column.name === 'value') return formatUnitValue(value, rowUnitKind(row), column.semantics);
-  // A ratio or percent row's value already reads 3.30%, so its unit says % rather than 比率 or pct. A row without a
-  // value, or with an amount or unmarked unit, keeps its unit as written.
+  // A ratio or percent row's value already reads 3.30%, so its unit says % rather than 比率 or pct, and a 百分点 row's
+  // 个百分点. A row without a value, or with an amount or unmarked unit, keeps its unit as written.
   const unitName = column.name.toLowerCase();
   if ((unitName === 'unit' || unitName === '单位') && nonEmpty(row.value)) {
     const kind = rowUnitKind(row);
     if (kind === 'decimal' || kind === 'percent') return '%';
+    if (kind === 'points') return '个百分点';
   }
   return formatBusinessValue(value, column.semantics);
 }
@@ -304,8 +306,10 @@ function sourceColumn(row: Record<string, unknown>): unknown {
   return row.source ?? row.source_note ?? row['来源'] ?? row['口径与来源'];
 }
 
+// The row's unit as the backend reads it (result_semantics.py _unit, finance_explanations.py _row_unit): the first of
+// unit, 单位 that is neither null nor empty, so 「unit: ''」 beside 「单位: '百分点'」 reads 百分点 everywhere.
 function unitColumn(row: Record<string, unknown>): unknown {
-  return row.unit ?? row['单位'];
+  return ['unit', '单位'].map((field) => row[field]).find((value) => value != null && value !== '');
 }
 
 // Where a row names its organization, in order; organization_id is an identifier, not a name, and is read nowhere.
@@ -400,17 +404,20 @@ function canonicalBasis(row: Record<string, unknown>): string {
 // is a different comparison and is left unpaired. A bare year (actual_2026) is
 // left unpaired too: it cannot tell year-to-date from the full year.
 const scenarioWithPeriod = /^(actual|budget|variance)_(\d{1,2}_\d{1,2}|\d{4}_\d{2})$/;
-// The unit table (KTD9, result_semantics.py FRACTION_UNITS / PERCENT_UNITS / UNMARKED_UNITS). 比率 and ratio
-// hold a fraction (0.945 = 94.5%); %, pct and 百分比 a percent; 「-」 says no unit was marked. Only the unit
-// converts a value; a name never does.
+// The unit table (KTD9, result_semantics.py FRACTION_UNITS / PERCENT_UNITS / UNMARKED_UNITS / POINT_UNITS). 比率 and
+// ratio hold a fraction (0.945 = 94.5%); %, pct and 百分比 a percent; 「-」 says no unit was marked; 百分点 a
+// difference of two percentages as written (3.3 = 3.3 个百分点, never ×100). Only the unit converts a value; a name
+// never does.
 const fractionUnits = new Set(['比率', 'ratio']);
 const ratioUnits = new Set([...fractionUnits, '%', 'pct', '百分比']);
 const unmarkedUnits = new Set(['-']);
+const pointUnits = new Set(['百分点']);
 
 /** How a row's unit reads its value (result_semantics.py unit_kind); null for an amount unit or none. */
-type UnitKind = 'amount' | 'decimal' | 'percent' | 'unmarked';
+type UnitKind = 'amount' | 'decimal' | 'percent' | 'unmarked' | 'points';
 function unitKind(unit: unknown): UnitKind | null {
   const text = String(unit ?? '').trim().toLowerCase();
+  if (pointUnits.has(text)) return 'points';
   if (fractionUnits.has(text)) return 'decimal';
   if (ratioUnits.has(text)) return 'percent';
   if (unmarkedUnits.has(text)) return 'unmarked';
@@ -444,6 +451,8 @@ function longScenarioEntry(row: Record<string, unknown>): { measure: CanonicalMe
   if (!scenario) return null;
   const metric = String(rowMetric(row) ?? '');
   const kind = unitKind(unitColumn(row));
+  // A difference of two percentages fills no comparison, as result_semantics.py _comparison reads it.
+  if (kind === 'points') return null;
   // 「-」 states no unit: such a 达成率 is kept out of its comparison (unmarked), and an amount in it fills none.
   const unmarked = kind === 'unmarked';
   const ratioUnit = kind === 'decimal' || kind === 'percent';
@@ -976,6 +985,9 @@ export function rowBasisLabel(row: Record<string, unknown>): string {
  *   the base metric a pair reads it as (revenue_variance stays revenue_variance).
  * - A group with two or more distinct keys is a collision; one key under one name (this year and last year of one
  *   metric) is told apart by its scenario and is not. Groups and their keys keep first-appearance order.
+ * - The backend warns by the estimates of the run's own declaration (its rows and pinned requirements version). An
+ *   estimate the task's latest requirements add at read time marks the row here (__estimate) but does not recompute
+ *   label_ambiguous, so the two sides can differ by a group then.
  */
 export type LabelCollision = { organization: string; period: string; label: string; keys: string[]; rows: Record<string, unknown>[] };
 

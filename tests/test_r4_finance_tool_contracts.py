@@ -255,6 +255,6 @@ def test_script_tool_descriptions_carry_the_result_row_contract_in_both_shipped_
         # Metric and scenario names, the period-suffix form, the unit table, the 口径 label and the basis column.
         for term in ("metric_key", "revenue", "scenario", "actual_1_8", "budget_2026_08", "比率", "ratio", "小数",
                      "pct", "百分比", "百分数", "未标单位", "metric_label", "口径", "basis", "estimate",
-                     "row_declarations.warnings"):
+                     "row_declarations.warnings", "百分点", "label_ambiguous", "写出对象"):
             assert term in text, (tool, term)
     assert "warnings" in descriptions["analysis-job-output"]

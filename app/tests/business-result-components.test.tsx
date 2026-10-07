@@ -273,7 +273,7 @@ describe('business result components', () => {
     const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
     expect(within(table).getByRole('cell', { name: '41,469.63' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '93.90%' })).toBeTruthy();
-    expect(within(table).getByRole('cell', { name: '-0.65个百分点' })).toBeTruthy();
+    expect(within(table).getByRole('cell', { name: '-0.65 个百分点' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '04表B5/B33' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'YTD' }));
     const updated = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
@@ -982,7 +982,7 @@ describe('business result components', () => {
       }] }} />);
     expect(screen.getByText(/修订 4 → 修订 5 · 需要处理 · 2 项问题 · 1 个可比指标/)).toBeTruthy();
     expect(screen.getByText(/94.53% → 93.90%/)).toBeTruthy();
-    expect(screen.getByText(/1.23个百分点 → -0.65个百分点/)).toBeTruthy();
+    expect(screen.getByText(/1.23 个百分点 → -0.65 个百分点/)).toBeTruthy();
   });
 
   it('renders long-form value regressions with the financial scenario and unit', () => {
