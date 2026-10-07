@@ -1924,6 +1924,12 @@ def test_writing_guidance_states_the_three_number_rules_without_forcing_two_deci
     assert "{{fact:FACT_ID}}" in rules
     assert "3.30%" in rules and "3.30 个百分点" in rules
     assert "两位小数" not in rules
+    # Until amounts render in their final format, only amount rows keep the placeholder; ratio and %/pct rows are
+    # hand-written percentages whose claims carry every field the check needs.
+    assert "金额行用 {{fact:FACT_ID}} 占位符并原样保留" in rules and "缺千分位" in rules
+    assert "比率行和 %、pct、「百分比」行不用占位符" in rules
+    assert "basis=calculation、run_id、row、column、value、fact_id 和 presentation" in rules
+    assert "比率行 scale 用 percent，%、pct、「百分比」行 scale 用 identity" in rules
 
 
 def test_hand_typed_amount_and_ratio_pass_with_presentation_and_fail_without(service):
@@ -1969,14 +1975,76 @@ def test_percent_unit_rows_are_written_as_their_value_with_a_percent_sign(servic
     with_percent = check("收缴率缺口 3.30%。", pct_run, pct_fact,
                          [_presentation_claim_for_fact(pct_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})])
     rate = check("收缴率 90.20%。", percent_run, percent_fact)
+    wide_run, wide_fact = _synthetic_single_value_fact(
+        store, run_id="a4545454545454545454545454545454", value="90.2", unit="％", metric_key="collection_rate",
+    )
+    wide = check("收缴率 90.2%。", wide_run, wide_fact)
 
     # Written by the rule, these rows raise no issue, so completion has nothing to repair.
     assert written["status"] == "pass", written["issues"]
     assert plain["status"] == "pass", plain["issues"]
     assert rate["status"] == "pass", rate["issues"]
+    # A full-width ％ unit is a percent unit too (result_semantics.PERCENT_UNITS).
+    assert wide["status"] == "pass", wide["issues"]
     assert any(issue["code"] == "uncited_number" and issue["text"] == "3.31%" for issue in other["issues"])
     assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "percent_requires_ratio_fact"
                for issue in with_percent["issues"])
+
+
+def test_percent_unit_row_rounds_with_an_identity_presentation(service):
+    store, _ = service
+    run, fact = _synthetic_single_value_fact(
+        store, run_id="a6666666666666666666666666666666", value="3.2547", unit="pct", metric_key="collection_gap",
+    )
+    claim = _presentation_claim_for_fact(fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"})
+
+    rounded = store.validate_explanation({"body": "收缴率缺口 3.25%。", "run_ids": [run["id"]], "claims": [claim]})
+    wrong = store.validate_explanation({"body": "收缴率缺口 3.26%。", "run_ids": [run["id"]], "claims": [claim]})
+
+    assert rounded["status"] == "pass", rounded["issues"]
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "3.26%" for issue in wrong["issues"])
+
+
+def test_percent_unit_rows_multiplied_by_100_do_not_pass(service):
+    store, _ = service
+    pct_run, pct_fact = _synthetic_single_value_fact(
+        store, run_id="a7777777777777777777777777777777", value="3.3", unit="pct", metric_key="collection_gap",
+    )
+    percent_run, percent_fact = _synthetic_single_value_fact(
+        store, run_id="a8888888888888888888888888888888", value="90.2547", unit="%", metric_key="collection_rate",
+    )
+
+    pct = store.validate_explanation({"body": "收缴率缺口 330%。", "run_ids": [pct_run["id"]], "fact_ids": [pct_fact["id"]]})
+    percent = store.validate_explanation({"body": "收缴率 9025.47%。", "run_ids": [percent_run["id"]], "fact_ids": [percent_fact["id"]]})
+
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "330%" for issue in pct["issues"])
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "9025.47%" for issue in percent["issues"])
+
+
+def test_each_row_written_by_the_rules_passes_the_number_check(service):
+    """The writing rules and the number check say the same: an amount placeholder, a hand-written ratio percentage
+    with a percent presentation, and a hand-written pct row with an identity presentation all pass."""
+    store, _ = service
+    amount_run, amount_fact = _synthetic_single_value_fact(
+        store, run_id="a9999999999999999999999999999999", value="325644.0000", metric_key="revenue",
+    )
+    ratio_run, ratio_fact = _synthetic_single_value_fact(
+        store, run_id="b1111111111111111111111111111111", value="0.945301", unit="比率", metric_key="achievement_ratio",
+    )
+    pct_run, pct_fact = _synthetic_single_value_fact(
+        store, run_id="b2222222222222222222222222222222", value="3.2547", unit="pct", metric_key="collection_gap",
+    )
+    draft = store.save_explanation_draft({
+        "title": "规则",
+        "body": "1-8 月营业收入 {{fact:%s}}，达成率 94.53%%，收缴率缺口 3.25%%。" % amount_fact["id"],
+        "run_ids": [amount_run["id"], ratio_run["id"], pct_run["id"]],
+        "fact_ids": [amount_fact["id"]],
+        "claims": [
+            _presentation_claim_for_fact(ratio_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"}),
+            _presentation_claim_for_fact(pct_fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"}),
+        ],
+    })
+    assert draft["explanation_check"]["status"] == "pass", draft["explanation_check"]["issues"]
 
 
 def test_fact_placeholder_keeps_its_rendered_display_and_passes(service):

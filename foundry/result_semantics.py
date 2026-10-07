@@ -96,10 +96,10 @@ RESULT_METRIC_LABELS = {
     '营业利润': '营业利润',
 }
 
-# The unit table (KTD9): 比率 and ratio hold a fraction (0.945 = 94.5%), %, pct and 百分比 a percent, and 「-」
+# The unit table (KTD9): 比率 and ratio hold a fraction (0.945 = 94.5%), % (or full-width ％), pct and 百分比 a percent, and 「-」
 # says no unit was marked. Only the declared unit converts a value; a name never does.
 FRACTION_UNITS = frozenset({'比率', 'ratio'})
-PERCENT_UNITS = frozenset({'%', 'pct', '百分比'})
+PERCENT_UNITS = frozenset({'%', '％', 'pct', '百分比'})
 UNMARKED_UNITS = frozenset({'-'})
 # 百分点 holds a difference of two percentages as written: 3.3 is 3.3 个百分点, never ×100. It fills no comparison.
 POINT_UNITS = frozenset({'百分点'})

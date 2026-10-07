@@ -12,6 +12,7 @@ from typing import Any
 from foundry.analysis import BASIS, _hash, _safe_text
 from foundry.analysis_data import json_value
 from foundry.errors import FoundryError
+from foundry.result_semantics import PERCENT_UNITS
 
 FACT_TOKEN = re.compile(r"\{\{fact:([0-9a-f]{64})\}\}")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![A-Za-z0-9_.])")
@@ -40,8 +41,8 @@ WRITING_GUIDANCE = {
         "多个驱动、条件或不确定性使用条列或比较表，条件贴近相关判断。",
         "完整公式、桥接计算和口径说明独立成段或小表，不塞进长句。",
         "来源定位使用章节末附注 [^n]；不得补造原因、行动、空值或未授权来源。",
-        "数字照三条写：手写的金额和数量加千分位（325,644.00 万元）；{{fact:FACT_ID}} 原样保留，不因渲染出的小数位或缺千分位改成手写；手写数字需要舍入或把比率写成百分数时，正文写展示值，对应 claim 带 fact_id 和 presentation（decimal_places，比率 scale 用 percent、其余 identity，rounding 为 half_up），由服务复核。",
-        "结果行里「比率」或 ratio 是小数，正文写成百分数（94.53%）并带 percent presentation；单位为 %、pct 或「百分比」的行本身已是百分数，正文写原数加 %（3.30%），不加 presentation；单位为「百分点」的差值行写「3.30 个百分点」。不写「比率以小数表示」这类格式说明。正文、运行说明和假设里不写内部字段名（metric_key、scenario、currency/unit），改写成指标、情景、币种和单位。",
+        "数字照三条写：手写的金额和数量加千分位（325,644.00 万元）；金额行用 {{fact:FACT_ID}} 占位符并原样保留，不因渲染出的小数位或缺千分位改成手写；比率行和 %、pct、「百分比」行不用占位符，正文手写百分数，对应 claim 写全 basis=calculation、run_id、row、column、value、fact_id 和 presentation（decimal_places，rounding 为 half_up；比率行 scale 用 percent，%、pct、「百分比」行 scale 用 identity），由服务复核；其他手写的舍入数同样带 presentation（scale 用 identity）。",
+        "结果行里「比率」或 ratio 是小数，正文写成百分数（94.53%）；单位为 %、pct 或「百分比」的行本身已是百分数，正文写展示值加 %（3.30%），不乘 100；单位为「百分点」的差值行写「3.30 个百分点」。不写「比率以小数表示」这类格式说明。正文、运行说明和假设里不写内部字段名（metric_key、scenario、currency/unit），改写成指标、情景、币种和单位。",
     ],
 }
 
@@ -449,6 +450,10 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     percent_values = _percent_number_values(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
+    # A number written with % never reads a %/pct row's value as a fraction: 330% is not that row's 3.3.
+    percent_token_allowed_numbers = _allowed_numbers(
+        [by_id[fact_id] for fact_id in referenced if fact_id in by_id and not _fact_has_percent_unit(by_id[fact_id])]
+    )
     ignored_number_spans = [
         *_generated_appendix_heading_number_spans(body, prepared),
         *_generated_appendix_label_number_spans(body, generated_regions, prepared),
@@ -456,9 +461,10 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
-        if normalized in base_allowed_numbers:
-            continue
-        if _is_cited_percent_number(token["text"], percent_values):
+        if token["text"].endswith("%"):
+            if normalized in percent_token_allowed_numbers or _is_cited_percent_number(token["text"], percent_values):
+                continue
+        elif normalized in base_allowed_numbers:
             continue
         if normalized in presentation["numbers"] and _presentation_token_unit_matches(body, token, presentation["numbers"][normalized]):
             continue
@@ -2102,8 +2108,10 @@ def _presentation_number(claim: dict, fact: dict | None) -> tuple[dict | None, d
     except InvalidOperation:
         return None, {**base_issue, "reason": "presentation_rounding_failed"}
     rendered = format(rounded, f".{decimal_places}f")
-    unit = "%" if scale == "percent" else str(fact.get("unit") or "").strip()
-    if scale == "percent":
+    # A %/pct row is already a percentage: identity rounds it and writes it with %, as a ratio's percent scale does.
+    percent_row = scale == "identity" and _fact_has_percent_unit(fact)
+    unit = "%" if scale == "percent" or percent_row else str(fact.get("unit") or "").strip()
+    if scale == "percent" or percent_row:
         rendered += "%"
     return {"number": _normalize_number(rendered), "unit": unit}, None
 
@@ -2205,14 +2213,18 @@ def _fact_number(fact: dict) -> str:
     return _normalize_number(str(value))
 
 
-# Units whose value already is a percentage: 3.3 in such a row is written 3.3%, not 330%.
-PERCENT_VALUE_UNITS = {"%", "pct", "百分比"}
+def _fact_has_percent_unit(fact: dict) -> bool:
+    """A value whose row unit is %, ％, pct or 百分比 already holds a percentage (result_semantics.PERCENT_UNITS): 3.3 is
+    written 3.3%. A ratio column's facts also read unit % (_fact_unit), but that % is how its fraction is shown."""
+    if _is_ratio_column(str(fact.get("column") or "")):
+        return False
+    return re.sub(r"\s+", "", str(fact.get("unit") or "")).lower() in PERCENT_UNITS
 
 
 def _percent_number_values(facts: list[dict]) -> set[Decimal]:
     values = set()
     for fact in facts:
-        if re.sub(r"\s+", "", str(fact.get("unit") or "")).lower() not in PERCENT_VALUE_UNITS:
+        if not _fact_has_percent_unit(fact):
             continue
         try:
             values.add(Decimal(str(fact["value"])))
