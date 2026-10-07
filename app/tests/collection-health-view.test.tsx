@@ -40,6 +40,8 @@ describe('回款与现金', () => {
     const worst = within(bodyRows[0]).getByText('-6.94 个百分点');
     expect(worst.className).toContain('fnd-figure--negative');
     expect(within(bodyRows[0]).getAllByText('红').length).toBeGreaterThan(0);
+    // The risk radar's score sits at the end of the row, with its own light.
+    expect(within(bodyRows[0]).getByText('3 分')).toBeTruthy();
   });
 
   it('draws the scatter and the group’s sensitivity grid with the current cell marked', () => {

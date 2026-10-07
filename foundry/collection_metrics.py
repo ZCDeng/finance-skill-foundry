@@ -52,6 +52,15 @@ DEFAULT_PARAMS: dict[str, str] = {
     "impairment_progress_flag": "0.5",
     # Last year's same-period share of its full year below this makes the pace meaningless.
     "seasonal_share_min": "0.1",
+    "renewal_exposure_yellow": "0.15",
+    "renewal_exposure_red": "0.25",
+    # Risk radar: score bands and the signals that are not other metrics' lights.
+    "risk_red_at": "6",
+    "risk_orange_at": "4",
+    "risk_yellow_at": "2",
+    "risk_revenue_decline": "0.05",
+    "risk_collection_drop": "0.03",
+    "risk_budget_lag": "0.10",
     # Break-even sensitivity grid.
     "matrix_margin_from": "0.10",
     "matrix_margin_to": "0.30",
@@ -69,6 +78,19 @@ INPUT_LABELS: dict[str, str] = {
     "net_profit_le": "净利润最新预估（LE）",
     "impairment_py_full": "上年全年减值损失",
     "months_elapsed": "已过月数",
+    "area_begin": "在管面积年初",
+    "area_end": "在管面积期末",
+    "area_exit": "低效退场面积",
+    "area_nonrenewal": "到期未续约面积",
+    "contract_revenue": "合同确认收入合计",
+    "revenue_at_risk": "12个月内到期及拟退场合同的确认收入",
+    "billed_exiting": "拟退场合同账单",
+    "collected_exiting": "拟退场合同实收",
+    "billed_staying": "在约合同账单",
+    "collected_staying": "在约合同实收",
+    "headcount": "在岗人数",
+    "operating_profit": "营业利润（本期）",
+    "revenue_budget_full": "全年收入预算",
     "cost": "营业成本（本期）",
     "gross_profit": "毛利（本期）",
     "period_expense": "期间费用（本期）",
@@ -95,10 +117,12 @@ INPUT_LABELS: dict[str, str] = {
 }
 """Every input a metric may read. A name ending in _py is the same input for the prior-year period."""
 
-COUNT_INPUTS = frozenset({"months_elapsed"})
+COUNT_INPUTS = frozenset({"months_elapsed", "headcount"})
+AREA_INPUTS = frozenset({"area_begin", "area_end", "area_exit", "area_nonrenewal"})
+"""Counts carry no money unit. months_elapsed has no prior-year form; a prior headcount is still a headcount."""
 RATE_INPUTS = frozenset({"collection_rate_current", "collection_rate_total", "gross_margin", "expense_ratio"})
 
-LEVEL_LABELS = {"red": "红", "yellow": "黄", "green": "绿", "unknown": "无法判断"}
+LEVEL_LABELS = {"red": "红", "orange": "橙", "yellow": "黄", "green": "绿", "unknown": "无法判断"}
 
 COLUMNS = [
     "entity",
@@ -195,7 +219,7 @@ def _input_name(name: Any) -> str:
     base = name[:-3] if name.endswith("_py") else name
     if base not in INPUT_LABELS:
         raise FoundryError(f"unknown collection_health input: {name}")
-    if name.endswith("_py") and base in COUNT_INPUTS:
+    if name.endswith("_py") and base == "months_elapsed":
         raise FoundryError(f"{name}: {base} has no prior-year counterpart")
     return name
 
@@ -237,6 +261,7 @@ def resolve_entities(
         sources: dict[str, dict] = {}
         manual: set[str] = set()
         units: dict[str, str] = {}
+        area_units: dict[str, str | None] = {}
         for key, ref in refs.items():
             key = _input_name(key)
             rate = key.removesuffix("_py") in RATE_INPUTS
@@ -253,6 +278,17 @@ def resolve_entities(
             if not isinstance(column, str) or not column:
                 raise FoundryError(f"{where} requires a column")
             candidates = rows_by_alias[alias]
+            if "sum_where" in ref:
+                if rate or key.removesuffix("_py") == "months_elapsed":
+                    raise FoundryError(f"{where}: only an amount or a headcount is summed over rows")
+                total, refs = _sum_rows(candidates, ref, column, where)
+                values[key] = total
+                sources[key] = refs
+                if key.removesuffix("_py") in AREA_INPUTS:
+                    area_units[key] = _unit(ref.get("unit"))
+                elif key.removesuffix("_py") not in COUNT_INPUTS:
+                    units[key] = _unit(ref.get("unit") or units_by_alias.get(alias))
+                continue
             if "source_row" in ref:
                 if "match" in ref:
                     raise FoundryError(f"{where} gives both match and source_row; give one")
@@ -281,8 +317,10 @@ def resolve_entities(
             if column not in row:
                 raise FoundryError(f"{where} column {column} is not in {alias}")
             values[key] = _parse_cell(row[column], limit=limit, scale=ref.get("scale"), where=where)
-            sources[key] = {**row["source"], "column": column}
-            if not rate and key not in COUNT_INPUTS:
+            sources[key] = [{**row["source"], "column": column}]
+            if key.removesuffix("_py") in AREA_INPUTS:
+                area_units[key] = _unit(ref.get("unit") or row.get("unit"))
+            elif not rate and key.removesuffix("_py") not in COUNT_INPUTS:
                 unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
                 units[key] = _unit(unit)
         months = values.get("months_elapsed")
@@ -293,6 +331,9 @@ def resolve_entities(
             raise FoundryError(
                 f"{name} mixes amount units {', '.join(distinct)}; ratios across units are wrong"
             )
+        areas = sorted({unit for unit in area_units.values() if unit})
+        if len(areas) > 1:
+            raise FoundryError(f"{name} mixes area units {', '.join(areas)}")
         unknown = sorted(key for key, unit in units.items() if not unit)
         if distinct and unknown:
             raise FoundryError(
@@ -306,6 +347,7 @@ def resolve_entities(
                 "sources": sources,
                 "manual": manual,
                 "unit": distinct[0] if distinct else None,
+                "area_unit": areas[0] if areas else None,
                 # A row of a detail table, or a unit named on its own (often the group total over those rows).
                 "origin": raw.get("origin") or "declared",
                 "sensitivity": bool(raw.get("sensitivity")),
@@ -322,6 +364,33 @@ def _unit(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return UNIT_ALIASES.get(text, text)
+
+
+def _sum_rows(rows: list[dict], ref: dict, column: str, where: str) -> tuple[Decimal, list[dict]]:
+    """Σ column over the rows whose columns hold one of the listed texts (a contract ledger filtered by status).
+
+    require_columns skips rows where any of those columns is blank, so a numerator and denominator summed apart
+    read the same rows.
+    """
+    conditions = ref["sum_where"]
+    if not isinstance(conditions, dict):
+        raise FoundryError(f"{where} sum_where must be an object {{column: text or [texts]}}")
+    wanted = {col: {str(item).strip() for item in (texts if isinstance(texts, list) else [texts])}
+              for col, texts in conditions.items()}
+    total, refs = Decimal(0), []
+    for row in rows:
+        if not all(str(row.get(col) if row.get(col) is not None else "").strip() in texts for col, texts in wanted.items()):
+            continue
+        if column not in row:
+            raise FoundryError(f"{where} column {column} is not in the table")
+        # A collection rate sums 实收 and 账单 apart: both sides must skip the rows where either is blank.
+        if _blank(row[column]) or any(_blank(row.get(other)) for other in ref.get("require_columns") or []):
+            continue
+        total += _parse_cell(row[column], limit=None, scale=ref.get("scale"), where=where)
+        refs.append({**row["source"], "column": column})
+    if not refs:
+        raise FoundryError(f"{where} matched no row with a figure ({conditions})")
+    return total, refs
 
 
 def _blank(value: Any) -> bool:
@@ -595,6 +664,29 @@ def _m_impairment_progress(v, p) -> Computed:
     return abs(v["impairment_py"]) / abs(v["impairment_py_full"]), ["impairment_py", "impairment_py_full"], False
 
 
+def _m_area_growth(v, p) -> Computed:
+    if not _need(v, "area_begin", "area_end"):
+        return None
+    value = _div(v["area_end"] - v["area_begin"], v["area_begin"])
+    return None if value is None else (value, ["area_begin", "area_end"], False)
+
+
+def _m_area_exit(v, p) -> Computed:
+    parts = [name for name in ("area_exit", "area_nonrenewal") if name in v]
+    if not parts or "area_begin" not in v:
+        return None
+    value = _div(sum((v[name] for name in parts), Decimal(0)), v["area_begin"])
+    return None if value is None else (value, sorted({*parts, "area_begin"}), False)
+
+
+def _m_exiting_gap(v, p) -> Computed:
+    names = ("collected_exiting", "billed_exiting", "collected_staying", "billed_staying")
+    if not _need(v, *names) or v["billed_exiting"] == 0 or v["billed_staying"] == 0:
+        return None
+    return (v["collected_exiting"] / v["billed_exiting"] - v["collected_staying"] / v["billed_staying"],
+            list(names), False)
+
+
 METRICS: list[dict[str, Any]] = [
     {"key": "gross_margin", "label": "毛利率", "kind": "ratio", "fn": _m_gross_margin,
      "formula": "毛利 ÷ 营业收入"},
@@ -646,6 +738,23 @@ METRICS: list[dict[str, Any]] = [
      "formula": "（LE − 按去年节奏的全年数）÷ 按去年节奏的全年数"},
     {"key": "impairment_progress_py", "label": "去年同期减值占全年比重", "kind": "ratio",
      "fn": _m_impairment_progress, "formula": "上年同期减值 ÷ 上年全年减值（均按绝对值）"},
+    {"key": "area_net_growth", "label": "在管面积净增率", "kind": "ratio", "fn": _m_area_growth,
+     "formula": "（期末 − 年初）÷ 年初"},
+    {"key": "area_exit_share", "label": "退场与未续约面积占年初", "kind": "ratio", "fn": _m_area_exit,
+     "formula": "（低效退场 + 到期未续约）÷ 年初面积"},
+    {"key": "renewal_exposure", "label": "续约风险敞口", "kind": "ratio", "fn": _share("revenue_at_risk", "contract_revenue"),
+     "formula": "12个月内到期及拟退场合同的确认收入 ÷ 合同确认收入合计"},
+    {"key": "exiting_collection_rate", "label": "拟退场合同收缴率", "kind": "ratio",
+     "fn": _share("collected_exiting", "billed_exiting"), "formula": "拟退场合同实收 ÷ 账单"},
+    {"key": "staying_collection_rate", "label": "在约合同收缴率", "kind": "ratio",
+     "fn": _share("collected_staying", "billed_staying"), "formula": "在约合同实收 ÷ 账单"},
+    {"key": "exiting_collection_gap", "label": "拟退场比在约合同收缴率", "kind": "pp", "fn": _m_exiting_gap,
+     "formula": "拟退场合同收缴率 − 在约合同收缴率"},
+    {"key": "revenue_per_head", "label": "人均创收", "kind": "amount", "fn": _share("revenue", "headcount"),
+     "formula": "营业收入 ÷ 在岗人数", "unit": lambda entity: f"{entity['unit']}/人" if entity.get("unit") else "每人"},
+    {"key": "area_per_head", "label": "人均在管面积", "kind": "amount", "fn": _share("area_end", "headcount"),
+     "formula": "期末在管面积 ÷ 在岗人数",
+     "unit": lambda entity: f"{entity['area_unit']}/人" if entity.get("area_unit") else "面积/人"},
 ]
 METRIC_KEYS = tuple(metric["key"] for metric in METRICS)
 
@@ -676,6 +785,14 @@ _METRIC_INPUTS = {
     "net_profit_full_year_linear": ("net_profit", "months_elapsed"),
     "net_profit_le_gap": ("net_profit", "net_profit_py", "net_profit_py_full", "net_profit_le"),
     "impairment_progress_py": ("impairment_py", "impairment_py_full"),
+    "area_net_growth": ("area_begin", "area_end"),
+    "area_exit_share": ("area_begin", "area_exit|area_nonrenewal"),
+    "renewal_exposure": ("revenue_at_risk", "contract_revenue"),
+    "exiting_collection_rate": ("collected_exiting", "billed_exiting"),
+    "staying_collection_rate": ("collected_staying", "billed_staying"),
+    "exiting_collection_gap": ("collected_exiting", "billed_exiting", "collected_staying", "billed_staying"),
+    "revenue_per_head": ("revenue", "headcount"),
+    "area_per_head": ("area_end", "headcount"),
     "related_party_provision_ratio": ("related_provision", "related_ar"),
 }
 
@@ -699,6 +816,14 @@ def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[s
         if value < p["impairment_progress_flag"]:
             return "yellow", "去年减值大半在后几个月确认，今年剩余月份还会有减值"
         return "green", ""
+    if key == "renewal_exposure":
+        if value > p["renewal_exposure_red"]:
+            return "red", "四分之一以上的收入来自快到期或拟退场的合同"
+        if value > p["renewal_exposure_yellow"]:
+            return "yellow", ""
+        return "green", ""
+    if key == "exiting_collection_gap" and value < 0:
+        return None, "拟退场合同收得比在约合同差，退场多因收缴不足"
     if key in {"revenue_full_year_linear", "net_profit_full_year_linear"}:
         return None, "线性外推只作对照，不进结论"
     if key in {"collection_gap", "collection_gap_total"}:
@@ -838,8 +963,9 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
             notes.append("含手填数：" + "、".join(_input_label(name) for name in manual))
         if estimate:
             notes.append("估算")
-        unit = UNIT_BY_KIND.get(kind, entity.get("unit"))
-        change_unit = CHANGE_UNIT_BY_KIND.get(kind, entity.get("unit"))
+        own = metric["unit"](entity) if "unit" in metric else entity.get("unit")
+        unit = UNIT_BY_KIND.get(kind, own)
+        change_unit = CHANGE_UNIT_BY_KIND.get(kind, own)
 
         def row(scenario, number, row_unit, read, is_estimate, *, signed=False, judged=False):
             shown = _shown(kind, number) if row_unit in {"%", "百分点"} else number
@@ -858,7 +984,7 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
                 "formula": metric["formula"],
                 "note": "；".join(notes) if judged else ("估算" if is_estimate else ""),
                 "inputs": {name: format(values[name], "f") for name in read},
-                "source_rows": [entity["sources"][name] for name in read if name in entity["sources"]],
+                "source_rows": [ref for name in read for ref in entity["sources"].get(name, [])],
             }
 
         rows.append(row("本期", value, unit, used, estimate, signed=kind == "pp", judged=True))
@@ -867,7 +993,90 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
             both = sorted({*used, *compare_used})
             rows.append(row("变动", change, change_unit, both, estimate or compare_estimate, signed=True))
     _provision_follow_up(rows)
+    risk = _risk_row(entity, values, computed, params)
+    if risk:
+        rows.append(risk)
     return rows, skipped
+
+
+def _risk_signals(values: dict, computed: dict, p: dict) -> list[tuple[str, int, str]]:
+    """(signal, points, hit | clear | unknown) for each screening signal of the risk radar."""
+    out: list[tuple[str, int, str]] = []
+
+    def add(label: str, points: int | None) -> None:
+        out.append((label, points or 0, "unknown" if points is None else "hit" if points else "clear"))
+
+    add("营业利润为负", None if "operating_profit" not in values else 2 if values["operating_profit"] < 0 else 0)
+    share = computed.get("impairment_to_gross_profit")
+    gp = _gross_profit(values)
+    if share is None or (gp is not None and gp[0] <= 0):
+        add("减值占毛利高", None)
+    else:
+        add("减值占毛利高", 2 if share > p["impairment_red_above"] else 1 if share > p["impairment_yellow_above"] else 0)
+    dso = computed.get("dso")
+    if dso is None or computed.get("ttm_revenue", Decimal(1)) <= 0:
+        add("应收天数长", None)
+    else:
+        add("应收天数长", 2 if dso > p["dso_red_above"] else 1 if dso > p["dso_yellow_above"] else 0)
+    gap = computed.get("collection_gap")
+    add("收缴率低于生死线", None if gap is None else 2 if gap < p["gap_severe_below"] else 1 if gap < 0 else 0)
+    if _need(values, "collection_rate_current", "collection_rate_current_py"):
+        drop = values["collection_rate_current_py"] - values["collection_rate_current"]
+        add("收缴率同比下降", 1 if drop > p["risk_collection_drop"] else 0)
+    else:
+        add("收缴率同比下降", None)
+    if _need(values, "revenue", "revenue_py") and values["revenue_py"] > 0:
+        add("收入同比下滑", 1 if (values["revenue"] - values["revenue_py"]) / values["revenue_py"] < -p["risk_revenue_decline"] else 0)
+    else:
+        add("收入同比下滑", None)
+    if _need(values, "revenue", "revenue_budget_full", "months_elapsed") and values["revenue_budget_full"] > 0:
+        pace = values["revenue"] / (values["revenue_budget_full"] * values["months_elapsed"] / 12)
+        add("收入预算进度落后", 1 if pace < 1 - p["risk_budget_lag"] else 0)
+    else:
+        add("收入预算进度落后", None)
+    return out
+
+
+RISK_INPUTS = ("operating_profit", "impairment", "revenue", "cost", "gross_profit", "ar_end", "contract_assets_end",
+               "revenue_ttm", "revenue_py_full", "revenue_py", "period_expense", "gross_margin", "expense_ratio",
+               "collection_rate_current", "collection_rate_current_py", "revenue_budget_full", "months_elapsed")
+
+
+def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | None:
+    """A screening score from the signals the entity's inputs allow. Not a rating, and never counted in the close."""
+    signals = _risk_signals(values, computed, p)
+    known = [signal for signal in signals if signal[2] != "unknown"]
+    if len(known) < 2:
+        return None
+    score = sum(points for _, points, status in signals if status == "hit")
+    level = ("red" if score >= p["risk_red_at"] else "orange" if score >= p["risk_orange_at"]
+             else "yellow" if score >= p["risk_yellow_at"] else "green")
+    hits = [f"{label}（{points}分）" for label, points, status in signals if status == "hit"]
+    unknown = [label for label, _, status in signals if status == "unknown"]
+    notes = [("触发：" + "、".join(hits)) if hits else "未触发信号"]
+    if unknown:
+        notes.append("无法判断：" + "、".join(unknown))
+    notes.append("筛查提示，不是评级，不计入月结")
+    read = [name for name in RISK_INPUTS if name in values]
+    return {
+        "entity": entity["name"],
+        "entity_origin": entity.get("origin", "declared"),
+        "metric_key": "risk_score",
+        "metric_label": "风险雷达得分",
+        "scenario": "本期",
+        "value": str(score),
+        "unit": "分",
+        "display_value": f"{score} 分",
+        "level": level,
+        "level_label": LEVEL_LABELS[level],
+        "estimate": False,
+        "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；"
+                   "低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；"
+                   "收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+        "note": "；".join(notes),
+        "inputs": {name: format(values[name], "f") for name in read},
+        "source_rows": [ref for name in read for ref in entity["sources"].get(name, [])],
+    }
 
 
 def _provision_follow_up(rows: list[dict]) -> None:

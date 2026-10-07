@@ -613,3 +613,97 @@ def test_full_year_pace_refuses_a_tiny_share_a_ytd_loss_a_reversal_and_a_prior_m
     assert rows["impairment_progress_py"]["level"] == "unknown"
     with pytest.raises(FoundryError, match="no prior-year counterpart"):
         _rows({"revenue": "50", "revenue_py": "40", "months_elapsed": "6", "months_elapsed_py": "0"})
+
+
+LEDGER = [
+    {"合同": "A", "续约状态": "正常在约", "确认收入": "600", "账单": "600", "实收": "570", "在岗人数": "30", "source": {"source_row": 1}},
+    {"合同": "B", "续约状态": "12个月内到期", "确认收入": "200", "账单": "200", "实收": "176", "在岗人数": "10", "source": {"source_row": 2}},
+    {"合同": "C", "续约状态": "拟退场", "确认收入": "100", "账单": "100", "实收": "60", "在岗人数": "6", "source": {"source_row": 3}},
+    {"合同": "D", "续约状态": "正常在约", "确认收入": "100", "账单": None, "实收": "95", "在岗人数": "4", "source": {"source_row": 4}},
+]
+
+
+def test_contract_ledger_sums_give_renewal_exposure_and_exiting_collection():
+    def total(column, *statuses, **extra):
+        where = {"续约状态": list(statuses)} if statuses else {"合同": ["A", "B", "C", "D"]}
+        return {"alias": "ledger", "column": column, "sum_where": where, **extra}
+
+    entities = resolve_entities(
+        {
+            "entities": [
+                {
+                    "name": "集团",
+                    "values": {
+                        "contract_revenue": total("确认收入"),
+                        "revenue_at_risk": total("确认收入", "12个月内到期", "拟退场"),
+                        "billed_exiting": total("账单", "拟退场"),
+                        "collected_exiting": total("实收", "拟退场"),
+                        "billed_staying": total("账单", "正常在约", "12个月内到期", require_columns=["账单", "实收"]),
+                        "collected_staying": total("实收", "正常在约", "12个月内到期", require_columns=["账单", "实收"]),
+                        "revenue": total("确认收入"),
+                        "headcount": total("在岗人数"),
+                        "area_begin": {"alias": "area", "match": {"项目": "年初"}, "column": "面积"},
+                        "area_end": {"alias": "area", "match": {"项目": "年末"}, "column": "面积"},
+                        "area_exit": {"alias": "area", "match": {"项目": "低效退场"}, "column": "面积"},
+                        "area_nonrenewal": {"alias": "area", "match": {"项目": "到期未续约"}, "column": "面积"},
+                    },
+                }
+            ]
+        },
+        {
+            "ledger": LEDGER,
+            "area": [
+                {"项目": "年初", "面积": "18840", "unit": "万㎡", "source": {"source_row": 1}},
+                {"项目": "年末", "面积": "20000", "unit": "万㎡", "source": {"source_row": 2}},
+                {"项目": "低效退场", "面积": "300", "unit": "万㎡", "source": {"source_row": 3}},
+                {"项目": "到期未续约", "面积": "200", "unit": "万㎡", "source": {"source_row": 4}},
+            ],
+        },
+        {"ledger": "万元", "area": None},
+    )
+    rows = {row["metric_key"]: row for row in evaluate_collection_health(entities, resolve_params({}))["rows"]
+            if row["scenario"] == "本期"}
+    assert Decimal(rows["renewal_exposure"]["value"]) == Decimal("30")
+    assert rows["renewal_exposure"]["level"] == "red"
+    assert len(rows["renewal_exposure"]["source_rows"]) == 6  # 4 rows for the total, 2 at risk
+    assert Decimal(rows["exiting_collection_rate"]["value"]) == Decimal("60")
+    # The staying side skips D's blank bill: 746 of 800.
+    assert Decimal(rows["staying_collection_rate"]["value"]) == Decimal("746") / Decimal("800") * 100
+    assert "退场多因收缴不足" in rows["exiting_collection_gap"]["note"]
+    assert rows["revenue_per_head"]["unit"] == "万元/人" and Decimal(rows["revenue_per_head"]["value"]) == 20
+    assert rows["area_per_head"]["unit"] == "万㎡/人" and Decimal(rows["area_per_head"]["value"]) == 400
+    assert Decimal(rows["area_exit_share"]["value"]) == Decimal("500") / Decimal("18840") * 100
+
+
+def test_sum_where_refuses_a_rate_and_a_filter_that_matches_nothing():
+    rows = {"ledger": LEDGER}
+    with pytest.raises(FoundryError, match="only an amount"):
+        resolve_entities({"entities": [{"name": "x", "values": {
+            "collection_rate_current": {"alias": "ledger", "column": "实收", "sum_where": {"合同": "A"}}}}]}, rows)
+    with pytest.raises(FoundryError, match="matched no row"):
+        resolve_entities({"entities": [{"name": "x", "values": {
+            "revenue": {"alias": "ledger", "column": "确认收入", "sum_where": {"续约状态": "已续签待生效"}}}}]}, rows)
+
+
+def test_risk_radar_adds_the_signals_it_can_read_and_names_the_rest():
+    rows, _ = _rows(
+        {
+            **GROUP,
+            "operating_profit": "-5",
+            "collection_rate_current": "0.80",
+            "collection_rate_current_py": "0.85",
+            "revenue_budget_full": "1800",
+            "months_elapsed": "8",
+        }
+    )
+    risk = rows["risk_score"]
+    # Loss 2, impairment 16% of gross profit 1, DSO 136.58 days 1, 8.3pp below the line 2, rate down 5pp 1,
+    # revenue up on last year 0, 1000 of a 1200 pace (83%) 1.
+    assert risk["value"] == "8" and risk["level"] == "red" and risk["display_value"] == "8 分"
+    assert "营业利润为负（2分）" in risk["note"] and "不计入月结" in risk["note"]
+    assert "无法判断" not in risk["note"]
+    rows, _ = _rows({"revenue": "100", "revenue_py": "90", "cost": "80", "period_expense": "5"})
+    assert "risk_score" not in rows  # one readable signal is not a radar
+    rows, _ = _rows({"revenue": "100", "revenue_py": "90", "cost": "80", "period_expense": "5",
+                     "collection_rate_current": "0.9"})
+    assert rows["risk_score"]["level"] == "green" and "无法判断：营业利润为负" in rows["risk_score"]["note"]
