@@ -524,6 +524,17 @@ describe('business result presentation', () => {
     ]);
   });
 
+  it.each([
+    ['2.345', '2.35 个百分点'],
+    ['-0.001', '0.00 个百分点'],
+    ['-1234567.125', '-1,234,567.13 个百分点'],
+  ])('reads a 百分点 value %s as the backend displays it, %s', (value, shown) => {
+    const column: DisplayColumn = { name: 'value', type: 'DECIMAL', label: '数值', semantics: 'amount' };
+    expect(formatBusinessCell(value, column, { value, unit: '百分点' })).toBe(shown);
+    // An empty unit gives way to 单位, as result_semantics.py and the facts read it.
+    expect(formatBusinessCell(value, column, { value, unit: '', 单位: '百分点' })).toBe(shown);
+  });
+
   it('never pairs a row whose unit is - as a budget amount', () => {
     const current = run({
       result: {

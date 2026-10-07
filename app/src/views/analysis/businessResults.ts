@@ -306,8 +306,10 @@ function sourceColumn(row: Record<string, unknown>): unknown {
   return row.source ?? row.source_note ?? row['来源'] ?? row['口径与来源'];
 }
 
+// The row's unit as the backend reads it (result_semantics.py _unit, finance_explanations.py _row_unit): the first of
+// unit, 单位 that is neither null nor empty, so 「unit: ''」 beside 「单位: '百分点'」 reads 百分点 everywhere.
 function unitColumn(row: Record<string, unknown>): unknown {
-  return row.unit ?? row['单位'];
+  return ['unit', '单位'].map((field) => row[field]).find((value) => value != null && value !== '');
 }
 
 // Where a row names its organization, in order; organization_id is an identifier, not a name, and is read nowhere.
@@ -983,6 +985,9 @@ export function rowBasisLabel(row: Record<string, unknown>): string {
  *   the base metric a pair reads it as (revenue_variance stays revenue_variance).
  * - A group with two or more distinct keys is a collision; one key under one name (this year and last year of one
  *   metric) is told apart by its scenario and is not. Groups and their keys keep first-appearance order.
+ * - The backend warns by the estimates of the run's own declaration (its rows and pinned requirements version). An
+ *   estimate the task's latest requirements add at read time marks the row here (__estimate) but does not recompute
+ *   label_ambiguous, so the two sides can differ by a group then.
  */
 export type LabelCollision = { organization: string; period: string; label: string; keys: string[]; rows: Record<string, unknown>[] };
 

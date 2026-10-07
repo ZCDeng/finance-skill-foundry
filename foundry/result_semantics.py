@@ -175,6 +175,12 @@ def _text(value: Any) -> str:
     return '' if value is None else str(value)
 
 
+def _unit(row: dict) -> str:
+    """The row's unit as its facts read it (finance_explanations._row_unit): the first of unit, 单位 that is neither
+    null nor empty, so 「unit: ''」 beside 「单位: '百分点'」 is in 百分点 on every side."""
+    return _text(next((row[key] for key in ('unit', '单位') if row.get(key) not in (None, '')), None))
+
+
 def _scenario_measure(row: dict) -> dict | None:
     scenario = _text(_first(row, ('scenario', '情景'))).strip().lower()
     if not scenario:
@@ -212,7 +218,7 @@ def _comparison(row: dict) -> dict | None:
     if scenario is None:
         return None
     metric = _text(_first(row, METRIC_FIELDS))
-    unit_kind = _unit_kind(_text(_first(row, ('unit', '单位'))).strip().lower())
+    unit_kind = _unit_kind(_unit(row).strip().lower())
     # A difference of two percentages is neither an amount nor a 达成率 (revenue_achievement_ratio in 百分点 included).
     if unit_kind == 'points':
         return None
@@ -284,7 +290,7 @@ def _declare_row(index: int, row: dict, long_format: bool, requirements: dict | 
     row = json_value(row)
     comparison = _comparison(row) if long_format else None
     role = ROLES[comparison['measure']] if comparison else None
-    unit = _text(_first(row, ('unit', '单位'))).strip()
+    unit = _unit(row).strip()
     unit_kind = _unit_kind(unit.lower())
     if unit_kind is None and role is not None:
         unit_kind = 'unmarked' if role == 'ratio' else 'amount'
@@ -334,8 +340,9 @@ def _contract_message(code: str, count: int, names: list[str]) -> str:
                 '以免结论与所引实际、预算的方向相反。差异行应写实际减预算，不写按利润影响取正负的数；'
                 '请核对实际、预算与差异是否取自同一口径，改好后重跑。')
     if code == 'label_ambiguous':
-        return (f'{_names(names)} 在同一组织、同一期间里被不同指标的 {count} 行共用，结果区只能在名字后补指标键区分。'
-                '请在 metric_label 写出对象（如「收入完成率」「营业利润完成率」），改好后重跑。')
+        return (f'{_names(names)} 在同一组织、同一期间里被 {count} 行没有进入配对的结果行共用，这些行的指标键不同，'
+                '结果区只能在名字后补中文名或指标键区分。请在 metric_label 写出对象（如「收入完成率」「营业利润完成率」），'
+                '改好后重跑。')
     return (f'{count} 行的文字写了估算用语，但依据列 basis 没有写 estimate。这些行仍按估算显示；'
             '请在这些行的 basis 列写 estimate，估算就不只靠文字识别。')
 
@@ -361,6 +368,11 @@ def label_collisions(rows: list[dict], entries: list[dict], pairs: list[dict] = 
     Organization: organization, region, 区域, the first not null, as a string. Period: period, else 期间, unformatted.
     Label: _shown_label. Key: the row's own first METRIC_FIELDS value, never the base metric a pair reads it as. Two or
     more keys under one name is a collision; groups and their keys keep first-appearance order.
+
+    The estimate a label is shown with is the declaration's own: the row's signals and the requirements version the
+    run is pinned to. Estimates the task's latest requirements add at read time (merge_latest) do not recompute the
+    warning, so where they give a row 「（估算）」 the result area may tell apart a group the warning still names, or
+    the other way round.
     """
     by_row = {entry['row']: entry for entry in entries}
     used = {index for pair in pairs

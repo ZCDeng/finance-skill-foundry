@@ -609,11 +609,17 @@ def test_the_shared_collision_sample_reports_the_groups_the_result_area_finds():
     sample = json.loads(LABEL_COLLISIONS.read_text(encoding='utf-8'))
     declaration = declare(sample['rows'], columns=sample['columns'])
 
-    assert declaration['pairs'] == []
+    # The 华东区域 profit actual and budget pair, so neither takes part though the budget's label matches a group.
+    paired = [(sample['rows'][index]['metric_key'], sample['rows'][index]['scenario'])
+              for pair in declaration['pairs'] for index in pair['members'].values()]
+    assert paired == [('profit', 'actual_1_8'), ('profit', 'budget_1_8')]
     assert collisions(declaration, sample['rows']) == sample['label_collisions']
+    # A label that is a metric code reads as its Chinese name, as the result area shows it.
+    assert {'organization': '集团合并', 'period': '2026', 'label': '收入',
+            'keys': ['revenue_actual_ly', 'revenue_le']} in sample['label_collisions']
     warning = warnings_by_code(declaration)['label_ambiguous']
-    members = sorted(index for group in result_semantics.label_collisions(sample['rows'], declaration['rows'])
-                     for index in group['rows'])
+    members = sorted(index for group in result_semantics.label_collisions(
+        sample['rows'], declaration['rows'], declaration['pairs']) for index in group['rows'])
     assert (warning['severity'], warning['rows'], warning['row_count']) == ('warning', members, len(members))
     assert warning['names'] == [group['label'] for group in sample['label_collisions']]
     assert '1-8 月实际÷全年 BUD' in warning['message'] and 'metric_label' in warning['message']
@@ -686,6 +692,15 @@ def test_a_difference_of_percentages_in_百分点_reads_as_points_and_pairs_with
     assert [(entry['role'], entry['unit_kind'], entry['value']) for entry in entries[3:]] == [(None, 'points', None)] * 3
     assert [sorted(pair['members']) for pair in declaration['pairs']] == [['actual', 'budget', 'variance']]
     assert declaration['warnings'] == []
+
+
+def test_an_empty_unit_gives_way_to_单位_as_the_facts_read_it():
+    gap = {**BASE, 'metric_key': 'collection_rate_gap', 'organization': '集团合并', 'scenario': 'actual_1_8',
+           'value': '3.3000', 'unit': '', '单位': '百分点', 'metric_label': '收缴率缺口'}
+    ratio = {**HUACHEN_ROWS[3], 'unit': '', '单位': '比率'}
+    entries = declare([gap, ratio], columns=[*COLUMNS, '单位'])['rows']
+    assert [(entry['unit'], entry['unit_kind'], entry['role']) for entry in entries] == [
+        ('百分点', 'points', None), ('比率', 'decimal', 'ratio')]
 
 
 # Pairs and conclusion sentences (R6, KTD7): the declaration pairs its rows as the result area does, and says in one
