@@ -19,7 +19,7 @@ export type HealthRow = {
   level: Level | null; level_label: string | null; estimate: boolean; formula: string; note: string;
 };
 
-type Level = 'red' | 'yellow' | 'green' | 'unknown';
+type Level = 'red' | 'orange' | 'yellow' | 'green' | 'unknown';
 
 export type SensitivityGrid = {
   entity: string; expense_ratio: string; gross_margins: string[]; collection_rates: string[]; cells: string[][];
@@ -42,10 +42,11 @@ const POSITION_COLUMNS: { key: string; label: string }[] = [
   { key: 'dso', label: '应收天数' },
   { key: 'cash_collection_ratio', label: '现金回收比' },
   { key: 'impairment_to_gross_profit', label: '减值占毛利' },
+  { key: 'risk_score', label: '风险雷达' },
 ];
 
 const LEVEL_ICONS: Record<Level, typeof CircleAlert> = {
-  red: CircleAlert, yellow: CircleMinus, green: CircleCheck, unknown: CircleDashed,
+  red: CircleAlert, orange: CircleAlert, yellow: CircleMinus, green: CircleCheck, unknown: CircleDashed,
 };
 
 export function LevelMark({ level, label }: { level: Level | null; label: string | null }) {

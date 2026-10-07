@@ -1,9 +1,9 @@
 {
- "id": "eebde417f17748679ef8a3b9d90fe630",
- "task_id": "42bd8becb8414370a66a4a4e7d48df90",
- "analysis_id": "1609a5215e66415da788e73f1d9e97ac",
+ "id": "7a8a358ed6cf47bd9d498329a1619ca2",
+ "task_id": "ebc898a7ebd54c748d6e3f01de8dbbb4",
+ "analysis_id": "4ca5388bc7694828bffd98170373df82",
  "schema_version": 1,
- "created_at": "2026-10-07T21:59:42Z",
+ "created_at": "2026-10-07T22:51:40Z",
  "execution_status": "succeeded",
  "reproducibility_status": "unverified",
  "review_status": "unreviewed",
@@ -216,6 +216,21 @@
     "note": ""
    },
    {
+    "entity": "上海城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "0",
+    "unit": "分",
+    "display_value": "0 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "未触发信号；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
+   },
+   {
     "entity": "合肥城市公司",
     "entity_origin": "table",
     "metric_key": "gross_margin",
@@ -289,6 +304,21 @@
     "estimate": false,
     "formula": "减值损失（绝对值）÷ 毛利",
     "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "0",
+    "unit": "分",
+    "display_value": "0 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "未触发信号；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
    },
    {
     "entity": "广州城市公司",
@@ -366,6 +396,21 @@
     "note": ""
    },
    {
+    "entity": "广州城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "0",
+    "unit": "分",
+    "display_value": "0 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "未触发信号；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
+   },
+   {
     "entity": "中山城市公司",
     "entity_origin": "table",
     "metric_key": "gross_margin",
@@ -439,6 +484,21 @@
     "estimate": false,
     "formula": "减值损失（绝对值）÷ 毛利",
     "note": ""
+   },
+   {
+    "entity": "中山城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "0",
+    "unit": "分",
+    "display_value": "0 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "未触发信号；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
    },
    {
     "entity": "北京城市公司",
@@ -516,6 +576,21 @@
     "note": ""
    },
    {
+    "entity": "北京城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "1",
+    "unit": "分",
+    "display_value": "1 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
+   },
+   {
     "entity": "大连城市公司",
     "entity_origin": "table",
     "metric_key": "gross_margin",
@@ -589,6 +664,21 @@
     "estimate": false,
     "formula": "减值损失（绝对值）÷ 毛利",
     "note": ""
+   },
+   {
+    "entity": "大连城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "2",
+    "unit": "分",
+    "display_value": "2 分",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）、收缴率低于生死线（1分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
    },
    {
     "entity": "武汉城市公司",
@@ -666,6 +756,21 @@
     "note": ""
    },
    {
+    "entity": "武汉城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "1",
+    "unit": "分",
+    "display_value": "1 分",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
+   },
+   {
     "entity": "宜昌城市公司",
     "entity_origin": "table",
     "metric_key": "gross_margin",
@@ -739,6 +844,21 @@
     "estimate": false,
     "formula": "减值损失（绝对值）÷ 毛利",
     "note": ""
+   },
+   {
+    "entity": "宜昌城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "2",
+    "unit": "分",
+    "display_value": "2 分",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）、收缴率低于生死线（1分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
    },
    {
     "entity": "成都城市公司",
@@ -816,6 +936,21 @@
     "note": ""
    },
    {
+    "entity": "成都城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "2",
+    "unit": "分",
+    "display_value": "2 分",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）、收缴率低于生死线（1分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
+   },
+   {
     "entity": "兰州城市公司",
     "entity_origin": "table",
     "metric_key": "gross_margin",
@@ -889,15 +1024,30 @@
     "estimate": false,
     "formula": "减值损失（绝对值）÷ 毛利",
     "note": ""
+   },
+   {
+    "entity": "兰州城市公司",
+    "entity_origin": "table",
+    "metric_key": "risk_score",
+    "metric_label": "风险雷达得分",
+    "scenario": "本期",
+    "value": "3",
+    "unit": "分",
+    "display_value": "3 分",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+    "note": "触发：减值占毛利高（1分）、收缴率低于生死线（2分）；无法判断：应收天数长、收缴率同比下降、收入同比下滑、收入预算进度落后；筛查提示，不是评级，不计入月结"
    }
   ],
-  "row_count": 55,
+  "row_count": 65,
   "truncated": false,
   "diagnostics": [
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "集团 有 12 项指标缺输入，未计算",
+    "message": "集团 有 27 项指标缺输入，未计算",
     "entity": "集团",
     "skipped": [
      {
@@ -989,13 +1139,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "上海城市公司 有 12 项指标缺输入，未计算",
+    "message": "上海城市公司 有 27 项指标缺输入，未计算",
     "entity": "上海城市公司",
     "skipped": [
      {
@@ -1088,13 +1351,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "合肥城市公司 有 12 项指标缺输入，未计算",
+    "message": "合肥城市公司 有 27 项指标缺输入，未计算",
     "entity": "合肥城市公司",
     "skipped": [
      {
@@ -1187,13 +1563,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "广州城市公司 有 12 项指标缺输入，未计算",
+    "message": "广州城市公司 有 27 项指标缺输入，未计算",
     "entity": "广州城市公司",
     "skipped": [
      {
@@ -1286,13 +1775,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "中山城市公司 有 12 项指标缺输入，未计算",
+    "message": "中山城市公司 有 27 项指标缺输入，未计算",
     "entity": "中山城市公司",
     "skipped": [
      {
@@ -1385,13 +1987,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "北京城市公司 有 12 项指标缺输入，未计算",
+    "message": "北京城市公司 有 27 项指标缺输入，未计算",
     "entity": "北京城市公司",
     "skipped": [
      {
@@ -1484,13 +2199,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "大连城市公司 有 12 项指标缺输入，未计算",
+    "message": "大连城市公司 有 27 项指标缺输入，未计算",
     "entity": "大连城市公司",
     "skipped": [
      {
@@ -1583,13 +2411,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "武汉城市公司 有 12 项指标缺输入，未计算",
+    "message": "武汉城市公司 有 27 项指标缺输入，未计算",
     "entity": "武汉城市公司",
     "skipped": [
      {
@@ -1682,13 +2623,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "宜昌城市公司 有 12 项指标缺输入，未计算",
+    "message": "宜昌城市公司 有 27 项指标缺输入，未计算",
     "entity": "宜昌城市公司",
     "skipped": [
      {
@@ -1781,13 +2835,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "成都城市公司 有 12 项指标缺输入，未计算",
+    "message": "成都城市公司 有 27 项指标缺输入，未计算",
     "entity": "成都城市公司",
     "skipped": [
      {
@@ -1880,13 +3047,126 @@
        "related_provision",
        "related_ar"
       ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
+      ]
      }
     ]
    },
    {
     "severity": "info",
     "code": "collection_metric_skipped",
-    "message": "兰州城市公司 有 12 项指标缺输入，未计算",
+    "message": "兰州城市公司 有 27 项指标缺输入，未计算",
     "entity": "兰州城市公司",
     "skipped": [
      {
@@ -1978,6 +3258,119 @@
       "needs": [
        "related_provision",
        "related_ar"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_seasonal",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full"
+      ]
+     },
+     {
+      "metric_key": "revenue_full_year_linear",
+      "needs": [
+       "revenue",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "revenue_le_gap",
+      "needs": [
+       "revenue",
+       "revenue_py",
+       "revenue_py_full",
+       "revenue_le"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_seasonal",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full"
+      ]
+     },
+     {
+      "metric_key": "net_profit_full_year_linear",
+      "needs": [
+       "net_profit",
+       "months_elapsed"
+      ]
+     },
+     {
+      "metric_key": "net_profit_le_gap",
+      "needs": [
+       "net_profit",
+       "net_profit_py",
+       "net_profit_py_full",
+       "net_profit_le"
+      ]
+     },
+     {
+      "metric_key": "impairment_progress_py",
+      "needs": [
+       "impairment_py",
+       "impairment_py_full"
+      ]
+     },
+     {
+      "metric_key": "area_net_growth",
+      "needs": [
+       "area_begin",
+       "area_end"
+      ]
+     },
+     {
+      "metric_key": "area_exit_share",
+      "needs": [
+       "area_begin",
+       "area_exit|area_nonrenewal"
+      ]
+     },
+     {
+      "metric_key": "renewal_exposure",
+      "needs": [
+       "revenue_at_risk",
+       "contract_revenue"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_rate",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting"
+      ]
+     },
+     {
+      "metric_key": "staying_collection_rate",
+      "needs": [
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "exiting_collection_gap",
+      "needs": [
+       "collected_exiting",
+       "billed_exiting",
+       "collected_staying",
+       "billed_staying"
+      ]
+     },
+     {
+      "metric_key": "revenue_per_head",
+      "needs": [
+       "revenue",
+       "headcount"
+      ]
+     },
+     {
+      "metric_key": "area_per_head",
+      "needs": [
+       "area_end",
+       "headcount"
       ]
      }
     ]
