@@ -680,7 +680,7 @@ def test_sum_where_refuses_a_rate_and_a_filter_that_matches_nothing():
     with pytest.raises(FoundryError, match="only an amount"):
         resolve_entities({"entities": [{"name": "x", "values": {
             "collection_rate_current": {"alias": "ledger", "column": "实收", "sum_where": {"合同": "A"}}}}]}, rows)
-    with pytest.raises(FoundryError, match="matched no row"):
+    with pytest.raises(FoundryError, match="found no figure"):
         resolve_entities({"entities": [{"name": "x", "values": {
             "revenue": {"alias": "ledger", "column": "确认收入", "sum_where": {"续约状态": "已续签待生效"}}}}]}, rows)
 
@@ -707,3 +707,43 @@ def test_risk_radar_adds_the_signals_it_can_read_and_names_the_rest():
     rows, _ = _rows({"revenue": "100", "revenue_py": "90", "cost": "80", "period_expense": "5",
                      "collection_rate_current": "0.9"})
     assert rows["risk_score"]["level"] == "green" and "无法判断：营业利润为负" in rows["risk_score"]["note"]
+
+
+def test_sum_where_guards_against_silent_misreads():
+    rows = {"t": [
+        {"城市": "A", "编号": 1.0, "人": "3", "unit": "人", "source": {"source_row": 1}},
+        {"城市": "B", "编号": 2, "人": "4", "unit": "人", "source": {"source_row": 2}},
+        {"城市": "合计", "编号": None, "人": "7", "source": {"source_row": 3}},
+    ]}
+
+    def resolve(values):
+        return resolve_entities({"entities": [{"name": "x", "values": values}]}, rows)
+
+    # A number cell matches the same number written as text.
+    assert resolve({"headcount": {"alias": "t", "column": "人", "sum_where": {"编号": ["1", "2"]}}})[0]["values"]["headcount"] == 7
+    with pytest.raises(FoundryError, match="at least one column"):
+        resolve({"headcount": {"alias": "t", "column": "人", "sum_where": {}}})
+    with pytest.raises(FoundryError, match="cannot sit beside"):
+        resolve_entities({"entity_tables": [{"alias": "t", "name_column": "城市", "columns": {
+            "headcount": {"column": "人", "sum_where": {"城市": ["A", "B"]}}}}]}, rows)
+    with pytest.raises(FoundryError, match="column 账单X is not in the table"):
+        resolve({"headcount": {"alias": "t", "column": "人", "sum_where": {"城市": "A"}, "require_columns": ["账单X"]}})
+    mixed = {"t": [
+        {"城市": "A", "金额": "3", "unit": "元", "source": {"source_row": 1}},
+        {"城市": "B", "金额": "4", "unit": "万元", "source": {"source_row": 2}},
+    ]}
+    with pytest.raises(FoundryError, match="one unit at a time"):
+        resolve_entities({"entities": [{"name": "x", "values": {
+            "revenue": {"alias": "t", "column": "金额", "sum_where": {"城市": ["A", "B"]}}}}]}, mixed)
+
+
+def test_risk_radar_orange_and_a_formula_that_follows_its_parameters():
+    values = {**GROUP, "operating_profit": "-5", "collection_rate_current": "0.86"}
+    rows, _ = _rows(values)
+    # Loss 2, impairment 16% 1, DSO 136.58 days 1, 2.3pp below the line 1: 5 points.
+    assert rows["risk_score"]["value"] == "5" and rows["risk_score"]["level"] == "orange"
+    assert rows["risk_score"]["level_label"] == "橙"
+    assert rows["risk_score"]["estimate"] is True and "估算" in rows["risk_score"]["note"]
+    rows, _ = _rows(values, risk_red_at="5", impairment_red_above="0.15")
+    assert rows["risk_score"]["level"] == "red"
+    assert "不低于 5 分红" in rows["risk_score"]["formula"] and "超过 15% 2 分" in rows["risk_score"]["formula"]

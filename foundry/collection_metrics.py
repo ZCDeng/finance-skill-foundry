@@ -279,15 +279,22 @@ def resolve_entities(
                 raise FoundryError(f"{where} requires a column")
             candidates = rows_by_alias[alias]
             if "sum_where" in ref:
+                if "match" in ref or "source_row" in ref:
+                    raise FoundryError(f"{where}: sum_where reads many rows; it cannot sit beside match, "
+                                       "source_row or an entity_tables column")
                 if rate or key.removesuffix("_py") == "months_elapsed":
                     raise FoundryError(f"{where}: only an amount or a headcount is summed over rows")
-                total, refs = _sum_rows(candidates, ref, column, where)
+                total, cells, row_units = _sum_rows(candidates, ref, column, where)
                 values[key] = total
-                sources[key] = refs
+                sources[key] = cells
+                stated = _unit(ref.get("unit"))
+                if len(row_units) > 1 and not stated:
+                    raise FoundryError(f"{where} sums rows in {', '.join(sorted(row_units))}; one unit at a time")
+                row_unit = stated or (next(iter(row_units)) if row_units else None)
                 if key.removesuffix("_py") in AREA_INPUTS:
-                    area_units[key] = _unit(ref.get("unit"))
+                    area_units[key] = row_unit
                 elif key.removesuffix("_py") not in COUNT_INPUTS:
-                    units[key] = _unit(ref.get("unit") or units_by_alias.get(alias))
+                    units[key] = row_unit or _unit(units_by_alias.get(alias))
                 continue
             if "source_row" in ref:
                 if "match" in ref:
@@ -323,6 +330,9 @@ def resolve_entities(
             elif not rate and key.removesuffix("_py") not in COUNT_INPUTS:
                 unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
                 units[key] = _unit(unit)
+        for count in ("headcount", "headcount_py"):
+            if count in values and values[count] <= 0:
+                raise FoundryError(f"{name}.{count} must be positive")
         months = values.get("months_elapsed")
         if months is not None and not (1 <= months <= 12 and months == months.to_integral_value()):
             raise FoundryError(f"{name}.months_elapsed must be a whole number of months from 1 to 12")
@@ -334,6 +344,8 @@ def resolve_entities(
         areas = sorted({unit for unit in area_units.values() if unit})
         if len(areas) > 1:
             raise FoundryError(f"{name} mixes area units {', '.join(areas)}")
+        if areas and any(not unit for unit in area_units.values()):
+            raise FoundryError(f"{name} reads an area without a unit beside areas in {areas[0]}")
         unknown = sorted(key for key, unit in units.items() if not unit)
         if distinct and unknown:
             raise FoundryError(
@@ -366,31 +378,58 @@ def _unit(value: Any) -> str | None:
     return UNIT_ALIASES.get(text, text)
 
 
-def _sum_rows(rows: list[dict], ref: dict, column: str, where: str) -> tuple[Decimal, list[dict]]:
+def _same_text(cell: Any, wanted: set[str]) -> bool:
+    """A filter cell matches a listed text as written, or as the same number (1.0 is 1)."""
+    text = str(cell if cell is not None else "").strip()
+    if text in wanted:
+        return True
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return False
+    for item in wanted:
+        try:
+            if number.is_finite() and Decimal(item) == number:
+                return True
+        except InvalidOperation:
+            continue
+    return False
+
+
+def _sum_rows(rows: list[dict], ref: dict, column: str, where: str) -> tuple[Decimal, list[dict], set[str]]:
     """Σ column over the rows whose columns hold one of the listed texts (a contract ledger filtered by status).
 
     require_columns skips rows where any of those columns is blank, so a numerator and denominator summed apart
     read the same rows.
     """
     conditions = ref["sum_where"]
-    if not isinstance(conditions, dict):
-        raise FoundryError(f"{where} sum_where must be an object {{column: text or [texts]}}")
+    if not isinstance(conditions, dict) or not conditions:
+        raise FoundryError(f"{where} sum_where must name at least one column {{column: text or [texts]}}")
     wanted = {col: {str(item).strip() for item in (texts if isinstance(texts, list) else [texts])}
               for col, texts in conditions.items()}
-    total, refs = Decimal(0), []
+    if any(not texts for texts in wanted.values()):
+        raise FoundryError(f"{where} sum_where lists no text for a column")
+    required = list(ref.get("require_columns") or [])
+    present = {name for row in rows for name in row}
+    for name in [column, *wanted, *required]:
+        if name not in present:
+            raise FoundryError(f"{where} column {name} is not in the table")
+    total, cells, units, matched, blank = Decimal(0), [], set(), 0, 0
     for row in rows:
-        if not all(str(row.get(col) if row.get(col) is not None else "").strip() in texts for col, texts in wanted.items()):
+        if not all(_same_text(row.get(col), texts) for col, texts in wanted.items()):
             continue
-        if column not in row:
-            raise FoundryError(f"{where} column {column} is not in the table")
+        matched += 1
         # A collection rate sums 实收 and 账单 apart: both sides must skip the rows where either is blank.
-        if _blank(row[column]) or any(_blank(row.get(other)) for other in ref.get("require_columns") or []):
+        if _blank(row.get(column)) or any(_blank(row.get(other)) for other in required):
+            blank += 1
             continue
         total += _parse_cell(row[column], limit=None, scale=ref.get("scale"), where=where)
-        refs.append({**row["source"], "column": column})
-    if not refs:
-        raise FoundryError(f"{where} matched no row with a figure ({conditions})")
-    return total, refs
+        cells.append({**row["source"], "column": column})
+        if _unit(row.get("unit")):
+            units.add(_unit(row.get("unit")))
+    if not cells:
+        raise FoundryError(f"{where} found no figure: {matched} rows matched {conditions}, {blank} of them blank")
+    return total, cells, units
 
 
 def _blank(value: Any) -> bool:
@@ -751,10 +790,10 @@ METRICS: list[dict[str, Any]] = [
     {"key": "exiting_collection_gap", "label": "拟退场比在约合同收缴率", "kind": "pp", "fn": _m_exiting_gap,
      "formula": "拟退场合同收缴率 − 在约合同收缴率"},
     {"key": "revenue_per_head", "label": "人均创收", "kind": "amount", "fn": _share("revenue", "headcount"),
-     "formula": "营业收入 ÷ 在岗人数", "unit": lambda entity: f"{entity['unit']}/人" if entity.get("unit") else "每人"},
+     "formula": "营业收入 ÷ 在岗人数", "unit": lambda entity: f"{entity['unit']}/人" if entity.get("unit") else "/人"},
     {"key": "area_per_head", "label": "人均在管面积", "kind": "amount", "fn": _share("area_end", "headcount"),
      "formula": "期末在管面积 ÷ 在岗人数",
-     "unit": lambda entity: f"{entity['area_unit']}/人" if entity.get("area_unit") else "面积/人"},
+     "unit": lambda entity: f"{entity['area_unit']}/人" if entity.get("area_unit") else "/人"},
 ]
 METRIC_KEYS = tuple(metric["key"] for metric in METRICS)
 
@@ -818,7 +857,7 @@ def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[s
         return "green", ""
     if key == "renewal_exposure":
         if value > p["renewal_exposure_red"]:
-            return "red", "四分之一以上的收入来自快到期或拟退场的合同"
+            return "red", f"超过 {_pct(p['renewal_exposure_red'])} 的收入来自快到期或拟退场的合同"
         if value > p["renewal_exposure_yellow"]:
             return "yellow", ""
         return "green", ""
@@ -1029,9 +1068,15 @@ def _risk_signals(values: dict, computed: dict, p: dict) -> list[tuple[str, int,
         add("收入同比下滑", 1 if (values["revenue"] - values["revenue_py"]) / values["revenue_py"] < -p["risk_revenue_decline"] else 0)
     else:
         add("收入同比下滑", None)
-    if _need(values, "revenue", "revenue_budget_full", "months_elapsed") and values["revenue_budget_full"] > 0:
-        pace = values["revenue"] / (values["revenue_budget_full"] * values["months_elapsed"] / 12)
-        add("收入预算进度落后", 1 if pace < 1 - p["risk_budget_lag"] else 0)
+    share = None
+    if _need(values, "revenue_py", "revenue_py_full") and values["revenue_py_full"] > 0 and values["revenue_py"] > 0:
+        share = values["revenue_py"] / values["revenue_py_full"]  # last year's pace
+    elif "months_elapsed" in values:
+        share = values["months_elapsed"] / 12  # linear, when last year's pace is not given
+    if _need(values, "revenue", "revenue_budget_full") and values["revenue_budget_full"] > 0 and share:
+        pace = values["revenue"] / (values["revenue_budget_full"] * share)
+        add("收入预算进度落后" if "revenue_py_full" in values else "收入预算进度落后（按月数线性）",
+            1 if pace < 1 - p["risk_budget_lag"] else 0)
     else:
         add("收入预算进度落后", None)
     return out
@@ -1040,6 +1085,34 @@ def _risk_signals(values: dict, computed: dict, p: dict) -> list[tuple[str, int,
 RISK_INPUTS = ("operating_profit", "impairment", "revenue", "cost", "gross_profit", "ar_end", "contract_assets_end",
                "revenue_ttm", "revenue_py_full", "revenue_py", "period_expense", "gross_margin", "expense_ratio",
                "collection_rate_current", "collection_rate_current_py", "revenue_budget_full", "months_elapsed")
+
+
+def _pct(value: Decimal) -> str:
+    return f"{display_amount(value * 100).removesuffix('.00')}%"
+
+
+def _points(value: Decimal) -> str:
+    return f"{display_amount(abs(value) * 100).removesuffix('.00')} 个百分点"
+
+
+def _days(value: Decimal) -> str:
+    return f"{display_amount(value).removesuffix('.00')} 天"
+
+
+def _risk_formula(p: dict) -> str:
+    """The scoring rule as the parameters of this run set it."""
+    def n(value: Decimal) -> str:
+        return display_amount(value).removesuffix(".00")
+
+    return (
+        f"七项信号加总：营业利润为负 2 分；减值占毛利超过 {_pct(p['impairment_red_above'])} 2 分、"
+        f"超过 {_pct(p['impairment_yellow_above'])} 1 分；应收天数超过 {_days(p['dso_red_above'])} 2 分、"
+        f"超过 {_days(p['dso_yellow_above'])} 1 分；收缴率低于生死线超过 {_points(p['gap_severe_below'])} 2 分、"
+        f"低于 1 分；收缴率同比降超过 {_points(p['risk_collection_drop'])} 1 分；收入同比降超过 "
+        f"{_pct(p['risk_revenue_decline'])} 1 分；收入预算进度落后超过 {_points(p['risk_budget_lag'])} 1 分"
+        f"（按去年节奏，没有去年数时按月数线性）。不低于 {n(p['risk_red_at'])} 分红，不低于 "
+        f"{n(p['risk_orange_at'])} 分橙，不低于 {n(p['risk_yellow_at'])} 分黄，其余绿"
+    )
 
 
 def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | None:
@@ -1056,8 +1129,15 @@ def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | Non
     notes = [("触发：" + "、".join(hits)) if hits else "未触发信号"]
     if unknown:
         notes.append("无法判断：" + "、".join(unknown))
-    notes.append("筛查提示，不是评级，不计入月结")
     read = [name for name in RISK_INPUTS if name in values]
+    estimate = "dso" in computed and "revenue_ttm" not in values and any(
+        label == "应收天数长" and status != "unknown" for label, _, status in signals)
+    manual = sorted(name for name in read if name in entity["manual"])
+    if manual:
+        notes.append("含手填数：" + "、".join(_input_label(name) for name in manual))
+    if estimate:
+        notes.append("应收天数用估算的近12个月收入")
+    notes.append("筛查提示，不是评级，不计入月结")
     return {
         "entity": entity["name"],
         "entity_origin": entity.get("origin", "declared"),
@@ -1069,10 +1149,8 @@ def _risk_row(entity: dict, values: dict, computed: dict, p: dict) -> dict | Non
         "display_value": f"{score} 分",
         "level": level,
         "level_label": LEVEL_LABELS[level],
-        "estimate": False,
-        "formula": "七项信号加总：营业利润为负 2；减值占毛利 >30% 2、15–30% 1；应收天数 >180 天 2、120–180 天 1；"
-                   "低于生死线 5 个百分点以上 2、低于 1；收缴率同比降 3 个百分点以上 1；收入同比降 5% 以上 1；"
-                   "收入预算进度落后 10 个百分点以上 1。≥6 红，4–5 橙，2–3 黄，≤1 绿",
+        "estimate": estimate,
+        "formula": _risk_formula(p),
         "note": "；".join(notes),
         "inputs": {name: format(values[name], "f") for name in read},
         "source_rows": [ref for name in read for ref in entity["sources"].get(name, [])],
