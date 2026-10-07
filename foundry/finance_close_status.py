@@ -303,7 +303,8 @@ def _difference(row: dict[str, Any]) -> str:
 
 def _sides(row: dict[str, Any]) -> set[str]:
     control = row.get("control") or {}
-    return {str(side.get("dataset_id")) for side in (control.get("left") or {}, control.get("right") or {}) if side.get("dataset_id")}
+    sides = [control.get("left") or {}, control.get("right") or {}, *(control.get("inputs") or {}).values()]
+    return {str(side.get("dataset_id")) for side in sides if isinstance(side, dict) and side.get("dataset_id")}
 
 
 def _workbooks(datasets: list[dict[str, Any]], replaced: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:

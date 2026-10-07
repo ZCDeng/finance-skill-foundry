@@ -32,7 +32,24 @@ from foundry.analysis_data import archived_numeric_parser, read_exact_numerics
 from foundry.errors import FoundryError
 from foundry.structure_records import MANAGER
 
-KINDS = frozenset({"subtotal", "tie_out"})
+KINDS = frozenset({"subtotal", "tie_out", "formula"})
+# A formula control recomputes a figure from cells and compares it with the figure the pack reports.
+# Inputs are named cells; the right side is the reported figure. Names a formula requires, then may read.
+FORMULAS = {
+    # Σ sign × input: a roll-forward (年初 + 新增 − 收回 − 核销 = 期末) whose signs the declarer states.
+    "signed_sum": {"label": "加减勾稽", "required": (), "optional": ()},
+    "dso": {
+        "label": "应收天数重算",
+        "required": ("ar_end",),
+        "optional": ("contract_assets_end", "revenue_ttm", "revenue_py_full", "revenue_py", "revenue"),
+    },
+    "implied_collection": {
+        "label": "反推回款率对收缴率",
+        "required": ("ar_end", "ar_begin", "impairment", "revenue"),
+        "optional": ("contract_assets_end", "contract_assets_begin"),
+    },
+}
+FORMULA_PARAMS = {"dso": {"days_per_year": "365"}, "implied_collection": {"vat_factor": "1.06"}}
 PROPOSED = "proposed"
 CONFIRMED = "confirmed"
 RETIRED = "retired"
@@ -70,8 +87,10 @@ def clean_control(spec: Any) -> dict[str, Any]:
         raise FoundryError("control must be an object")
     kind = spec.get("kind") or "tie_out"
     if kind not in KINDS:
-        raise FoundryError("control kind must be subtotal or tie_out")
+        raise FoundryError("control kind must be subtotal, tie_out or formula")
     label = _one_line(_text(spec.get("label"), "control label", maximum=200))
+    if kind == "formula":
+        return _clean_formula(spec, label)
     left = _side(spec.get("left"), "left")
     right = _side(spec.get("right"), "right")
     if kind == "subtotal" and (left["dataset_id"], left["sheet"]) != (right["dataset_id"], right["sheet"]):
@@ -90,12 +109,78 @@ def clean_control(spec: Any) -> dict[str, Any]:
     }
 
 
+def _clean_formula(spec: dict[str, Any], label: str) -> dict[str, Any]:
+    formula = spec.get("formula")
+    if formula not in FORMULAS:
+        raise FoundryError(f"control formula must be one of {', '.join(sorted(FORMULAS))}")
+    raw = spec.get("inputs")
+    if not isinstance(raw, dict) or not raw or len(raw) > 20:
+        raise FoundryError("a formula control requires inputs {name: cell range}, at most 20")
+    allowed = {*FORMULAS[formula]["required"], *FORMULAS[formula]["optional"]}
+    inputs = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z_]{1,40}", name):
+            raise FoundryError("formula input names are lowercase words joined by _")
+        if allowed and name not in allowed:
+            raise FoundryError(f"{formula} does not read {name}; it reads {', '.join(sorted(allowed))}")
+        side = _side(value, f"input {name}")
+        if formula == "signed_sum":
+            sign = (value or {}).get("sign", 1)
+            if sign not in (1, -1, "1", "-1"):
+                raise FoundryError(f"input {name} sign must be 1 or -1")
+            side["sign"] = str(int(sign))
+        inputs[name] = side
+    missing = [name for name in FORMULAS[formula]["required"] if name not in inputs]
+    if missing:
+        raise FoundryError(f"{formula} needs {', '.join(missing)}")
+    if formula == "dso" and "revenue_ttm" not in inputs and not {"revenue_py_full", "revenue_py", "revenue"} <= set(inputs):
+        raise FoundryError("dso needs revenue_ttm, or revenue_py_full, revenue_py and revenue to rebuild it")
+    params = spec.get("params") or {}
+    if not isinstance(params, dict) or set(params) - set(FORMULA_PARAMS.get(formula, {})):
+        raise FoundryError(f"{formula} params are {', '.join(FORMULA_PARAMS.get(formula, {})) or 'none'}")
+    cleaned_params = {}
+    for key, default in FORMULA_PARAMS.get(formula, {}).items():
+        value = _decimal(params.get(key, default), f"control {key}")
+        if value <= 0:
+            raise FoundryError(f"control {key} must be positive")
+        cleaned_params[key] = _format(value)
+    tolerance = _decimal(spec.get("tolerance", "0"), "control tolerance")
+    if tolerance < 0:
+        raise FoundryError("control tolerance cannot be negative")
+    return {
+        "kind": "formula",
+        "label": label,
+        "formula": formula,
+        "inputs": dict(sorted(inputs.items())),
+        "params": cleaned_params,
+        "right": _side(spec.get("right"), "right"),
+        "tolerance": _format(tolerance),
+        "unit": _text(spec.get("unit") or "", "control unit", required=False, maximum=20),
+        "note": _text(spec.get("note") or "", "control note", required=False, maximum=2000),
+    }
+
+
+def _sides(control: dict[str, Any]) -> list[dict[str, Any]]:
+    if control.get("kind") == "formula":
+        return [*control["inputs"].values(), control["right"]]
+    return [control["left"], control["right"]]
+
+
 def dataset_ids(control: dict[str, Any]) -> list[str]:
-    return list(dict.fromkeys([control["left"]["dataset_id"], control["right"]["dataset_id"]]))
+    return list(dict.fromkeys(side["dataset_id"] for side in _sides(control)))
 
 
 def control_key(control: dict[str, Any]) -> tuple:
     """What makes two controls the same check, whatever they are called."""
+    if control.get("kind") == "formula":
+        return (
+            ("formula", control["formula"], tuple(sorted(control["params"].items()))),
+            *(
+                (name, side["dataset_id"], side["sheet"], side["range"], side["scale"], side.get("sign", "1"))
+                for name, side in sorted(control["inputs"].items())
+            ),
+            tuple(control["right"][key] for key in ("dataset_id", "sheet", "range", "scale")),
+        )
     return tuple(
         (side["dataset_id"], side["sheet"], side["range"], side["scale"])
         for side in (control["left"], control["right"])
@@ -111,6 +196,8 @@ def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | No
     cache = {} if cache is None else cache
     if allowed is not None:
         cache.setdefault("__allowed", set(allowed))
+    if control.get("kind") == "formula":
+        return _evaluate_formula(analysis, control, cache)
     sides = {}
     for name in ("left", "right"):
         side = control[name]
@@ -140,6 +227,55 @@ def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | No
         # account for a gap this small. Whole numbers carry no such rounding.
         within_rounding=status == BREAK and abs(difference) <= _display_rounding(left) + _display_rounding(right),
     )
+
+
+def _evaluate_formula(analysis: Any, control: dict[str, Any], cache: dict) -> dict[str, Any]:
+    read: dict[str, dict[str, Any]] = {}
+    try:
+        for name, side in [*control["inputs"].items(), ("__right", control["right"])]:
+            read[name] = _sum_side(analysis, side, cache)
+    except _Stale as exc:
+        return _result(control, STALE, reason=str(exc))
+    except FoundryError as exc:
+        return _result(control, ERROR, reason=str(exc))
+    for side in read.values():
+        if side["text_cells"]:
+            return _result(control, ERROR, reason=f"{side['sheet']}!{side['range']} 里有 {side['text_cells']} 个文字单元格，不能当作空白跳过")
+    right = read.pop("__right")
+    try:
+        value = _formula_value(control, {name: side["value"] for name, side in read.items()})
+    except (FoundryError, ArithmeticError) as exc:
+        return _result(control, ERROR, reason=f"公式算不出来：{exc}")
+    left = {
+        "formula": control["formula"],
+        "label": FORMULAS[control["formula"]]["label"],
+        "value": _format(value),
+        "inputs": {name: {**_public_side(side), **({"sign": side["sign"]} if "sign" in side else {})}
+                   for name, side in read.items()},
+    }
+    difference = value - right["value"]
+    tolerance = Decimal(control["tolerance"])
+    noise = Decimal("1e-12") * max(abs(value), abs(right["value"]))
+    status = PASS if abs(difference) <= max(tolerance, noise) else BREAK
+    return _result(control, status, left=left, right=_public_side(right), difference=_format(difference),
+                   within_rounding=False)
+
+
+def _formula_value(control: dict[str, Any], values: dict[str, Decimal]) -> Decimal:
+    """The recomputed figure. dso and implied_collection use the collection-health formulas."""
+    from foundry.collection_metrics import _m_dso, _m_implied_collection, resolve_params
+
+    formula = control["formula"]
+    if formula == "signed_sum":
+        return sum((values[name] * int(side.get("sign", "1")) for name, side in control["inputs"].items()), Decimal(0))
+    params = resolve_params(control["params"])
+    if formula == "dso":
+        computed = _m_dso(values, params)
+    else:
+        computed = _m_implied_collection(values, params)
+    if computed is None:
+        raise FoundryError("分母为零")
+    return computed[0]
 
 
 def _display_rounding(side: dict[str, Any]) -> Decimal:
@@ -383,7 +519,7 @@ def _result(control: dict[str, Any], status: str, **fields: Any) -> dict[str, An
     return {
         "status": status,
         "tolerance": control["tolerance"],
-        "source_hashes": {side["dataset_id"]: side["source_hash"] for side in (control["left"], control["right"])},
+        "source_hashes": {side["dataset_id"]: side["source_hash"] for side in _sides(control)},
         **fields,
     }
 
