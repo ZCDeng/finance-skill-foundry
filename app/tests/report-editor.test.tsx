@@ -150,12 +150,122 @@ describe('report editor workspace', () => {
     const reading = screen.getByRole('article', { name: '文稿阅读' });
     expect(within(reading).getAllByRole('heading', { name: '经营分析' })).toHaveLength(1);
     expect(screen.queryByRole('link', { name: '经营分析' })).toBeNull();
-    const outline = screen.getByText('目录').closest('details') as HTMLDetailsElement;
-    expect(outline.open).toBe(false);
-    fireEvent.click(within(outline).getByText('目录'));
-    expect(outline.open).toBe(true);
-    expect(screen.getByRole('link', { name: '管理摘要' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: '附录' })).toBeTruthy();
+    const toolbar = screen.getByRole('group', { name: '文稿工具栏' });
+    const toggle = within(toolbar).getByRole('button', { name: '目录' });
+    const shell = toggle.closest('.report-shell') as HTMLElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    expect(shell.hasAttribute('data-outline-expanded')).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(shell.getAttribute('data-outline-expanded')).toBe('true');
+    const outline = screen.getByRole('complementary', { name: '文稿目录' });
+    expect(toggle.getAttribute('aria-controls')).toBe(outline.id);
+    expect(within(outline).getByRole('link', { name: '管理摘要' })).toBeTruthy();
+    expect(within(outline).getByRole('link', { name: '附录' })).toBeTruthy();
+    // Escape closes the outline and gives the focus back to 目录.
+    within(outline).getByRole('link', { name: '管理摘要' }).focus();
+    fireEvent.keyDown(outline, { key: 'Escape' });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(window.document.activeElement).toBe(toggle);
+  });
+
+  it('decides drawer or column when each event comes, across a breakpoint, and keeps the focus with 目录', async () => {
+    let mode = 'column';
+    const original = window.getComputedStyle.bind(window);
+    const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation(((element: Element, pseudo?: string | null) =>
+      element.classList.contains('report-outline')
+        ? ({ getPropertyValue: (name: string) => (name === '--report-outline-mode' ? mode : '') } as unknown as CSSStyleDeclaration)
+        : original(element, pseudo)) as typeof window.getComputedStyle);
+    const document = documentFromMarkdown('## 管理摘要\n正文\n\n## 附录\n用户附录。');
+    mount({ initialMode: 'read', document, body: documentToMarkdown(document) });
+    const toggle = within(screen.getByRole('group', { name: '文稿工具栏' })).getByRole('button', { name: '目录' });
+    const page = window.document;
+
+    // Opened as a column: the focus stays on 目录.
+    fireEvent.click(toggle);
+    toggle.focus();
+    expect(screen.getByRole('complementary', { name: '文稿目录' })).toBeTruthy();
+    // The workspace narrows while it is open: Escape on 目录 now closes the drawer.
+    mode = 'drawer';
+    fireEvent.keyDown(page, { key: 'Escape' });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    expect(page.activeElement).toBe(toggle);
+
+    // Opened as a drawer: the focus moves in, and a click on plain text outside closes it and gives the focus back.
+    fireEvent.click(toggle);
+    expect(page.activeElement).toBe(screen.getByRole('link', { name: '管理摘要' }));
+    fireEvent.pointerDown(screen.getByRole('article', { name: '文稿阅读' }));
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    await waitFor(() => expect(page.activeElement).toBe(toggle));
+
+    // Escape with the focus neither in the drawer nor on 目录 leaves it open.
+    mode = 'column';
+    fireEvent.click(toggle);
+    const importButton = screen.getByRole('button', { name: '导入' });
+    importButton.focus();
+    mode = 'drawer';
+    fireEvent.keyDown(page, { key: 'Escape' });
+    const outline = screen.getByRole('complementary', { name: '文稿目录' });
+    // Moving the focus out of the drawer closes it.
+    screen.getByRole('link', { name: '管理摘要' }).focus();
+    fireEvent.focusOut(outline, { relatedTarget: importButton });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    styles.mockRestore();
+  });
+
+  it('marks reading-table cells by what they say and makes only an overflowing table a named region', () => {
+    const body = [
+      '## 二、区域经营',
+      '',
+      '表题：表 2-1 区域营业利润',
+      '',
+      '| 区域 | 1 至 8 月实际 | 营业利润差异率（同口径） |',
+      '| --- | --- | --- |',
+      '| 华东区域 | 325,644.00 万元 | -3.30% |',
+      '| 华南区域 | -18,843.06 万元 | 预算为负，不作比率 |',
+      '| 西南区域 | 117814.5625 万元（估算） | 12.5% |',
+      '| 华北区域 | — | 1.5% |',
+    ].join('\n');
+    const widths = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.matches('figure.financial-table') ? 1200 : 0;
+    });
+    mount({ initialMode: 'read', body });
+    widths.mockRestore();
+    const main = screen.getByRole('article', { name: '文稿阅读' }).querySelector('.analysis-draft-main') as HTMLElement;
+    const figure = within(main).getByRole('region', { name: '表 2-1 区域营业利润' });
+    expect(figure.getAttribute('tabindex')).toBe('0');
+    expect(figure.classList.contains('financial-table')).toBe(true);
+    const cellClass = (text: string) => within(figure).getByText(text).closest('td, th')?.className;
+    expect(cellClass('325,644.00 万元')).toBe('num');
+    expect(cellClass('-18,843.06 万元')).toBe('num');
+    expect(cellClass('117814.5625 万元（估算）')).toBe('num');
+    expect(cellClass('-3.30%')).toBe('num');
+    // A dash or a note in a numeric column follows the column and does not vote on it.
+    expect(cellClass('预算为负，不作比率')).toBe('num note');
+    expect(cellClass('—')).toBe('num note');
+    expect(cellClass('华东区域')).toBe('text');
+    expect(cellClass('区域')).toBe('text');
+    expect(cellClass('1 至 8 月实际')).toBe('num');
+    expect(cellClass('营业利润差异率（同口径）')).toBe('num');
+  });
+
+  it('leaves a table that fits as a plain figure', () => {
+    mount({ initialMode: 'read', body: '| 区域 | 实际 |\n| --- | --- |\n| 华东 | 1,000.00 |' });
+    const figure = screen.getByRole('article', { name: '文稿阅读' }).querySelector('figure.financial-table') as HTMLElement;
+    expect(figure.hasAttribute('tabindex')).toBe(false);
+    expect(figure.getAttribute('role')).toBeNull();
+  });
+
+  it('puts the archive action in the document toolbar after the export menu', () => {
+    mount({ initialMode: 'read', archiveAction: <button type="button">归档此版</button>, assistantAction: <button type="button">继续分析</button> });
+    const toolbar = screen.getByRole('group', { name: '文稿工具栏' });
+    const archive = within(toolbar).getByRole('button', { name: '归档此版' });
+    const exportMenu = within(toolbar).getByRole('button', { name: '导出' });
+    const assistant = within(toolbar).getByRole('button', { name: '继续分析' });
+    expect(exportMenu.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(archive.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('folds the exact appendix without reparsing rich main content', () => {

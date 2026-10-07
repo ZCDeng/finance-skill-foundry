@@ -59,7 +59,7 @@ first-screen 跑完后，脚本回到「华东八月经营分析」这个 SQL �
 | 账簿字段悬停加聚焦 | 只在深色量一次，要 2px 焦点框、金色 #e2c180 | 浅色和深色各量一次，都要命中 `:focus-visible`，1px 实线，偏移 -1px；边框保持 `fnd-line`（浅色 rgba(31, 31, 31, 0.14)，深色 rgba(255, 255, 255, 0.14)），焦点框用 `fnd-focus`（浅色 #8a6729，深色 #bfa36c） | DESIGN.md「按钮与字段」和前置 token，`components.css` 的 `.fnd-field:focus-visible` |
 | 调参重跑 | 页面任意一格出现 240.00 | 「业务结果」表里出现 240.00 | 表名依据同第一行 |
 | 查看资料快照 | 页面任意一个「八月经营数据」标题 | 「依据资料预览」区里的标题，资料标识写着运行绑定的资料版本 | `Analysis.tsx` 在结果页打开依据资料预览，`DatasetPreview` 写出资料版本 |
-| 文稿阅读 | 找 `.analysis-draft-reading` 截图 | 已保存的文稿停在「阅读」，工具栏写「文稿」和「草稿 · 未阅 · 检查」；阅读区渲染出标题、两个章节、加粗的 250 万元和两条列表，不留 `**`；正文 Noto Sans SC、16px/28px、段后 18px | DESIGN.md「文稿与方法」和 Typography，`ReportEditor.tsx` 的阅读模式，`report.css` |
+| 文稿阅读 | 找 `.analysis-draft-reading` 截图（该类已于 2026-10 移除，阅读视图现为 `.report-reading`） | 已保存的文稿停在「阅读」，工具栏写「文稿」和「草稿 · 未阅 · 检查」；阅读区渲染出标题、两个章节、加粗的 250 万元和两条列表，不留 `**`；正文 Noto Sans SC、16px/28px、段后 18px | DESIGN.md「文稿与方法」和 Typography，`ReportEditor.tsx` 的阅读模式，`report.css` |
 | 文稿编辑与导出 | 点「编辑文稿」，往 `.analysis-draft-fields` 第一个 textarea 填正文，拦 `shell.openPath` | 切到「编辑」，标题框和 Markdown 源码框带出已保存内容；改源码后可视化编辑器跟着变，状态变成「改稿后未重检」，出现「保存文稿新版」和先保存再导出的提示；从「导出」菜单选「导出工作簿」，拦下 `dialog.showSaveDialog` 并给 QA 目录里的路径，等到「已导出工作簿」加这条路径 | 导出现在先弹保存框（`electron/reports/host.ts`），不再调 `shell.openPath` |
 | 导出后的记录 | 最新文稿正文是新正文，分析 2 版，运行 2 次 | 另要求文稿共 2 版，新版的上一版是原稿，引用的运行仍是 250 那次 | DESIGN.md「改正文不替换已引用的历史运行」 |
 

@@ -34,7 +34,7 @@ const fs=require('fs'); const {execFileSync}=require('child_process');
  await page.getByText('已保存为新的文稿版本。',{exact:true}).waitFor({timeout:15000}).catch(()=>{});
  await page.screenshot({path:qa+'/04-draft.png',fullPage:true});
  await app.evaluate(({shell})=>{globalThis.__qaOpened=[];shell.openPath=async file=>{globalThis.__qaOpened.push(file);return '';};});
- await page.getByRole('button',{name:'选定并归档此版',exact:true}).click();
+ await page.getByRole('button',{name:'归档此版',exact:true}).click();
  await page.getByRole('button',{name:'导出工作簿',exact:true}).click();
  await page.waitForTimeout(1000);
  const opened=await app.evaluate(()=>globalThis.__qaOpened);

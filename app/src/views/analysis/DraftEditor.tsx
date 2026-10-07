@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { MessageSquare } from 'lucide-react';
+import { Archive, MessageSquare } from 'lucide-react';
 import { bridge, when, type Answer, type AnalysisDraft, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown } from '../../bridge.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { RunStatus, draftStateText, textValue } from './presentation.js';
@@ -17,6 +17,7 @@ import { FinanceBackgroundPanel, type FinanceBackground } from './FinanceBackgro
 import { MaterialityFields, materialityScopeSummary, materialityToEdit, materialityToSpec, sameMateriality, type MaterialityEdit } from './MaterialityFields.js';
 import { unwrap, errorText } from './shared.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { findReadingParagraph } from './readabilityLocation.js';
 
 export type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 type ReportMode = 'read' | 'edit' | 'print';
@@ -74,6 +75,10 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
   const [backgroundMessage, setBackgroundMessage] = useState('');
   const [toolError, setToolError] = useState('');
   const [requirementsOpen, setRequirementsOpen] = useState(!draft);
+  // A reading suggestion's paragraph to show; seq lets the same paragraph be located twice in a row.
+  const [locating, setLocating] = useState<{ position: number; seq: number } | null>(null);
+  const [paragraphLocateNotice, setParagraphLocateNotice] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
   const qualityRequest = useRef(0);
   const factRequest = useRef(0);
   const backgroundRequest = useRef(0);
@@ -103,6 +108,27 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
   const hasUnsavedQualityInputs = Boolean(draft && ((edit?.body != null && edit.body !== draft.body) || materialityChanged
     || (updatedRequirementsId && updatedRequirementsId !== draft.requirements_id) || recovery));
   const reading = readableDraftParts(body, draft?.evidence_appendix);
+  useEffect(() => {
+    if (!locating || reportMode !== 'read') return;
+    const root = rootRef.current;
+    const main = root?.querySelector('.report-reading[data-reading-main] .analysis-draft-main');
+    root?.querySelectorAll('[data-located]').forEach((element) => element.removeAttribute('data-located'));
+    const paragraph = main ? findReadingParagraph(main, body, locating.position) : null;
+    if (paragraph) {
+      paragraph.setAttribute('data-located', 'true');
+      paragraph.tabIndex = -1;
+      paragraph.scrollIntoView?.({ block: 'center' });
+      paragraph.focus({ preventScroll: true });
+      setParagraphLocateNotice('');
+    } else setParagraphLocateNotice('阅读视图里没找到这一段，可能已经改过。重检当前正文后再试。');
+    setLocating(null);
+  }, [locating, reportMode, body]);
+  // A new check result is a new set of positions; a 「没找到」 from the old one no longer applies.
+  useEffect(() => { setParagraphLocateNotice(''); }, [quality]);
+  function locateParagraph(position: number) {
+    setReportMode('read');
+    setLocating((value) => ({ position, seq: (value?.seq ?? 0) + 1 }));
+  }
   useEffect(() => { onEdit({ title, body, limitations, review, document, materiality, recovery }); }, [title, body, limitations, review, document, materiality, recovery, onEdit]);
   useEffect(() => {
     setTitle(edit?.title ?? draft?.title ?? '经营分析');
@@ -332,7 +358,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     setReportMode('edit');
     markQualityStale();
   }
-  return <div className="analysis-draft">
+  return <div className="analysis-draft" ref={rootRef}>
     <CompletionRecoveriesPanel recoveries={recoveries} error={recoveryError} disabled={busy || !canLoadRecovery} onRetry={() => void loadRecoveries()} onLoad={loadRecovery} />
     {recoveries.length > 0 && !canLoadRecovery && <p className="analysis-note">当前有未保存输入；保存或放弃当前修改后再载入恢复稿，避免覆盖你的编辑。</p>}
     {recovery && <p role="status" className="analysis-message">已载入未保存恢复稿，尚未检查；保存后才会成为新的文稿版本。</p>}
@@ -354,6 +380,9 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
       assistantAction={<Button variant="ghost" size="sm" type="button" aria-label={draft ? '围绕此稿继续分析' : '请助手整理文稿'} title={draft ? '围绕此稿继续分析' : '请助手整理文稿'}
         disabled={busy || Boolean(draft && changed && (!title.trim() || !body.trim() || materialityError))}
         onClick={() => onChat(changed && body.trim() ? spec('draft') : undefined)}><MessageSquare size={14} aria-hidden />{draft ? '继续分析' : '请助手整理文稿'}</Button>}
+      archiveAction={<Button variant="outline" size="sm" type="button" title={materialityError || undefined}
+        disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)}
+        onClick={() => onSave(spec('archived'))}><Archive size={14} strokeWidth={1.5} aria-hidden />归档此版</Button>}
       limitations={limitations} review={review} document={document} runs={runs} busy={busy} initialMode={reportMode} mode={reportMode} onMode={setReportMode} onTitle={setTitle}
       onBody={onBodyChange} onDocument={onDocumentChange} onLimitations={setLimitations} onReview={setReview} onExport={(format, mode) => onExport(format, changed ? spec('draft') : undefined, mode)}
       onAppliedDraft={onAppliedDraft} />
@@ -363,7 +392,8 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     {/* Everything that decides whether this version can go out, after the text it checks. */}
     <section className="analysis-prepublish" aria-label="发布前检查">
     <div className="analysis-section-heading"><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
-    {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)} />}
+    {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)}
+      body={body} onLocateParagraph={locateParagraph} paragraphLocateNotice={paragraphLocateNotice} />}
     {draft && importedSources(draft).length > 0 && <section className="analysis-report-review-draft" aria-label="复核外部报告数字">
       <h4>外部报告数字</h4>
       <ReportReviewAction key={draft.id} taskId={taskId} spec={{ draft_id: draft.id }} label="复核外部报告数字" disabled={busy}
@@ -391,8 +421,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     {draft && financeRuns.length > 0 && <FinanceBackgroundPanel background={background} scope={backgroundScope} scopeJson={scopeJson} backgrounds={backgrounds} datasets={sourceDatasets} busy={busy}
       message={backgroundMessage} onBackground={setBackground} onScope={setBackgroundScope} onScopeJson={setScopeJson} onSave={() => void saveBackground()} onList={() => void loadBackgrounds()} />}
     </section>
-    <div className="analysis-actions">{changed && <Button type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</Button>}
-      <Button variant="outline" type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('archived'))}>选定并归档此版</Button></div>
+    {changed && <div className="analysis-actions"><Button type="button" disabled={busy || !title.trim() || !body.trim() || Boolean(materialityError)} onClick={() => onSave(spec('draft'))}>保存文稿新版</Button></div>}
     {changed && <p className="analysis-note">交给助手或导出时，会先保存当前内容为新版本。</p>}
     {toolError && <p role="alert" className="analysis-message analysis-message--error">{toolError}</p>}
   </div>;
