@@ -7,8 +7,9 @@
 .report-status { color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 22px; }
 .report-assistant-action { display: inline-flex; padding-left: 10px; border-left: 1px solid var(--fnd-line); }
 /* Open, the outline is a drawer over the start of the text; the text column does not move. */
-.report-outline { --report-outline-mode: drawer; position: absolute; grid-row: 2; grid-column: 1; top: 0; left: 0; z-index: 5; width: min(280px, 100%); max-height: min(70vh, 560px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-bg); box-shadow: var(--fnd-shadow-menu); color: var(--fnd-muted); font-size: var(--fnd-size-small); outline: none; }
-.report-outline nav { display: flex; flex-direction: column; gap: 2px; }
+.report-outline { --report-outline-mode: drawer; position: absolute; grid-row: 2; grid-column: 1; top: 0; left: 0; z-index: 5; width: min(280px, 100%); max-height: min(70vh, 560px); overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-bg); box-shadow: var(--fnd-shadow-menu); color: var(--fnd-muted); font-size: var(--fnd-size-small); outline: none; }
+/* The drawer frame keeps its shadow; the list scrolls inside it and takes the scroll fade (components.css). */
+.report-outline nav { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .report-outline a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 5px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .report-outline a:hover, .report-outline a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
 .report-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
@@ -142,6 +143,7 @@
   .report-shell[data-outline-expanded='true'] > .report-outline { --report-outline-mode: column; left: auto; right: calc(100% + 32px); bottom: 0; z-index: auto; width: 200px; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
   /* The column runs the height of the text, and its list stays in view while a long draft scrolls. */
   .report-shell[data-outline-expanded='true'] > .report-outline > :is(nav, p) { position: sticky; top: 16px; }
+  .report-shell[data-outline-expanded='true'] > .report-outline > nav { overflow: visible; }
 }
 @container report-workspace (max-width: 960px) {
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }

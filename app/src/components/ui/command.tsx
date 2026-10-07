@@ -18,7 +18,7 @@ function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrim
 }
 
 function CommandList({ className, ...props }: ComponentProps<typeof CommandPrimitive.List>) {
-  return <CommandPrimitive.List data-slot="command-list" className={cn('fnd-combobox__list', className)} {...props} />;
+  return <CommandPrimitive.List data-slot="command-list" className={cn('fnd-combobox__list fnd-scroll-fade', className)} {...props} />;
 }
 
 function CommandItem({ className, ...props }: ComponentProps<typeof CommandPrimitive.Item>) {

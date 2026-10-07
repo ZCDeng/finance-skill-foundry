@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import { APP_NAME } from '../components/Shell.js';
-import { WaitOrb } from '../components/WaitOrb.js';
+import { WaitLoop } from '../components/WaitLoop.js';
 import type { HarnessStatus, TaskDetail, TaskRow } from '../bridge.js';
 import { NativeSelect } from '../components/ui/native-select.js';
 import { formatPeriod } from '../lib/period.js';
@@ -205,7 +205,7 @@ export function WiringTrouble({ status }: { status: HarnessStatus | null }) {
 export function Booting() {
   return (
     <div className="fnd-booting">
-      <WaitOrb state="connecting" delay={0} />
+      <WaitLoop delay={0} />
       <p className="fnd-muted">{APP_NAME} 正在启动</p>
     </div>
   );

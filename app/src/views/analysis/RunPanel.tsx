@@ -109,6 +109,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     </article>}
     {run && evidence && <div className="analysis-evidence-anchor"><aside id={`analysis-evidence-${analysis.task_id}`} role="dialog" aria-modal="false" className="analysis-evidence" aria-label="本次计算依据" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeEvidence(); } }}>
       <div className="analysis-section-heading"><h3>本次计算依据</h3><Button variant="outline" ref={closeButton} type="button" onClick={closeEvidence} aria-label="关闭计算依据"><X size={16} aria-hidden /></Button></div>
+      <div className="analysis-evidence-body fnd-scroll-fade">
       <p className="analysis-note">按实际保存的资料版本和这次计算的记录核对。</p>
       <div className="analysis-evidence-sources">{Object.entries(run.input_hashes ?? {}).map(([id, hash]) => {
         // SQL and script runs store alias -> data_hash. Bindings are immutable
@@ -126,7 +127,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {run.finance_scope && <details className="analysis-details"><DisclosureSummary>计算范围</DisclosureSummary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
         <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
       <TechnicalInfo rows={[['计算编号', run.id], ['结果摘要', run.output_hash]]} />
-    </aside></div>}
+    </div></aside></div>}
     <details className="analysis-details analysis-history"><DisclosureSummary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</DisclosureSummary>
       <HistoryRows rows={[...runs].reverse().filter((row) => runPresentationRole(row) !== 'activity')} runs={runs} analyses={analyses} current={run} onPick={pick} />
       {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><DisclosureSummary tone="quiet">中间步骤 · {selection.activityRuns.length}</DisclosureSummary>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
-import { WaitOrb } from '../../components/WaitOrb.js';
+import { WaitLoop } from '../../components/WaitLoop.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
@@ -81,7 +81,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
     </div></details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
       <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>
-      {refreshing && <span role="status" className="analysis-note"><WaitOrb state="working" />正在选择文件并刷新来源…</span>}</div>
+      {refreshing && <span role="status" className="analysis-note"><WaitLoop />正在选择文件并刷新来源…</span>}</div>
     {batches.length > 0 && <details className="analysis-details"><DisclosureSummary>来源刷新批次 · {batches.length} 个</DisclosureSummary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
