@@ -2640,7 +2640,7 @@ ${canonicalAppendix} 已改写`;
       if (command === 'workbook-inspect') return success({ sheet_names: ['Sheet1'], tables: ['OutputTable'], named_ranges: [], unsupported_features: [] });
       if (command === 'workbook-bind') return success({ id: 'bind-1' });
       if (command === 'workbook-read') return success({ rows: [{ amount: '10.00' }], diagnostics: [] });
-      if (command === 'workbook-preview') return success({ patch_id: 'patch-1', patch: { cells: [{ cell: 'B2', field: 'amount', old_value: '10.00', new_value: '0.00', conflict: true }] } });
+      if (command === 'workbook-preview') return success({ patch_id: 'patch-1', patch: { cells: [{ cell: 'B2', field: 'amount', old_value: '-1000', new_value: '1250000.5', conflict: true }] } });
       if (command === 'workbook-apply') return success({ artifact_path: 'finance/workbook_outputs/files/out.xlsx' });
       return success({});
     });
@@ -2665,6 +2665,9 @@ ${canonicalAppendix} 已改写`;
     expect(within(previewTable).getByRole('columnheader', { name: '原值' })).toBeTruthy();
     expect(within(previewTable).queryByRole('columnheader', { name: 'old_value' })).toBeNull();
     expect(within(previewTable).getByRole('cell', { name: '是' })).toBeTruthy();
+    // Write-back values are what the cells will hold: set as figures, never regrouped or put in parentheses.
+    expect(within(previewTable).getByRole('cell', { name: '-1000' }).querySelector('.fnd-figure--negative')).toBeTruthy();
+    expect(within(previewTable).getByRole('cell', { name: '1250000.5' })).toBeTruthy();
     expect(financeCall).toHaveBeenCalledWith(task.id, 'workbook-preview', expect.objectContaining({ binding_id: 'bind-1', dataset_id: refreshedWorkbook.id }));
     expect((screen.getByLabelText(/B2 · 原值/) as HTMLSelectElement).value).toBe('keep');
     fireEvent.change(screen.getByLabelText(/B2 · 原值/), { target: { value: 'apply' } });

@@ -146,7 +146,7 @@ function useOverflow(enabled: boolean): [(node: HTMLDivElement | null) => void, 
   return [setNode, enabled && overflowing];
 }
 
-export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false }: {
+export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false, exact = false }: {
   columns: TableColumn[];
   rows: Record<string, unknown>[];
   caption: string;
@@ -156,22 +156,25 @@ export function Table({ columns, rows, caption, groupBy, groupFallback = '', scr
   groupFallback?: string;
   /** Say below the table, in words, that more columns sit to the right when it is wider than its area. */
   scrollHint?: boolean;
+  /** Values that are, or will be, cell contents as written (a workbook read, a write-back preview): set as figures
+   * but never reformatted, rounded or put in parentheses. */
+  exact?: boolean;
 }) {
   const [page, setPage] = useState(0);
   const [measured, overflowing] = useOverflow(scrollHint);
   const hintId = useId();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const current = Math.min(page, pages - 1);
-  const formatRaw = columns.map((column) => rawFigureColumn(column, rows));
+  const formatRaw = columns.map((column) => exact ? null : rawFigureColumn(column, rows));
   const shown = new Map(rows.map((item) => [item, columns.map((column, index) => shownCell(column, item, formatRaw[index]))]));
   const figures = columns.map((column, index) => figureColumn(column, rows.map((item) => shown.get(item)![index])));
-  const hangs = columns.map((_, index) => figures[index] && hasParenthesizedNegative(rows.flatMap((item) => shown.get(item)![index].text ?? [])));
+  const hangs = columns.map((_, index) => !exact && figures[index] && hasParenthesizedNegative(rows.flatMap((item) => shown.get(item)![index].text ?? [])));
   const row = (item: Record<string, unknown>, index: number) => {
     const cells = shown.get(item)!;
     return <tr key={index} className={rowWeight(cells[0])}>{columns.map((column, at) => {
       const cell = cells[at];
       return <td className={figures[at] ? 'analysis-number' : undefined} key={column.name} title={cell.raw}>
-        {figures[at] && cell.text != null ? <Figure text={cell.text} hang={hangs[at]} /> : cell.node}</td>;
+        {figures[at] && cell.text != null ? <Figure text={cell.text} hang={hangs[at]} exact={exact} /> : cell.node}</td>;
     })}</tr>;
   };
   const body = groupBy == null

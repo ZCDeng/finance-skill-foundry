@@ -171,9 +171,9 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
       {Array.isArray(inspection.unsupported_features) && inspection.unsupported_features.length > 0 && <p>需生成独立结果工作簿：{inspection.unsupported_features.map(textValue).join('、')}</p>}
     </details>}
-    {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" />}
+    {readResult && Array.isArray(readResult.rows) && <Table columns={Object.keys(readResult.rows[0] ?? {}).map((name) => ({ name, type: 'VARCHAR' }))} rows={readResult.rows as Record<string, unknown>[]} caption="绑定区域读取结果" exact />}
     {cells.length > 0 && <Table columns={[{ name: '单元格', type: 'VARCHAR' }, { name: '字段', type: 'VARCHAR' }, { name: '原值', type: 'VARCHAR' }, { name: '新值', type: 'VARCHAR' }, { name: '冲突', type: 'VARCHAR' }]}
-      rows={cells.map((cell) => ({ 单元格: cell.cell, 字段: cell.field, 原值: cell.old_value, 新值: cell.new_value, 冲突: cell.conflict === true ? '是' : '否' }))} caption="写回预览" />}
+      rows={cells.map((cell) => ({ 单元格: cell.cell, 字段: cell.field, 原值: cell.old_value, 新值: cell.new_value, 冲突: cell.conflict === true ? '是' : '否' }))} caption="写回预览" exact />}
     {conflictCells.length > 0 && <div className="analysis-workbook-conflicts" aria-label="写回冲突处理">
       <strong>冲突处理</strong>
       {conflictCells.map((cell) => {

@@ -64,6 +64,9 @@ describe('raw engine values in the 原样 tables (decision 6B)', () => {
     expect(formatRawFigure('0.0035', 'weight')).toBe('0.0035');
     expect(formatRawFigure('12345', 'count')).toBe('12,345');
     expect(formatRawFigure('1250000', 'value', 1)).toBe('1,250,000.0');
+    // Padding stops at four places; a longer value in the column keeps all of its own.
+    expect(formatRawFigure('1', 'value', 5)).toBe('1.0000');
+    expect(formatRawFigure('0.12345', 'value', 5)).toBe('0.12345');
     expect(formatRawFigure('0.123456789012345678901234567890', 'value', 30)).toBe('0.123456789012345678901234567890');
   });
 

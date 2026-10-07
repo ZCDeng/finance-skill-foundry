@@ -242,7 +242,8 @@ export function formatRawFigure(value: unknown, name: string, columnPlaces = 0):
   if (semantics === 'ratio' || semantics === 'ratio_pct' || semantics === 'ratio_delta') return formatBusinessValue(text, semantics);
   if (semantics === 'amount') return decimalToFixed(text, 2);
   const places = text.split('.')[1]?.length ?? 0;
-  return groupDigits(columnPlaces > places && columnPlaces <= 4 ? decimalToFixed(text, columnPlaces) : text);
+  const target = Math.min(columnPlaces, 4);
+  return groupDigits(target > places ? decimalToFixed(text, target) : text);
 }
 
 export function formatBusinessValue(value: unknown, semantics: FieldSemantics): string {
