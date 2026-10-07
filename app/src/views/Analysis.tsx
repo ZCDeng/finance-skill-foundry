@@ -426,14 +426,15 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         </>}
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
-          {selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis && <p className="analysis-note">当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。</p>}
           {!analysis ? <AnalysisEmpty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
             onChat={() => void chat(question.trim() || undefined)} /> : <>
-            <div className="analysis-select-label"><SearchableSelect label="分析版本" value={analysis.id}
-              triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
-              options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)}` }))}
-              onChange={setSelectedAnalysis} placeholder="搜索问题或时间" /></div>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
+              question={task.title}
+              versionPicker={<SearchableSelect label="分析版本" compact value={analysis.id}
+                triggerText={`第 ${view.analyses.findIndex((row) => row.id === analysis.id) + 1} 版（共 ${view.analyses.length} 版）· ${when(analysis.created_at)}`}
+                options={[...view.analyses].reverse().map((row) => ({ value: row.id, label: row.question, meta: `第 ${view.analyses.indexOf(row) + 1} 版 · ${when(row.created_at)}` }))}
+                onChange={setSelectedAnalysis} placeholder="搜索问题或时间" />}
+              versionNote={selectedAnalysis && view.analyses.at(-1)?.id !== selectedAnalysis ? '当前正在查看选定版本。可在分析版本中查看其他结果，工作副本会保留。' : undefined}
               onPick={setSelectedAnalysis} onChat={(prompt) => void chat(prompt)}
               onAdjustScope={financeWorkbench ? (run) => setScopeRequest((value) => ({ count: value.count + 1, contextId: run.finance_context_id ?? undefined })) : undefined}
               onOpen={(run, path) => void perform(async (taskId) => {

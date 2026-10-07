@@ -1,4 +1,5 @@
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun, PairMeasure, RowDeclaration, RowDeclarations } from '../../bridge.js';
+import { formatPeriod } from '../../lib/period.js';
 
 export type RunPresentationRole = 'business' | 'activity' | 'failure';
 
@@ -267,6 +268,8 @@ export function formatBusinessCell(value: unknown, column: DisplayColumn, row: R
   // A row shown as it is keeps its estimate visible even when its label does not say so.
   // In a declared run the declaration says it, grain_basis included; its own words still count (KTD3).
   if (column.name === 'metric_label' && typeof value === 'string' && value && (row[declaredEstimateField] === true || declaresEstimate(row)) && !mentionsEstimate(value)) return `${value}（估算）`;
+  // A period reads in words (2026 年 1–8 月); the stored value still filters the tabs and goes to the assistant.
+  if (column.name.toLowerCase() === 'period' || column.name === '期间') return value == null || value === '' ? '—' : formatPeriod(value);
   // A long-form value column mixes amounts and ratios; the row's own unit says which, as its declaration read it.
   if (column.name === 'value') return formatUnitValue(value, declaredUnitField in row ? row[declaredUnitField] as UnitKind | null : unitKind(unitColumn(row)), column.semantics);
   return formatBusinessValue(value, column.semantics);

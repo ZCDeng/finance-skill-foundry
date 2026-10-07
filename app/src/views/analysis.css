@@ -31,8 +31,8 @@
 .analysis-source-list .fnd-card { display: flex; flex-direction: column; gap: 5px; overflow-wrap: anywhere; }
 .analysis-source-meta { font-size: var(--fnd-size-small); color: var(--fnd-muted); }
 .analysis-source-preview, .analysis-definition, .analysis-method, .analysis-source-refresh, .analysis-workbook-panel, .analysis-finance-setup, .analysis-finance-run { display: flex; flex-direction: column; gap: 14px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 18px 0; min-width: 0; }
-.analysis-result { display: flex; flex-direction: column; gap: 20px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 4px 0 24px; min-width: 0; }
-.analysis-source-preview h3, .analysis-result h3, .analysis-definition h3, .analysis-method h3, .analysis-source-refresh h3, .analysis-workbook-panel h3, .analysis-finance-setup h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
+.analysis-result { display: flex; flex-direction: column; gap: 20px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 4px 0 24px; min-width: 0; container: analysis-result / inline-size; }
+.analysis-source-preview h3, .analysis-definition h3, .analysis-method h3, .analysis-source-refresh h3, .analysis-workbook-panel h3, .analysis-finance-setup h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
 .analysis-source-refresh-title { display: block; font-size: var(--fnd-size-body); font-weight: var(--fnd-weight-strong); }
 .analysis-source-refresh > summary .analysis-note { display: block; margin-top: 4px; }
 .analysis-source-refresh:not([open]) { gap: 0; padding-bottom: 12px; }
@@ -101,17 +101,16 @@
 .analysis-table th { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 .analysis-result-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; position: relative; container-type: inline-size; isolation: isolate; }
-.analysis-result .analysis-section-heading { align-items: flex-start; }
-/* Conclusion first: the question that was asked reads as the result's label, the answer below it is the largest line. */
-.analysis-result .analysis-section-heading h3 { font-size: var(--fnd-size-h3); line-height: 24px; max-width: 42em; }
-/* With no conclusion to lead, the question stays the result's heading. */
-.analysis-result:not(:has(.analysis-headline)) .analysis-section-heading h3 { font-size: 20px; line-height: 28px; }
-.analysis-result .analysis-section-heading .analysis-note { margin-top: 6px; }
+/* Conclusion first: the page header already names the task, so the heading is for screen readers and the script's own sentence (or the date and states) leads. The four states sit under the date at every width. */
+.analysis-result-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* The version picker heads the result; 比较版本 sits beside it and opens below. */
+.analysis-version { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.analysis-version-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.analysis-version-note { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 18px; border: 0; padding: 0; overflow-wrap: anywhere; }
 .analysis-output-list { display: flex; flex-direction: column; gap: 10px; }
 .analysis-result-area[data-evidence-open='true'] > .analysis-result { margin-right: min(360px, 48%); }
 .analysis-evidence-anchor { position: sticky; top: 12px; grid-column: 1; grid-row: 1; height: 0; width: min(340px, 46%); justify-self: end; align-self: start; z-index: 3; }
-.analysis-result-area > .analysis-result, .analysis-result-area > .analysis-message { grid-column: 1; grid-row: 1; }
-.analysis-result-area > .analysis-message + .analysis-result { grid-row: 2; }
+.analysis-result-area > .analysis-result { grid-column: 1; grid-row: 1; }
 .analysis-evidence { display: flex; flex-direction: column; gap: 18px; min-width: 0; max-height: min(640px, calc(100dvh - 180px)); padding: 0 18px 18px; border: 1px solid var(--fnd-line); border-radius: 12px; background: var(--fnd-surface); overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
 .analysis-evidence > .analysis-section-heading { position: sticky; top: 0; padding: 14px 0 10px; background: var(--fnd-surface); z-index: 1; }
 .analysis-evidence h3 { font-size: 16px; }
@@ -201,12 +200,21 @@
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-finance-variance .analysis-table th, .analysis-finance-variance .analysis-table td { white-space: nowrap; }
 .analysis-business-result, .analysis-scope-card, .analysis-revision-diff { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.analysis-period-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-.analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
-.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 12px; display: grid; gap: 4px; background: var(--fnd-surface); min-width: 0; }
+.analysis-period-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+/* KPI cards (DESIGN.md card-compact): budget, variance and rate one per line, label left, figure right. */
+.analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
+@container analysis-result (max-width: 900px) { .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container analysis-result (max-width: 480px) { .analysis-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
+.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; }
 .analysis-kpi-card span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
-.analysis-kpi-card strong { font-size: 20px; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-kpi-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 20px; }
+.analysis-kpi-card strong { font-size: 20px; line-height: 28px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-kpi-meta > span { white-space: nowrap; }
 .analysis-kpi-card .analysis-kpi-source { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 1.5; }
+.analysis-kpi-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; padding-top: 8px; border-top: 1px solid var(--fnd-line); }
+.analysis-kpi-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.analysis-kpi-list dt { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
+.analysis-kpi-list dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .analysis-headline { display: grid; gap: 10px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); }
 .analysis-headline-line { display: grid; gap: 2px; }
 .analysis-headline-text { margin: 0; font-size: 22px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

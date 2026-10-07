@@ -53,8 +53,27 @@ const buttonVariants = cva(
         sm: 'h-8 px-2.5',
         lg: 'h-[var(--fnd-button-height)] px-3.5',
         icon: 'size-8 rounded-[6px] p-0',
+        // A clickable chip (result period tabs, period shortcuts, candidate values): DESIGN.md 按钮与字段.
+        // The focus ring stands 1px off the edge so a selected chip keeps its ink edge while focused.
+        chip: 'h-7 rounded-[var(--fnd-radius-chip)] px-2.5 text-[length:var(--fnd-size-label)] focus-visible:outline-offset-1',
       },
     },
+    compoundVariants: [
+      {
+        // Selected reads as an ink edge on the selection surface, never the solid primary or the gold.
+        variant: 'outline',
+        size: 'chip',
+        // The hover lines repeat the outline hover's own modifier chain behind aria-*, so they outrank that hover
+        // (one attribute more) and a selected chip stays selected under the pointer. Written out in full for the
+        // Tailwind scanner.
+        className: [
+          'aria-pressed:border-[var(--fnd-ink)] aria-pressed:bg-[var(--fnd-selection-surface)] aria-pressed:text-foreground',
+          'aria-pressed:enabled:hover:not-focus-visible:border-[var(--fnd-ink)] aria-pressed:enabled:hover:bg-[var(--fnd-selection-surface)]',
+          'aria-selected:border-[var(--fnd-ink)] aria-selected:bg-[var(--fnd-selection-surface)] aria-selected:text-foreground',
+          'aria-selected:enabled:hover:not-focus-visible:border-[var(--fnd-ink)] aria-selected:enabled:hover:bg-[var(--fnd-selection-surface)]',
+        ].join(' '),
+      },
+    ],
     defaultVariants: {
       variant: 'default',
       size: 'default',

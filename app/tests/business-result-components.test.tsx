@@ -311,7 +311,9 @@ describe('business result components', () => {
     const card = screen.getByRole('article');
     expect(within(card).getByText('营业利润')).toBeTruthy();
     expect(within(card).getByLabelText('营业利润实际').textContent).toBe('90.00');
-    expect(within(card).getByText('2026-08 · 万元 · 依据：专业判断')).toBeTruthy();
+    expect(card.querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 8 月 · 万元 · 依据：专业判断');
+    // Each part stays whole; the line may break only at a separator.
+    expect(Array.from(card.querySelectorAll('.analysis-kpi-meta > span')).map((part) => part.textContent)).toEqual(['2026 年 8 月', '万元', '依据：专业判断']);
     expect(within(card).getByText('预算')).toBeTruthy();
     expect(within(card).getByText('100.00')).toBeTruthy();
     expect(within(card).getByText('差异')).toBeTruthy();
@@ -361,7 +363,7 @@ describe('business result components', () => {
     const cards = screen.getAllByRole('article');
     expect(within(cards[0]).getByText('收入 · 华东区域')).toBeTruthy();
     expect(within(cards[0]).getByLabelText('收入 · 华东区域实际').textContent).toBe('109,742.03');
-    expect(within(cards[0]).getByText('1_8月 · 万元 · 依据：估算')).toBeTruthy();
+    expect(cards[0].querySelector('.analysis-kpi-meta')?.textContent).toMatch(/^1_8月 · 万元 · 依据：估算/);
     expect(within(cards[0]).getByText('93.15%')).toBeTruthy();
     expect(screen.queryByText('未声明期间')).toBeNull();
     expect(screen.queryByText('未声明单位')).toBeNull();
@@ -401,7 +403,7 @@ describe('business result components', () => {
     expect(within(card).getByLabelText('收入 · 西部区域实际').textContent).toBe('33,541.33');
     expect(within(card).getByText('33,415.24')).toBeTruthy();
     expect(within(card).getByText('100.38%')).toBeTruthy();
-    expect(within(card).getByText('2026-01:2026-08 · 万元 · 依据：估算')).toBeTruthy();
+    expect(card.querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 1–8 月 · 万元 · 依据：估算 · 推断');
   });
 
   it('keeps unsafe long-form rows in the raw table without rendering blank KPI cards', () => {
@@ -495,7 +497,7 @@ describe('business result components', () => {
     expect(within(ytdTable).getByRole('cell', { name: '344,487.06' })).toBeTruthy();
     expect(within(ytdTable).getByRole('cell', { name: '-18,843.06' })).toBeTruthy();
     expect(within(ytdTable).getAllByRole('cell', { name: '万元' }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+    fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
     cards = screen.getAllByRole('article');
     expect(within(cards[0]).getByText('收入 · 集团合并')).toBeTruthy();
     expect(within(cards[0]).getByLabelText('收入 · 集团合并实际').textContent).toBe('41,469.63');
@@ -552,11 +554,11 @@ describe('business result components', () => {
     expect(within(cards[0]).getByText('94.53%')).toBeTruthy();
     expect(within(cards[1]).getByText('利润 · 集团合并')).toBeTruthy();
     expect(within(cards[1]).getByText('-6,106.38')).toBeTruthy();
-    expect(within(cards[0]).getByText('2026-01:2026-08 · 万元 · 依据：计算')).toBeTruthy();
+    expect(cards[0].querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 1–8 月 · 万元 · 依据：计算 · 推断');
     expect(within(cards[0]).getByText('预算')).toBeTruthy();
     expect(within(cards[2]).getByText('收入 · 华东区域')).toBeTruthy();
     // The regional budget is an estimate by its own label, so the card says so twice.
-    expect(within(cards[2]).getByText('2026-01:2026-08 · 万元 · 依据：估算')).toBeTruthy();
+    expect(cards[2].querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 1–8 月 · 万元 · 依据：估算 · 推断');
     expect(within(cards[2]).getByText('预算（估算）')).toBeTruthy();
     expect(within(cards[2]).getByText('117,814.57')).toBeTruthy();
     const others = screen.getByRole('region', { name: '其他结果' });
@@ -569,12 +571,12 @@ describe('business result components', () => {
     expect(within(others).getByRole('cell', { name: '3.30%' })).toBeTruthy();
     expect(within(others).queryByRole('columnheader', { name: /metric_key|scenario|value/ })).toBeNull();
     expect(within(others).queryByRole('cell', { name: '营业收入 1-8 月实际' })).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: '2026' }));
+    fireEvent.click(screen.getByRole('tab', { name: '2026 年' }));
     expect(screen.queryByRole('article')).toBeNull();
     expect(screen.queryByRole('table', { name: '业务结果' })).toBeNull();
     expect(screen.getByRole('table', { name: '其他结果' })).toBeTruthy();
     expect(within(screen.getByRole('region', { name: '其他结果' })).getByRole('cell', { name: '区域全年收入预算（源表列示）' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+    fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
     const month = screen.getAllByRole('article');
     expect(month).toHaveLength(1);
     expect(within(month[0]).getByLabelText('收入 · 集团合并实际').textContent).toBe('41,469.63');
@@ -691,7 +693,7 @@ describe('business result components', () => {
       expect(within(others).getByRole('cell', { name: 'actual_py_1_8' })).toBeTruthy();
       expect(within(others).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
       expect(within(others).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
-      fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+      fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
       expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
     });
 
@@ -778,9 +780,9 @@ describe('business result components', () => {
           { metric_key: 'revenue_budget_fy', organization: '集团', 期间: '2026', scenario: 'budget_bud_fy', value: '1200', unit: '万元', metric_label: '全年收入预算' },
         ], row_count: 3, truncated: false } };
       render(<BusinessResultView run={current} />);
-      expect(screen.getByRole('tab', { name: '2026' })).toBeTruthy();
+      expect(screen.getByRole('tab', { name: '2026 年' })).toBeTruthy();
       expect(screen.queryByRole('table', { name: '其他结果' })).toBeNull();
-      fireEvent.click(screen.getByRole('tab', { name: '2026' }));
+      fireEvent.click(screen.getByRole('tab', { name: '2026 年' }));
       expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '全年收入预算' })).toBeTruthy();
     });
 
@@ -1066,7 +1068,7 @@ describe('result rows by declaration, inference and unit', () => {
     render(<BusinessResultView run={declaredRun({ pairs, current_requirements: { id: 'b2'.repeat(16), fingerprint: 'e'.repeat(64) } } as Partial<Declarations>)} />);
     // Its 达成率 row was left out for an unmarked unit, so the card's 达成率 stays empty and says why.
     const south = cardFor('利润 · 华南区域');
-    expect(within(south).getByText('推断 · 依据旧版需求 · 未标单位')).toBeTruthy();
+    expect(Array.from(south.querySelectorAll('.analysis-kpi-note')).map((note) => note.textContent)).toEqual(['推断', '依据旧版需求', '未标单位']);
     expect(within(south).getByText('预算（估算）')).toBeTruthy();
     expect(within(cardFor('收入 · 集团合并')).getByText('依据旧版需求')).toBeTruthy();
   });
@@ -1078,7 +1080,7 @@ describe('result rows by declaration, inference and unit', () => {
       row('revenue_achievement_ratio', '华东区域', 'budget_1_8', '0.9', '-', '收入达成率'),
     ])} />);
     const card = screen.getByRole('article');
-    expect(within(card).getByText('推断 · 未标单位')).toBeTruthy();
+    expect(Array.from(card.querySelectorAll('.analysis-kpi-note')).map((note) => note.textContent)).toEqual(['推断', '未标单位']);
     expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '0.9（未标单位）' })).toBeTruthy();
   });
 
@@ -1155,6 +1157,14 @@ describe('result rows by declaration, inference and unit', () => {
     expect(within(card).getByText('900.00').previousSibling?.textContent).toBe('预算');
     expect(within(card).getByText('800.00').previousSibling?.textContent).toBe('预算（估算）');
     expect(businessTable().row).toMatchObject({ 同期预算: '900.00', '同期预算（估算）': '800.00' });
+  });
+
+  it('writes — for a missing rate on an estimated-budget card, with no reason made up beside it', () => {
+    render(<BusinessResultView run={withEstimatedBudget(null)} />);
+    const last = screen.getByRole('article').querySelector('.analysis-kpi-list')!.lastElementChild as HTMLElement;
+    expect(last.querySelector('dt')?.textContent).toBe('达成率');
+    expect(last.querySelector('dd')?.textContent).toBe('—');
+    expect(screen.getByRole('article').textContent).not.toMatch(/不计|估算预算不/);
   });
 });
 
@@ -1245,7 +1255,7 @@ describe('script conclusion sentences', () => {
     expect(within(conclusions).getByText(sentences.eastRevenue).textContent).toContain('华东区域预算为估算');
     // A sentence belongs to its period tab, as the cards do.
     expect(within(conclusions).queryByText(sentences.august)).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: '2026-08' }));
+    fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
     const august = screen.getByRole('region', { name: '脚本结论' });
     expect(within(august).getByText(sentences.august)).toBeTruthy();
     expect(within(august).queryByText(sentences.groupRevenue)).toBeNull();
@@ -1261,12 +1271,76 @@ describe('script conclusion sentences', () => {
 
     // An incomplete declaration pairs its rows but concludes nothing: the same cards, without 推断.
     const before = render(<BusinessResultView run={declared(false)} />).container.innerHTML;
-    expect(before).toBe(inferred.replaceAll('<small class="analysis-kpi-notes">推断</small>', ''));
+    expect(before).toBe(inferred.replaceAll(' · <span class="analysis-kpi-note">推断</span>', ''));
     cleanup();
 
     // With conclusions, the sentences are the only addition.
     const { container } = render(<BusinessResultView run={declared(true)} />);
     container.querySelector('[aria-label="脚本结论"]')!.remove();
     expect(container.innerHTML).toBe(before);
+  });
+});
+
+describe('result page reading order', () => {
+  it('names the period tabs in words, as chips, and still filters by the stored value', () => {
+    render(<BusinessResultView run={run([
+      { period: '2026-01:2026-08', metric_key: 'revenue', actual: '800', budget: '900' },
+      { period: '2026-08', metric_key: 'revenue', actual: '100', budget: '110' },
+    ])} />);
+    const tabs = within(screen.getByRole('tablist', { name: '结果期间' })).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['2026 年 1–8 月', '2026 年 8 月']);
+    expect(tabs.every((tab) => tab.getAttribute('data-variant') === 'outline' && tab.getAttribute('data-size') === 'chip')).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
+    expect(screen.getByRole('tab', { name: '2026 年 8 月' }).getAttribute('aria-selected')).toBe('true');
+    const card = screen.getByRole('article');
+    expect(within(card).getByLabelText('收入实际').textContent).toBe('100.00');
+    expect(card.querySelector('.analysis-kpi-meta')?.textContent).toMatch(/^2026 年 8 月 · /);
+    const table = screen.getByRole('table', { name: '业务结果' });
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    expect(within(table).getByRole('cell', { name: '2026 年 8 月' })).toBeTruthy();
+    // The raw table under 技术信息 keeps the stored values.
+    const raw = screen.getByRole('table', { name: '原始计算结果' });
+    expect(within(raw).getByRole('cell', { name: '2026-01:2026-08' })).toBeTruthy();
+    expect(within(raw).getByRole('cell', { name: '2026-08' })).toBeTruthy();
+  });
+
+  it('keeps the stored values on two tabs that would read alike', () => {
+    render(<BusinessResultView run={run([
+      { period: '2026-08', metric_key: 'revenue', actual: '100', budget: '110' },
+      { period: '2026-08:2026-08', metric_key: 'revenue', actual: '101', budget: '110' },
+      { period: '2026', metric_key: 'revenue', actual: '900', budget: '1000' },
+    ])} />);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['2026-08', '2026-08:2026-08', '2026 年']);
+  });
+
+  it('labels the rate line by the field that filled it: 达成率 when absent, 差异率 for ratio', () => {
+    render(<BusinessResultView run={run([{ period: '2026-08', metric_key: 'revenue', actual: '90', budget: '100' }])} />);
+    let last = screen.getByRole('article').querySelector('.analysis-kpi-list')!.lastElementChild!;
+    expect([last.querySelector('dt')?.textContent, last.querySelector('dd')?.textContent]).toEqual(['达成率', '—']);
+    cleanup();
+    render(<BusinessResultView run={run([{ period: '2026-08', metric_key: 'revenue', actual: '90', budget: '100', ratio: '-0.1' }])} />);
+    last = screen.getByRole('article').querySelector('.analysis-kpi-list')!.lastElementChild!;
+    expect(last.querySelector('dt')?.textContent).toBe('差异率');
+  });
+
+  it('places the next steps right after the cards, or after the tables when there are none', () => {
+    const actions = <div data-testid="next">整理成文稿</div>;
+    const withCards = { ...run([{ period: '2026-08', metric_key: 'revenue', actual: '90', budget: '100' }]), assumptions: ['预算按 8 月口径。', '汇率取月末。'] };
+    render(<BusinessResultView run={withCards} actions={actions} />);
+    const next = screen.getByTestId('next');
+    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(screen.getByLabelText('关键指标'), next)).toBe(true);
+    const assumptions = screen.getByLabelText('本次计算的假设');
+    expect(follows(next, assumptions)).toBe(true);
+    // The run's two sentences joined without 。；.
+    expect(assumptions.textContent).toBe('本次计算的假设：预算按 8 月口径；汇率取月末。');
+    cleanup();
+    render(<BusinessResultView run={run([{ period: '2026-08', metric_key: 'revenue', budget: '100' }])} actions={actions} />);
+    expect(screen.queryByLabelText('关键指标')).toBeNull();
+    const tables = screen.getAllByRole('table');
+    const later = screen.getByTestId('next');
+    expect(follows(screen.getByRole('table', { name: '业务结果' }), later)).toBe(true);
+    expect(follows(later, screen.getByRole('table', { name: '原始计算结果' }))).toBe(true);
+    expect(tables.length).toBeGreaterThan(1);
   });
 });
