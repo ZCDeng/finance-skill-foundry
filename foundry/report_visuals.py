@@ -40,6 +40,16 @@ def _exact_label(value: Any) -> str:
     return sign + expanded
 
 
+def _figure_label(value: Any) -> str:
+    """The drawn value label: every digit kept, thousands grouped (visuals.ts::exactFigure)."""
+    exact = _exact_label(value)
+    match = re.fullmatch(r"([+-]?)(\d+)((?:\.\d+)?)", exact)
+    if not match:
+        return exact
+    sign, whole, fraction = match.groups()
+    return sign + re.sub(r"\B(?=(\d{3})+(?!\d))", ",", whole) + fraction
+
+
 def _wrapped_lines(text: str, width: int, size: int) -> int:
     """Match the deterministic glyph budget in the offline TypeScript renderer."""
     lines = 0
@@ -84,7 +94,7 @@ def visual_height(visual: dict) -> int:
             if grouped:
                 y += header
             for column in visual["value_columns"]:
-                y += max(44, n(_exact_label(row[column]), 216, 18) * 27 + 12,
+                y += max(44, n(_figure_label(row[column]), 216, 18) * 27 + 12,
                          n(column, 220, 16) * 24 + 12 if grouped else 12, 0 if grouped else header + 12)
             y += 20 if index == len(rows) - 1 else 28
     else:
@@ -93,7 +103,7 @@ def visual_height(visual: dict) -> int:
         chart_bottom = chart_top + 288
         label_y = chart_top + 12
         for column in visual["value_columns"]:
-            label_y += max(76, n(column + " · 末项 " + _exact_label(rows[-1][column]), 232, 18) * 27 + 24)
+            label_y += max(76, n(column + " · 末项 " + _figure_label(rows[-1][column]), 232, 18) * 27 + 24)
         y = max(chart_bottom + 68, label_y + 12) + 32
         for start in range(0, len(rows), 4):
             y += max(n(f"{start + offset + 1}. {row[visual['category']]}", 204, 16) * 24 + 16

@@ -79,7 +79,7 @@ describe('report visual composer', () => {
     fireEvent.click(screen.getByLabelText('数值列 金额'));
     fireEvent.change(screen.getByLabelText('图表单位'), { target: { value: '万元' } });
     expect(screen.getByLabelText('图表原始数据').textContent).toContain('9007199254740993');
-    expect(screen.getByLabelText('图表预览').textContent).toContain('9007199254740995');
+    expect(screen.getByLabelText('图表预览').textContent).toContain('9,007,199,254,740,995');
     fireEvent.click(screen.getByRole('button', { name: '插入文稿' }));
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ series: record.report_series }));
   });

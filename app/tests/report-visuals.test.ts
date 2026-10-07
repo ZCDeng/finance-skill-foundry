@@ -41,7 +41,24 @@ describe('report visual evidence and validation', () => {
     expect(raw.series.rows[0].利润).toBe('900719925474099.990000');
     expect(reportVisualMarkdown(raw)).toContain('900719925474099.990000');
     const texts = Array.from(parseHTML(renderReportVisualSvg(raw)).document.querySelectorAll('text')).map((node) => node.textContent);
-    expect(texts).toContain('900719925474099.990000');
+    // The label groups thousands and keeps every digit.
+    expect(texts).toContain('900,719,925,474,099.990000');
+  });
+
+  it('sets figures in IBM Plex Mono, the chart text in FND Figures, and a negative value in the muted red', () => {
+    const svg = parseHTML(renderReportVisualSvg(chart())).document;
+    expect(svg.querySelector('svg > g')?.getAttribute('font-family')).toMatch(/^'FND Figures', 'Noto Sans SC'/);
+    const label = (text: string) => Array.from(svg.querySelectorAll('text')).find((node) => node.textContent === text);
+    expect(label('120.00')?.getAttribute('font-family')).toMatch(/^'IBM Plex Mono'/);
+    expect(label('-40.10')?.getAttribute('fill')).toBe('#94463d');
+    expect(label('120.00')?.getAttribute('fill')).not.toBe('#94463d');
+    expect(label('华东')?.getAttribute('font-family')).toBeNull();
+    for (const tick of svg.querySelectorAll('[data-report-axis-tick] text')) expect(tick.getAttribute('font-family')).toMatch(/^'IBM Plex Mono'/);
+    // A negative last value on a line keeps the series colour on its name and reads in the muted red itself.
+    const line = parseHTML(renderReportVisualSvg(chart({ kind: 'line', series: { columns: chart().series.columns, rows: [{ 区域: '一月', 利润: '12.00' }, { 区域: '二月', 利润: '-1234.50' }] } }))).document;
+    const last = Array.from(line.querySelectorAll('tspan tspan')).find((node) => node.textContent === '-1,234.50');
+    expect(last?.getAttribute('fill')).toBe('#94463d');
+    expect(last?.parentElement?.closest('text')?.getAttribute('fill')).not.toBe('#94463d');
   });
 
   it.each([true, false, '', ' ', 'NaN', 'Infinity', Infinity, NaN, '-Infinity', '1e999', '1e-999', '0x10', '1,000', {}, undefined])('rejects invalid selected numeric value %s', (value) => {
@@ -185,7 +202,7 @@ describe('static report visual rendering', () => {
     expect(markdown).toContain('9.0071992547409999000e+14');
     expect(markdown).toContain('1.2300e-3');
     const texts = Array.from(parseHTML(renderReportVisualSvg(raw)).document.querySelectorAll('text')).map((node) => node.textContent);
-    expect(texts).toContain('900719925474099.99000');
+    expect(texts).toContain('900,719,925,474,099.99000');
     expect(texts).toContain('0.0012300');
   });
 

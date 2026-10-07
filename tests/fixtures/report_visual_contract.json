@@ -717,5 +717,45 @@
       "snapshot_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "source_label": "已核算月度金额"
     }
+  },
+  {
+    "name": "bar-grouped-value-wraps",
+    "accepted": true,
+    "height": 456,
+    "visual": {
+      "version": 1,
+      "kind": "bar",
+      "title": "大额金额",
+      "takeaway": "",
+      "chart_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "category": "项目",
+      "value_columns": [
+        "金额"
+      ],
+      "unit": "元",
+      "series": {
+        "columns": [
+          {
+            "name": "项目"
+          },
+          {
+            "name": "金额"
+          }
+        ],
+        "rows": [
+          {
+            "项目": "收入",
+            "金额": "1234567890123456.12"
+          },
+          {
+            "项目": "成本",
+            "金额": "-1234567890123456.12"
+          }
+        ]
+      },
+      "run_id": "dddddddddddddddddddddddddddddddd",
+      "snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_label": "八月核算"
+    }
   }
 ]

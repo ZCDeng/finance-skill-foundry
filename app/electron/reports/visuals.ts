@@ -31,6 +31,12 @@ const INK = '#252525';
 const MUTED = '#626262';
 const RULE = '#dedbd4';
 const COLORS = ['#8a6729', '#426786', '#626262'];
+// The muted negative red of DESIGN.md 财务数字 (--fnd-negative, light): a value below zero, never a series colour.
+const NEGATIVE = '#94463d';
+// Standalone figures (axis ticks, value labels, row numbers) are set whole in IBM Plex Mono; the chart's own text takes
+// only digits and % from it ('FND Figures'), as result sentences do. Both families are the app's and the export's.
+const FIGURE_FONT = "'IBM Plex Mono', 'Noto Sans SC', 'PingFang SC', sans-serif";
+const PROSE_FONT = "'FND Figures', 'Noto Sans SC', 'PingFang SC', sans-serif";
 const WIDTH = 960;
 const PAD = 40;
 const CONTENT = WIDTH - PAD * 2;
@@ -183,6 +189,12 @@ function exactValue(value: ReportVisualJson | undefined): string {
   return sign + expanded;
 }
 
+/** An exact value as a label: every digit kept, thousands grouped (−1234567.5 → -1,234,567.5). */
+function exactFigure(value: ReportVisualJson | undefined): string {
+  const exact = exactValue(value);
+  return /^[+-]?\d+(?:\.\d+)?$/.test(exact) ? groupThousands(exact) : exact;
+}
+
 function glyphWidth(char: string, size: number): number {
   return size * (/\s/u.test(char) ? 0.34 : /[\u0000-\u00ff]/u.test(char) ? 0.62 : 1.02);
 }
@@ -223,14 +235,14 @@ function visualHeight(visual: ReportVisual): number {
       const header = n(categoryValue(row[visual.category]), 220, 18) * 27 + (grouped ? 8 : 0);
       if (grouped) y += header;
       visual.value_columns.forEach((column) => {
-        y += Math.max(44, n(exactValue(row[column]), 216, 18) * 27 + 12, grouped ? n(column, 220, 16) * 24 + 12 : 12, grouped ? 0 : header + 12);
+        y += Math.max(44, n(exactFigure(row[column]), 216, 18) * 27 + 12, grouped ? n(column, 220, 16) * 24 + 12 : 12, grouped ? 0 : header + 12);
       });
       y += index === visual.series.rows.length - 1 ? 20 : 28;
     });
   } else {
     const chartTop = y + 24; const chartBottom = chartTop + 288;
     let labelY = chartTop + 12;
-    visual.value_columns.forEach((column) => { labelY += Math.max(76, n(`${column} · 末项 ${exactValue(visual.series.rows[visual.series.rows.length - 1][column])}`, 232, 18) * 27 + 24); });
+    visual.value_columns.forEach((column) => { labelY += Math.max(76, n(`${column} · 末项 ${exactFigure(visual.series.rows[visual.series.rows.length - 1][column])}`, 232, 18) * 27 + 24); });
     y = Math.max(chartBottom + 68, labelY + 12) + 32;
     for (let start = 0; start < visual.series.rows.length; start += 4) {
       y += Math.max(...visual.series.rows.slice(start, start + 4).map((row, offset) => n(`${start + offset + 1}. ${categoryValue(row[visual.category])}`, 204, 16) * 24 + 16));
@@ -250,8 +262,8 @@ function assertVisualDensity(visual: ReportVisual): void {
   if (visualHeight(visual) > 1200) throw new Error('图表内容过密，请拆分图表或缩短图题、类别与步骤说明（最大高度 1200 像素）');
 }
 
-function label(lines: string[], x: number, y: number, size = 16, color = INK, weight = 400, anchor = 'start'): string {
-  return `<text x="${x}" y="${y}" font-size="${size}" fill="${color}" font-weight="${weight}" text-anchor="${anchor}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? size * 1.5 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+function label(lines: string[], x: number, y: number, size = 16, color = INK, weight = 400, anchor = 'start', figure = false): string {
+  return `<text x="${x}" y="${y}"${figure ? ` font-family="${FIGURE_FONT}"` : ''} font-size="${size}" fill="${color}" font-weight="${weight}" text-anchor="${anchor}">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? size * 1.5 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`;
 }
 
 function point(value: number): string { return String(Math.round(value * 100) / 100); }
@@ -321,12 +333,12 @@ function renderBars(visual: ReportDataVisual, top: number): { svg: string; botto
   const headerHeight = Math.max(36, categoryHeader.length * 21 + 12);
   const shapes: string[] = []; let y = top + headerHeight;
   shapes.push(label(categoryHeader, PAD, top + 14, 14, MUTED), label(['精确值'], valueX, top + 14, 14, MUTED));
-  shapes.push(label(['0'], zeroX, top + 14, 14, MUTED, 400, 'middle'));
+  shapes.push(label(['0'], zeroX, top + 14, 14, MUTED, 400, 'middle', true));
   visual.series.rows.forEach((row, rowIndex) => {
     const categoryLines = wrap(categoryValue(row[visual.category]), categoryWidth, 18);
     const rowTop = y;
     const entries = visual.value_columns.map((column, index) => {
-      const valueLines = wrap(exactValue(row[column]), valueWidth, 18);
+      const valueLines = wrap(exactFigure(row[column]), valueWidth, 18);
       const seriesLines = visual.value_columns.length > 1 ? wrap(column, categoryWidth, 16) : [];
       const height = Math.max(44, valueLines.length * 27 + 12, seriesLines.length * 24 + 12);
       return { column, index, valueLines, seriesLines, height };
@@ -342,7 +354,7 @@ function renderBars(visual: ReportDataVisual, top: number): { svg: string; botto
         if (value === 0) shapes.push(line(zeroX, middle - 9, zeroX, middle + 9, COLORS[index], 3));
         else shapes.push(rect(Math.min(zeroX, endpoint), middle - 9, Math.abs(endpoint - zeroX), 18, COLORS[index]));
       }
-      shapes.push(label(valueLines, valueX, y + 20, 18, value === null ? MUTED : COLORS[index], 500));
+      shapes.push(label(valueLines, valueX, y + 20, 18, value === null ? MUTED : value < 0 ? NEGATIVE : COLORS[index], 500, 'start', value !== null));
       y += Math.max(height, entries.length === 1 ? headerHeight + 12 : 0);
     });
     shapes.push(line(PAD, y + 8, WIDTH - PAD, y + 8));
@@ -365,7 +377,7 @@ function renderLines(visual: ReportDataVisual, top: number): { svg: string; bott
   const shapes = ticks.flatMap((tick) => {
     const tickY = chartBottom - tick * chartHeight;
     const text = tick === scale.zero ? '0' : axisTick(scale.normalizedAt(tick), scale.magnitude, scientific);
-    return [line(chartLeft, tickY, chartRight, tickY, '#efeeea'), `<g data-report-axis-tick="true">${label([text], chartLeft - 12, tickY + 5, 14, MUTED, 400, 'end')}</g>`];
+    return [line(chartLeft, tickY, chartRight, tickY, '#efeeea'), `<g data-report-axis-tick="true">${label([text], chartLeft - 12, tickY + 5, 14, MUTED, 400, 'end', true)}</g>`];
   });
   shapes.push(line(chartLeft, y(0), chartRight, y(0), '#aaa49a', 1.5));
   let labelY = chartTop + 12;
@@ -380,15 +392,23 @@ function renderLines(visual: ReportDataVisual, top: number): { svg: string; bott
     });
     flush();
     const value = rows[rows.length - 1][column];
-    const lastLabel = wrap(`${column} · 末项 ${exactValue(value)}`, 232, 18);
+    const lastLabel = wrap(`${column} · 末项 ${exactFigure(value)}`, 232, 18);
     if (last && value !== null) {
       const endpoint = last as { x: number; y: number };
       shapes.push(`<path d="M ${point(endpoint.x)} ${point(endpoint.y)} H 672 V ${point(labelY - 5)} H 680" fill="none" stroke="${COLORS[seriesIndex]}" stroke-width="1"/>`);
     }
-    shapes.push(label(lastLabel, 688, labelY, 18, COLORS[seriesIndex], 600));
+    // The series name keeps its colour; a negative last value itself reads in the muted negative red.
+    const lastValue = numberValue(value, column);
+    const figure = escapeXml(exactFigure(value));
+    let lastText = label(lastLabel, 688, labelY, 18, COLORS[seriesIndex], 600);
+    if (lastValue !== null && lastValue < 0) {
+      const at = lastText.lastIndexOf(`${figure}</tspan>`);
+      if (at >= 0) lastText = `${lastText.slice(0, at)}<tspan fill="${NEGATIVE}" font-family="${FIGURE_FONT}">${figure}</tspan>${lastText.slice(at + figure.length)}`;
+    }
+    shapes.push(lastText);
     labelY += Math.max(76, lastLabel.length * 27 + 24);
   });
-  rows.forEach((_row, index) => shapes.push(label([String(index + 1)], x(index), chartBottom + 28, 16, MUTED, 400, 'middle')));
+  rows.forEach((_row, index) => shapes.push(label([String(index + 1)], x(index), chartBottom + 28, 16, MUTED, 400, 'middle', true)));
   const dataTop = Math.max(chartBottom + 68, labelY + 12);
   shapes.push(label(['按原始行序排列 · 序号对应下方类别 · 缺失值保留断线'], PAD, dataTop, 16, MUTED));
   let categoryY = dataTop + 32;
@@ -447,7 +467,7 @@ export function renderReportVisualSvg(raw: unknown): string {
     notes.forEach((note) => { const lines = wrap(note, CONTENT, 14); shapes.push(label(lines, PAD, y + 4, 14, MUTED)); y += lines.length * 21 + 4; });
   }
   const height = Math.ceil((y + 28) / 4) * 4;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}" role="img" aria-label="${escapeXml(visual.title)}"><title>${escapeXml(visual.title)}</title><desc>${escapeXml(caption(visual))}</desc>${rect(0, 0, WIDTH, height, PAPER)}<g font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-variant-numeric="tabular-nums">${shapes.join('')}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}" role="img" aria-label="${escapeXml(visual.title)}"><title>${escapeXml(visual.title)}</title><desc>${escapeXml(caption(visual))}</desc>${rect(0, 0, WIDTH, height, PAPER)}<g font-family="${PROSE_FONT}" font-variant-numeric="tabular-nums">${shapes.join('')}</g></svg>`;
 }
 
 function escapeHtml(value: string): string {

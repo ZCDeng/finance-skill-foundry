@@ -7,7 +7,7 @@ async function run() {
   const { operation, payload } = workerData;
   if (operation === 'resource-references') return imageResourceReferences(Buffer.from(payload.data), payload.format);
   if (operation === 'import') return importReport(Buffer.from(payload.data), payload.format, payload.source, payload.resources);
-  if (operation === 'docx') return exportDocx(payload.document, payload.title, payload.fontData ? new Uint8Array(payload.fontData) : undefined, payload.options);
+  if (operation === 'docx') return exportDocx(payload.document, payload.title, payload.fontData ? new Uint8Array(payload.fontData) : undefined, payload.options, payload.figureFontData ? new Uint8Array(payload.figureFontData) : undefined);
   if (operation === 'html') return renderReportHtml(payload.document, payload.title, payload.options);
   if (operation === 'markdown') return documentFromMarkdown(payload.body);
   throw new Error('Unsupported document operation');

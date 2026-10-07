@@ -86,6 +86,30 @@ async function fontData(): Promise<string> {
   return font;
 }
 
+const FIGURE_FACES = [[400, 'IBMPlexMono-Regular.woff2'], [600, 'IBMPlexMono-SemiBold.woff2'], [700, 'IBMPlexMono-Bold.woff2']] as const;
+
+async function figureFile(file: string): Promise<Buffer> {
+  for (const candidate of [path.join(process.resourcesPath, 'fonts/ibm-plex-mono', file),
+    path.join(app.getAppPath(), 'src/assets/fonts/ibm-plex-mono', file)]) {
+    try { return await readFile(candidate); } catch { /* Try the development resource. */ }
+  }
+  throw new Error('缺少离线数字字体，无法生成可靠的文稿。');
+}
+
+let figureFonts: Promise<{ weight: number; url: string }[]> | undefined;
+/** IBM Plex Mono for exported figures, embedded as data URLs so a saved HTML or PDF needs no network. */
+async function figureFontData(): Promise<{ weight: number; url: string }[]> {
+  figureFonts ??= Promise.all(FIGURE_FACES.map(async ([weight, file]) =>
+    ({ weight, url: `data:font/woff2;base64,${(await figureFile(file)).toString('base64')}` })));
+  return figureFonts;
+}
+
+let wordFigureFont: Promise<Buffer> | undefined;
+async function docxFigureFontData(): Promise<Buffer> {
+  wordFigureFont ??= figureFile('IBMPlexMono-Regular.ttf');
+  return wordFigureFont;
+}
+
 let wordFont: Promise<Buffer> | undefined;
 async function docxFontData(): Promise<Buffer> {
   wordFont ??= (async () => {
@@ -260,7 +284,7 @@ export class ReportHost {
     if (typeof title !== 'string' || title.length > 1000) throw new Error('文稿标题无效。');
     return this.job(task, async (signal) => {
       this.progress(task, '生成打印预览');
-      return { html: await conversion<string>('html', { document, title, options: { print: true, fontDataUrl: await fontData() } }, signal) };
+      return { html: await conversion<string>('html', { document, title, options: { print: true, fontDataUrl: await fontData(), figureFonts: await figureFontData() } }, signal) };
     });
   }
   async export(task: string, id: string, rawFormat: unknown, rawMode: unknown = 'management'): Promise<Record<string, unknown>> {
@@ -287,11 +311,11 @@ export class ReportHost {
           let data: Buffer;
           const renderOptions = { marker: projection.marker, contentMode: projection.content_mode, projectionHash: projection.projection_hash, draftId: projection.draft_id, contentHash: projection.content_hash, publicationStatus: projection.publication_status, reviewStatus: projection.review_status, reproducibilityStatus: projection.reproducibility_status, sources: projection.sources ?? [] };
           if (format === 'docx') {
-            const document = await materializeReportVisualsForDocx(projection.document, await fontData(), signal);
-            data = Buffer.from(await conversion<Uint8Array>('docx', { document, title: projection.title, fontData: await docxFontData(), options: { ...renderOptions, visualSources: reportVisualEvidence(projection.document) } }, signal));
+            const document = await materializeReportVisualsForDocx(projection.document, await fontData(), signal, await figureFontData());
+            data = Buffer.from(await conversion<Uint8Array>('docx', { document, title: projection.title, fontData: await docxFontData(), figureFontData: await docxFigureFontData(), options: { ...renderOptions, visualSources: reportVisualEvidence(projection.document) } }, signal));
           }
           else {
-            const html = await conversion<string>('html', { document: projection.document, title: projection.title, options: { print: format === 'pdf', fontDataUrl: await fontData(), ...renderOptions } }, signal);
+            const html = await conversion<string>('html', { document: projection.document, title: projection.title, options: { print: format === 'pdf', fontDataUrl: await fontData(), figureFonts: await figureFontData(), ...renderOptions } }, signal);
             data = format === 'pdf' ? await printReportPdf(html, signal, projection.marker) : Buffer.from(html);
           }
           aborted(signal);

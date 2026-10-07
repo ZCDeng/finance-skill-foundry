@@ -154,7 +154,8 @@ describe('offline font resources', () => {
     expect(reportFont.source_sha256).toBe(createHash('sha256').update(readFileSync(FONT)).digest('hex'));
     expect(createHash('sha256').update(readFileSync(resolve(ASSETS, 'noto-sans-sc', reportFont.file))).digest('hex')).toBe(reportFont.sha256);
     for (const family of ['asap-sharp', 'noto-sans-sc', 'ibm-plex-mono']) for (const name of readdirSync(resolve(ASSETS, family))) {
-      if (/\.(woff2?|ttf|otf)$/.test(name) && name !== reportFont.file) expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
+      // Word embeds TrueType: the Noto report face and the Plex Mono Word face are exported, not drawn by the app.
+      if (/\.(woff2?|ttf|otf)$/.test(name) && name !== reportFont.file && name !== 'IBMPlexMono-Regular.ttf') expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
     }
   });
 
@@ -251,6 +252,29 @@ describe('IBM Plex Mono figures', () => {
       expect(names(path).get(1)?.[0]).toMatch(/^IBM Plex Mono\b/);
       expect(table('OS/2', path).readUInt16BE(4), face.file).toBe(face.weight);
     }
+  });
+
+  it("embeds IBM's own Regular TrueType in Word, installable and unmodified", () => {
+    const word = record().word as { file: string; sha256: string; release: string; release_sha256: string; source: string };
+    expect(word.release).toMatch(/^https:\/\/github\.com\/IBM\/plex\/releases\/download\//);
+    expect(word.release_sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(word.source).toBe('ibm-plex-mono/fonts/complete/ttf/IBMPlexMono-Regular.ttf');
+    const bytes = readFileSync(resolve(PLEX, word.file));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(word.sha256);
+    expect(bytes.readUInt32BE(0)).toBe(0x00010000);
+    const sfnt = new Map<string, Buffer>();
+    for (let i = 0; i < bytes.readUInt16BE(4); i++) {
+      const at = 12 + i * 16;
+      sfnt.set(bytes.toString('ascii', at, at + 4), bytes.subarray(bytes.readUInt32BE(at + 8), bytes.readUInt32BE(at + 8) + bytes.readUInt32BE(at + 12)));
+    }
+    const os2 = sfnt.get('OS/2')!;
+    expect(os2.readUInt16BE(4)).toBe(400);
+    // fsType 0: installable embedding, which Word needs to carry the face inside a document.
+    expect(os2.readUInt16BE(8)).toBe(0);
+    // Same family as the WOFF2 faces the app draws with, so a document reads like the app.
+    const hmtx = sfnt.get('hmtx')!, hhea = sfnt.get('hhea')!;
+    expect(hhea.readUInt16BE(34)).toBeGreaterThan(0);
+    expect(hmtx.readUInt16BE(0)).toBe(600);
   });
 
   it('gives every character a figure is written with one width at every weight', () => {
