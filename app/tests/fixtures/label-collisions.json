@@ -1,5 +1,5 @@
 {
-  "description": "Huachen-shaped long-form rows, none of which pair. app/tests/business-result-components.test.tsx asserts labelCollisions(rows) equals label_collisions; the backend label_ambiguous check (C') must report the same groups for the same rows. Contract: see labelCollisions in app/src/views/analysis/businessResults.ts.",
+  "description": "Huachen-shaped long-form rows. Two of them (华东区域 profit actual_1_8 and budget_1_8) pair into a comparison and take no part, though the budget's label matches an unpaired group; one label is a metric code (revenue) and reads as its Chinese name 收入. app/src/views/analysis/businessResults.test.ts asserts labelCollisions(otherLongRows(run)) equals label_collisions; the backend label_ambiguous check (C') must report the same groups for the same rows. Contract: see labelCollisions in app/src/views/analysis/businessResults.ts.",
   "columns": [
     "metric_key",
     "organization",
@@ -191,6 +191,51 @@
       "unit": "万元",
       "metric_label": "应收账款期末余额",
       "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "12000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月实际",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "13936.4958",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月预算（估算）",
+      "source": "预算工作簿 09·预算执行分析",
+      "basis": "estimate"
+    },
+    {
+      "metric_key": "revenue_actual_ly",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "actual_ly_fy",
+      "value": "455000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "revenue",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_le",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "budget_le_fy",
+      "value": "500000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "收入",
+      "source": "预算工作簿 09·预算执行分析"
     }
   ],
   "label_collisions": [
@@ -237,6 +282,15 @@
       "keys": [
         "receivable_balance",
         "receivable_balance_adj"
+      ]
+    },
+    {
+      "organization": "集团合并",
+      "period": "2026",
+      "label": "收入",
+      "keys": [
+        "revenue_actual_ly",
+        "revenue_le"
       ]
     }
   ]

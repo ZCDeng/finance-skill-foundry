@@ -205,9 +205,22 @@ export function columnSemantics(name: string, type?: string): FieldSemantics {
   return 'text';
 }
 
+/**
+ * A label table's own entry for a key. The tables are plain objects, so a bare lookup of a script's own text
+ * (「constructor」, 「toString」) would return what every object inherits rather than nothing.
+ */
+function ownLabel(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** A metric code's Chinese name (result_semantics.py RESULT_METRIC_LABELS), or undefined for any other text. */
+function metricLabel(key: unknown): string | undefined {
+  return ownLabel(metricLabels, String(key));
+}
+
 export function businessColumnLabel(name: string): string {
   const key = name.toLowerCase();
-  return amountFieldLabels[key] ?? ratioFieldLabels[key] ?? ratioPctFieldLabels[key] ?? textFieldLabels[key] ?? name;
+  return ownLabel(amountFieldLabels, key) ?? ownLabel(ratioFieldLabels, key) ?? ownLabel(ratioPctFieldLabels, key) ?? ownLabel(textFieldLabels, key) ?? name;
 }
 
 function decimalParts(value: unknown): { negative: boolean; digits: string; scale: number } | null {
@@ -248,7 +261,7 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
   if (semantics === 'ratio_delta') return `${decimalToFixed(value, 2, 100)}个百分点`;
   if (semantics === 'amount') return decimalToFixed(value, 2);
   if (typeof value === 'object') return JSON.stringify(value);
-  const metric = metricLabels[String(value)] ?? String(value);
+  const metric = metricLabel(value) ?? String(value);
   return metric;
 }
 
@@ -322,7 +335,7 @@ export function rowPeriod(row: Record<string, unknown>): unknown {
 
 function preferredMetricLabel(value: unknown): string {
   if (value == null || value === '') return '结果';
-  return metricLabels[String(value)] ?? String(value);
+  return metricLabel(value) ?? String(value);
 }
 
 function matchMeasure(parts: string[]): { index: number; length: number; measure: CanonicalMeasure } | null {
@@ -987,9 +1000,9 @@ export function labelCollisions(rows: Record<string, unknown>[]): LabelCollision
 
 /** What a shared name gets after it: each key's Chinese name when every key has a distinct one, else the keys. */
 function collisionSuffixes(collision: LabelCollision): Map<string, string> {
-  const chinese = collision.keys.map((key) => metricLabels[key]);
+  const chinese = collision.keys.map(metricLabel);
   const useChinese = chinese.every(Boolean) && new Set(chinese).size === chinese.length;
-  return new Map(collision.keys.map((key, index) => [key, useChinese ? chinese[index] : key]));
+  return new Map(collision.keys.map((key, index) => [key, (useChinese && chinese[index]) || key]));
 }
 
 /**
@@ -1069,7 +1082,7 @@ export function compareBusinessRuns(current: AnalysisRun, previous?: AnalysisRun
       const oldValue = formatBusinessValue(before[field], semantics);
       const newValue = formatBusinessValue(row[field], semantics);
       if (oldValue !== newValue) {
-        changes.push({ identity, label: metricLabels[String(row.metric ?? row.metric_key ?? identity)] ?? String(row.metric ?? identity), field: businessColumnLabel(field), before: oldValue, after: newValue });
+        changes.push({ identity, label: metricLabel(row.metric ?? row.metric_key ?? identity) ?? String(row.metric ?? identity), field: businessColumnLabel(field), before: oldValue, after: newValue });
       }
     }
   }

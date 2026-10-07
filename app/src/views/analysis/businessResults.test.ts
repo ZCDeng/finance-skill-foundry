@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun } from '../../bridge.js';
 import sharedCollisions from '../../../tests/fixtures/label-collisions.json';
-import { businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessCell, formatBusinessValue, formatDisplayRows, labelCollisions, longRowColumns, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult, type DisplayColumn } from './businessResults.js';
+import { businessColumnLabel, businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessCell, formatBusinessValue, formatDisplayRows, labelCollisions, longRowColumns, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult, type DisplayColumn } from './businessResults.js';
 
 const analysis: AnalysisRevision = {
   id: 'analysis-1',
@@ -555,8 +555,24 @@ describe('business result presentation', () => {
 
     // The sample the backend label_ambiguous check (C') asserts too: both sides must find these groups in these rows.
     it('finds the shared Huachen sample\'s collisions, the contract with the backend check', () => {
-      expect(labelCollisions(sharedCollisions.rows).map(({ organization, period, label, keys }) => ({ organization, period, label, keys })))
+      const sample = run({
+        result: { columns: longColumns(sharedCollisions.columns), rows: sharedCollisions.rows, row_count: sharedCollisions.rows.length, truncated: false },
+      });
+      // The 华东区域 profit actual and budget pair into a card; only the rows left over are compared.
+      const others = otherLongRows(sample);
+      expect(sharedCollisions.rows.filter((item) => !others.includes(item)).map((item) => [item.metric_key, item.scenario]))
+        .toEqual([['profit', 'actual_1_8'], ['profit', 'budget_1_8']]);
+      expect(labelCollisions(others).map(({ organization, period, label, keys }) => ({ organization, period, label, keys })))
         .toEqual(sharedCollisions.label_collisions);
+    });
+
+    it('reads a label that only an object has by inheritance as written', () => {
+      const rows = [row('ratio', 'constructor'), row('revenue_completion_ratio', 'constructor'), row('profit', 'toString'), row('ratio', '__proto__')];
+      expect(labelCollisions(rows).map(({ label, keys }) => ({ label, keys }))).toEqual([{ label: 'constructor', keys: ['ratio', 'revenue_completion_ratio'] }]);
+      const shown = formatDisplayRows(rows, columnsFor(rows));
+      expect(shown.map((item) => item['指标'])).toEqual(['constructor（ratio）', 'constructor（revenue_completion_ratio）', 'toString', '__proto__']);
+      expect(formatBusinessValue('toString', 'text')).toBe('toString');
+      expect(businessColumnLabel('constructor')).toBe('constructor');
     });
 
     it('compares names as the table shows them, so an estimate reads alike with a label that already says 估算', () => {
