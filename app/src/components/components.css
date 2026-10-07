@@ -209,8 +209,16 @@
   border-bottom: 0;
 }
 
+/* A figure: IBM Plex Mono gives every digit, comma, point, sign and parenthesis one width, so a column of
+ * amounts lines up at the last digit. Chinese units fall through to Noto Sans SC. */
+.fnd-figure {
+  font-family: var(--fnd-font-figure);
+  font-variant-numeric: tabular-nums;
+}
+
 .fnd-num {
   text-align: right;
+  font-family: var(--fnd-font-figure);
   font-variant-numeric: tabular-nums;
 }
 
