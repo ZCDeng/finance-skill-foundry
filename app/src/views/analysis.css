@@ -61,7 +61,7 @@
 .analysis-table td { white-space: nowrap; }
 /* Three weights per table: detail rows 400, 小计 600 (the header's weight), 合计/总计 700 with a rule above. */
 .analysis-table tr.analysis-row--subtotal > td { font-weight: var(--fnd-weight-strong); }
-.analysis-table tr.analysis-row--total > td { font-weight: var(--fnd-weight-heavy); border-top: 1px solid var(--fnd-line-hover); }
+.analysis-table tr.analysis-row--total > td { font-weight: var(--fnd-weight-heavy); border-top: 1.5px solid var(--fnd-line-hover); }
 .analysis-script-summary { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-script-summary > * { min-width: 0; }
 .analysis-script-summary > .fnd-tablewrap .analysis-table { width: 100%; table-layout: fixed; }
