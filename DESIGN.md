@@ -25,6 +25,7 @@ components:
   chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.chip}', padding: 4px 10px}
   card: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 18px 20px}
   workspace-tab: {backgroundColor: transparent, textColor: '{colors.fnd-muted}', typography: '{typography.small}', padding: 12px 0}
+  disclosure: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.mark}', padding: 5px 8px 5px 32px}
 ---
 
 # Design System: FA Foundry
@@ -46,7 +47,7 @@ components:
 
 ## Colors
 
-主操作使用 `fnd-accent/on-accent` 的中性反差。标题栏品牌字「FA Foundry」用 `fnd-selected` 金色。标题栏按钮平时用次要文字色、透明底，悬停时文字变金；当前页签用金色文字、选择底色，标签下方加一条 1px 金色下划线，当前位置因此不只靠颜色区分；键盘聚焦保留所在状态，另加 1px `fnd-focus` 焦点框，不改文字颜色。这几条只写在 `.fnd-head` 里，其他页面复用 `.fnd-head__tab` 的返回按钮和 Formulator 按钮保持中性。`fnd-selected` 作文字时，浅色在标题栏白底上 5.18:1、在选择底色 #efefed 上 4.50:1，正好压在下限，改这两个 token 前先跑 tokens.test.ts；深色分别为 9.55:1 和 8.43:1。品牌字和页签都保持静态，2026-09-27 试做的两个动效按门槛撤回。metal-fx 的 MetalText 材质固定为 chromatic，浅色下品牌字读成灰色，对比度最低 4.33:1；liquid-gooey 的滑动指示器每次切换后约 40 秒持续重绘，空闲时渲染进程和 GPU 占用都上升。成果页签同样用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点框，`fnd-selection-surface` 用于任务及布局选择底色。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
+主操作使用 `fnd-accent/on-accent` 的中性反差。标题栏品牌字「FA Foundry」用 `fnd-selected` 金色。标题栏按钮平时用次要文字色、透明底，悬停时文字变金；当前页签用金色文字、选择底色，标签下方加一条 1px 金色下划线，当前位置因此不只靠颜色区分；键盘聚焦保留所在状态，另加 1px `fnd-focus` 焦点框，不改文字颜色。这几条只写在 `.fnd-head` 里，其他页面复用 `.fnd-head__tab` 的返回按钮和 Formulator 按钮保持中性。`fnd-selected` 作文字时，浅色在标题栏白底上 5.18:1、在选择底色 #efefed 上 4.50:1，正好压在下限，改这两个 token 前先跑 tokens.test.ts；深色分别为 9.55:1 和 8.43:1。品牌字和页签都保持静态，2026-09-27 试做的两个动效按门槛撤回。metal-fx 的 MetalText 材质固定为 chromatic，浅色下品牌字读成灰色，对比度最低 4.33:1；liquid-gooey 的滑动指示器每次切换后约 40 秒持续重绘，空闲时渲染进程和 GPU 占用都上升。成果页签同样用 1px 金色下划线。`fnd-line-hover` 用于中性悬停边界，`fnd-focus` 仅用于焦点框，`fnd-selection-surface` 用于任务及布局选择底色，也是折叠摘要等文字行的中性悬停底。界面控件和折叠摘要只用中性色、金色（位置、选择、焦点）和砖红（警示）；蓝色只留给 external 历史标记，图表系列色另行规定。背景、容器、次要层、正文、次要文字和分隔线分别对应 `bg/surface/surface-strong/ink/muted/line`。
 
 警告、错误、不可逆删除和输入错误使用砖红警示色 `fnd-warning`，文字用主色，边用 `fnd-warning-line`，浅底用 `fnd-warning-fill`。浅色主色 #a3372b 在白底上 6.69:1，深色主色 #eb9a8c 在 #1f1f1f 上 7.48:1。三件一起换，警示文字旁边不留金色边或金色浅底。
 
@@ -78,11 +79,13 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Shapes
 
-控件和任务行使用 `control` 圆角，独立资料卡、文稿输入与依据使用 `container`，小图标操作使用 `mark`，工具菜单使用 `menu`，历史 chip 保留原形。内容以细分隔线组织，避免把每个标题和操作组包成卡片。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
+控件和任务行使用 `control` 圆角，独立资料卡、文稿输入与依据使用 `container`，小图标操作和折叠摘要使用 `mark`，工具菜单使用 `menu`，历史 chip 保留原形。内容以细分隔线组织，避免把每个标题和操作组包成卡片。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
 
 ## Components
 
 **按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-warning-line`，错误文字使用 `fnd-warning`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-warning` 砖红文字与 `fnd-warning-line` 边，悬停为 `fnd-warning-fill`）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
+
+**折叠段落。** 应用内原位展开的折叠段落都是原生 `details`，摘要统一用 `DisclosureSummary`（[组件](app/src/components/Disclosure.tsx)）。摘要为正文色 14px/22px 常规字重，左侧 16px Lucide `ChevronRight`，描边 1.5，随文字色，不进入无障碍名称，展开时旋转 90°，过渡用 `fnd-duration/easing`。悬停为 `fnd-selection-surface` 中性底，键盘焦点沿用 base 的 1px `fnd-focus` 框。技术信息、诊断、脚本输出、中间步骤和图表原始数据这类辅助折叠用 `tone="quiet"`，12px/18px、`fnd-muted`，图标 14px。标签文字直接作为 `summary` 的文本；需要标题层级或说明行时可以放块级标题或说明 span。警告这类语义图标可以和 chevron 并存，装饰图标不放。页面样式只给折叠调间距，不改摘要的颜色、字号、字重、标记和焦点，也不用文字三角、原生三角或右侧 chevron。行内展开（按钮带 `aria-expanded` 在行下展开）、Popover 和「设置与高级」的原位面板各按自己的规则，不在此列。原生对话标题区的「对话工具」打开浮层，保留向下 chevron，用正文色和原生中性悬停底。
 
 **导航与焦点。** 顶层为工作区/成果库，方法库、数据台、历史任务从次级入口可达。资料/结果/文稿用带计数的 tablist，支持左右键、Home/End 与 roving tabindex。任务抽屉聚焦搜索、限制 Tab、使主工作区 inert；Escape 关闭并返回开关。图标动作有名称和状态，分隔条提供方向与数值。
 
@@ -129,7 +132,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## 工作簿公式体检（2026-10-04）
 
-公式体检是资料页上的提示，不是关卡：它放在表结构待办之后，每本有提示的工作簿一个默认折叠的 `analysis-details`，摘要写「公式体检 · 资料名 · N 类提示」，展开后逐类给出中文说明、处数和至多 5 个样例单元格，样例用链接式「查看」在原表只读预览中定位。需留意的提示用砖红 `fnd-warning` 系列配「需留意」字样和警示图标，一般提示用 muted 配「提示」字样和信息图标，颜色从不单独表意，也不使用金色。提示不禁用任何按钮、不改变任何状态；结尾一句「这些是提示，不影响导入和计算；是否需要修改由你判断。」说明由谁决定。
+公式体检是资料页上的提示，不是关卡：它放在表结构待办之后，每本有提示的工作簿一个默认折叠的 `analysis-details`（摘要用 `DisclosureSummary`），摘要写「公式体检 · 资料名 · N 类提示」，展开后逐类给出中文说明、处数和至多 5 个样例单元格，样例用链接式「查看」在原表只读预览中定位。需留意的提示用砖红 `fnd-warning` 系列配「需留意」字样和警示图标，一般提示用 muted 配「提示」字样和信息图标，颜色从不单独表意，也不使用金色。提示不禁用任何按钮、不改变任何状态；结尾一句「这些是提示，不影响导入和计算；是否需要修改由你判断。」说明由谁决定。
 
 ## 差异问题类型与套表可用结论（2026-10-04）
 
