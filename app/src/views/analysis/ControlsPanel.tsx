@@ -8,7 +8,7 @@ import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import {
-  DECISION_LABELS, FINDING_TYPES, ISSUE_LABELS, STATUS_LABELS, where,
+  DECISION_LABELS, FINDING_TYPES, ISSUE_LABELS, STATUS_LABELS, declaredLeft, isFormulaSide, where,
   type ControlFinding, type ControlList, type ControlRow, type Disposition, type FindingType, type Suggestion,
 } from './controls.js';
 import { errorText, unwrap } from './shared.js';
@@ -143,7 +143,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
               <Checkbox checked={Boolean(picked[index])} onCheckedChange={(state) => setPicked((current) => ({ ...current, [index]: state === true }))} />
               <span>{row.control.label}</span>
               <span className={`analysis-controls-status analysis-controls-status--${row.preview.status}`}>{STATUS_LABELS[row.preview.status]}</span>
-              {row.preview.status === 'break' ? <span className="analysis-note">差额 {groupDigits(row.preview.difference)} · {where(row.control.left)} 对 {where(row.control.right)}</span> : null}
+              {row.preview.status === 'break' ? <span className="analysis-note">差额 {groupDigits(row.preview.difference)} · {declaredLeft(row.control)} 对 {where(row.control.right)}</span> : null}
             </label>
           </li>)}
         </ul>
@@ -210,7 +210,7 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
       {decidedType ? <Badge><span className="sr-only">问题类型：</span>{decidedType}</Badge> : null}
     </div>
     {result?.left ? <p className="analysis-note">
-      {where(result.left)} 合计 {groupDigits(result.left.value)}；{where(result.right)} 合计 {groupDigits(result.right?.value)}
+      {where(result.left)} {isFormulaSide(result.left) ? '得' : '合计'} {groupDigits(result.left.value)}；{where(result.right)} 合计 {groupDigits(result.right?.value)}
       {result.difference ? `；差额 ${groupDigits(result.difference)}` : ''}{result.within_rounding ? '（可能是显示舍入）' : ''}
     </p> : null}
     {result?.reason ? <p className="analysis-note">{result.reason}</p> : null}

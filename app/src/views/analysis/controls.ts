@@ -11,8 +11,15 @@ export type ControlSide = {
   value?: string; cells?: number; text_cells?: number; blank_cells?: number;
 };
 
+/** The recomputed side of a formula control: what the cells give, and which cells. */
+export type FormulaSide = {
+  formula: 'signed_sum' | 'dso' | 'implied_collection'; label: string; value: string;
+  inputs: Record<string, ControlSide & { sign?: string }>;
+};
+
 export type ControlSpec = {
-  kind: 'subtotal' | 'tie_out'; label: string; left: ControlSide; right: ControlSide;
+  kind: 'subtotal' | 'tie_out' | 'formula'; label: string; left?: ControlSide; right: ControlSide;
+  formula?: FormulaSide['formula']; inputs?: Record<string, ControlSide & { sign?: string }>;
   tolerance: string; unit?: string; note?: string;
 };
 
@@ -20,7 +27,7 @@ export type ControlStatus = 'pass' | 'break' | 'error' | 'stale';
 
 export type ControlResult = {
   status: ControlStatus; difference?: string; within_rounding?: boolean; reason?: string;
-  left?: ControlSide; right?: ControlSide; run_at?: string;
+  left?: ControlSide | FormulaSide; right?: ControlSide; run_at?: string;
 };
 
 export type Disposition = {
@@ -89,6 +96,25 @@ export const FINDING_TYPES: Record<FindingType, { label: string; meaning: string
 };
 
 /** 「08·AR收缴率与欠费!D25:D30」, the way a manager finds the cells. */
-export function where(side?: ControlSide): string {
-  return side ? `${side.sheet}!${side.range}` : '—';
+const FORMULA_LABELS: Record<FormulaSide['formula'], string> = {
+  signed_sum: '加减勾稽', dso: '应收天数重算', implied_collection: '反推回款率',
+};
+
+export function isFormulaSide(side?: ControlSide | FormulaSide): side is FormulaSide {
+  return Boolean(side && 'formula' in side);
+}
+
+/** Where a side reads: a range, or for a recomputed side the formula and how many cells it read. */
+export function where(side?: ControlSide | FormulaSide): string {
+  if (!side) return '—';
+  if (isFormulaSide(side)) return `按公式重算（${side.label}，${Object.keys(side.inputs).length} 处取数）`;
+  return `${side.sheet}!${side.range}`;
+}
+
+/** The left side of a control as it was declared, before any run. */
+export function declaredLeft(control: ControlSpec): string {
+  if (control.kind === 'formula' && control.formula) {
+    return `按公式重算（${FORMULA_LABELS[control.formula]}，${Object.keys(control.inputs ?? {}).length} 处取数）`;
+  }
+  return where(control.left);
 }
