@@ -5,6 +5,8 @@ import { HelpLink } from '../guide/GuideHub.js';
 import { CURRENCY_OPTIONS, SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
 import { SCOPE_LABELS, type AnalysisScope, type ScopeCandidateSources, type ScopeCandidates, type ScopeKey, type ScopeValues } from './scope.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { formatPeriods } from '../../lib/period.js';
+import { joinParts } from '../../components/PeriodWords.js';
 
 const validPeriod = (value: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 
@@ -78,7 +80,7 @@ export function PeriodPending({ scope, announce = true }: { scope: Pick<Analysis
   const periods = pendingPeriods(scope);
   if (!periods.length) return null;
   // The scope card announces it; a second copy in the settings dialog would read it twice.
-  return <p role={announce ? 'status' : undefined} className="analysis-message">资料写的期间是 {periods.join('、')}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;
+  return <p role={announce ? 'status' : undefined} className="analysis-message">资料写的期间是 {joinParts(formatPeriods(periods).map((words) => <span className="fnd-period">{words}</span>), '、')}，但任务期间还没确认。确认后，计算、背景和文稿才会使用该期间。</p>;
 }
 
 const PRIMARY_FIELDS: readonly ScopeKey[] = ['period', 'organization', 'unit', 'currency', 'scenario'];

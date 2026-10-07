@@ -6,12 +6,15 @@ import { Field, FieldDescription, FieldError, FieldLabel, FieldTitle } from './u
 import { Input } from './ui/input.js';
 import { Button } from './ui/button.js';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from './ui/popover.js';
+import { searchKey } from '../lib/search.js';
 import './financial-controls.css';
 
 export type SelectOption = {
   value: string;
   label: string;
   meta?: string;
+  /** Also matched by the search, never shown: a stored value the meta writes in words (2026-08). */
+  keywords?: string;
   disabled?: boolean;
 };
 
@@ -386,12 +389,12 @@ export function MultiSelect({ label, values, options, onChange, placeholder = 'æ
 }
 
 function filterOptions(options: SelectOption[], query: string, allowEmptyLabel?: string, maxOptions = 80): FilteredOptions {
-  const needle = query.trim().toLowerCase();
+  const needle = searchKey(query);
   const base = allowEmptyLabel ? [{ value: '', label: allowEmptyLabel }, ...options] : options;
   const score = (option: SelectOption) => {
-    const label = option.label.toLowerCase();
-    const value = option.value.toLowerCase();
-    const meta = (option.meta ?? '').toLowerCase();
+    const label = searchKey(option.label);
+    const value = searchKey(option.value);
+    const meta = searchKey(`${option.meta ?? ''} ${option.keywords ?? ''}`);
     if (!needle) return 0;
     if (label.includes(needle)) return 0;
     if (value.includes(needle)) return 1;

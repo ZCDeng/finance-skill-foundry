@@ -35,6 +35,36 @@ describe('one task workspace', () => {
     expect(props.onNew).not.toHaveBeenCalled();
   });
 
+  it('writes the period in words beside the title and in the list, and finds it either way', () => {
+    render(<Workspace {...props} />);
+    expect(document.querySelector('.workspace-title > span')!.textContent).toBe('2026 年 8 月');
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    const row = screen.getByRole('button', { name: '华东利润分析' });
+    expect(row.querySelector('small')!.textContent).toBe('2026 年 8 月 · 进行中');
+    const search = screen.getByRole('searchbox', { name: '搜索任务' });
+    for (const query of ['8 月', '2026-08']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getByRole('button', { name: '华东利润分析' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '西南回款' })).toBeNull();
+    }
+  });
+
+  it('finds a period written with or without spaces and with a plain hyphen, and keeps it on one line', () => {
+    const rows: TaskRow[] = [...tasks, { id: 'c'.repeat(32), title: '集团累计', period: '2026-01:2026-08', skill_id: null, created_at: '', windows: 0 }];
+    render(<Workspace {...props} tasks={rows} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
+    expect(screen.getByRole('button', { name: '集团累计' }).querySelector('small .fnd-period')!.textContent).toBe('2026 年 1–8 月');
+    const search = screen.getByRole('searchbox', { name: '搜索任务' });
+    const found = () => screen.queryAllByRole('button').filter((button) => button.classList.contains('workspace-task')).map((button) => button.getAttribute('aria-label'));
+    fireEvent.change(search, { target: { value: '2026年8月' } });
+    expect(found()).toEqual(['华东利润分析']);
+    fireEvent.change(search, { target: { value: '8月' } });
+    expect(found()).toEqual(expect.arrayContaining(['华东利润分析', '集团累计']));
+    expect(found()).toHaveLength(2);
+    fireEvent.change(search, { target: { value: '1-8月' } });
+    expect(found()).toEqual(['集团累计']);
+  });
+
   it('lets keyboard users resize and reset the dialogue width', () => {
     render(<Workspace {...props} />);
     const separator = screen.getByRole('separator', { name: '调整对话宽度' });
@@ -65,6 +95,7 @@ describe('one task workspace', () => {
       expect(icon.tagName.toLowerCase(), item.textContent!).toBe('svg');
       expect(icon.getAttribute('aria-hidden')).toBe('true');
       expect(icon.getAttribute('width')).toBe('15');
+      expect(icon.getAttribute('stroke-width'), item.textContent!).toBe('1.5');
     }
   });
 

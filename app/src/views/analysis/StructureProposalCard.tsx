@@ -6,6 +6,7 @@ import { WaitOrb } from '../../components/WaitOrb.js';
 import { Input } from '../../components/ui/input.js';
 import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
+import { PeriodWords } from '../../components/PeriodWords.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
@@ -424,7 +425,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
             <p className="analysis-note">向下填充：{sheet.fill_down_columns.join('、')} 列只在每组首行有值。</p>
           )}
           <p className="analysis-note">
-            标题读到：期间 {sheet.scope_hints.period || '未声明'} · 单位 {sheet.scope_hints.unit || '未声明'} · 币种 {sheet.scope_hints.currency || '未声明'}
+            标题读到：期间 {sheet.scope_hints.period ? <PeriodWords value={sheet.scope_hints.period} /> : '未声明'} · 单位 {sheet.scope_hints.unit || '未声明'} · 币种 {sheet.scope_hints.currency || '未声明'}
             {sheet.scope_hints.granularity ? ` · 粒度 ${sheet.scope_hints.granularity}` : ''}
             {sheet.scope_hints.as_of_date ? ` · 基准日 ${sheet.scope_hints.as_of_date}` : ''}
             {sheet.scope_hints.scenario ? ` · 情景 ${scenarioLabel(sheet.scope_hints.scenario)}` : ''}

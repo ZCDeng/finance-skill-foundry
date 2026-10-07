@@ -179,6 +179,25 @@ def test_organization_is_not_asked_of_files_that_name_none():
     assert _status(scope={**SCOPE, "organization": ["华东", ""]})["headline"]["state"] == "ready_for_review"
 
 
+def _scope_items(result):
+    return next(block for block in result["blocks"] if block["key"] == "scope")["items"]
+
+
+def test_the_confirmed_scope_keeps_its_text_and_gives_the_values_by_key_for_the_page_to_word():
+    [item] = _scope_items(_status(scope={**SCOPE, "period": "2026-01:2026-08", "organization": ["华东", "华南"]}))
+    # The assistant, CLI and MCP read the text; it stays exactly as stored.
+    assert item["text"] == "2026-01:2026-08 · 华东、华南 · 万元 · CNY"
+    assert list(item["scope"].items()) == [("period", "2026-01:2026-08"), ("organization", "华东、华南"),
+                                           ("unit", "万元"), ("currency", "CNY")]
+
+
+def test_a_single_entity_scope_names_no_organization_and_an_unconfirmed_one_gives_no_values():
+    [item] = _scope_items(_status(scope={**SCOPE, "organization": ""}, organization_required=False))
+    assert item["text"] == "2026-08 · 万元 · CNY"
+    assert list(item["scope"]) == ["period", "unit", "currency"]
+    assert all("scope" not in row for row in _scope_items(_status(scope={**SCOPE, "period": ""})))
+
+
 def test_a_failed_run_after_the_last_success_is_flagged():
     result = _status(runs=[RUN, {"execution_status": "failed", "seq": 11}], draft={**CLEAN_DRAFT, "seq": 12})
     review = result["blocks"][-1]

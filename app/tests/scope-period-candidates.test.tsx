@@ -50,7 +50,7 @@ it('names no source for a candidate nothing vouches for', () => {
 it('holds the period-bound actions while the files name a month the task has not confirmed', () => {
   expect(pendingPeriods(scopeOf('', ['2026-08']))).toEqual(['2026-08']);
   render(<PeriodPending scope={scopeOf('', ['2026-08'])} />);
-  expect(screen.getByRole('status').textContent).toContain('资料写的期间是 2026-08，但任务期间还没确认');
+  expect(screen.getByRole('status').textContent).toContain('资料写的期间是 2026 年 8 月，但任务期间还没确认');
 });
 
 it('does not hold anything once a period is chosen, or when no file names one', () => {

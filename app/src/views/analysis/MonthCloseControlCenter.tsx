@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CircleAlert, CircleCheck, CircleDashed, CircleSlash, RefreshCw } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { ControlsPanel } from './ControlsPanel.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { errorText } from './shared.js';
+import { formatPeriod } from '../../lib/period.js';
+import { joinParts } from '../../components/PeriodWords.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
 type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
-type CloseItem = { text: string; blocking: boolean; attention?: boolean; target?: CloseTarget; hint?: string };
+type CloseItem = { text: string; blocking: boolean; attention?: boolean; target?: CloseTarget; hint?: string; scope?: Record<string, string> };
 type CloseBlock = { key: string; label: string; state: BlockState; items: CloseItem[] };
 type ConclusionLevel = 'usable' | 'usable_with_caveats' | 'not_usable' | 'not_assessable';
 type ConclusionReason = { text: string; target?: CloseTarget };
@@ -113,9 +115,32 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   );
 }
 
+/**
+ * An item as the page writes it. The confirmed scope comes with its values by key, so its period
+ * reads 2026 年 1–8 月; the text stays as stored for the assistant, and an older answer without
+ * the values shows that text.
+ */
+// The order the server writes the scope text in (SCOPE_REQUIRED), not the order the keys arrive in.
+const SCOPE_ORDER = ['period', 'organization', 'unit', 'currency'] as const;
+
+/** The scope segments in order, each with whether it is the worded period; null for any other item. */
+function scopeSegments(item: CloseItem): { text: string; period: boolean }[] | null {
+  if (!item.scope) return null;
+  const scope = item.scope;
+  return SCOPE_ORDER.filter((key) => scope[key]).map((key) => ({ text: key === 'period' ? formatPeriod(scope[key]) : scope[key], period: key === 'period' }));
+}
+
+const itemWords = (item: CloseItem): string => scopeSegments(item)?.map(({ text }) => text).join(' · ') ?? item.text;
+
+/** The same words on screen, the period kept on one line. */
+const itemNode = (item: CloseItem): ReactNode => {
+  const segments = scopeSegments(item);
+  return segments ? joinParts(segments.map(({ text, period }) => period ? <span className="fnd-period">{text}</span> : text)) : item.text;
+};
+
 /** An item's words; a hint (a file's digest) rides only in the tooltip: a hash read aloud tells nobody anything. */
 function ItemText({ item }: { item: CloseItem }) {
-  return item.hint ? <span title={item.hint}>{item.text}</span> : <>{item.text}</>;
+  return item.hint ? <span title={item.hint}>{itemNode(item)}</span> : <>{itemNode(item)}</>;
 }
 
 /**
@@ -157,10 +182,10 @@ function SettledLine({ words, Icon, blocks }: { words: string; Icon: typeof Circ
     <span>{words}：{blocks.map((block, index) => {
       const shown = block.items.filter((item) => inView(block, item));
       const tucked = block.items.filter((item) => !inView(block, item));
-      const title = tucked.map((item) => [item.text, item.hint].filter(Boolean).join(' · ')).join('\n');
+      const title = tucked.map((item) => [itemWords(item), item.hint].filter(Boolean).join(' · ')).join('\n');
       return <span key={block.key}>{index ? '、' : ''}<span title={title || undefined}>{block.label}</span>
-        {shown.length ? <span className="analysis-close-settled-detail">（{shown.map((item) => item.text).join('；')}）</span> : null}
-        {tucked.length ? <span className="sr-only">（{tucked.map((item) => item.text).join('；')}）</span> : null}</span>;
+        {shown.length ? <span className="analysis-close-settled-detail">（{joinParts(shown.map(itemNode), '；')}）</span> : null}
+        {tucked.length ? <span className="sr-only">（{tucked.map(itemWords).join('；')}）</span> : null}</span>;
     })}</span>
   </p>;
 }

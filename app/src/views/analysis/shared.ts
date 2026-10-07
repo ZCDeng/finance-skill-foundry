@@ -2,6 +2,7 @@ import { when, type Answer, type AnalysisRun, type DatasetSnapshot, type Finance
 import { textValue } from './presentation.js';
 import type { SelectOption } from '../../components/FinancialControls.js';
 import { friendlyError, scenarioLabel } from './glossary.js';
+import { formatPeriod } from '../../lib/period.js';
 
 export { errorText, friendlyError } from './glossary.js';
 
@@ -41,6 +42,8 @@ export const contextOptions = (finance: FinanceContextState | null): SelectOptio
   value: context.id,
   label: context.name,
   meta: Object.entries(context.scopes ?? {}).map(([alias, item]) => `${scenarioLabel(alias)} ${scopeSummary(item)}`).join('；') || '未记录范围',
+  // 搜索范围名称或期间: the period as typed (2026-08) still finds the scope its meta words.
+  keywords: Object.values(context.scopes ?? {}).map((item) => item.period).filter((period) => typeof period === 'string').join(' '),
 })) ?? [];
 export const accountMapOptions = (finance: FinanceContextState | null): SelectOption[] => finance?.account_maps.map((item) => ({
   value: String(item.id ?? ''),
@@ -51,6 +54,15 @@ export const aliasOptions = (aliases: string[], context?: FinanceContext, datase
   return { value: alias, label: scenarioLabel(alias), meta: bound ? datasets.find((source) => source.id === bound)?.name ?? '已绑定资料' : '' };
 });
 
+/** A scope's set fields in order, each as label and words; `period` marks the worded period, which must not break across lines. */
+export function scopeParts(scope: Record<string, unknown> = {}): { label: string; text: string; period: boolean }[] {
+  return scopeFields.filter(([key]) => scope[key]).map(([key, label]) => {
+    const period = key === 'period' && typeof scope[key] === 'string';
+    const text = key === 'scenario' ? scenarioLabel(scope[key]) : period ? formatPeriod(scope[key]) : textValue(scope[key]);
+    return { label, text, period };
+  });
+}
+
 export function scopeSummary(scope: Record<string, unknown> = {}): string {
-  return scopeFields.map(([key, label]) => scope[key] ? `${label} ${key === 'scenario' ? scenarioLabel(scope[key]) : textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
+  return scopeParts(scope).map(({ label, text }) => `${label} ${text}`).join(' · ') || '未限定';
 }

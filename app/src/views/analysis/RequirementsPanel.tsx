@@ -6,7 +6,8 @@ import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, RESULT_SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
 import type { AnalysisScope } from './scope.js';
-import { errorText, scopeSummary, unwrap } from './shared.js';
+import { errorText, unwrap } from './shared.js';
+import { ScopeSummary } from './ScopeSummary.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
@@ -554,7 +555,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, anal
     <fieldset className="analysis-fieldset" disabled={loading || saving || !api?.financeCall}>
       <label>用户问题<Textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
-      <details className="analysis-details"><DisclosureSummary>范围 · {scopeSummary(scope)}</DisclosureSummary>
+      <details className="analysis-details"><DisclosureSummary>范围 · <ScopeSummary scope={scope} /></DisclosureSummary>
         <p className="analysis-note">与资料页的「分析范围」是同一份记录；这里改动后保存，资料页会显示新版本。</p>
         <div className="analysis-edit-grid">
           {hasSavedCustomPeriod
@@ -698,7 +699,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     {!dimensions ? <p role="alert" className="analysis-message analysis-message--error">维度必须是 JSON object。</p> : null}
     {support ? <RequirementSupportHint support={support} stale={supportStale} /> : null}
     <div className="analysis-actions"><span className="analysis-note">要求 {index + 1} · {requirementTitle(item)}</span>
-      <Button variant="outline" type="button" onClick={onRemove}><Trash2 size={14} aria-hidden />删除要求</Button></div>
+      <Button variant="outline" type="button" onClick={onRemove}><Trash2 size={14} strokeWidth={1.5} aria-hidden />删除要求</Button></div>
     <TechnicalInfo rows={[['要求编号', item.id], ['指标键', item.metric]]} />
   </article>;
 }

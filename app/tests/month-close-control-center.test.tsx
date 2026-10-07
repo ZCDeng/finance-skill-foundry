@@ -149,6 +149,34 @@ it('shows in plain view what was confirmed, what the manager still has to do and
   expect(screen.queryByRole('listitem', { name: /已就绪/ })).toBeNull();
 });
 
+it('words the confirmed period from the values the server gives, and shows an older answer as its text', async () => {
+  const withScope = (item: Record<string, unknown>): CloseStatus => ({
+    headline: { state: 'ready_for_review', text: '可提交经理复核' }, blocking: [],
+    blocks: [{ key: 'scope', label: '范围', state: 'done', items: [{ blocking: false, target: 'scope', ...item } as CloseStatus['blocks'][number]['items'][number]] }],
+  });
+  mount(withScope({ text: '2026-01:2026-08 · 华宸 · 万元 · CNY',
+    scope: { period: '2026-01:2026-08', organization: '华宸', unit: '万元', currency: 'CNY' } }));
+  const { unmount } = render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '可提交经理复核' });
+  expect(visible(document.querySelector('.analysis-close-settled')!)).toBe('已就绪：范围（2026 年 1–8 月 · 华宸 · 万元 · CNY）');
+  // The worded period wraps as one piece; the line breaks at its separators.
+  expect(document.querySelector('.analysis-close-settled .fnd-period')!.textContent).toBe('2026 年 1–8 月');
+  unmount();
+
+  // The values are written in the server's order whatever order the keys arrive in.
+  mount(withScope({ text: '2026-01:2026-08 · 华宸 · 万元 · CNY',
+    scope: { currency: 'CNY', unit: '万元', organization: '华宸', period: '2026-01:2026-08' } }));
+  const shuffled = render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '可提交经理复核' });
+  expect(visible(document.querySelector('.analysis-close-settled')!)).toBe('已就绪：范围（2026 年 1–8 月 · 华宸 · 万元 · CNY）');
+  shuffled.unmount();
+
+  mount(withScope({ text: '2026-08 · 万元 · CNY' }));
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '可提交经理复核' });
+  expect(visible(document.querySelector('.analysis-close-settled')!)).toBe('已就绪：范围（2026-08 · 万元 · CNY）');
+});
+
 it('lists every row of a 请留意 card and gives it no 去处理, and marks a note on a 待处理 card', async () => {
   const noted: CloseStatus = {
     ...status,
