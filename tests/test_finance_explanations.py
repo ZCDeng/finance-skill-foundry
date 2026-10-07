@@ -2021,6 +2021,89 @@ def test_percent_unit_rows_multiplied_by_100_do_not_pass(service):
     assert any(issue["code"] == "uncited_number" and issue["text"] == "9025.47%" for issue in percent["issues"])
 
 
+def test_percent_rows_cannot_take_a_percent_presentation_or_be_multiplied_by_100(service):
+    store, _ = service
+    checks = {}
+    for index, metric_key in enumerate(("achievement_ratio", "achievement_pct")):
+        run, fact = _synthetic_single_value_fact(
+            store, run_id=f"c{index}" + "1" * 30, value="94.5301", unit="%", metric_key=metric_key,
+        )
+        percent = _presentation_claim_for_fact(fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})
+        checks[metric_key] = (
+            store.validate_explanation({"body": "达成率 9453.01%。", "run_ids": [run["id"]], "claims": [percent]}),
+            store.validate_explanation({"body": "达成率 9453.01%。", "run_ids": [run["id"]], "fact_ids": [fact["id"]]}),
+            store.validate_explanation({"body": "达成率 94.53%。", "run_ids": [run["id"]],
+                                        "claims": [_presentation_claim_for_fact(fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"})]}),
+        )
+    for metric_key, (with_percent, plain, identity) in checks.items():
+        assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "percent_requires_ratio_fact"
+                   for issue in with_percent["issues"]), metric_key
+        assert any(issue["code"] == "uncited_number" and issue["text"] == "9453.01%" for issue in with_percent["issues"]), metric_key
+        assert any(issue["code"] == "uncited_number" and issue["text"] == "9453.01%" for issue in plain["issues"]), metric_key
+        assert identity["status"] == "pass", (metric_key, identity["issues"])
+
+
+def test_points_amounts_and_pct_columns_multiplied_by_100_do_not_pass(service):
+    store, _ = service
+    points_run, points_fact = _synthetic_single_value_fact(
+        store, run_id="c2222222222222222222222222222222", value="3.3", unit="百分点", metric_key="collection_gap",
+    )
+    amount_run, amount_fact = _synthetic_single_value_fact(
+        store, run_id="c3333333333333333333333333333333", value="3.3", metric_key="other_income",
+    )
+    gap_run = _write_synthetic_run(store.analysis, {
+        "id": "c4444444444444444444444444444444", "bindings": {}, "assumptions": [], "execution_status": "succeeded",
+        "reproducibility_status": "reproducible", "output_hash": "hash-c4444444",
+        "result": {"columns": [{"name": "metric_key", "type": "VARCHAR"}, {"name": "gap_pct", "type": "DECIMAL(38,18)"}],
+                   "rows": [{"metric_key": "collection", "gap_pct": "3.3"}]},
+    })
+    from foundry.finance_explanations import prepare_explanation
+    gap_fact = next(fact for fact in prepare_explanation(store.analysis, [gap_run])["facts"] if fact["column"] == "gap_pct")
+
+    def check(body, run, fact):
+        return store.validate_explanation({"body": body, "run_ids": [run["id"]], "fact_ids": [fact["id"]]})
+
+    for run, fact in ((points_run, points_fact), (amount_run, amount_fact), (gap_run, gap_fact)):
+        multiplied = check("差值 330%。", run, fact)
+        assert any(issue["code"] == "uncited_number" and issue["text"] == "330%" for issue in multiplied["issues"]), fact["unit"]
+    # The ways the rules write them still pass.
+    assert check("收缴率缺口 3.30 个百分点。", points_run, points_fact)["status"] == "pass"
+    assert check("其他收益 3.3 万元。", amount_run, amount_fact)["status"] == "pass"
+    gap = check("收缴率缺口 3.3%。", gap_run, gap_fact)
+    assert gap["status"] == "pass", gap["issues"]
+
+
+def test_percent_signs_negatives_and_bare_decimals_on_percent_rows(service):
+    store, _ = service
+    pct_run, pct_fact = _synthetic_single_value_fact(
+        store, run_id="c5555555555555555555555555555555", value="3.2547", unit="pct", metric_key="collection_gap",
+    )
+    negative_run, negative_fact = _synthetic_single_value_fact(
+        store, run_id="c6666666666666666666666666666666", value="-3.3", unit="pct", metric_key="collection_gap",
+    )
+    ratio_run, ratio_fact = _synthetic_single_value_fact(
+        store, run_id="c7777777777777777777777777777777", value="-0.068519", unit="比率", metric_key="variance_ratio",
+    )
+    identity = _presentation_claim_for_fact(pct_fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"})
+
+    def check(body, run, spec):
+        return store.validate_explanation({"body": body, "run_ids": [run["id"]], **spec})
+
+    full_width = check("收缴率缺口 3.25％。", pct_run, {"claims": [identity]})
+    bare = check("收缴率缺口 0.0325。", pct_run, {"claims": [identity]})
+    negative = check("收缴率缺口 -3.30%。", negative_run, {"fact_ids": [negative_fact["id"]]})
+    negative_wide = check("收缴率缺口 -330％。", negative_run, {"fact_ids": [negative_fact["id"]]})
+    ratio = check("差异率 -6.85%。", ratio_run, {"claims": [
+        _presentation_claim_for_fact(ratio_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})]})
+
+    assert full_width["status"] == "pass", full_width["issues"]
+    # A %/pct row's identity presentation passes only the number written with %.
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "0.0325" for issue in bare["issues"])
+    assert negative["status"] == "pass", negative["issues"]
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "-330％" for issue in negative_wide["issues"])
+    assert ratio["status"] == "pass", ratio["issues"]
+
+
 def test_each_row_written_by_the_rules_passes_the_number_check(service):
     """The writing rules and the number check say the same: an amount placeholder, a hand-written ratio percentage
     with a percent presentation, and a hand-written pct row with an identity presentation all pass."""

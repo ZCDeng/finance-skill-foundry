@@ -15,7 +15,7 @@ from foundry.errors import FoundryError
 from foundry.result_semantics import PERCENT_UNITS
 
 FACT_TOKEN = re.compile(r"\{\{fact:([0-9a-f]{64})\}\}")
-NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![A-Za-z0-9_.])")
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?(?![A-Za-z0-9_.])")
 CLOSURE_EXPR = re.compile(r"(?P<expr>[-+]?\d+(?:\.\d+)?(?:\s*[+\-−]\s*\d+(?:\.\d+)?)+\s*=\s*[-+]?\d+(?:\.\d+)?)")
 DATE_SPAN = re.compile(r"\b\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?")
 PERIOD_RANGE = re.compile(
@@ -450,9 +450,10 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     percent_values = _percent_number_values(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
-    # A number written with % never reads a %/pct row's value as a fraction: 330% is not that row's 3.3.
+    # A number written with % is a percentage of a fraction the run stored (a ratio fact), a %/pct row's own value,
+    # or a presentation: never an amount, a 百分点 or a %/pct value read again as a fraction (330% for 3.3).
     percent_token_allowed_numbers = _allowed_numbers(
-        [by_id[fact_id] for fact_id in referenced if fact_id in by_id and not _fact_has_percent_unit(by_id[fact_id])]
+        [by_id[fact_id] for fact_id in referenced if fact_id in by_id and _fact_is_ratio(by_id[fact_id])]
     )
     ignored_number_spans = [
         *_generated_appendix_heading_number_spans(body, prepared),
@@ -461,7 +462,7 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     ]
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
-        if token["text"].endswith("%"):
+        if _is_percent_text(token["text"]):
             if normalized in percent_token_allowed_numbers or _is_cited_percent_number(token["text"], percent_values):
                 continue
         elif normalized in base_allowed_numbers:
@@ -2110,7 +2111,7 @@ def _presentation_number(claim: dict, fact: dict | None) -> tuple[dict | None, d
     rendered = format(rounded, f".{decimal_places}f")
     # A %/pct row is already a percentage: identity rounds it and writes it with %, as a ratio's percent scale does.
     percent_row = scale == "identity" and _fact_has_percent_unit(fact)
-    unit = "%" if scale == "percent" or percent_row else str(fact.get("unit") or "").strip()
+    unit = "%" if scale == "percent" else PERCENT_ROW_UNIT if percent_row else str(fact.get("unit") or "").strip()
     if scale == "percent" or percent_row:
         rendered += "%"
     return {"number": _normalize_number(rendered), "unit": unit}, None
@@ -2126,6 +2127,9 @@ def _claim_matches_fact(claim: dict, fact: dict) -> bool:
 
 
 def _fact_is_ratio(fact: dict) -> bool:
+    """A fact that stores a fraction and so may be written as a percentage. A %, ％, pct or 百分比 row already is one."""
+    if _fact_has_percent_unit(fact):
+        return False
     unit = str(fact.get("unit") or "").strip().lower()
     semantics = fact.get("semantics") if isinstance(fact.get("semantics"), dict) else {}
     return unit in {"%", "比率", "ratio"} or semantics.get("role") == "ratio"
@@ -2138,18 +2142,25 @@ def _fact_percent_value(fact: dict, value: Decimal) -> Decimal:
 
 
 EXPLICIT_PRESENTATION_UNITS = ("亿元", "万元", "千元", "元", "%", "比率")
+# The unit a %/pct row's identity presentation allows: only a number written with %. A ratio's percent presentation
+# keeps the older leniency of also passing its bare decimal (0.9453 for 94.53%); that is left as it was.
+PERCENT_ROW_UNIT = "%（百分数行）"
+
+
+def _is_percent_text(text: str) -> bool:
+    return str(text).endswith(("%", "％"))
 
 
 def _presentation_token_unit_matches(body: str, token: dict, allowed_units: set[str]) -> bool:
     explicit = _explicit_unit_for_token(body, token)
     if explicit is None:
-        return True
+        return any(unit != PERCENT_ROW_UNIT for unit in allowed_units)
     return any(_units_compatible(explicit, unit) for unit in allowed_units)
 
 
 def _explicit_unit_for_token(body: str, token: dict) -> str | None:
     text = str(token.get("text") or "")
-    if text.endswith("%"):
+    if _is_percent_text(text):
         return "%"
     start = token.get("start")
     if not isinstance(start, int):
@@ -2163,7 +2174,7 @@ def _explicit_unit_for_token(body: str, token: dict) -> str | None:
 def _units_compatible(explicit: str, expected: str) -> bool:
     if explicit == expected:
         return True
-    return explicit == "%" and expected in {"%", "比率", "ratio"}
+    return explicit == "%" and expected in {"%", "比率", "ratio", PERCENT_ROW_UNIT}
 
 
 def _validate_calculation_claim(analysis, claim: dict, run_ids: list[str]) -> dict | None:
@@ -2208,7 +2219,9 @@ def _validate_calculation_claim(analysis, claim: dict, run_ids: list[str]) -> di
 
 def _fact_number(fact: dict) -> str:
     value = Decimal(str(fact["value"]))
-    if fact.get("column") in RATIO_COLUMNS and fact["column"].endswith("_pct"):
+    column = str(fact.get("column") or "")
+    # A *_pct ratio column holds a percentage (3.3 is 3.3%), as _fact_percent_value reads it.
+    if _is_ratio_column(column) and column.endswith("_pct"):
         value /= 100
     return _normalize_number(str(value))
 
@@ -2235,7 +2248,7 @@ def _percent_number_values(facts: list[dict]) -> set[Decimal]:
 
 def _is_cited_percent_number(text: str, values: set[Decimal]) -> bool:
     """A body number written with % that equals a cited %, pct or 百分比 value as written (3.3 is 3.30%)."""
-    if not values or not text.endswith("%"):
+    if not values or not _is_percent_text(text):
         return False
     try:
         return Decimal(text[:-1].replace(",", "")) in values
@@ -2744,7 +2757,7 @@ def _numbers_from_text(text: str) -> set[str]:
 
 
 def _normalize_number(text: str) -> str:
-    text = str(text).strip().replace(",", "")
+    text = str(text).strip().replace(",", "").replace("％", "%")
     if text.endswith("%"):
         try:
             return format(Decimal(text[:-1]) / Decimal(100), "f")
