@@ -131,7 +131,9 @@
 /* When the centred 56rem column leaves 232px on its left (896px + 2 × 232px of workspace), the open outline sits there,
    outside the column: neither the toolbar nor the text moves. ReportEditor reads --report-outline-mode. */
 @container report-workspace (min-width: 1360px) {
-  .report-shell[data-outline-expanded='true'] > .report-outline { --report-outline-mode: column; left: auto; right: calc(100% + 32px); z-index: auto; width: 200px; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .report-shell[data-outline-expanded='true'] > .report-outline { --report-outline-mode: column; left: auto; right: calc(100% + 32px); bottom: 0; z-index: auto; width: 200px; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  /* The column runs the height of the text, and its list stays in view while a long draft scrolls. */
+  .report-shell[data-outline-expanded='true'] > .report-outline > :is(nav, p) { position: sticky; top: 16px; }
 }
 @container report-workspace (max-width: 960px) {
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }

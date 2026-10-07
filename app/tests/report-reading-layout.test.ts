@@ -32,5 +32,7 @@ describe('reading view tables and outline', () => {
     // Beside the column only when the centred column leaves 232px on its left; the grid and max-width never change.
     expect(css).toMatch(/@container report-workspace \(min-width: 1360px\) \{\n  \.report-shell\[data-outline-expanded='true'\] > \.report-outline \{ --report-outline-mode: column; left: auto; right: calc\(100% \+ 32px\);/);
     expect(css).not.toMatch(/data-outline-expanded='true'\] \{ grid-template-columns/);
+    // In the column the list sticks below the top while the text scrolls.
+    expect(css).toContain(".report-shell[data-outline-expanded='true'] > .report-outline > :is(nav, p) { position: sticky; top: 16px; }");
   });
 });
