@@ -68,7 +68,7 @@
 .report-visual-preview { min-width: 0; border: 1px solid var(--fnd-line); border-radius: 8px; overflow: hidden; }
 .report-visual-preview > p { margin: 0; padding: 18px; }
 .report-visual-data { min-width: 0; font-size: var(--fnd-size-small); }
-.report-visual-data summary { color: var(--fnd-muted); cursor: pointer; padding: 6px 0 10px; }
+.report-visual-data[open] > summary { margin-bottom: 8px; }
 .report-visual-data table { font-variant-numeric: tabular-nums; }
 .report-source-recovery { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--fnd-line); border-radius: 8px; }
 .report-source-recovery p { flex: 1; margin: 0; min-width: 220px; }
@@ -132,14 +132,9 @@
 .report-reflow-preview { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px dashed var(--fnd-line); border-radius: 10px; background: var(--fnd-surface); }
 .report-reflow-preview .report-reading { padding: 0; }
 .report-outline__sections { display: flex; flex-direction: column; gap: 8px; }
-.report-outline__sections summary { cursor: pointer; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); border-radius: 6px; width: fit-content; max-width: 100%; padding: 4px 6px; }
-.report-outline__sections summary:hover, .report-info-fields summary:hover { background: var(--fnd-selection-surface); }
-.report-outline__sections summary:focus-visible, .report-info-fields summary:focus-visible { outline: 1px solid var(--fnd-disclosure); outline-offset: 2px; }
-.report-outline__sections summary svg { display: inline-block; margin-right: 8px; vertical-align: -2px; }
 }
 @layer layout {
 .report-info-fields { border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; background: var(--fnd-surface); }
-.report-info-fields summary { cursor: pointer; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); border-radius: 6px; width: fit-content; max-width: 100%; padding: 4px 6px; }
 .report-info-fields > div { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
 .report-info-fields label, .report-source-compat { display: flex; flex-direction: column; gap: 8px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 @container report-workspace (max-width: 900px) { .report-info-fields > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -1,5 +1,6 @@
 import type { AnalysisRun } from '../../bridge.js';
 import { businessColumnLabel, columnSemantics, compareBusinessRuns, formatBusinessValue, type RevisionValueComparison } from './businessResults.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type BackendRevisionIssue = {
   code?: string;
@@ -52,10 +53,10 @@ export function RevisionDiff({ current, previous, currentRevision, previousRevis
           <span>{change.label}</span><span>{change.field}</span><span>{change.before} → {change.after}</span>
         </article>)}
       </div> : <p className="analysis-note">{noChangeNote(local!, tablesBelow)}</p>}
-    {evidence?.affected_claims?.length ? <details className="analysis-details"><summary>受影响结论 · {evidence.affected_claims.length} 项</summary>
+    {evidence?.affected_claims?.length ? <details className="analysis-details"><DisclosureSummary>受影响结论 · {evidence.affected_claims.length} 项</DisclosureSummary>
       {evidence.affected_claims.map((claim, index) => <p key={claim.id ?? index}>{claim.label ?? claim.id ?? `结论 ${index + 1}`}：{claim.message ?? '需要按当前修订复核。'}</p>)}
     </details> : null}
-    {evidence?.unresolved_issues?.length ? <details className="analysis-details"><summary>未解决问题 · {evidence.unresolved_issues.length} 项</summary>
+    {evidence?.unresolved_issues?.length ? <details className="analysis-details"><DisclosureSummary>未解决问题 · {evidence.unresolved_issues.length} 项</DisclosureSummary>
       {evidence.unresolved_issues.map((issue, index) => <p key={`${issue.code ?? 'issue'}:${index}`}>{issue.message ?? issue.code ?? '仍需复核'}</p>)}
     </details> : null}
   </section>;

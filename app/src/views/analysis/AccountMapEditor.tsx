@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** The three the engine knows. Chinese account names map onto these. */
 const ACCOUNTS: { value: string; label: string }[] = [
@@ -103,7 +104,7 @@ export function AccountMapEditor({ value, disabled, onChange }: {
         <Plus size={15} strokeWidth={1.5} aria-hidden />加一行
       </Button>
       <details className="analysis-details">
-        <summary>高级：直接改 JSON</summary>
+        <DisclosureSummary>高级：直接改 JSON</DisclosureSummary>
         <Textarea className="analysis-code" rows={4} value={value} disabled={disabled}
           onChange={(event) => onChange(event.target.value)} />
       </details>

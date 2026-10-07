@@ -9,6 +9,7 @@ import type { AnalysisScope } from './scope.js';
 import { errorText, scopeSummary, unwrap } from './shared.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type RequirementScope = {
   ledger?: string;
@@ -553,7 +554,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, anal
     <fieldset className="analysis-fieldset" disabled={loading || saving || !api?.financeCall}>
       <label>用户问题<Textarea aria-label="用户问题" className="analysis-code" rows={3} value={question}
         onChange={(event) => setQuestion(event.target.value)} placeholder="例如：解释本期利润差异并下钻利润来源。" /></label>
-      <details className="analysis-details"><summary>范围 · {scopeSummary(scope)}</summary>
+      <details className="analysis-details"><DisclosureSummary>范围 · {scopeSummary(scope)}</DisclosureSummary>
         <p className="analysis-note">与资料页的「分析范围」是同一份记录；这里改动后保存，资料页会显示新版本。</p>
         <div className="analysis-edit-grid">
           {hasSavedCustomPeriod
@@ -577,7 +578,7 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, anal
       </div> : <p className="analysis-note">尚未登记必答指标。至少添加一项，才能让文稿覆盖检查有明确对象。</p>}
       {removedExisting.length ? <TextField label="删除要求的变更原因" value={changeReason} onChange={setChangeReason}
         error={changeReason.trim() ? undefined : '删要求必须写明变更原因。'} placeholder="例如：经理改为只核对范围，不再要求费用下钻。" /> : null}
-      <details className="analysis-details"><summary>高级：绑定与历史版本</summary>
+      <details className="analysis-details"><DisclosureSummary>高级：绑定与历史版本</DisclosureSummary>
         <p className="analysis-note">Excel 区域随当前范围一起保存；有已保存的财务范围时，系统会自动核对并补齐。</p>
         <pre className="analysis-source-text">{JSON.stringify({ context_id: contextId ?? current?.context_id ?? null, bindings, versions: records.map((record) => record.id) }, null, 2)}</pre>
       </details>
@@ -683,7 +684,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
         {scenarios.map((scenario) => <Button variant="outline" key={scenario} type="button" title={scenario} onClick={() => removeScenario(scenario)}>{scenarioLabel(scenario)} ×</Button>)}
       </div> : <p className="analysis-note">只在同一指标要同时给出多个结果情景（如累计实际、累计预算、达成率）时填写；每个组织、期间和情景都须有对应结果。</p>}
     </FieldShell>
-    <details className="analysis-details"><summary>高级：精确结果键</summary>
+    <details className="analysis-details"><DisclosureSummary>高级：精确结果键</DisclosureSummary>
       <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
       <p className="analysis-note">与计算结果中的指标键完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
     </details>

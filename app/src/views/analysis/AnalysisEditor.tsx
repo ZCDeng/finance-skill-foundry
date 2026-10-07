@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { datasetOptions, metricLabel } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type AnalysisEdit = Pick<AnalysisRevision, 'parameters' | 'assumptions' | 'bindings'> & { sql: string };
 
@@ -83,7 +84,7 @@ export function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, 
         {assumptions.map((value, index) => <label key={`assumption-${index}`}>假设 · {itemLabel(value, index)}
           <Input className="min-w-0 flex-1" value={itemValue(value)} onChange={(event) => updateAssumptions(assumptions.map((item, at) => at === index ? editItem(item, event.target.value) : item))}  /></label>)}
       </div>
-      <details className="analysis-details"><summary>高级参数与公式常量</summary>
+      <details className="analysis-details"><DisclosureSummary>高级参数与公式常量</DisclosureSummary>
         <p className="analysis-note">未标注业务含义的参数按计算定义中的名称或顺序展示。</p>
         <div className="analysis-edit-grid">{Object.entries(parameters).filter(([key]) => metadataFor(key)?.role !== 'business').map(([key, value], index) =>
           <TextField key={key} label={`参数 · ${Array.isArray(parameters) ? itemLabel(value, index) : key}`} value={itemValue(value)}
@@ -95,7 +96,7 @@ export function AnalysisEditor({ analysis, datasets, busy, edit, onEdit, onRun, 
       <p className="analysis-note">参数会传入计算，假设说明用于记录依据；改变计算方式可请助手更新表达式。</p>
       <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(changed ? spec() : undefined)}>与助手调整计算方式</Button>
     </section>
-    <details className="analysis-details"><summary>高级：查看或编辑计算 SQL</summary>
+    <details className="analysis-details"><DisclosureSummary>高级：查看或编辑计算 SQL</DisclosureSummary>
       <Textarea className="analysis-code" aria-label="计算 SQL" rows={7} value={sql} disabled={busy} onChange={(event) => updateSql(event.target.value)} /></details>
     <div className="analysis-actions"><Button type="button" disabled={busy || !sql.trim()} onClick={() => void finishAndClose(() => onSave(spec()))}>保存新版并重跑</Button><Button variant="outline" type="button" disabled={busy} onClick={() => void finishAndClose(onRun)}>重跑当前已保存版本</Button></div>
   </div>;

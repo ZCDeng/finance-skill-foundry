@@ -7,6 +7,7 @@ import { SearchableSelect, TextField } from '../../components/FinancialControls.
 import { Button } from '../../components/ui/button.js';
 import { datasetOptions } from './shared.js';
 import { scenarioLabel } from './glossary.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export function Methods({ state, busy, onApply }: {
   state: AnalysisState; busy: boolean;
@@ -50,7 +51,7 @@ function Method({ method, datasets, taskId, busy, onApply }: {
       const metadata = metadataAt(index);
       return !formula(index) && metadata?.role === 'business' ? <ParameterField key={index} metadata={metadata} value={parameter.value} onChange={(value) => update(index, value)} /> : null;
     })}</div>
-    <details className="analysis-details"><summary>高级：参数与计算定义</summary><p className="analysis-note">未提供业务含义的参数按计算定义顺序填写。上次的业务数值不会自动带入。</p>
+    <details className="analysis-details"><DisclosureSummary>高级：参数与计算定义</DisclosureSummary><p className="analysis-note">未提供业务含义的参数按计算定义顺序填写。上次的业务数值不会自动带入。</p>
       {parameters.map((parameter, index) => formula(index) || metadataAt(index)?.role === 'business' ? null : <div className="analysis-edit-grid" key={index}>
         <TextField label={`参数 ${index + 1} 的值${contract[index] ? ` · ${typeLabel[contract[index].type] ?? contract[index].type}` : ''}`}
           value={parameter.value == null ? '' : String(parameter.value)} onChange={(value) => update(index, value)} />

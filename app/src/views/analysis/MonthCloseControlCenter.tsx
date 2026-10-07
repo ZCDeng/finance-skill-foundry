@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button.js';
 import { ControlsPanel } from './ControlsPanel.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { errorText } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
 type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
@@ -126,11 +127,11 @@ function Conclusion({ conclusion }: { conclusion: CloseConclusion }) {
       {reasons.slice(0, 3).map((reason, index) => <li key={index}>{reason.text}</li>)}
     </ul> : null}
     {reasons.length > 3 ? <details className="analysis-details">
-      <summary>另外 {reasons.length - 3} 条原因</summary>
+      <DisclosureSummary>另外 {reasons.length - 3} 条原因</DisclosureSummary>
       <ul className="analysis-close-conclusion-reasons">{reasons.slice(3).map((reason, index) => <li key={index}>{reason.text}</li>)}</ul>
     </details> : null}
     {workbooks.length ? <details className="analysis-details">
-      <summary>按工作簿看</summary>
+      <DisclosureSummary>按工作簿看</DisclosureSummary>
       <ul className="analysis-close-conclusion-books">
         {workbooks.map((book) => <li key={book.dataset_id} className={`analysis-close-conclusion-book--${book.level}`}>
           <span><strong>{book.name}</strong>：{book.text}</span>

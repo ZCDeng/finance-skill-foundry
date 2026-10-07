@@ -16,6 +16,7 @@ import { ExplanationQualityPanel, type ExplanationFact, type ExplanationQuality 
 import { FinanceBackgroundPanel, type FinanceBackground } from './FinanceBackgroundPanel.js';
 import { MaterialityFields, materialityScopeSummary, materialityToEdit, materialityToSpec, sameMateriality, type MaterialityEdit } from './MaterialityFields.js';
 import { unwrap, errorText } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type DraftEdit = { title: string; body: string; limitations: string; review: string; document?: ReportDraftDocument; materiality?: MaterialityEdit; recovery?: FinanceCompletionRecovery | null };
 type ReportMode = 'read' | 'edit' | 'print';
@@ -341,7 +342,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     {versionPicker && <div className="analysis-version-picker">{versionPicker}</div>}
     {bridge()?.financeCall && <details className="analysis-details analysis-requirements" open={requirementsOpen}
       onToggle={(event) => setRequirementsOpen((event.currentTarget as HTMLDetailsElement).open)}>
-      <summary>本次分析要求</summary>
+      <DisclosureSummary>本次分析要求</DisclosureSummary>
       <RequirementsPanel taskId={taskId} contextId={contextId} draftRequirementsId={draft?.requirements_id ?? undefined} analysisScope={analysisScope}
         onChanged={(requirements) => { qualityRequest.current += 1; setUpdatedRequirementsId(requirements.id); setQuality(null); setQualityState('stale'); }}
         onDiscuss={onDiscussRequirements} />
@@ -373,7 +374,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
     <fieldset className="analysis-fieldset analysis-draft-fields" disabled={busy}>
     <MaterialityFields value={materiality} scopeText={materialityScopeSummary(financeRuns)} error={materialityError} disabled={busy} onChange={onMaterialityChange} />
     </fieldset>
-    {(draft || recovery) && <details className="analysis-details"><summary>引用的计算与依据 · {effectiveRunIds.length} 次计算</summary>
+    {(draft || recovery) && <details className="analysis-details"><DisclosureSummary>引用的计算与依据 · {effectiveRunIds.length} 次计算</DisclosureSummary>
       {effectiveRunIds.length === 0 && <p>这份文稿尚未引用计算记录。</p>}
       {effectiveRunIds.map((id, index) => { const run = runs.find((item) => item.id === id); return <div key={id}>
         <p>引用计算 {index + 1}{run ? ` · ${when(run.created_at)}` : ''}</p>

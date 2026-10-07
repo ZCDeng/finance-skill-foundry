@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AnalysisRun } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { DecimalInput, FieldShell, SearchableSelect, type SelectOption } from '../../components/FinancialControls.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type MaterialityDenominator = 'baseline_abs' | 'actual_abs' | 'max_abs';
 type MaterialityNegativePolicy = 'absolute' | 'signed';
@@ -70,7 +71,7 @@ export function MaterialityFields({ value, scopeText, error, disabled, onChange 
   useEffect(() => { if (error) setOpen(true); }, [error]);
   const summary = [value.absolute && `绝对 ${value.absolute}`, value.relative && `相对 ${value.relative}`].filter(Boolean).join(' · ');
   return <details className="analysis-details" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
-    <summary>重要性阈值{summary ? ` · ${summary}` : ' · 未设置'}</summary>
+    <DisclosureSummary>重要性阈值{summary ? ` · ${summary}` : ' · 未设置'}</DisclosureSummary>
     <p className="analysis-note">用于准备可引用事实和重检覆盖范围。相对阈值填 0.1 表示 10%。</p>
     <div className="analysis-edit-grid">
       <DecimalInput label="重要性绝对金额" value={value.absolute} onChange={(absolute) => set({ absolute })} placeholder="0"

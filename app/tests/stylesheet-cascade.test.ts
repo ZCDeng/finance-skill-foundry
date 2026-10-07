@@ -60,3 +60,55 @@ describe('stylesheet cascade', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/** Every innermost rule as [one selector, its body]; commas inside :where()/:not() stay with their selector. */
+function rules(css: string): [string, string][] {
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const found: [string, string][] = [];
+  for (const [, selectors, body] of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    let depth = 0;
+    let current = '';
+    for (const char of selectors) {
+      if (char === '(') depth += 1;
+      if (char === ')') depth -= 1;
+      if (char === ',' && depth === 0) {
+        found.push([current.trim().replace(/\s+/g, ' '), body]);
+        current = '';
+      } else current += char;
+    }
+    found.push([current.trim().replace(/\s+/g, ' '), body]);
+  }
+  return found;
+}
+
+/** The compound the rule styles: what is left after the last combinator. */
+function subject(selector: string): string {
+  return selector.split(/\s*[>+~]\s*|\s+/).pop() ?? '';
+}
+
+describe('disclosures (DESIGN.md 折叠段落)', () => {
+  it('no longer has --fnd-disclosure', () => {
+    const compact = fileURLToPath(new URL('../harness-client/compact.css', import.meta.url));
+    const holders = [...sheets(SRC), compact].filter((path) => readFileSync(path, 'utf8').includes('--fnd-disclosure'));
+    expect(holders).toEqual([]);
+  });
+
+  it('lets page rules on a summary element only space it', () => {
+    const spacing: string[] = [];
+    for (const path of sheets(SRC)) {
+      for (const [selector, body] of rules(readFileSync(path, 'utf8'))) {
+        if (!/^summary\b/.test(subject(selector))) continue;
+        const properties = body.split(';').map((part) => part.split(':')[0].trim()).filter(Boolean);
+        expect(properties.filter((name) => !name.startsWith('margin')), `${path.slice(SRC.length + 1)} ${selector}`).toEqual([]);
+        spacing.push(selector);
+      }
+    }
+    // The parser still sees the spacing rules that are allowed to stay.
+    expect(spacing).toEqual(expect.arrayContaining([
+      '.analysis-source-refresh[open] > summary',
+      '.analysis-details[open] > summary',
+      '.fnd-doc__locks[open] > summary',
+      '.report-visual-data[open] > summary',
+    ]));
+  });
+});

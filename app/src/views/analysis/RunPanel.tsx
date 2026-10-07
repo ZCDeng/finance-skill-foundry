@@ -12,6 +12,7 @@ import { businessColumnLabel, runPresentationRole, selectBusinessResult } from '
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -51,7 +52,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
       {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
-      {run.stdout && <details className="analysis-details"><summary>脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</summary>
+      {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
@@ -62,7 +63,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
         {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整范围</Button>}
         {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
       </div>
-      {analysis.sql && <details className="analysis-details"><summary>保存这次分析方法</summary><form className="analysis-method-form" onSubmit={(event) => {
+      {analysis.sql && <details className="analysis-details"><DisclosureSummary>保存这次分析方法</DisclosureSummary><form className="analysis-method-form" onSubmit={(event) => {
         event.preventDefault(); if (methodName.trim()) onSaveMethod(analysis.id, methodName.trim());
       }}><label>方法名称<Input className="min-w-0 flex-1" value={methodName} onChange={(event) => setMethodName(event.target.value)} placeholder={analysis.question} disabled={busy}  /></label>
         <Button variant="outline" type="submit" disabled={busy || !methodName.trim()}>保存为方法</Button></form>
@@ -84,7 +85,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       })}</div>
       <p>参数：{parameterSummary(run.parameters ?? analysis.parameters, run.parameter_metadata ?? analysis.parameter_metadata)}</p>
       {assumptions.length > 0 && <p>假设说明：{assumptionSummary(assumptions)}</p>}
-      {run.finance_scope && <details className="analysis-details"><summary>计算范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+      {run.finance_scope && <details className="analysis-details"><DisclosureSummary>计算范围</DisclosureSummary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
         <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
       <TechnicalInfo rows={[['计算编号', run.id], ['结果摘要', run.output_hash]]} />
     </aside></div>}
@@ -103,9 +104,9 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
             : <p className="analysis-note">{row.error ? errorText(row.error) : '这次计算没有表格结果。'}</p>}</div>;
       })}</div></>}
     </section>}
-    <details className="analysis-details analysis-history"><summary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</summary>
+    <details className="analysis-details analysis-history"><DisclosureSummary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</DisclosureSummary>
       <HistoryRows rows={[...runs].reverse().filter((row) => runPresentationRole(row) !== 'activity')} runs={runs} analyses={analyses} current={run} onPick={pick} />
-      {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><summary>中间步骤 · {selection.activityRuns.length}</summary>
+      {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><DisclosureSummary tone="quiet">中间步骤 · {selection.activityRuns.length}</DisclosureSummary>
         <p className="analysis-note">助手在得到结果前做的探查和重试。它们不是结论，文稿也不会引用它们。</p>
         <HistoryRows rows={[...selection.activityRuns].reverse()} runs={runs} analyses={analyses} current={run} onPick={pick} />
       </details>}
@@ -146,7 +147,7 @@ function NotRunYet({ runs, onPick }: { runs: AnalysisRun[]; onPick(run: Analysis
  */
 function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
   return <details className="analysis-details">
-    <summary><TriangleAlert size={15} strokeWidth={1.5} aria-hidden /> {`结果行有 ${warnings.length} 处不合约定`}</summary>
+    <DisclosureSummary><TriangleAlert size={15} strokeWidth={1.5} aria-hidden /> {`结果行有 ${warnings.length} 处不合约定`}</DisclosureSummary>
     {warnings.map((warning, index) => <p key={`${warning.code}:${index}`}>{warning.message}</p>)}
   </details>;
 }
@@ -197,7 +198,7 @@ function ScriptSummaryTable({ run }: { run: AnalysisRun }) {
   return <section className="analysis-script-summary">
     <Table key={`${run.id}:summary`} columns={columns} rows={rows} caption="计算结果" />
     <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
-    <details className="analysis-details"><summary>完整明细 · {result.columns.length} 列</summary>
+    <details className="analysis-details"><DisclosureSummary>完整明细 · {result.columns.length} 列</DisclosureSummary>
       <Table key={`${run.id}:full`} columns={result.columns} rows={result.rows} caption="完整明细" />
     </details>
   </section>;
@@ -274,10 +275,10 @@ function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
     </div>}
     <Table key={`${run.id}:structured`} columns={columns} rows={structuredAggregateRows(result.rows)} caption="结构化汇总结果" />
     <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
-    {detailRows.length > 0 && <details className="analysis-details"><summary>来源明细 · {detailRows.length} 行</summary>
+    {detailRows.length > 0 && <details className="analysis-details"><DisclosureSummary>来源明细 · {detailRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:detail`} columns={structuredAggregateColumns(run, detailRows)} rows={structuredAggregateRows(detailRows)} caption="来源明细" />
     </details>}
-    {excludedRows.length > 0 && <details className="analysis-details"><summary>剔除明细 · {excludedRows.length} 行</summary>
+    {excludedRows.length > 0 && <details className="analysis-details"><DisclosureSummary>剔除明细 · {excludedRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:excluded`} columns={structuredAggregateColumns(run, excludedRows)} rows={structuredAggregateRows(excludedRows)} caption="剔除明细" />
     </details>}
     <RawResultDetails run={run} />
@@ -566,9 +567,9 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
   }
   return <section className="analysis-finance-run" aria-label="结果范围与来源">
     {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}
-    {run.engine === 'finance' && !isFinanceVarianceRun(run) && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details analysis-technical"><summary>技术信息 · 诊断 {run.result.diagnostics.length} 项</summary>
+    {run.engine === 'finance' && !isFinanceVarianceRun(run) && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details analysis-technical"><DisclosureSummary tone="quiet">技术信息 · 诊断 {run.result.diagnostics.length} 项</DisclosureSummary>
       {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
-    {run.finance_scope && <details className="analysis-details"><summary>计算范围</summary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
+    {run.finance_scope && <details className="analysis-details"><DisclosureSummary>计算范围</DisclosureSummary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
       <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
     {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">
       <div className="analysis-edit-grid"><label>结果行来源<NativeSelect value={target} onChange={(event) => setTarget(event.target.value)}>
@@ -578,7 +579,7 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
       <Button variant="outline" type="button" disabled={busy || !target} onClick={() => void open()}>查看来源行</Button>
       {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
       {drilldown && <div className="analysis-drilldown-result"><p className="analysis-note">{drilldown.message} · {drilldown.total} 行来源{drilldown.has_more ? ' · 仍有更多' : ''}</p>
-        {drilldown.rows.map((item, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(item.source)}</summary>
+        {drilldown.rows.map((item, index) => <details className="analysis-details" key={index}><DisclosureSummary>来源 {index + 1} · {textValue(item.source)}</DisclosureSummary>
           <p>凭证明细：{item.voucher_detail_available ? '可用' : '不可用'}</p>
           <pre className="analysis-source-text">{JSON.stringify(item.data, null, 2)}</pre>
           <TechnicalInfo rows={[['来源摘要', item.source_hash]]} /></details>)}</div>}

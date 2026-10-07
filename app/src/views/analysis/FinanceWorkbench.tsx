@@ -15,6 +15,7 @@ import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
 import { accountMapOptions, aliasOptions, contextOptions, datasetOptions, scopeFields, scopeSummary, unwrap, errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 function bridgeScenarioLabels(context?: FinanceContext): { actual: string; baseline: string } {
   const scopes = context?.scopes ?? {};
@@ -329,7 +330,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     {budget && <div className="analysis-edit-grid"><AccountingPeriodInput label="对比期间" value={comparePeriod} onChange={setComparePeriod}
       shortcutBaseValue={scope.period} shortcutBaseLabel="实际期间"
       help="留空时预算与实际取同一期间；填写后预算按这个期间取数。" /></div>}
-    <details className="analysis-details"><summary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</summary>
+    <details className="analysis-details"><DisclosureSummary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</DisclosureSummary>
       <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
     </details></fieldset>
     <div className="analysis-actions">
@@ -341,7 +342,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     </div>
     {analysisScope.error ? <p className="analysis-message analysis-message--error">{analysisScope.error}</p> : null}
     {advancedChildren ? <section className="analysis-finance-definition" aria-label="计算定义">{advancedChildren}</section> : null}
-    {contextId && <details className="analysis-details analysis-scenario-panel"><summary>情景测算</summary>
+    {contextId && <details className="analysis-details analysis-scenario-panel"><DisclosureSummary>情景测算</DisclosureSummary>
       <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
         <FieldShell label="情景类型"><NativeSelect aria-label="情景类型" value={scenarioKind} onChange={(event) => setScenarioKind(event.target.value as typeof scenarioKind)}>
           <option value="receivables_aging">应收账龄</option><option value="cash_13_weeks">13 周现金</option></NativeSelect></FieldShell>
@@ -373,11 +374,11 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
         aria-current={scenario.id === baselineScenarioId ? 'true' : undefined} onClick={() => setBaselineScenarioId(String(scenario.id ?? ''))}>
         <span>{textValue(scenario.label ?? scenario.kind)}</span><span>{scenario.kind === 'cash_13_weeks' ? '13 周现金' : scenario.kind === 'receivables_aging' ? '应收账龄' : textValue(scenario.kind)}</span><time>{when(String(scenario.created_at ?? ''))}</time></button>)}</div> : null}
     </details>}
-    {finance?.contexts.length ? <details className="analysis-details"><summary>已保存的范围 · {finance.contexts.length} 个</summary>
+    {finance?.contexts.length ? <details className="analysis-details"><DisclosureSummary>已保存的范围 · {finance.contexts.length} 个</DisclosureSummary>
       <div className="analysis-history-list">{[...finance.contexts].reverse().map((context) => <button key={context.id} type="button" className="analysis-history-row" disabled={locked}
         aria-current={context.id === contextId ? 'true' : undefined} onClick={() => setContextId(context.id)}>
         <span>{context.name}</span><span>{Object.entries(context.scopes ?? {}).map(([alias, item]) => `${alias === 'actual' ? '实际' : alias === 'budget' ? '预算' : alias} ${scopeSummary(item)}`).join('；')}</span></button>)}</div></details> : null}
-    <details className="analysis-details"><summary>管理科目映射</summary>
+    <details className="analysis-details"><DisclosureSummary>管理科目映射</DisclosureSummary>
       <p className="analysis-note">损益表算不出来，多半是这里没配齐。系统只认收入、成本、费用三类管理科目，把原表的科目代码归到这三类。</p>
       <div className="analysis-edit-grid"><label>映射名称<Input className="min-w-0 flex-1" value={mapName} disabled={locked} onChange={(event) => setMapName(event.target.value)}  /></label>
         <SearchableSelect label="已保存映射" value={accountMapId} disabled={locked} options={accountMapOptions(finance)} onChange={setAccountMapId}

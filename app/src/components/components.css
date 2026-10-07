@@ -856,21 +856,60 @@ textarea.fnd-field {
  * the line that makes every figure reproducible, so it is kept whole and put
  * behind a disclosure rather than truncated.
  */
-.fnd-doc__locks > summary {
-  cursor: pointer;
-  font-size: var(--fnd-size-small);
-  color: var(--fnd-ink);
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
 .fnd-doc__locks[open] > summary {
   margin-bottom: 10px;
 }
 
-.fnd-doc__locks > summary::marker {
-  color: var(--fnd-line-hover);
+/*
+ * The one summary line every in-place disclosure draws (DESIGN.md 折叠段落).
+ * Native <details> keeps the open state; the row is body text with a Lucide
+ * chevron on the left that turns a quarter when the section opens. Pages only
+ * space a disclosure, they never restyle its summary.
+ */
+.fnd-disclosure-summary {
+  position: relative;
+  display: block;
+  list-style: none;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 8px 5px 32px;
+  border-radius: var(--fnd-radius-mark);
+  color: var(--fnd-ink);
+  font-size: var(--fnd-size-body);
+  line-height: var(--fnd-leading-body);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background var(--fnd-transition);
+}
+
+.fnd-disclosure-summary:hover {
+  background: var(--fnd-selection-surface);
+}
+
+.fnd-disclosure-summary__icon {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  transition: transform var(--fnd-transition);
+}
+
+details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
+  transform: rotate(90deg);
+}
+
+/* Technical and diagnostic folds sit one step quieter; the text keeps the same left edge. */
+.fnd-disclosure-summary[data-tone='quiet'] {
+  padding-block: 3px;
+  color: var(--fnd-muted);
+  font-size: var(--fnd-size-label);
+  line-height: 18px;
+}
+
+.fnd-disclosure-summary[data-tone='quiet'] > .fnd-disclosure-summary__icon {
+  top: 5px;
+  width: 14px;
+  height: 14px;
 }
 
 /* A row that opens something says so before it is clicked. */

@@ -209,8 +209,8 @@
 .fnd-combobox--compact .fnd-combobox__button:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
   border-color: transparent; background: var(--fnd-selection-surface); color: var(--fnd-ink);
 }
-.fnd-combobox--compact .fnd-combobox__prefix { flex: none; color: var(--fnd-disclosure); font-weight: var(--fnd-weight-strong); }
-.fnd-combobox--compact .fnd-combobox__button > svg { flex: none; color: var(--fnd-disclosure); }
+.fnd-combobox--compact .fnd-combobox__prefix { flex: none; color: var(--fnd-ink); font-weight: var(--fnd-weight-strong); }
+.fnd-combobox--compact .fnd-combobox__button > svg { flex: none; }
 
 .fnd-combobox__clear {
   position: absolute;

@@ -84,7 +84,7 @@
     text-underline-offset: 3px;
   }
 
-  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
     outline: 1px solid var(--fnd-focus);
     outline-offset: -1px;
   }

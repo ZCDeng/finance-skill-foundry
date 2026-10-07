@@ -30,6 +30,7 @@ import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
 import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty.js';
+import { DisclosureSummary } from '../components/Disclosure.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
@@ -299,7 +300,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     }), { rethrow: true })} onSaved={onSaved} onRun={() => perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)), { rethrow: true })} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
       <p className="analysis-note">{definitionCopy(analysis).note}</p>
       {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
-      <details className="analysis-details"><summary>{definitionCopy(analysis).detailSummary}</summary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
+      <details className="analysis-details"><DisclosureSummary>{definitionCopy(analysis).detailSummary}</DisclosureSummary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
       <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
     </div>) : null;
   const financeWorkbench = task && view && view.datasets.length > 0
@@ -416,10 +417,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
           <HelpLink article="data-safety" label="资料快照与原文件" />
-          <details className="analysis-details"><summary>写回 Excel</summary>
+          <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
           </details>
-          <details className="analysis-details"><summary>滚动到下月</summary>
+          <details className="analysis-details"><DisclosureSummary>滚动到下月</DisclosureSummary>
             <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
           </details>
         </>}

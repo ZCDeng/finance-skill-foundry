@@ -3,6 +3,7 @@ import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table } from './presentation.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
@@ -124,7 +125,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
     {/* The backend's own sentences, shown as written: the frontend does no arithmetic on them. */}
     {conclusions.length ? <section className="analysis-headline" aria-label="脚本结论">
       {conclusions.slice(0, shownConclusions).map((conclusion, index) => <ConclusionLine key={index} conclusion={conclusion} />)}
-      {conclusions.length > shownConclusions ? <details className="analysis-details"><summary>其余 {conclusions.length - shownConclusions} 句结论</summary>
+      {conclusions.length > shownConclusions ? <details className="analysis-details"><DisclosureSummary>其余 {conclusions.length - shownConclusions} 句结论</DisclosureSummary>
         {conclusions.slice(shownConclusions).map((conclusion, index) => <ConclusionLine key={index} conclusion={conclusion} />)}
       </details> : null}
     </section> : null}
@@ -154,7 +155,7 @@ export function BusinessResultView({ run, onSources }: { run: AnalysisRun; onSou
     </div>
     <div className="analysis-actions">
       {onSources ? <Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button> : null}
-      <details className="analysis-details"><summary>技术信息</summary>
+      <details className="analysis-details"><DisclosureSummary tone="quiet">技术信息</DisclosureSummary>
         <p className="analysis-note">原始字段 · {run.result?.columns.length ?? 0} 列</p>
         <Table key={`${run.id}:raw-business`} columns={run.result?.columns ?? []} rows={run.result?.rows ?? []} caption="原始计算结果" />
       </details>
