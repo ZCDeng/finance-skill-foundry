@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun } from '../../bridge.js';
-import { businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessValue, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
+import sharedCollisions from '../../../tests/fixtures/label-collisions.json';
+import { businessColumnLabel, businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessCell, formatBusinessValue, formatDisplayRows, labelCollisions, longRowColumns, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult, type DisplayColumn } from './businessResults.js';
 
 const analysis: AnalysisRevision = {
   id: 'analysis-1',
@@ -513,6 +514,120 @@ describe('business result presentation', () => {
     });
     expect(businessRows(current)).toEqual([expect.objectContaining({ metric: '利润', actual: '9', same_period_budget: '10' })]);
     expect(otherLongRows(current).map((row) => row.unit)).toEqual(['万元', '-']);
+  });
+
+  describe('one name for two metrics', () => {
+    const ytd = '2026-01:2026-08';
+    const row = (metric_key: string, metric_label: string, organization = '集团合并', period: string | null = ytd, extra: Record<string, unknown> = {}) =>
+      ({ metric_key, organization, period, scenario: 'budget_bud_fy', value: '0.5', unit: '比率', metric_label, ...extra });
+    const longColumns = (names: string[]) => names.map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' }));
+    const columnsFor = (rows: Record<string, unknown>[], names = ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label']) =>
+      longRowColumns(run({ result: { columns: longColumns(names), rows, row_count: rows.length, truncated: false } }), rows);
+
+    it('collects only an organization and period whose shared name covers different keys', () => {
+      const rows = [
+        row('ratio', '1-8 月实际÷全年 BUD'),
+        row('revenue_completion_ratio', ' 1-8 月实际÷全年 BUD '),
+        // This year and last year under one key: told apart by the scenario.
+        row('revenue_prior', '营业收入', '华东区域', ytd, { scenario: 'actual_py_1_8' }),
+        row('revenue_prior', '营业收入', '华东区域', ytd, { scenario: 'actual_ly_1_8' }),
+        // One name in two organizations, or two periods.
+        row('ratio', '收缴率', '集团合并'), row('collection', '收缴率', '华东区域'),
+        row('ratio', '回款率', '集团合并', '2026-08'), row('collection', '回款率', '集团合并', '2026'),
+      ];
+      expect(labelCollisions(rows).map(({ organization, period, label, keys, rows: members }) => ({ organization, period, label, keys, size: members.length })))
+        .toEqual([{ organization: '集团合并', period: ytd, label: '1-8 月实际÷全年 BUD', keys: ['ratio', 'revenue_completion_ratio'], size: 2 }]);
+    });
+
+    it('adds the key, or its Chinese name, only where no key column is shown', () => {
+      const raw = [row('ratio', '1-8 月实际÷全年 BUD'), row('revenue_completion_ratio', '1-8 月实际÷全年 BUD')];
+      const shown = formatDisplayRows(raw, columnsFor(raw));
+      expect(shown.map((item) => item['指标'])).toEqual(['1-8 月实际÷全年 BUD（ratio）', '1-8 月实际÷全年 BUD（revenue_completion_ratio）']);
+      expect(shown.map((item) => item.__metricKey)).toEqual(['ratio', 'revenue_completion_ratio']);
+      const chinese = [row('revenue', '1-8 月合计'), row('operating_profit', '1-8 月合计')];
+      expect(formatDisplayRows(chinese, columnsFor(chinese)).map((item) => item['指标'])).toEqual(['1-8 月合计（收入）', '1-8 月合计（营业利润）']);
+      // With the key column on screen (a row without a label keeps it), the name stays as written.
+      const unlabelled = [...raw, row('receivable', '')];
+      const columns = columnsFor(unlabelled);
+      expect(columns.map((column) => column.label)).toContain('指标');
+      expect(formatDisplayRows(unlabelled, columns).map((item) => item['指标说明'])).toEqual(['1-8 月实际÷全年 BUD', '1-8 月实际÷全年 BUD', '—']);
+    });
+
+    // The sample the backend label_ambiguous check (C') asserts too: both sides must find these groups in these rows.
+    it('finds the shared Huachen sample\'s collisions, the contract with the backend check', () => {
+      const sample = run({
+        result: { columns: longColumns(sharedCollisions.columns), rows: sharedCollisions.rows, row_count: sharedCollisions.rows.length, truncated: false },
+      });
+      // The 华东区域 profit actual and budget pair into a card; only the rows left over are compared.
+      const others = otherLongRows(sample);
+      expect(sharedCollisions.rows.filter((item) => !others.includes(item)).map((item) => [item.metric_key, item.scenario]))
+        .toEqual([['profit', 'actual_1_8'], ['profit', 'budget_1_8']]);
+      expect(labelCollisions(others).map(({ organization, period, label, keys }) => ({ organization, period, label, keys })))
+        .toEqual(sharedCollisions.label_collisions);
+    });
+
+    it('reads a label that only an object has by inheritance as written', () => {
+      const rows = [row('ratio', 'constructor'), row('revenue_completion_ratio', 'constructor'), row('profit', 'toString'), row('ratio', '__proto__')];
+      expect(labelCollisions(rows).map(({ label, keys }) => ({ label, keys }))).toEqual([{ label: 'constructor', keys: ['ratio', 'revenue_completion_ratio'] }]);
+      const shown = formatDisplayRows(rows, columnsFor(rows));
+      expect(shown.map((item) => item['指标'])).toEqual(['constructor（ratio）', 'constructor（revenue_completion_ratio）', 'toString', '__proto__']);
+      expect(formatBusinessValue('toString', 'text')).toBe('toString');
+      expect(businessColumnLabel('constructor')).toBe('constructor');
+    });
+
+    it('compares names as the table shows them, so an estimate reads alike with a label that already says 估算', () => {
+      const raw = [row('profit_budget_est', '营业利润预算', '华东区域', ytd, { basis: 'estimate', unit: '万元' }), row('profit_budget_note', '营业利润预算（估算）', '华东区域', ytd, { unit: '万元' })];
+      expect(labelCollisions(raw).map((item) => item.label)).toEqual(['营业利润预算（估算）']);
+      expect(formatDisplayRows(raw, columnsFor(raw, ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label', 'basis'])).map((item) => item['指标']))
+        .toEqual(['营业利润预算（估算）（profit_budget_est）', '营业利润预算（估算）（profit_budget_note）']);
+    });
+
+    it('keeps the key columns when metric and metric_key disagree, so no row loses what tells it apart', () => {
+      const names = ['metric', 'metric_key', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label'];
+      const disagree = [
+        { ...row('revenue_ytd', '收入'), metric: 'revenue' },
+        { ...row('revenue_month', '收入'), metric: 'revenue' },
+      ];
+      const columns = columnsFor(disagree, names);
+      expect(columns.filter((column) => ['metric', 'metric_key'].includes(column.name)).map((column) => column.label)).toEqual(['指标键（metric）', '指标键（metric_key）']);
+      // The key columns are on screen, so the name stays as written.
+      expect(formatDisplayRows(disagree, columns).map((item) => item['指标'])).toEqual(['收入', '收入']);
+      // Where they agree, they go as one.
+      const agree = disagree.map((item) => ({ ...item, metric: item.metric_key }));
+      expect(columnsFor(agree, names).map((column) => column.name)).not.toEqual(expect.arrayContaining(['metric']));
+      expect(columnsFor(agree, names).map((column) => column.name)).not.toContain('metric_key');
+    });
+
+    it('drops a Chinese 指标 key column like metric_key and tells its rows apart the same way', () => {
+      const rows = [{ 指标: 'ratio', organization: '集团合并', period: ytd, scenario: 'budget_bud_fy', value: '0.48', unit: '比率', metric_label: '完成率' },
+        { 指标: 'revenue_completion_ratio', organization: '集团合并', period: ytd, scenario: 'budget_bud_fy', value: '0.62', unit: '比率', metric_label: '完成率' }];
+      const columns = columnsFor(rows, ['指标', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label']);
+      expect(columns.map((column) => column.name)).not.toContain('指标');
+      expect(formatDisplayRows(rows, columns).map((item) => item['指标'])).toEqual(['完成率（ratio）', '完成率（revenue_completion_ratio）']);
+    });
+
+    it('adds no key where 估算 already tells two names apart, and no 估算 for a key that names one', () => {
+      const rows = [row('revenue_estimated_budget', '全年预算', '集团合并', ytd, { scenario: 'estimated_budget_ytd', unit: '万元' }), row('revenue_budget', '全年预算', '集团合并', ytd, { unit: '万元' })];
+      // The estimate already reads apart from the approved budget, so neither gets a key.
+      expect(formatDisplayRows(rows, columnsFor(rows)).map((item) => item['指标'])).toEqual(['全年预算（估算）', '全年预算']);
+      // A key alone does not make a row an estimate.
+      const keyOnly = [row('revenue_estimated_budget', '全年预算', '集团合并', ytd, { unit: '万元' }), row('revenue_budget', '全年预算', '集团合并', ytd, { unit: '万元' })];
+      expect(formatDisplayRows(keyOnly, columnsFor(keyOnly)).map((item) => item['指标'])).toEqual(['全年预算（revenue_estimated_budget）', '全年预算（revenue_budget）']);
+    });
+  });
+
+  it.each([
+    ['比率', '0.616750', '%'],
+    ['pct', '3.3000', '%'],
+    ['%', '94.5', '%'],
+    ['天', '45', '天'],
+    ['万元', '41400', '万元'],
+    ['-', '0.9', '-'],
+    ['比率', '', '比率'],
+  ])('writes the unit %s of a row valued %j as %s', (unit, value, shown) => {
+    const column: DisplayColumn = { name: 'unit', type: 'VARCHAR', label: '单位', semantics: 'text' };
+    expect(formatBusinessCell(unit, column, { unit, value })).toBe(shown);
+    expect(formatBusinessCell(unit, { ...column, name: '单位' }, { 单位: unit, value })).toBe(shown);
   });
 
   it('compares revisions by stable business identity rather than row position', () => {

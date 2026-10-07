@@ -686,7 +686,7 @@ function RequirementItemEditor({ item, index, support, supportStale, onChange, o
     </FieldShell>
     <details className="analysis-details"><DisclosureSummary>高级：精确结果键</DisclosureSummary>
       <TextField label={`精确结果键 ${index + 1}`} value={exactMetricKey} onChange={setExactMetricKey} placeholder="例如：operating_profit、revenue" />
-      <p className="analysis-note">与计算结果中的指标键完全一致；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
+      <p className="analysis-note">与结果页指标名悬停时显示的指标键一致（技术信息原始结果里的 metric_key）；指定后，毛利不会代替营业利润，收入达成率不会代替利润达成率。</p>
     </details>
     <label>维度 JSON<Textarea aria-label={`维度 JSON ${index + 1}`} className="analysis-code" rows={3} value={dimensionsText}
       onChange={(event) => {

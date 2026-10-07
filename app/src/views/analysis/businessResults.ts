@@ -205,9 +205,22 @@ export function columnSemantics(name: string, type?: string): FieldSemantics {
   return 'text';
 }
 
+/**
+ * A label table's own entry for a key. The tables are plain objects, so a bare lookup of a script's own text
+ * (「constructor」, 「toString」) would return what every object inherits rather than nothing.
+ */
+function ownLabel(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** A metric code's Chinese name (result_semantics.py RESULT_METRIC_LABELS), or undefined for any other text. */
+function metricLabel(key: unknown): string | undefined {
+  return ownLabel(metricLabels, String(key));
+}
+
 export function businessColumnLabel(name: string): string {
   const key = name.toLowerCase();
-  return amountFieldLabels[key] ?? ratioFieldLabels[key] ?? ratioPctFieldLabels[key] ?? textFieldLabels[key] ?? name;
+  return ownLabel(amountFieldLabels, key) ?? ownLabel(ratioFieldLabels, key) ?? ownLabel(ratioPctFieldLabels, key) ?? ownLabel(textFieldLabels, key) ?? name;
 }
 
 function decimalParts(value: unknown): { negative: boolean; digits: string; scale: number } | null {
@@ -248,7 +261,7 @@ export function formatBusinessValue(value: unknown, semantics: FieldSemantics): 
   if (semantics === 'ratio_delta') return `${decimalToFixed(value, 2, 100)}个百分点`;
   if (semantics === 'amount') return decimalToFixed(value, 2);
   if (typeof value === 'object') return JSON.stringify(value);
-  const metric = metricLabels[String(value)] ?? String(value);
+  const metric = metricLabel(value) ?? String(value);
   return metric;
 }
 
@@ -271,8 +284,20 @@ export function formatBusinessCell(value: unknown, column: DisplayColumn, row: R
   // A period reads in words (2026 年 1–8 月); the stored value still filters the tabs and goes to the assistant.
   if (column.name.toLowerCase() === 'period' || column.name === '期间') return value == null || value === '' ? '—' : formatPeriod(value);
   // A long-form value column mixes amounts and ratios; the row's own unit says which, as its declaration read it.
-  if (column.name === 'value') return formatUnitValue(value, declaredUnitField in row ? row[declaredUnitField] as UnitKind | null : unitKind(unitColumn(row)), column.semantics);
+  if (column.name === 'value') return formatUnitValue(value, rowUnitKind(row), column.semantics);
+  // A ratio or percent row's value already reads 3.30%, so its unit says % rather than 比率 or pct. A row without a
+  // value, or with an amount or unmarked unit, keeps its unit as written.
+  const unitName = column.name.toLowerCase();
+  if ((unitName === 'unit' || unitName === '单位') && nonEmpty(row.value)) {
+    const kind = rowUnitKind(row);
+    if (kind === 'decimal' || kind === 'percent') return '%';
+  }
   return formatBusinessValue(value, column.semantics);
+}
+
+/** How a long-form row's value reads: its declared unit kind in a declared run, else its own unit. */
+function rowUnitKind(row: Record<string, unknown>): UnitKind | null {
+  return declaredUnitField in row ? row[declaredUnitField] as UnitKind | null : unitKind(unitColumn(row));
 }
 
 function sourceColumn(row: Record<string, unknown>): unknown {
@@ -283,8 +308,21 @@ function unitColumn(row: Record<string, unknown>): unknown {
   return row.unit ?? row['单位'];
 }
 
+// Where a row names its organization, in order; organization_id is an identifier, not a name, and is read nowhere.
+const regionFields = ['organization', 'region', '区域'];
+
 function regionColumn(row: Record<string, unknown>): unknown {
-  return row.organization ?? row.region ?? row['区域'];
+  const field = regionFields.find((name) => row[name] != null);
+  return field ? row[field] : undefined;
+}
+
+/** The column a table of long-form rows groups by: the organization, by the same fields regionColumn reads. */
+export function groupingColumn(columns: DisplayColumn[]): DisplayColumn | undefined {
+  for (const field of regionFields) {
+    const column = columns.find((item) => item.name.toLowerCase() === field);
+    if (column) return column;
+  }
+  return undefined;
 }
 
 function rowMetric(row: Record<string, unknown>): unknown {
@@ -297,7 +335,7 @@ export function rowPeriod(row: Record<string, unknown>): unknown {
 
 function preferredMetricLabel(value: unknown): string {
   if (value == null || value === '') return '结果';
-  return metricLabels[String(value)] ?? String(value);
+  return metricLabel(value) ?? String(value);
 }
 
 function matchMeasure(parts: string[]): { index: number; length: number; measure: CanonicalMeasure } | null {
@@ -766,34 +804,40 @@ export function otherLongRows(run: AnalysisRun): Record<string, unknown>[] {
   return shownLongRows(run).filter((_, index) => !pairing.used.has(index));
 }
 
+// The key columns a long form names its metric by (isLongFormat accepts any one of them).
+const longKeyFields = ['metric_key', 'metric', '指标'];
+const renminbi = new Set(['CNY', '人民币']);
+
 /**
- * Columns for long-form rows shown as they are. The Chinese label stands in for
- * the key and the scenario code only when every row has one and it tells the
- * rows apart; otherwise (this year and last year under one label, or a row
- * with no label) the key and scenario stay beside it.
+ * Columns for long-form rows shown as they are. When every row has a Chinese label it leads and the key columns go:
+ * the key stays in 技术信息's raw table and on hover over the name, and formatDisplayRows adds it to a name two rows
+ * share. The scenario goes too once label and key tell rows apart (this year and last year under one key keep it).
+ * A currency column that only ever says 人民币 goes; any other currency, or more than one, stays.
  */
 export function longRowColumns(run: AnalysisRun, rows: Record<string, unknown>[] = run.result?.rows ?? []): DisplayColumn[] {
   const columns = (run.result?.columns ?? []).filter((column) => !hiddenFields.has(column.name));
   const names = new Set(columns.map((column) => column.name.toLowerCase()));
   const distinct = (parts: (row: Record<string, unknown>) => unknown[]) => new Set(rows.map((row) => JSON.stringify(parts(row)))).size === rows.length;
   const labelled = names.has('metric_label') && rows.every((row) => typeof row.metric_label === 'string' && row.metric_label.trim() !== '');
-  // The label replaces the key when it alone tells rows apart; the scenario goes
-  // too once the label and key together do (two ratios sharing one label keep
-  // their keys; this year and last year under one key keep their scenarios).
-  // A unique label need not name its metric (全年年初批复预算), so the key always stays,
-  // last, as 指标键; the label leads. The scenario goes once label and key tell rows apart.
   const hideScenario = labelled && distinct((row) => [row.metric_label, rowMetric(row), regionColumn(row), rowPeriod(row)]);
+  // The key columns go only when every one of them says what rowMetric reads. A metric_key beside a different metric
+  // would otherwise vanish while the collision check, which reads rowMetric alone, could not tell its rows apart.
+  const keyColumns = columns.filter((column) => longKeyFields.includes(column.name.toLowerCase()));
+  const keysAgree = keyColumns.every((column) => rows.every((row) => !nonEmpty(row[column.name]) || String(row[column.name]) === String(rowMetric(row) ?? '')));
+  const hideKeys = labelled && keysAgree;
+  const currencies = new Set(rows.map(currencyColumn).filter(nonEmpty).map((value) => String(value).trim().toUpperCase()));
+  const hideCurrency = currencies.size === 1 && renminbi.has([...currencies][0]);
   const labelIndex = columns.findIndex((column) => column.name.toLowerCase() === 'metric_label');
-  const keyIndex = columns.findIndex((column) => ['metric_key', 'metric'].includes(column.name.toLowerCase()));
   if (labelled && labelIndex >= 0) {
     const [label] = columns.splice(labelIndex, 1);
     columns.unshift(label);
-    if (keyIndex >= 0) columns.push(...columns.splice(columns.findIndex((column) => ['metric_key', 'metric'].includes(column.name.toLowerCase())), 1));
   }
   return uniqueColumns(columns.flatMap((column): DisplayColumn[] => {
     const key = column.name.toLowerCase();
     if (hideScenario && key === 'scenario') return [];
-    if (labelled && (key === 'metric_key' || key === 'metric')) return [{ name: column.name, type: 'VARCHAR', label: '指标键', semantics: 'text' }];
+    if (hideKeys && longKeyFields.includes(key)) return [];
+    if (labelled && longKeyFields.includes(key)) return [{ name: column.name, type: 'VARCHAR', label: keyColumns.length > 1 ? `指标键（${column.name}）` : '指标键', semantics: 'text' }];
+    if (hideCurrency && (key === 'currency' || key === '币种')) return [];
     if (key === 'metric_label' && labelled) return [{ name: column.name, type: 'VARCHAR', label: '指标', semantics: 'text' }];
     return [{ name: column.name, type: column.type, label: businessColumnLabel(column.name), semantics: key === 'value' ? 'amount' : columnSemantics(column.name, column.type) }];
   }));
@@ -915,15 +959,83 @@ export function rowBasisLabel(row: Record<string, unknown>): string {
   return basisLabels[rowBasisKind(row)];
 }
 
-export function displayRows(run: AnalysisRun): Record<string, string>[] {
-  const columns = displayColumns(run);
-  return businessRows(run).map((row) => {
+/**
+ * Rows of one organization and period whose names read alike but whose metric keys differ: on screen, without the
+ * key columns, nothing tells them apart. This is the contract the backend's label_ambiguous check (C') must keep,
+ * field for field, and app/tests/fixtures/label-collisions.json is the sample both sides assert:
+ * - Rows: long-form rows in no pair (其他结果 when the run pairs, every row of the main table when it does not).
+ *   Paired rows carry no metric_label and never take part.
+ * - Organization: the first of organization, region, 区域 that is not null, as a string ('' counts as a value);
+ *   '' when all are null. organization_id is not read.
+ * - Period: the stored period, else 期间, as written and not formatted; '' when null.
+ * - Label: rows whose metric_label is not a string with text after trim take no part. The trimmed label reads as
+ *   the table shows it: with 「（估算）」 after it when the row is an estimate (declared so, or by declaresEstimate's
+ *   own signals) and the label does not already say so; otherwise a label that is a metricLabels key reads as its
+ *   Chinese name. Labels compare after a final trim.
+ * - Key: the first of METRIC_FIELDS (rowMetric's order) that is not null, as a string; the row's own key, never
+ *   the base metric a pair reads it as (revenue_variance stays revenue_variance).
+ * - A group with two or more distinct keys is a collision; one key under one name (this year and last year of one
+ *   metric) is told apart by its scenario and is not. Groups and their keys keep first-appearance order.
+ */
+export type LabelCollision = { organization: string; period: string; label: string; keys: string[]; rows: Record<string, unknown>[] };
+
+const labelDisplayColumn: DisplayColumn = { name: 'metric_label', type: 'VARCHAR', label: '指标', semantics: 'text' };
+
+export function labelCollisions(rows: Record<string, unknown>[]): LabelCollision[] {
+  const groups = new Map<string, LabelCollision>();
+  for (const row of rows) {
+    if (typeof row.metric_label !== 'string' || !row.metric_label.trim()) continue;
+    const organization = String(regionColumn(row) ?? '');
+    const period = String(rowPeriod(row) ?? '');
+    const label = formatBusinessCell(row.metric_label.trim(), labelDisplayColumn, row).trim();
+    const id = JSON.stringify([organization, period, label]);
+    const group = groups.get(id) ?? { organization, period, label, keys: [], rows: [] };
+    const key = String(rowMetric(row) ?? '');
+    if (!group.keys.includes(key)) group.keys.push(key);
+    group.rows.push(row);
+    groups.set(id, group);
+  }
+  return [...groups.values()].filter((group) => group.keys.length >= 2);
+}
+
+/** What a shared name gets after it: each key's Chinese name when every key has a distinct one, else the keys. */
+function collisionSuffixes(collision: LabelCollision): Map<string, string> {
+  const chinese = collision.keys.map(metricLabel);
+  const useChinese = chinese.every(Boolean) && new Set(chinese).size === chinese.length;
+  return new Map(collision.keys.map((key, index) => [key, (useChinese && chinese[index]) || key]));
+}
+
+/**
+ * Rows as a result table shows them, keyed by column label. Where the key columns are not shown, a name that two
+ * rows of one organization and period share gets what tells them apart after it. Each row also carries fields no
+ * column shows: __metricKey for the hover over its name, and __group, its organization as stored.
+ */
+export function formatDisplayRows(rows: Record<string, unknown>[], columns: DisplayColumn[]): Record<string, string>[] {
+  const names = new Set(columns.map((column) => column.name.toLowerCase()));
+  const labelColumn = columns.find((column) => column.name.toLowerCase() === 'metric_label');
+  const suffixes = new Map<Record<string, unknown>, string>();
+  if (labelColumn && !longKeyFields.some((field) => names.has(field))) {
+    for (const collision of labelCollisions(rows)) {
+      const byKey = collisionSuffixes(collision);
+      for (const row of collision.rows) suffixes.set(row, byKey.get(String(rowMetric(row) ?? '')) ?? '');
+    }
+  }
+  return rows.map((row) => {
     const output: Record<string, string> = {};
     for (const column of columns) {
       output[column.label] = column.name === '__basis' ? rowBasisLabel(row) : formatBusinessCell(row[column.name], column, row);
     }
+    const suffix = suffixes.get(row);
+    if (labelColumn && suffix) output[labelColumn.label] = `${output[labelColumn.label]}（${suffix}）`;
+    output.__metricKey = String(rowMetric(row) ?? '');
+    // The organization as stored, for grouping: a formatted cell would turn a missing one into 「—」.
+    output.__group = String(regionColumn(row) ?? '');
     return output;
   });
+}
+
+export function displayRows(run: AnalysisRun): Record<string, string>[] {
+  return formatDisplayRows(businessRows(run), displayColumns(run));
 }
 
 export function periodOptions(run: AnalysisRun): string[] {
@@ -970,7 +1082,7 @@ export function compareBusinessRuns(current: AnalysisRun, previous?: AnalysisRun
       const oldValue = formatBusinessValue(before[field], semantics);
       const newValue = formatBusinessValue(row[field], semantics);
       if (oldValue !== newValue) {
-        changes.push({ identity, label: metricLabels[String(row.metric ?? row.metric_key ?? identity)] ?? String(row.metric ?? identity), field: businessColumnLabel(field), before: oldValue, after: newValue });
+        changes.push({ identity, label: metricLabel(row.metric ?? row.metric_key ?? identity) ?? String(row.metric ?? identity), field: businessColumnLabel(field), before: oldValue, after: newValue });
       }
     }
   }

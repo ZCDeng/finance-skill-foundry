@@ -40,9 +40,11 @@
 .analysis-source-refresh[open] > summary { margin-bottom: 2px; }
 .analysis-source-text { font: inherit; font-size: var(--fnd-size-small); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; }
 .analysis-table { font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); min-width: 100%; border-collapse: collapse; border: 0; }
-.analysis-table caption { text-align: left; color: var(--fnd-muted); padding: 0 10px 8px; }
-.analysis-table th, .analysis-table td { border-right: 0; border-left: 0; border-bottom: 1px solid var(--fnd-line); padding: 10px 12px; vertical-align: top; }
-.analysis-table th { color: var(--fnd-muted); font-weight: var(--fnd-weight-strong); white-space: nowrap; }
+.analysis-table caption { text-align: left; color: var(--fnd-muted); padding: 0 0 8px; }
+.analysis-table th:not([scope='rowgroup']), .analysis-table td { border-right: 0; border-left: 0; border-bottom: 1px solid var(--fnd-line); padding: 10px 12px; vertical-align: top; }
+.analysis-table th:not([scope='rowgroup']) { color: var(--fnd-muted); font-weight: var(--fnd-weight-strong); white-space: nowrap; }
+/* A group heading keeps components.css's look; here it only lines up with the cells' text. */
+.analysis-table th[scope='rowgroup'] { padding-left: 12px; padding-right: 12px; }
 .analysis-table td { white-space: nowrap; }
 .analysis-script-summary { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-script-summary > * { min-width: 0; }
@@ -64,7 +66,7 @@
 .analysis-edit-grid > .fnd-control:has(.fnd-period-field) { grid-column: 1 / -1; }
 .analysis-logic { font-size: var(--fnd-size-small); }
 .analysis-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.fnd-tablewrap > table + .analysis-actions { margin-top: 12px; }
+.fnd-tablewrap > .analysis-actions { margin-top: 12px; }
 .analysis-code { line-height: 1.8; padding: 12px; resize: vertical; }
 .analysis-code { font-family: ui-monospace, monospace; }
 .analysis-draft textarea { line-height: 1.8; padding: 12px; resize: vertical; }
@@ -98,7 +100,7 @@
 .analysis-prepublish { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; border-top: 1px solid var(--fnd-line); }
 .analysis-prepublish > .analysis-section-heading h3 { font-size: var(--fnd-size-reading); }
 .analysis-number { text-align: right !important; font-variant-numeric: tabular-nums; }
-.analysis-table th { position: sticky; top: 0; background: var(--fnd-bg); }
+.analysis-table th:not([scope='rowgroup']) { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 .analysis-result-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; position: relative; container-type: inline-size; isolation: isolate; }
 /* Conclusion first: the page header already names the task, so the heading is for screen readers and the script's own sentence (or the date and states) leads. The four states sit under the date at every width. */
@@ -220,10 +222,21 @@
 .analysis-headline-text { margin: 0; font-size: 22px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 /* The first conclusion leads; the ones after it stay above body text but no longer compete with it. */
 .analysis-headline-line + .analysis-headline-line .analysis-headline-text, .analysis-headline details .analysis-headline-text { font-size: 18px; line-height: 28px; }
+.analysis-business-table { display: flex; flex-direction: column; gap: var(--fnd-space-content); min-width: 0; }
 .analysis-business-table .fnd-tablewrap { max-width: 100%; }
 .analysis-business-table .analysis-table { table-layout: auto; }
-.analysis-business-table .analysis-table th:first-child,
+.analysis-business-table .analysis-table thead th:first-child,
 .analysis-business-table .analysis-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--fnd-bg); }
+/* A group's name stays at the left while the row scrolls under it. */
+.analysis-business-table th[scope='rowgroup'] > span { position: sticky; left: 12px; display: inline-block; }
+/* 其他结果's long source: its first reference and a count, opening to the list. */
+.analysis-source-refs { max-width: 20em; text-align: left; }
+.analysis-source-refs__first { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-source-refs__count { flex: none; color: var(--fnd-muted); }
+.analysis-source-refs > svg { flex: none; }
+.analysis-source-refs__panel { max-width: min(32em, calc(100vw - 48px)); padding: 12px 14px; font-size: var(--fnd-size-small); line-height: 1.7; overflow-wrap: anywhere; }
+.analysis-source-refs__panel ol { margin: 0; padding-left: 20px; }
+.analysis-table-scroll-hint { position: sticky; left: 0; margin-top: 8px; }
 .analysis-quality { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 16px; background: color-mix(in srgb, var(--fnd-surface) 88%, transparent); }
 .analysis-quality h4 { margin: 0; font-size: 15px; }
 .analysis-quality-summary { margin: 0; color: var(--fnd-ink); }

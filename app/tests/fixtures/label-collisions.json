@@ -1,0 +1,297 @@
+{
+  "description": "Huachen-shaped long-form rows. Two of them (华东区域 profit actual_1_8 and budget_1_8) pair into a comparison and take no part, though the budget's label matches an unpaired group; one label is a metric code (revenue) and reads as its Chinese name 收入. app/src/views/analysis/businessResults.test.ts asserts labelCollisions(otherLongRows(run)) equals label_collisions; the backend label_ambiguous check (C') must report the same groups for the same rows. Contract: see labelCollisions in app/src/views/analysis/businessResults.ts.",
+  "columns": [
+    "metric_key",
+    "organization",
+    "period",
+    "scenario",
+    "value",
+    "currency",
+    "unit",
+    "metric_label",
+    "source",
+    "basis",
+    "region"
+  ],
+  "rows": [
+    {
+      "metric_key": "revenue_completion_ratio",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_bud_fy",
+      "value": "0.616750",
+      "currency": "CNY",
+      "unit": "比率",
+      "metric_label": "1-8 月实际÷全年 BUD",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "ratio",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_bud_fy",
+      "value": "0.484700",
+      "currency": "CNY",
+      "unit": "比率",
+      "metric_label": "1-8 月实际÷全年 BUD",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_prior",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_py_1_8",
+      "value": "300000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业收入",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_prior",
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_ly_1_8",
+      "value": "290000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业收入",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "528000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "全年年初批复预算",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "43500.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "全年年初批复预算",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_variance",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "variance_bud_le",
+      "value": "-28000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "BUD 与 LE 差额",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit_variance",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "variance_bud_le",
+      "value": "-11000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "BUD 与 LE 差额",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_budget_bud_fy",
+      "organization": "华东区域",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "180576.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "区域全年预算（源表列示）",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_budget_bud_fy",
+      "organization": "华南区域",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "119328.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "区域全年预算（源表列示）",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit_budget_bud_fy",
+      "organization": "华东区域",
+      "period": "2026",
+      "scenario": "budget_bud_fy",
+      "value": "22407.6400",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "区域全年营业利润预算",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit_budget_bud_fy",
+      "organization": "华东区域",
+      "period": "2026-08",
+      "scenario": "budget_bud_fy",
+      "value": "2800.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "区域全年营业利润预算",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit_budget_ytd_est",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_bud_fy",
+      "value": "13936.4958",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月预算",
+      "source": "预算工作簿 09·预算执行分析",
+      "basis": "estimate"
+    },
+    {
+      "metric_key": "profit_budget_ytd_note",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_bud_fy",
+      "value": "13900.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月预算（估算）",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "receivable_balance",
+      "organization": null,
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "41400.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "应收账款期末余额",
+      "source": "预算工作簿 09·预算执行分析",
+      "region": "华北区域"
+    },
+    {
+      "metric_key": "receivable_balance_adj",
+      "organization": "华北区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "41000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "应收账款期末余额",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "actual_1_8",
+      "value": "12000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月实际",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "profit",
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "scenario": "budget_1_8",
+      "value": "13936.4958",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "营业利润 1-8 月预算（估算）",
+      "source": "预算工作簿 09·预算执行分析",
+      "basis": "estimate"
+    },
+    {
+      "metric_key": "revenue_actual_ly",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "actual_ly_fy",
+      "value": "455000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "revenue",
+      "source": "预算工作簿 09·预算执行分析"
+    },
+    {
+      "metric_key": "revenue_le",
+      "organization": "集团合并",
+      "period": "2026",
+      "scenario": "budget_le_fy",
+      "value": "500000.0000",
+      "currency": "CNY",
+      "unit": "万元",
+      "metric_label": "收入",
+      "source": "预算工作簿 09·预算执行分析"
+    }
+  ],
+  "label_collisions": [
+    {
+      "organization": "集团合并",
+      "period": "2026-01:2026-08",
+      "label": "1-8 月实际÷全年 BUD",
+      "keys": [
+        "revenue_completion_ratio",
+        "ratio"
+      ]
+    },
+    {
+      "organization": "集团合并",
+      "period": "2026",
+      "label": "全年年初批复预算",
+      "keys": [
+        "revenue",
+        "profit"
+      ]
+    },
+    {
+      "organization": "集团合并",
+      "period": "2026",
+      "label": "BUD 与 LE 差额",
+      "keys": [
+        "revenue_variance",
+        "profit_variance"
+      ]
+    },
+    {
+      "organization": "华东区域",
+      "period": "2026-01:2026-08",
+      "label": "营业利润 1-8 月预算（估算）",
+      "keys": [
+        "profit_budget_ytd_est",
+        "profit_budget_ytd_note"
+      ]
+    },
+    {
+      "organization": "华北区域",
+      "period": "2026-01:2026-08",
+      "label": "应收账款期末余额",
+      "keys": [
+        "receivable_balance",
+        "receivable_balance_adj"
+      ]
+    },
+    {
+      "organization": "集团合并",
+      "period": "2026",
+      "label": "收入",
+      "keys": [
+        "revenue_actual_ly",
+        "revenue_le"
+      ]
+    }
+  ]
+}
