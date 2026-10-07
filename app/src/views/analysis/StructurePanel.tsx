@@ -25,14 +25,18 @@ function keep<T extends { id: string }>(current: T[], next: T[], same: (a: T, b:
 /**
  * Every file in this task and what its table structure is waiting on: one waiting for
  * her to say what its tables are, one somebody else confirmed on her behalf, one a
- * remembered structure was applied to. Read again when the files change, not on every
- * read of the page: the page reads the task every 5 seconds and hands over a new list
- * each time.
+ * remembered structure was applied to. Read again when the set of files changes or the
+ * page's 刷新 bumps `refreshKey`, not on every read of the page: the page reads the task
+ * every 5 seconds and hands over a new list each time. The task read carries no
+ * structure state, so a decision taken elsewhere that adds no file shows on 刷新. A read
+ * that fails is tried again on the page's 5-second beat until one succeeds.
  */
-export function useStructureTodos(taskId: string, datasets: DatasetSnapshot[]) {
+export function useStructureTodos(taskId: string, datasets: DatasetSnapshot[], refreshKey = 0) {
   const [proposals, setProposals] = useState<StructureProposal[]>([]);
   const [pending, setPending] = useState<StructurePending[]>([]);
   const [error, setError] = useState('');
+  // Reads that have failed in a row; each one schedules the next try.
+  const [failures, setFailures] = useState(0);
   // A read started on one task must not land on the next one.
   const currentTask = useRef(taskId);
   currentTask.current = taskId;
@@ -46,15 +50,24 @@ export function useStructureTodos(taskId: string, datasets: DatasetSnapshot[]) {
     const superseded = new Set(rows.map((row) => row.parent_id).filter(Boolean) as string[]);
     setProposals((current) => keep(current, listed.proposals ?? [], sameProposal));
     setPending((current) => keep(current, rows.filter((row) => row.state === 'pending_acknowledgement' && !superseded.has(row.id)), samePending));
-    setError('');
+    setError(''); setFailures(0);
   }, [taskId]);
-  useEffect(() => { setProposals([]); setPending([]); setError(''); }, [taskId]);
-  // The files as a key, not the array: the same files read again are the same key.
-  const key = datasets.map((dataset) => `${dataset.id}:${(dataset as { structure_state?: string }).structure_state ?? ''}`).join('|');
-  useEffect(() => {
+  const read = useCallback(() => {
     const forTask = taskId;
-    void load().catch((failure) => { if (currentTask.current === forTask) setError(errorText(failure)); });
-  }, [load, key]);
+    return load().catch((failure) => {
+      if (currentTask.current !== forTask) return;
+      setError(errorText(failure)); setFailures((count) => count + 1);
+    });
+  }, [load, taskId]);
+  useEffect(() => { setProposals([]); setPending([]); setError(''); setFailures(0); }, [taskId]);
+  // The files as a key, not the array: the same files read again are the same key.
+  const key = datasets.map((dataset) => dataset.id).join('|');
+  useEffect(() => { void read(); }, [read, key, refreshKey]);
+  useEffect(() => {
+    if (!failures) return;
+    const timer = setTimeout(() => void read(), 5000);
+    return () => clearTimeout(timer);
+  }, [failures, read]);
 
   const byDataset: Record<string, StructureTodo> = {};
   for (const proposal of proposals) byDataset[proposal.dataset_id] = { ...byDataset[proposal.dataset_id], proposal };

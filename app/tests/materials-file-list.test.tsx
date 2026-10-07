@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DatasetSnapshot, WorkbookHealth } from '../src/bridge.js';
 import { MaterialsFileList, fileMeta, materialsAnchor } from '../src/views/analysis/MaterialsFileList.js';
 
@@ -53,6 +53,7 @@ function List(props: Partial<Parameters<typeof MaterialsFileList>[0]> & { datase
 const rowOf = (name: string) => screen.getByText(name, { selector: '.fnd-title' }).closest('li') as HTMLElement;
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   document.body.innerHTML = '';
   delete (globalThis as { foundry?: unknown }).foundry;
@@ -112,6 +113,91 @@ describe('the 资料 file list', () => {
     expect(form.querySelector('.fnd-card')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '处理表结构追认：助手确认的套表' }));
     expect(within(rowOf('助手确认的套表')).getByRole('button', { name: '追认' })).toBeTruthy();
+  });
+
+  it('keeps a half-answered form when the row is closed and opened again', async () => {
+    mount({ proposals: [proposal(workbook.id, 'pending_confirmation')] });
+    render(<List datasets={[workbook]} />);
+    const open = await screen.findByRole('button', { name: '去确认表结构：月结套表' });
+    // The detail is in the page from the start, so the button always points at something.
+    const form = document.getElementById(open.getAttribute('aria-controls')!)!;
+    expect(form.hidden).toBe(true);
+    fireEvent.click(open);
+    fireEvent.change(screen.getByLabelText('02·GL科目余额表 A 列含义'), { target: { value: 'account_name' } });
+    fireEvent.click(open);
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    expect(form.hidden).toBe(true);
+    fireEvent.click(open);
+    expect((screen.getByLabelText('02·GL科目余额表 A 列含义') as HTMLSelectElement).value).toBe('account_name');
+    // The row's text buttons are ordinary 36px buttons.
+    expect(open.getAttribute('data-size')).toBe('default');
+    // The card's own heading repeats the row's file name, so only screen readers get it.
+    expect(within(form).getByRole('heading', { name: '月结套表' }).className).toBe('sr-only');
+  });
+
+  it('closes an opened detail on Escape and hands focus back to its button', async () => {
+    mount({ proposals: [proposal(workbook.id, 'pending_confirmation')] });
+    render(<List datasets={[workbook]} />);
+    const open = await screen.findByRole('button', { name: '去确认表结构：月结套表' });
+    fireEvent.click(open);
+    const field = screen.getByLabelText('表头行');
+    field.focus();
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    await waitFor(() => expect(document.activeElement).toBe(open));
+  });
+
+  it('hands focus to the file name once a structure is confirmed and its button is gone', async () => {
+    let state = 'pending_confirmation';
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'structure-proposal-list') return { ok: true, value: { proposals: [proposal(workbook.id, state)] } };
+      if (command === 'structure-proposal-confirm') { state = 'confirmed'; return { ok: true, value: {} }; }
+      return { ok: true, value: { confirmations: [] } };
+    });
+    (globalThis as { foundry?: unknown }).foundry = { financeCall };
+    const onRefresh = vi.fn();
+    render(<List datasets={[workbook]} onRefresh={onRefresh} />);
+    fireEvent.click(await screen.findByRole('button', { name: '去确认表结构：月结套表' }));
+    fireEvent.click(screen.getByRole('button', { name: /^确认表结构/ }));
+    expect(await within(rowOf('月结套表')).findByText('已确认')).toBeTruthy();
+    expect(onRefresh).toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText('月结套表', { selector: '.fnd-title' })));
+  });
+
+  it('reads the to-dos again for a new file or a 刷新, not for the same files read again', async () => {
+    const financeCall = mount();
+    const { rerender } = render(<List datasets={[workbook]} />);
+    const listed = () => calls(financeCall, 'structure-proposal-list').length;
+    await waitFor(() => expect(listed()).toBe(1));
+    // The page's 5-second read hands over equal files as new objects.
+    rerender(<List datasets={[{ ...workbook }]} />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(listed()).toBe(1);
+    rerender(<List datasets={[{ ...workbook }, csv]} />);
+    await waitFor(() => expect(listed()).toBe(2));
+    rerender(<List datasets={[{ ...workbook }, csv]} refreshKey={1} />);
+    await waitFor(() => expect(listed()).toBe(3));
+  });
+
+  it('tries a failed read again on the 5-second beat until it succeeds', async () => {
+    vi.useFakeTimers();
+    let fail = true;
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'structure-proposal-list') return fail ? { ok: false, message: '读取表结构失败' } : { ok: true, value: { proposals: [proposal(workbook.id, 'pending_confirmation')] } };
+      return { ok: true, value: { confirmations: [] } };
+    });
+    (globalThis as { foundry?: unknown }).foundry = { financeCall };
+    render(<List datasets={[workbook]} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByRole('alert').textContent).toContain('读取表结构失败');
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(calls(financeCall, 'structure-proposal-list')).toHaveLength(2);
+    fail = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: '去确认表结构：月结套表' })).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(calls(financeCall, 'structure-proposal-list')).toHaveLength(3);
   });
 
   it('keeps a to-do for a file the list does not hold, as a row at the end', async () => {

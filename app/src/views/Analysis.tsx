@@ -5,7 +5,7 @@ import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisR
 import './analysis.css';
 import { STATUS, assumptionSummary, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
-import { isSuccessfulRun, runPresentationRole } from './analysis/businessResults.js';
+import { isBudgetAlias, isSuccessfulRun, runPresentationRole } from './analysis/businessResults.js';
 import { ScopePanel } from './analysis/ScopePanel.js';
 import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
@@ -72,6 +72,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
   }, [draftRequest, task?.id]);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest>({ count: 0 });
   const [scopeRefresh, setScopeRefresh] = useState(0);
+  const [materialsRefresh, setMaterialsRefresh] = useState(0);
   // One scope per task, edited from the 资料 page and the finance settings alike.
   const analysisScope = useAnalysisScope(task?.id, task?.title ?? '', state?.datasets ?? [], scopeRefresh);
   // Held here, not in the workbench: it unmounts when the tab changes, and a run
@@ -306,7 +307,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
     </div>) : null;
   const financeWorkbench = task && view && view.datasets.length > 0
     ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} scope={analysisScope}
-      comparesBudget={Boolean(analysis && (analysis.operation === 'variance' || Object.hasOwn(analysis.bindings ?? {}, 'budget')))}
+      comparesBudget={Boolean(analysis && (analysis.operation === 'variance' || Object.keys(analysis.bindings ?? {}).some(isBudgetAlias)))}
       openRequest={scopeRequest} running={financeRunning[task.id] ?? ''} outcome={financeOutcome[task.id]}
       onRunning={(label, active) => setFinanceRunning((current) => {
         if (active) return { ...current, [task.id]: label };
@@ -387,7 +388,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
               chooseTab(tabs[next][0]); document.getElementById(`analysis-tab-${tabs[next][0]}`)?.focus();
             }}>{title}{id === 'close' ? null : <span>{counts[id]}</span>}</TabsTrigger>
         ))}
-      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => void perform((taskId) => refresh(taskId, { scope: true }))}>
+      </TabsList><Button variant="outline" type="button" disabled={busy || loading} onClick={() => {
+        // The 5-second read leaves the structure to-dos alone; an explicit 刷新 reads them again too.
+        setMaterialsRefresh((count) => count + 1);
+        void perform((taskId) => refresh(taskId, { scope: true }));
+      }}>
         <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
@@ -400,12 +405,12 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
-          {view.datasets.length > 0 && <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset}
+          <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset} refreshKey={materialsRefresh}
             onPreview={(source) => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
               const content = unwrap(await api.analysisReadDataset(taskId, source.id));
               if (currentTask.current === taskId) setDataset({ source, content });
-            })} onClosePreview={() => setDataset(null)} onRefresh={() => refresh(task.id)} />}
+            })} onClosePreview={() => setDataset(null)} onRefresh={() => refresh(task.id)} />
           {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />

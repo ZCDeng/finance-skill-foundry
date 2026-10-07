@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun } from '../../bridge.js';
 import sharedCollisions from '../../../tests/fixtures/label-collisions.json';
-import { businessColumnLabel, businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessCell, formatBusinessValue, formatDisplayRows, labelCollisions, longRowColumns, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult, type DisplayColumn } from './businessResults.js';
+import { businessColumnLabel, businessRows, columnSemantics, compareBusinessRuns, displayColumns, displayRows, formatBusinessCell, formatBusinessValue, formatDisplayRows, isBudgetAlias, labelCollisions, longRowColumns, otherLongRows, rowBasisLabel, runPresentationRole, selectBusinessResult, type DisplayColumn } from './businessResults.js';
 
 const analysis: AnalysisRevision = {
   id: 'analysis-1',
@@ -54,6 +54,11 @@ function draft(runIds: string[]): AnalysisDraft {
 }
 
 describe('business result presentation', () => {
+  it('names the budget side by the same words the backend gives the budget role, approved or estimated', () => {
+    for (const word of ['budget', 'Budget_YTD', 'same_period_budget', 'baseline', 'estimated_budget_month']) expect(isBudgetAlias(word)).toBe(true);
+    for (const word of ['actual', 'budget_variance', 'forecast', 'invoices']) expect(isBudgetAlias(word)).toBe(false);
+  });
+
   it.each(['preanalysis', 'draft_support', 'audit_check'])('keeps explicit %s activity out of business results even with numeric rows', (role) => {
     const activity = { ...run({ result: { columns: [{ name: 'actual', type: 'DECIMAL' }], rows: [{ actual: '100' }], row_count: 1, truncated: false } }), result_role: role };
     expect(runPresentationRole(activity)).toBe('activity');

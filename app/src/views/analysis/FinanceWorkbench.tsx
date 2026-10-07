@@ -53,6 +53,7 @@ const MORE_FIELDS: readonly ScopeKey[] = ['currency', 'scenario', 'ledger'];
 export type ScopeRequest = { count: number; contextId?: string };
 type Calculation = 'pnl' | 'bridge';
 const CALCULATION_NAMES: Record<Calculation, string> = { pnl: '计算损益表', bridge: '计算预算差异' };
+const RERUN_NAMES: Record<Calculation, string> = { pnl: '按已保存范围重算损益表', bridge: '按已保存范围计算预算差异' };
 
 /**
  * Which calculation is the main action: the analysis decides, never the form. Choosing
@@ -347,18 +348,31 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     conflicts: analysisScope.conflicts.length > 0, scopeError: Boolean(analysisScope.error), actual,
     periodPending: pendingPeriods(analysisScope).length > 0, budget,
   })])) as Record<Calculation, string>;
-  // A missing budget is only worth a standing line when the budget comparison is the main action.
-  const reasons = ([lead, second] as const).filter((kind) => blockers[kind] && !(kind === 'bridge' && lead !== 'bridge' && blockers.bridge === '先选预算资料。'));
+  // The saved-scope reruns need no form, only a readable scope without conflicts.
+  const rerunBlocker = analysisScope.conflicts.length > 0 ? '先到资料页「分析范围」处理冲突。'
+    : analysisScope.error ? '分析范围没有读出来，见下方提示。' : '';
   const reasonId = useId();
-  const sameReason = reasons.length === 2 && blockers.pnl === blockers.bridge;
-  const reasonLines: { id: string; text: string; kinds: Calculation[] }[] = sameReason
-    ? [{ id: `${reasonId}-both`, text: blockers[lead], kinds: reasons }]
-    : reasons.map((kind) => ({ id: `${reasonId}-${kind}`, text: `${CALCULATION_NAMES[kind]}：${blockers[kind]}`, kinds: [kind] }));
-  const describedBy = (kind: Calculation) => reasonLines.find((line) => line.kinds.includes(kind))?.id;
+  // Every closed button says why. A reason several buttons share is one line; a profit task that only lacks a
+  // budget file keeps that to screen readers rather than a standing line under the main action.
+  const gates: { key: string; name: string; reason: string; quiet?: boolean }[] = [
+    ...([lead, second] as const).map((kind) => ({ key: kind, name: CALCULATION_NAMES[kind], reason: blockers[kind],
+      quiet: kind === 'bridge' && lead === 'pnl' && !blockers.pnl })),
+    ...(contextId ? (['pnl', 'bridge'] as const).map((kind) => ({ key: `rerun-${kind}`, name: RERUN_NAMES[kind], reason: rerunBlocker })) : []),
+  ].filter((gate) => gate.reason);
+  const reasonLines: { id: string; text: string; keys: string[]; quiet?: boolean }[] = [];
+  for (const gate of gates) {
+    if (gate.quiet) { reasonLines.push({ id: `${reasonId}-${gate.key}`, text: `${gate.name}：${gate.reason}`, keys: [gate.key], quiet: true }); continue; }
+    const line = reasonLines.find((item) => !item.quiet && item.text === gate.reason);
+    if (line) line.keys.push(gate.key);
+    else reasonLines.push({ id: `${reasonId}-${gate.key}`, text: gate.reason, keys: [gate.key] });
+  }
+  // A line one button owns names it.
+  for (const line of reasonLines) if (!line.quiet && line.keys.length === 1) line.text = `${gates.find((gate) => gate.key === line.keys[0])!.name}：${line.text}`;
+  const describedBy = (key: string) => reasonLines.find((line) => line.keys.includes(key))?.id;
   const calculate = (kind: Calculation, variant: 'default' | 'outline') => <Button key={kind} variant={variant} type="button"
     disabled={transient || Boolean(blockers[kind])} aria-describedby={describedBy(kind)} onClick={() => void saveContext(kind)}>{CALCULATION_NAMES[kind]}</Button>;
-  const rerun = (kind: Calculation) => <Button key={kind} variant="outline" type="button" disabled={locked} onClick={() => void runExisting(kind)}>
-    {kind === 'pnl' ? '按已保存范围重算损益表' : '按已保存范围计算预算差异'}</Button>;
+  const rerun = (kind: Calculation) => <Button key={kind} variant="outline" type="button" disabled={locked} aria-describedby={describedBy(`rerun-${kind}`)}
+    onClick={() => void runExisting(kind)}>{RERUN_NAMES[kind]}</Button>;
   const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
@@ -387,8 +401,10 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       {calculate(second, 'outline')}
       {calculate(lead, 'default')}
     </div>
-    {reasonLines.length ? <div className="analysis-actions-reasons">{reasonLines.map((line) => <p key={line.id} id={line.id}>{line.text}</p>)}</div> : null}
     {contextId && <div className="analysis-actions analysis-actions--end">{rerun(lead)}{rerun(second)}</div>}
+    {reasonLines.some((line) => !line.quiet) ? <div className="analysis-actions-reasons">
+      {reasonLines.filter((line) => !line.quiet).map((line) => <p key={line.id} id={line.id}>{line.text}</p>)}</div> : null}
+    {reasonLines.filter((line) => line.quiet).map((line) => <span key={line.id} id={line.id} className="sr-only">{line.text}</span>)}
     {analysisScope.error ? <p className="analysis-message analysis-message--error">{analysisScope.error}</p> : null}
     {advancedChildren ? <section className="analysis-finance-definition" aria-label="计算定义">{advancedChildren}</section> : null}
     {contextId && <details className="analysis-details analysis-scenario-panel"><DisclosureSummary>情景测算</DisclosureSummary>

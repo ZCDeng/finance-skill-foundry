@@ -602,6 +602,8 @@ describe('the 资料 page, settings panel and task drawer controls', () => {
     expect(body).not.toHaveProperty('overscroll-behavior');
     expect(ANALYSIS).not.toContain('analysis-finance-setup-scroll');
     expect(declarations(ANALYSIS, '.analysis-finance-setup-head')).toMatchObject({ position: 'sticky', top: '-24px', 'z-index': '2' });
+    // The column around the panes clips rather than hides, so scrollIntoView inside a pane cannot slide it.
+    expect(declarations(read('../src/components/components.css'), ".fnd-shell[data-screen='analysis'] .fnd-column").overflow).toBe('clip');
     // -24px cancels the results pane's own top padding, so the stuck heading meets the pane's edge.
     expect(declarations(WORKSPACE, '.workspace-results').padding.split(' ')[0]).toBe('24px');
     // The evidence drawer stays above the sticky heading.

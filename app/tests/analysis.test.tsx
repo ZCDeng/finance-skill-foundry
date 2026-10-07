@@ -1239,7 +1239,32 @@ ${canonicalAppendix} 已改写`;
       await waitForSettingsEntryOrDialog();
       const dialog = openFinanceSettings();
       expect(order(dialog)).toEqual([['保存范围', 'outline'], ['计算预算差异', 'outline'], ['计算损益表', 'default']]);
-      expect(screen.queryByText(/先选预算资料/)).toBeNull();
+      // The missing budget is not a standing line under the main action, but the closed button still says why.
+      expect(dialog.querySelector('.analysis-actions-reasons')).toBeNull();
+      const bridgeButton = within(dialog).getByRole('button', { name: '计算预算差异' }) as HTMLButtonElement;
+      expect(bridgeButton.disabled).toBe(true);
+      const reason = document.getElementById(bridgeButton.getAttribute('aria-describedby')!)!;
+      expect(reason.textContent).toBe('计算预算差异：先选预算资料。');
+      expect(reason.className).toBe('sr-only');
+    });
+
+    it('says why the saved-scope reruns are closed, on the line the calculations share', async () => {
+      const current = { id: 'legacy-requirements', question: '核对月度利润', scope: { period: '2026-01:2026-08' },
+        bindings: { actual: source.id }, items: [{ id: 'monthly_profit', metric: 'operating_profit', periods: ['2026-01', '2026-08'], dimensions: {}, requires_drilldown: true }] };
+      const saved = { ...object, id: '4'.repeat(32), name: '2026-08 经营范围', bindings: { actual: source.id }, scopes: { actual: { period: '2026-08' } }, diagnostics: [] };
+      mountBridge({ analysisState: async () => success({ ...initial, runs: [], drafts: [] }),
+        financeCall: async (_taskId: string, command: string) => command === 'list-finance-context'
+          ? success({ task_id: task.id, datasets: [source], contexts: [saved], account_maps: [], scenarios: [], metric_definitions: [], capabilities: ['metrics'] })
+          : command === 'analysis-requirements-list' ? success({ current }) : success({}) });
+      render(<Analysis {...props} embedded section="results" />);
+      await waitForSettingsEntryOrDialog();
+      const dialog = openFinanceSettings();
+      const line = await within(dialog).findByText('先到资料页「分析范围」处理冲突。');
+      for (const name of ['计算损益表', '计算预算差异', '按已保存范围重算损益表', '按已保存范围计算预算差异']) {
+        const button = within(dialog).getByRole('button', { name }) as HTMLButtonElement;
+        expect(button.disabled, name).toBe(true);
+        expect(button.getAttribute('aria-describedby'), name).toBe(line.id);
+      }
     });
 
     it('sends a scope conflict to the 资料 page, where its 清空 button is', async () => {
@@ -1343,6 +1368,27 @@ ${canonicalAppendix} 已改写`;
     expect(analysisState).toHaveBeenCalledTimes(2);
     expect((screen.getByLabelText('02·GL科目余额表 A 列含义') as HTMLSelectElement).value).toBe('account_name');
     expect(financeCall.mock.calls.filter(([, command]) => command === 'structure-proposal-list')).toHaveLength(1);
+  });
+
+  it('reads the structure to-dos again on 刷新, though not on the 5-second read', async () => {
+    const financeCall = vi.fn(async (_taskId: string, command: string) => command === 'structure-proposal-list' ? success({ proposals: [] })
+      : command === 'structure-confirmation-list' ? success({ confirmations: [] }) : command === 'finance-source-list' ? success({ batches: [] }) : success({}));
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: initial.datasets.map((row) => ({ ...row })) }), financeCall });
+    render(<Analysis {...props} embedded section="materials" />);
+    const listed = () => financeCall.mock.calls.filter(([, command]) => command === 'structure-proposal-list').length;
+    await waitFor(() => expect(listed()).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => expect(listed()).toBe(2));
+  });
+
+  it('keeps a structure to-do on screen when the task lists no files', async () => {
+    const orphan = '9'.repeat(32);
+    mountBridge({ analysisState: async () => success({ ...initial, datasets: [] }), financeCall: async (_taskId: string, command: string) =>
+      command === 'structure-proposal-list' ? success({ proposals: [{ id: 'p9', dataset_id: orphan, revision: 1, structure_state: 'no_table', sheets: [], template_matches: [] }] })
+        : command === 'structure-confirmation-list' ? success({ confirmations: [] }) : success({}) });
+    render(<Analysis {...props} embedded section="materials" />);
+    expect(await screen.findByRole('button', { name: `查看原因：${orphan}` })).toBeTruthy();
+    expect(screen.getByText('把手头的资料加进来')).toBeTruthy();
   });
 
   it('lists the files before the scope settings and the workbook tools on the materials tab', async () => {
