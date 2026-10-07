@@ -27,7 +27,7 @@ const mount = (handler: (command: string, spec: unknown) => unknown) => {
 it('shows where each side was read and that the difference holds the close', async () => {
   mount(() => listOf([broken]));
   render(<ControlsPanel taskId="t" />);
-  expect(await screen.findByText(/08·AR!D25:D30 合计 33780；08·AR!D31 合计 22125；差额 11655/)).toBeTruthy();
+  expect(await screen.findByText(/08·AR!D25:D30 合计 33,780；08·AR!D31 合计 22,125；差额 11,655/)).toBeTruthy();
   expect(screen.getByText('待处理')).toBeTruthy();
   expect(screen.getByText(/挡住月结 1 项/)).toBeTruthy();
 });
@@ -149,7 +149,7 @@ it('lets the manager compare two places across workbooks, preview the gap, then 
   fireEvent.change(screen.getByLabelText('第二处单元格'), { target: { value: 'C11' } });
   expect(check.disabled).toBe(false);
   fireEvent.click(check);
-  expect(await screen.findByText('差额 -2793.2794 万元')).toBeTruthy();
+  expect(await screen.findByText('差额 -2,793.2794 万元')).toBeTruthy();
   const control = {
     kind: 'tie_out', tolerance: '0', unit: '万元', label: '11·物业服务合同台账!T605 对 08·AR收缴率与欠费!C11',
     left: { dataset_id: 'ledger', source_hash: 'h1', sheet: '11·物业服务合同台账', range: 'T605', scale: '1' },
@@ -223,7 +223,7 @@ it('lets the manager choose one of the five types, shows the decided one, and ne
   const typed: ControlRow = { ...broken, finding: { set_by_manager: true, type: 'not_updated', type_label: '未更新' } };
   const calls = mount((command) => command === 'finance-controls-list' ? listOf([typed]) : {});
   render(<ControlsPanel taskId="t" />);
-  await screen.findByText(/差额 11655/);
+  await screen.findByText(/差额 11,655/);
   expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe('问题类型：未更新');
   const save = screen.getByRole('button', { name: '保存问题类型' }) as HTMLButtonElement;
   expect(save.disabled).toBe(true);

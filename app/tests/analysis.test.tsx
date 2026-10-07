@@ -170,7 +170,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => ({ ok: false, refused: true, message: '分析存储不可读取' }) });
     render(<Analysis {...props} />);
     expect((await screen.findByRole('alert')).textContent).toBe('分析存储不可读取');
-    expect(screen.queryByText('900719925474099.99')).toBeNull();
+    expect(screen.queryByText('900,719,925,474,099.99')).toBeNull();
   });
 
   it('ignores a delayed response for the previously selected task', async () => {
@@ -190,7 +190,7 @@ describe('analysis workbench', () => {
   it('preserves exact Decimal text and separates execution, reproducibility, review and publication', async () => {
     mountBridge(); render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
-    expect(screen.getByText('900719925474099.99')).toBeTruthy();
+    expect(screen.getByText('900,719,925,474,099.99')).toBeTruthy();
     expect(screen.getByText('指标：经营利润：收入−成本−费用；利润率')).toBeTruthy();
     expect(within(screen.getByLabelText('结果状态')).getByText('计算成功')).toBeTruthy();
     expect(screen.getByText('可复算')).toBeTruthy();
@@ -552,7 +552,7 @@ describe('analysis workbench', () => {
     const analysisAddFiles = vi.fn(async () => success([]));
     mountBridge({ analysisAddFiles });
     render(<Analysis {...props} embedded section="results" onSectionChange={onSectionChange} />);
-    await screen.findByText('900719925474099.99');
+    await screen.findByText('900,719,925,474,099.99');
     expect(screen.queryByLabelText('接下来想了解什么？')).toBeNull();
     expect(screen.queryByRole('heading', { name: task.title, level: 2 })).toBeNull();
     expect(screen.queryByRole('tab', { name: /方法/ })).toBeNull();
@@ -567,10 +567,10 @@ describe('analysis workbench', () => {
     const failed = { ...run, id: '2'.repeat(32), analysis_id: newer.id, execution_status: 'failed', error: '缺少成本列', result: undefined };
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [analysis, newer], runs: [run, failed] }) });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('900719925474099.99');
-    const resultArea = screen.getByText('900719925474099.99').closest('.analysis-result') as HTMLElement;
+    await screen.findByText('900,719,925,474,099.99');
+    const resultArea = screen.getByText('900,719,925,474,099.99').closest('.analysis-result') as HTMLElement;
     expect(within(resultArea).getAllByRole('table')).toHaveLength(1);
-    expect(screen.getByText('900719925474099.99').classList.contains('analysis-number')).toBe(true);
+    expect(screen.getByText('900,719,925,474,099.99').closest('td')?.classList.contains('analysis-number')).toBe(true);
     expectFinanceSettingsClosed();
     fireEvent.click(screen.getByRole('button', { name: '查看未完成的计算' }));
     expect((await screen.findByRole('alert')).textContent).toBe('缺少成本列');
@@ -586,7 +586,7 @@ describe('analysis workbench', () => {
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {
     const analysisReadDataset = vi.fn(async () => success({ text: '本次依据内容' }));
     mountBridge({ analysisReadDataset }); render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('900719925474099.99');
+    await screen.findByText('900,719,925,474,099.99');
     const trigger = screen.getByRole('button', { name: '查看本次计算依据' });
     fireEvent.click(trigger);
     const panel = screen.getByRole('dialog', { name: '本次计算依据' });
@@ -604,12 +604,12 @@ describe('analysis workbench', () => {
   it('compares actual saved results without fabricating a derived variance', async () => {
     const earlier = { ...run, id: '9'.repeat(32), result: { ...run.result!, rows: [{ profit: '900719925474000.09' }] } };
     mountBridge({ analysisState: async () => success({ ...initial, runs: [earlier, run] }) });
-    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900719925474099.99');
+    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900,719,925,474,099.99');
     fireEvent.click(screen.getByRole('button', { name: '比较版本' }));
     fireEvent.change(screen.getByLabelText('对照结果'), { target: { value: earlier.id } });
     const comparison = screen.getByRole('region', { name: '版本比较' });
-    expect(within(comparison).getByText('900719925474099.99')).toBeTruthy();
-    expect(within(comparison).getByText('900719925474000.09')).toBeTruthy();
+    expect(within(comparison).getByText('900,719,925,474,099.99')).toBeTruthy();
+    expect(within(comparison).getByText('900,719,925,474,000.09')).toBeTruthy();
     expect(within(comparison).getByText(/未推断业务主键或计算差额/)).toBeTruthy();
     expect(within(comparison).getByText('两次结果没有可对齐的指标，请直接对照下方两张结果表。')).toBeTruthy();
     expect(within(comparison).queryByText('可比较指标没有发现数值变化。')).toBeNull();
@@ -888,7 +888,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [original, replacement],
       analyses: [runBindings ? { ...analysis, bindings: revised.bindings } : analysis, revised], runs: [actualRun] }), analysisReadDataset });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByText('900719925474099.99');
+    await screen.findByText('900,719,925,474,099.99');
     fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
     const evidence = screen.getByRole('dialog', { name: '本次计算依据' });
     fireEvent.click(within(evidence).getByRole('button', { name: '查看 八月经营数据' }));
@@ -907,7 +907,7 @@ ${canonicalAppendix} 已改写`;
     const analysisReadDataset = vi.fn();
     mountBridge({ analysisReadDataset, analysisState: async () => success({ ...initial,
       datasets: [{ ...source, data_hash: currentHash }], runs: [{ ...run, bindings: analysis.bindings, input_hashes: { actual: recordedHash } }] }) });
-    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900719925474099.99');
+    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900,719,925,474,099.99');
     fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
     const panel = screen.getByRole('dialog', { name: '本次计算依据' });
     const open = within(panel).getByRole('button', { name: '查看 本月实际' });
@@ -930,7 +930,7 @@ ${canonicalAppendix} 已改写`;
       parameter_metadata: [{ key: 'Overhead', label: '总部费用分摊', type: 'decimal' as const, role: 'business' as const, unit: '万元' }],
       assumptions: [{ name: '分摊口径', value: '各区域按本月收入分摊' }] };
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [previous, current], runs: [run, savedRun] }) });
-    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900719925474099.99');
+    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900,719,925,474,099.99');
     fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
     const evidence = screen.getByRole('dialog', { name: '本次计算依据' });
     expect(within(evidence).getByText('参数：总部费用分摊：30.00000000000001 万元')).toBeTruthy();
@@ -950,7 +950,7 @@ ${canonicalAppendix} 已改写`;
     const unknown = { ...analysis, parameters: { overhead: '30.00', legacy_rate: '0.8500000000000001' },
       assumptions: [{ label: '估计依据', description: '经理提供的本次估计' }, { note: '未知结构保持原文' }] };
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [unknown] }) });
-    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900719925474099.99');
+    render(<Analysis {...props} embedded section="results" />); await screen.findByText('900,719,925,474,099.99');
     fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
     const evidence = screen.getByRole('dialog', { name: '本次计算依据' });
     expect(within(evidence).getByText('参数：overhead：30.00；legacy_rate：0.8500000000000001')).toBeTruthy();
@@ -1761,7 +1761,7 @@ ${canonicalAppendix} 已改写`;
     expect(within(bridge).getByRole('cell', { name: '33.33%' })).toBeTruthy();
     const costRow = within(bridge).getAllByRole('row').find((rowElement) => (rowElement.textContent ?? '').includes('成本'));
     expect(costRow?.textContent).toContain('10');
-    expect(costRow?.textContent).toContain('-10');
+    expect(costRow?.textContent).toContain('(10.00)');
     const raw = screen.getByText('技术信息').closest('details') as HTMLDetailsElement;
     expect(raw.open).toBe(false);
     fireEvent.click(screen.getByText('技术信息'));

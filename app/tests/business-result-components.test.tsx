@@ -313,7 +313,7 @@ describe('business result components', () => {
     };
     const view = render(<BusinessResultView run={first} />);
     fireEvent.click(screen.getByRole('tab', { name: 'YTD' }));
-    expect(screen.getByRole('cell', { name: '100.00' })).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: '业务结果' })).getByRole('cell', { name: '100.00' })).toBeTruthy();
 
     view.rerender(<BusinessResultView run={second} />);
 
@@ -335,7 +335,7 @@ describe('business result components', () => {
     expect(within(card).getByText('预算')).toBeTruthy();
     expect(within(card).getByText('100.00')).toBeTruthy();
     expect(within(card).getByText('差异')).toBeTruthy();
-    expect(within(card).getByText('-10.00')).toBeTruthy();
+    expect(within(card).getByText('(10.00)')).toBeTruthy();
     expect(within(card).getByText('达成率')).toBeTruthy();
     expect(within(card).getByText('90.00%')).toBeTruthy();
   });
@@ -513,7 +513,7 @@ describe('business result components', () => {
     expect(within(ytdTable).getAllByRole('cell', { name: '集团合并' }).length).toBeGreaterThan(0);
     expect(within(ytdTable).getByRole('cell', { name: '325,644.00' })).toBeTruthy();
     expect(within(ytdTable).getByRole('cell', { name: '344,487.06' })).toBeTruthy();
-    expect(within(ytdTable).getByRole('cell', { name: '-18,843.06' })).toBeTruthy();
+    expect(within(ytdTable).getByRole('cell', { name: '(18,843.06)' })).toBeTruthy();
     expect(within(ytdTable).getAllByRole('cell', { name: '万元' }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
     cards = screen.getAllByRole('article');
@@ -568,10 +568,10 @@ describe('business result components', () => {
     expect(within(cards[0]).getByText('收入 · 集团合并')).toBeTruthy();
     expect(within(cards[0]).getByLabelText('收入 · 集团合并实际').textContent).toBe('325,644.00');
     expect(within(cards[0]).getByText('344,487.06')).toBeTruthy();
-    expect(within(cards[0]).getByText('-18,843.06')).toBeTruthy();
+    expect(within(cards[0]).getByText('(18,843.06)')).toBeTruthy();
     expect(within(cards[0]).getByText('94.53%')).toBeTruthy();
     expect(within(cards[1]).getByText('利润 · 集团合并')).toBeTruthy();
-    expect(within(cards[1]).getByText('-6,106.38')).toBeTruthy();
+    expect(within(cards[1]).getByText('(6,106.38)')).toBeTruthy();
     expect(cards[0].querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 1–8 月 · 万元 · 依据：计算 · 推断');
     expect(within(cards[0]).getByText('预算')).toBeTruthy();
     expect(within(cards[2]).getByText('收入 · 华东区域')).toBeTruthy();
@@ -583,7 +583,7 @@ describe('business result components', () => {
     expect(within(others).getByRole('cell', { name: '应收账款期末余额' })).toBeTruthy();
     expect(within(others).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
     expect(within(others).getByRole('cell', { name: '上年同期营业利润' })).toBeTruthy();
-    expect(within(others).getByRole('cell', { name: '-6.85%' })).toBeTruthy();
+    expect(within(others).getByRole('cell', { name: '(6.85%)' })).toBeTruthy();
     expect(within(others).getByRole('cell', { name: '61.68%' })).toBeTruthy();
     // pct is a percent by the unit table (KTD9), in 其他结果 as on a card.
     expect(within(others).getByRole('cell', { name: '3.30%' })).toBeTruthy();
@@ -593,7 +593,7 @@ describe('business result components', () => {
     for (const gone of ['币种', '指标键', '组织']) expect(otherHeaders).not.toContain(gone);
     expect(within(others).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['集团合并', '华东区域']);
     // A ratio or percent row's unit says %; its value is unchanged.
-    for (const value of ['61.68%', '3.30%', '-6.85%']) {
+    for (const value of ['61.68%', '3.30%', '(6.85%)']) {
       expect(within(within(others).getByRole('cell', { name: value }).closest('tr')!).getByRole('cell', { name: '%' }), value).toBeTruthy();
     }
     expect(within(within(others).getByRole('cell', { name: '41,400.00' }).closest('tr')!).getByRole('cell', { name: '万元' })).toBeTruthy();
@@ -674,21 +674,21 @@ describe('business result components', () => {
     it('keeps an approved budget as 预算 and shows the estimated one beside it', () => {
       render(<BusinessResultView run={longRun(withEstimate(), ['note'])} />);
       const card = screen.getByRole('article');
-      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
-      expect(within(card).getByText('110.00').previousSibling?.textContent).toBe('预算（估算）');
+      expect(within(card).getByText('100.00').closest('dd')?.previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText('110.00').closest('dd')?.previousSibling?.textContent).toBe('预算（估算）');
     });
 
     it('still pairs when an approved budget only mentions an estimate in its note, flagging it rather than dropping the table', () => {
       render(<BusinessResultView run={longRun(withEstimate('另列估算预算供参考'), ['note'])} />);
       const card = screen.getByRole('article');
-      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算（估算）');
+      expect(within(card).getByText('100.00').closest('dd')?.previousSibling?.textContent).toBe('预算（估算）');
       expect(within(card).getByText('110.00')).toBeTruthy();
     });
 
     it('does not call an approved budget an estimate when only the actual declares one', () => {
       render(<BusinessResultView run={longRun(pair({}, { note: '实际含估算调整' }), ['note'])} />);
       const card = screen.getByRole('article');
-      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText('100.00').closest('dd')?.previousSibling?.textContent).toBe('预算');
       expect(within(card).getByText(/依据：估算/)).toBeTruthy();
     });
 
@@ -703,7 +703,7 @@ describe('business result components', () => {
       const cards = screen.getAllByRole('article');
       expect(cards).toHaveLength(1);
       expect(within(cards[0]).getByText('利润 · 华东区域')).toBeTruthy();
-      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '-10.50' })).toBeTruthy();
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '(10.50)' })).toBeTruthy();
     });
 
     it('keeps the scenario when one label and key cover two rows, adds the key where only the key differs, and shows rows without a period on every tab', () => {
@@ -901,7 +901,7 @@ describe('business result components', () => {
     ])('keeps an approved budget as 预算 when %s', (_, budget, extra) => {
       render(<BusinessResultView run={longRun(pair(budget), extra)} />);
       const card = screen.getByRole('article');
-      expect(within(card).getByText('100.00').previousSibling?.textContent).toBe('预算');
+      expect(within(card).getByText('100.00').closest('dd')?.previousSibling?.textContent).toBe('预算');
       expect(within(card).getByText(/依据：计算/)).toBeTruthy();
     });
 
@@ -939,8 +939,8 @@ describe('business result components', () => {
       const expense = (scenario: string, value: string, metric_key = 'expense') => ({ metric_key, organization: '集团', period: '2026-08', scenario, value, unit: '万元' });
       render(<BusinessResultView run={longRun([expense('actual_ytd', '120'), expense('budget_ytd', '100'), expense('variance_favorable', '-20'), expense('variance_favorable', '-20', 'expense_variance')])} />);
       const card = screen.getByRole('article');
-      expect(within(card).queryByText('-20.00')).toBeNull();
-      expect(within(screen.getByRole('table', { name: '其他结果' })).getAllByRole('cell', { name: '-20.00' })).toHaveLength(2);
+      expect(within(card).queryByText('(20.00)')).toBeNull();
+      expect(within(screen.getByRole('table', { name: '其他结果' })).getAllByRole('cell', { name: '(20.00)' })).toHaveLength(2);
     });
 
     it('follows a Chinese 期间 column for the other results and the period tabs', () => {
@@ -1148,7 +1148,7 @@ describe('result rows by declaration, inference and unit', () => {
     expect(within(cards[0]).getByText('利润 · 华东区域')).toBeTruthy();
     const others = screen.getByRole('table', { name: '其他结果' });
     expect(within(others).getByRole('cell', { name: '0.945（未标单位）' })).toBeTruthy();
-    expect(screen.queryByText('0.95')).toBeNull();
+    expect(within(others).queryByText('0.95')).toBeNull();
   });
 
   // Huachen's long form (runs 84b65b7d / 269d9fd9) in miniature: a group pair and two regional pairs whose budgets
@@ -1204,7 +1204,7 @@ describe('result rows by declaration, inference and unit', () => {
     }
     const group = cardFor('收入 · 集团合并');
     expect(within(group).getByText('预算')).toBeTruthy();
-    expect(within(group).getByText('-18,843.06')).toBeTruthy();
+    expect(within(group).getByText('(18,843.06)')).toBeTruthy();
     expect(within(group).getByText('94.53%')).toBeTruthy();
     // A row in no pair stays in 其他结果.
     expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '应收账款期末余额' })).toBeTruthy();
@@ -1314,7 +1314,7 @@ describe('result rows by declaration, inference and unit', () => {
   it.each([['null', null], ['empty', '']])('reads the estimate as 预算（估算） when the declared approved budget beside it is %s', (_, budget) => {
     render(<BusinessResultView run={withEstimatedBudget(budget)} />);
     const card = screen.getByRole('article');
-    expect(within(card).getAllByText('800.00').map((node) => node.previousSibling?.textContent)).toEqual(['预算（估算）']);
+    expect(within(card).getAllByText('800.00').map((node) => node.closest('dd')?.previousSibling?.textContent)).toEqual(['预算（估算）']);
     expect(within(card).queryByText('预算')).toBeNull();
     // The table's one budget column holds the estimate its row reads against, 依据 估算, as an estimate-only comparison
     // always has; no 同期预算（估算） column beside it makes that figure read as an approved budget.
@@ -1326,8 +1326,8 @@ describe('result rows by declaration, inference and unit', () => {
   it('keeps a declared approved budget as 预算 and shows the estimated one beside it', () => {
     render(<BusinessResultView run={withEstimatedBudget('900.0000')} />);
     const card = screen.getByRole('article');
-    expect(within(card).getByText('900.00').previousSibling?.textContent).toBe('预算');
-    expect(within(card).getByText('800.00').previousSibling?.textContent).toBe('预算（估算）');
+    expect(within(card).getByText('900.00').closest('dd')?.previousSibling?.textContent).toBe('预算');
+    expect(within(card).getByText('800.00').closest('dd')?.previousSibling?.textContent).toBe('预算（估算）');
     expect(businessTable().row).toMatchObject({ 同期预算: '900.00', '同期预算（估算）': '800.00' });
   });
 

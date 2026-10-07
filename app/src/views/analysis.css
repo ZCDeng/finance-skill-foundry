@@ -59,6 +59,9 @@
 /* A group heading keeps components.css's look; here it only lines up with the cells' text. */
 .analysis-table th[scope='rowgroup'] { padding-left: 12px; padding-right: 12px; }
 .analysis-table td { white-space: nowrap; }
+/* Three weights per table: detail rows 400, 小计 600 (the header's weight), 合计/总计 700 with a rule above. */
+.analysis-table tr.analysis-row--subtotal > td { font-weight: var(--fnd-weight-strong); }
+.analysis-table tr.analysis-row--total > td { font-weight: var(--fnd-weight-heavy); border-top: 1px solid var(--fnd-line-hover); }
 .analysis-script-summary { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-script-summary > * { min-width: 0; }
 .analysis-script-summary > .fnd-tablewrap .analysis-table { width: 100%; table-layout: fixed; }
@@ -219,7 +222,7 @@
 @container analysis-result (max-width: 900px) { .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container analysis-result (max-width: 480px) { .analysis-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
 .analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; font-family: var(--fnd-font-prose); }
-.analysis-kpi-card span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.analysis-kpi-card > span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .analysis-kpi-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 20px; }
 .analysis-kpi-card strong { font-size: 20px; line-height: 28px; font-weight: var(--fnd-weight-strong); font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .analysis-kpi-meta > span { white-space: nowrap; }

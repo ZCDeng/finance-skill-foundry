@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/input.js';
 import { STATUS_LABELS, where, type ControlResult, type ControlSpec } from './controls.js';
 import { errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { groupDigits } from '../../lib/figures.js';
 
 export type ControlSource = { dataset_id: string; source_hash: string; name: string; sheets: string[] };
 type Place = { dataset_id: string; sheet: string; range: string; unit: string };
@@ -104,9 +105,9 @@ export function TieOutForm({ call, locked, refreshKey, onBusy, onSaved, onCancel
     {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
     {result ? <div className="analysis-tieout-result" role="status">
       <p><span className={`analysis-controls-status analysis-controls-status--${result.status}`}>{STATUS_LABELS[result.status]}</span></p>
-      {result.left ? <p>{where(result.left)} 合计 {result.left.value ?? '—'}</p> : null}
-      {result.right ? <p>{where(result.right)} 合计 {result.right.value ?? '—'}</p> : null}
-      {result.difference ? <p className="analysis-tieout-difference">差额 {result.difference}{preview?.control.unit ? ` ${preview.control.unit}` : ''}{result.within_rounding ? '（可能是显示舍入，仍算不相符）' : ''}</p> : null}
+      {result.left ? <p>{where(result.left)} 合计 {groupDigits(result.left.value)}</p> : null}
+      {result.right ? <p>{where(result.right)} 合计 {groupDigits(result.right.value)}</p> : null}
+      {result.difference ? <p className="analysis-tieout-difference">差额 {groupDigits(result.difference)}{preview?.control.unit ? ` ${preview.control.unit}` : ''}{result.within_rounding ? '（可能是显示舍入，仍算不相符）' : ''}</p> : null}
       {result.reason ? <p className="analysis-note">{result.reason}</p> : null}
     </div> : null}
     {result && !savable ? <p className="analysis-note">这两处读不出可比较的合计，改选单元格后再加总。</p> : null}

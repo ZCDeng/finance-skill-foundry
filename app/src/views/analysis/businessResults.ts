@@ -1,4 +1,5 @@
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun, PairMeasure, RowDeclaration, RowDeclarations } from '../../bridge.js';
+import { decimalToFixed, groupDigits } from '../../lib/figures.js';
 import { formatPeriod } from '../../lib/period.js';
 
 export type RunPresentationRole = 'business' | 'activity' | 'failure';
@@ -223,35 +224,25 @@ export function businessColumnLabel(name: string): string {
   return ownLabel(amountFieldLabels, key) ?? ownLabel(ratioFieldLabels, key) ?? ownLabel(ratioPctFieldLabels, key) ?? ownLabel(textFieldLabels, key) ?? name;
 }
 
-function decimalParts(value: unknown): { negative: boolean; digits: string; scale: number } | null {
-  if (value == null || value === '') return null;
-  const text = String(value).trim().replace(/,/g, '');
-  const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(text);
-  if (!match) return null;
-  const [, sign, integer, fraction = ''] = match;
-  const digits = `${integer}${fraction}`.replace(/^0+(?=\d)/, '') || '0';
-  return { negative: sign === '-', digits, scale: fraction.length };
-}
+/** Columns whose digits name something rather than count it: periods, dates, codes, row and sheet positions, versions, exact companions. */
+const notAQuantity = /(?:^|[_\s-])(?:period|year|month|date|time|code|id|no|row|index|sheet|cell|version|revision|hash|sha256|exact)(?:$|[_\s-])|期间|年度|^年$|月份|日期|时间|编码|编号|代码|序号|行号|单元格|版本|精确值/i;
 
-function decimalToFixed(value: unknown, places: number, multiplier = 1): string {
-  const parsed = decimalParts(value);
-  if (!parsed) return value == null || value === '' ? '—' : String(value);
-  const targetScale = places;
-  const current = BigInt(parsed.digits) * BigInt(multiplier);
-  const scaleDiff = parsed.scale - targetScale;
-  let rounded: bigint;
-  if (scaleDiff > 0) {
-    const divisor = 10n ** BigInt(scaleDiff);
-    rounded = current / divisor;
-    if (current % divisor >= divisor / 2n) rounded += 1n;
-  } else {
-    rounded = current * (10n ** BigInt(-scaleDiff));
-  }
-  const sign = parsed.negative && rounded !== 0n ? '-' : '';
-  const raw = rounded.toString().padStart(places + 1, '0');
-  const integer = places ? raw.slice(0, -places) : raw;
-  const fraction = places ? raw.slice(-places) : '';
-  return `${sign}${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${places ? `.${fraction}` : ''}`;
+/**
+ * An unformatted engine value as the raw tables show it (技术信息 and the other 原样 tables, decision 6B): ratios by
+ * their column's semantics and amounts at two places, like the business table. Any other number keeps every place it
+ * was written with, padded to its column's places (up to four) so the column lines up, and gains grouped thousands:
+ * a script's 0.0035 must not read 0.00. Codes, periods, positions and exact companions stay as written, as does anything
+ * that is not a plain decimal. Null when the value stays as it is.
+ */
+export function formatRawFigure(value: unknown, name: string, columnPlaces = 0): string | null {
+  if (typeof value !== 'number' && typeof value !== 'string' && typeof value !== 'bigint') return null;
+  const text = String(value).trim();
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(text) || notAQuantity.test(name)) return null;
+  const semantics = columnSemantics(name);
+  if (semantics === 'ratio' || semantics === 'ratio_pct' || semantics === 'ratio_delta') return formatBusinessValue(text, semantics);
+  if (semantics === 'amount') return decimalToFixed(text, 2);
+  const places = text.split('.')[1]?.length ?? 0;
+  return groupDigits(columnPlaces > places && columnPlaces <= 4 ? decimalToFixed(text, columnPlaces) : text);
 }
 
 export function formatBusinessValue(value: unknown, semantics: FieldSemantics): string {

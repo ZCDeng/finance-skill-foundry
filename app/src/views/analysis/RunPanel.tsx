@@ -14,6 +14,7 @@ import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { formatPeriod } from '../../lib/period.js';
+import { decimalToFixed, groupDigits } from '../../lib/figures.js';
 
 export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, question, versionPicker, versionNote, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
@@ -384,7 +385,9 @@ function formatVarianceRatio(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return `${textValue(value)} 倍`;
   if (Math.abs(numeric) > 1000) return `${textValue(value)} 倍`;
-  return `${(numeric * 100).toLocaleString('zh-CN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}%`;
+  // Two places like every other ratio on the page; the exact decimal, not the float, is what rounds.
+  const exact = decimalToFixed(String(value).trim(), 2, 100);
+  return exact === String(value).trim() ? `${(numeric * 100).toFixed(2)}%` : `${exact}%`;
 }
 
 function distinctFinanceValues(rows: Record<string, unknown>[], name: string): string[] {
@@ -538,7 +541,7 @@ function changePhrase(row: Record<string, unknown>, profit: boolean): string | n
   const amount = text.replace(/^[-+]/, '');
   if (!/^\d*\.?\d+$/.test(amount)) return null;
   const word = /^0*\.?0*$/.test(amount) ? '持平' : text.startsWith('-') ? '减少' : '增加';
-  return `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${word}${word === '持平' ? '' : ` ${amount}${unit ? ` ${unit}` : ''}`}`;
+  return `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${word}${word === '持平' ? '' : ` ${groupDigits(amount)}${unit ? ` ${unit}` : ''}`}`;
 }
 
 /** The row's unit, or the one both sides declare; null when the two sides disagree. */
