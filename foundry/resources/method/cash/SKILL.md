@@ -25,7 +25,7 @@ There is no payment, posting, or bank-send tool. Do not invent one.
 
 ## Collection health (collection_health)
 
-Formulas live in the engine; you only pick cells. Bind the month-close workbook's tables, then name each input as a cell (match on the label column, or source_row) or a ledger sum (sum_where, with the same require_columns on both sides of a rate). Use entity_tables to run every row of a city-company sheet. A bare number is a manual input and is marked so.
+Formulas live in the engine; you only pick cells. Bind the month-close workbook's tables, then name each input as a cell (match on the label column, or source_row) or a ledger sum (sum_where, with the same require_columns on both sides of a rate). Use entity_tables to run every row of a city-company sheet. A bare number is a manual input and is marked so. Set sensitivity to true on an entity to get the break-even grid; it needs an expense ratio.
 
 | Question | Metric | Formula |
 | --- | --- | --- |
@@ -43,12 +43,12 @@ Read the result this way:
 - The default collection rate is the current-year billing rate (本年账单收缴率); the rate including arrears (综合收缴率) sits beside it and reads higher.
 - Red, orange, yellow and green are screening hints, not conclusions. The risk radar never counts in the close.
 - Never state a full year as year to date × 12 ÷ months; that row is a comparison only. Use the at-pace figure or the manager's LE, and call it an estimate.
-- Industry benchmarks in the pack (13·行业对标) are side evidence only; do not compute or conclude from them.
+- Industry benchmarks in the pack (an industry-benchmark sheet such as 行业对标与假设) are side evidence only; do not compute or conclude from them.
 - Rows marked 估算 stay estimates in the draft.
 
 ## Formula checks in the close
 
-To make the pack check itself, save a control with `finance_controls_save` and `kind=formula`: signed_sum for the AR roll-forward (年初 + 新增 − 收回 − 核销 = 期末), dso to recompute the reported turnover days, implied_collection to compare the AR movement with the reported rate. They are saved as proposed; only the manager's confirmation counts them in the close.
+To make the pack check itself, save a control with `finance_controls_save`, `kind=formula`, a formula name, named input cells and the reported figure as the right side: formula signed_sum for the AR roll-forward (年初 + 新增 − 收回 − 核销 = 期末, each input with sign 1 or -1), dso to recompute the reported turnover days (tolerance in days), implied_collection to compare the AR movement with the reported rate (the rate as a decimal; scale 0.01 for a cell written in percent). They are saved as proposed; only the manager's confirmation counts them in the close.
 
 ## Standard output
 
