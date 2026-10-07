@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { ArrowLeft, Eye, FilePen, FileSpreadsheet, FileText, ExternalLink, Search } from 'lucide-react';
 
 import { Reader } from '../components/Reader.js';
@@ -35,7 +35,40 @@ const MODE_LABEL: Record<string, string> = { management: '管理版', audit: '�
 
 /** The 文稿 export menu's order (ReportEditor), so a row's chips read the way the menu does. */
 const FORMAT_ORDER: ExportFormat[] = ['docx', 'pdf', 'html', 'md', 'xlsx'];
-const MODE_ORDER: Array<AnalysisExportRow['content_mode']> = ['management', 'audit', null];
+/** Export rows in a revision's cell: 管理版, 审计版, then anything else (no mode, or one this build does not name). */
+type ModeRow = 'management' | 'audit' | 'other';
+const MODE_ORDER: ModeRow[] = ['management', 'audit', 'other'];
+const ROW_LABEL: Record<ModeRow, string> = { management: '管理版', audit: '审计版', other: '其他' };
+const modeRow = (mode: string | null): ModeRow => mode === 'management' || mode === 'audit' ? mode : 'other';
+
+/** `when` to the second, for two exports of one format filed in the same minute. */
+function whenToSecond(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return `${when(iso)}:${String(at.getSeconds()).padStart(2, '0')}`;
+}
+
+/**
+ * The visible tag that tells the exports of one format in one row apart. The newest keeps the bare format
+ * name; each older one adds its time, to the second when two share a minute, and its place (第 N 份,
+ * counted from the oldest) when two share a second too.
+ */
+function exportStamps(files: AnalysisExportRow[]): Map<string, string> {
+  const stamps = new Map<string, string>();
+  for (const format of FORMAT_ORDER) {
+    const same = files.filter((row) => row.format === format);
+    const older = same.slice(1);
+    const clash = (stamp: (iso: string) => string, row: AnalysisExportRow) =>
+      older.some((other) => other !== row && stamp(other.created_at) === stamp(row.created_at));
+    older.forEach((row, index) => {
+      const stamp = !clash(when, row) ? when(row.created_at)
+        : !clash(whenToSecond, row) ? whenToSecond(row.created_at)
+          : `第 ${same.length - 1 - index} 份`;
+      stamps.set(row.export_id, stamp);
+    });
+  }
+  return stamps;
+}
 
 /**
  * One 文稿 revision and every file exported from it. `state` is the revision's own review and publication
@@ -147,6 +180,8 @@ export function Deliverables({
   busy: string | null;
   onBack(): void;
 }) {
+  // Kept here, above the open version, so going back to the list finds the search as it was left.
+  const [query, setQuery] = useState('');
   if (open) {
     return (
       <div className="fnd-stack" style={{ gap: 20 }}>
@@ -247,33 +282,30 @@ export function Deliverables({
   }
 
   return (
-    <DeliverablesList rows={rows} onOpen={onOpen} onOpenDraft={onOpenDraft} onOpenExport={onOpenExport} />
+    <DeliverablesList rows={rows} query={query} onQuery={setQuery} onOpen={onOpen} onOpenDraft={onOpenDraft} onOpenExport={onOpenExport} />
   );
 }
 
-/** The newest export of a format keeps the bare name; an older one of the same format adds its time. */
-function exportName(exported: AnalysisExportRow, line: RevisionLine): { text: string; stamp: string } {
-  const sameFormat = line.exports.filter((row) => row.format === exported.format && row.content_mode === exported.content_mode);
-  const older = sameFormat.indexOf(exported) > 0;
-  return { text: FORMAT_LABEL[exported.format], stamp: older ? when(exported.created_at) : '' };
-}
-
 /**
- * The list, its own component so its search state and grouping are hooks of
- * their own: Deliverables returns early while a version is open.
+ * The list, its own component so its grouping is a hook of its own: Deliverables
+ * returns early while a version is open. The search text is Deliverables', so it
+ * outlives a visit to one version.
  */
 function DeliverablesList({
   rows,
+  query,
+  onQuery,
   onOpen,
   onOpenDraft,
   onOpenExport,
 }: {
   rows: GalleryRow[];
+  query: string;
+  onQuery(query: string): void;
   onOpen(task: TaskRow, row: DeliverableRow): void;
   onOpenDraft?(task: TaskRow, draft: AnalysisDraftRow): void;
   onOpenExport?(task: TaskRow, exported: AnalysisExportRow): void;
 }) {
-  const [query, setQuery] = useState('');
   const groups = useMemo(() => groupByTask(rows), [rows]);
   const needle = query.trim();
   const shown = needle
@@ -297,7 +329,7 @@ function DeliverablesList({
         <label className="fnd-library__search">
           <Search size={14} strokeWidth={1.5} aria-hidden />
           <Input type="search" aria-label="按任务名搜索" placeholder="按任务名搜索" value={query}
-            onChange={(event) => setQuery(event.target.value)} />
+            onChange={(event) => onQuery(event.target.value)} />
         </label>
       </div>
       {/* Present from the start so a change is announced, not inserted with its words. */}
@@ -332,15 +364,14 @@ function DeliverablesList({
                   <tr key={line.key} className="fnd-table__open">
                     <td>
                       {/*
-                        * The button carries the whole row's name, so a pointer has
-                        * the row to aim at and a screen reader is told which version
-                        * it is about to open rather than hearing "打开" seven times.
+                        * The button's name starts with what it shows and carries the
+                        * task, so a screen reader is told which version it is about
+                        * to open rather than hearing "打开" seven times.
                         */}
                       <button
                         type="button"
                         className="fnd-linkish"
                         onClick={() => onOpen(task, line.row)}
-                        aria-label={`打开 ${task.title} 的${KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版`}
                       >
                         {isWorkbook(line.row) ? (
                           <FileSpreadsheet size={13} strokeWidth={1.5} aria-hidden />
@@ -348,6 +379,7 @@ function DeliverablesList({
                           <FileText size={13} strokeWidth={1.5} aria-hidden />
                         )}
                         {`${isWorkbook(line.row) ? '表格' : KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版`}
+                        <span className="sr-only">{`（打开 ${task.title} 的${KIND_LABEL[line.row.kind]} 第 ${line.row.seq} 版）`}</span>
                       </button>
                       <span className="fnd-muted"><span aria-hidden> · </span><span>{line.row.cause}</span></span>
                     </td>
@@ -366,7 +398,11 @@ function DeliverablesList({
   );
 }
 
-/** One 文稿 revision: its source draft, its state once, and its exports as chips by version kind. */
+/**
+ * One 文稿 revision: its source draft, its state once, and its exports as chips by version kind. Every
+ * button's name starts with what it shows; the task, the revision and the file's own time follow for a
+ * screen reader only.
+ */
 function RevisionRow({ task, line, onOpenDraft, onOpenExport }: {
   task: TaskRow;
   line: RevisionLine;
@@ -380,12 +416,12 @@ function RevisionRow({ task, line, onOpenDraft, onOpenExport }: {
     .map((mode) => ({
       mode,
       files: line.exports
-        .filter((row) => row.content_mode === mode)
+        .filter((row) => modeRow(row.content_mode) === mode)
         .sort((a, b) => FORMAT_ORDER.indexOf(a.format) - FORMAT_ORDER.indexOf(b.format)),
     }))
     .filter(({ files }) => files.length);
   return (
-    <tr className="fnd-table__open">
+    <tr>
       <td>
         {draft ? (
           <button
@@ -393,38 +429,51 @@ function RevisionRow({ task, line, onOpenDraft, onOpenExport }: {
             className="fnd-linkish"
             onClick={() => onOpenDraft?.(task, draft)}
             disabled={!onOpenDraft}
-            aria-label={`打开 ${task.title} 的文稿 修订 ${line.revision}`}
           >
             <FilePen size={13} strokeWidth={1.5} aria-hidden />
             {name}
+            <span className="sr-only">{`（${task.title} 的文稿 修订 ${line.revision}，${when(draft.created_at)}）`}</span>
           </button>
         ) : name}
       </td>
       <td className="fnd-library__state">{draftStateText(line.state)}</td>
       <td>
-        {byMode.length ? byMode.map(({ mode, files }) => (
-          <div key={mode ?? 'none'} className="fnd-library__exports">
-            {mode ? <span className="fnd-library__mode">{MODE_LABEL[mode] ?? mode}</span> : null}
-            {files.map((exported) => {
-              const { text, stamp } = exportName(exported, line);
-              const detail = [`修订 ${exported.revision}`, mode ? MODE_LABEL[mode] ?? mode : '', stamp].filter(Boolean).join(' · ');
-              const flagged = exported.review_marker ? `，文件带「${exported.review_marker}」标记` : '';
+        {byMode.length ? (
+          <div className="fnd-library__exports">
+            {byMode.map(({ mode, files }) => {
+              const stamps = exportStamps(files);
               return (
-                <Button
-                  key={exported.export_id}
-                  variant="outline"
-                  size="chip"
-                  type="button"
-                  onClick={() => onOpenExport?.(task, exported)}
-                  disabled={!onOpenExport}
-                  aria-label={`用默认程序打开 ${task.title} 的${text} 导出件（${detail}）${flagged}`}
-                >
-                  {stamp ? `${text} · ${stamp}` : text}
-                </Button>
+                <Fragment key={mode}>
+                  <span className="fnd-library__mode">{ROW_LABEL[mode]}</span>
+                  <div className="fnd-library__chips">
+                    {files.map((exported) => {
+                      const label = FORMAT_LABEL[exported.format];
+                      const stamp = stamps.get(exported.export_id);
+                      const kind = exported.content_mode ? MODE_LABEL[exported.content_mode] ?? exported.content_mode : '';
+                      const detail = [`修订 ${exported.revision}`, kind, when(exported.created_at)].filter(Boolean).join(' · ');
+                      const flagged = exported.review_marker ? `，文件带「${exported.review_marker}」标记` : '';
+                      return (
+                        <Button
+                          key={exported.export_id}
+                          variant="outline"
+                          size="chip"
+                          type="button"
+                          onClick={() => onOpenExport?.(task, exported)}
+                          disabled={!onOpenExport}
+                        >
+                          {stamp ? `${label} · ${stamp}` : label}
+                          {/* The space is its own text node: a name trims the edges of each element's text. */}
+                          {' '}
+                          <span className="sr-only">{`导出件（${detail}），${task.title}，用默认程序打开${flagged}`}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </Fragment>
               );
             })}
           </div>
-        )) : '—'}
+        ) : '—'}
         {marker ? <p className="fnd-library__marker">导出件带「{marker}」标记</p> : null}
       </td>
       <td className="fnd-library__when">{when(line.at)}</td>

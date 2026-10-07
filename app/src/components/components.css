@@ -438,6 +438,11 @@ textarea.fnd-field {
   color: var(--fnd-muted);
 }
 
+/* A search field clears like any field; the platform's blue clear mark is not one of our colours. */
+.fnd-field[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
 .fnd-field:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
   border-color: var(--fnd-line-hover);
 }
@@ -957,9 +962,11 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 .fnd-library__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 .fnd-library__title { margin: 0; font-size: 20px; line-height: 28px; }
 .fnd-library__search { display: flex; align-items: center; gap: 8px; width: min(100%, 320px); color: var(--fnd-muted); }
-.fnd-library__exports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.fnd-library__exports + .fnd-library__exports { margin-top: 6px; }
-.fnd-library__mode { min-width: 3.5em; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
+/* One row per version kind: its label in the first column, its chips in the second, wrapping under each other
+   rather than under the label. The minimum keeps a row of the five formats on one line. */
+.fnd-library__exports { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 6px 8px; min-width: 360px; }
+.fnd-library__mode { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 28px; white-space: nowrap; }
+.fnd-library__chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .fnd-library__marker { margin: 6px 0 0; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
 .fnd-library__state, .fnd-library__when { white-space: nowrap; }
 
@@ -975,8 +982,9 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 .fnd-guide-hub__head { display: flex; align-items: center; justify-content: space-between; }
 .fnd-guide-hub__head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__search { display: flex; align-items: center; gap: 8px; color: var(--fnd-muted); }
-/* The one scroll area of the column: search hits, then the article. */
-.fnd-guide-hub__body { min-height: 0; overflow: auto; display: grid; gap: 16px; align-content: start; padding-bottom: 16px; }
+/* The one scroll area of the column: search hits, then the article. It reaches 8px into the column's padding,
+   so the scrollbar sits there rather than over the text. */
+.fnd-guide-hub__body { min-height: 0; overflow: auto; display: grid; gap: 16px; align-content: start; padding-bottom: 16px; margin-right: -8px; padding-right: 8px; }
 .fnd-guide-hub__results ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .fnd-guide-hub__hit { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
 .fnd-guide-hub__hit[aria-current='page'] { background: var(--fnd-surface-strong); color: var(--fnd-selected); }

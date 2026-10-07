@@ -17,6 +17,8 @@ import type {
   TaskRow,
 } from '../src/bridge.js';
 import { Deliverables } from '../src/views/Deliverables.js';
+import { EXPORT_MENU_FORMATS } from '../src/views/analysis/ReportEditor.js';
+import { when } from '../src/bridge.js';
 
 /*
  * 成果库 as one list (R10, KTD11): the old flow's versions, the newest draft of
@@ -82,7 +84,7 @@ describe('the 成果库 list', () => {
     // The review stamp the file carries stays visible in the row and in the button's name.
     const pdf = screen.getByRole('button', { name: /PDF 导出件/ });
     expect(pdf.closest('tr')!.textContent).toContain('导出件带「分析草稿·待复核」标记');
-    expect(pdf.getAttribute('aria-label')).toContain('分析草稿·待复核');
+    expect(pdf.textContent).toContain('分析草稿·待复核');
   });
 
   it('gives every row its own key even when a draft and an old version share a seq', () => {
@@ -135,7 +137,7 @@ describe('the 成果库 list', () => {
     const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
     expect(within(row).getByText('管理版')).toBeTruthy();
     expect(within(row).getByText('审计版')).toBeTruthy();
-    const audit = within(row).getByRole('button', { name: /PDF 导出件（修订 2 · 审计版）/ });
+    const audit = within(row).getByRole('button', { name: /^PDF 导出件（修订 2 · 审计版 · / });
     expect(audit.getAttribute('data-size')).toBe('chip');
     expect(audit.hasAttribute('aria-pressed')).toBe(false);
     fireEvent.click(audit);
@@ -194,7 +196,7 @@ describe('the 成果库 list', () => {
   it('writes 最近更新 as plain text, and keeps the table a focusable region', () => {
     render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     const header = screen.getAllByRole('columnheader').map((cell) => cell.textContent);
-    for (const row of document.querySelectorAll('tbody tr.fnd-table__open')) {
+    for (const row of [...document.querySelectorAll('tbody tr')].filter((tr) => !tr.querySelector("th[scope='rowgroup']"))) {
       const cell = within(row as HTMLElement).getAllByRole('cell')[header.indexOf('最近更新')];
       expect(cell.textContent).not.toBe('');
       expect(within(cell).queryByRole('button')).toBeNull();
@@ -204,7 +206,7 @@ describe('the 成果库 list', () => {
     expect(region.classList.contains('fnd-tablewrap')).toBe(true);
   });
 
-  it('tells two exports of one format apart by time', () => {
+  it('tells two exports of one format apart by time, leaving the newest bare', () => {
     const EARLIER = '2026-09-26T03:00:00Z';
     const older: AnalysisExportRow = { ...htmlOfV2, export_id: '8'.repeat(32), sha256: '8'.repeat(64), created_at: EARLIER };
     const rows: GalleryRow[] = [
@@ -213,11 +215,67 @@ describe('the 成果库 list', () => {
       { type: 'export', key: `export:${older.export_id}`, at: EARLIER, task: A, exported: older },
     ];
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
-    const chips = screen.getAllByRole('button', { name: /HTML 导出件/ });
+    const chips = screen.getAllByRole('button', { name: /^HTML/ });
     expect(chips).toHaveLength(2);
-    const names = chips.map((chip) => chip.getAttribute('aria-label'));
-    expect(new Set(names).size).toBe(2);
-    expect(chips[1].textContent).not.toBe(chips[0].textContent);
+    expect(chips[0].firstChild!.textContent).toBe('HTML');
+    expect(chips[1].firstChild!.textContent).toBe(`HTML · ${when(EARLIER)}`);
+    expect(new Set(chips.map((chip) => chip.textContent)).size).toBe(2);
+  });
+
+  it('adds seconds, then a count, when exports of one format share a minute', () => {
+    const at = (time: string) => `2026-09-26T03:00:${time}Z`;
+    const copy = (n: string, created_at: string): AnalysisExportRow => ({ ...htmlOfV2, export_id: n.repeat(32), sha256: n.repeat(64), created_at });
+    const files = [copy('1', at('50')), copy('2', at('30')), copy('3', at('10'))];
+    const rows: GalleryRow[] = files.map((exported) => ({ type: 'export', key: `export:${exported.export_id}`, at: exported.created_at, task: A, exported }));
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    const shown = screen.getAllByRole('button', { name: /^HTML/ }).map((chip) => chip.firstChild!.textContent);
+    expect(shown).toEqual(['HTML', `HTML · ${when(at('30'))}:30`, `HTML · ${when(at('10'))}:10`]);
+    cleanup();
+    const twins = [copy('1', at('50')), copy('2', at('10')), copy('3', at('10'))];
+    render(<Deliverables rows={twins.map((exported) => ({ type: 'export', key: `export:${exported.export_id}`, at: exported.created_at, task: A, exported }))} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    const counted = screen.getAllByRole('button', { name: /^HTML/ }).map((chip) => chip.firstChild!.textContent);
+    expect(counted).toEqual(['HTML', 'HTML · 第 2 份', 'HTML · 第 1 份']);
+  });
+
+  it('starts every button\'s name with what it shows and carries the file\'s own time', () => {
+    render(<Deliverables rows={ROWS} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    const draft = screen.getByRole('button', { name: /文稿 修订 2/ });
+    expect(draft.getAttribute('aria-label')).toBeNull();
+    expect(draft.textContent!.startsWith('八月利润说明 · 修订 2')).toBe(true);
+    expect(draft.textContent).toContain(when(v2.created_at));
+    const pdf = screen.getByRole('button', { name: /PDF 导出件/ });
+    expect(pdf.getAttribute('aria-label')).toBeNull();
+    expect(pdf.textContent!.startsWith('PDF')).toBe(true);
+    expect(pdf.textContent).toContain(when(pdfOfV1.created_at));
+    const old = screen.getByRole('button', { name: /结论稿/ });
+    expect(old.getAttribute('aria-label')).toBeNull();
+    expect(old.textContent!.startsWith('结论稿 第 2 版')).toBe(true);
+    expect(old.textContent).toContain(`打开 ${A.title} 的结论稿 第 2 版`);
+  });
+
+  it('puts an export with no named version kind in an 其他 row, and leaves revision rows without a hover fill', () => {
+    const plain: AnalysisExportRow = { ...htmlOfV2, export_id: '5'.repeat(32), sha256: '5'.repeat(64), content_mode: null };
+    const odd = { ...htmlOfV2, export_id: '6'.repeat(32), sha256: '6'.repeat(64), format: 'pdf', content_mode: 'board' } as unknown as AnalysisExportRow;
+    const rows: GalleryRow[] = [
+      { type: 'export', key: `export:${plain.export_id}`, at: SECOND, task: A, exported: plain },
+      { type: 'export', key: `export:${odd.export_id}`, at: SECOND, task: A, exported: odd },
+      { type: 'draft', key: `draft:${v2.draft_id}`, at: SECOND, task: A, draft: v2 },
+    ];
+    render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
+    const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
+    expect(within(row).getAllByText('其他')).toHaveLength(1);
+    expect([...row.querySelectorAll('.fnd-library__chips')].map((chips) => chips.children.length)).toEqual([2]);
+    expect(row.classList.contains('fnd-table__open')).toBe(false);
+  });
+
+  it('keeps the search when a version is opened and closed again', () => {
+    const props = { rows: ROWS, ...LIST, onOpen: () => {}, onExport: () => {} };
+    const { rerender } = render(<Deliverables {...props} />);
+    fireEvent.change(screen.getByRole('searchbox', { name: '按任务名搜索' }), { target: { value: '八月' } });
+    rerender(<Deliverables {...props} open={{ task: A, row: brief, text: '# 本期结论稿' }} />);
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    rerender(<Deliverables {...props} />);
+    expect((screen.getByRole('searchbox', { name: '按任务名搜索' }) as HTMLInputElement).value).toBe('八月');
   });
 
   it('goes back to 成果库 by name and shows the opened version\'s period in words', () => {
@@ -238,7 +296,8 @@ describe('the 成果库 list', () => {
     render(<Deliverables rows={rows} {...LIST} onOpen={() => {}} onExport={() => {}} />);
     const row = screen.getByRole('button', { name: /文稿 修订 2/ }).closest('tr')!;
     const chips = within(row).getAllByRole('button').filter((button) => button.getAttribute('data-size') === 'chip');
-    expect(chips.map((chip) => chip.textContent)).toEqual(['Word', 'PDF', 'HTML', 'Markdown', 'Excel']);
+    const label = { docx: 'Word', pdf: 'PDF', html: 'HTML', md: 'Markdown', xlsx: 'Excel' };
+    expect(chips.map((chip) => chip.firstChild!.textContent)).toEqual(EXPORT_MENU_FORMATS.map((format) => label[format]));
   });
 
   it('opens a draft, an export and an old version each its own way', () => {

@@ -51,6 +51,8 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
   const [query, setQuery] = useState('');
+  // What the drop-down just put up, said through the status line since focus stays on the drop-down.
+  const [shown, setShown] = useState('');
   const [current, setCurrent] = useState(() => GUIDE_ARTICLES.find((row) => row.id === requested)?.id ?? GUIDE_ARTICLES[0].id);
   const heading = useRef<HTMLHeadingElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -61,7 +63,12 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   const article = GUIDE_ARTICLES.find((row) => row.id === current) ?? GUIDE_ARTICLES[0];
   const pick = (id: string) => { setCurrent(id); requestAnimationFrame(() => heading.current?.focus()); };
   // Focus stays on the drop-down, so arrow keys can keep changing it (Windows changes the value per key press).
-  const choose = (id: string) => { setCurrent(id); if (body.current) body.current.scrollTop = 0; };
+  // Escape while the platform's own list is open is meant to close only the list; not yet checked on a machine.
+  const choose = (id: string) => {
+    setCurrent(id);
+    setShown(`已显示「${GUIDE_ARTICLES.find((row) => row.id === id)?.title ?? ''}」`);
+    if (body.current) body.current.scrollTop = 0;
+  };
   return (
     <div className="fnd-guide-hub" role="region" aria-label="使用指南"
       onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }}>
@@ -79,11 +86,11 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
       </NativeSelect>
       <label className="fnd-guide-hub__search">
         <Search size={14} strokeWidth={1.5} aria-hidden />
-        <Input aria-label="搜索使用指南" placeholder="搜索，例如：收缴率、期间、损坏 Excel、未阅" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Input aria-label="搜索使用指南" placeholder="搜索，例如：收缴率、期间、损坏 Excel、未阅" value={query} onChange={(event) => { setQuery(event.target.value); setShown(''); }} />
       </label>
       <div className="fnd-guide-hub__body" ref={body}>
         {/* Present from the start so a change is announced, not inserted with its words. */}
-        <span className="sr-only" role="status">{query.trim() ? found.length ? `找到 ${found.length} 篇` : `没有找到「${query.trim()}」相关的说明。` : ''}</span>
+        <span className="sr-only" role="status">{query.trim() ? found.length ? `找到 ${found.length} 篇` : `没有找到「${query.trim()}」相关的说明。` : shown}</span>
         {query.trim() ? <nav aria-label="搜索结果" className="fnd-guide-hub__results">
           {found.length ? <ul>{found.map((row) => <GuideHit key={row.id} row={row} current={current} onPick={pick} />)}</ul>
             : <p className="analysis-note">没有找到「{query.trim()}」相关的说明。</p>}

@@ -101,6 +101,7 @@ it('changes the article from the drop-down and leaves focus on it', () => {
   fireEvent.change(contents, { target: { value: 'export' } });
   expect(screen.getByRole('heading', { level: 3, name: '文稿与导出' })).toBeTruthy();
   expect(document.activeElement).toBe(contents);
+  expect(screen.getByRole('status').textContent).toBe('已显示「文稿与导出」');
 });
 
 it('lists search hits above the article and moves to the one picked', async () => {
