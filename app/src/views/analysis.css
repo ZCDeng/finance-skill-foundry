@@ -329,10 +329,11 @@
 .analysis-close-block li { overflow-wrap: anywhere; }
 .analysis-close-block .analysis-note { margin: 0; overflow-wrap: anywhere; }
 .analysis-close-block-action { margin-top: auto; align-self: flex-start; }
-.analysis-close-settled { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-body); }
-.analysis-close-settled svg { flex: none; }
-/* 去处理 on the 控制 card focuses this wrapper; its focus frame follows the card it holds. */
-.analysis-close-controls { border-radius: var(--fnd-radius-container); }
+/* The icon keeps to the first line and the words wrap beside it, not under it. */
+.analysis-close-settled { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-body); }
+.analysis-close-settled svg { flex: none; height: 1lh; }
+.analysis-close-settled > span { min-width: 0; overflow-wrap: anywhere; }
+.analysis-close-settled-detail { font-size: var(--fnd-size-small); }
 .analysis-scope-candidate-source { margin: 0 12px 0 6px; }
 
 /* Workbook formula health hints (公式体检, 2026-10-04). Hints never block: a
@@ -356,9 +357,9 @@
 .analysis-formula-health-view { display: grid; gap: 8px; }
 .analysis-formula-health-close { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
-/* 问题类型 on a difference, and the 套表可用结论 under the month-close headline (2026-10-04).
-   The conclusion's level is in its words and icon; 不可用 takes the warning tokens and 无法判断
-   the muted ink. Gold stays for location and focus. */
+/* 问题类型 on a difference, and the 套表可用结论 below the month-close step cards (2026-10-04).
+   The conclusion's level is in its words and icon; under 不可用 the level word and icon take the
+   warning ink and under 无法判断 the muted ink, the label stays in ink. Gold stays for location and focus. */
 .analysis-controls-finding { display: grid; gap: 8px; }
 .analysis-controls-finding-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .analysis-controls-finding-suggestion .analysis-note { margin: 0; }
@@ -370,10 +371,10 @@
 .analysis-close-conclusion .analysis-note { margin: 0; }
 .analysis-close-conclusion-reasons, .analysis-close-conclusion-books { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
 .analysis-close-conclusion-books { padding-left: 0; list-style: none; }
-.analysis-close-conclusion--not_usable .analysis-close-conclusion-head { color: var(--fnd-warning); }
-.analysis-close-conclusion--not_assessable .analysis-close-conclusion-head { color: var(--fnd-muted); }
-.analysis-close-conclusion-book--not_usable > span { color: var(--fnd-warning); }
-.analysis-close-conclusion-book--not_assessable > span { color: var(--fnd-muted); }
+.analysis-close-conclusion--not_usable :is(.analysis-close-conclusion-head svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
+.analysis-close-conclusion-book--not_usable .analysis-close-conclusion-level { color: var(--fnd-warning); }
+.analysis-close-conclusion--not_assessable :is(.analysis-close-conclusion-head svg, .analysis-close-conclusion-head .analysis-close-conclusion-level),
+.analysis-close-conclusion-book--not_assessable .analysis-close-conclusion-level { color: var(--fnd-muted); }
 
 /* Evidence labels, 证据等级 and dataset freshness (2026-10-04). Problem labels and stale or
    mismatched files use the warning tokens with an icon and words; gold is never used here. */

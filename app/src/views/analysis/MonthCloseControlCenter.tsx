@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, CircleDashed, CircleHelp, CircleSlash, RefreshCw } from 'lucide-react';
+import { CircleAlert, CircleCheck, CircleDashed, CircleSlash, RefreshCw } from 'lucide-react';
 import { bridge, type Answer } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { ControlsPanel } from './ControlsPanel.js';
@@ -28,7 +28,7 @@ export type CloseStatus = {
 
 const STATE_WORDS: Record<BlockState, string> = { done: '已就绪', blocked: '待处理', attention: '请留意', not_started: '尚未开始' };
 const STATE_ICONS = { done: CircleCheck, blocked: CircleSlash, attention: CircleAlert, not_started: CircleDashed } as const;
-const CONCLUSION_ICONS = { usable: CircleCheck, usable_with_caveats: CircleAlert, not_usable: CircleSlash, not_assessable: CircleHelp } as const;
+const CONCLUSION_ICONS = { usable: CircleCheck, usable_with_caveats: CircleAlert, not_usable: CircleSlash, not_assessable: CircleDashed } as const;
 
 /**
  * 月结控制中心: whether this month can go to the manager for sign-off, and what is in the way.
@@ -40,8 +40,9 @@ const CONCLUSION_ICONS = { usable: CircleCheck, usable_with_caveats: CircleAlert
  *
  * The headline number is the length of `status.blocking`, which is exactly the rows listed in
  * the open (待处理) cards, so a manager can count it there. Only 待处理 and 请留意 blocks open
- * as cards; the settled ones fold into one 已就绪 line and one 尚未开始 line, their details
- * kept in a tooltip and for screen readers.
+ * as cards; the settled ones fold into one 已就绪 line and one 尚未开始 line. The page reads
+ * top down as headline, 下一步, the open cards, those two lines, then the 套表可用结论, so the
+ * conclusion's reasons never sit beside the number they are not counted in.
  */
 export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   taskId: string; refreshKey?: unknown; busy?: boolean; onOpen(target: CloseTarget): void;
@@ -74,7 +75,7 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
     // Only the pane that scrolls moves: the app frame around it clips, but would still scroll.
     // (`container` is in Chromium since 140; the DOM typings do not list it yet.)
     controlsRef.current?.scrollIntoView?.({ block: 'start', container: 'nearest' } as ScrollIntoViewOptions);
-    controlsRef.current?.focus({ preventScroll: true });
+    controlsRef.current?.querySelector<HTMLElement>('#analysis-controls-heading')?.focus({ preventScroll: true });
   };
   const blocks = status?.blocks.map((block, index) => ({ block, number: index + 1 })) ?? [];
   const holding = status && ['not_ready', 'needs_review'].includes(status.headline.state);
@@ -95,7 +96,6 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>
-      {status?.conclusion ? <Conclusion conclusion={status.conclusion} /> : null}
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {status && !['ready_for_review', 'archived'].includes(status.headline.state) && status.blocking.length
         ? <p className="analysis-note">下一步：{status.blocking[0]}</p> : null}
@@ -105,20 +105,26 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
       </ol> : null}
       <SettledLine words="已就绪" Icon={CircleCheck} blocks={blocks.filter(({ block }) => block.state === 'done').map(({ block }) => block)} />
       <SettledLine words="尚未开始" Icon={CircleDashed} blocks={blocks.filter(({ block }) => block.state === 'not_started').map(({ block }) => block)} />
-      <div id="month-close-controls" className="analysis-close-controls" ref={controlsRef} tabIndex={-1}>
+      {status?.conclusion ? <Conclusion conclusion={status.conclusion} /> : null}
+      <div id="month-close-controls" ref={controlsRef}>
         <ControlsPanel taskId={taskId} refreshKey={`${String(refreshKey)}:${controlsVersion}`} busy={busy} onChanged={() => setControlsVersion((value) => value + 1)} />
       </div>
     </div>
   );
 }
 
-/** An item's words; a hint (a file's digest) rides in the tooltip and is read out, never shown. */
+/** An item's words; a hint (a file's digest) rides only in the tooltip: a hash read aloud tells nobody anything. */
 function ItemText({ item }: { item: CloseItem }) {
-  if (!item.hint) return <>{item.text}</>;
-  return <><span title={item.hint}>{item.text}</span><span className="sr-only">（{item.hint}）</span></>;
+  return item.hint ? <span title={item.hint}>{item.text}</span> : <>{item.text}</>;
 }
 
-const itemLine = (item: CloseItem) => [item.text, item.hint].filter(Boolean).join(' · ');
+/**
+ * What a settled block says in plain view. 范围 shows what was confirmed and 复核 its line about
+ * the manager, so 已就绪 is never read as signed off; a note on replaced files stays in view too.
+ * File rows and the other blocks' one-line summaries are left to the tooltip and screen readers.
+ */
+const inView = (block: CloseBlock, item: CloseItem) =>
+  block.key === 'scope' || block.key === 'review' || (block.key === 'source' && item.target !== 'datasets');
 
 /**
  * A 待处理 or 请留意 card. A 待处理 card lists only the rows that hold the close, the ones the
@@ -143,26 +149,30 @@ function OpenBlock({ block, number, onOpen }: { block: CloseBlock; number: numbe
   </li>;
 }
 
-/** 已就绪：来源、异常 — the settled blocks in one line; each name carries its details for pointer and screen reader. */
+/** 已就绪：范围（…）、来源、异常 — the settled blocks in one line, each name with its details. */
 function SettledLine({ words, Icon, blocks }: { words: string; Icon: typeof CircleCheck; blocks: CloseBlock[] }) {
   if (!blocks.length) return null;
   return <p className="analysis-close-settled">
     <Icon size={16} strokeWidth={1.5} aria-hidden />
     <span>{words}：{blocks.map((block, index) => {
-      const lines = block.items.map(itemLine);
-      return <span key={block.key}>{index ? '、' : ''}<span title={lines.join('\n') || undefined}>{block.label}</span>
-        {lines.length ? <span className="sr-only">（{lines.join('；')}）</span> : null}</span>;
+      const shown = block.items.filter((item) => inView(block, item));
+      const tucked = block.items.filter((item) => !inView(block, item));
+      const title = tucked.map((item) => [item.text, item.hint].filter(Boolean).join(' · ')).join('\n');
+      return <span key={block.key}>{index ? '、' : ''}<span title={title || undefined}>{block.label}</span>
+        {shown.length ? <span className="analysis-close-settled-detail">（{shown.map((item) => item.text).join('；')}）</span> : null}
+        {tucked.length ? <span className="sr-only">（{tucked.map((item) => item.text).join('；')}）</span> : null}</span>;
     })}</span>
   </p>;
 }
 
 /**
- * 套表可用结论 under the headline, never in place of it: the headline says where the close stands,
- * this says whether the books as they stand can be used. Words and an icon carry the level;
- * 不可用 takes the warning colour and 无法判断 the muted one, never the gold of location.
+ * 套表可用结论 below the step cards, never in place of the headline: the headline says where the
+ * close stands, this says whether the books as they stand can be used. Words and an icon carry
+ * the level; under 不可用 the level word and icon take the warning colour and under 无法判断 the
+ * muted one, while the label stays in ink. Never the gold of location.
  */
 function Conclusion({ conclusion }: { conclusion: CloseConclusion }) {
-  const Icon = CONCLUSION_ICONS[conclusion.level] ?? CircleHelp;
+  const Icon = CONCLUSION_ICONS[conclusion.level] ?? CircleDashed;
   const reasons = conclusion.reasons ?? [];
   const workbooks = conclusion.workbooks ?? [];
   const basis = conclusion.basis;
@@ -171,7 +181,7 @@ function Conclusion({ conclusion }: { conclusion: CloseConclusion }) {
   return <section className={`analysis-close-conclusion analysis-close-conclusion--${conclusion.level}`} aria-label="套表可用结论">
     <div className="analysis-close-conclusion-head">
       <Icon size={16} strokeWidth={1.5} aria-hidden />
-      <h4>套表可用结论：{conclusion.text}</h4>
+      <h4>套表可用结论：<span className="analysis-close-conclusion-level">{conclusion.text}</span></h4>
     </div>
     <p className="analysis-note">结论只根据你确认过的控制和处置得出；助手的类型建议不改变结论。</p>
     {basis && Object.values(basis).some((count) => count > 0) ? <p className="analysis-note">依据：你确认的 {basis.confirmed} 条控制，相符 {basis.passed} 条，已接受差异 {basis.waived} 条，仍挡住月结 {basis.open} 条。</p> : null}
@@ -186,7 +196,7 @@ function Conclusion({ conclusion }: { conclusion: CloseConclusion }) {
       <DisclosureSummary>按工作簿看</DisclosureSummary>
       <ul className="analysis-close-conclusion-books">
         {workbooks.map((book) => <li key={book.dataset_id} className={`analysis-close-conclusion-book--${book.level}`}>
-          <span><strong>{book.name}</strong>：{book.text}</span>
+          <span><strong>{book.name}</strong>：<span className="analysis-close-conclusion-level">{book.text}</span></span>
           {book.reasons?.length ? <ul className="analysis-close-conclusion-reasons">{book.reasons.map((reason, index) => <li key={index}>{reason.text}</li>)}</ul> : null}
         </li>)}
       </ul>
