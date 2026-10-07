@@ -351,9 +351,10 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('返回后还要继续写的判断。');
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.92');
-    // The picker names the version; the question it answers is the result heading below it.
+    // The picker names the version; the task's question is the result heading, the version's own words go to 技术信息.
     expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 1 版（共 2 版）');
-    expect(screen.getByRole('heading', { name: '华东利润分析' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: task.title, level: 3 })).toBeTruthy();
+    expect([...document.querySelectorAll('.analysis-result .analysis-technical-list')].map((item) => item.textContent).join(' ')).toContain('运行描述华东利润分析');
     fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
     expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
@@ -550,7 +551,7 @@ describe('analysis workbench', () => {
     render(<Analysis {...props} embedded section="results" onSectionChange={onSectionChange} />);
     await screen.findByText('900719925474099.99');
     expect(screen.queryByLabelText('接下来想了解什么？')).toBeNull();
-    expect(screen.queryByRole('heading', { name: task.title })).toBeNull();
+    expect(screen.queryByRole('heading', { name: task.title, level: 2 })).toBeNull();
     expect(screen.queryByRole('tab', { name: /方法/ })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /资料/ }));
     expect(onSectionChange).toHaveBeenCalledWith('materials');
@@ -574,7 +575,8 @@ describe('analysis workbench', () => {
     // its own elsewhere on the page, so this looks where the result would be.
     expect(document.querySelector('.analysis-result table')).toBeNull();
     expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 2 版（共 2 版）');
-    expect(screen.getByRole('heading', { name: '新的成本口径' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: task.title, level: 3 })).toBeTruthy();
+    expect([...document.querySelectorAll('.analysis-result .analysis-technical-list')].map((item) => item.textContent).join(' ')).toContain('运行描述新的成本口径');
   });
 
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {
@@ -1588,7 +1590,7 @@ ${canonicalAppendix} 已改写`;
     expect(within(bridge).getByRole('columnheader', { name: '差异贡献' })).toBeTruthy();
     expect(within(bridge).queryByRole('columnheader', { name: 'amount_change' })).toBeNull();
     expect(within(bridge).queryByRole('columnheader', { name: 'profit_impact' })).toBeNull();
-    expect(screen.getByText('范围：账簿 L1 · 组织 华东 · 币种 CNY · 单位 万元 · 期间 2026-09')).toBeTruthy();
+    expect(screen.getByText('范围：账簿 L1 · 组织 华东 · 币种 CNY · 单位 万元 · 期间 2026 年 9 月')).toBeTruthy();
     expect(within(bridge).getByRole('cell', { name: '利润' })).toBeTruthy();
     expect(within(bridge).getByRole('cell', { name: '33.33%' })).toBeTruthy();
     const costRow = within(bridge).getAllByRole('row').find((rowElement) => (rowElement.textContent ?? '').includes('成本'));
@@ -1624,9 +1626,9 @@ ${canonicalAppendix} 已改写`;
     expect(screen.queryByText(/组织 2 项|期间 2 项/)).toBeNull();
     const rows = within(bridge).getAllByRole('row').map((rowElement) => rowElement.textContent ?? '');
     expect(rows[1]).toContain('华东');
-    expect(rows[1]).toContain('2026-09');
+    expect(rows[1]).toContain('2026 年 9 月');
     expect(rows[2]).toContain('华南');
-    expect(rows[2]).toContain('2026-10');
+    expect(rows[2]).toContain('2026 年 10 月');
   });
 
   it('shows explicit units for very large finance variance ratios', async () => {

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunPanel } from '../src/views/analysis/RunPanel.js';
-import type { AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown, ResultContractWarning } from '../src/bridge.js';
+import type { AnalysisDraft, AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown, ResultContractWarning } from '../src/bridge.js';
 
 const taskId = 'a'.repeat(32);
 const analysis: AnalysisRevision = { id: 'b'.repeat(32), task_id: taskId, schema_version: 1, created_at: '2026-09-07T00:00:00Z',
@@ -373,7 +373,7 @@ describe('RunPanel finance conclusion', () => {
 
   it.each([
     [{ actual_scenario: 'forecast', baseline_scenario: 'budget' }, '预测与预算相比，利润减少 5 万元', '预算差异桥'],
-    [{ actual_scenario: 'actual', baseline_scenario: 'budget', actual_filters: { period: '2026-08' }, baseline_filters: { period: '2026-07' } }, '实际（2026-08）与预算（2026-07）相比，利润减少 5 万元', '预算差异桥'],
+    [{ actual_scenario: 'actual', baseline_scenario: 'budget', actual_filters: { period: '2026-08' }, baseline_filters: { period: '2026-07' } }, '实际（2026 年 8 月）与预算（2026 年 7 月）相比，利润减少 5 万元', '预算差异桥'],
     [{ actual_scenario: 'actual', baseline_scenario: 'actual' }, '实际与对照（实际）相比，利润减少 5 万元', '损益差异桥'],
     [{ actual_scenario: 'actual', baseline_scenario: 'estimated_budget' }, '实际与预算（估算）相比，利润减少 5 万元', '估算预算差异桥'],
   ])('names both sides of the comparison: %j', (comparison, sentence, caption) => {
@@ -530,5 +530,78 @@ describe('RunPanel result contract warnings', () => {
     unmount();
     render(<RunPanel {...props} runs={[scriptResultRun({ row_declarations: declarations(undefined) })]} />);
     expect(screen.queryByText(/不合约定/)).toBeNull();
+  });
+});
+
+describe('RunPanel result head and next steps', () => {
+  // run_metric management_pnl's own shape: a finance business result that is not a variance bridge.
+  const pnl = (overrides: Partial<AnalysisRun> = {}): AnalysisRun => ({ ...baseRun, engine: 'finance', result: {
+    columns: ['organization', 'scenario', 'unit', 'revenue', 'profit'].map((name) => ({ name, type: ['revenue', 'profit'].includes(name) ? 'DECIMAL' : 'VARCHAR' })),
+    rows: [{ organization: '华东区域', scenario: 'actual', unit: '万元', revenue: '120', profit: '30' }],
+    row_count: 1, truncated: false,
+  }, ...overrides });
+
+  afterEach(() => sessionStorage.clear());
+
+  it('titles the result with the task question and keeps the run description in 技术信息 only', () => {
+    render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
+    const heading = screen.getByRole('heading', { level: 3, name: '华东经营分析' });
+    expect(heading.getAttribute('title')).toBe('华东经营分析');
+    const article = heading.closest('article') as HTMLElement;
+    const technical = Array.from(article.querySelectorAll('.analysis-technical'));
+    expect(technical).toHaveLength(1);
+    expect(within(technical[0] as HTMLElement).getByText('运行描述').nextElementSibling?.textContent).toBe(analysis.question);
+    const outside = article.cloneNode(true) as HTMLElement;
+    outside.querySelectorAll('.analysis-technical').forEach((fold) => fold.remove());
+    expect(outside.textContent).not.toContain(analysis.question);
+  });
+
+  it('puts the title, the date line and the four states in one header, in that order', () => {
+    render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
+    const head = screen.getByRole('heading', { level: 3, name: '华东经营分析' }).parentElement as HTMLElement;
+    expect(head.tagName).toBe('HEADER');
+    expect(head.classList.contains('analysis-result-head')).toBe(true);
+    const children = Array.from(head.children);
+    expect(children.map((child) => child.tagName)).toEqual(['H3', 'P', 'DIV']);
+    expect(children[1].textContent).toContain('第 1 次计算');
+    expect(children[2].getAttribute('aria-label')).toBe('结果状态');
+  });
+
+  it('makes 整理成文稿 the primary action on a business result only', () => {
+    render(<RunPanel {...props} runs={[pnl()]} />);
+    const primary = screen.getByRole('button', { name: '整理成文稿' });
+    expect(primary.getAttribute('data-variant')).toBe('default');
+    // Right after the cards, ahead of the 依据 button.
+    const actions = primary.parentElement as HTMLElement;
+    expect(Array.from(actions.querySelectorAll('button')).map((button) => button.textContent)).toEqual(['整理成文稿', '查看本次计算依据']);
+    cleanup();
+    const failed = { ...baseRun, id: '0'.repeat(32), execution_status: 'failed', error: '缺少列' } as AnalysisRun;
+    render(<RunPanel {...props} runs={[failed]} />);
+    expect(screen.getByRole('button', { name: '整理成文稿' }).getAttribute('data-variant')).toBe('outline');
+  });
+
+  it('says the result is the draft-cited run only while that run is on screen', () => {
+    const cited = pnl({ id: '1'.repeat(32) });
+    const later = pnl({ id: '2'.repeat(32), created_at: '2026-09-08T00:00:00Z' });
+    const draft = { task_id: taskId, schema_version: 1, created_at: '2026-09-09T00:00:00Z', id: '3'.repeat(32), title: '经营简报', body: '',
+      run_ids: [cited.id], claims: [], publication_status: 'draft', review_status: 'unreviewed' } as unknown as AnalysisDraft;
+    render(<RunPanel {...props} runs={[cited, later]} drafts={[draft]} />);
+    const note = '当前结果是最新文稿引用的那次计算；之后的探查和重试保留在「中间步骤」里。';
+    expect(screen.getByText(note).className).toBe('analysis-version-note');
+    const history = screen.getByText(/^计算历史/).closest('details') as HTMLElement;
+    const rows = within(history).getAllByRole('button').filter((button) => button.classList.contains('analysis-history-row'));
+    fireEvent.click(rows.find((row) => row.getAttribute('aria-current') !== 'true')!);
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
+  it('keeps a finance result and its diagnostics in one 技术信息 fold', () => {
+    const run = pnl();
+    run.result!.diagnostics = [{ code: 'control_total_missing', message: '控制数未提供' }];
+    render(<RunPanel {...props} runs={[run]} />);
+    const folds = Array.from(document.querySelectorAll('.analysis-result .analysis-technical'));
+    expect(folds).toHaveLength(1);
+    expect(folds[0].textContent).toContain('原始诊断细节 · 1 项');
+    expect(folds[0].textContent).toContain('control_total_missing');
+    expect(screen.queryByText(/技术信息 · 诊断/)).toBeNull();
   });
 });

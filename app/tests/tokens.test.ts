@@ -306,6 +306,22 @@ describe('where the warning colour is drawn', () => {
     expect(classes).not.toContain('mark-outside');
   });
 
+  it('draws a selected chip with an ink edge on the selection surface, not the primary fill or the gold', async () => {
+    const { buttonVariants } = await import('../src/components/ui/button.js');
+    const { cn } = await import('../src/lib/utils.js');
+    // As Button renders it: cn() lets the chip radius and label size replace the control ones.
+    const classes = cn(buttonVariants({ variant: 'outline', size: 'chip' })).split(' ');
+    expect(classes).toContain('rounded-[var(--fnd-radius-chip)]');
+    expect(classes).not.toContain('rounded-[var(--fnd-radius-control)]');
+    expect(classes).toContain('text-[length:var(--fnd-size-label)]');
+    expect(classes).toContain('h-7');
+    for (const state of ['aria-selected', 'aria-pressed']) {
+      expect(classes).toContain(`${state}:border-[var(--fnd-ink)]`);
+      expect(classes).toContain(`${state}:bg-[var(--fnd-selection-surface)]`);
+    }
+    expect(classes.some((name) => /bg-primary|--fnd-selected|--fnd-gold/.test(name))).toBe(false);
+  });
+
   it('gives the destructive badge the warning edge, fill and text', async () => {
     const { badgeVariants } = await import('../src/components/ui/badge.js');
     const classes = badgeVariants({ variant: 'destructive' });

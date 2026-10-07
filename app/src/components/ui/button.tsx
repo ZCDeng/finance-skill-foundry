@@ -53,8 +53,21 @@ const buttonVariants = cva(
         sm: 'h-8 px-2.5',
         lg: 'h-[var(--fnd-button-height)] px-3.5',
         icon: 'size-8 rounded-[6px] p-0',
+        // A clickable chip (result period tabs, period shortcuts, candidate values): DESIGN.md 按钮与字段.
+        chip: 'h-7 rounded-[var(--fnd-radius-chip)] px-2.5 text-[length:var(--fnd-size-label)]',
       },
     },
+    compoundVariants: [
+      {
+        // Selected reads as an ink edge on the selection surface, never the solid primary or the gold.
+        variant: 'outline',
+        size: 'chip',
+        className: [
+          'aria-pressed:border-[var(--fnd-ink)] aria-pressed:bg-[var(--fnd-selection-surface)] aria-pressed:text-foreground',
+          'aria-selected:border-[var(--fnd-ink)] aria-selected:bg-[var(--fnd-selection-surface)] aria-selected:text-foreground',
+        ].join(' '),
+      },
+    ],
     defaultVariants: {
       variant: 'default',
       size: 'default',

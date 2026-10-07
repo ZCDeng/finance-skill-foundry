@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
 import { when, type AnalysisDraft, type AnalysisRevision, type AnalysisRun, type DatasetSnapshot, type FinanceDrilldown, type ResultContractWarning } from '../../bridge.js';
 import { readCopy, writeCopy } from './workingCopy.js';
@@ -7,20 +7,27 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { TechnicalInfo } from './TechnicalInfo.js';
+import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { formatPeriod } from '../../lib/period.js';
 
-export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
+export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy, question, versionPicker, versionNote, onPick, onChat, onOpen, onSource, onSaveMethod, onDrilldown, onAdjustScope }: {
   analysis: AnalysisRevision; analyses: AnalysisRevision[]; runs: AnalysisRun[]; drafts?: AnalysisDraft[]; datasets: DatasetSnapshot[]; busy: boolean;
   onPick(id: string): void; onChat(question: string): void; onOpen(run: AnalysisRun, path: string): void;
   onSource(source: DatasetSnapshot): void; onSaveMethod(id: string, name: string): void;
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
   /** Opens the finance scope settings, which sit below the result, on the scope this run used. */
   onAdjustScope?(run: AnalysisRun): void;
+  /** The task's own question, the result's title. The version's run description goes to 技术信息 when it differs. */
+  question?: string;
+  /** The 分析版本 picker, drawn above the result with 比较版本 beside it. */
+  versionPicker?: ReactNode;
+  /** One line under the picker, such as which version is on screen. */
+  versionNote?: ReactNode;
 }) {
   const [selected, setSelected] = useState(() => readCopy<string>(`${analysis.task_id}:run`) ?? '');
   const [evidence, setEvidence] = useState(false);
@@ -41,28 +48,55 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     setSelected(next.id); writeCopy(`${analysis.task_id}:run`, next.id); onPick(next.analysis_id);
     setEvidence(false); setComparing(false);
   };
+  const heading = question?.trim() || analysis.question;
+  // The version's run description, kept for support and the assistant when the task's question is the title.
+  const technical: TechnicalRow[] = heading !== analysis.question ? [['运行描述', analysis.question]] : [];
+  const compareButton = run && runs.length > 1 ? <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button> : null;
+  // Only the run the latest draft cites is that run; once another is picked the sentence no longer holds.
+  const draftReference = Boolean(run && selection.reason === 'draft_reference' && run.id === selection.primary?.id);
+  const versionBlock = versionPicker || compareButton || versionNote || draftReference ? <div className="analysis-version">
+    {versionPicker || compareButton ? <div className="analysis-version-row">{versionPicker}{compareButton}</div> : null}
+    {versionNote ? <p className="analysis-version-note">{versionNote}</p> : null}
+    {draftReference && <p className="analysis-version-note">当前结果是最新文稿引用的那次计算；之后的探查和重试保留在「中间步骤」里。</p>}
+  </div> : null;
+  const resultActions = run ? <div className="analysis-actions">
+    <Button variant={runPresentationRole(run) === 'business' ? 'default' : 'outline'} type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的计算 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
+    <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
+    {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整范围</Button>}
+  </div> : null;
   return <div className="analysis-result-area" data-evidence-open={evidence || undefined}>
-    {latest && run && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
-      最近一次计算没有完成，当前保留的是上一次成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看未完成的计算</Button></p>}
-    {!run ? <NotRunYet runs={runs} onPick={(next) => pick(next)} /> : <article className="analysis-result">
-      <div className="analysis-section-heading"><div><h3>{analysis.question}</h3><p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p></div><RunStatus run={run} /></div>
-      {selection.reason === 'draft_reference' && <p className="analysis-message">当前结果是最新文稿引用的那次计算；之后的探查和重试保留在「中间步骤」里。</p>}
+    {!run ? <>{versionBlock}<NotRunYet runs={runs} onPick={(next) => pick(next)} /></> : <article className="analysis-result">
+      {versionBlock}
+      {latest && latest.id !== run.id && latest.execution_status === 'failed' && <p className="analysis-message analysis-message--error">
+        最近一次计算没有完成，当前保留的是上一次成功的结果。<Button variant="outline" type="button" onClick={() => pick(latest)}>查看未完成的计算</Button></p>}
+      {comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
+        <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
+        <label className="analysis-select-label">对照结果<NativeSelect value={comparison} onChange={(event) => setComparison(event.target.value)}>
+          <option value="">选择一次已保存的计算</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
+            <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</option>)}</NativeSelect></label>
+        {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} tablesBelow />
+        <p className="analysis-note">完整原始结果仍按各次计算自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
+          const definition = analyses.find((item) => item.id === row.analysis_id);
+          return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</h4><RunStatus run={row} />
+            <p>参数：{parameterSummary(row.parameters ?? definition?.parameters, row.parameter_metadata ?? definition?.parameter_metadata)}</p>
+            <p>假设说明：{assumptionSummary(row.assumptions ?? definition?.assumptions)}</p>
+            {row.result?.columns.length ? <Table columns={row.result.columns} rows={row.result.rows} caption={index === 0 ? '当前版本数据' : '对照版本数据'} />
+              : <p className="analysis-note">{row.error ? errorText(row.error) : '这次计算没有表格结果。'}</p>}</div>;
+        })}</div></>}
+      </section>}
+      <header className="analysis-result-head"><h3 title={heading}>{heading}</h3>
+        <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} /></header>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
-      {run.result && run.result.columns.length > 0 && <RunResultTable run={run} />}
+      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} />
+        : <>{resultActions}<TechnicalInfo rows={technical} /></>}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
       {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
           onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}
-      <div className="analysis-actions">
-        <Button variant="outline" ref={evidenceButton} type="button" aria-expanded={evidence} aria-controls={`analysis-evidence-${analysis.task_id}`} onClick={() => setEvidence(!evidence)}>查看本次计算依据</Button>
-        <Button variant="outline" type="button" disabled={busy} onClick={() => onChat(`请把分析「${analysis.question}」的计算 ${run.id} 整理成可编辑的经营分析文稿，区分计算结果、假设与专业判断。`)}>整理成文稿</Button>
-        {onAdjustScope && run.engine === 'finance' && <Button variant="outline" type="button" disabled={busy} onClick={() => onAdjustScope(run)}>调整范围</Button>}
-        {runs.length > 1 && <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button>}
-      </div>
       {analysis.sql && <details className="analysis-details"><DisclosureSummary>保存这次分析方法</DisclosureSummary><form className="analysis-method-form" onSubmit={(event) => {
         event.preventDefault(); if (methodName.trim()) onSaveMethod(analysis.id, methodName.trim());
       }}><label>方法名称<Input className="min-w-0 flex-1" value={methodName} onChange={(event) => setMethodName(event.target.value)} placeholder={analysis.question} disabled={busy}  /></label>
@@ -89,21 +123,6 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
         <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
       <TechnicalInfo rows={[['计算编号', run.id], ['结果摘要', run.output_hash]]} />
     </aside></div>}
-    {run && comparing && <section className="analysis-comparison" aria-label="版本比较"><div className="analysis-section-heading"><h3>版本比较</h3>
-      <Button variant="outline" type="button" onClick={() => setComparing(false)}>关闭比较</Button></div>
-      <label className="analysis-select-label">对照结果<NativeSelect value={comparison} onChange={(event) => setComparison(event.target.value)}>
-        <option value="">选择一次已保存的计算</option>{[...runs].reverse().filter((row) => row.id !== run.id).map((row) =>
-          <option key={row.id} value={row.id}>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</option>)}</NativeSelect></label>
-      {compared && <><RevisionDiff current={run} previous={compared} currentRevision={revisionLabel(run, runs)} previousRevision={revisionLabel(compared, runs)} tablesBelow />
-      <p className="analysis-note">完整原始结果仍按各次计算自身表格展示；未识别业务身份的行不参与修订差异，未推断业务主键或计算差额。</p><div className="analysis-comparison-grid">{[run, compared].map((row, index) => {
-        const definition = analyses.find((item) => item.id === row.analysis_id);
-        return <div key={row.id}><h4>{index === 0 ? '当前结果' : '对照结果'} · 第 {revisionLabel(row, runs)} 次计算 · {when(row.created_at)}</h4><RunStatus run={row} />
-          <p>参数：{parameterSummary(row.parameters ?? definition?.parameters, row.parameter_metadata ?? definition?.parameter_metadata)}</p>
-          <p>假设说明：{assumptionSummary(row.assumptions ?? definition?.assumptions)}</p>
-          {row.result?.columns.length ? <Table columns={row.result.columns} rows={row.result.rows} caption={index === 0 ? '当前版本数据' : '对照版本数据'} />
-            : <p className="analysis-note">{row.error ? errorText(row.error) : '这次计算没有表格结果。'}</p>}</div>;
-      })}</div></>}
-    </section>}
     <details className="analysis-details analysis-history"><DisclosureSummary>计算历史 · 结果 {selection.businessRuns.length}{selection.failedRuns.length ? ` · 未完成 ${selection.failedRuns.length}` : ''}</DisclosureSummary>
       <HistoryRows rows={[...runs].reverse().filter((row) => runPresentationRole(row) !== 'activity')} runs={runs} analyses={analyses} current={run} onPick={pick} />
       {selection.activityRuns.length > 0 && <details className="analysis-details analysis-history-steps"><DisclosureSummary tone="quiet">中间步骤 · {selection.activityRuns.length}</DisclosureSummary>
@@ -124,7 +143,13 @@ function HistoryRows({ rows, runs, analyses, current, onPick }: {
 /** A scope in the words the settings use, one field per phrase. */
 function scopeText(scope: unknown): string {
   if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return textValue(scope);
-  return Object.entries(scope as Record<string, unknown>).map(([key, item]) => `${financeScopeLabels[key] ?? key} ${key === 'scenario' ? scenarioLabel(textValue(item)) : textValue(item)}`).join(' · ') || '—';
+  return Object.entries(scope as Record<string, unknown>).map(([key, item]) => `${financeScopeLabels[key] ?? key} ${key === 'scenario' ? scenarioLabel(textValue(item)) : key === 'period' ? periodText(item) : textValue(item)}`).join(' · ') || '—';
+}
+
+/** A period as the result area writes it (2026 年 1–8 月); the stored value stays in the run and in what goes to the assistant. */
+function periodText(value: unknown): string {
+  if (value == null || value === '') return '—';
+  return typeof value === 'object' ? textValue(value) : formatPeriod(value);
 }
 
 
@@ -152,13 +177,21 @@ function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
   </details>;
 }
 
-function RunResultTable({ run }: { run: AnalysisRun }) {
-  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} />;
-  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} />;
-  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} />;
-  if (runPresentationRole(run) === 'business' && run.result?.rows.length) return <BusinessResultView run={run} />;
+/** Whether the result is drawn by BusinessResultView, which then also holds the run's diagnostics. */
+function rendersBusinessView(run: AnalysisRun): boolean {
+  return Boolean(run.result?.columns.length) && !isFinanceVarianceRun(run) && !isStructuredAggregateRun(run) && !isScriptSummaryRun(run)
+    && runPresentationRole(run) === 'business' && Boolean(run.result?.rows.length);
+}
+
+/** The result, with the run's next steps right after what a manager reads first and one 技术信息 fold. */
+function RunResultTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} technical={technical} />;
+  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} technical={technical} />;
+  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} technical={technical} />;
+  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} technicalRows={technical} diagnostics={run.result?.diagnostics ?? []} />;
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
-    <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p></>;
+    <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
+    {actions}<TechnicalInfo rows={technical} /></>;
 }
 
 function runRoleLabel(run: AnalysisRun): string {
@@ -191,16 +224,18 @@ function isScriptSummaryRun(run: AnalysisRun): boolean {
   return scriptSummaryKeys.every((name) => set.has(name));
 }
 
-function ScriptSummaryTable({ run }: { run: AnalysisRun }) {
+function ScriptSummaryTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const result = run.result!;
   const columns = scriptSummaryKeys.map((name) => ({ name: scriptSummaryLabels[name], type: columnType(run, name) }));
   const rows = result.rows.map((row) => Object.fromEntries(scriptSummaryKeys.map((name) => [scriptSummaryLabels[name], row[name]])));
   return <section className="analysis-script-summary">
     <Table key={`${run.id}:summary`} columns={columns} rows={rows} caption="计算结果" />
     <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
+    {actions}
     <details className="analysis-details"><DisclosureSummary>完整明细 · {result.columns.length} 列</DisclosureSummary>
       <Table key={`${run.id}:full`} columns={result.columns} rows={result.rows} caption="完整明细" />
     </details>
+    <TechnicalInfo rows={technical} />
   </section>;
 }
 
@@ -251,10 +286,10 @@ function structuredDiagnosticText(value: unknown): string {
   return message || `结构化汇总诊断：${textValue(value)}`;
 }
 
-function RawResultDetails({ run }: { run: AnalysisRun }) {
+function RawResultDetails({ run, rows }: { run: AnalysisRun; rows?: TechnicalRow[] }) {
   const result = run.result!;
   const diagnostics = result.diagnostics ?? [];
-  return <TechnicalInfo>
+  return <TechnicalInfo rows={rows}>
     {diagnostics.length > 0 && <><h4>原始诊断细节 · {diagnostics.length} 项</h4>
       {diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</>}
     <h4>原始结果字段 · {result.columns.length} 列</h4>
@@ -262,7 +297,7 @@ function RawResultDetails({ run }: { run: AnalysisRun }) {
   </TechnicalInfo>;
 }
 
-function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
+function StructuredAggregateTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const result = run.result!;
   const detailRows = result.detail_rows ?? [];
   const excludedRows = result.excluded_detail_rows ?? [];
@@ -275,13 +310,14 @@ function StructuredAggregateTable({ run }: { run: AnalysisRun }) {
     </div>}
     <Table key={`${run.id}:structured`} columns={columns} rows={structuredAggregateRows(result.rows)} caption="结构化汇总结果" />
     <p className="analysis-note">{result.row_count} 行{result.truncated ? ' · 当前为截断预览' : ''}</p>
+    {actions}
     {detailRows.length > 0 && <details className="analysis-details"><DisclosureSummary>来源明细 · {detailRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:detail`} columns={structuredAggregateColumns(run, detailRows)} rows={structuredAggregateRows(detailRows)} caption="来源明细" />
     </details>}
     {excludedRows.length > 0 && <details className="analysis-details"><DisclosureSummary>剔除明细 · {excludedRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:excluded`} columns={structuredAggregateColumns(run, excludedRows)} rows={structuredAggregateRows(excludedRows)} caption="剔除明细" />
     </details>}
-    <RawResultDetails run={run} />
+    <RawResultDetails run={run} rows={technical} />
   </section>;
 }
 
@@ -353,7 +389,7 @@ function financeVarianceScope(run: AnalysisRun): string {
     const values = distinctFinanceValues(rows, name);
     if (values.length !== 1) return [];
     const label = financeScopeLabels[name] ?? name;
-    return `${label} ${values[0]}`;
+    return `${label} ${name === 'period' ? periodText(values[0]) : values[0]}`;
   });
   return parts.join(' · ') || '按当前范围汇总';
 }
@@ -384,7 +420,7 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
   const actualPeriod = period(comparison?.actual_filters);
   const baselinePeriod = period(comparison?.baseline_filters);
   // Periods are named only when the two sides differ; the same words on both sides get their codes.
-  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${value}）` : words;
+  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${periodText(value)}）` : words;
   const actualLabel = withPeriod(scenarioWords(actual, 'actual'), actualPeriod);
   let baselineLabel = withPeriod(scenarioWords(baseline, 'baseline'), baselinePeriod);
   // Same words on both sides (the same scenario under other filters) must still read as two sides.
@@ -398,12 +434,12 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
   };
 }
 
-function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
+function FinanceVarianceTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const dimensions = financeVarianceDimensionColumns(run);
   const copy = financeVarianceCopy(run);
   const hasAmountChange = new Set(run.result?.columns.map((column) => column.name) ?? []).has('amount_change');
   const rows = (run.result?.rows ?? []).map((row) => ({
-    ...Object.fromEntries(dimensions.map((column) => [financeScopeLabels[column.name] ?? column.name, row[column.name]])),
+    ...Object.fromEntries(dimensions.map((column) => [financeScopeLabels[column.name] ?? column.name, column.name === 'period' ? periodText(row.period) : row[column.name]])),
     科目: `${financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric)}${isPartial(row) ? '（缺项）' : ''}`,
     [copy.actualLabel]: row.actual,
     [copy.baselineLabel]: row.baseline,
@@ -413,13 +449,14 @@ function FinanceVarianceTable({ run }: { run: AnalysisRun }) {
   }));
   const dimensionHeaders = dimensions.map((column) => ({ name: financeScopeLabels[column.name] ?? column.name, type: column.type }));
   return <section className="analysis-finance-variance">
+    {actions}
     <p className="analysis-note">范围：{financeVarianceScope(run)}</p>
     <Table key={`${run.id}:finance-variance`} columns={[
       ...dimensionHeaders, { name: '科目', type: 'VARCHAR' }, { name: copy.actualLabel, type: 'DECIMAL' }, { name: copy.baselineLabel, type: 'DECIMAL' },
       ...(hasAmountChange ? [{ name: '科目增减', type: 'DECIMAL' }] : []), { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
     ]} rows={rows} caption={copy.caption} />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
-    <RawResultDetails run={run} />
+    <RawResultDetails run={run} rows={technical} />
   </section>;
 }
 
@@ -447,7 +484,7 @@ function FinanceVarianceHeadline({ run }: { run: AnalysisRun }) {
     const missing = rows.filter((row) => isPartial(row) && row.metric !== 'profit')
       .map((row) => financeMetricLabel[textValue(row.metric)] ?? textValue(row.metric));
     return {
-      label: dimensions.map((name) => textValue(rows[0][name])).join(' · '),
+      label: dimensions.map((name) => name === 'period' ? periodText(rows[0][name]) : textValue(rows[0][name])).join(' · '),
       headline: profit && !partial ? changePhrase(profit, true) : null,
       partial: partial ? (missing.length ? `${missing.join('、')}是缺项，只在一侧有来源行，利润差异不完整，见下表。` : '利润差异是缺项，不完整，见下表。') : null,
       drivers: ['revenue', 'cost', 'expense'].map((metric) => rows.find((row) => row.metric === metric))
@@ -532,7 +569,9 @@ function rowHasSources(row: Record<string, unknown>): boolean {
 }
 
 function sourceLabel(row: Record<string, unknown>, index: number, prefix = '第'): string {
-  return `${prefix} ${index + 1} 行 · ${textValue(row.management_account ?? row.account_code ?? row.period ?? row.scenario ?? row.metric ?? row.customer ?? row.item ?? '')}`;
+  // A row named by its period reads it in words; an account name or code is shown as written.
+  const byPeriod = row.management_account == null && row.account_code == null && row.period != null;
+  return `${prefix} ${index + 1} 行 · ${byPeriod ? periodText(row.period) : textValue(row.management_account ?? row.account_code ?? row.period ?? row.scenario ?? row.metric ?? row.customer ?? row.item ?? '')}`;
 }
 
 function SourceTraceDetails({ run, busy, onDrilldown }: {
@@ -567,7 +606,7 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
   }
   return <section className="analysis-finance-run" aria-label="结果范围与来源">
     {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}
-    {run.engine === 'finance' && !isFinanceVarianceRun(run) && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details analysis-technical"><DisclosureSummary tone="quiet">技术信息 · 诊断 {run.result.diagnostics.length} 项</DisclosureSummary>
+    {run.engine === 'finance' && !isFinanceVarianceRun(run) && !rendersBusinessView(run) && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details analysis-technical"><DisclosureSummary tone="quiet">技术信息 · 诊断 {run.result.diagnostics.length} 项</DisclosureSummary>
       {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
     {run.finance_scope && <details className="analysis-details"><DisclosureSummary>计算范围</DisclosureSummary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
       <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}

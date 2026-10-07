@@ -24,6 +24,7 @@ components:
   nav-current: {backgroundColor: '{colors.fnd-selection-surface}', textColor: '{colors.fnd-selected}', typography: '{typography.body}', rounded: '{rounded.control}', padding: 0 16px, height: 36px}
   chip: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.label}', rounded: '{rounded.chip}', padding: 4px 10px}
   card: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 18px 20px}
+  card-compact: {backgroundColor: '{colors.fnd-surface}', textColor: '{colors.fnd-ink}', rounded: '{rounded.container}', padding: 16px}
   workspace-tab: {backgroundColor: transparent, textColor: '{colors.fnd-muted}', typography: '{typography.small}', padding: 12px 0}
   disclosure: {backgroundColor: transparent, textColor: '{colors.fnd-ink}', typography: '{typography.body}', rounded: '{rounded.mark}', padding: 5px 8px 5px 32px}
 ---
@@ -59,7 +60,7 @@ components:
 
 Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳和原生客户端离线打包，真实变量字重 100–900，关闭合成字重；不依赖 localhost 或远程字体。Asap Sharp 仅用于品牌字。见[字体来源与许可](app/src/assets/fonts/noto-sans-sc/README.md)。
 
-任务标题 20px，窄窗为 18px；结果页结论优先，首句脚本结论 22px/32px、其余 18px/28px，所问问题作为结果标签 16px（没有脚本结论时仍为 20px 标题）。文稿标题 28px/40px（字重 750）、章 22px/32px（720）、节 18px/28px、小节 16px/26px（700），编辑器、阅读视图与导出 HTML 共用 `--fnd-doc-*` token（h4 至 h6 同用小节字号；旧草稿阅读样式一并对齐），由 `document-headings.test.ts` 保持一致。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。文稿最大宽度 42em，段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
+任务标题 20px，窄窗为 18px；结果页结论优先，首句脚本结论 22px/32px、其余 18px/28px，任务名作为结果标签 16px，最多两行，完整名称放在 title 属性（没有脚本结论时为 20px 标题）。分析版本的运行描述不作结果标题，版本选择器、比较下拉和计算历史里仍用它区分版本。文稿标题 28px/40px（字重 750）、章 22px/32px（720）、节 18px/28px、小节 16px/26px（700），编辑器、阅读视图与导出 HTML 共用 `--fnd-doc-*` token（h4 至 h6 同用小节字号；旧草稿阅读样式一并对齐），由 `document-headings.test.ts` 保持一致。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。文稿最大宽度 42em，段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐。
 
 **The Real Weight Rule.** 中文强调使用已打包的真实字重；数据保留原有精度、负号、零和缺值，不借排版制造业务含义。
 
@@ -79,11 +80,11 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 ## Shapes
 
-控件和任务行使用 `control` 圆角，独立资料卡、文稿输入与依据使用 `container`，小图标操作和折叠摘要使用 `mark`，工具菜单使用 `menu`，历史 chip 保留原形。内容以细分隔线组织，避免把每个标题和操作组包成卡片。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
+控件和任务行使用 `control` 圆角，独立资料卡、文稿输入与依据使用 `container`，小图标操作和折叠摘要使用 `mark`，工具菜单使用 `menu`，历史 chip 保留原形。内容以细分隔线组织，避免把每个标题和操作组包成卡片。KPI 卡、月结步骤卡这类并排汇总卡用 `card-compact`，独立资料卡用 `card`。沿用线性 SVG 控件，装饰图标不进入无障碍名称。
 
 ## Components
 
-**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-warning-line`，错误文字使用 `fnd-warning`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-warning` 砖红文字与 `fnd-warning-line` 边，悬停为 `fnd-warning-fill`）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。
+**按钮与字段。** 主操作实心，次操作细描边；常规按钮、输入和选择框高 36px（紧凑图标动作 32px），长示例允许换行增高。次操作/输入悬停为中性边界，主按钮没有额外悬停变色，按下时略降透明度或使用选择底色。字段组合为标签、控件、帮助或错误；`aria-invalid` 与警告边使用 `fnd-warning-line`，错误文字使用 `fnd-warning`。通用焦点外框 1px、偏移 -1px，与原边界重叠成单一指示；聚焦、错误或禁用的字段不叠加普通悬停边色。原生选择框与财务输入沿用同一字段状态。主按钮文字使用 `on-accent`，暗色下不得继承 ink。禁用使用真实 disabled 与既有透明度。工具菜单、选择弹出层和导出菜单共用 `fnd-shadow-menu`；抽屉遮罩使用 `fnd-overlay`。成果页签为下划线式 tab，未选中悬停变为正文色。参数显示真实业务名称、类型、单位和约束，未标注语义的旧参数按原名留在高级区。不可逆删除使用次操作的 destructive 变体（`fnd-warning` 砖红文字与 `fnd-warning-line` 边，悬停为 `fnd-warning-fill`）。薄控件（按钮、简单输入、成果页签、菜单）来自 shadcn 原语，视觉仍只读 `--fnd-*` token。可点 chip（结果期间页签、期间快捷项、候选值）用按钮的 chip 尺寸，28px 高、12px 字、chip 圆角、细描边；选中用 ink 边加选择底色，不用主色实心，也不用金色。
 
 **折叠段落。** `app/src` 的 React 视图里原位展开的折叠段落都是原生 `details`，摘要统一用 `DisclosureSummary`（[组件](app/src/components/Disclosure.tsx)）。摘要为正文色 14px/22px 常规字重，左侧 16px Lucide `ChevronRight`，描边 1.5，随文字色，不进入无障碍名称，展开时旋转 90°，过渡用 `fnd-duration/easing`。悬停为 `fnd-selection-surface` 中性底，键盘焦点沿用 base 的 1px `fnd-focus` 框。摘要整行向左让出 8px，chevron 的图标盒左缘与展开内容的左缘对齐，摘要文字从内容左缘起 24px 处开始，悬停底伸进左侧 8px 留白。技术信息、诊断、脚本输出、中间步骤和图表原始数据这类辅助折叠用 `tone="quiet"`，12px/18px、`fnd-muted`，图标 14px。标签文字直接作为 `summary` 的文本；需要标题层级或说明行时可以放块级标题或说明 span。警告这类语义图标可以和 chevron 并存，装饰图标不放。页面样式只给折叠调间距，不改摘要的颜色、字号、字重、标记和焦点，也不用文字三角、原生三角或右侧 chevron。行内展开（按钮带 `aria-expanded` 在行下展开）、Popover 和「设置与高级」的原位面板各按自己的规则，不在此列。原生对话标题区的「对话工具」打开浮层，保留向下 chevron，用正文色和原生中性悬停底。另有三处摘要不经过这个组件：导出 HTML 里图表的「查看图表数据与说明」（`app/electron/reports/format.ts` 生成，应用内阅读视图由 report.css 的一条限定规则画成同样的 quiet 行）、原生对话里的工具调用折叠（`foundry/resources/dsh-plugin/client.js`）和 Excel 加载项 taskpane。
 
@@ -91,7 +92,7 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 **持续对话。** 任务切换和隐藏/显示保留会话与未发送草稿；完整问题按准确任务转交，实际接收成功才确认提交，受阻时保留问题并允许重试，同一动作不重复发送。400/460px 设置与工具详情已有验收；这不等于未来客户端版本无需适配。
 
-**结果与依据。** 先展示运行问题（16px 标签）、日期、四项独立状态，随后以 22px 脚本结论领起真实结果；定义、历史及方法保存按需展开。失败明确说明当前保留的是历史成功结果。表格使用中性横线与 10px 以上单元格内边距。Python/shell 结果包含明确的 label/value/unit 字段，且其余列仅为 metric、wb、sheet、cell、note、check 等已知依据字段时，先显示项目、数值、单位，完整原始列通过“完整明细”展开；额外数值列或未知字段继续默认显示全表。不改变精度、行序、缺值或财务专用展示。表格具备 caption、列标题、可聚焦横向滚动区，每页最多 100 行，截断明确提示，缺值显示“—”。依据按本次运行绑定定位确切快照；非模态 dialog 打开聚焦关闭按钮，Escape 返回触发按钮。参数/假设优先用保存版本的元数据；比较并列保存运行及原行序，不推断主键或差额。
+**结果与依据。** 分析版本选择器在结果最上方，比较版本在它右侧并在下方展开；结果正是最新文稿引用的那次计算时，下方用一行 12px 辅助文字说明，不加边框。随后是任务名、日期和四项独立状态，状态在任何宽度下都在标题下方，再以 22px 脚本结论领起结果。KPI 卡预算、差异、达成率各占一行，标签在左、等宽数字在右；期间、单位、依据与「推断」等标记合成一行元信息；结果区不超过 900px 时两列。达成率字段是差异率时标签写差异率，缺值照常写“—”。业务结果的「整理成文稿」是主按钮，和「查看本次计算依据」紧跟 KPI 卡，没有 KPI 卡时跟在结果表之后；运行描述和原始字段、诊断一起放进「技术信息」。界面上的会计期间一律经 formatPeriod 写成「2026 年 1–8 月」，保存、导出、筛选和交给助手的文字用原值。定义、历史及方法保存按需展开。失败明确说明当前保留的是历史成功结果。表格使用中性横线与 10px 以上单元格内边距。Python/shell 结果包含明确的 label/value/unit 字段，且其余列仅为 metric、wb、sheet、cell、note、check 等已知依据字段时，先显示项目、数值、单位，完整原始列通过“完整明细”展开；额外数值列或未知字段继续默认显示全表。不改变精度、行序、缺值或财务专用展示。表格具备 caption、列标题、可聚焦横向滚动区，每页最多 100 行，截断明确提示，缺值显示“—”。依据按本次运行绑定定位确切快照；非模态 dialog 打开聚焦关闭按钮，Escape 返回触发按钮。参数/假设优先用保存版本的元数据；比较并列保存运行及原行序，不推断主键或差额。
 
 **文稿与方法。** 文稿支持 Markdown 阅读和独立编辑，借鉴 Kami 的行长、章节留白与轻表格规范。仅当已保存的计算依据与正文末尾完全匹配时，阅读区将该附录折叠，编辑和导出仍保留完整正文；旧版和不匹配内容直接呈现。工作副本按任务/版本使用会话级存储恢复，正式保存生成新版本；交给助手或导出前先保存改动。改正文不替换已引用的历史运行，导出、归档与经理认可分别操作。方法保存是折叠的可选动作，复用重新选择资料与参数；未来领域入口随实际能力出现。
 

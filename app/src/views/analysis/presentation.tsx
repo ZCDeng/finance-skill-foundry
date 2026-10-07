@@ -24,7 +24,7 @@ export function parameterSummary(parameters?: unknown[] | Record<string, unknown
   }).join('；') || '—';
 }
 export function assumptionSummary(assumptions?: unknown[]): string {
-  return (assumptions ?? []).map((item) => {
+  const parts = (assumptions ?? []).map((item) => {
     if (item && typeof item === 'object' && !Array.isArray(item)) {
       const entry = item as Record<string, unknown>;
       const label = typeof entry.name === 'string' ? entry.name : entry.label;
@@ -33,7 +33,9 @@ export function assumptionSummary(assumptions?: unknown[]): string {
       }
     }
     return textValue(item);
-  }).join('；') || '—';
+  });
+  // Each item may end on its own 。 or ；; joined with ； that reads 。；, so all but the last lose it. ASCII full stops stay.
+  return parts.map((part, index) => index < parts.length - 1 ? part.trimEnd().replace(/[。；;]+$/, '') : part).join('；') || '—';
 }
 export function Table({ columns, rows, caption }: {
   columns: { name: string; type?: string }[];
