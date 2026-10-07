@@ -6,8 +6,8 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../components/
  *
  * After chanhdai.com's toc-minimap (MIT; components/chanhdai.LICENSE.txt), on Radix rather than Base UI and
  * without its sound. The current heading is the last one whose top has passed a line a little below the
- * top of the scrolling area, and the last heading once the area is scrolled to its end, so a short final
- * section still lights up. Measured on scroll, at most once a frame; nothing runs while the page is still.
+ * top of the scrolling area (none while the reader is still above the first), and the last heading once the
+ * area is scrolled to its end, so a short final section still lights up. Measured on scroll, at most once a frame; nothing runs while the page is still.
  */
 export interface ReportHeading { id: string; level: number; text: string }
 
@@ -39,7 +39,7 @@ export function useActiveHeading(ids: string[], enabled: boolean): string | null
       const box = area ?? document.documentElement;
       const top = area ? area.getBoundingClientRect().top : 0;
       const atEnd = box.scrollHeight > box.clientHeight && box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
-      let current = list[0];
+      let current: string | null = null;
       for (const id of list) {
         const node = headingNode(id);
         if (node && node.getBoundingClientRect().top - top <= LINE) current = id;

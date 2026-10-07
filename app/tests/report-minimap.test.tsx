@@ -36,6 +36,12 @@ describe('useActiveHeading', () => {
     expect(result.current).toBe('section-3');
   });
 
+  it('is nothing while the reader is still above the first heading', () => {
+    page({ 'section-2': 300, 'section-3': 700, 'section-5': 1100 });
+    const { result } = renderHook(() => useActiveHeading(headings.map((item) => item.id), true));
+    expect(result.current).toBeNull();
+  });
+
   it('is nothing outside the reading view, where the headings carry no ids', () => {
     page({ 'section-2': 20 });
     const { result } = renderHook(() => useActiveHeading(['section-2'], false));
