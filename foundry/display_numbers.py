@@ -8,15 +8,20 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
-# Enough working precision that quantizing any finite amount a run can hold is exact.
+# Working precision floor; a longer amount widens it to its own digits so quantizing stays exact at any size.
 DISPLAY_PRECISION = 100
 _PLACES = Decimal("0.01")
+
+
+def _precision(value: Decimal) -> int:
+    """Digits enough to hold the value at two places (and a hundredfold for a percentage)."""
+    return max(DISPLAY_PRECISION, value.adjusted() + 5)
 
 
 def display_amount(value: Decimal) -> str:
     """An amount at two places, half away from zero, thousands grouped: 8072.5449 reads 8,072.54."""
     with localcontext() as context:
-        context.prec = DISPLAY_PRECISION
+        context.prec = _precision(value)
         shown = value.quantize(_PLACES, rounding=ROUND_HALF_UP)
         # -0.004 rounds to zero and reads 0.00, never -0.00.
         return format(shown.copy_abs() if shown.is_zero() else shown, ",f")
@@ -25,5 +30,5 @@ def display_amount(value: Decimal) -> str:
 def display_percent(ratio: Decimal) -> str:
     """A ratio as a percentage at two places: 0.94531 reads 94.53%."""
     with localcontext() as context:
-        context.prec = DISPLAY_PRECISION
+        context.prec = _precision(ratio)
         return f"{display_amount(ratio * 100)}%"

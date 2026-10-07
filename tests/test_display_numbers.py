@@ -26,3 +26,9 @@ def test_display_amount_two_places_half_up_grouped(value, shown):
 ])
 def test_display_percent_two_places(ratio, shown):
     assert display_percent(Decimal(ratio)) == shown
+
+
+def test_display_amount_and_percent_any_magnitude():
+    huge = Decimal("1" + "0" * 120 + ".005")
+    assert display_amount(huge) == f"1{',000' * 40}.01"
+    assert display_percent(Decimal(10) ** 120) == f"100{',000' * 40}.00%"
