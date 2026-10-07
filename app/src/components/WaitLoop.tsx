@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 /**
  * The loop beside a wait's own words: a ring that turns into a figure-eight and
  * back, drawn by a CSS path animation (components.css). The shape is chanhdai.com's
- * mobius-loop-icon (MIT; WaitLoop.license.txt), redrawn without its animation library.
+ * mobius-loop-icon (MIT; chanhdai.LICENSE.txt), redrawn without its animation library.
  *
  * It only appears once the wait has lasted `delay` ms: on a quick call a flash of
  * motion reads as a glitch. It is decorative; the Chinese text next to it carries

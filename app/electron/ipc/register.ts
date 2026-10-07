@@ -22,6 +22,7 @@ import type { UniverPreviewHost } from '../univer.js';
 import { changeTaskLifecycle, newTask, sampleTask } from '../writes.js';
 import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
+import { type Appearance, appearanceOf, readAppearance, writeAppearance } from '../appearance.js';
 import * as path from 'node:path';
 import type { ReportHost } from '../reports/host.js';
 import { withDraftSpec } from '../reports/input.js';
@@ -103,6 +104,8 @@ export function registerIpc(
     /** This app's own state root; a session's workspace is made under it. */
     userData: () => string;
   },
+  /** Where the appearance choice is kept and how it reaches the window. Absent, the switch is not offered. */
+  appearance?: { folder: () => string; apply: (value: Appearance) => void },
 ): { shutdown(): void } {
   /**
    * The locator scratch directories this process fenced Univer to, by task.
@@ -513,6 +516,25 @@ export function registerIpc(
       dialogOpen.delete(entry.kind);
       await appendWait(folder, entry, picking);
       return { written: true };
+    }));
+
+  /**
+   * The window's appearance. Registered before the harness gate: the switch
+   * works in a build whose conversation failed to wire, like the rest of the shell.
+   */
+  ipcMain.handle(CHANNELS.appearanceGet, () =>
+    answer(async () => {
+      if (!appearance) throw new Error('appearance is not available in this build');
+      return { appearance: readAppearance(appearance.folder()) };
+    }));
+  ipcMain.handle(CHANNELS.appearanceSet, (_e, raw: unknown) =>
+    answer(async () => {
+      if (!appearance) throw new Error('appearance is not available in this build');
+      const value = appearanceOf(raw);
+      // Saved first: a write that fails leaves the window, the file and the switch on the old choice together.
+      writeAppearance(appearance.folder(), value);
+      appearance.apply(value);
+      return { appearance: value };
     }));
 
   if (!panes) return { shutdown };

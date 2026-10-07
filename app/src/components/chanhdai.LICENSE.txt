@@ -1,7 +1,10 @@
-The wait loop's path shapes (WaitLoop.tsx, components.css @keyframes fnd-wait-loop)
-and the scroll fade (components.css .fnd-scroll-fade) are adapted from
-chanhdai.com's mobius-loop-icon and scroll-fade-effect components
-(https://github.com/ncdai/chanhdai.com), used under the MIT License:
+Adapted from chanhdai.com's components (https://github.com/ncdai/chanhdai.com),
+used under the MIT License:
+
+- the wait loop's path shapes (WaitLoop.tsx, components.css @keyframes fnd-wait-loop),
+  from mobius-loop-icon;
+- the scroll fade (components.css .fnd-scroll-fade), from scroll-fade-effect;
+- the appearance switch (ThemeSwitch.tsx, components.css .fnd-theme), from theme-switcher.
 
 MIT License
 

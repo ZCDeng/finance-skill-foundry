@@ -41,6 +41,13 @@ export const CHANNELS = {
    * folder. Nothing reads it back over IPC, and it never reaches the task store.
    */
   timingLog: 'timing:log',
+  /**
+   * The window's appearance (跟随系统 / 浅色 / 深色). The renderer names one of
+   * three words; main saves it in this app's own folder and applies it to every
+   * page at once. See `appearance.ts`.
+   */
+  appearanceGet: 'appearance:get',
+  appearanceSet: 'appearance:set',
   tasks: 'foundry:tasks',
   task: 'foundry:task',
   gallery: 'foundry:gallery',

@@ -22,6 +22,7 @@ import { FENCE_REASON, installFence } from './harness/fence.js';
 import { type Wiring, type WiringStep, installPlugin, installPresets } from './harness/wiring.js';
 import { CHANNELS } from './ipc/contract.js';
 import { registerIpc } from './ipc/register.js';
+import { type Appearance, readAppearance } from './appearance.js';
 import { UniverPreviewHost } from './univer.js';
 
 const isDev = !app.isPackaged;
@@ -166,6 +167,12 @@ let preview: UniverPreviewHost | null = null;
 /** What `registerIpc` hands back: the locator scratch it fenced, to be removed on the way out. */
 let ipc: { shutdown(): void } | null = null;
 
+/** Where the header's appearance switch lands: one file in this app's folder, and the theme every page reads. */
+const appearance = {
+  folder: () => app.getPath('userData'),
+  apply: (value: Appearance) => { nativeTheme.themeSource = value; },
+};
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -237,8 +244,9 @@ if (!app.requestSingleInstanceLock()) {
 void app.whenReady().then(() => {
   // The losing process is on its way out; `whenReady` still fires for it.
   if (!app.hasSingleInstanceLock()) return;
-  // The shell and native views follow the same operating-system appearance.
-  nativeTheme.themeSource = 'system';
+  // Every page in the window follows one appearance: the system's unless the
+  // manager picked light or dark in the header (appearance.ts).
+  nativeTheme.themeSource = readAppearance(app.getPath('userData'));
   // A packed app takes its Dock icon from the bundle. A dev run is Electron's
   // own binary, so it is told which one to show.
   if (isDev) app.dock?.setIcon(path.join(__dirname, '..', 'resources', 'icon.png'));
@@ -324,6 +332,7 @@ void app.whenReady().then(() => {
         },
         userData: () => app.getPath('userData'),
       },
+      appearance,
     );
     // Wiring first, then the view. The order is load-bearing: the runtime reads
     // its profile once at boot, so a plugin installed after the child has
@@ -361,7 +370,7 @@ void app.whenReady().then(() => {
       }
     })();
   } else {
-    ipc = registerIpc({ varRoot: varRoot() });
+    ipc = registerIpc({ varRoot: varRoot() }, undefined, appearance);
   }
   createWindow();
   app.on('activate', () => {
