@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation, localcontext
 
+from foundry.display_numbers import display_amount
 from foundry.errors import FoundryError
 from foundry.finance_metrics import evaluate_metric
 
@@ -302,7 +303,7 @@ def _direction(value):
 def _display_profit_impact(value, unit):
     if value is None:
         return None
-    text = _text(value)
+    text = display_amount(value)
     return f"利润影响 {text} {unit}" if unit else f"利润影响 {text}"
 
 
@@ -314,7 +315,7 @@ def _display_amount_change(account, value, unit):
         return None
     word = "增加" if value > 0 else "减少" if value < 0 else "持平"
     amount = abs(value)
-    text = _text(amount)
+    text = display_amount(amount)
     suffix = f" {unit}" if unit else ""
     return f"{_ACCOUNT_LABELS.get(account, account)}{word} {text}{suffix}"
 

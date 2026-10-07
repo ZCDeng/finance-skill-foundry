@@ -107,6 +107,8 @@ Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳
 
 **文稿和导出里的数字。** 文稿的数字要过核对，所以作者写的负号、括号和小数位一律不改，只换字体、颜色和字重（决定 1A）。阅读视图、导出 HTML 和 PDF 里，`format.ts` 判定为数字的格（`td.num`）用 IBM Plex Mono 右对齐，负数格（以负号或括号开头）加 `neg` 着 `fnd-negative`，首格「合计」「总计」的行 700 字重加上方细线，「小计」600。正文和表格里的文字用 `--fnd-font-prose`，句中数字也走 Plex Mono（决定 4B）。编辑模式下右对齐的格用数字字体，负数颜色和合计字重只在阅读视图和导出里显示。导出 HTML 和 PDF 用 data URL 内嵌三个字重的 WOFF2，打印时负数色固定为浅色值。Word 内嵌 IBM 官方发布包里的 `IBMPlexMono-Regular.ttf`（Word 每个字体只嵌一个 Regular，粗体由 Word 加粗）：数字格的拉丁字符用 Plex Mono、单位字用 Noto Sans SC，负数 #94463D，小计和合计行加粗，合计行上方加线；正文只有数字和 % 拆成 Plex Mono 的片段。图表里坐标刻度、数值标签和序号整段用 Plex Mono，数值标签加千分位、保留全部小数位，负值标签用 #94463d；图表其余文字只让数字走 Plex Mono。Word 里的图表在光栅化时同样内嵌这些字体。
 
+**后端写好的显示文字。** 指标、差异和结果说明里由后端拼好的显示文字（如「利润影响 -10.00 万元」「成本增加 10.00 万元」）统一由 `foundry/display_numbers.py` 生成：金额保留 2 位小数、四舍五入（HALF_UP）、千分位，不出现 -0.00；比率保留 2 位加 %（决定 8A）。只改显示文字，计算值、存储值、文稿事实值和核对逻辑不变。显示文字变了，所以 `FINANCE_CALCULATION_VERSION` 升到 3，旧运行要重跑才显示新写法。
+
 **文稿与方法。** 文稿支持 Markdown 阅读和独立编辑，借鉴 Kami 的行长、章节留白与轻表格规范。仅当已保存的计算依据与正文末尾完全匹配时，阅读区将该附录折叠，编辑和导出仍保留完整正文；旧版和不匹配内容直接呈现。工作副本按任务/版本使用会话级存储恢复，正式保存生成新版本；交给助手或导出前先保存改动。改正文不替换已引用的历史运行，导出、归档与经理认可分别操作，「归档此版」和导出并列在文稿工具栏。发布前检查里相同的阅读建议合并成一条，逐段写出章节、段序和段首文字，点「定位」切到阅读视图并滚到该段；分析要求的缺口按原因合并，要求和组织列在原因下面，完整说明留在「原始问题」里。方法保存是折叠的可选动作，复用重新选择资料与参数；未来领域入口随实际能力出现。
 
 **验证边界。** 已核对最终整窗图与[流程](build/ui-workspace-review/final/verification.json)、[比较补拍](build/ui-workspace-review/final/comparison-recapture.json)、[原生检查](build/verification/native-workspace-final.json)、[产物记录](build/verification/ui-final-artifacts.json)：26 项原生检查和 6 项界面流程通过，资料为合成 fixture，真实 provider 调用为 0。真实模型接收/流式响应、物理 macOS 中文候选窗、完整屏幕阅读器流程未验收。[最终 ship](docs/reviews/2026-09-06-ui-finish-review.md)仅覆盖 F1–F4 修复评分；详细实现与限制见 [UI 实施记录](docs/plans/2026-09-06-ui-execution-log.md)。

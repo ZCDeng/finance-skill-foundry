@@ -39,7 +39,9 @@ from foundry.finance_model import (
 )
 from foundry.finance_variance import explain_variance, price_quantity_bridge
 
-FINANCE_CALCULATION_VERSION = 2
+# 3: display strings (amount_change_display, profit_impact_display, *_display) read at two places with grouped
+# thousands, so an earlier run's output hash cannot confirm or refute a rerun (it reads unverified).
+FINANCE_CALCULATION_VERSION = 3
 """What the finance engine computes, recorded on each run beside (not in) its result.
 
 2 marks an account with source rows on one side only as partial (缺项). Runs

@@ -33,6 +33,7 @@ from typing import Any
 
 from foundry.analysis import _hash_bytes
 from foundry.analysis_data import json_value, parse_source
+from foundry.display_numbers import display_amount
 from foundry.errors import FoundryError
 from foundry.finance_requirements import (
     _declared_basis,
@@ -46,8 +47,9 @@ from foundry.finance_requirements import (
 # Vocabulary 3: the vocabulary also pairs rows and words the conclusion sentences; an estimated budget has a span.
 # Vocabulary 4: a variance row that is not actual minus budget silences its pair's sentence and warns.
 # Vocabulary 5: rows sharing organization, period and metric_label under different metrics warn (label_ambiguous).
+# Vocabulary 6: conclusion figures that round to zero read 0.00, never -0.00 (foundry.display_numbers).
 # Unit table 2: 百分点 holds a difference of two percentages.
-VOCABULARY_VERSION = 5
+VOCABULARY_VERSION = 6
 UNIT_TABLE_VERSION = 2
 ESTIMATE_WORDS_VERSION = 1
 # A declaration covers at most this many rows; a longer result is declared up to here and marked incomplete.
@@ -516,9 +518,7 @@ def _plain(value: Decimal) -> str:
 
 def _shown(value: Decimal) -> str:
     """A figure as the cards show it: two places, half away from zero, thousands grouped (decimalToFixed)."""
-    with localcontext() as context:
-        context.prec = CONCLUSION_PRECISION
-        return format(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), ',f')
+    return display_amount(value)
 
 
 def _period_phrase(pair: dict) -> str:
