@@ -6,6 +6,7 @@ import { assumptionSummary, parameterSummary, RunStatus, STATUS, Table } from '.
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
+import { CollectionHealthView, isCollectionHealthRun } from './CollectionHealthView.js';
 import { RevisionDiff } from './RevisionDiff.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
@@ -211,12 +212,13 @@ function ContractWarnings({ warnings }: { warnings: ResultContractWarning[] }) {
 
 /** Whether the result is drawn by BusinessResultView, which then also holds the run's diagnostics. */
 function rendersBusinessView(run: AnalysisRun): boolean {
-  return Boolean(run.result?.columns.length) && !isFinanceVarianceRun(run) && !isStructuredAggregateRun(run) && !isScriptSummaryRun(run)
+  return Boolean(run.result?.columns.length) && !isCollectionHealthRun(run) && !isFinanceVarianceRun(run) && !isStructuredAggregateRun(run) && !isScriptSummaryRun(run)
     && runPresentationRole(run) === 'business' && Boolean(run.result?.rows.length);
 }
 
 /** The result, with the run's next steps right after what a manager reads first and one 技术信息 fold. */
 function RunResultTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+  if (isCollectionHealthRun(run)) return <CollectionHealthView run={run} actions={actions} technical={technical} />;
   if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} technical={technical} />;
   if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} technical={technical} />;
   if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} technical={technical} />;

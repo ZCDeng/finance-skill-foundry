@@ -485,4 +485,28 @@
 .analysis-report-review-candidate, .analysis-report-review-difference { margin: 0; font-size: var(--fnd-size-body); font-family: var(--fnd-font-prose); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .analysis-report-review-difference { color: var(--fnd-warning); }
 .analysis-report-review-closing { margin: 0; padding-top: 10px; border-top: 1px solid var(--fnd-line); color: var(--fnd-ink); font-size: var(--fnd-size-small); }
+/* 回款与现金 (CollectionHealthView): screening lights, the break-even scatter and the sensitivity grid. */
+.analysis-health { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.analysis-health-level { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-family: var(--fnd-font-prose); font-size: var(--fnd-size-small); white-space: nowrap; }
+.analysis-health-level--red { color: var(--fnd-warning); }
+.analysis-health-level--yellow { color: var(--fnd-level-watch); }
+.analysis-health-level--green { color: var(--fnd-level-ok); }
+.analysis-health-level--unknown { color: var(--fnd-mark-absent); }
+.analysis-health-table th[scope='row'], .analysis-health-detail th[scope='row'] { font-weight: 500; text-align: left; white-space: nowrap; }
+.analysis-health-estimate { margin-left: 6px; color: var(--fnd-muted); font-family: var(--fnd-font-prose); font-size: var(--fnd-size-small); }
+.analysis-health-note { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
+.analysis-health-chart { margin: 0; max-width: 640px; }
+.analysis-health-chart svg { width: 100%; height: auto; display: block; }
+.analysis-health-grid { stroke: var(--fnd-line); stroke-width: 1; }
+.analysis-health-tick { fill: var(--fnd-muted); font-family: var(--fnd-font-figure); font-size: 11px; font-variant-numeric: tabular-nums; }
+.analysis-health-axis { fill: var(--fnd-muted); font-family: var(--fnd-font-prose); font-size: 12px; }
+.analysis-health-line { stroke: var(--fnd-warning-line); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.analysis-health-dot { stroke: var(--fnd-surface); stroke-width: 1.5; }
+.analysis-health-dot--red { fill: var(--fnd-warning); }
+.analysis-health-dot--yellow { fill: var(--fnd-level-watch); }
+.analysis-health-dot--green { fill: var(--fnd-level-ok); }
+.analysis-health-dot--unknown { fill: var(--fnd-mark-absent); }
+.analysis-health-cell--loss { background: var(--fnd-warning-fill); }
+.analysis-health-cell--edge { background: var(--fnd-level-watch-fill); }
+.analysis-health-cell--current { outline: 2px solid var(--fnd-selected); outline-offset: -2px; }
 }

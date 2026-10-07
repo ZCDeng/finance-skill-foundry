@@ -288,6 +288,8 @@ def resolve_entities(
                 "sources": sources,
                 "manual": manual,
                 "unit": distinct[0] if distinct else None,
+                # A row of a detail table, or a unit named on its own (often the group total over those rows).
+                "origin": raw.get("origin") or "declared",
                 "sensitivity": bool(raw.get("sensitivity")),
             }
         )
@@ -362,7 +364,7 @@ def _table_entities(tables: Any, rows_by_alias: dict[str, list[dict]]) -> list[d
                     continue
                 values[key] = {**spec, "alias": alias, "source_row": row["source"]["source_row"]}
             if values:
-                out.append({"name": prefix + str(name).strip(), "values": values})
+                out.append({"name": prefix + str(name).strip(), "values": values, "origin": "table"})
     return out
 
 
@@ -743,6 +745,7 @@ def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict
             shown = _shown(kind, number) if row_unit in {"%", "百分点"} else number
             return {
                 "entity": entity["name"],
+                "entity_origin": entity.get("origin", "declared"),
                 "metric_key": key,
                 "metric_label": metric["label"],
                 "scenario": scenario,
@@ -809,6 +812,8 @@ def break_even_matrix(entity: dict, params: dict[str, Decimal]) -> dict | None:
         "gross_margins": [format(m, "f") for m in margins],
         "collection_rates": [format(c, "f") for c in rates],
         "cells": [[format(c - (1 - m) - er[0], "f") for c in rates] for m in margins],
+        # Cells at or above zero but below this sit close to the line (the gap's yellow threshold).
+        "edge_below": format(params["gap_yellow_below"], "f"),
         "current": {
             "gross_margin": None if gm is None else format(gm[0], "f"),
             "collection_rate": None
@@ -857,6 +862,8 @@ def evaluate_collection_health(entities: list[dict], params: dict[str, Decimal])
         )
     return {
         "domain": DOMAIN,
+        # Stamped here, not on every scenario result: older runs of other kinds keep their output hash.
+        "scenario_kind": "collection_health",
         "columns": COLUMNS,
         "rows": rows,
         "diagnostics": diagnostics,

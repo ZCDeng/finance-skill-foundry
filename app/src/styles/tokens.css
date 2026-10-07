@@ -75,6 +75,11 @@
   --fnd-negative: #94463d;
   --fnd-mark-absent: #6b6b6b;
   --fnd-mark-external: #3a6b8a;
+  /* A screening light that passed: quieter than the warning, never the accent. */
+  --fnd-level-ok: #4f7553;
+  /* A screening light to watch: orange-brown, apart from the gold that marks where the reader is. */
+  --fnd-level-watch: #a35f1f;
+  --fnd-level-watch-fill: #a35f1f1f;
   --fnd-duration: 180ms;
   --fnd-easing: ease;
   --fnd-transition: var(--fnd-duration) var(--fnd-easing);
@@ -107,6 +112,9 @@
     --fnd-negative: #d9a097;
     --fnd-mark-absent: #9a9a9a;
     --fnd-mark-external: #96bcd2;
+    --fnd-level-ok: #9cc0a0;
+    --fnd-level-watch: #e0a46a;
+    --fnd-level-watch-fill: #e0a46a1f;
   }
 }
 :root[data-theme='dark'] {
@@ -136,6 +144,9 @@
   --fnd-negative: #d9a097;
   --fnd-mark-absent: #9a9a9a;
   --fnd-mark-external: #96bcd2;
+  --fnd-level-ok: #9cc0a0;
+  --fnd-level-watch: #e0a46a;
+  --fnd-level-watch-fill: #e0a46a1f;
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --fnd-duration: 0ms; }

@@ -540,3 +540,26 @@ def test_assistant_tools_offer_the_kind_the_engine_accepts():
         for kind in SCENARIO_KINDS:
             assert f'"{kind}"' in text, (path, kind)
         assert "entity_tables" in text
+
+
+def test_only_collection_health_results_carry_the_kind_and_table_rows_their_origin(tmp_path):
+    service, context = _service(tmp_path, SHEET)
+    scenario = service.save_scenario(
+        {
+            "context_id": context["id"],
+            "kind": "collection_health",
+            "inputs": {
+                "entities": [{"name": "集团", "values": {"revenue": _cell("营业收入"), "cost": _cell("营业成本")}}],
+                "entity_tables": [{"alias": "kpi", "name_column": "指标", "exclude": ["营业收入", "营业成本", "期间费用", "本年账单收缴率"],
+                                   "columns": {"revenue": "本年累计", "cash_from_sales": "上年同期累计"}}],
+            },
+        }
+    )
+    result = service.run_scenario({"scenario_id": scenario["id"]})["result"]
+    assert result["scenario_kind"] == "collection_health"
+    assert {row["entity"]: row["entity_origin"] for row in result["rows"]} == {
+        "集团": "declared", "销售商品、提供劳务收到的现金": "table"}
+    driver = service.save_scenario({"context_id": context["id"], "kind": "driver_model", "inputs": {
+        "drivers": [{"name": "x", "direct_assumption": True}], "manager_assumptions": {"x": {"value": "1"}}}})
+    # Older runs of the other kinds keep their output hash: nothing new is stamped on them.
+    assert "scenario_kind" not in service.run_scenario({"scenario_id": driver["id"]})["result"]
