@@ -69,6 +69,16 @@
 .report-visual-preview > p { margin: 0; padding: 18px; }
 .report-visual-data { min-width: 0; font-size: var(--fnd-size-small); }
 .report-visual-data[open] > summary { margin-bottom: 8px; }
+/*
+ * The reading view injects the exported report HTML (electron/reports/format.ts), whose chart
+ * figures carry their own <summary>查看图表数据与说明</summary>. React's DisclosureSummary cannot
+ * reach that markup, so this one scoped row redraws the quiet disclosure (DESIGN.md 折叠段落):
+ * muted 12px/18px, a 14px Lucide chevron-right drawn as a mask, turned a quarter when open.
+ */
+.analysis-draft-main .report-visual-data > summary { position: relative; display: block; list-style: none; width: fit-content; max-width: calc(100% + 8px); margin-inline-start: -8px; padding: 3px 8px 3px 32px; border-radius: var(--fnd-radius-mark); color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 18px; cursor: pointer; transition: background var(--fnd-transition); }
+.analysis-draft-main .report-visual-data > summary:hover { background: var(--fnd-selection-surface); }
+.analysis-draft-main .report-visual-data > summary::before { content: ''; position: absolute; top: 5px; left: 8px; width: 14px; height: 14px; background: currentColor; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; transition: transform var(--fnd-transition); }
+.analysis-draft-main .report-visual-data[open] > summary::before { transform: rotate(90deg); }
 .report-visual-data table { font-variant-numeric: tabular-nums; }
 .report-source-recovery { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px; border: 1px solid var(--fnd-line); border-radius: 8px; }
 .report-source-recovery p { flex: 1; margin: 0; min-width: 220px; }

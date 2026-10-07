@@ -81,11 +81,6 @@ function rules(css: string): [string, string][] {
   return found;
 }
 
-/** The compound the rule styles: what is left after the last combinator. */
-function subject(selector: string): string {
-  return selector.split(/\s*[>+~]\s*|\s+/).pop() ?? '';
-}
-
 describe('disclosures (DESIGN.md 折叠段落)', () => {
   it('no longer has --fnd-disclosure', () => {
     const compact = fileURLToPath(new URL('../harness-client/compact.css', import.meta.url));
@@ -93,22 +88,68 @@ describe('disclosures (DESIGN.md 折叠段落)', () => {
     expect(holders).toEqual([]);
   });
 
-  it('lets page rules on a summary element only space it', () => {
-    const spacing: string[] = [];
-    for (const path of sheets(SRC)) {
-      for (const [selector, body] of rules(readFileSync(path, 'utf8'))) {
-        if (!/^summary\b/.test(subject(selector))) continue;
-        const properties = body.split(';').map((part) => part.split(':')[0].trim()).filter(Boolean);
-        expect(properties.filter((name) => !name.startsWith('margin')), `${path.slice(SRC.length + 1)} ${selector}`).toEqual([]);
-        spacing.push(selector);
+  /*
+   * Outside components.css (which owns .fnd-disclosure-summary), a rule that names a summary
+   * anywhere in its selector, or the shared summary classes, may only space the disclosure.
+   * The exceptions are listed by file and selector, each with the reason it may draw.
+   */
+  const MAY_DRAW: Record<string, string> = {
+    'styles/base.css :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible': 'the shared 1px focus ring',
+    'views/analysis.css .analysis-source-refresh > summary .analysis-note': 'the description line inside the 更新 ERP 来源 summary',
+    'views/analysis.css .analysis-source-refresh:not([open]) > summary .analysis-note::after': 'the 点击展开刷新 suffix (PR E)',
+    // The reading view injects exported report HTML (electron/reports/format.ts); its chart-data
+    // <summary> is not React, so report.css redraws the quiet disclosure for it.
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary:hover': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary::before': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data[open] > summary::before': 'exported HTML chart-data summary',
+  };
+
+  /** The rule offenders and the exceptions it used, for one sheet's text. */
+  function summaryRules(name: string, css: string): { offenders: string[]; excepted: string[] } {
+    const offenders: string[] = [];
+    const excepted: string[] = [];
+    for (const [selector, body] of rules(css)) {
+      const touches = /(^|[\s>+~(,])summary(?![\w-])/.test(selector) || selector.includes('.fnd-disclosure-summary');
+      if (!touches) continue;
+      const key = `${name} ${selector}`;
+      if (key in MAY_DRAW) {
+        excepted.push(key);
+        continue;
       }
+      const properties = body.split(';').map((part) => part.split(':')[0].trim()).filter(Boolean);
+      const drawn = properties.filter((property) => !property.startsWith('margin'));
+      if (drawn.length) offenders.push(`${key} { ${drawn.join(', ')} }`);
     }
-    // The parser still sees the spacing rules that are allowed to stay.
-    expect(spacing).toEqual(expect.arrayContaining([
-      '.analysis-source-refresh[open] > summary',
-      '.analysis-details[open] > summary',
-      '.fnd-doc__locks[open] > summary',
-      '.report-visual-data[open] > summary',
-    ]));
+    return { offenders, excepted };
+  }
+
+  it('lets rules outside components.css only space a summary', () => {
+    const offenders: string[] = [];
+    const excepted: string[] = [];
+    for (const path of sheets(SRC)) {
+      const name = path.slice(SRC.length + 1);
+      if (name === 'components/components.css') continue;
+      const found = summaryRules(name, readFileSync(path, 'utf8'));
+      offenders.push(...found.offenders);
+      excepted.push(...found.excepted);
+    }
+    expect(offenders).toEqual([]);
+    // Every exception still names a live rule, so the list cannot rot into blanket permission.
+    expect(excepted.sort()).toEqual(Object.keys(MAY_DRAW).sort());
+  });
+
+  it('catches a summary restyled through a descendant, a class or the icon', () => {
+    const probe = [
+      '.x details > summary span { color: red; }',
+      '.x .fnd-disclosure-summary { font-weight: 600; }',
+      '.x .fnd-disclosure-summary__icon { transform: none; }',
+      '.x[open] > summary { margin-bottom: 4px; }',
+    ].join('\n');
+    expect(summaryRules('probe.css', probe).offenders).toEqual([
+      'probe.css .x details > summary span { color }',
+      'probe.css .x .fnd-disclosure-summary { font-weight }',
+      'probe.css .x .fnd-disclosure-summary__icon { transform }',
+    ]);
   });
 });

@@ -63,11 +63,18 @@ describe('DisclosureSummary (DESIGN.md 折叠段落)', () => {
 });
 
 describe('every in-app disclosure goes through DisclosureSummary', () => {
-  it('writes <summary> only inside components/Disclosure.tsx', () => {
-    const writers = files(SRC, '.tsx')
+  // Scope: every .ts/.tsx under app/src (the React views) and app/electron (main process and
+  // exported HTML). The one known writer outside React is the exported report's chart-data
+  // summary in electron/reports/format.ts; report.css redraws it in the reading view.
+  it('writes <summary> only inside components/Disclosure.tsx and the exported report HTML', () => {
+    const APP = resolve(process.cwd());
+    const sources = [...files(SRC, '.ts'), ...files(SRC, '.tsx'), ...files(resolve(APP, 'electron'), '.ts')];
+    const writers = sources
+      .filter((path) => !/\.test\.tsx?$/.test(path))
       .filter((path) => readFileSync(path, 'utf8').includes('<summary'))
-      .map((path) => path.slice(SRC.length + 1));
-    expect(writers).toEqual(['components/Disclosure.tsx']);
+      .map((path) => path.slice(APP.length + 1))
+      .sort();
+    expect(writers).toEqual(['electron/reports/format.ts', 'src/components/Disclosure.tsx']);
   });
 
   it('never styles the native disclosure marker', () => {
