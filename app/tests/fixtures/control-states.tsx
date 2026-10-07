@@ -72,7 +72,7 @@ function ControlStatesFixture() {
           </details>
           <details className="analysis-details" open>
             <DisclosureSummary>来源明细 · 12 行</DisclosureSummary>
-            <p>展开后箭头转向下方。</p>
+            <p>展开后箭头转向下方；这段正文的左缘和箭头的左缘对齐。</p>
           </details>
           <details className="analysis-details analysis-technical">
             <DisclosureSummary tone="quiet">技术信息 · 诊断 2 项</DisclosureSummary>

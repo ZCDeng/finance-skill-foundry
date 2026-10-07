@@ -506,6 +506,25 @@ describe('the disclosure summary', () => {
     }
   });
 
+  it('steps technical folds down to the label size in the secondary text colour, same left edge', () => {
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet']`)).toMatchObject({
+      color: 'var(--fnd-muted)',
+      'font-size': 'var(--fnd-size-label)',
+      'line-height': '18px',
+    });
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet']`)).not.toHaveProperty('padding-left');
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`)).toMatchObject({ width: '14px', height: '14px' });
+  });
+
+  it('pulls the row 8px left so the chevron box starts on the content edge', () => {
+    expect(declarations(COMPONENTS, SUMMARY)).toMatchObject({
+      'margin-inline-start': '-8px',
+      'max-width': 'calc(100% + 8px)',
+      padding: '5px 8px 5px 32px',
+    });
+    expect(declarations(COMPONENTS, ICON).left).toBe('8px');
+  });
+
   it('turns the chevron a quarter when open, on the shared transition', () => {
     expect(declarations(COMPONENTS, `details[open] > ${SUMMARY} > ${ICON}`).transform).toBe('rotate(90deg)');
     expect(declarations(COMPONENTS, ICON).transition).toBe('transform var(--fnd-transition)');
