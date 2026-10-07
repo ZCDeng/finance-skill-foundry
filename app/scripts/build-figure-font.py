@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 import tarfile
 from urllib.request import urlopen
+import zipfile
 
 from fontTools.ttLib import TTFont
 
@@ -30,6 +31,11 @@ FACES = {
     600: ("IBMPlexMono-SemiBold.woff2", "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3"),
     700: ("IBMPlexMono-Bold.woff2", "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d"),
 }
+# Word embeds TrueType only, and the npm package carries no TTF. IBM's own release archive for the same version does;
+# its WOFF2 files are byte-identical to the npm ones. Word embeds a single Regular face per family.
+RELEASE = f"https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%40{VERSION}/ibm-plex-mono.zip"
+RELEASE_SHA256 = "6d23f01257663d8cc49a0d64c22ced630b79e0e2a0ac08a0da86e9a38bbc481c"
+WORD_FACE = ("IBMPlexMono-Regular.ttf", "7c6fbddca4b700be918f5f6183d9bd4464fa427fe435f0b480d77fe2bb8c5a43")
 LICENSE = ("LICENSE.txt", "OFL.txt", "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da")
 # Every character a figure is written with: digits, grouping, sign, accounting parentheses, percent and the space
 # that holds a positive figure's closing-parenthesis column.
@@ -71,7 +77,13 @@ def check() -> None:
             raise ValueError(f"bundled face is not the publisher's file: {row['file']}")
         if inspect_font(path) != row["measured"]:
             raise ValueError(f"face metadata or figure widths differ from manifest: {row['file']}")
-    print(json.dumps({"verified": [row["file"] for row in manifest["faces"]]}))
+    word = manifest["word"]
+    path = DEST / word["file"]
+    if digest(path.read_bytes()) != word["sha256"] or word["sha256"] != WORD_FACE[1]:
+        raise ValueError(f"bundled Word face is not the publisher's file: {word['file']}")
+    if inspect_font(path) != word["measured"] or word["measured"]["fs_type"] != 0:
+        raise ValueError(f"Word face metadata, embedding permission or figure widths differ: {word['file']}")
+    print(json.dumps({"verified": [row["file"] for row in manifest["faces"]] + [word["file"]]}))
 
 
 def build() -> None:
@@ -97,6 +109,19 @@ def build() -> None:
         if digest(license_text) != LICENSE[2]:
             raise ValueError("publisher license hash mismatch")
         (DEST / LICENSE[1]).write_bytes(license_text)
+    release = urlopen(RELEASE, timeout=120).read()
+    if digest(release) != RELEASE_SHA256:
+        raise ValueError("release archive hash mismatch")
+    with zipfile.ZipFile(io.BytesIO(release)) as archive:
+        source = f"ibm-plex-mono/fonts/complete/ttf/{WORD_FACE[0]}"
+        face = archive.read(source)
+        if digest(face) != WORD_FACE[1]:
+            raise ValueError(f"publisher face hash mismatch: {WORD_FACE[0]}")
+        if digest(archive.read("ibm-plex-mono/LICENSE.txt")) != LICENSE[2]:
+            raise ValueError("release license differs from the npm license")
+    (DEST / WORD_FACE[0]).write_bytes(face)
+    word = {"file": WORD_FACE[0], "sha256": WORD_FACE[1], "bytes": len(face), "release": RELEASE,
+            "release_sha256": RELEASE_SHA256, "source": source, "measured": inspect_font(DEST / WORD_FACE[0])}
     manifest = {
         "source": {"package": PACKAGE, "version": VERSION, "tarball": TARBALL, "sha256": TARBALL_SHA256,
                    "repository": "https://github.com/IBM/plex"},
@@ -104,6 +129,7 @@ def build() -> None:
         "build": {"copied_unmodified": True, "subset": False, "converted": False},
         "figure_characters": FIGURE_CHARACTERS,
         "faces": faces,
+        "word": word,
     }
     (DEST / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     check()

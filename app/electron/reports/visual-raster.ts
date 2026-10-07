@@ -4,7 +4,9 @@ import type { ReportDocument, ReportNode } from './model.js';
 import { renderReportVisualSvg, reportVisualCaption } from './visuals.js';
 
 /** Only the controlled renderer's primitives reach this isolated, offline rasterizer. */
-export async function materializeReportVisualsForDocx(document: ReportDocument, fontDataUrl: string, signal: AbortSignal): Promise<ReportDocument> {
+const FONT_URL = /^data:font\/woff2;base64,[A-Za-z0-9+/=]+$/;
+
+export async function materializeReportVisualsForDocx(document: ReportDocument, fontDataUrl: string, signal: AbortSignal, figureFonts: { weight: number; url: string }[] = []): Promise<ReportDocument> {
   const visuals: ReportNode[] = [];
   const collect = (nodes: ReportNode[]) => nodes.forEach((node) => {
     if (node.type === 'reportVisual') visuals.push(node);
@@ -13,7 +15,13 @@ export async function materializeReportVisualsForDocx(document: ReportDocument, 
   collect(document.content);
   if (!visuals.length) return document;
   if (visuals.length > 20) throw new Error('文稿最多包含 20 张图表，请按章节拆分。');
-  if (!/^data:font\/woff2;base64,[A-Za-z0-9+/=]+$/.test(fontDataUrl)) throw new Error('图表导出缺少离线字体。');
+  if (!FONT_URL.test(fontDataUrl) || !figureFonts.every((font) => FONT_URL.test(font.url) && Number.isInteger(font.weight))) throw new Error('图表导出缺少离线字体。');
+  // Every family the chart names, embedded: Noto Sans SC for words, IBM Plex Mono for whole figures, FND Figures for
+  // the digits inside chart text. The SVG's own font-family attributes choose among them.
+  const faces = [{ family: 'Noto Sans SC', url: fontDataUrl, weight: '100 900', range: '' },
+    ...figureFonts.flatMap((font) => [{ family: 'IBM Plex Mono', url: font.url, weight: String(font.weight), range: 'U+0020-007E,U+00A0-00FF,U+2030,U+2212' },
+      { family: 'FND Figures', url: font.url, weight: String(font.weight), range: 'U+0025,U+0030-0039' }])];
+  const style = faces.map((face) => `@font-face{font-family:"${face.family}";src:url("${face.url}") format("woff2");font-weight:${face.weight};${face.range ? `unicode-range:${face.range};` : ''}}`).join('');
   if (signal.aborted) throw new Error('已取消文档转换。');
   const window = new BrowserWindow({ show: false, width: 960, height: 800, webPreferences: {
     sandbox: true, contextIsolation: true, nodeIntegration: false, partition: `report-visual-${randomUUID()}`,
@@ -32,16 +40,19 @@ export async function materializeReportVisualsForDocx(document: ReportDocument, 
     let totalBytes = 0;
     for (const node of visuals) {
       if (signal.aborted) throw new Error('已取消文档转换。');
-      const svg = renderReportVisualSvg(node.attrs?.visual).replace(/(<svg\b[^>]*>)/, `$1<style>@font-face{font-family:"Noto Sans SC";src:url("${fontDataUrl}") format("woff2");font-weight:100 900;}text{font-family:"Noto Sans SC",sans-serif}</style>`);
+      const svg = renderReportVisualSvg(node.attrs?.visual).replace(/(<svg\b[^>]*>)/, `$1<style>${style}</style>`);
       const src = await window.webContents.executeJavaScript(`(async () => {
         const svg = ${JSON.stringify(svg)};
         const markup = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
         const box = markup.getAttribute('viewBox').split(/\\s+/).map(Number);
         const width = box[2], height = box[3];
         if (!(width > 0 && width <= 1920 && height > 0 && height <= 6000)) throw new Error('图表尺寸无效');
-        // Warm the exact embedded font before decoding the standalone SVG image.
-        const font = new FontFace('Noto Sans SC', 'url(' + ${JSON.stringify(fontDataUrl)} + ')');
-        document.fonts.add(await font.load()); await document.fonts.ready;
+        // Warm the exact embedded fonts before decoding the standalone SVG image.
+        for (const face of ${JSON.stringify(faces)}) {
+          const font = new FontFace(face.family, 'url(' + face.url + ')', { weight: face.weight, ...(face.range ? { unicodeRange: face.range } : {}) });
+          document.fonts.add(await font.load());
+        }
+        await document.fonts.ready;
         const image = new Image();
         image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
         await image.decode();

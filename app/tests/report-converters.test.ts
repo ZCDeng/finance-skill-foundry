@@ -1,4 +1,6 @@
 import JSZip from 'jszip';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { documentFromMarkdown, documentToMarkdown, exportDocx, importReport, renderReportHtml } from '../electron/reports/converters.js';
 import type { ReportDocument, ReportNode, ReportSource } from '../electron/reports/model.js';
@@ -196,7 +198,8 @@ describe('report document converters', () => {
         expect(html).not.toContain('109742.028 万元（估算）');
       }
 
-      const documentXml = await (await JSZip.loadAsync(await exportDocx(doc, '区域收入', undefined, options))).file('word/document.xml')!.async('string');
+      // Prose digits are their own Plex Mono runs, so sentences are read as the text Word shows.
+      const documentXml = wordText(await (await JSZip.loadAsync(await exportDocx(doc, '区域收入', undefined, options))).file('word/document.xml')!.async('string'));
       const positions = ['估算值声明', '以下数值为估算，经理确认前不作为批复预算。', formula, '华东区域同期预算 117814.5625 万元（估算）'].map((text) => documentXml.indexOf(text));
       expect(positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1]))).toBe(true);
       expect(documentXml).toContain(declaredValue);
@@ -322,6 +325,59 @@ describe('report document converters', () => {
     expect(JSON.stringify(result.document)).toContain('"page":1');
   });
 
+  it('embeds IBM Plex Mono in HTML and PDF exports: whole figure cells, and digits inside prose', () => {
+    const doc = documentFromMarkdown(['利润 12 万元。', '', '| 项目 | 本月 |', '| --- | --- |', '| 小计 | 1.00 |', '| 合计 | -2.00 |'].join('\n'));
+    const url = 'data:font/woff2;base64,AAAA';
+    const html = renderReportHtml(doc, '数字', { print: true, figureFonts: [400, 600, 700].map((weight) => ({ weight, url })) });
+    for (const weight of [400, 600, 700]) {
+      expect(html).toContain(`@font-face{font-family:"IBM Plex Mono";src:url("${url}") format("woff2");font-weight:${weight};font-style:normal;font-display:block;unicode-range:U+0020-007E,U+00A0-00FF,U+2030,U+2212;}`);
+      expect(html).toContain(`@font-face{font-family:"FND Figures";src:url("${url}") format("woff2");font-weight:${weight};font-style:normal;font-display:block;unicode-range:U+0025,U+0030-0039;}`);
+    }
+    expect(html).toContain('body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:var(--report-prose);');
+    expect(html).toContain('td.num{font-family:var(--report-figure)}');
+    expect(html).toContain('<tr class="row-subtotal">');
+    expect(html).toContain('<tr class="row-total"><td class="text" data-first-column=""><p>合计</p></td><td class="num neg"><p>-2.00</p></td></tr>');
+    // Anything but an inline WOFF2 data URL is dropped, so an export never reaches for a network font.
+    expect(renderReportHtml(doc, '数字', { figureFonts: [{ weight: 400, url: 'https://example.com/plex.woff2' }] })).not.toContain('example.com');
+  });
+
+  it('sets Word figure cells in the embedded IBM Plex Mono, negatives in the muted red and totals bold', async () => {
+    const doc = documentFromMarkdown([
+      '营业利润 1,250,000.00 元。',
+      '',
+      '| 项目 | 本月 |',
+      '| --- | --- |',
+      '| 收入 | 1,250,000.00 |',
+      '| 成本 | -98,765.43 |',
+      '| 小计 | 1,151,234.57 |',
+      '| 合计 | 1,151,234.57 |',
+    ].join('\n'));
+    const plex = new Uint8Array(readFileSync(fileURLToPath(new URL('../src/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf', import.meta.url))));
+    const zip = await JSZip.loadAsync(await exportDocx(doc, '数字', undefined, {}, plex));
+    const documentXml = await zip.file('word/document.xml')!.async('string');
+    const fontTable = await zip.file('word/fontTable.xml')!.async('string');
+    expect(fontTable).toContain('w:name="IBM Plex Mono"');
+    expect(fontTable).toContain('w:embedRegular');
+    expect(Object.keys(zip.files).some((name) => /^word\/fonts\/.+\.odttf$/.test(name))).toBe(true);
+    const run = (text: string) => documentXml.match(new RegExp(`<w:r>(?:(?!<w:r>).)*?<w:t[^>]*>${text.replace(/[.()]/g, '\\$&')}</w:t>`))?.[0] ?? '';
+    // A figure cell: Plex Mono for its Latin characters, Noto Sans SC for any unit, in one run.
+    expect(run('1,250,000.00')).toContain('w:ascii="IBM Plex Mono"');
+    expect(run('1,250,000.00')).toContain('w:eastAsia="Noto Sans SC"');
+    expect(run('-98,765.43')).toContain('w:val="94463D"');
+    expect(run('1,250,000.00')).not.toContain('94463D');
+    // Prose keeps its words and separators in Noto Sans SC; only the digit runs take Plex Mono.
+    expect(run('营业利润 ')).toContain('w:ascii="Noto Sans SC"');
+    expect(run('250')).toContain('w:ascii="IBM Plex Mono"');
+    // 小计 and 合计 rows are bold; the 合计 row also sits under a rule.
+    const rows = documentXml.match(/<w:tr>[\s\S]*?<\/w:tr>/g) ?? [];
+    const row = (name: string) => rows.find((xml) => xml.includes(`>${name}</w:t>`)) ?? '';
+    expect(row('收入')).not.toContain('<w:b/>');
+    expect(row('小计')).toContain('<w:b/>');
+    expect(row('合计')).toContain('<w:b/>');
+    expect(row('合计')).toContain('<w:top w:val="single"');
+    expect(row('小计')).not.toContain('<w:top w:val="single"');
+  });
+
   it('exports DOCX with A4 margins, repeated table headers, footer page numbers and exact numbers', async () => {
     const doc: ReportDocument = documentFromMarkdown([
       '# 经营与预算分析',
@@ -350,7 +406,7 @@ describe('report document converters', () => {
     expect(documentXml).toContain('华宸物业 / 2026-08 / CNY / 万元');
     expect(documentXml).toContain('<w:tblHeader/>');
     expect(documentXml).toContain('经营与预算分析');
-    expect(documentXml).toContain('-98,765.43');
+    expect(wordText(documentXml)).toContain('预算差异为 -98,765.43 元。');
     expect(documentXml).toContain('<w:vertAlign w:val="superscript"/>');
     expect(documentXml).toContain('续表');
     expect(footerXml).toContain('PAGE');
@@ -398,7 +454,9 @@ describe('report document converters', () => {
       expect(html).not.toContain('role="region"');
       expect(html).toContain('<th class="text" data-first-column=""><p>区域</p></th><th class="num"><p>1 至 8 月实际</p></th><th class="num"><p>差异率</p></th>');
       expect(html).toContain('<td class="num"><p>325,644.00 万元</p></td>');
-      expect(html).toContain('<td class="num"><p>-18,843.06 万元</p></td>');
+      // A negative keeps the author's sign and is only marked for the muted red.
+      expect(html).toContain('<td class="num neg"><p>-18,843.06 万元</p></td>');
+      expect(html).toContain('<td class="num neg"><p>-3.30%</p></td>');
       expect(html).toContain('<td class="num"><p>117814.5625 万元（估算）</p></td>');
       expect(html).toContain('<td class="num note"><p>预算为负，不作比率</p></td>');
       expect(html).toContain('<td class="text" data-first-column=""><p>华东区域</p></td>');
@@ -443,7 +501,8 @@ describe('report document converters', () => {
       '| 年份 | 2026 |',
     ].join('\n'));
     const html = renderReportHtml(doc, '单位');
-    for (const text of ['−3.30 个百分点', '+1,200.00 万元', '12,500 平方米', '300 ㎡', '35 户', '120 人', '8 笔', '3.5 亿', '120 万']) {
+    expect(html).toContain('<td class="num neg"><p>−3.30 个百分点</p></td>');
+    for (const text of ['+1,200.00 万元', '12,500 平方米', '300 ㎡', '35 户', '120 人', '8 笔', '3.5 亿', '120 万']) {
       expect(html).toContain(`<td class="num"><p>${text}</p></td>`);
     }
     expect(html).toContain('<td class="text"><p>(123</p></td>');
@@ -519,6 +578,11 @@ function minimalPdf(text: string): Buffer {
   }
   output += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(output);
+}
+
+/** The text Word shows: runs joined, one line per paragraph. */
+function wordText(xml: string): string {
+  return xml.replace(/<\/w:p>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
 
 function cell(type: 'tableHeader' | 'tableCell', text: string, attrs: Record<string, unknown> = {}): ReportNode {

@@ -33,6 +33,17 @@ export { documentFromMarkdown, documentToMarkdown, renderReportHtml };
 const TWIP_PER_MM = 56.6929133858;
 const NUMERIC_TEXT = /^[(（]?-?(?:¥|￥|\$)?\s*\d[\d,]*(?:\.\d+)?%?[)）]?$/;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+// DESIGN.md 财务数字 in Word: figure cells set their Latin characters in the embedded IBM Plex Mono (units such as 万元
+// stay in Noto Sans SC), a negative reads in the muted red, and a 合计/总计 or 小计 row is bold. Word embeds one
+// Regular face, so bold Plex is drawn by Word itself.
+const FIGURE_FONT = 'IBM Plex Mono';
+const FIGURE_RUN_FONT = { ascii: FIGURE_FONT, hAnsi: FIGURE_FONT, eastAsia: 'Noto Sans SC', cs: FIGURE_FONT };
+const NEGATIVE_COLOR = '94463D';
+const NEGATIVE_FIGURE = /^(?:[-−]|[(（](?=[-−]?(?:¥|￥|\$)?\s*\d))/;
+const TOTAL_ROW = /^(?:合计|总计|总额|total\b)/i;
+const SUBTOTAL_ROW = /^(?:小计|subtotal\b)/i;
+// In prose only digits and % take Plex Mono, as in the app (FND Figures); words, commas and points keep Noto Sans SC.
+const PROSE_DIGITS = /[0-9%]+/g;
 
 const HEADING_LEVELS = {
   1: HeadingLevel.HEADING_1,
@@ -66,7 +77,7 @@ export async function importReport(data: Buffer, format: ReportFormat, source: R
 
 type ExportOptions = { marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[]; visualSources?: string[] };
 
-export async function exportDocx(doc: ReportDocument, title: string, fontData?: Uint8Array, options: ExportOptions = {}): Promise<Buffer> {
+export async function exportDocx(doc: ReportDocument, title: string, fontData?: Uint8Array, options: ExportOptions = {}, figureFontData?: Uint8Array): Promise<Buffer> {
   const metadata = [doc.metadata.company, doc.metadata.period, doc.metadata.currency, doc.metadata.unit].filter(Boolean).join(' / ');
   const content = exportNodes(doc.content, title);
   const managementMode = isManagementMode(options);
@@ -89,7 +100,10 @@ export async function exportDocx(doc: ReportDocument, title: string, fontData?: 
   const document = new Document({
     creator: 'FA Foundry',
     title,
-    fonts: fontData ? [{ name: 'Noto Sans SC', data: Buffer.from(fontData) }] : undefined,
+    fonts: fontData || figureFontData ? [
+      ...(fontData ? [{ name: 'Noto Sans SC', data: Buffer.from(fontData) }] : []),
+      ...(figureFontData ? [{ name: FIGURE_FONT, data: Buffer.from(figureFontData) }] : []),
+    ] : undefined,
     styles: {
       paragraphStyles: [
         { id: 'Normal', name: 'Normal', run: { font: 'Noto Sans SC', size: 22 }, paragraph: { spacing: { line: 360, after: 160 } } },
@@ -646,18 +660,29 @@ function expandRowCells(row: ReportNode): ReportNode[] {
 }
 
 function rowToDocx(row: ReportNode, header: boolean, noteIds: Set<string>): TableRow {
+  const name = textContent(row.content?.[0] ?? { type: 'text' }).trim();
+  const total = !header && TOTAL_ROW.test(name);
+  const weighted = total || (!header && SUBTOTAL_ROW.test(name));
   return new TableRow({
     tableHeader: header,
     cantSplit: true,
-    children: (row.content ?? []).map((cell) => new TableCell({
-      columnSpan: numberOrUndefined(cell.attrs?.colspan),
-      rowSpan: numberOrUndefined(cell.attrs?.rowspan),
-      margins: { top: 100, bottom: 100, left: 120, right: 120 },
-      children: [new Paragraph({
-        alignment: cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(textContent(cell).trim()) ? AlignmentType.RIGHT : AlignmentType.LEFT,
-        children: inlineToDocxRuns(flatInline(cell.content ?? []), { size: 18, bold: header || cell.type === 'tableHeader' }, noteIds),
-      })],
-    })),
+    children: (row.content ?? []).map((cell, index) => {
+      const text = textContent(cell).trim();
+      const right = cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(text);
+      const headerCell = header || cell.type === 'tableHeader';
+      const figure = right && index > 0 && !headerCell;
+      return new TableCell({
+        columnSpan: numberOrUndefined(cell.attrs?.colspan),
+        rowSpan: numberOrUndefined(cell.attrs?.rowspan),
+        margins: { top: 100, bottom: 100, left: 120, right: 120 },
+        ...(total ? { borders: { top: { style: BorderStyle.SINGLE, size: 6, color: '1B1B18' } } } : {}),
+        children: [new Paragraph({
+          alignment: right ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          children: inlineToDocxRuns(flatInline(cell.content ?? []), { size: 18, bold: headerCell || weighted,
+            ...(figure ? { figure: true, color: NEGATIVE_FIGURE.test(text) ? NEGATIVE_COLOR : undefined } : {}) }, noteIds),
+        })],
+      });
+    }),
   });
 }
 
@@ -708,7 +733,9 @@ function imageDimensions(data: Buffer, type: 'png' | 'jpg'): { width: number; he
   return { width, height };
 }
 
-function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?: boolean } = {}, noteIds: Set<string> = new Set()): Array<TextRun | ExternalHyperlink> {
+type RunDefaults = { size?: number; bold?: boolean; figure?: boolean; color?: string };
+
+function inlineToDocxRuns(nodes: ReportNode[], defaults: RunDefaults = {}, noteIds: Set<string> = new Set()): Array<TextRun | ExternalHyperlink> {
   return nodes.flatMap((node) => {
     if (node.type === 'text') {
       const marks = node.marks ?? [];
@@ -721,7 +748,8 @@ function inlineToDocxRuns(nodes: ReportNode[], defaults: { size?: number; bold?:
         italics: marks.some((mark) => mark.type === 'italic'),
         strike: marks.some((mark) => mark.type === 'strike'),
         underline: marks.some((mark) => mark.type === 'underline') ? {} : undefined,
-        font: marks.some((mark) => mark.type === 'code') ? 'Menlo' : 'Noto Sans SC',
+        font: marks.some((mark) => mark.type === 'code') ? 'Menlo' : defaults.figure ? FIGURE_RUN_FONT : 'Noto Sans SC',
+        ...(defaults.color ? { color: defaults.color } : {}),
       });
       if (link) return [new ExternalHyperlink({ link: String(link.attrs?.href), children: [run] })];
       if (marks.some((mark) => mark.type === 'code')) return [run];
@@ -747,7 +775,22 @@ function collectNoteIds(nodes: ReportNode[] = []): Set<string> {
   return ids;
 }
 
-function textRunsWithNoteRefs(node: ReportNode, defaults: { size?: number; bold?: boolean }, noteIds: Set<string>): TextRun[] {
+/** Prose text as runs, its digits and % in IBM Plex Mono; a figure cell's text is one run in the figure font. */
+function proseRuns(text: string, base: Record<string, unknown>, defaults: RunDefaults): TextRun[] {
+  if (defaults.figure) return [new TextRun({ ...base, text, font: FIGURE_RUN_FONT, ...(defaults.color ? { color: defaults.color } : {}) })];
+  const runs: TextRun[] = [];
+  let last = 0;
+  for (const match of text.matchAll(PROSE_DIGITS)) {
+    const index = match.index ?? 0;
+    if (index > last) runs.push(new TextRun({ ...base, text: text.slice(last, index) }));
+    runs.push(new TextRun({ ...base, text: match[0], font: FIGURE_RUN_FONT }));
+    last = index + match[0].length;
+  }
+  if (last < text.length || runs.length === 0) runs.push(new TextRun({ ...base, text: text.slice(last) }));
+  return runs;
+}
+
+function textRunsWithNoteRefs(node: ReportNode, defaults: RunDefaults, noteIds: Set<string>): TextRun[] {
   const text = node.text ?? '';
   const marks = node.marks ?? [];
   const runs: TextRun[] = [];
@@ -765,11 +808,11 @@ function textRunsWithNoteRefs(node: ReportNode, defaults: { size?: number; bold?
     const index = match.index ?? 0;
     const id = safeNoteId(match[1]);
     if (!id || !noteIds.has(id)) continue;
-    if (index > lastIndex) runs.push(new TextRun({ ...base, text: text.slice(lastIndex, index) }));
+    if (index > lastIndex) runs.push(...proseRuns(text.slice(lastIndex, index), base, defaults));
     runs.push(new TextRun({ ...base, text: `[${id}]`, superScript: true, size: Math.max(16, defaults.size ?? 18) }));
     lastIndex = index + match[0].length;
   }
-  if (lastIndex < text.length || runs.length === 0) runs.push(new TextRun({ ...base, text: text.slice(lastIndex) }));
+  if (lastIndex < text.length || runs.length === 0) runs.push(...proseRuns(text.slice(lastIndex), base, defaults));
   return runs;
 }
 

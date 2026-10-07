@@ -239,9 +239,9 @@ describe('report editor workspace', () => {
     expect(figure.classList.contains('financial-table')).toBe(true);
     const cellClass = (text: string) => within(figure).getByText(text).closest('td, th')?.className;
     expect(cellClass('325,644.00 万元')).toBe('num');
-    expect(cellClass('-18,843.06 万元')).toBe('num');
+    expect(cellClass('-18,843.06 万元')).toBe('num neg');
     expect(cellClass('117814.5625 万元（估算）')).toBe('num');
-    expect(cellClass('-3.30%')).toBe('num');
+    expect(cellClass('-3.30%')).toBe('num neg');
     // A dash or a note in a numeric column follows the column and does not vote on it.
     expect(cellClass('预算为负，不作比率')).toBe('num note');
     expect(cellClass('—')).toBe('num note');

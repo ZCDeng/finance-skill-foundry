@@ -14,10 +14,17 @@ const NUMERIC_CELL = /^[(（]?[-+−]?(?:¥|￥|\$)?\s*(?:\d{1,3}(?:,\d{3})+|\d+
 const NOTE_CELL = /^(?:[-—–－]+|不适用|不可比|不计算|无|暂无|无数据|暂无数据|数据缺失|缺数|未提供|未披露|待补充|n\/?a|.{0,8}不作比率)$/i;
 // A bare year (2026) labels a row or column; it is not a figure to align with the numbers.
 const BARE_YEAR = /^(?:19|20)\d{2}$/;
+// A figure written below zero, by sign or by accounting parentheses. The author's text stays as written; the cell is
+// only marked so it reads in the muted negative red (DESIGN.md 财务数字).
+const NEGATIVE_FIGURE = /^(?:[-−]|[(（](?=[-−]?(?:¥|￥|\$)?\s*\d))/;
+// A row named 合计/总计 is a total and 小计 a subtotal: Bold and SemiBold, the table's two weights above Regular.
+const TOTAL_ROW = /^(?:合计|总计|总额|total\b)/i;
+const SUBTOTAL_ROW = /^(?:小计|subtotal\b)/i;
 const NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const NOTE_REF_PATTERN = /\[\^([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})\]/g;
 
-type RenderOptions = { fontDataUrl?: string; print?: boolean; marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[]; visualSources?: string[] };
+type FigureFont = { weight: number; url: string };
+type RenderOptions = { fontDataUrl?: string; figureFonts?: FigureFont[]; print?: boolean; marker?: string; contentMode?: string; projectionHash?: string; draftId?: string; contentHash?: string; publicationStatus?: string; reviewStatus?: string; reproducibilityStatus?: string; sources?: string[]; visualSources?: string[] };
 
 const blockTypes = new Set([
   'paragraph',
@@ -584,11 +591,12 @@ function tableRowsToHtml(table: ReportNode, rows: ReportNode[], continuation: bo
       const inNumericColumn = span === 1 && numericColumns.has(column);
       const note = !first && rowIndex > 0 && inNumericColumn && !isNumericCell(cell) && NOTE_CELL.test(textContent(cell).trim());
       const numeric = !first && (isNumericCell(cell) || (rowIndex === 0 && inNumericColumn));
+      const negative = numeric && tag === 'td' && NEGATIVE_FIGURE.test(textContent(cell).trim());
       const colspan = numberAttr('colspan', cell.attrs?.colspan);
       const rowspan = numberAttr('rowspan', cell.attrs?.rowspan);
-      return `<${tag} class="${note ? 'num note' : numeric ? 'num' : 'text'}"${first ? ' data-first-column=""' : ''}${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0, noteIds)).join('')}</${tag}>`;
+      return `<${tag} class="${note ? 'num note' : negative ? 'num neg' : numeric ? 'num' : 'text'}"${first ? ' data-first-column=""' : ''}${colspan}${rowspan}>${(cell.content ?? []).map((child) => nodeToHtml(child, 0, noteIds)).join('')}</${tag}>`;
     }).join('');
-    return `<tr>${cells}</tr>`;
+    return `<tr${rowIndex > 0 ? rowWeightClass(row) : ''}>${cells}</tr>`;
   });
   const head = renderedRows.length > 0 ? `<thead>${renderedRows[0]}</thead>` : '';
   const body = renderedRows.length > 1 ? `<tbody>${renderedRows.slice(1).join('')}</tbody>` : '<tbody></tbody>';
@@ -619,6 +627,13 @@ function cellColumns(rows: ReportNode[]): number[][] {
     for (let index = 0; index < held.length; index += 1) if (held[index] > 0) held[index] -= 1;
     return starts;
   });
+}
+
+function rowWeightClass(row: ReportNode): string {
+  const name = textContent(row.content?.[0] ?? { type: 'text' }).trim();
+  if (TOTAL_ROW.test(name)) return ' class="row-total"';
+  if (SUBTOTAL_ROW.test(name)) return ' class="row-subtotal"';
+  return '';
 }
 
 function isNumericCell(cell: ReportNode): boolean {
@@ -777,14 +792,29 @@ function escapeAttribute(value: string): string {
   return escapeHtml(value).replace(/\n/g, '&#10;');
 }
 
+const FIGURE_LATIN = 'U+0020-007E,U+00A0-00FF,U+2030,U+2212';
+const FIGURE_DIGITS = 'U+0025,U+0030-0039';
+
+/**
+ * The same IBM Plex Mono faces the app uses (styles/fonts.css), registered twice: whole figure cells take every Latin
+ * character from it; prose takes only digits and %, so numbers inside sentences read in Plex Mono (DESIGN.md 财务数字).
+ */
+function figureFontFaces(fonts: FigureFont[]): string {
+  return fonts.filter((font) => /^data:font\/woff2;base64,[A-Za-z0-9+/=]+$/.test(font.url) && Number.isInteger(font.weight))
+    .flatMap((font) => [['IBM Plex Mono', FIGURE_LATIN], ['FND Figures', FIGURE_DIGITS]].map(([family, range]) =>
+      `@font-face{font-family:"${family}";src:url("${font.url}") format("woff2");font-weight:${font.weight};font-style:normal;font-display:block;unicode-range:${range};}`))
+    .join('');
+}
+
 function reportCss(options: RenderOptions): string {
-  const fontFace = options.fontDataUrl ? `@font-face{font-family:"Noto Sans SC";src:url("${options.fontDataUrl}") format("woff2");font-weight:100 900;font-display:block;}` : '';
+  const fontFace = (options.fontDataUrl ? `@font-face{font-family:"Noto Sans SC";src:url("${options.fontDataUrl}") format("woff2");font-weight:100 900;font-display:block;}` : '')
+    + figureFontFaces(options.figureFonts ?? []);
   return `${fontFace}
-:root{color-scheme:light dark;--report-bg:#f7f7f5;--report-paper:#fff;--report-ink:#1b1b18;--report-muted:#696760;--report-line:#d9d4c7;--report-accent:#b78a38;--report-font:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif}
-@media (prefers-color-scheme:dark){:root{--report-bg:#111;--report-paper:#181817;--report-ink:#efeee8;--report-muted:#a8a49b;--report-line:#36332e;--report-accent:#d1a85a}}
+:root{color-scheme:light dark;--report-bg:#f7f7f5;--report-paper:#fff;--report-ink:#1b1b18;--report-muted:#696760;--report-line:#d9d4c7;--report-accent:#b78a38;--report-negative:#94463d;--report-font:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;--report-prose:"FND Figures",var(--report-font);--report-figure:"IBM Plex Mono",var(--report-font)}
+@media (prefers-color-scheme:dark){:root{--report-bg:#111;--report-paper:#181817;--report-ink:#efeee8;--report-muted:#a8a49b;--report-line:#36332e;--report-accent:#d1a85a;--report-negative:#d9a097}}
 @page{size:A4;margin:20mm}
 *{box-sizing:border-box}
-body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:var(--report-font);font-size:16px;line-height:28px;letter-spacing:0}
+body{margin:0;background:var(--report-bg);color:var(--report-ink);font-family:var(--report-prose);font-size:16px;line-height:28px;letter-spacing:0}
 .report-shell{max-width:calc(42em + 48px);margin:0 auto;padding:32px 24px 56px}
 .report-cover,.report-toc,.report-body{max-width:42em;margin:0 auto}
 .report-cover{padding:12px 0 28px;border-bottom:1px solid var(--report-line)}
@@ -813,6 +843,8 @@ tr{break-inside:avoid}
 th,td{padding:8px 10px;border:0;border-bottom:1px solid var(--report-line);vertical-align:top}
 th{font-weight:700;text-align:left;border-top:1px solid var(--report-line);background:color-mix(in srgb,var(--report-paper),var(--report-line) 12%)}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.num{font-family:var(--report-figure)}td.num.note{font-family:var(--report-prose)}td.neg{color:var(--report-negative)}
+tr.row-subtotal td{font-weight:600}tr.row-total td{font-weight:700;border-top:1.5px solid var(--report-ink)}
 .report-image img{max-width:100%;height:auto;display:block}
 .report-image,.report-visual{break-inside:avoid;page-break-inside:avoid}
 .report-visual>svg{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--report-line);border-radius:6px}
@@ -823,8 +855,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .report-page-break{break-after:page;height:0}
 .report-shell.is-print{width:210mm;min-height:297mm;max-width:none;margin:24px auto;padding:20mm;background:#fff;color:#111;box-shadow:0 20px 60px rgba(0,0,0,.16)}
 .report-shell.is-print .report-cover,.report-shell.is-print .report-toc,.report-shell.is-print .report-body{max-width:none}
+.report-shell.is-print{--report-negative:#94463d}
 .report-shell.is-print table{font-size:9pt;line-height:1.4}
 .report-shell.is-print th,.report-shell.is-print td{padding:5pt 6pt}
 .report-shell.is-print .report-note{font-size:9pt;line-height:1.45}
-@media print{body{background:#fff;color:#111;font-size:11pt;line-height:1.65}.report-shell{max-width:none;padding:0}.report-cover,.report-toc,.report-body{max-width:none}.report-cover{break-after:avoid}.report-toc{break-after:page}table{font-size:9pt;line-height:1.4}thead{display:table-header-group}tfoot{display:table-footer-group}th,td{padding:5pt 6pt}.report-note{font-size:9pt;line-height:1.45}.report-shell.is-print{width:auto;min-height:0;max-width:none;margin:0;padding:0;background:#fff;box-shadow:none}}`;
+@media print{:root{--report-negative:#94463d}body{background:#fff;color:#111;font-size:11pt;line-height:1.65}.report-shell{max-width:none;padding:0}.report-cover,.report-toc,.report-body{max-width:none}.report-cover{break-after:avoid}.report-toc{break-after:page}table{font-size:9pt;line-height:1.4}thead{display:table-header-group}tfoot{display:table-footer-group}th,td{padding:5pt 6pt}.report-note{font-size:9pt;line-height:1.45}.report-shell.is-print{width:auto;min-height:0;max-width:none;margin:0;padding:0;background:#fff;box-shadow:none}}`;
 }
