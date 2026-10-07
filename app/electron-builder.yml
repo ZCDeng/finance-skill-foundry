@@ -126,6 +126,10 @@ extraResources:
 
 mac:
   category: public.app-category.finance
+  # Not under `build/`, the default buildResources: the root `.gitignore` drops
+  # every `build/` directory, and an icon left there never reaches a clean
+  # checkout. Without one the bundle ships Electron's own.
+  icon: resources/icon.icns
   target:
     - dir
   # `npm run package` stays unsigned so any machine can build; first open goes through

@@ -3,7 +3,15 @@
 .fnd-shell { display: flex; flex-direction: column; min-height: 100vh; background: var(--fnd-bg); }
 .fnd-head { display: flex; align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
 .fnd-head__brand { flex: 1 0 0; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.fnd-head__logo { width: 18.5px; height: 24px; flex: 0 0 auto; background: url('../assets/mark.png') center / contain no-repeat; }
+/* The artwork keeps its glow inside a wide transparent margin; the box is drawn larger and the margin
+   given back, so the ring itself reads at about 36px without pushing the name. */
+.fnd-head__logo { width: 48px; height: 48px; margin: 0 -4px; flex: 0 0 auto; background: url('../assets/logo-animated.webp') center / contain no-repeat; }
+/* A 96px animated WebP and not the source SVG: the SVG's 580 SMIL animations and blur filters kept the
+   renderer near half a core for as long as the window stayed open; the WebP runs at about 5%.
+   With reduced motion the header holds the still mark. */
+@media (prefers-reduced-motion: reduce) {
+  .fnd-head__logo { background-image: url('../assets/logo.svg'); }
+}
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
 .fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
 .fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }

@@ -239,6 +239,9 @@ void app.whenReady().then(() => {
   if (!app.hasSingleInstanceLock()) return;
   // The shell and native views follow the same operating-system appearance.
   nativeTheme.themeSource = 'system';
+  // A packed app takes its Dock icon from the bundle. A dev run is Electron's
+  // own binary, so it is told which one to show.
+  if (isDev) app.dock?.setIcon(path.join(__dirname, '..', 'resources', 'icon.png'));
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     // Only this app's own documents. The harness page and Formulator are served
     // by child processes over loopback and carry their own headers; rewriting
