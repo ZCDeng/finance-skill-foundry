@@ -1,50 +1,66 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { bridge, type Answer, type DatasetSnapshot } from '../../bridge.js';
-import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from './StructureProposalCard.js';
+import type { StructureProposal } from './StructureProposalCard.js';
 import { unwrap, errorText } from './shared.js';
-import { DisclosureSummary } from '../../components/Disclosure.js';
+
+/** A structure somebody else settled, waiting for the manager to own it. */
+export type StructurePending = { id: string; dataset_id: string; source: string; state: string; parent_id: string | null };
+/** What one file's table structure says: the engine's latest proposal, and a settlement waiting on her. */
+export type StructureTodo = { proposal?: StructureProposal; pending?: StructurePending };
+
+/** A proposal or settlement waiting on the manager, as opposed to one already settled. */
+export const isStructureTodo = (todo: StructureTodo | undefined): boolean => Boolean(todo?.pending
+  || todo?.proposal?.structure_state === 'pending_confirmation' || todo?.proposal?.structure_state === 'no_table');
+
+const sameProposal = (a: StructureProposal, b: StructureProposal) =>
+  a.id === b.id && a.revision === b.revision && a.structure_state === b.structure_state;
+const samePending = (a: StructurePending, b: StructurePending) => a.id === b.id && a.state === b.state;
+
+/** The new list, keeping each old object the new read did not change so an open form keeps its proposal. */
+function keep<T extends { id: string }>(current: T[], next: T[], same: (a: T, b: T) => boolean): T[] {
+  const reused = next.map((row) => current.find((old) => same(old, row)) ?? row);
+  return reused.length === current.length && reused.every((row, index) => row === current[index]) ? current : reused;
+}
 
 /**
- * Every file in this task that is waiting on the manager: one waiting for her to
- * say what its tables are, one somebody else confirmed on her behalf, one a
- * remembered structure was applied to.
+ * Every file in this task and what its table structure is waiting on: one waiting for
+ * her to say what its tables are, one somebody else confirmed on her behalf, one a
+ * remembered structure was applied to. Read again when the files change, not on every
+ * read of the page: the page reads the task every 5 seconds and hands over a new list
+ * each time.
  */
-export function StructurePanel({ taskId, datasets, busy, onRefresh }: {
-  taskId: string; datasets: DatasetSnapshot[]; busy: boolean; onRefresh(): Promise<void> | void;
-}) {
+export function useStructureTodos(taskId: string, datasets: DatasetSnapshot[]) {
   const [proposals, setProposals] = useState<StructureProposal[]>([]);
-  const [pending, setPending] = useState<{ id: string; dataset_id: string; source: string; state: string; parent_id: string | null }[]>([]);
+  const [pending, setPending] = useState<StructurePending[]>([]);
   const [error, setError] = useState('');
+  // A read started on one task must not land on the next one.
+  const currentTask = useRef(taskId);
+  currentTask.current = taskId;
   const load = useCallback(async () => {
     const api = bridge(); if (!api?.financeCall) return;
-    const listed = unwrap(await api.financeCall(taskId, 'structure-proposal-list', {}) as Answer<{ proposals?: StructureProposal[] }>);
-    setProposals(listed.proposals ?? []);
-    const settled = unwrap(await api.financeCall(taskId, 'structure-confirmation-list', {}) as Answer<{ confirmations?: typeof pending }>);
+    const forTask = taskId;
+    const listed = unwrap(await api.financeCall(forTask, 'structure-proposal-list', {}) as Answer<{ proposals?: StructureProposal[] }>);
+    const settled = unwrap(await api.financeCall(forTask, 'structure-confirmation-list', {}) as Answer<{ confirmations?: StructurePending[] }>);
+    if (currentTask.current !== forTask) return;
     const rows = settled.confirmations ?? [];
     const superseded = new Set(rows.map((row) => row.parent_id).filter(Boolean) as string[]);
-    setPending(rows.filter((row) => row.state === 'pending_acknowledgement' && !superseded.has(row.id)));
+    setProposals((current) => keep(current, listed.proposals ?? [], sameProposal));
+    setPending((current) => keep(current, rows.filter((row) => row.state === 'pending_acknowledgement' && !superseded.has(row.id)), samePending));
+    setError('');
   }, [taskId]);
-  useEffect(() => { void load().catch((failure) => setError(errorText(failure))); }, [load, datasets]);
+  useEffect(() => { setProposals([]); setPending([]); setError(''); }, [taskId]);
+  // The files as a key, not the array: the same files read again are the same key.
+  const key = datasets.map((dataset) => `${dataset.id}:${(dataset as { structure_state?: string }).structure_state ?? ''}`).join('|');
+  useEffect(() => {
+    const forTask = taskId;
+    void load().catch((failure) => { if (currentTask.current === forTask) setError(errorText(failure)); });
+  }, [load, key]);
 
-  const named = (id: string) => datasets.find((item) => item.id === id)?.name ?? id;
-  const settle = async () => { await load(); await onRefresh(); };
-  const waiting = proposals.filter((item) => item.structure_state === 'pending_confirmation' || item.structure_state === 'no_table');
-  if (!waiting.length && !pending.length && !error) return null;
-  return (
-    <div className="analysis-structure-panel">
-      {error && <p role="alert" className="analysis-structure-error">{error}</p>}
-      {/* A to-do line per file; the confirmation form is long and opens on demand. */}
-      {waiting.map((proposal) => (
-        <details key={proposal.id} className="analysis-details analysis-structure-todo">
-          <DisclosureSummary>待确认表结构 · {named(proposal.dataset_id)}{proposal.structure_state === 'no_table' ? ' · 没有识别出数据表' : ` · ${proposal.sheets.length} 张工作表`}</DisclosureSummary>
-          <StructureProposalCard taskId={taskId} datasetName={named(proposal.dataset_id)}
-            proposal={proposal} busy={busy} onSettled={settle} />
-        </details>
-      ))}
-      {pending.map((confirmation) => (
-        <StructurePendingStrip key={confirmation.id} taskId={taskId} datasetName={named(confirmation.dataset_id)}
-          confirmation={confirmation} busy={busy} onSettled={settle} />
-      ))}
-    </div>
-  );
+  const byDataset: Record<string, StructureTodo> = {};
+  for (const proposal of proposals) byDataset[proposal.dataset_id] = { ...byDataset[proposal.dataset_id], proposal };
+  for (const confirmation of pending) byDataset[confirmation.dataset_id] = { ...byDataset[confirmation.dataset_id], pending: confirmation };
+  // A to-do for a file the page does not list is still a to-do: it gets a row of its own.
+  const listed = new Set(datasets.map((dataset) => dataset.id));
+  const orphans = Object.keys(byDataset).filter((id) => !listed.has(id) && isStructureTodo(byDataset[id]));
+  return { byDataset, orphans, error, reload: load };
 }

@@ -6,7 +6,7 @@
 .workspace-sidebar-header h2 { font-size: 14px; line-height: 22px; font-weight: 600; color: var(--fnd-ink); }
 .workspace-new { justify-content: center; gap: 8px; width: 100%; }
 .workspace-lifecycle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.workspace-lifecycle button { min-height: 30px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); background: transparent; color: var(--fnd-muted); cursor: pointer; font-size: 12px; line-height: 18px; }
+.workspace-lifecycle button { min-height: var(--fnd-button-height); border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); background: transparent; color: var(--fnd-muted); cursor: pointer; font-size: var(--fnd-size-body); line-height: 22px; }
 .workspace-lifecycle button[aria-pressed='true'] { background: var(--fnd-surface); color: var(--fnd-ink); border-color: var(--fnd-line-hover); }
 .workspace-lifecycle button:focus-visible { outline: 1px solid var(--fnd-focus); outline-offset: 1px; }
 .workspace-search { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; color: var(--fnd-muted); background: var(--fnd-surface); border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); }

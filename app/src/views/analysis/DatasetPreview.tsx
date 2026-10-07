@@ -3,12 +3,13 @@ import { Table, textValue } from './presentation.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 
-export function DatasetPreview({ source, content }: { source: DatasetSnapshot; content: Record<string, unknown> }) {
+/** `headingHidden`: opened under the file's own row, the name is already on screen, so the heading is for screen readers. */
+export function DatasetPreview({ source, content, headingHidden = false }: { source: DatasetSnapshot; content: Record<string, unknown>; headingHidden?: boolean }) {
   const columns = Array.isArray(content.columns) ? content.columns.map((column: unknown) => typeof column === 'string'
     ? { name: column } : column as { name: string; type?: string }) : source.schema ?? [];
   const rows = Array.isArray(content.rows) ? content.rows as Record<string, unknown>[] : [];
   const workbook = content.workbook as { sheets?: { name: string; rows: number; columns: number }[] } | undefined;
-  return <article className="analysis-source-preview"><h3>{source.name}</h3>
+  return <article className="analysis-source-preview"><h3 className={headingHidden ? 'sr-only' : undefined}>{source.name}</h3>
     {source.kind === 'workbook' && <>
       <p className="analysis-note">已保留完整工作簿及所有工作表。请与助手确定分析范围，封面和标题不会被当作数据表头。</p>
       {Array.isArray(workbook?.sheets) && <Table caption="工作表目录"

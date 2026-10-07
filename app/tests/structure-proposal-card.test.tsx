@@ -87,6 +87,23 @@ describe('structure confirmation card', () => {
     await waitFor(() => expect(screen.queryByText('正在按确认的结构整理数据…')).toBeNull());
   });
 
+  // The page reads the task back every 5 seconds and hands the card an equal proposal as a new object.
+  it('keeps the manager\'s unconfirmed changes when the same proposal arrives again, and starts over on a new revision', () => {
+    const first = proposal([ledger()]);
+    const { rerender } = render(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={first} busy={false} onSettled={vi.fn()} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '采用 02·GL科目余额表' }));
+    fireEvent.change(screen.getByLabelText('表头行'), { target: { value: '6' } });
+    expect(screen.getByRole('checkbox', { name: '采用 02·GL科目余额表' }).getAttribute('aria-checked')).toBe('false');
+
+    rerender(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={proposal([ledger()])} busy={false} onSettled={vi.fn()} />);
+    expect(screen.getByRole('checkbox', { name: '采用 02·GL科目余额表' }).getAttribute('aria-checked')).toBe('false');
+    expect((screen.getByLabelText('表头行') as HTMLInputElement).value).toBe('6');
+
+    rerender(<StructureProposalCard taskId="t" datasetName="月结套表" proposal={{ ...proposal([ledger()]), revision: 2 }} busy={false} onSettled={vi.fn()} />);
+    expect(screen.getByRole('checkbox', { name: '采用 02·GL科目余额表' }).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByLabelText('表头行') as HTMLInputElement).value).toBe('4');
+  });
+
   it('will not confirm while a kept sheet has no debit or credit side', () => {
     const undecided = ledger({
       sheet: '余额表',

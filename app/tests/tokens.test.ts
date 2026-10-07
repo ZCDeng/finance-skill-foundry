@@ -584,3 +584,66 @@ describe('the disclosure summary', () => {
     expect(rule![2].replace(/\s+/g, ' ')).toContain('outline: 1px solid var(--fnd-focus);');
   });
 });
+
+describe('the 资料 page, settings panel and task drawer controls', () => {
+  const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+  const ANALYSIS = read('../src/views/analysis.css');
+  const WORKSPACE = read('../src/components/workspace.css');
+  const CONTROLS = read('../src/components/financial-controls.css');
+  const light = block(TOKENS, ':root');
+  const dark = block(TOKENS, ":root[data-theme='dark']");
+
+  it('lets the settings panel scroll with the page, with no scroll area of its own, and keeps its heading in view', () => {
+    const dialog = declarations(ANALYSIS, '.analysis-finance-setup-dialog');
+    expect(dialog).not.toHaveProperty('max-height');
+    expect(dialog).not.toHaveProperty('overflow');
+    const body = declarations(ANALYSIS, '.analysis-finance-setup-body');
+    expect(body).not.toHaveProperty('overflow');
+    expect(body).not.toHaveProperty('overscroll-behavior');
+    expect(ANALYSIS).not.toContain('analysis-finance-setup-scroll');
+    expect(declarations(ANALYSIS, '.analysis-finance-setup-head')).toMatchObject({ position: 'sticky', top: '-24px', 'z-index': '2' });
+    // -24px cancels the results pane's own top padding, so the stuck heading meets the pane's edge.
+    expect(declarations(WORKSPACE, '.workspace-results').padding.split(' ')[0]).toBe('24px');
+    // The evidence drawer stays above the sticky heading.
+    expect(Number(declarations(ANALYSIS, '.analysis-evidence-anchor')['z-index'])).toBeGreaterThan(2);
+  });
+
+  it('draws the task drawer\'s status segments as ordinary 36px, 14px controls', () => {
+    expect(declarations(WORKSPACE, '.workspace-lifecycle button')).toMatchObject({
+      'min-height': 'var(--fnd-button-height)', 'font-size': 'var(--fnd-size-body)', 'line-height': '22px',
+    });
+    expect(light['--fnd-button-height']).toBe('36px');
+    expect(light['--fnd-size-body']).toBe('14px');
+  });
+
+  it('leaves the period shortcuts to the chip button, with no pressed colours of their own', () => {
+    expect(declarations(CONTROLS, '.fnd-period-shortcuts')).toMatchObject({ display: 'flex', 'flex-wrap': 'wrap', gap: '6px' });
+    expect(CONTROLS).not.toContain('.fnd-period-shortcuts .fnd-control-icon');
+  });
+
+  it('keeps a pressed chip\'s ink edge at 3:1 or better on the surfaces it sits on, in both themes', () => {
+    for (const [theme, table] of [['light', light], ['dark', dark]] as const) {
+      for (const ground of ['--fnd-surface', '--fnd-bg', '--fnd-selection-surface']) {
+        const ratio = contrast(table['--fnd-ink'], over(table[ground], table['--fnd-surface']));
+        expect(ratio, `${theme} ink edge on ${ground} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('renders a chip without the control radius or the body size', async () => {
+    const { buttonVariants } = await import('../src/components/ui/button.js');
+    const { cn } = await import('../src/lib/utils.js');
+    const classes = cn(buttonVariants({ variant: 'outline', size: 'chip' })).split(' ');
+    expect(classes).not.toContain('rounded-[var(--fnd-radius-control)]');
+    expect(classes).not.toContain('text-[length:var(--fnd-size-body)]');
+    expect(classes).toContain('aria-pressed:border-[var(--fnd-ink)]');
+  });
+
+  it('keeps the 资料 state words neutral and gives the file meta the 12px label size', () => {
+    expect(declarations(ANALYSIS, '.analysis-file-state').color).toBe('var(--fnd-ink)');
+    expect(declarations(ANALYSIS, '.analysis-file-status-label').color).toBe('var(--fnd-muted)');
+    expect(declarations(ANALYSIS, '.analysis-source-meta')['font-size']).toBe('var(--fnd-size-label)');
+    // The old formula-health rule that only re-zeroed a margin nobody sets any more is gone.
+    expect(ANALYSIS).not.toContain('.analysis-formula-health [data-slot="button"]');
+  });
+});

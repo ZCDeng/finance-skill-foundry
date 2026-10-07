@@ -24,7 +24,7 @@ function Candidates({ field, values, sources, current, disabled, onPick }: {
   if (!offered.length) return null;
   const visible = (value: string) => field === 'scenario' ? scenarioLabel(value) : value;
   return <p className="analysis-note analysis-scope-candidates">资料里读到：{offered.map((value) => <span key={value}>
-    <Button variant="outline" type="button" size="sm" disabled={disabled} aria-label={`采用资料里的${SCOPE_LABELS[field]} ${value}`}
+    <Button variant="outline" type="button" size="chip" disabled={disabled} aria-label={`采用资料里的${SCOPE_LABELS[field]} ${value}`}
       onClick={() => onPick(value)}>{visible(value)}</Button>
     {sources?.[value] ? <span className="analysis-scope-candidate-source">来自 {sources[value]}</span> : null}</span>)}</p>;
 }
@@ -109,7 +109,7 @@ export function ScopePanel({ scope: state, datasetCount, disabled, onSaved }: {
     </p>)}
     {state.error ? <p role="alert" className="analysis-message analysis-message--error">{state.error}</p> : null}
     {state.message ? <p role="status" className="analysis-message">{state.message}</p> : null}
-    <Button type="button" disabled={blocked || state.conflicts.length > 0} onClick={() => void state.save().then((record) => { if (record) onSaved?.(); })}>
-      <Save size={14} aria-hidden />保存范围</Button>
+    <div className="analysis-actions analysis-actions--end"><Button type="button" disabled={blocked || state.conflicts.length > 0} onClick={() => void state.save().then((record) => { if (record) onSaved?.(); })}>
+      <Save size={14} aria-hidden />保存范围</Button></div>
   </section>;
 }

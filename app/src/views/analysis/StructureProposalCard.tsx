@@ -189,6 +189,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
 
+  // Only another proposal or a new revision of it starts the form over. The page reads
+  // the task back every 5 seconds and may hand over an equal proposal as a new object;
+  // that must not wipe what the manager has changed but not yet confirmed.
   useEffect(() => {
     setSheets(proposal.sheets);
     const next: Record<string, boolean> = {};
@@ -196,7 +199,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
       if (sheet.decision === 'table') next[sheet.sheet] = true;
     }
     setChosen(next);
-  }, [proposal]);
+  }, [proposal.id, proposal.revision]);
 
   const tables = sheets.filter((sheet) => sheet.decision === 'table');
   const setAside = sheets.filter((sheet) => sheet.decision !== 'table');
@@ -225,7 +228,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
   if (proposal.structure_state === 'no_table' && tables.length === 0) {
     return (
-      <section className="fnd-card analysis-structure-card">
+      <section className="analysis-structure-card">
         <div className="analysis-section-heading">
           <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
         </div>
@@ -248,7 +251,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
   }
 
   return (
-    <section className="fnd-card analysis-structure-card">
+    <section className="analysis-structure-card">
       <div className="analysis-section-heading">
         <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
         <span className="analysis-note">确认表结构后才能计算</span>
@@ -507,7 +510,7 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
   }
 
   return (
-    <section className="fnd-card analysis-structure-card">
+    <section className="analysis-structure-card">
       <div className="analysis-section-heading">
         <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
         <span className="analysis-note">待经理追认</span>

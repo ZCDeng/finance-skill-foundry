@@ -54,15 +54,3 @@ export const aliasOptions = (aliases: string[], context?: FinanceContext, datase
 export function scopeSummary(scope: Record<string, unknown> = {}): string {
   return scopeFields.map(([key, label]) => scope[key] ? `${label} ${key === 'scenario' ? scenarioLabel(scope[key]) : textValue(scope[key])}` : '').filter(Boolean).join(' · ') || '未限定';
 }
-
-const STRUCTURE_LABELS: Record<string, string> = {
-  pending_confirmation: '待确认表结构',
-  pending_acknowledgement: '待经理追认',
-  no_table: '没有可用的表',
-  withdrawn: '已撤回',
-};
-
-export function structureLabel(source: DatasetSnapshot): string {
-  const state = (source as { structure_state?: string }).structure_state ?? '';
-  return STRUCTURE_LABELS[state] ?? '';
-}

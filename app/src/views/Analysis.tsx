@@ -3,9 +3,9 @@ import { ArrowUp, FilePlus2, MessageSquare, RefreshCw } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisDraft, type AnalysisRevision, type AnalysisState, type DatasetSnapshot, type FinanceDrilldown,
   type TaskRow } from '../bridge.js';
 import './analysis.css';
-import { STATUS, textValue } from './analysis/presentation.js';
+import { STATUS, assumptionSummary, textValue } from './analysis/presentation.js';
 import { RunPanel } from './analysis/RunPanel.js';
-import { runPresentationRole } from './analysis/businessResults.js';
+import { isSuccessfulRun, runPresentationRole } from './analysis/businessResults.js';
 import { ScopePanel } from './analysis/ScopePanel.js';
 import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
@@ -18,8 +18,7 @@ import { Button } from '../components/ui/button.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js';
 import { DatasetPreview } from './analysis/DatasetPreview.js';
-import { StructurePanel } from './analysis/StructurePanel.js';
-import { FormulaHealthPanel } from './analysis/FormulaHealthPanel.js';
+import { MaterialsFileList, materialsAnchor } from './analysis/MaterialsFileList.js';
 import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { RollforwardPanel } from './analysis/RollforwardPanel.js';
@@ -28,7 +27,7 @@ import { SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
-import { datasetSize, structureLabel, unwrap, errorText } from './analysis/shared.js';
+import { unwrap, errorText } from './analysis/shared.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
 
@@ -297,14 +296,17 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
       if (currentTask.current === taskId && selectionNow.current.analysis === analysis.id) setSelectedAnalysis(next.id);
       // Save and run are distinct records; refresh the saved definition even if execution fails.
       await runSaved(taskId, next.id, note);
-    }), { rethrow: true })} onSaved={onSaved} onRun={() => perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)), { rethrow: true })} /> : <div className="analysis-definition"><h3>{analysis.question}</h3>
+    }), { rethrow: true })} onSaved={onSaved} onRun={() => perform((taskId) => timeWait('analysis.run', (note) => runSaved(taskId, analysis.id, note)), { rethrow: true })} /> : <div className="analysis-definition"><h3>计算定义</h3>
       <p className="analysis-note">{definitionCopy(analysis).note}</p>
-      {analysis.assumptions.length > 0 && <p>假设：{analysis.assumptions.map(textValue).join('；')}</p>}
+      {/* Once this version has run, its assumptions are in the result's 计算依据; before that, only here. */}
+      {analysis.assumptions.length > 0 && !view?.runs.some((row) => row.analysis_id === analysis.id && isSuccessfulRun(row))
+        && <p className="analysis-note">假设：{assumptionSummary(analysis.assumptions)}</p>}
       <details className="analysis-details"><DisclosureSummary>{definitionCopy(analysis).detailSummary}</DisclosureSummary><pre className="analysis-source-text">{definitionCopy(analysis).detail}</pre></details>
-      <Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button>
+      <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy} onClick={() => void chat(`请读取${definitionCopy(analysis).kind}分析版本 ${analysis.id}，继续调整或重跑，保存新的运行记录。`)}>调整或重跑此分析</Button></div>
     </div>) : null;
   const financeWorkbench = task && view && view.datasets.length > 0
     ? <FinanceWorkbench key={`${task.id}:finance`} taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} scope={analysisScope}
+      comparesBudget={Boolean(analysis && (analysis.operation === 'variance' || Object.hasOwn(analysis.bindings ?? {}, 'budget')))}
       openRequest={scopeRequest} running={financeRunning[task.id] ?? ''} outcome={financeOutcome[task.id]}
       onRunning={(label, active) => setFinanceRunning((current) => {
         if (active) return { ...current, [task.id]: label };
@@ -391,32 +393,23 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
         {loading && <p role="status" className="analysis-note">正在读取任务资料与成果…</p>}
         {view && tab === 'datasets' && <>
-          {embedded && <div className="analysis-section-heading"><h3>任务资料</h3>{view.datasets.length > 0
-            ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>}
+          <div className="analysis-section-heading"><span className="fnd-with-help"><h3>任务资料</h3><HelpLink article="data-safety" label="资料快照与原文件" /></span>{embedded && view.datasets.length > 0
+            ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>
           {!view.datasets.length && <AnalysisEmpty title="把手头的资料加进来" body="添加文件，或先和助手说清范围。"
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
           <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
-          <StructurePanel taskId={task.id} datasets={view.datasets} busy={busy} onRefresh={() => refresh(task.id)} />
-          <FormulaHealthPanel taskId={task.id} datasets={view.datasets} />
-          <div className="analysis-source-list">{view.datasets.map((source) => <button key={source.id} className="fnd-card"
-            type="button" onClick={() => void perform(async (taskId) => {
+          {view.datasets.length > 0 && <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset}
+            onPreview={(source) => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');
               const content = unwrap(await api.analysisReadDataset(taskId, source.id));
               if (currentTask.current === taskId) setDataset({ source, content });
-            })} disabled={busy}>
-            <span className="fnd-title">{source.name}</span><span className="analysis-source-meta">
-              {{ table: '数据表', background: '背景资料', workbook: 'Excel 工作簿' }[source.kind] ?? source.kind}{datasetSize(source) ? ` · ${datasetSize(source)}` : ''} · {when(source.created_at)}{structureLabel(source) ? ` · ${structureLabel(source)}` : ''}</span>
-            <span className="analysis-note">{['period', 'unit', 'currency'].filter((key) => source.metadata?.[key] != null)
-              .map((key) => textValue(source.metadata[key])).join(' · ') || '查看内容与来源'}</span>
-          </button>)}</div>
-          {dataset && <DatasetPreview source={dataset.source} content={dataset.content} />}
+            })} onClosePreview={() => setDataset(null)} onRefresh={() => refresh(task.id)} />}
           {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
           <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
-          <HelpLink article="data-safety" label="资料快照与原文件" />
           <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
             <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
           </details>
@@ -469,9 +462,10 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'close' && <MonthCloseControlCenter taskId={task.id} refreshKey={`${view.datasets.length}:${view.runs.length}:${view.drafts.length}`} busy={busy}
           onOpen={(target: CloseTarget) => {
             chooseTab(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : 'datasets');
-            // The scope card and the structure panel sit on the 资料 tab; bring the one asked for into view.
-            const anchor = { scope: '.analysis-scope-card', structure: '.analysis-structure-panel', datasets: '.analysis-source-list' }[target as 'scope' | 'structure' | 'datasets'];
-            if (anchor) requestAnimationFrame(() => document.querySelector(anchor)?.scrollIntoView?.({ block: 'start' }));
+            // The scope card and the files sit on the 资料 tab; bring the one asked for into view.
+            if (target === 'scope' || target === 'structure' || target === 'datasets') {
+              requestAnimationFrame(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }));
+            }
           }} />}
         {view && tab === 'drafts' && <>
           <DraftEditor key={draftKey} taskId={task.id} draft={draft} drafts={view.drafts} busy={busy} runs={view.runs} datasets={view.datasets}

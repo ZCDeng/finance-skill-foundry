@@ -25,6 +25,7 @@ import { TaskDetail } from './views/TaskDetail.js';
 import { Tasks } from './views/Tasks.js';
 import { DataBar, Formulator } from './views/Formulator.js';
 import { Analysis } from './views/Analysis.js';
+import { materialsAnchor } from './views/analysis/MaterialsFileList.js';
 import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 import { Button } from './components/ui/button.js';
@@ -870,8 +871,9 @@ export function App() {
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}
               onOpen={(target: GuideTarget) => {
                 setAnalysisSection(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : target === 'close' ? 'close' : 'materials');
-                const anchor = { scope: '.analysis-scope-card', structure: '.analysis-structure-panel', datasets: '.analysis-source-list' }[target as 'scope' | 'structure' | 'datasets'];
-                if (anchor) setTimeout(() => document.querySelector(anchor)?.scrollIntoView?.({ block: 'start' }), 60);
+                if (target === 'scope' || target === 'structure' || target === 'datasets') {
+                  setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
+                }
               }} />
             : boundReadOnly ? <div className="workspace-connection"><h2>任务已停用对话</h2><p>归档或回收站任务只能查看已有成果，恢复后才能继续分析。</p></div>
             : conversationProblem ? <div className="workspace-connection" role="alert"><h2>对话暂时中断</h2><p>{conversationProblem}</p>

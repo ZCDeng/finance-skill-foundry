@@ -59,23 +59,9 @@
 }
 
 .fnd-period-shortcuts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--fnd-space-control);
-}
-
-.fnd-period-shortcuts .fnd-control-icon {
-  min-width: 0;
-  width: 100%;
-  padding: 0 6px;
-  color: var(--fnd-ink);
-  background: var(--fnd-surface-strong);
-}
-
-.fnd-period-shortcuts .fnd-control-icon[aria-pressed='true'] {
-  background: var(--fnd-accent);
-  color: var(--fnd-on-accent);
-  border-color: var(--fnd-accent);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .fnd-control-icon {

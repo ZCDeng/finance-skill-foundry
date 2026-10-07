@@ -4,6 +4,7 @@ import { Calendar } from './ui/calendar.js';
 import { Command, CommandInput, CommandItem, CommandList } from './ui/command.js';
 import { Field, FieldDescription, FieldError, FieldLabel, FieldTitle } from './ui/field.js';
 import { Input } from './ui/input.js';
+import { Button } from './ui/button.js';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from './ui/popover.js';
 import './financial-controls.css';
 
@@ -147,9 +148,9 @@ export function AccountingPeriodInput({ label, value, onChange, placeholder = 'Y
             }} />
             <PopoverTrigger asChild><button type="button" className="fnd-control-icon fnd-control-icon--calendar" disabled={disabled} aria-label={`${label}打开年月选择`}><CalendarDays size={14} aria-hidden /></button></PopoverTrigger></div></PopoverAnchor>
           <div className="fnd-period-shortcuts">
-            <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(previousPeriod(baseShortcut))} aria-pressed={value === previousPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上期` : '上期'}`}>上期</button>
-            <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(lastYearPeriod(baseShortcut))} aria-pressed={value === lastYearPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上年同期` : '上年同期'}`}>上年同期</button>
-            <button type="button" className="fnd-control-icon" disabled={disabled} onClick={() => shortcut(currentPeriod())} aria-pressed={value === currentPeriod()} aria-label={`${label}设为本期`}>本期</button>
+            <Button type="button" variant="outline" size="chip" disabled={disabled} onClick={() => shortcut(previousPeriod(baseShortcut))} aria-pressed={value === previousPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上期` : '上期'}`}>上期</Button>
+            <Button type="button" variant="outline" size="chip" disabled={disabled} onClick={() => shortcut(lastYearPeriod(baseShortcut))} aria-pressed={value === lastYearPeriod(baseShortcut)} aria-label={`${label}设为${shortcutBaseLabel ? `${shortcutBaseLabel}上年同期` : '上年同期'}`}>上年同期</Button>
+            <Button type="button" variant="outline" size="chip" disabled={disabled} onClick={() => shortcut(currentPeriod())} aria-pressed={value === currentPeriod()} aria-label={`${label}设为本期`}>本期</Button>
           </div>
         </div>
       </div>

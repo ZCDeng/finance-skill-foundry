@@ -55,6 +55,19 @@ describe('one task workspace', () => {
     expect(props.onData).toHaveBeenCalledOnce();
   });
 
+  it('starts every task tool with a line icon that stays out of its name', async () => {
+    render(<Workspace {...props} onArchive={vi.fn()} onTrash={vi.fn()} />);
+    press(screen.getByRole('button', { name: '任务工具' }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual(['方法库', '数据台', '任务记录与旧版流程', '归档任务', '移入回收站']);
+    for (const item of items) {
+      const icon = item.firstElementChild as SVGElement;
+      expect(icon.tagName.toLowerCase(), item.textContent!).toBe('svg');
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+      expect(icon.getAttribute('width')).toBe('15');
+    }
+  });
+
   it('filters lifecycle buckets and exposes recoverable task actions', async () => {
     render(<Workspace {...props} onArchive={vi.fn()} onTrash={vi.fn()} onRestore={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
