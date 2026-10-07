@@ -4,7 +4,8 @@ used under the MIT License:
 - the wait loop's path shapes (WaitLoop.tsx, components.css @keyframes fnd-wait-loop),
   from mobius-loop-icon;
 - the scroll fade (components.css .fnd-scroll-fade), from scroll-fade-effect;
-- the appearance switch (ThemeSwitch.tsx, components.css .fnd-theme), from theme-switcher.
+- the appearance switch (ThemeSwitch.tsx, components.css .fnd-theme), from theme-switcher;
+- the draft minimap and current-section tracking (views/analysis/ReportMinimap.tsx), from toc-minimap.
 
 MIT License
 
