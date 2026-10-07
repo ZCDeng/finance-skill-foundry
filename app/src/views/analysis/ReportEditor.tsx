@@ -77,6 +77,7 @@ import { REPORT_VISUAL_EDIT_EVENT, ReportVisualNode } from './ReportVisualNode.j
 import { normalizeReportVisual, type ReportVisual } from '../../../electron/reports/visuals.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { ReportMinimap, useActiveHeading } from './ReportMinimap.js';
 
 type ReportMode = "read" | "edit" | "print";
 type ExportFormat = ReportExportFormat;
@@ -500,6 +501,9 @@ export function ReportEditor({
     () => reportHeadings(readingDocument, title),
     [readingDocument, title],
   );
+  const headingIds = useMemo(() => headings.map((item) => item.id), [headings]);
+  // Only the reading view carries the heading ids (renderReportHtml); the editor's headings have none.
+  const activeHeading = useActiveHeading(headingIds, mode === "read");
   const closeOutline = (returnFocus: boolean) => {
     setOutlineOpen(false);
     if (returnFocus) outlineToggleRef.current?.focus();
@@ -1190,6 +1194,7 @@ export function ReportEditor({
                   <a
                     key={item.id}
                     href={`#${item.id}`}
+                    aria-current={item.id === activeHeading ? "location" : undefined}
                     style={{
                       paddingLeft: `${Math.max(0, item.level - 1) * 12}px`,
                     }}
@@ -1202,6 +1207,9 @@ export function ReportEditor({
               <p className="analysis-note">添加一、二级标题后生成目录。</p>
             )}
           </aside>
+        )}
+        {mode === "read" && !outlineOpen && headings.length > 1 && (
+          <ReportMinimap headings={headings} active={activeHeading} />
         )}
         <div className="report-main">
 

@@ -12,6 +12,22 @@
 .report-outline nav { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .report-outline a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 5px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .report-outline a:hover, .report-outline a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
+/* The section being read: ink text on the selection surface; the minimap marks it in gold. */
+.report-outline a[aria-current='location'] { color: var(--fnd-ink); background: var(--fnd-selection-surface); }
+/* The minimap (ReportMinimap.tsx) only appears beside the text where the outline column would go, so it is off
+   until the container query below; a narrow window keeps 目录 alone. */
+.report-minimap { display: none; }
+.report-minimap__marks { display: flex; flex-direction: column; gap: 10px; width: 40px; padding: 12px 0; cursor: default; transition: opacity var(--fnd-transition); }
+.report-minimap__marks[data-open='true'] { opacity: 0; }
+.report-minimap__mark { flex: none; width: 24px; height: 2px; border-radius: 1px; background: var(--fnd-line-hover); transition: background-color var(--fnd-transition); }
+.report-minimap__mark[data-level='2'] { width: 16px; margin-left: 8px; }
+.report-minimap__mark[data-active='true'] { background: var(--fnd-selected); }
+.report-minimap__card { width: 240px; }
+.report-minimap__card nav { display: flex; flex-direction: column; gap: 2px; min-height: 0; max-height: min(50dvh, 480px); overflow: auto; overscroll-behavior: contain; padding: 10px; font-size: var(--fnd-size-small); }
+.report-minimap__card a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 4px 8px; border-radius: 6px; overflow-wrap: anywhere; }
+.report-minimap__card a[data-level='2'] { padding-left: 20px; }
+.report-minimap__card a:hover, .report-minimap__card a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
+.report-minimap__card a[aria-current='location'] { color: var(--fnd-ink); background: var(--fnd-selection-surface); }
 .report-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .report-topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .report-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -144,6 +160,9 @@
   /* The column runs the height of the text, and its list stays in view while a long draft scrolls. */
   .report-shell[data-outline-expanded='true'] > .report-outline > :is(nav, p) { position: sticky; top: 16px; }
   .report-shell[data-outline-expanded='true'] > .report-outline > nav { overflow: visible; }
+  /* With 目录 closed, the marks stand in the outline column's place and stay in view as the draft scrolls. */
+  .report-shell > .report-minimap { display: block; position: absolute; grid-row: 2; top: 0; bottom: 0; right: calc(100% + 32px); width: 40px; }
+  .report-shell > .report-minimap > .report-minimap__marks { position: sticky; top: 16px; }
 }
 @container report-workspace (max-width: 960px) {
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }
