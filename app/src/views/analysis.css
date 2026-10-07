@@ -156,13 +156,7 @@
 .analysis-comparison-grid p { font-size: 13px; overflow-wrap: anywhere; }
 .analysis-drilldown, .analysis-drilldown-result { display: flex; flex-direction: column; gap: 12px; }
 .analysis-definition { padding-top: 0; }
-.analysis-draft-reading { width: min(100%, 42em); max-width: 42em; padding: 16px 0 32px; font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); overflow-wrap: anywhere; }
-.analysis-draft-reading h2 { font-size: var(--fnd-doc-title); line-height: var(--fnd-doc-title-leading); font-weight: var(--fnd-doc-title-weight); margin: 0 0 24px; }
-.analysis-draft-reading h3 { font-size: var(--fnd-doc-chapter); line-height: var(--fnd-doc-chapter-leading); font-weight: var(--fnd-doc-chapter-weight); margin: 32px 0 12px; }
-.analysis-draft-reading h3 + * { margin-top: 0; }
 .analysis-draft-body p { white-space: pre-wrap; margin: 0 0 18px; }
-.analysis-draft-reading ul, .analysis-draft-reading ol { margin: 0 0 20px; padding-left: 24px; }
-.analysis-draft-reading li + li { margin-top: 6px; }
 .analysis-draft-body h4 { font-size: var(--fnd-doc-section); line-height: var(--fnd-doc-section-leading); font-weight: var(--fnd-doc-heading-weight); margin: 28px 0 10px; }
 .analysis-draft-body h5, .analysis-draft-body h6 { font-size: var(--fnd-doc-sub); line-height: var(--fnd-doc-sub-leading); font-weight: var(--fnd-doc-heading-weight); margin: 24px 0 8px; }
 .analysis-draft-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--fnd-bg); border-radius: 4px; padding: 1px 4px; overflow-wrap: anywhere; }
@@ -184,7 +178,6 @@
   .analysis-history-row time { grid-column: 1 / -1; }
   .analysis-tabs { gap: 12px; }
   .analysis-tabbar { flex-wrap: wrap; }
-  .analysis-draft-reading { font-size: var(--fnd-size-reading, 16px); line-height: var(--fnd-leading-reading, 28px); }
 }
 
 .analysis-workbook-conflicts {
@@ -259,6 +252,8 @@
 .analysis-quality h4 { margin: 0; font-size: 15px; }
 .analysis-quality-summary { margin: 0; color: var(--fnd-ink); }
 .analysis-quality ul { margin: 0; padding-left: 20px; font-size: var(--fnd-size-small); }
+.analysis-quality .analysis-requirement-gaps { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+.analysis-quality .analysis-requirement-gaps li > span { display: block; overflow-wrap: anywhere; }
 .analysis-fact-list { display: grid; gap: 10px; }
 .analysis-fact-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); padding: 10px 12px; display: grid; gap: 8px; }
 .analysis-background-panel .analysis-history-list { margin-top: 12px; }
@@ -377,8 +372,8 @@
 .analysis-formula-health-item--warning .analysis-formula-health-severity { color: var(--fnd-warning); border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
 .analysis-formula-health-count { color: var(--fnd-muted); font-size: var(--fnd-size-small); font-weight: normal; }
 .analysis-formula-health-why { margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-.analysis-formula-health-samples { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: var(--fnd-size-small); }
-.analysis-formula-health-samples li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; overflow-wrap: anywhere; }
+.analysis-formula-health-samples, .analysis-quality .analysis-readability-locations { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: var(--fnd-size-small); }
+.analysis-formula-health-samples li, .analysis-quality .analysis-readability-locations li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; overflow-wrap: anywhere; }
 .analysis-formula-health-formula { font-family: ui-monospace, monospace; font-size: var(--fnd-size-small); }
 .analysis-formula-health-detail { color: var(--fnd-muted); }
 .analysis-formula-health-view { display: grid; gap: 8px; }

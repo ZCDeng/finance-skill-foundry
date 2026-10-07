@@ -415,11 +415,11 @@ export function isBudgetAlias(name: string): boolean {
   return budgetScenarios.includes(word) || estimatedBudgetScenarios.includes(word);
 }
 // The unit table (KTD9, result_semantics.py FRACTION_UNITS / PERCENT_UNITS / UNMARKED_UNITS / POINT_UNITS). 比率 and
-// ratio hold a fraction (0.945 = 94.5%); %, pct and 百分比 a percent; 「-」 says no unit was marked; 百分点 a
+// ratio hold a fraction (0.945 = 94.5%); % (or ％), pct and 百分比 a percent; 「-」 says no unit was marked; 百分点 a
 // difference of two percentages as written (3.3 = 3.3 个百分点, never ×100). Only the unit converts a value; a name
 // never does.
 const fractionUnits = new Set(['比率', 'ratio']);
-const ratioUnits = new Set([...fractionUnits, '%', 'pct', '百分比']);
+const ratioUnits = new Set([...fractionUnits, '%', '％', 'pct', '百分比']);
 const unmarkedUnits = new Set(['-']);
 const pointUnits = new Set(['百分点']);
 

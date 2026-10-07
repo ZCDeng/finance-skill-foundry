@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Image } from "@tiptap/extension-image";
@@ -26,6 +26,7 @@ import {
   Link as LinkIcon,
   List,
   ListOrdered,
+  ListTree,
   Redo2,
   Rows3,
   Scissors,
@@ -389,6 +390,7 @@ export function ReportEditor({
   toolbarLabel = "文稿",
   status,
   assistantAction,
+  archiveAction,
   initialMode = "read",
   mode: controlledMode,
   onMode,
@@ -414,6 +416,8 @@ export function ReportEditor({
   toolbarLabel?: string;
   status?: string;
   assistantAction?: ReactNode;
+  /** The draft's own archive action, beside the export menu. */
+  archiveAction?: ReactNode;
   initialMode?: ReportMode;
   mode?: ReportMode;
   onMode?(value: ReportMode): void;
@@ -426,6 +430,13 @@ export function ReportEditor({
   onAppliedDraft?(draft: { id: string; title?: string; body?: string; document?: ReportDocument }): void;
 }) {
   const [localMode, setLocalMode] = useState<ReportMode>(initialMode);
+  // The outline opens from the toolbar: a left column when the workspace has room beside the 56rem text column,
+  // otherwise a drawer over the text (report.css). The text column keeps its width either way.
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const outlineId = useId();
+  const outlineRef = useRef<HTMLElement>(null);
+  const outlineToggleRef = useRef<HTMLButtonElement>(null);
+  const outlineOpenedByToggle = useRef(false);
   const mode = controlledMode ?? localMode;
   const [templates, setTemplates] = useState<{ template_id: string; label: string; kind: string }[]>([]);
   const [templateError, setTemplateError] = useState('');
@@ -489,6 +500,52 @@ export function ReportEditor({
     () => reportHeadings(readingDocument, title),
     [readingDocument, title],
   );
+  const closeOutline = (returnFocus: boolean) => {
+    setOutlineOpen(false);
+    if (returnFocus) outlineToggleRef.current?.focus();
+  };
+  // Whether the open outline is the drawer or the column beside the text is the stylesheet's call (report.css
+  // --report-outline-mode); it is read whenever an event needs it, so a resize across the breakpoint is followed.
+  const outlineFloating = () => Boolean(outlineRef.current
+    && getComputedStyle(outlineRef.current).getPropertyValue("--report-outline-mode").trim() !== "column");
+  useEffect(() => {
+    if (!outlineOpen) return;
+    const aside = outlineRef.current;
+    const openedByToggle = outlineOpenedByToggle.current;
+    outlineOpenedByToggle.current = false;
+    if (!aside) return;
+    // A drawer takes the focus while it is open and gives it back to 目录 when it closes.
+    if (openedByToggle && outlineFloating()) (aside.querySelector<HTMLElement>("a") ?? aside).focus();
+    const page = aside.ownerDocument;
+    const toggle = () => outlineToggleRef.current;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !outlineFloating()) return;
+      const active = page.activeElement;
+      if (aside.contains(active) || active === toggle()) closeOutline(true);
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!outlineFloating()) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (aside.contains(target) || toggle()?.contains(target)) return;
+      const focusable = target?.closest("a[href], button, input, select, textarea, summary, [contenteditable='true'], [tabindex]:not([tabindex='-1'])");
+      closeOutline(false);
+      // A click on something that takes no focus would leave it nowhere; 目录 takes it back.
+      if (!focusable) setTimeout(() => toggle()?.focus(), 0);
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget instanceof globalThis.Node ? event.relatedTarget : null;
+      if (!next || aside.contains(next) || next === toggle() || !outlineFloating()) return;
+      closeOutline(false);
+    };
+    page.addEventListener("keydown", onKey);
+    page.addEventListener("pointerdown", onPointer);
+    aside.addEventListener("focusout", onFocusOut);
+    return () => {
+      page.removeEventListener("keydown", onKey);
+      page.removeEventListener("pointerdown", onPointer);
+      aside.removeEventListener("focusout", onFocusOut);
+    };
+  }, [outlineOpen]);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] } }),
@@ -993,13 +1050,29 @@ export function ReportEditor({
           </Button>
         </div>
       )}
-      <div className="report-shell">
+      <div className="report-shell" data-outline-expanded={outlineOpen ? 'true' : undefined}>
         <div className="report-toolbar" role="group" aria-label="文稿工具栏">
           <div className="report-context">
             <h3>{toolbarLabel}</h3>
             {status && <span className="report-status">{status}</span>}
           </div>
           <div className="report-topbar">
+            <div className="report-view-controls">
+            <Button
+              ref={outlineToggleRef}
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-expanded={outlineOpen}
+              aria-controls={outlineId}
+              onClick={() => {
+                outlineOpenedByToggle.current = !outlineOpen;
+                setOutlineOpen((open) => !open);
+              }}
+            >
+              <ListTree size={14} strokeWidth={1.5} aria-hidden />
+              目录
+            </Button>
             <div className="report-modes" role="tablist" aria-label="文稿模式">
               {(
                 [
@@ -1018,6 +1091,7 @@ export function ReportEditor({
                   {label}
                 </button>
               ))}
+            </div>
             </div>
             <div className="report-actions">
               <Button
@@ -1088,13 +1162,28 @@ export function ReportEditor({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              {archiveAction}
               {assistantAction && <span className="report-assistant-action">{assistantAction}</span>}
             </div>
           </div>
         </div>
-        <aside className="report-outline" aria-label="文稿目录">
-          <details className="report-outline__sections">
-            <DisclosureSummary>目录</DisclosureSummary>
+        {outlineOpen && (
+          <aside
+            ref={outlineRef}
+            id={outlineId}
+            className="report-outline"
+            aria-label="文稿目录"
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.stopPropagation();
+              closeOutline(true);
+            }}
+            onClick={(event) => {
+              // Following a heading link closes the drawer without pulling the focus back up to 目录.
+              if ((event.target as Element).closest("a") && outlineFloating()) closeOutline(false);
+            }}
+          >
             {headings.length ? (
               <nav>
                 {headings.map((item) => (
@@ -1112,8 +1201,8 @@ export function ReportEditor({
             ) : (
               <p className="analysis-note">添加一、二级标题后生成目录。</p>
             )}
-          </details>
-        </aside>
+          </aside>
+        )}
         <div className="report-main">
 
           {reflowPreview && (
@@ -1609,6 +1698,7 @@ export function ReportEditor({
               appendix={appendix}
               preserveStructured={Boolean(document)}
               appendixFolded={readingResult.folded}
+              main
             />
           )}
           {mode === "print" && (
@@ -1694,6 +1784,7 @@ function ReportReading({
   appendix,
   preserveStructured = true,
   appendixFolded,
+  main,
 }: {
   title: string;
   body: string;
@@ -1702,6 +1793,8 @@ function ReportReading({
   appendix?: string;
   preserveStructured?: boolean;
   appendixFolded?: boolean;
+  /** The draft's one reading view; previews leave it out so a paragraph is located here only. */
+  main?: boolean;
 }) {
   const appendixResult = useMemo(
     () => exactAppendixResult(document, body, appendix, preserveStructured),
@@ -1711,6 +1804,31 @@ function ReportReading({
     () => reportArticleFragment(renderReportHtml(appendixResult.document, title)),
     [appendixResult.document, title],
   );
+  // React rewrites innerHTML whenever this object changes, which would drop a located paragraph's mark.
+  const mainHtml = useMemo(() => ({ __html: html }), [html]);
+  const mainRef = useRef<HTMLDivElement>(null);
+  // A table wider than the column scrolls inside its figure; only then is the figure a named, focusable region,
+  // so the keyboard can scroll it. The exported HTML leaves figures as they are.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const mark = () => {
+      for (const figure of main.querySelectorAll<HTMLElement>("figure.financial-table")) {
+        if (figure.scrollWidth > figure.clientWidth) {
+          figure.tabIndex = 0;
+          figure.setAttribute("role", "region");
+        } else {
+          figure.removeAttribute("tabindex");
+          figure.removeAttribute("role");
+        }
+      }
+    };
+    mark();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(mark);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [mainHtml]);
   const appendixHtml = useMemo(
     () =>
       appendix
@@ -1724,11 +1842,12 @@ function ReportReading({
     [appendix],
   );
   return (
-    <article className="report-reading" aria-label="文稿阅读">
+    <article className="report-reading" aria-label="文稿阅读" data-reading-main={main ? "" : undefined}>
       <h2>{title}</h2>
       <div
+        ref={mainRef}
         className="analysis-draft-main"
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={mainHtml}
       />
       {appendix && (appendixFolded ?? appendixResult.folded) && (
         <details className="analysis-details analysis-appendix-fold">

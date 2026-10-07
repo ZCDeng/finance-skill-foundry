@@ -3810,6 +3810,8 @@ def test_tool_descriptions_state_the_round_8_rules():
     assert '该组合仍按估算计' in tools and '该组合仍按估算计' in preset
     for text in (draft, tools, preset):
         assert 'amount_column_unmapped' in text and 'field_map' in text
+    for text in (draft, tools, preset):
+        assert 'presentation' in text
     assert 'requirements_id names the current one' in draft
     assert 'requirements_id 为当前版本 id' in tools and 'requirements_id为当前版本id' in preset
     assert 'required_scope' in draft and 'required_scope' in tools

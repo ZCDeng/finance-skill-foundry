@@ -780,7 +780,7 @@ async function verifyUi(seed) {
     'wrong number quality issue',
     30000,
   );
-  const saveButtons = await page.getByRole('button', {name: /保存文稿新版|选定并归档此版/}).evaluateAll((buttons) => buttons.map((button) => ({text: button.textContent, disabled: button.disabled})));
+  const saveButtons = await page.getByRole('button', {name: /保存文稿新版|归档此版/}).evaluateAll((buttons) => buttons.map((button) => ({text: button.textContent, disabled: button.disabled})));
   check('wrong_number_recheck_flags_issue_save_available', 'real UI keeps draft save path available while quality warns', {badQuality: badQuality.slice(0, 1200), saveButtons}, saveButtons.some((button) => !button.disabled));
   await page.getByRole('button', {name: '保存文稿新版'}).click();
   await until(
