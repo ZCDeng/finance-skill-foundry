@@ -91,13 +91,10 @@ COLUMNS = [
     "entity",
     "metric_key",
     "metric_label",
-    "value_kind",
-    "value",
+    "scenario",
+    {"name": "value", "type": "decimal"},
+    "unit",
     "display_value",
-    "compare_label",
-    "compare_value",
-    "change",
-    "change_display",
     "level",
     "level_label",
     "estimate",
@@ -141,7 +138,21 @@ def resolve_params(raw: Any) -> dict[str, Decimal]:
 # ---------------------------------------------------------------- cell resolution
 
 
-def _parse_cell(value: Any, *, rate: bool, scale: str | None, where: str) -> Decimal:
+def _rate_limit(key: str) -> Decimal | None:
+    """Above this a bare number is taken for a percentage written without its sign.
+
+    A margin or expense ratio is below one as a fraction, so 1.2 is 1.2%; a collection
+    rate can pass 100% when arrears come in, so only a figure past 150% is refused.
+    """
+    base = key.removesuffix("_py")
+    if base in {"gross_margin", "expense_ratio"}:
+        return Decimal("1")
+    if base in RATE_INPUTS:
+        return Decimal("1.5")
+    return None
+
+
+def _parse_cell(value: Any, *, limit: Decimal | None, scale: str | None, where: str) -> Decimal:
     if value is None or (isinstance(value, str) and value.strip() in {"", "-", "—", "--"}):
         raise FoundryError(f"{where} is empty")
     percent = False
@@ -157,7 +168,7 @@ def _parse_cell(value: Any, *, rate: bool, scale: str | None, where: str) -> Dec
         raise FoundryError(f"{where} scale must be percent or fraction")
     if percent or scale == "percent":
         return number / 100
-    if rate and scale is None and abs(number) > Decimal("1.5"):
+    if limit is not None and scale is None and abs(number) > limit:
         raise FoundryError(
             f"{where} reads {number}, which looks like a percentage; "
             "set scale to percent (87.32 means 87.32%) or fraction"
@@ -214,9 +225,10 @@ def resolve_entities(
         for key, ref in refs.items():
             key = _input_name(key)
             rate = key.removesuffix("_py") in RATE_INPUTS
+            limit = _rate_limit(key)
             where = f"{name}.{key}"
             if not isinstance(ref, dict):
-                values[key] = _parse_cell(ref, rate=rate, scale=None, where=where)
+                values[key] = _parse_cell(ref, limit=limit, scale=None, where=where)
                 manual.add(key)
                 continue
             alias = ref.get("alias")
@@ -227,8 +239,14 @@ def resolve_entities(
                 raise FoundryError(f"{where} requires a column")
             candidates = rows_by_alias[alias]
             if "source_row" in ref:
-                candidates = [r for r in candidates if r["source"].get("source_row") == ref["source_row"]]
-                wanted = f"source_row {ref['source_row']}"
+                if "match" in ref:
+                    raise FoundryError(f"{where} gives both match and source_row; give one")
+                try:
+                    source_row = int(ref["source_row"])
+                except (TypeError, ValueError) as exc:
+                    raise FoundryError(f"{where} source_row must be a row number") from exc
+                candidates = [r for r in candidates if r["source"].get("source_row") == source_row]
+                wanted = f"source_row {source_row}"
             else:
                 match = ref.get("match")
                 if not isinstance(match, dict) or not match:
@@ -247,15 +265,21 @@ def resolve_entities(
             row = candidates[0]
             if column not in row:
                 raise FoundryError(f"{where} column {column} is not in {alias}")
-            values[key] = _parse_cell(row[column], rate=rate, scale=ref.get("scale"), where=where)
+            values[key] = _parse_cell(row[column], limit=limit, scale=ref.get("scale"), where=where)
             sources[key] = {**row["source"], "column": column}
-            unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
-            if unit and not rate:
-                units[key] = str(unit)
-        distinct = sorted(set(units.values()))
+            if not rate:
+                unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
+                units[key] = _unit(unit)
+        distinct = sorted({unit for unit in units.values() if unit})
         if len(distinct) > 1:
             raise FoundryError(
                 f"{name} mixes amount units {', '.join(distinct)}; ratios across units are wrong"
+            )
+        unknown = sorted(key for key, unit in units.items() if not unit)
+        if distinct and unknown:
+            raise FoundryError(
+                f"{name} reads {', '.join(unknown)} without a unit beside amounts in {distinct[0]}; "
+                "state the unit on the cell reference or in the table scope"
             )
         entities.append(
             {
@@ -263,10 +287,21 @@ def resolve_entities(
                 "values": values,
                 "sources": sources,
                 "manual": manual,
+                "unit": distinct[0] if distinct else None,
                 "sensitivity": bool(raw.get("sensitivity")),
             }
         )
     return entities
+
+
+UNIT_ALIASES = {"万": "万元", "亿": "亿元", "千": "千元"}
+
+
+def _unit(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return UNIT_ALIASES.get(text, text)
 
 
 def _blank(value: Any) -> bool:
@@ -294,13 +329,35 @@ def _table_entities(tables: Any, rows_by_alias: dict[str, list[dict]]) -> list[d
             raise FoundryError("an entity table requires name_column and columns {input: column}")
         exclude = {str(name).strip() for name in table.get("exclude") or []}
         prefix = str(table.get("name_prefix") or "")
-        for row in rows_by_alias[alias]:
+        rows = rows_by_alias[alias]
+        present = {column for row in rows for column in row}
+        specs = {key: column if isinstance(column, dict) else {"column": column} for key, column in columns.items()}
+        for key, spec in [("name_column", {"column": name_column}), *specs.items()]:
+            if spec.get("column") not in present:
+                raise FoundryError(f"entity table {alias}: column {spec.get('column')} for {key} is not in the table")
+        for key, spec in specs.items():
+            # A percentage column written without its sign is caught on any row, not only past the limit.
+            limit = _rate_limit(_input_name(key))
+            if limit is None or spec.get("scale") is not None:
+                continue
+            for row in rows:
+                cell = row.get(spec["column"])
+                if not _blank(cell) and not (isinstance(cell, str) and cell.strip().endswith(("%", "％"))):
+                    try:
+                        number = Decimal(str(cell).replace(",", ""))
+                    except InvalidOperation:
+                        continue
+                    if number.is_finite() and abs(number) > limit:
+                        raise FoundryError(
+                            f"entity table {alias}: {spec['column']} reads {number} on a row, which looks "
+                            "like a percentage; set scale to percent or fraction for the column"
+                        )
+        for row in rows:
             name = row.get(name_column)
             if _blank(name) or str(name).strip() in exclude:
                 continue
             values = {}
-            for key, column in columns.items():
-                spec = column if isinstance(column, dict) else {"column": column}
+            for key, spec in specs.items():
                 if _blank(row.get(spec.get("column"))):
                     continue
                 values[key] = {**spec, "alias": alias, "source_row": row["source"]["source_row"]}
@@ -386,9 +443,18 @@ def _receivables(v: dict, when: str) -> tuple[Decimal, list[str]] | None:
     if ar not in v:
         return None
     ca = f"contract_assets_{when}"
-    if ca in v:
+    if _with_contract_assets(v) and ca in v:
         return v[ar] + v[ca], [ar, ca]
     return v[ar], [ar]
+
+
+def _with_contract_assets(v: dict) -> bool:
+    """Contract assets count only when both ends have them, or there is no year start to compare with.
+
+    Adding them at year end but not at year start would count the whole contract-asset
+    balance as a year's increase in receivables.
+    """
+    return "contract_assets_end" in v and ("contract_assets_begin" in v or "ar_begin" not in v)
 
 
 def _m_dso(v, p) -> Computed:
@@ -426,7 +492,7 @@ def _m_implied_collection(v, p) -> Computed:
     change = _ar_change(v)
     if change is None or not _need(v, "impairment", "revenue"):
         return None
-    value = _div(change[0] + v["impairment"], v["revenue"] * p["vat_factor"])
+    value = _div(change[0] + abs(v["impairment"]), v["revenue"] * p["vat_factor"])
     if value is None:
         return None
     return 1 - value, sorted({*change[1], "impairment", "revenue"}), True
@@ -457,7 +523,7 @@ def _m_impairment_to_gp(v, p) -> Computed:
     gp = _gross_profit(v)
     if gp is None or "impairment" not in v:
         return None
-    value = _div(v["impairment"], gp[0])
+    value = _div(abs(v["impairment"]), gp[0])
     return None if value is None else (value, sorted({*gp[1], "impairment"}), False)
 
 
@@ -491,7 +557,7 @@ METRICS: list[dict[str, Any]] = [
     {"key": "ar_buildup", "label": "应收蓄水率", "kind": "ratio", "fn": _m_buildup,
      "formula": "（期末应收 − 年初应收）÷ 本期营业收入，应收含合同资产"},
     {"key": "implied_collection", "label": "反推回款率", "kind": "ratio", "fn": _m_implied_collection,
-     "formula": "1 − （应收增加额 + 本期减值）÷（本期营业收入 × 税率因子）"},
+     "formula": "1 − （应收增加额 + 本期减值）÷（本期营业收入 × 税率因子），减值按绝对值计"},
     {"key": "implied_vs_reported", "label": "反推回款率与综合收缴率之差", "kind": "pp",
      "fn": _m_implied_vs_reported, "formula": "反推回款率 − 综合收缴率"},
     {"key": "rollforward_collection", "label": "滚动回款率", "kind": "ratio", "fn": _m_rollforward_collection,
@@ -499,7 +565,7 @@ METRICS: list[dict[str, Any]] = [
     {"key": "cash_collection_ratio", "label": "现金回收比", "kind": "ratio", "fn": _m_cash_collection,
      "formula": "销售商品、提供劳务收到的现金 ÷（营业收入 × 税率因子）"},
     {"key": "impairment_to_gross_profit", "label": "减值占毛利", "kind": "ratio", "fn": _m_impairment_to_gp,
-     "formula": "减值损失 ÷ 毛利"},
+     "formula": "减值损失（绝对值）÷ 毛利"},
     {"key": "provision_ratio", "label": "应收拨备率", "kind": "ratio", "fn": _share("provision", "ar_gross"),
      "formula": "坏账准备 ÷ 应收账款账面余额"},
     {"key": "aging_over_1y_share", "label": "账龄1年以上占比", "kind": "ratio",
@@ -585,101 +651,129 @@ def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[s
 # ---------------------------------------------------------------- evaluation
 
 
-def _display(kind: str, value: Decimal) -> str:
-    if kind == "ratio":
-        return display_percent(value)
-    if kind == "pp":
-        return f"{display_amount(value * 100)}pp"
-    if kind == "days":
-        return f"{display_amount(value)} 天"
-    return display_amount(value)
+UNIT_BY_KIND = {"ratio": "%", "pp": "百分点", "days": "天"}
+CHANGE_UNIT_BY_KIND = {"ratio": "百分点", "pp": "百分点", "days": "天"}
 
 
-def _change_display(kind: str, change: Decimal) -> str:
-    sign = "+" if change > 0 else ""
-    if kind in {"ratio", "pp"}:
-        return f"{sign}{display_amount(change * 100)}pp"
-    if kind == "days":
-        return f"{sign}{display_amount(change)} 天"
-    return f"{sign}{display_amount(change)}"
+def _shown(kind: str, value: Decimal) -> Decimal:
+    """The value as its row states it: a ratio in percent, a gap in percentage points."""
+    return value * 100 if kind in {"ratio", "pp"} else value
+
+
+def _display(unit: str | None, value: Decimal, *, signed: bool = False) -> str:
+    text = display_amount(value)
+    if signed and not text.startswith("-") and text != "0.00":
+        text = "+" + text
+    if unit == "%":
+        return f"{text}%"
+    if unit == "百分点":
+        return f"{text} 个百分点"
+    return f"{text} {unit}" if unit else text
 
 
 def _prior(values: dict[str, Decimal]) -> dict[str, Decimal]:
     return {key[:-3]: value for key, value in values.items() if key.endswith("_py")}
 
 
+def _judged_out(key: str, values: dict, computed: dict, params: dict) -> str | None:
+    """Why a value is not judged although it was computed, or None."""
+    if key == "dso" and computed.get("ttm_revenue", Decimal(1)) <= 0:
+        return "近12个月收入不为正，天数没有意义，不作判断"
+    if key == "impairment_to_gross_profit":
+        gp = _gross_profit(values)
+        if gp is not None and gp[0] <= 0:
+            return "毛利不为正，占比没有意义，不作判断"
+    if key in {"implied_collection", "implied_vs_reported"} and "implied_collection" in computed:
+        implied = computed["implied_collection"]
+        if not params["implied_collection_min"] <= implied <= params["implied_collection_max"]:
+            return "反推回款率超出合理区间，可能受收并购、处置或重分类影响，不作判断"
+    return None
+
+
 def evaluate_entity(entity: dict, params: dict[str, Decimal]) -> tuple[list[dict], list[dict]]:
-    """Every metric the entity's inputs support, and a diagnostic per metric they do not."""
+    """Every metric the entity's inputs support, and a diagnostic per metric they do not.
+
+    Rows are long-form: one row for the period, and when there is something to compare
+    with, one for 年初 or 上年同期 and one for the change, each with its own value and unit.
+    """
     values = entity["values"]
     prior = _prior(values)
-    rows, skipped = [], []
+    rows, skipped, computed = [], [], {}
     for metric in METRICS:
-        key = metric["key"]
-        computed = metric["fn"](values, params)
-        if computed is None:
+        key, kind = metric["key"], metric["kind"]
+        result = metric["fn"](values, params)
+        if result is None:
             skipped.append({"metric_key": key, "needs": list(_METRIC_INPUTS[key])})
             continue
-        value, used, estimate = computed
-        compare_label = compare_value = change = None
+        value, used, estimate = result
+        computed[key] = value
+        compare_label = compare = None
+        compare_used: list[str] = []
+        compare_estimate = False
         if metric.get("compare") == "begin":
             begin = _m_dso_begin(values, params)
             if begin is not None:
-                compare_label, compare_value = "年初", begin[0]
-                used = sorted({*used, *begin[1]})
-        else:
-            previous = metric["fn"](prior, params) if prior else None
+                compare_label, compare, compare_used = "年初", begin[0], begin[1]
+        elif prior:
+            previous = metric["fn"](prior, params)
             if previous is not None:
-                compare_label, compare_value = "上年同期", previous[0]
-                used = sorted({*used, *(f"{name}_py" for name in previous[1])})
-                estimate = estimate or previous[2]
-        if compare_value is not None:
-            change = value - compare_value
+                compare_label, compare = "上年同期", previous[0]
+                compare_used, compare_estimate = [f"{name}_py" for name in previous[1]], previous[2]
+        change = None if compare is None else value - compare
         level, note = _level(key, value, change, params)
         notes = [note] if note else []
-        if key == "implied_collection" and not (
-            params["implied_collection_min"] <= value <= params["implied_collection_max"]
-        ):
-            level = "unknown"
-            notes.append("超出合理区间，可能受收并购、处置或重分类影响，不作判断")
-        if key == "dso" and "contract_assets_end" not in values:
+        reason = _judged_out(key, values, computed, params)
+        if reason:
+            level, notes = "unknown", [reason]
+        if key == "dso" and "contract_assets_end" in values and not _with_contract_assets(values):
+            notes.append("年初缺合同资产，两端都只算应收账款")
+        elif key == "dso" and "contract_assets_end" not in values:
             notes.append("未取合同资产，应收天数只含应收账款")
-        manual = sorted(name for name in used if name in entity["manual"])
+        if key in {"implied_collection", "impairment_to_gross_profit"} and values.get("impairment", 0) < 0:
+            notes.append("减值在报表中列为负数，按绝对值计")
+        manual = sorted(name for name in {*used, *compare_used} if name in entity["manual"])
         if manual:
             notes.append("含手填数：" + "、".join(_input_label(name) for name in manual))
         if estimate:
             notes.append("估算")
-        rows.append(
-            {
+        unit = UNIT_BY_KIND.get(kind, entity.get("unit"))
+        change_unit = CHANGE_UNIT_BY_KIND.get(kind, entity.get("unit"))
+
+        def row(scenario, number, row_unit, read, is_estimate, *, signed=False, judged=False):
+            shown = _shown(kind, number) if row_unit in {"%", "百分点"} else number
+            return {
                 "entity": entity["name"],
                 "metric_key": key,
                 "metric_label": metric["label"],
-                "value_kind": metric["kind"],
-                "value": format(value, "f"),
-                "display_value": _display(metric["kind"], value),
-                "compare_label": compare_label,
-                "compare_value": None if compare_value is None else format(compare_value, "f"),
-                "change": None if change is None else format(change, "f"),
-                "change_display": None if change is None else _change_display(metric["kind"], change),
-                "level": level,
-                "level_label": LEVEL_LABELS.get(level or ""),
-                "estimate": estimate,
+                "scenario": scenario,
+                "value": format(shown, "f"),
+                "unit": row_unit,
+                "display_value": _display(row_unit, shown, signed=signed),
+                "level": level if judged else None,
+                "level_label": LEVEL_LABELS.get(level or "") if judged else None,
+                "estimate": is_estimate,
                 "formula": metric["formula"],
-                "note": "；".join(notes),
-                "inputs": {name: format(values[name], "f") for name in used},
-                "source_rows": [entity["sources"][name] for name in used if name in entity["sources"]],
+                "note": "；".join(notes) if judged else ("估算" if is_estimate else ""),
+                "inputs": {name: format(values[name], "f") for name in read},
+                "source_rows": [entity["sources"][name] for name in read if name in entity["sources"]],
             }
-        )
+
+        rows.append(row("本期", value, unit, used, estimate, signed=kind == "pp", judged=True))
+        if compare is not None:
+            rows.append(row(compare_label, compare, unit, compare_used, compare_estimate, signed=kind == "pp"))
+            both = sorted({*used, *compare_used})
+            rows.append(row("变动", change, change_unit, both, estimate or compare_estimate, signed=True))
     _provision_follow_up(rows)
     return rows, skipped
 
 
 def _provision_follow_up(rows: list[dict]) -> None:
     """Older receivables with a falling provision rate: the provision has not kept up."""
-    by_key = {row["metric_key"]: row for row in rows}
-    aging, provision = by_key.get("aging_over_1y_share"), by_key.get("provision_ratio")
-    if not aging or not provision or aging["change"] is None or provision["change"] is None:
+    changes = {row["metric_key"]: Decimal(row["value"]) for row in rows if row["scenario"] == "变动"}
+    provision = next((row for row in rows if row["metric_key"] == "provision_ratio" and row["scenario"] == "本期"), None)
+    if provision is None or "aging_over_1y_share" not in changes or "provision_ratio" not in changes:
         return
-    if Decimal(aging["change"]) > 0 and Decimal(provision["change"]) < 0:
+    if changes["aging_over_1y_share"] > 0 and changes["provision_ratio"] < 0:
         provision["level"], provision["level_label"] = "yellow", LEVEL_LABELS["yellow"]
         provision["note"] = "；".join(filter(None, ["账龄变老而拨备率下降，拨备没跟上", provision["note"]]))
 

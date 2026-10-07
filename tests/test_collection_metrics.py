@@ -37,23 +37,35 @@ def _entity(values, name="集团", sensitivity=False):
 
 
 def _rows(values, **params):
+    """The period rows keyed by metric, and the whole result; _all gives every scenario."""
+    result = _result(values, **params)
+    return {row["metric_key"]: row for row in result["rows"] if row["scenario"] == "本期"}, result
+
+
+def _result(values, **params):
     entities = resolve_entities({"entities": [_entity(values)]}, {})
-    result = evaluate_collection_health(entities, resolve_params(params))
-    return {row["metric_key"]: row for row in result["rows"]}, result
+    return evaluate_collection_health(entities, resolve_params(params))
+
+
+def _all(values, **params):
+    return {(row["metric_key"], row["scenario"]): row for row in _result(values, **params)["rows"]}
 
 
 def test_break_even_collection_rate_and_gap():
     rows, _ = _rows(GROUP)
-    assert Decimal(rows["gross_margin"]["value"]) == Decimal("0.187")
-    assert Decimal(rows["expense_ratio"]["value"]) == Decimal("0.07")
-    assert Decimal(rows["break_even_collection"]["value"]) == Decimal("0.883")
+    assert Decimal(rows["gross_margin"]["value"]) == Decimal("18.7")
+    assert rows["gross_margin"]["unit"] == "%"
+    assert Decimal(rows["expense_ratio"]["value"]) == Decimal("7")
+    assert Decimal(rows["break_even_collection"]["value"]) == Decimal("88.3")
     assert rows["break_even_collection"]["display_value"] == "88.30%"
     gap = rows["collection_gap"]
-    assert Decimal(gap["value"]) == Decimal("0.8732") - Decimal("0.883")
-    assert gap["display_value"] == "-0.98pp"
+    assert Decimal(gap["value"]) == (Decimal("0.8732") - Decimal("0.883")) * 100
+    assert gap["unit"] == "百分点"
+    assert gap["display_value"] == "-0.98 个百分点"
     assert (gap["level"], gap["level_label"]) == ("red", "红")
     assert "倒贴现金" in gap["note"]
     assert rows["collection_gap_total"]["level"] == "green"
+    assert rows["collection_gap_total"]["display_value"] == "+6.80 个百分点"
 
 
 def test_gap_levels_follow_thresholds():
@@ -66,14 +78,19 @@ def test_gap_levels_follow_thresholds():
 
 
 def test_dso_uses_rebuilt_ttm_revenue_marked_estimate_and_compares_to_year_start():
-    rows, _ = _rows(GROUP)
-    ttm = rows["ttm_revenue"]
+    rows = _all(GROUP)
+    ttm = rows[("ttm_revenue", "本期")]
     assert Decimal(ttm["value"]) == Decimal("1550")
     assert ttm["estimate"] is True and "估算" in ttm["note"]
-    dso = rows["dso"]
+    dso = rows[("dso", "本期")]
     assert Decimal(dso["value"]) == Decimal("580") * 365 / Decimal("1550")
-    assert dso["compare_label"] == "年初"
-    assert Decimal(dso["compare_value"]) == Decimal("480") * 365 / Decimal("1500")
+    assert dso["unit"] == "天" and dso["display_value"].endswith(" 天")
+    begin = rows[("dso", "年初")]
+    assert Decimal(begin["value"]) == Decimal("480") * 365 / Decimal("1500")
+    assert begin["level"] is None
+    change = rows[("dso", "变动")]
+    assert Decimal(change["value"]) == Decimal(dso["value"]) - Decimal(begin["value"])
+    assert change["display_value"].startswith("+")
     assert dso["estimate"] is True
     # 136.58 days is yellow; a rise of 15 days or more lifts it one step.
     assert dso["level"] == "red"
@@ -89,37 +106,61 @@ def test_dso_without_estimate_when_ttm_given_and_notes_missing_contract_assets()
     assert "未取合同资产" in dso["note"]
 
 
+def test_contract_assets_at_year_end_only_are_left_out_of_both_ends():
+    values = {k: v for k, v in GROUP.items() if k != "contract_assets_begin"}
+    rows = _all({**values, "ar_end": "100", "contract_assets_end": "300", "ar_begin": "90"})
+    assert Decimal(rows[("ar_buildup", "本期")]["value"]) == Decimal("1")  # (100 - 90) / 1000, in percent
+    assert Decimal(rows[("dso", "本期")]["value"]) == Decimal("100") * 365 / Decimal("1550")
+    assert "年初缺合同资产" in rows[("dso", "本期")]["note"]
+
+
 def test_implied_collection_and_reconciliation_to_reported_rate():
     rows, _ = _rows(GROUP)
     implied = rows["implied_collection"]
-    assert Decimal(implied["value"]) == 1 - Decimal("130") / Decimal("1060")
+    assert Decimal(implied["value"]) == (1 - Decimal("130") / Decimal("1060")) * 100
     assert implied["estimate"] is True
     check = rows["implied_vs_reported"]
     assert check["level"] == "yellow"
     assert "对不上" in check["note"]
 
 
-def test_implied_collection_out_of_range_is_not_judged():
+def test_negative_impairment_as_reported_under_cas_is_read_as_a_loss():
+    positive, _ = _rows(GROUP)
+    negative, _ = _rows({**GROUP, "impairment": "-30"})
+    for key in ("implied_collection", "impairment_to_gross_profit"):
+        assert negative[key]["value"] == positive[key]["value"]
+        assert "按绝对值计" in negative[key]["note"]
+
+
+def test_implied_collection_out_of_range_is_not_judged_nor_its_reconciliation():
     rows, _ = _rows({**GROUP, "ar_end": "1500"})
-    implied = rows["implied_collection"]
-    assert implied["level"] == "unknown"
-    assert "超出合理区间" in implied["note"]
+    for key in ("implied_collection", "implied_vs_reported"):
+        assert rows[key]["level"] == "unknown"
+        assert "超出合理区间" in rows[key]["note"]
+
+
+def test_nonpositive_ttm_and_gross_profit_are_not_judged():
+    rows, _ = _rows({**GROUP, "revenue_py_full": "-1000"})
+    assert rows["dso"]["level"] == "unknown"
+    rows, _ = _rows({**GROUP, "cost": "1100"})
+    assert rows["impairment_to_gross_profit"]["level"] == "unknown"
 
 
 def test_cash_collection_ratio_against_prior_year():
-    rows, _ = _rows(GROUP)
-    cash = rows["cash_collection_ratio"]
-    assert Decimal(cash["value"]) == Decimal("950") / Decimal("1060")
-    assert cash["compare_label"] == "上年同期"
-    assert Decimal(cash["compare_value"]) == Decimal("940") / (Decimal("950") * Decimal("1.06"))
+    rows = _all(GROUP)
+    cash = rows[("cash_collection_ratio", "本期")]
+    assert Decimal(cash["value"]) == Decimal("950") / Decimal("1060") * 100
+    prior = rows[("cash_collection_ratio", "上年同期")]
+    assert Decimal(prior["value"]) == Decimal("940") / (Decimal("950") * Decimal("1.06")) * 100
+    assert "cash_from_sales_py" in prior["inputs"] and "revenue_py" in prior["inputs"]
+    change = rows[("cash_collection_ratio", "变动")]
+    assert change["unit"] == "百分点" and change["display_value"].endswith(" 个百分点")
     assert cash["level"] == "yellow"
-    assert cash["change_display"].endswith("pp")
-    assert "cash_from_sales_py" in cash["inputs"] and "revenue_py" in cash["inputs"]
 
 
 def test_vat_factor_is_a_parameter():
     rows, result = _rows(GROUP, vat_factor="1.09")
-    assert Decimal(rows["cash_collection_ratio"]["value"]) == Decimal("950") / Decimal("1090")
+    assert Decimal(rows["cash_collection_ratio"]["value"]) == Decimal("950") / Decimal("1090") * 100
     assert result["params"]["vat_factor"] == "1.09"
 
 
@@ -138,9 +179,9 @@ def test_impairment_and_provision_structure():
         }
     )
     assert rows["impairment_to_gross_profit"]["level"] == "yellow"
-    assert Decimal(rows["provision_ratio"]["value"]) == Decimal("0.2")
-    assert Decimal(rows["aging_over_1y_share"]["value"]) == Decimal("0.375")
-    assert Decimal(rows["related_party_provision_ratio"]["value"]) == Decimal("0.9")
+    assert Decimal(rows["provision_ratio"]["value"]) == Decimal("20")
+    assert Decimal(rows["aging_over_1y_share"]["value"]) == Decimal("37.5")
+    assert Decimal(rows["related_party_provision_ratio"]["value"]) == Decimal("90")
     # Older receivables with a lower provision rate than last year.
     assert rows["provision_ratio"]["level"] == "yellow"
     assert "拨备没跟上" in rows["provision_ratio"]["note"]
@@ -163,6 +204,9 @@ def test_no_metric_at_all_is_an_error():
 def test_rate_that_looks_like_a_percentage_needs_a_scale():
     with pytest.raises(FoundryError, match="looks like a percentage"):
         _rows({**GROUP, "collection_rate_current": "87.32"})
+    # A margin or expense ratio above one is a percentage written without its sign.
+    with pytest.raises(FoundryError, match="looks like a percentage"):
+        _rows({"expense_ratio": "1.2"})
 
 
 def test_unknown_input_and_param_are_refused():
@@ -245,13 +289,23 @@ def test_scenario_reads_cells_and_drills_back_to_source_rows(tmp_path):
     )
     run = service.run_scenario({"scenario_id": scenario["id"]})
     assert run["execution_status"] == "succeeded"
-    rows = {row["metric_key"]: (index, row) for index, row in enumerate(run["result"]["rows"])}
+    rows = {
+        row["metric_key"]: (index, row)
+        for index, row in enumerate(run["result"]["rows"])
+        if row["scenario"] == "本期"
+    }
     index, gap = rows["collection_gap"]
     assert gap["level"] == "red"
     assert "含手填数" not in gap["note"]
     assert {ref["column"] for ref in gap["source_rows"]} == {"本年累计"}
     assert service.drilldown_fact({"run_id": run["id"], "row": index})["total"] == 4
     assert run["result"]["sensitivity"][0]["expense_ratio"] == "0.07"
+    # Every figure is a fact a draft can cite, with the unit its row states.
+    from foundry.finance_explanations import _facts_for_run
+
+    facts = {(fact["row"], fact["column"]): fact for fact in _facts_for_run(run, {"absolute": "0"})}
+    assert facts[(index, "value")]["unit"] == "百分点"
+    assert facts[(index, "value")]["display_value"] == "-0.98 个百分点"
     again = service.run_scenario({"scenario_id": scenario["id"]})
     assert again["output_hash"] == run["output_hash"]
 
@@ -327,9 +381,9 @@ def test_reported_ratios_on_a_kpi_dashboard_are_read_as_reported(tmp_path):
         }
     )
     run = service.run_scenario({"scenario_id": scenario["id"]})
-    rows = {row["metric_key"]: row for row in run["result"]["rows"]}
+    rows = {row["metric_key"]: row for row in run["result"]["rows"] if row["scenario"] == "本期"}
     assert rows["break_even_collection"]["display_value"] == "91.14%"
-    assert rows["collection_gap"]["display_value"] == "-3.22pp"
+    assert rows["collection_gap"]["display_value"] == "-3.22 个百分点"
     assert rows["collection_gap"]["level"] == "red"
     assert rows["collection_gap_total"]["note"].startswith("严重低于生死线")
 
@@ -367,7 +421,11 @@ def test_entity_table_gives_one_entity_per_named_row(tmp_path):
         }
     )
     run = service.run_scenario({"scenario_id": scenario["id"]})
-    gaps = {row["entity"]: row for row in run["result"]["rows"] if row["metric_key"] == "collection_gap"}
+    gaps = {
+        row["entity"]: row
+        for row in run["result"]["rows"]
+        if row["metric_key"] == "collection_gap" and row["scenario"] == "本期"
+    }
     assert set(gaps) == {"上海城市公司"}
     assert gaps["上海城市公司"]["level"] == "green"
     entities = {row["entity"] for row in run["result"]["rows"]}
@@ -375,3 +433,110 @@ def test_entity_table_gives_one_entity_per_named_row(tmp_path):
     skipped = [d for d in run["result"]["diagnostics"] if d["code"] == "collection_metric_skipped"]
     assert any(d["entity"] == "杭州城市公司" and any(i["metric_key"] == "collection_gap" for i in d["skipped"])
                for d in skipped)
+
+
+def test_entity_table_refuses_a_column_it_does_not_have(tmp_path):
+    service, context = _service(tmp_path, SHEET)
+    scenario = service.save_scenario(
+        {
+            "context_id": context["id"],
+            "kind": "collection_health",
+            "inputs": {
+                "entity_tables": [
+                    {"alias": "kpi", "name_column": "指标", "columns": {"revenue": "本年累计", "cost": "成本X"}}
+                ]
+            },
+        }
+    )
+    run = service.run_scenario({"scenario_id": scenario["id"]})
+    assert run["execution_status"] == "failed"
+    assert "成本X" in run["error"]
+
+
+def test_entity_table_rate_column_written_in_percent_needs_a_scale():
+    rows = {
+        "t": [
+            {"公司": "甲", "费用率": 0.9, "source": {"source_row": 1}},
+            {"公司": "乙", "费用率": 7.2, "source": {"source_row": 2}},
+        ]
+    }
+    with pytest.raises(FoundryError, match="looks like a percentage"):
+        resolve_entities(
+            {"entity_tables": [{"alias": "t", "name_column": "公司", "columns": {"expense_ratio": "费用率"}}]}, rows
+        )
+
+
+def test_amount_without_a_unit_beside_amounts_with_one_is_refused():
+    rows = {
+        "a": [{"指标": "营业收入", "值": "1000", "source": {"source_row": 1}}],
+        "b": [{"指标": "收现", "值": "950000", "source": {"source_row": 1}}],
+    }
+    with pytest.raises(FoundryError, match="without a unit"):
+        resolve_entities(
+            {
+                "entities": [
+                    {
+                        "name": "集团",
+                        "values": {
+                            "revenue": {"alias": "a", "match": {"指标": "营业收入"}, "column": "值"},
+                            "cash_from_sales": {"alias": "b", "match": {"指标": "收现"}, "column": "值"},
+                        },
+                    }
+                ]
+            },
+            rows,
+            {"a": "万元", "b": None},
+        )
+    # 万 and 万元 are the same unit.
+    entities = resolve_entities(
+        {
+            "entities": [
+                {
+                    "name": "集团",
+                    "values": {
+                        "revenue": {"alias": "a", "match": {"指标": "营业收入"}, "column": "值"},
+                        "cash_from_sales": {"alias": "b", "match": {"指标": "收现"}, "column": "值", "unit": "万"},
+                    },
+                }
+            ]
+        },
+        rows,
+        {"a": "万元", "b": None},
+    )
+    assert entities[0]["unit"] == "万元"
+
+
+def test_source_row_is_read_as_a_number_and_not_beside_match():
+    rows = {"a": [{"指标": "营业收入", "值": "1000", "source": {"source_row": 2}}]}
+    entities = resolve_entities(
+        {"entities": [{"name": "集团", "values": {"revenue": {"alias": "a", "source_row": "2", "column": "值"}}}]},
+        rows,
+    )
+    assert entities[0]["values"]["revenue"] == Decimal("1000")
+    with pytest.raises(FoundryError, match="both match and source_row"):
+        resolve_entities(
+            {
+                "entities": [
+                    {
+                        "name": "集团",
+                        "values": {
+                            "revenue": {"alias": "a", "source_row": 2, "match": {"指标": "x"}, "column": "值"}
+                        },
+                    }
+                ]
+            },
+            rows,
+        )
+
+
+def test_assistant_tools_offer_the_kind_the_engine_accepts():
+    from pathlib import Path
+
+    from foundry.finance_service import SCENARIO_KINDS
+
+    root = Path(__file__).resolve().parents[1]
+    for path in (root / "dsh-plugin/finance-tools.js", root / "foundry/resources/dsh-plugin/finance-tools.js"):
+        text = path.read_text(encoding="utf-8")
+        for kind in SCENARIO_KINDS:
+            assert f'"{kind}"' in text, (path, kind)
+        assert "entity_tables" in text
