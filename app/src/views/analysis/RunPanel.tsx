@@ -140,21 +140,29 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
 
 /**
  * The calculation history as a timeline (after chanhdai.com's work-experience, MIT; components/chanhdai.LICENSE.txt):
- * consecutive calculations of one analysis version sit under its question, joined by a thin line, one dot per
+ * the calculations of one analysis version sit under its question, joined by a thin line, one dot per
  * calculation and the one on screen in gold. Only the layout is borrowed; each row stays a button that opens it.
  */
+/**
+ * One group per analysis version, in the order its newest calculation appears; rerunning an older version after a
+ * newer one still adds to that version's group rather than starting a second one.
+ */
+export function historyGroups(rows: AnalysisRun[]): { analysisId: string; rows: AnalysisRun[] }[] {
+  const groups = new Map<string, AnalysisRun[]>();
+  for (const row of rows) {
+    const group = groups.get(row.analysis_id);
+    if (group) group.push(row);
+    else groups.set(row.analysis_id, [row]);
+  }
+  return [...groups].map(([analysisId, items]) => ({ analysisId, rows: items }));
+}
+
 function HistoryRows({ rows, runs, analyses, current, onPick }: {
   rows: AnalysisRun[]; runs: AnalysisRun[]; analyses: AnalysisRevision[]; current: AnalysisRun | undefined; onPick(run: AnalysisRun): void;
 }) {
-  const groups: { analysisId: string; rows: AnalysisRun[] }[] = [];
-  for (const row of rows) {
-    const last = groups.at(-1);
-    if (last && last.analysisId === row.analysis_id) last.rows.push(row);
-    else groups.push({ analysisId: row.analysis_id, rows: [row] });
-  }
-  return <div className="analysis-history-list analysis-history-timeline">{groups.map((group, at) => {
+  return <div className="analysis-history-list analysis-history-timeline">{historyGroups(rows).map((group) => {
     const question = analyses.find((item) => item.id === group.analysisId)?.question ?? '分析';
-    return <div key={`${group.analysisId}:${at}`} className="analysis-history-group" role="group" aria-label={question}>
+    return <div key={group.analysisId} className="analysis-history-group" role="group" aria-label={question}>
       <p className="analysis-history-group__question">{question}</p>
       {group.rows.map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === current?.id ? 'true' : undefined} onClick={() => onPick(row)}>
         <span className="analysis-history-row__title">第 {revisionLabel(row, runs)} 次计算</span>
