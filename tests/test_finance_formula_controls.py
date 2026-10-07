@@ -166,3 +166,46 @@ def test_a_repeat_save_of_a_formula_control_returns_the_live_one_and_a_new_file_
     analysis.add_dataset(_pack(tmp_path / "pack2.xlsx", closing=149000), name="月结")
     result = assistant.finance_controls_run({"ids": [first["id"]]})["results"][0]
     assert result["status"] == "stale"
+
+
+def test_input_names_signs_and_a_percentage_rate_are_refused_where_they_would_mislead(tmp_path):
+    analysis, assistant, _manager = _task(tmp_path)
+    pack = analysis.add_dataset(_pack(tmp_path / "pack.xlsx"), name="月结")
+    bad = _rollforward(pack)
+    bad["inputs"]["__right"] = bad["inputs"].pop("opening")
+    with pytest.raises(FoundryError, match="lowercase"):
+        assistant.finance_controls_save({"control": bad})
+    bad = _rollforward(pack)
+    bad["inputs"]["opening"]["sign"] = True
+    with pytest.raises(FoundryError, match="sign must be"):
+        assistant.finance_controls_save({"control": bad})
+    implied = {
+        "kind": "formula", "formula": "implied_collection", "label": "反推", "tolerance": "0.03",
+        "inputs": {
+            "ar_end": _side(pack, "05·资产负债表", "B2"),
+            "ar_begin": {**_side(pack, "05·资产负债表", "C2"), "sign": -1},
+            "impairment": _side(pack, "01·看板", "B5"),
+            "revenue": _side(pack, "01·看板", "B2"),
+        },
+        "right": _side(pack, "01·看板", "B4"),
+    }
+    with pytest.raises(FoundryError, match="only a signed_sum"):
+        assistant.finance_controls_save({"control": implied})
+    del implied["inputs"]["ar_begin"]["sign"]
+    # The reported rate cell read as 82.4 rather than 0.824.
+    implied["right"] = _side(pack, "01·看板", "B4", scale="100")
+    result = assistant.finance_controls_preview({"control": implied})["preview"]
+    assert result["status"] == "error" and "像是百分数" in result["reason"]
+
+
+def test_the_confirmation_sheet_names_the_cells_a_recomputed_side_read(tmp_path):
+    from foundry.finance_controls import confirmation_sheet
+
+    analysis, assistant, _manager = _task(tmp_path)
+    pack = analysis.add_dataset(_pack(tmp_path / "pack.xlsx", closing=151000), name="月结")
+    control = assistant.finance_controls_save({"control": _rollforward(pack)})["controls"][0]
+    result = assistant.finance_controls_run({"ids": [control["id"]]})["results"][0]
+    sheet = confirmation_sheet([{"control": control["control"], "result": result}], {pack["id"]: "月结"})
+    text = "".join(sheet.values())
+    assert "按公式重算（加减勾稽）" in text
+    assert "collected（减） 月结 · 07·AR!B5" in text

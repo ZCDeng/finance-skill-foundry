@@ -119,14 +119,17 @@ def _clean_formula(spec: dict[str, Any], label: str) -> dict[str, Any]:
     allowed = {*FORMULAS[formula]["required"], *FORMULAS[formula]["optional"]}
     inputs = {}
     for name, value in raw.items():
-        if not isinstance(name, str) or not re.fullmatch(r"[a-z_]{1,40}", name):
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z_]{0,39}", name):
             raise FoundryError("formula input names are lowercase words joined by _")
         if allowed and name not in allowed:
             raise FoundryError(f"{formula} does not read {name}; it reads {', '.join(sorted(allowed))}")
         side = _side(value, f"input {name}")
-        if formula == "signed_sum":
-            sign = (value or {}).get("sign", 1)
-            if sign not in (1, -1, "1", "-1"):
+        sign = (value or {}).get("sign", 1 if formula == "signed_sum" else None) if isinstance(value, dict) else None
+        if formula != "signed_sum":
+            if sign is not None:
+                raise FoundryError(f"input {name}: only a signed_sum input carries a sign")
+        else:
+            if isinstance(sign, bool) or sign not in (1, -1, "1", "-1"):
                 raise FoundryError(f"input {name} sign must be 1 or -1")
             side["sign"] = str(int(sign))
         inputs[name] = side
@@ -232,20 +235,25 @@ def evaluate_control(analysis: Any, control: dict[str, Any], *, cache: dict | No
 def _evaluate_formula(analysis: Any, control: dict[str, Any], cache: dict) -> dict[str, Any]:
     read: dict[str, dict[str, Any]] = {}
     try:
-        for name, side in [*control["inputs"].items(), ("__right", control["right"])]:
+        for name, side in control["inputs"].items():
             read[name] = _sum_side(analysis, side, cache)
+        right = _sum_side(analysis, control["right"], cache)
     except _Stale as exc:
         return _result(control, STALE, reason=str(exc))
     except FoundryError as exc:
         return _result(control, ERROR, reason=str(exc))
-    for side in read.values():
+    for side in [*read.values(), right]:
         if side["text_cells"]:
             return _result(control, ERROR, reason=f"{side['sheet']}!{side['range']} 里有 {side['text_cells']} 个文字单元格，不能当作空白跳过")
-    right = read.pop("__right")
+    if control["formula"] == "implied_collection" and abs(right["value"]) > Decimal("1.5"):
+        return _result(control, ERROR, reason=f"{right['sheet']}!{right['range']} 读到 {_format(right['value'])}，像是百分数；"
+                                              "收缴率按小数比较，请把右侧 scale 设为 0.01")
     try:
         value = _formula_value(control, {name: side["value"] for name, side in read.items()})
     except (FoundryError, ArithmeticError) as exc:
         return _result(control, ERROR, reason=f"公式算不出来：{exc}")
+    if control["formula"] == "dso" and value < 0:
+        return _result(control, ERROR, reason="重算出的应收天数为负，近12个月收入或应收取数有误")
     left = {
         "formula": control["formula"],
         "label": FORMULAS[control["formula"]]["label"],
@@ -257,8 +265,12 @@ def _evaluate_formula(analysis: Any, control: dict[str, Any], cache: dict) -> di
     tolerance = Decimal(control["tolerance"])
     noise = Decimal("1e-12") * max(abs(value), abs(right["value"]))
     status = PASS if abs(difference) <= max(tolerance, noise) else BREAK
+    rounding = (
+        sum((_display_rounding(side) for side in read.values()), Decimal(0)) + _display_rounding(right)
+        if control["formula"] == "signed_sum" else Decimal(0)
+    )
     return _result(control, status, left=left, right=_public_side(right), difference=_format(difference),
-                   within_rounding=False)
+                   within_rounding=status == BREAK and abs(difference) <= rounding)
 
 
 def _formula_value(control: dict[str, Any], values: dict[str, Decimal]) -> Decimal:
@@ -796,7 +808,15 @@ def confirmation_sheet(rows: list[dict[str, Any]], names: dict[str, str]) -> dic
     for index, row in enumerate(rows, start=1):
         result = row.get("result") or {}
         left, right = result.get("left") or {}, result.get("right") or {}
-        where = lambda side: _one_line(f"{names.get(side.get('dataset_id', ''), '资料')} · {side.get('sheet', '')}!{side.get('range', '')}")
+        def where(side: dict[str, Any]) -> str:
+            if "formula" in side:
+                reads = "；".join(
+                    f"{name}{'（减）' if part.get('sign') == '-1' else ''} {names.get(part.get('dataset_id', ''), '资料')} · "
+                    f"{part.get('sheet', '')}!{part.get('range', '')}"
+                    for name, part in (side.get("inputs") or {}).items()
+                )
+                return _one_line(f"按公式重算（{side.get('label', '')}）：{reads}")
+            return _one_line(f"{names.get(side.get('dataset_id', ''), '资料')} · {side.get('sheet', '')}!{side.get('range', '')}")
         issue = row.get("issue") or {}
         note = _one_line((issue.get("disposition") or {}).get("reason") or "")
         label = _one_line(row["control"]["label"])
