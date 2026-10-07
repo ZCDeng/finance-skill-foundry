@@ -6,6 +6,8 @@ from collections import defaultdict
 from decimal import Decimal, DivisionByZero, InvalidOperation
 from typing import Any
 
+from foundry.display_numbers import display_amount, display_percent
+
 FLOW_SIGNS = {"revenue": Decimal("1"), "cost": Decimal("-1"), "expense": Decimal("-1")}
 """Which way a bare amount moves profit, for rows that never say which side.
 
@@ -457,12 +459,12 @@ def _money(value: Decimal) -> str:
 
 
 def _display_amount(value: Decimal, unit: str | None) -> str:
-    amount = _money(value)
+    amount = display_amount(value)
     return f"{amount} {unit}" if unit else amount
 
 
 def _display_percent(value: Decimal) -> str:
-    return f"{value * Decimal('100'):.2f}%"
+    return display_percent(value)
 
 
 def _diag(severity: str, code: str, message: str, **extra: Any) -> dict:

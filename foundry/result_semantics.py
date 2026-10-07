@@ -33,6 +33,7 @@ from typing import Any
 
 from foundry.analysis import _hash_bytes
 from foundry.analysis_data import json_value, parse_source
+from foundry.display_numbers import display_amount
 from foundry.errors import FoundryError
 from foundry.finance_requirements import (
     _declared_basis,
@@ -516,9 +517,7 @@ def _plain(value: Decimal) -> str:
 
 def _shown(value: Decimal) -> str:
     """A figure as the cards show it: two places, half away from zero, thousands grouped (decimalToFixed)."""
-    with localcontext() as context:
-        context.prec = CONCLUSION_PRECISION
-        return format(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), ',f')
+    return display_amount(value)
 
 
 def _period_phrase(pair: dict) -> str:

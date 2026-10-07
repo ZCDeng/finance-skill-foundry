@@ -45,8 +45,8 @@ def test_profit_bridge_closes_and_links_sources():
     assert sum(
         Decimal(rows[m]["profit_impact"]) for m in ("revenue", "cost", "expense")
     ) == Decimal(rows["profit"]["contribution"])
-    assert rows["cost"]["display_value"] == "利润影响 -10 万元"
-    assert rows["cost"]["amount_change_display"] == "成本增加 10 万元"
+    assert rows["cost"]["display_value"] == "利润影响 -10.00 万元"
+    assert rows["cost"]["amount_change_display"] == "成本增加 10.00 万元"
     assert rows["cost"]["semantics"]["amount_change_direction"] == "increase"
     assert rows["cost"]["semantics"]["profit_impact_direction"] == "decrease"
     assert rows["cost"]["favorability"] == "unfavorable"

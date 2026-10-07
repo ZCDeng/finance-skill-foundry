@@ -261,7 +261,7 @@ def _recorded_before_calculation_version(service, run):
 def test_finance_run_records_its_calculation_version_outside_the_result(finance):
     service, context = finance
     run = service.explain_variance({"context_id": context["id"]})
-    assert run["calculation_version"] == FINANCE_CALCULATION_VERSION == 2
+    assert run["calculation_version"] == FINANCE_CALCULATION_VERSION == 3
     assert "calculation_version" not in run["result"]
     assert run["environment"]["runner"] == "finance-v1"
 
