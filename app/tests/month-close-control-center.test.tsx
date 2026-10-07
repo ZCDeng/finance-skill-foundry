@@ -7,20 +7,20 @@ import { MonthCloseControlCenter, type CloseStatus } from '../src/views/analysis
 afterEach(() => { cleanup(); delete (globalThis as { foundry?: Partial<Bridge> }).foundry; });
 
 const status: CloseStatus = {
-  headline: { state: 'not_ready', text: '尚未准备：还有 1 项必须确认' },
-  blocking: ['期间未确认'],
+  headline: { state: 'not_ready', text: '尚未准备：还有 2 项待处理' },
+  blocking: ['期间未确认', '还没有确认的勾稽控制'],
   blocks: [
     { key: 'scope', label: '范围', state: 'blocked', items: [{ text: '期间未确认', blocking: true, target: 'scope' }] },
-    { key: 'source', label: '来源', state: 'done', items: [{ text: '月结 · 摘要 e3763c14568d', blocking: false, target: 'datasets' }] },
+    { key: 'source', label: '来源', state: 'done', items: [{ text: '月结', hint: '摘要 e3763c14568d', blocking: false, target: 'datasets' }] },
     { key: 'structure', label: '结构', state: 'done', items: [] },
     { key: 'controls', label: '控制', state: 'blocked', items: [{ text: '还没有确认的勾稽控制', blocking: true, target: 'controls' }] },
     { key: 'exceptions', label: '异常', state: 'done', items: [{ text: '没有未处置的差异', blocking: false }] },
     { key: 'review', label: '复核', state: 'not_started', items: [{ text: '还没有计算结果', blocking: false, target: 'results' }] },
   ],
 };
-const mount = () => {
+const mount = (answer: CloseStatus = status) => {
   const financeCall = vi.fn(async (_task: string, command: string) => ({ ok: true, value: command === 'finance-close-status'
-    ? status : { controls: [], summary: { controls: 0, confirmed: 0, pass: 0, break: 0, stale: 0, error: 0 } } }));
+    ? answer : { controls: [], summary: { controls: 0, confirmed: 0, pass: 0, break: 0, stale: 0, error: 0 } } }));
   (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall: financeCall as unknown as Bridge['financeCall'] };
   return financeCall;
 };
@@ -28,9 +28,9 @@ const mount = () => {
 it('leads with the server headline and the next thing to do', async () => {
   mount();
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
-  expect(await screen.findByRole('heading', { name: '尚未准备：还有 1 项必须确认' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '尚未准备：还有 2 项待处理' })).toBeTruthy();
   expect(screen.getByText('下一步：期间未确认')).toBeTruthy();
-  expect(screen.getAllByRole('status')[0].textContent).toBe('尚未准备：还有 1 项必须确认');
+  expect(screen.getAllByRole('status')[0].textContent).toBe('尚未准备：还有 2 项待处理');
 });
 
 it('puts the differences that will hold the close under a 可计算 headline', async () => {
@@ -44,12 +44,83 @@ it('puts the differences that will hold the close under a 可计算 headline', a
   expect(screen.getAllByRole('status')[0].textContent).toBe('可计算：范围和结构已确认。3 项差异仍挡住月结，处理完才能提交复核');
 });
 
-it('says each block state in words, not colour alone', async () => {
+/** What a sighted reader sees: the text with the screen-reader-only parts taken out. */
+const visible = (element: Element) => {
+  const copy = element.cloneNode(true) as Element;
+  copy.querySelectorAll('.sr-only').forEach((node) => node.remove());
+  return copy.textContent;
+};
+
+it('opens only the steps that need work and says the rest in one line each', async () => {
   mount();
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
   expect(await screen.findByRole('listitem', { name: '1 范围：待处理' })).toBeTruthy();
-  expect(screen.getByRole('listitem', { name: '2 来源：已就绪' })).toBeTruthy();
-  expect(screen.getByRole('listitem', { name: '6 复核：尚未开始' })).toBeTruthy();
+  expect(screen.getByRole('listitem', { name: '4 控制：待处理' })).toBeTruthy();
+  expect(screen.queryByRole('listitem', { name: '2 来源：已就绪' })).toBeNull();
+  expect(screen.queryByRole('listitem', { name: '6 复核：尚未开始' })).toBeNull();
+  const lines = Array.from(document.querySelectorAll('.analysis-close-settled')).map(visible);
+  expect(lines).toEqual(['已就绪：来源、结构、异常', '尚未开始：复核']);
+});
+
+it('lets the headline number be counted row by row in the open cards', async () => {
+  const qa: CloseStatus = {
+    headline: { state: 'not_ready', text: '尚未准备：还有 6 项待处理' },
+    blocking: ['期间未确认', '预算 的表结构等你确认', '月结套表 的表结构等你确认', '还没有确认的勾稽控制',
+      '文稿早于最新一次计算，请按新结果更新', '文稿数值引用：需要处理'],
+    blocks: [
+      { key: 'scope', label: '范围', state: 'blocked', items: [{ text: '期间未确认', blocking: true, target: 'scope' }] },
+      { key: 'source', label: '来源', state: 'done', items: [{ text: '预算', hint: '摘要 bbfdc3ccd5b1', blocking: false, target: 'datasets' }] },
+      { key: 'structure', label: '结构', state: 'blocked', items: [
+        { text: '预算 的表结构等你确认', blocking: true, target: 'structure' },
+        { text: '月结套表 的表结构等你确认', blocking: true, target: 'structure' }] },
+      { key: 'controls', label: '控制', state: 'blocked', items: [{ text: '还没有确认的勾稽控制', blocking: true, target: 'controls' }] },
+      { key: 'exceptions', label: '异常', state: 'done', items: [{ text: '没有未处置的差异', blocking: false }] },
+      { key: 'review', label: '复核', state: 'blocked', items: [
+        { text: '文稿早于最新一次计算，请按新结果更新', blocking: true, target: 'drafts' },
+        { text: '文稿数值引用：需要处理', blocking: true, target: 'drafts' },
+        { text: '经理尚未复核（提交后由经理完成）', blocking: false, target: 'drafts' }] },
+    ],
+  };
+  mount(qa);
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '尚未准备：还有 6 项待处理' });
+  const cards = Array.from(document.querySelectorAll('.analysis-close-block--blocked')) as HTMLElement[];
+  const rows = cards.flatMap((card) => Array.from(card.querySelectorAll(':scope > ul > li')).map((row) => row.textContent));
+  expect(rows).toEqual(qa.blocking);
+  expect(rows).toHaveLength(6);
+  // What does not hold the close is said below the list, not counted in it.
+  const note = screen.getByText('经理尚未复核（提交后由经理完成）');
+  expect(note.closest('ul')).toBeNull();
+  for (const card of cards) {
+    const [action] = within(card).getAllByRole('button', { name: '去处理' });
+    expect(within(card).getAllByRole('button', { name: '去处理' })).toHaveLength(1);
+    for (const item of Array.from(card.querySelectorAll('li, p'))) {
+      expect(item.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  }
+});
+
+it('keeps the 去处理 of the control card on this page, at the tie-out controls', async () => {
+  mount();
+  const onOpen = vi.fn();
+  const spy = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  render(<MonthCloseControlCenter taskId="t" onOpen={onOpen} />);
+  const controls = await screen.findByRole('listitem', { name: '4 控制：待处理' });
+  fireEvent.click(within(controls).getByRole('button', { name: '去处理' }));
+  expect(onOpen).not.toHaveBeenCalled();
+  const target = spy.mock.contexts[0] as HTMLElement;
+  expect(within(target).getByRole('region', { name: '勾稽控制' })).toBeTruthy();
+  expect(document.activeElement).toBe(target);
+  spy.mockRestore();
+});
+
+it('keeps a settled block\'s details for screen readers and the pointer, not on the page', async () => {
+  mount();
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  await screen.findByRole('heading', { name: '尚未准备：还有 2 项待处理' });
+  expect(screen.getByText(/摘要 e3763c14568d/, { selector: '.sr-only' })).toBeTruthy();
+  expect(screen.getByTitle(/摘要 e3763c14568d/).textContent).toBe('来源');
+  expect(visible(document.querySelector('.analysis-close')!)).not.toContain('摘要');
 });
 
 it('sends the manager to where a blocking item is fixed', async () => {
@@ -90,22 +161,46 @@ it('states the 可用结论 under the headline, apart from it, with reasons and 
   expect(within(conclusion).getByRole('heading', { name: '套表可用结论：不可用' })).toBeTruthy();
   expect(within(conclusion).getByText('结论只根据你确认过的控制和处置得出；助手的类型建议不改变结论。')).toBeTruthy();
   expect(within(conclusion).getByText('依据：你确认的 7 条控制，相符 2 条，已接受差异 0 条，仍挡住月结 5 条。')).toBeTruthy();
-  const [shown, more, books] = [conclusion.querySelector(':scope > ul')!, ...Array.from(conclusion.querySelectorAll(':scope > details'))];
-  expect(Array.from(shown.querySelectorAll('li')).map((item) => item.textContent)).toEqual(reasons.slice(0, 3));
-  expect(more.querySelector('summary')!.textContent).toBe('另外 2 条原因');
-  expect(Array.from(more.querySelectorAll('li')).map((item) => item.textContent)).toEqual(reasons.slice(3));
+  // Five reasons are all in view; only 按工作簿看 folds.
+  const shown = conclusion.querySelector(':scope > ul')!;
+  expect(Array.from(shown.querySelectorAll('li')).map((item) => item.textContent)).toEqual(reasons);
+  const folds = Array.from(conclusion.querySelectorAll(':scope > details'));
+  expect(folds).toHaveLength(1);
+  const [books] = folds;
   expect(books.querySelector('summary')!.textContent).toBe('按工作簿看');
   expect(within(books as HTMLElement).getByText('银行流水.xlsx').parentElement!.textContent).toBe('银行流水.xlsx：无法判断');
   expect(conclusion.className).toContain('analysis-close-conclusion--not_usable');
   expect(conclusion.textContent).not.toMatch(/完成|通过/);
   // Only the headline is announced as status.
   expect(screen.getAllByRole('status')[0].textContent).toBe('需要复核：计算完成，但有 5 项来源冲突');
+  // The guide sits beside the headline only.
+  expect(within(conclusion).queryByRole('button', { name: /^使用指南：/ })).toBeNull();
+  expect(screen.getByRole('button', { name: '使用指南：月结怎么走一遍' })).toBeTruthy();
+});
+
+it('leads with three of more than five reasons and folds the rest', async () => {
+  const reasons = ['一', '二', '三', '四', '五', '六'].map((word) => `原因${word}`);
+  mount({ ...status, conclusion: { level: 'not_assessable', text: '无法判断', reasons: reasons.map((text) => ({ text })) } });
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  const conclusion = await screen.findByRole('region', { name: '套表可用结论' });
+  expect(Array.from(conclusion.querySelectorAll(':scope > ul > li')).map((item) => item.textContent)).toEqual(reasons.slice(0, 3));
+  const [more] = Array.from(conclusion.querySelectorAll(':scope > details'));
+  expect(more.querySelector('summary')!.textContent).toBe('另外 3 条原因');
+  expect(Array.from(more.querySelectorAll('li')).map((item) => item.textContent)).toEqual(reasons.slice(3));
+});
+
+it('gives no 依据 line when no control has been confirmed', async () => {
+  mount({ ...status, conclusion: { level: 'not_assessable', text: '无法判断', reasons: [{ text: '还没有你确认的勾稽控制' }],
+    basis: { confirmed: 0, passed: 0, waived: 0, open: 0 } } });
+  render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
+  const conclusion = await screen.findByRole('region', { name: '套表可用结论' });
+  expect(within(conclusion).queryByText(/^依据：/)).toBeNull();
 });
 
 it('shows no conclusion when an older engine leaves it out, and a bare one without crashing', async () => {
   mount();
   render(<MonthCloseControlCenter taskId="t" onOpen={vi.fn()} />);
-  await screen.findByRole('heading', { name: '尚未准备：还有 1 项必须确认' });
+  await screen.findByRole('heading', { name: '尚未准备：还有 2 项待处理' });
   expect(screen.queryByRole('region', { name: '套表可用结论' })).toBeNull();
   cleanup();
   const bare = { ...status, conclusion: { level: 'not_assessable', text: '无法判断' } } as CloseStatus;

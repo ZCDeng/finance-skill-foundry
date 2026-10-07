@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from foundry.finance_close_status import close_status
@@ -35,12 +37,12 @@ def test_everything_the_system_checks_clear_reads_ready_for_the_manager_never_do
 def test_a_scope_field_left_blank_holds_everything(missing):
     result = _status(scope={**SCOPE, missing: ""})
     assert result["headline"]["state"] == "not_ready"
-    assert result["headline"]["text"] == "尚未准备：还有 1 项必须确认"
+    assert result["headline"]["text"] == "尚未准备：还有 1 项待处理"
 
 
 def test_no_files_and_unconfirmed_structures_are_not_ready():
     assert _status(datasets=[])["headline"]["state"] == "not_ready"
-    assert _status(pending_structures=["月结"])["headline"]["text"] == "尚未准备：还有 1 项必须确认"
+    assert _status(pending_structures=["月结"])["headline"]["text"] == "尚未准备：还有 1 项待处理"
 
 
 def test_ready_to_calculate_before_anything_has_run():
@@ -181,6 +183,44 @@ def test_a_failed_run_after_the_last_success_is_flagged():
     result = _status(runs=[RUN, {"execution_status": "failed", "seq": 11}], draft={**CLEAN_DRAFT, "seq": 12})
     review = result["blocks"][-1]
     assert any(item["text"] == "最近一次计算没有成功" for item in review["items"])
+
+
+def test_the_headline_counts_every_row_the_open_blocks_hold():
+    # The QA pack: no period, two structures waiting, no confirmed control, a draft older than the run.
+    result = _status(scope={**SCOPE, "period": ""}, pending_structures=["月结", "台账"], controls=[],
+                     draft={**CLEAN_DRAFT, "seq": 9})
+    assert result["headline"] == {"state": "not_ready", "text": "尚未准备：还有 5 项待处理"}
+    rows = [item["text"] for block in result["blocks"] for item in block["items"] if item["blocking"]]
+    assert result["blocking"] == rows == [
+        "期间未确认", "月结 的表结构等你确认", "台账 的表结构等你确认", "还没有确认的勾稽控制", "文稿早于最新一次计算，请按新结果更新"]
+    # The conclusion still answers from the inputs and the missing controls, apart from the headline.
+    assert [reason["text"] for reason in result["conclusion"]["reasons"]] == [
+        "期间未确认", "月结 的表结构等你确认", "台账 的表结构等你确认", "还没有你确认的勾稽控制"]
+
+
+@pytest.mark.parametrize("facts", [
+    dict(scope={**SCOPE, "unit": ""}),
+    dict(datasets=[], runs=[], draft=None),
+    dict(scope={**SCOPE, "period": ""}, pending_structures=["月结"], controls=[], draft=None),
+    dict(controls=[]),
+    dict(controls=[_break("open"), _break("pending_external")]),
+    dict(controls=[_break("open")], draft=None),
+    dict(scope_seq=12, draft={**CLEAN_DRAFT, "seq": 9}),
+], ids=["scope", "no-files", "everything", "no-control", "conflicts", "conflict-and-draft", "rerun-and-draft"])
+def test_the_headline_number_is_the_blocking_list(facts):
+    result = _status(**facts)
+    assert result["headline"]["state"] in {"not_ready", "needs_review"}
+    number = int(re.search(r"(\d+) 项", result["headline"]["text"]).group(1))
+    held = sum(1 for block in result["blocks"] if block["state"] == "blocked" for item in block["items"] if item["blocking"])
+    assert number == len(result["blocking"]) == held
+
+
+def test_a_source_row_is_the_file_name_and_its_digest_only_a_hint():
+    source = _status()["blocks"][1]["items"][0]
+    assert source["text"] == "月结" and "摘要" not in source["text"]
+    assert source["hint"] == "摘要 aaaaaaaaaaaa"
+    unhashed = _status(datasets=[{"id": "d1", "name": "月结"}])["blocks"][1]["items"][0]
+    assert unhashed["text"] == "月结" and "hint" not in unhashed
 
 
 # ---- 可用结论: whether the books as they stand can be used, beside the headline -----------------

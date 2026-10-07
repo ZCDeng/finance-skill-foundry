@@ -14,7 +14,7 @@ const status = (overrides: Partial<Record<string, CloseStatus['blocks'][number]>
   headline: { state: 'not_ready', text: '' }, blocking: [],
   blocks: [
     overrides.scope ?? block('scope', 'blocked', [{ text: '期间未确认', blocking: true, target: 'scope' }]),
-    overrides.source ?? block('source', 'done', [{ text: '示例 · 摘要 abc', blocking: false, target: 'datasets' }]),
+    overrides.source ?? block('source', 'done', [{ text: '示例', hint: '摘要 abc', blocking: false, target: 'datasets' }]),
     overrides.structure ?? block('structure', 'done'),
     overrides.controls ?? block('controls', 'blocked', [{ text: '还没有确认的勾稽控制', blocking: true, target: 'controls' }]),
     overrides.exceptions ?? block('exceptions', 'done'),

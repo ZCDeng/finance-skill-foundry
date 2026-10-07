@@ -4,7 +4,8 @@ The month-close control center (app MonthCloseControlCenter) shows what this
 returns and nothing else, so no panel can call a close finished on its own
 terms. The top line is one of five, never a bare 完成 or 通过:
 
-    尚未准备   something in 范围 / 来源 / 结构 still has to be confirmed
+    尚未准备   something in 范围 / 来源 / 结构 still has to be confirmed; its number, like
+               需要复核's, counts ``blocking``, the rows the open blocks list as holding the close
     可计算     those are confirmed and nothing has been calculated yet; open differences
                add a detail line, since they will hold the close after calculation
     需要复核   calculated, but a control, a difference or the draft still needs work
@@ -79,16 +80,19 @@ def close_status(
     ]
     must = [item["text"] for block in blocks[:3] for item in block["items"] if item["blocking"]]
     later = [item["text"] for block in blocks[3:] for item in block["items"] if item["blocking"]]
+    # One list for the headline number, the open blocks' rows and 下一步, so the three always agree.
+    blocking = [*must, *later]
     succeeded = [run for run in runs if run.get("execution_status") == "succeeded"]
     # Only differences between two readings of the books are source conflicts.
     conflicts = sum(1 for item in blocks[4]["items"] if item["blocking"])
     if archived:
         state, text = ARCHIVED, "已归档：保留当时快照与版本"
     elif must:
-        state, text = NOT_READY, f"尚未准备：还有 {len(must)} 项必须确认"
+        state, text = NOT_READY, f"尚未准备：还有 {len(blocking)} 项待处理"
     elif not succeeded:
         state, text = CALCULABLE, "可计算：范围和结构已确认"
     elif later:
+        # Nothing in must here, so len(later) is len(blocking): the same rows the open blocks list.
         detail = f"有 {conflicts} 项来源冲突" if conflicts and conflicts == len(later) else f"还有 {len(later)} 项待处理"
         state, text = NEEDS_REVIEW, f"需要复核：计算完成，但{detail}"
     else:
@@ -102,7 +106,7 @@ def close_status(
         "schema_version": 1,
         "headline": headline,
         "blocks": blocks,
-        "blocking": [*must, *later],
+        "blocking": blocking,
         "conclusion": _conclusion(controls, datasets, blocks[:3], pending_structures, replaced, other_months),
     }
 
@@ -117,8 +121,10 @@ def _block(key: str, label: str, items: list[dict[str, Any]], *, empty_state: st
     return {"key": key, "label": label, "state": state, "items": items}
 
 
-def _item(text: str, *, blocking: bool = False, attention: bool = False, target: str | None = None) -> dict[str, Any]:
-    return {"text": text, "blocking": blocking, "attention": attention, **({"target": target} if target else {})}
+def _item(text: str, *, blocking: bool = False, attention: bool = False, target: str | None = None,
+          hint: str | None = None) -> dict[str, Any]:
+    return {"text": text, "blocking": blocking, "attention": attention, **({"target": target} if target else {}),
+            **({"hint": hint} if hint else {})}
 
 
 def _scope_value(value: Any) -> str:
@@ -145,7 +151,11 @@ def _scope_block(scope: dict[str, Any] | None, *, organization_required: bool = 
 def _source_block(datasets: list[dict[str, Any]], superseded: int) -> dict[str, Any]:
     if not datasets:
         return _block("source", "来源", [_item("还没有资料", blocking=True, target="datasets")])
-    items = [_item(f"{row.get('name') or '资料'} · 摘要 {str(row.get('source_hash') or '')[:12]}", target="datasets") for row in datasets]
+    items = []
+    for row in datasets:
+        # The digest tells two uploads of one name apart; it is a hint, not part of the row a manager reads.
+        digest = str(row.get("source_hash") or "")
+        items.append(_item(row.get("name") or "资料", target="datasets", hint=f"摘要 {digest[:12]}" if digest else None))
     if superseded:
         items.append(_item(f"另有 {superseded} 份旧版本已被更新的资料取代，只读保留", attention=False))
     return _block("source", "来源", items)
