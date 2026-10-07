@@ -1,9 +1,9 @@
 {
- "id": "b123fd9f8da847f6aa19f419a71e9e78",
- "task_id": "8220d66860984dfcb40dcdc9c98c36c4",
- "analysis_id": "b2421bc1be034051b05093194eb25d13",
+ "id": "eebde417f17748679ef8a3b9d90fe630",
+ "task_id": "42bd8becb8414370a66a4a4e7d48df90",
+ "analysis_id": "1609a5215e66415da788e73f1d9e97ac",
  "schema_version": 1,
- "created_at": "2026-10-07T21:52:17Z",
+ "created_at": "2026-10-07T21:59:42Z",
  "execution_status": "succeeded",
  "reproducibility_status": "unverified",
  "review_status": "unreviewed",
@@ -67,6 +67,7 @@
   "rows": [
    {
     "entity": "集团",
+    "entity_origin": "declared",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -81,6 +82,7 @@
    },
    {
     "entity": "集团",
+    "entity_origin": "declared",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -95,6 +97,7 @@
    },
    {
     "entity": "集团",
+    "entity_origin": "declared",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -109,6 +112,7 @@
    },
    {
     "entity": "集团",
+    "entity_origin": "declared",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -123,6 +127,7 @@
    },
    {
     "entity": "集团",
+    "entity_origin": "declared",
     "metric_key": "collection_gap_total",
     "metric_label": "距生死线（综合收缴率，含清欠）",
     "scenario": "本期",
@@ -137,6 +142,7 @@
    },
    {
     "entity": "上海城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -151,6 +157,7 @@
    },
    {
     "entity": "上海城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -165,6 +172,7 @@
    },
    {
     "entity": "上海城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -179,6 +187,7 @@
    },
    {
     "entity": "上海城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -193,6 +202,7 @@
    },
    {
     "entity": "上海城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -207,6 +217,7 @@
    },
    {
     "entity": "合肥城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -221,6 +232,7 @@
    },
    {
     "entity": "合肥城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -235,6 +247,7 @@
    },
    {
     "entity": "合肥城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -249,6 +262,7 @@
    },
    {
     "entity": "合肥城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -263,6 +277,7 @@
    },
    {
     "entity": "合肥城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -277,6 +292,7 @@
    },
    {
     "entity": "广州城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -291,6 +307,7 @@
    },
    {
     "entity": "广州城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -305,6 +322,7 @@
    },
    {
     "entity": "广州城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -319,6 +337,7 @@
    },
    {
     "entity": "广州城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -333,6 +352,7 @@
    },
    {
     "entity": "广州城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -347,6 +367,7 @@
    },
    {
     "entity": "中山城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -361,6 +382,7 @@
    },
    {
     "entity": "中山城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -375,6 +397,7 @@
    },
    {
     "entity": "中山城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -389,6 +412,7 @@
    },
    {
     "entity": "中山城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -403,6 +427,7 @@
    },
    {
     "entity": "中山城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -417,6 +442,7 @@
    },
    {
     "entity": "北京城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -431,6 +457,7 @@
    },
    {
     "entity": "北京城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -445,6 +472,7 @@
    },
    {
     "entity": "北京城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -459,6 +487,7 @@
    },
    {
     "entity": "北京城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -473,6 +502,7 @@
    },
    {
     "entity": "北京城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -487,6 +517,7 @@
    },
    {
     "entity": "大连城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -501,6 +532,7 @@
    },
    {
     "entity": "大连城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -515,6 +547,7 @@
    },
    {
     "entity": "大连城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -529,6 +562,7 @@
    },
    {
     "entity": "大连城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -543,6 +577,7 @@
    },
    {
     "entity": "大连城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -557,6 +592,7 @@
    },
    {
     "entity": "武汉城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -571,6 +607,7 @@
    },
    {
     "entity": "武汉城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -585,6 +622,7 @@
    },
    {
     "entity": "武汉城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -599,6 +637,7 @@
    },
    {
     "entity": "武汉城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -613,6 +652,7 @@
    },
    {
     "entity": "武汉城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -627,6 +667,7 @@
    },
    {
     "entity": "宜昌城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -641,6 +682,7 @@
    },
    {
     "entity": "宜昌城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -655,6 +697,7 @@
    },
    {
     "entity": "宜昌城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -669,6 +712,7 @@
    },
    {
     "entity": "宜昌城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -683,6 +727,7 @@
    },
    {
     "entity": "宜昌城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -697,6 +742,7 @@
    },
    {
     "entity": "成都城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -711,6 +757,7 @@
    },
    {
     "entity": "成都城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -725,6 +772,7 @@
    },
    {
     "entity": "成都城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -739,6 +787,7 @@
    },
    {
     "entity": "成都城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -753,6 +802,7 @@
    },
    {
     "entity": "成都城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -767,6 +817,7 @@
    },
    {
     "entity": "兰州城市公司",
+    "entity_origin": "table",
     "metric_key": "gross_margin",
     "metric_label": "毛利率",
     "scenario": "本期",
@@ -781,6 +832,7 @@
    },
    {
     "entity": "兰州城市公司",
+    "entity_origin": "table",
     "metric_key": "expense_ratio",
     "metric_label": "期间费用率",
     "scenario": "本期",
@@ -795,6 +847,7 @@
    },
    {
     "entity": "兰州城市公司",
+    "entity_origin": "table",
     "metric_key": "break_even_collection",
     "metric_label": "生死线收缴率",
     "scenario": "本期",
@@ -809,6 +862,7 @@
    },
    {
     "entity": "兰州城市公司",
+    "entity_origin": "table",
     "metric_key": "collection_gap",
     "metric_label": "距生死线（本年账单收缴率）",
     "scenario": "本期",
@@ -823,6 +877,7 @@
    },
    {
     "entity": "兰州城市公司",
+    "entity_origin": "table",
     "metric_key": "impairment_to_gross_profit",
     "metric_label": "减值占毛利",
     "scenario": "本期",
@@ -2103,6 +2158,7 @@
       "0.20804068246305782"
      ]
     ],
+    "edge_below": "0.03",
     "current": {
      "gross_margin": "0.1805330360762059",
      "collection_rate": "0.879185"

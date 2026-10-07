@@ -21,9 +21,13 @@ describe('回款与现金', () => {
 
   it('says how many units sit below their own break-even line', () => {
     const rows = (run.result as unknown as { rows: HealthRow[] }).rows;
-    expect(healthHeadline(rows)).toBe('11 个主体中 5 个收缴率低于自身生死线');
+    // The group total is named on its own, never counted with the city companies it sums.
+    expect(healthHeadline(rows)).toBe('明细 10 个主体中 4 个收缴率低于自身生死线；集团本年账单收缴率比生死线低 3.22 个百分点，每收 100 元倒贴现金');
     const group = rows.filter((row) => row.entity === '集团');
     expect(healthHeadline(group)).toBe('集团本年账单收缴率比生死线低 3.22 个百分点，每收 100 元倒贴现金');
+    const onTheLine = group.map((row) => row.metric_key === 'collection_gap' && row.scenario === '本期'
+      ? { ...row, value: '0.0000001', display_value: '+0.00 个百分点' } : row);
+    expect(healthHeadline(onTheLine)).toBe('集团本年账单收缴率正好在生死线上');
   });
 
   it('lists units from furthest below the line, with the run’s own figures and lights', () => {
@@ -45,5 +49,24 @@ describe('回款与现金', () => {
     const current = grid.querySelector('[aria-current="true"]');
     expect(current?.textContent).toMatch(/^\(/); // 18% margin at 87.5%: below the line
     expect(screen.getByText(/红黄绿是筛查提示/)).toBeTruthy();
+  });
+});
+
+describe('回款与现金 edges', () => {
+  it('frames no cell when the current position lies off the grid, and marks estimates in the table', () => {
+    const result = run.result as unknown as { rows: HealthRow[]; sensitivity: { current: Record<string, string | null> }[] };
+    const offGrid = {
+      ...run,
+      result: {
+        ...run.result!,
+        sensitivity: [{ ...result.sensitivity[0], current: { gross_margin: '0.45', collection_rate: '0.8' } }],
+        rows: result.rows.map((row) => row.entity === '上海城市公司' && row.metric_key === 'gross_margin' ? { ...row, estimate: true } : row),
+      },
+    } as unknown as AnalysisRun;
+    render(<CollectionHealthView run={offGrid} actions={null} technical={[]} />);
+    const grid = screen.getByRole('table', { name: /当前位置不在表内/ });
+    expect(grid.querySelector('[aria-current="true"]')).toBeNull();
+    const shanghai = within(screen.getByRole('table', { name: /生死线定位/ })).getByRole('rowheader', { name: '上海城市公司' }).closest('tr')!;
+    expect(within(shanghai).getByText('估算')).toBeTruthy();
   });
 });

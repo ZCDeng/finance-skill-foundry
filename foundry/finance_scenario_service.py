@@ -178,7 +178,6 @@ def calculate_scenario(scenario, context, datasets):
         raise FoundryError("unsupported financial scenario kind")
     result.update(
         domain="foundry.finance.scenario_result.v1",
-        scenario_kind=kind,
         scenario_id=scenario["id"],
         parent_scenario_id=scenario.get("parent_id"),
         input_hash=scenario["input_hash"],

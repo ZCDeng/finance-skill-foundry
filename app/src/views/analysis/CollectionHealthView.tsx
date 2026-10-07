@@ -14,7 +14,7 @@ import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
  */
 
 export type HealthRow = {
-  entity: string; metric_key: string; metric_label: string; scenario: string;
+  entity: string; entity_origin?: 'table' | 'declared'; metric_key: string; metric_label: string; scenario: string;
   value: string; unit: string | null; display_value: string;
   level: Level | null; level_label: string | null; estimate: boolean; formula: string; note: string;
 };
@@ -23,7 +23,7 @@ type Level = 'red' | 'yellow' | 'green' | 'unknown';
 
 export type SensitivityGrid = {
   entity: string; expense_ratio: string; gross_margins: string[]; collection_rates: string[]; cells: string[][];
-  current: { gross_margin: string | null; collection_rate: string | null }; formula: string;
+  current: { gross_margin: string | null; collection_rate: string | null }; formula: string; edge_below?: string;
 };
 
 type HealthResult = { rows: HealthRow[]; sensitivity?: SensitivityGrid[]; diagnostics?: unknown[]; scenario_kind?: string };
@@ -73,20 +73,33 @@ function numeric(row?: HealthRow): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-/** The one-line reading the rows already say: how many units sit below their own break-even line. */
+function oneGap(gap: HealthRow): string {
+  const value = numeric(gap) ?? 0;
+  if (value < 0) return `${gap.entity}本年账单收缴率比生死线低 ${gap.display_value.replace(/^-/, '')}，每收 100 元倒贴现金`;
+  if (gap.display_value.replace(/^[+-]/, '').startsWith('0.00 ')) return `${gap.entity}本年账单收缴率正好在生死线上`;
+  return `${gap.entity}本年账单收缴率在生死线以上 ${gap.display_value.replace(/^\+/, '')}`;
+}
+
+/**
+ * The one-line reading the rows already say: how many rows of the detail table sit below their own break-even
+ * line, and each unit named on its own (a group total over those rows) told apart rather than counted with them.
+ */
 export function healthHeadline(rows: HealthRow[]): string | null {
   const gaps = [...periodRows(rows).values()].map((metrics) => metrics.get('collection_gap')).filter((row): row is HealthRow => Boolean(row));
   if (!gaps.length) return null;
-  const below = gaps.filter((row) => (numeric(row) ?? 0) < 0);
-  if (gaps.length === 1) {
-    const [gap] = gaps;
-    return below.length
-      ? `${gap.entity}本年账单收缴率比生死线低 ${gap.display_value.replace(/^-/, '')}，每收 100 元倒贴现金`
-      : `${gap.entity}本年账单收缴率在生死线以上 ${gap.display_value.replace(/^\+/, '')}`;
+  const detail = gaps.filter((row) => row.entity_origin === 'table');
+  const named = gaps.filter((row) => row.entity_origin !== 'table');
+  const parts: string[] = [];
+  if (detail.length) {
+    const below = detail.filter((row) => (numeric(row) ?? 0) < 0).length;
+    parts.push(below ? `明细 ${detail.length} 个主体中 ${below} 个收缴率低于自身生死线` : `明细 ${detail.length} 个主体的收缴率都在自身生死线以上`);
   }
-  return below.length
-    ? `${gaps.length} 个主体中 ${below.length} 个收缴率低于自身生死线`
-    : `${gaps.length} 个主体的收缴率都在自身生死线以上`;
+  if (named.length === 1 || (named.length && named.length <= 3 && detail.length)) parts.push(...named.map(oneGap));
+  else if (named.length) {
+    const below = named.filter((row) => (numeric(row) ?? 0) < 0).length;
+    parts.push(below ? `${named.length} 个主体中 ${below} 个收缴率低于自身生死线` : `${named.length} 个主体的收缴率都在自身生死线以上`);
+  }
+  return parts.join('；');
 }
 
 function PositionTable({ byEntity }: { byEntity: Map<string, Map<string, HealthRow>> }) {
@@ -103,7 +116,8 @@ function PositionTable({ byEntity }: { byEntity: Map<string, Map<string, HealthR
         {shown.map((column) => {
           const row = metrics.get(column.key);
           return <td key={column.key} className="fnd-num">
-            {row ? <><Figure text={row.display_value} />{row.level ? <LevelMark level={row.level} label={row.level_label} /> : null}</> : '—'}
+            {row ? <><Figure text={row.display_value} />{row.estimate ? <span className="analysis-health-estimate">估算</span> : null}
+              {row.level ? <LevelMark level={row.level} label={row.level_label} /> : null}</> : '—'}
           </td>;
         })}
       </tr>)}</tbody>
@@ -159,9 +173,13 @@ function PositionChart({ byEntity }: { byEntity: Map<string, Map<string, HealthR
 }
 
 function SensitivityTable({ grid }: { grid: SensitivityGrid }) {
+  // The cell holding the current position, or none when it lies off the grid.
   const near = (value: string | null, candidates: string[]) => {
-    if (value === null) return -1;
+    if (value === null || candidates.length < 2) return -1;
     const target = Number(value);
+    const values = candidates.map(Number);
+    const half = Math.abs(values[1] - values[0]) / 2;
+    if (target < Math.min(...values) - half || target > Math.max(...values) + half) return -1;
     let best = -1, distance = Infinity;
     candidates.forEach((candidate, index) => {
       const gap = Math.abs(Number(candidate) - target);
@@ -173,13 +191,14 @@ function SensitivityTable({ grid }: { grid: SensitivityGrid }) {
   const column = near(grid.current.collection_rate, grid.collection_rates);
   return <div className="fnd-tablewrap">
     <table className="analysis-table analysis-health-grid-table">
-      <caption>{grid.entity}现金经营利润率（期间费用率 {decimalToFixed(grid.expense_ratio, 2, 100)}%，框出的格最接近当前位置）</caption>
+      <caption>{grid.entity}现金经营利润率（期间费用率 {decimalToFixed(grid.expense_ratio, 2, 100)}%{row >= 0 && column >= 0 ? '，框出的格最接近当前位置' : '，当前位置不在表内'}）</caption>
       <thead><tr><th scope="col">毛利率 \ 收缴率</th>{grid.collection_rates.map((rate) => <th key={rate} scope="col" className="fnd-num">{decimalToFixed(rate, 1, 100)}%</th>)}</tr></thead>
       <tbody>{grid.gross_margins.map((margin, rowIndex) => <tr key={margin}>
         <th scope="row" className="fnd-num">{decimalToFixed(margin, 0, 100)}%</th>
         {grid.cells[rowIndex].map((cell, columnIndex) => {
           const value = Number(cell);
-          const tone = value < 0 ? 'loss' : value < 0.03 ? 'edge' : 'gain';
+          const edge = grid.edge_below === undefined ? null : Number(grid.edge_below);
+          const tone = value < 0 ? 'loss' : edge !== null && value < edge ? 'edge' : 'gain';
           const current = rowIndex === row && columnIndex === column;
           return <td key={grid.collection_rates[columnIndex]}
             className={`fnd-num analysis-health-cell analysis-health-cell--${tone}${current ? ' analysis-health-cell--current' : ''}`}
