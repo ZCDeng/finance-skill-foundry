@@ -1916,6 +1916,85 @@ def test_claim_presentation_preserves_negative_sign_and_percent_requires_ratio(s
     assert ratio["status"] == "pass", ratio["issues"]
 
 
+def test_writing_guidance_states_the_three_number_rules_without_forcing_two_decimals(service):
+    from foundry.finance_explanations import WRITING_GUIDANCE
+
+    rules = " ".join(WRITING_GUIDANCE["rules"])
+    assert "千分位" in rules and "presentation" in rules
+    assert "{{fact:FACT_ID}}" in rules
+    assert "3.30%" in rules and "3.30 个百分点" in rules
+    assert "两位小数" not in rules
+
+
+def test_hand_typed_amount_and_ratio_pass_with_presentation_and_fail_without(service):
+    store, _ = service
+    amount_run, amount_fact = _synthetic_single_value_fact(
+        store, run_id="a1111111111111111111111111111111", value="325644.0040",
+    )
+    ratio_run, ratio_fact = _synthetic_single_value_fact(
+        store, run_id="a2222222222222222222222222222222", value="0.945301", unit="比率", metric_key="achievement_ratio",
+    )
+    claims = [
+        _presentation_claim_for_fact(amount_fact, {"decimal_places": 2, "scale": "identity", "rounding": "half_up"}),
+        _presentation_claim_for_fact(ratio_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"}),
+    ]
+    body = "1-8 月营业收入 325,644.00 万元，达成率 94.53%。"
+    run_ids = [amount_run["id"], ratio_run["id"]]
+
+    with_presentation = store.validate_explanation({"body": body, "run_ids": run_ids, "claims": claims})
+    without = store.validate_explanation({"body": body, "run_ids": run_ids, "fact_ids": [amount_fact["id"], ratio_fact["id"]]})
+
+    assert with_presentation["status"] == "pass", with_presentation["issues"]
+    flagged = {issue["text"] for issue in without["issues"] if issue["code"] == "uncited_number"}
+    assert flagged == {"325,644.00", "94.53%"}
+
+
+def test_percent_unit_rows_are_written_as_their_value_with_a_percent_sign(service):
+    store, _ = service
+    pct_run, pct_fact = _synthetic_single_value_fact(
+        store, run_id="a3333333333333333333333333333333", value="3.3000", unit="pct", metric_key="collection_gap",
+    )
+    percent_run, percent_fact = _synthetic_single_value_fact(
+        store, run_id="a4444444444444444444444444444444", value="90.2", unit=" % ", metric_key="collection_rate",
+    )
+
+    def check(body, run, fact, claims=None):
+        spec = {"body": body, "run_ids": [run["id"]]}
+        spec.update({"claims": claims} if claims else {"fact_ids": [fact["id"]]})
+        return store.validate_explanation(spec)
+
+    written = check("收缴率缺口 3.30%。", pct_run, pct_fact)
+    plain = check("收缴率缺口 3.3%。", pct_run, pct_fact)
+    other = check("收缴率缺口 3.31%。", pct_run, pct_fact)
+    with_percent = check("收缴率缺口 3.30%。", pct_run, pct_fact,
+                         [_presentation_claim_for_fact(pct_fact, {"decimal_places": 2, "scale": "percent", "rounding": "half_up"})])
+    rate = check("收缴率 90.20%。", percent_run, percent_fact)
+
+    # Written by the rule, these rows raise no issue, so completion has nothing to repair.
+    assert written["status"] == "pass", written["issues"]
+    assert plain["status"] == "pass", plain["issues"]
+    assert rate["status"] == "pass", rate["issues"]
+    assert any(issue["code"] == "uncited_number" and issue["text"] == "3.31%" for issue in other["issues"])
+    assert any(issue["code"] == "invalid_presentation" and issue["reason"] == "percent_requires_ratio_fact"
+               for issue in with_percent["issues"])
+
+
+def test_fact_placeholder_keeps_its_rendered_display_and_passes(service):
+    store, _ = service
+    run, fact = _synthetic_single_value_fact(
+        store, run_id="a5555555555555555555555555555555", value="325644.0000", metric_key="revenue",
+    )
+    draft = store.save_explanation_draft({
+        "title": "收入",
+        "body": "1-8 月营业收入 {{fact:%s}}。" % fact["id"],
+        "run_ids": [run["id"]],
+        "fact_ids": [fact["id"]],
+    })
+    # The writing rules leave _display_value alone: the placeholder still renders the run's own text.
+    assert draft["body"].startswith("1-8 月营业收入 325644.0000 万元。")
+    assert draft["explanation_check"]["status"] == "pass", draft["explanation_check"]["issues"]
+
+
 def test_claim_presentation_persists_and_appears_in_audit_projection(service):
     from foundry.report_projection import build_report_projection
 

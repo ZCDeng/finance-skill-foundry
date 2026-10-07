@@ -215,6 +215,7 @@ def test_dsh_and_method_r4_contracts_are_mirrored_into_resources():
     assert "status_filter" in finance_tools
     assert "excluded_detail_rows" in finance_tools
     assert "repair_allowed" in finance_tools
+    assert "千分位" in finance_tools
 
     persona = (ROOT / "dsh-plugin/presets/analysis/agent.cordis.yml").read_text(
         encoding="utf-8"
@@ -223,11 +224,15 @@ def test_dsh_and_method_r4_contracts_are_mirrored_into_resources():
     assert "inputs.status_filter" in persona
     assert "completion.repair_allowed" in persona
     assert "stop_reason 为 no_progress" in persona
+    assert "千分位" in persona and "presentation" in persona
+    # The persona is a template: only {{model}} may sit in double braces there.
+    assert "{{fact" not in persona
 
     foundry_note = (ROOT / "method/FOUNDRY.md").read_text(encoding="utf-8")
     assert "Before calculation, save the current question contract" in foundry_note
     assert "excluded_detail_rows" in foundry_note
     assert "completion.repair_allowed" in foundry_note
+    assert "thousands separators" in foundry_note
 
 
 def test_script_tool_descriptions_carry_the_result_row_contract_in_both_shipped_copies(tmp_path: Path):

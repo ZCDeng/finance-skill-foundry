@@ -40,6 +40,8 @@ WRITING_GUIDANCE = {
         "多个驱动、条件或不确定性使用条列或比较表，条件贴近相关判断。",
         "完整公式、桥接计算和口径说明独立成段或小表，不塞进长句。",
         "来源定位使用章节末附注 [^n]；不得补造原因、行动、空值或未授权来源。",
+        "数字照三条写：手写的金额和数量加千分位（325,644.00 万元）；{{fact:FACT_ID}} 原样保留，不因渲染出的小数位或缺千分位改成手写；手写数字需要舍入或把比率写成百分数时，正文写展示值，对应 claim 带 fact_id 和 presentation（decimal_places，比率 scale 用 percent、其余 identity，rounding 为 half_up），由服务复核。",
+        "结果行里「比率」或 ratio 是小数，正文写成百分数（94.53%）并带 percent presentation；单位为 %、pct 或「百分比」的行本身已是百分数，正文写原数加 %（3.30%），不加 presentation；单位为「百分点」的差值行写「3.30 个百分点」。不写「比率以小数表示」这类格式说明。正文、运行说明和假设里不写内部字段名（metric_key、scenario、currency/unit），改写成指标、情景、币种和单位。",
     ],
 }
 
@@ -444,6 +446,9 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     base_allowed_numbers = _allowed_numbers(
         [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
     )
+    percent_values = _percent_number_values(
+        [by_id[fact_id] for fact_id in referenced if fact_id in by_id]
+    )
     ignored_number_spans = [
         *_generated_appendix_heading_number_spans(body, prepared),
         *_generated_appendix_label_number_spans(body, generated_regions, prepared),
@@ -452,6 +457,8 @@ def validate_explanation(analysis, spec: dict, *, _requirement_recipe_report: di
     for token in _body_numbers(body, ignored_spans=ignored_number_spans):
         normalized = _normalize_number(token["text"])
         if normalized in base_allowed_numbers:
+            continue
+        if _is_cited_percent_number(token["text"], percent_values):
             continue
         if normalized in presentation["numbers"] and _presentation_token_unit_matches(body, token, presentation["numbers"][normalized]):
             continue
@@ -2196,6 +2203,32 @@ def _fact_number(fact: dict) -> str:
     if fact.get("column") in RATIO_COLUMNS and fact["column"].endswith("_pct"):
         value /= 100
     return _normalize_number(str(value))
+
+
+# Units whose value already is a percentage: 3.3 in such a row is written 3.3%, not 330%.
+PERCENT_VALUE_UNITS = {"%", "pct", "百分比"}
+
+
+def _percent_number_values(facts: list[dict]) -> set[Decimal]:
+    values = set()
+    for fact in facts:
+        if re.sub(r"\s+", "", str(fact.get("unit") or "")).lower() not in PERCENT_VALUE_UNITS:
+            continue
+        try:
+            values.add(Decimal(str(fact["value"])))
+        except (InvalidOperation, KeyError, TypeError):
+            continue
+    return values
+
+
+def _is_cited_percent_number(text: str, values: set[Decimal]) -> bool:
+    """A body number written with % that equals a cited %, pct or 百分比 value as written (3.3 is 3.30%)."""
+    if not values or not text.endswith("%"):
+        return False
+    try:
+        return Decimal(text[:-1].replace(",", "")) in values
+    except InvalidOperation:
+        return False
 
 
 def _allowed_numbers(facts: list[dict]) -> set[str]:
