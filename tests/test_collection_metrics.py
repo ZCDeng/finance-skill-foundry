@@ -602,3 +602,14 @@ def test_full_year_at_last_years_pace_is_not_judged_on_a_loss_year_and_months_ar
     assert rows["net_profit_le_gap"]["level"] == "unknown"
     with pytest.raises(FoundryError, match="months_elapsed"):
         _rows({"net_profit": "100", "months_elapsed": "13"})
+
+
+def test_full_year_pace_refuses_a_tiny_share_a_ytd_loss_a_reversal_and_a_prior_month_count():
+    rows, _ = _rows({"net_profit": "5", "net_profit_py": "1", "net_profit_py_full": "1000", "net_profit_le": "100"})
+    assert rows["net_profit_le_gap"]["level"] == "unknown" and "很小一部分" in rows["net_profit_le_gap"]["note"]
+    rows, _ = _rows({"net_profit": "-100", "net_profit_py": "50", "net_profit_py_full": "100", "net_profit_le": "-150"})
+    assert rows["net_profit_le_gap"]["level"] == "unknown"
+    rows, _ = _rows({"impairment_py": "200", "impairment_py_full": "-1000"})
+    assert rows["impairment_progress_py"]["level"] == "unknown"
+    with pytest.raises(FoundryError, match="no prior-year counterpart"):
+        _rows({"revenue": "50", "revenue_py": "40", "months_elapsed": "6", "months_elapsed_py": "0"})

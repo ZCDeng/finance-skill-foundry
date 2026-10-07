@@ -50,6 +50,8 @@ DEFAULT_PARAMS: dict[str, str] = {
     "le_gap_flag": "0.10",
     # Last year booked less than this share of its impairment by the same point: the rest comes late.
     "impairment_progress_flag": "0.5",
+    # Last year's same-period share of its full year below this makes the pace meaningless.
+    "seasonal_share_min": "0.1",
     # Break-even sensitivity grid.
     "matrix_margin_from": "0.10",
     "matrix_margin_to": "0.30",
@@ -193,6 +195,8 @@ def _input_name(name: Any) -> str:
     base = name[:-3] if name.endswith("_py") else name
     if base not in INPUT_LABELS:
         raise FoundryError(f"unknown collection_health input: {name}")
+    if name.endswith("_py") and base in COUNT_INPUTS:
+        raise FoundryError(f"{name}: {base} has no prior-year counterpart")
     return name
 
 
@@ -768,6 +772,13 @@ def _judged_out(key: str, values: dict, computed: dict, params: dict) -> str | N
         base = key.split("_full_year")[0].removesuffix("_le_gap")
         if values.get(f"{base}_py_full", Decimal(1)) <= 0 or values.get(f"{base}_py", Decimal(1)) <= 0:
             return "上年同期或全年不为正，去年节奏没有意义，不作判断"
+        if values.get(base, Decimal(1)) <= 0:
+            return "本年累计不为正，按去年节奏放大没有意义，不作判断"
+        if f"{base}_py" in values and f"{base}_py_full" in values and \
+                values[f"{base}_py"] / values[f"{base}_py_full"] < params["seasonal_share_min"]:
+            return "上年同期只占全年很小一部分，按去年节奏放大没有意义，不作判断"
+    if key == "impairment_progress_py" and values["impairment_py"] * values["impairment_py_full"] < 0:
+        return "上年同期减值与全年方向相反（有转回），进度没有意义，不作判断"
     if key == "dso" and computed.get("ttm_revenue", Decimal(1)) <= 0:
         return "近12个月收入不为正，天数没有意义，不作判断"
     if key == "impairment_to_gross_profit":
