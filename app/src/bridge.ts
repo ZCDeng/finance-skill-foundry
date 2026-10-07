@@ -167,6 +167,9 @@ export interface Bridge {
   rollforwardExport?(task: string, runId: string, name?: string): Promise<Answer<{ cancelled?: boolean; exported?: boolean; filename?: string }>>;
   /** Write-only: hands one user wait to the local timing log. Absent in a build without it. */
   timingLog?(entry: WaitEntry): Promise<Answer<{ written: true }>>;
+  /** The window's appearance (跟随系统 / 浅色 / 深色). Absent in a build without it; the header then shows no switch. */
+  appearanceGet?(): Promise<Answer<{ appearance: Appearance }>>;
+  appearanceSet?(appearance: Appearance): Promise<Answer<{ appearance: Appearance }>>;
   tasks(lifecycle?: TaskLifecycleFilter): Promise<Answer<TaskRow[]>>;
   task(id: string): Promise<Answer<TaskDetail>>;
   /** 成果库: old-flow versions, the newest draft of each revision chain and every filed export, newest first. */
@@ -275,6 +278,7 @@ export type WaitKind = import('../electron/ipc/contract').WaitKind;
 export type WaitOutcome = import('../electron/ipc/contract').WaitOutcome;
 /** One user wait as the timing log takes it: what, how it ended, and two durations. */
 export type WaitEntry = import('../electron/timing').WaitEntry;
+export type Appearance = import('../electron/appearance').Appearance;
 
 /**
  * Times one user wait: from the call, made on the click, to the end of `work`,

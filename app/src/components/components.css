@@ -529,8 +529,66 @@ textarea.fnd-field {
 .fnd-head__end {
   flex: 1 0 0;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   min-width: 0;
+}
+
+/*
+ * The appearance switch (ThemeSwitch.tsx): three icon buttons in a pill as tall as 使用指南. The chosen one sits
+ * on a ring with the chip's selected look (selection surface, ink edge); gold stays for the current tab. The
+ * ring slides on the shell transition, so reduced motion makes it jump.
+ */
+.fnd-theme {
+  --fnd-theme-size: calc(var(--fnd-button-height) - 8px);
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--fnd-line);
+  border-radius: var(--fnd-radius-pill);
+}
+
+.fnd-theme__ring {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: var(--fnd-theme-size);
+  height: var(--fnd-theme-size);
+  border: 1px solid var(--fnd-ink);
+  border-radius: var(--fnd-radius-pill);
+  background: var(--fnd-selection-surface);
+  transform: translateX(calc(var(--fnd-theme-index) * (var(--fnd-theme-size) + 2px)));
+  transition: transform var(--fnd-transition);
+  pointer-events: none;
+}
+
+.fnd-theme__option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fnd-theme-size);
+  height: var(--fnd-theme-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fnd-radius-pill);
+  background: transparent;
+  color: var(--fnd-muted);
+  cursor: pointer;
+  transition: color var(--fnd-transition);
+}
+
+.fnd-theme__option:hover,
+.fnd-theme__option[aria-checked='true'] {
+  color: var(--fnd-ink);
+}
+
+.fnd-theme__option:focus-visible {
+  outline: 1px solid var(--fnd-focus);
+  outline-offset: 1px;
 }
 
 .fnd-head__help {
@@ -714,7 +772,7 @@ textarea.fnd-field {
 }
 
 /*
- * Scroll fade (after chanhdai.com's scroll-fade-effect, MIT; see WaitLoop.license.txt).
+ * Scroll fade (after chanhdai.com's scroll-fade-effect, MIT; see chanhdai.LICENSE.txt).
  *
  * A scroll area dims its last line while more lies below and, once scrolled, its first line too, so a list
  * that is cut off reads as cut off. A scroll timeline drives it: no script and no clock, so it costs nothing

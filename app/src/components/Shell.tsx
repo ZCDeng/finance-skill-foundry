@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { BookOpen } from 'lucide-react';
 import './components.css';
 import { Button } from './ui/button.js';
+import { ThemeSwitch } from './ThemeSwitch.js';
 
 export type Screen = 'analysis' | 'workbench' | 'formulator' | 'tasks' | 'deliverables';
 export interface ShellProps {
@@ -31,6 +32,7 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
             onClick={() => onScreen('deliverables')}>成果库</button>
         </nav>
         <span className="fnd-head__end">
+          <ThemeSwitch />
           {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. */}
           {onGuide ? <Button type="button" variant="ghost" size="sm"
             className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)]"
