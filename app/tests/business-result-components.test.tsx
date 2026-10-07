@@ -311,7 +311,9 @@ describe('business result components', () => {
     const card = screen.getByRole('article');
     expect(within(card).getByText('营业利润')).toBeTruthy();
     expect(within(card).getByLabelText('营业利润实际').textContent).toBe('90.00');
-    expect(within(card).getByText('2026 年 8 月 · 万元 · 依据：专业判断')).toBeTruthy();
+    expect(card.querySelector('.analysis-kpi-meta')?.textContent).toBe('2026 年 8 月 · 万元 · 依据：专业判断');
+    // Each part stays whole; the line may break only at a separator.
+    expect(Array.from(card.querySelectorAll('.analysis-kpi-meta > span')).map((part) => part.textContent)).toEqual(['2026 年 8 月', '万元', '依据：专业判断']);
     expect(within(card).getByText('预算')).toBeTruthy();
     expect(within(card).getByText('100.00')).toBeTruthy();
     expect(within(card).getByText('差异')).toBeTruthy();
@@ -361,7 +363,7 @@ describe('business result components', () => {
     const cards = screen.getAllByRole('article');
     expect(within(cards[0]).getByText('收入 · 华东区域')).toBeTruthy();
     expect(within(cards[0]).getByLabelText('收入 · 华东区域实际').textContent).toBe('109,742.03');
-    expect(within(cards[0]).getByText('1_8月 · 万元 · 依据：估算')).toBeTruthy();
+    expect(cards[0].querySelector('.analysis-kpi-meta')?.textContent).toMatch(/^1_8月 · 万元 · 依据：估算/);
     expect(within(cards[0]).getByText('93.15%')).toBeTruthy();
     expect(screen.queryByText('未声明期间')).toBeNull();
     expect(screen.queryByText('未声明单位')).toBeNull();
@@ -1066,7 +1068,7 @@ describe('result rows by declaration, inference and unit', () => {
     render(<BusinessResultView run={declaredRun({ pairs, current_requirements: { id: 'b2'.repeat(16), fingerprint: 'e'.repeat(64) } } as Partial<Declarations>)} />);
     // Its 达成率 row was left out for an unmarked unit, so the card's 达成率 stays empty and says why.
     const south = cardFor('利润 · 华南区域');
-    expect(within(south).getByText('推断 · 依据旧版需求 · 未标单位')).toBeTruthy();
+    expect(Array.from(south.querySelectorAll('.analysis-kpi-note')).map((note) => note.textContent)).toEqual(['推断', '依据旧版需求', '未标单位']);
     expect(within(south).getByText('预算（估算）')).toBeTruthy();
     expect(within(cardFor('收入 · 集团合并')).getByText('依据旧版需求')).toBeTruthy();
   });
@@ -1078,7 +1080,7 @@ describe('result rows by declaration, inference and unit', () => {
       row('revenue_achievement_ratio', '华东区域', 'budget_1_8', '0.9', '-', '收入达成率'),
     ])} />);
     const card = screen.getByRole('article');
-    expect(within(card).getByText('推断 · 未标单位')).toBeTruthy();
+    expect(Array.from(card.querySelectorAll('.analysis-kpi-note')).map((note) => note.textContent)).toEqual(['推断', '未标单位']);
     expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '0.9（未标单位）' })).toBeTruthy();
   });
 
@@ -1269,7 +1271,7 @@ describe('script conclusion sentences', () => {
 
     // An incomplete declaration pairs its rows but concludes nothing: the same cards, without 推断.
     const before = render(<BusinessResultView run={declared(false)} />).container.innerHTML;
-    expect(before).toBe(inferred.replaceAll(' · <span class="analysis-kpi-notes">推断</span>', ''));
+    expect(before).toBe(inferred.replaceAll(' · <span class="analysis-kpi-note">推断</span>', ''));
     cleanup();
 
     // With conclusions, the sentences are the only addition.

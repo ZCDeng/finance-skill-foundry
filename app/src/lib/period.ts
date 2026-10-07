@@ -7,9 +7,10 @@
  * exactly as stored. Display only: storage, export, filters and the text handed
  * to the assistant keep the stored value.
  */
-const MONTH = /^(\d{4})-(\d{2})$/;
-const YEAR = /^(\d{4})$/;
-const RANGE = /^(\d{4})-(\d{2}):(\d{4})-(\d{2})$/;
+// A year is 19xx or 20xx, so a bare code such as 2608 or 0000 is not read as one.
+const MONTH = /^((?:19|20)\d{2})-(\d{2})$/;
+const YEAR = /^((?:19|20)\d{2})$/;
+const RANGE = /^((?:19|20)\d{2})-(\d{2}):((?:19|20)\d{2})-(\d{2})$/;
 
 function validMonth(month: string): boolean {
   const value = Number(month);

@@ -43,6 +43,18 @@ describe('the result page layout (DESIGN.md 结果区)', () => {
     expect(declarations('.analysis-kpi-title')).toMatchObject({ '-webkit-line-clamp': '2', overflow: 'hidden' });
   });
 
+  it('hides a title that only repeats the task name, for sighted readers only and only without a conclusion', () => {
+    const hidden = declarations('.analysis-result:not(:has(.analysis-headline)) .analysis-result-head h3[data-repeats-task]');
+    expect(hidden).toMatchObject({ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', 'clip-path': 'inset(50%)', 'white-space': 'nowrap' });
+    expect(hidden).not.toHaveProperty('display');
+    expect(hidden).not.toHaveProperty('visibility');
+  });
+
+  it('keeps each KPI meta part whole and drops the fixed title height', () => {
+    expect(declarations('.analysis-kpi-meta > span')).toMatchObject({ 'white-space': 'nowrap' });
+    expect(declarations('.analysis-kpi-title')).not.toHaveProperty('min-height');
+  });
+
   it('writes the version notes as plain secondary text, no box', () => {
     const note = declarations('.analysis-version-note');
     expect(note).toMatchObject({ color: 'var(--fnd-muted)', 'font-size': 'var(--fnd-size-label)', border: '0' });

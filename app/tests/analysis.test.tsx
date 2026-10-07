@@ -351,10 +351,9 @@ describe('analysis workbench', () => {
     expect((screen.getByLabelText('文稿正文') as HTMLTextAreaElement).value).toBe('返回后还要继续写的判断。');
     openAnalysisEditor();
     expect((screen.getByLabelText('参数 · 第 1 项') as HTMLInputElement).value).toBe('0.92');
-    // The picker names the version; the task's question is the result heading, the version's own words go to 技术信息.
+    // The picker names the version; the question it answers is the result heading below it.
     expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 1 版（共 2 版）');
-    expect(screen.getByRole('heading', { name: task.title, level: 3 })).toBeTruthy();
-    expect([...document.querySelectorAll('.analysis-result .analysis-technical-list')].map((item) => item.textContent).join(' ')).toContain('运行描述华东利润分析');
+    expect(screen.getByRole('heading', { name: '华东利润分析', level: 3 })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '分析版本' }));
     expect(await screen.findByRole('option', { name: /助手新计算的预算差异/ })).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText('分析版本搜索'), { key: 'Escape' });
@@ -575,8 +574,7 @@ describe('analysis workbench', () => {
     // its own elsewhere on the page, so this looks where the result would be.
     expect(document.querySelector('.analysis-result table')).toBeNull();
     expect(screen.getByRole('button', { name: '分析版本' }).textContent).toContain('第 2 版（共 2 版）');
-    expect(screen.getByRole('heading', { name: task.title, level: 3 })).toBeTruthy();
-    expect([...document.querySelectorAll('.analysis-result .analysis-technical-list')].map((item) => item.textContent).join(' ')).toContain('运行描述新的成本口径');
+    expect(screen.getByRole('heading', { name: '新的成本口径', level: 3 })).toBeTruthy();
   });
 
   it('opens a local evidence panel and returns keyboard focus when it is dismissed', async () => {

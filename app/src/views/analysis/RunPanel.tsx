@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
+import { TechnicalInfo } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
@@ -22,7 +22,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
   /** Opens the finance scope settings, which sit below the result, on the scope this run used. */
   onAdjustScope?(run: AnalysisRun): void;
-  /** The task's own question, the result's title. The version's run description goes to 技术信息 when it differs. */
+  /** The task's own name. The result is titled by the version's question; one that only repeats this name stays for screen readers. */
   question?: string;
   /** The 分析版本 picker, drawn above the result with 比较版本 beside it. */
   versionPicker?: ReactNode;
@@ -43,14 +43,16 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   const compared = runs.find((row) => row.id === comparison && row.id !== run?.id);
   const assumptions = run?.assumptions ?? analysis.assumptions;
   useEffect(() => { if (evidence) closeButton.current?.focus({ preventScroll: true }); }, [evidence]);
+  // Another version from the picker: the comparison and the evidence panel described the one before.
+  useEffect(() => { setComparing(false); setEvidence(false); }, [analysis.id]);
   const closeEvidence = () => { setEvidence(false); evidenceButton.current?.focus({ preventScroll: true }); };
   const pick = (next: AnalysisRun) => {
     setSelected(next.id); writeCopy(`${analysis.task_id}:run`, next.id); onPick(next.analysis_id);
     setEvidence(false); setComparing(false);
   };
-  const heading = question?.trim() || analysis.question;
-  // The version's run description, kept for support and the assistant when the task's question is the title.
-  const technical: TechnicalRow[] = heading !== analysis.question ? [['运行描述', analysis.question]] : [];
+  const heading = analysis.question?.trim() || question?.trim() || '';
+  // The task name already heads the page; without a conclusion to label, a title that only repeats it is not drawn.
+  const repeatsTask = !analysis.question?.trim() || analysis.question.trim() === question?.trim();
   const compareButton = run && runs.length > 1 ? <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button> : null;
   // Only the run the latest draft cites is that run; once another is picked the sentence no longer holds.
   const draftReference = Boolean(run && selection.reason === 'draft_reference' && run.id === selection.primary?.id);
@@ -84,13 +86,13 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
               : <p className="analysis-note">{row.error ? errorText(row.error) : '这次计算没有表格结果。'}</p>}</div>;
         })}</div></>}
       </section>}
-      <header className="analysis-result-head"><h3 title={heading}>{heading}</h3>
+      <header className="analysis-result-head"><h3 title={heading} data-repeats-task={repeatsTask || undefined}>{heading}</h3>
         <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} /></header>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
-      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} />
-        : <>{resultActions}<TechnicalInfo rows={technical} /></>}
+      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} />
+        : <>{resultActions}{run.result?.diagnostics?.length ? <TechnicalInfo><RawDiagnostics items={run.result.diagnostics} /></TechnicalInfo> : null}</>}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
@@ -184,14 +186,21 @@ function rendersBusinessView(run: AnalysisRun): boolean {
 }
 
 /** The result, with the run's next steps right after what a manager reads first and one 技术信息 fold. */
-function RunResultTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
-  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} technical={technical} />;
-  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} technical={technical} />;
-  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} technical={technical} />;
-  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} technicalRows={technical} diagnostics={run.result?.diagnostics ?? []} />;
+function RunResultTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
+  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} />;
+  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} />;
+  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} />;
+  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} diagnostics={run.result?.diagnostics ?? []} />;
+  const diagnostics = run.result!.diagnostics ?? [];
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
-    {actions}<TechnicalInfo rows={technical} /></>;
+    {actions}{diagnostics.length > 0 && <TechnicalInfo><RawDiagnostics items={diagnostics} /></TechnicalInfo>}</>;
+}
+
+/** The engine's diagnostics as recorded, for the one 技术信息 fold of a result. */
+function RawDiagnostics({ items }: { items: unknown[] }) {
+  return <><h4>原始诊断细节 · {items.length} 项</h4>
+    {items.map((item, index) => <p key={index}>{textValue(item)}</p>)}</>;
 }
 
 function runRoleLabel(run: AnalysisRun): string {
@@ -224,7 +233,7 @@ function isScriptSummaryRun(run: AnalysisRun): boolean {
   return scriptSummaryKeys.every((name) => set.has(name));
 }
 
-function ScriptSummaryTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+function ScriptSummaryTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
   const result = run.result!;
   const columns = scriptSummaryKeys.map((name) => ({ name: scriptSummaryLabels[name], type: columnType(run, name) }));
   const rows = result.rows.map((row) => Object.fromEntries(scriptSummaryKeys.map((name) => [scriptSummaryLabels[name], row[name]])));
@@ -235,7 +244,6 @@ function ScriptSummaryTable({ run, actions, technical }: { run: AnalysisRun; act
     <details className="analysis-details"><DisclosureSummary>完整明细 · {result.columns.length} 列</DisclosureSummary>
       <Table key={`${run.id}:full`} columns={result.columns} rows={result.rows} caption="完整明细" />
     </details>
-    <TechnicalInfo rows={technical} />
   </section>;
 }
 
@@ -286,18 +294,17 @@ function structuredDiagnosticText(value: unknown): string {
   return message || `结构化汇总诊断：${textValue(value)}`;
 }
 
-function RawResultDetails({ run, rows }: { run: AnalysisRun; rows?: TechnicalRow[] }) {
+function RawResultDetails({ run }: { run: AnalysisRun }) {
   const result = run.result!;
   const diagnostics = result.diagnostics ?? [];
-  return <TechnicalInfo rows={rows}>
-    {diagnostics.length > 0 && <><h4>原始诊断细节 · {diagnostics.length} 项</h4>
-      {diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</>}
+  return <TechnicalInfo>
+    {diagnostics.length > 0 && <RawDiagnostics items={diagnostics} />}
     <h4>原始结果字段 · {result.columns.length} 列</h4>
     <Table key={`${run.id}:raw`} columns={result.columns} rows={result.rows} caption="原始计算结果" />
   </TechnicalInfo>;
 }
 
-function StructuredAggregateTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+function StructuredAggregateTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
   const result = run.result!;
   const detailRows = result.detail_rows ?? [];
   const excludedRows = result.excluded_detail_rows ?? [];
@@ -317,7 +324,7 @@ function StructuredAggregateTable({ run, actions, technical }: { run: AnalysisRu
     {excludedRows.length > 0 && <details className="analysis-details"><DisclosureSummary>剔除明细 · {excludedRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:excluded`} columns={structuredAggregateColumns(run, excludedRows)} rows={structuredAggregateRows(excludedRows)} caption="剔除明细" />
     </details>}
-    <RawResultDetails run={run} rows={technical} />
+    <RawResultDetails run={run} />
   </section>;
 }
 
@@ -420,7 +427,9 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
   const actualPeriod = period(comparison?.actual_filters);
   const baselinePeriod = period(comparison?.baseline_filters);
   // Periods are named only when the two sides differ; the same words on both sides get their codes.
-  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${periodText(value)}）` : words;
+  // Two stored periods that read alike in words (2026-08 and 2026-08:2026-08) keep their stored values.
+  const sameWords = periodText(actualPeriod) === periodText(baselinePeriod);
+  const withPeriod = (words: string, value: string) => actualPeriod !== baselinePeriod && value ? `${words}（${sameWords ? value : periodText(value)}）` : words;
   const actualLabel = withPeriod(scenarioWords(actual, 'actual'), actualPeriod);
   let baselineLabel = withPeriod(scenarioWords(baseline, 'baseline'), baselinePeriod);
   // Same words on both sides (the same scenario under other filters) must still read as two sides.
@@ -434,7 +443,7 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
   };
 }
 
-function FinanceVarianceTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+function FinanceVarianceTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
   const dimensions = financeVarianceDimensionColumns(run);
   const copy = financeVarianceCopy(run);
   const hasAmountChange = new Set(run.result?.columns.map((column) => column.name) ?? []).has('amount_change');
@@ -456,7 +465,7 @@ function FinanceVarianceTable({ run, actions, technical }: { run: AnalysisRun; a
       ...(hasAmountChange ? [{ name: '科目增减', type: 'DECIMAL' }] : []), { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
     ]} rows={rows} caption={copy.caption} />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
-    <RawResultDetails run={run} rows={technical} />
+    <RawResultDetails run={run} />
   </section>;
 }
 
@@ -606,8 +615,6 @@ function SourceTraceDetails({ run, busy, onDrilldown }: {
   }
   return <section className="analysis-finance-run" aria-label="结果范围与来源">
     {(run.engine === 'finance' || run.completeness) && <p className="analysis-note">{financeCompleteness(run.completeness)}</p>}
-    {run.engine === 'finance' && !isFinanceVarianceRun(run) && !rendersBusinessView(run) && Array.isArray(run.result?.diagnostics) && run.result.diagnostics.length > 0 && <details className="analysis-details analysis-technical"><DisclosureSummary tone="quiet">技术信息 · 诊断 {run.result.diagnostics.length} 项</DisclosureSummary>
-      {run.result.diagnostics.map((item, index) => <p key={index}>{textValue(item)}</p>)}</details>}
     {run.finance_scope && <details className="analysis-details"><DisclosureSummary>计算范围</DisclosureSummary>{Object.entries(run.finance_scope).map(([alias, scope]) =>
       <p key={alias}>{scenarioLabel(alias)}：{scopeText(scope)}</p>)}</details>}
     {sourceRows.length > 0 && onDrilldown && <div className="analysis-drilldown">

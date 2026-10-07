@@ -14,10 +14,14 @@ describe('formatPeriod', () => {
     expect(formatPeriod(value)).toBe(expected);
   });
 
-  it.each(['2026-08:2026-01', '2026-13', '2026-00', '2026-01:2026-13', 'YTD', '1_8月', '2026-08-31', '2026 YTD', '2026-8'])(
+  it.each(['2026-08:2026-01', '2026-13', '2026-00', '2026-01:2026-13', 'YTD', '1_8月', '2026-08-31', '2026 YTD', '2026-8', '2608', '0000', '0000-08', '2026-01:3026-02'])(
     'leaves %j as stored', (value) => {
       expect(formatPeriod(value)).toBe(value);
     });
+
+  it('leaves a number that is not a year as stored', () => {
+    expect(formatPeriod(2608)).toBe('2608');
+  });
 
   it('returns nothing for a missing period, leaving the placeholder to the caller', () => {
     expect(formatPeriod(null)).toBe('');

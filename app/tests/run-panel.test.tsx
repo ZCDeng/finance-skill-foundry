@@ -543,22 +543,28 @@ describe('RunPanel result head and next steps', () => {
 
   afterEach(() => sessionStorage.clear());
 
-  it('titles the result with the task question and keeps the run description in 技术信息 only', () => {
+  it('titles the result with the version question, falling back to the task name', () => {
     render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
+    const heading = screen.getByRole('heading', { level: 3, name: analysis.question });
+    expect(heading.getAttribute('title')).toBe(analysis.question);
+    // A question of its own is drawn, with or without a conclusion.
+    expect(heading.hasAttribute('data-repeats-task')).toBe(false);
+    cleanup();
+    render(<RunPanel {...props} analysis={{ ...analysis, question: '' }} question="华东经营分析" runs={[pnl()]} />);
+    expect(screen.getByRole('heading', { level: 3, name: '华东经营分析' }).hasAttribute('data-repeats-task')).toBe(true);
+  });
+
+  it('keeps a title that only repeats the task name for screen readers when no conclusion leads', () => {
+    render(<RunPanel {...props} analysis={{ ...analysis, question: '华东经营分析' }} question="华东经营分析" runs={[pnl()]} />);
+    // Still the result's heading for assistive technology; analysis.css hides it only while there is no .analysis-headline.
     const heading = screen.getByRole('heading', { level: 3, name: '华东经营分析' });
-    expect(heading.getAttribute('title')).toBe('华东经营分析');
-    const article = heading.closest('article') as HTMLElement;
-    const technical = Array.from(article.querySelectorAll('.analysis-technical'));
-    expect(technical).toHaveLength(1);
-    expect(within(technical[0] as HTMLElement).getByText('运行描述').nextElementSibling?.textContent).toBe(analysis.question);
-    const outside = article.cloneNode(true) as HTMLElement;
-    outside.querySelectorAll('.analysis-technical').forEach((fold) => fold.remove());
-    expect(outside.textContent).not.toContain(analysis.question);
+    expect(heading.getAttribute('data-repeats-task')).toBe('true');
+    expect(document.querySelector('.analysis-headline')).toBeNull();
   });
 
   it('puts the title, the date line and the four states in one header, in that order', () => {
     render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
-    const head = screen.getByRole('heading', { level: 3, name: '华东经营分析' }).parentElement as HTMLElement;
+    const head = screen.getByRole('heading', { level: 3, name: analysis.question }).parentElement as HTMLElement;
     expect(head.tagName).toBe('HEADER');
     expect(head.classList.contains('analysis-result-head')).toBe(true);
     const children = Array.from(head.children);
@@ -603,5 +609,43 @@ describe('RunPanel result head and next steps', () => {
     expect(folds[0].textContent).toContain('原始诊断细节 · 1 项');
     expect(folds[0].textContent).toContain('control_total_missing');
     expect(screen.queryByText(/技术信息 · 诊断/)).toBeNull();
+  });
+
+  it('keeps a finance result without rows and its diagnostics in one 技术信息 fold', () => {
+    const empty = pnl();
+    empty.result = { ...empty.result!, rows: [], row_count: 0, diagnostics: [{ code: 'control_total_missing', message: '控制数未提供' }] };
+    render(<RunPanel {...props} runs={[empty]} />);
+    const folds = Array.from(document.querySelectorAll('.analysis-result .analysis-technical'));
+    expect(folds).toHaveLength(1);
+    expect(folds[0].textContent).toContain('原始诊断细节 · 1 项');
+    expect(screen.queryByText(/技术信息 · 诊断/)).toBeNull();
+    cleanup();
+    const failed = { ...baseRun, engine: 'finance', execution_status: 'failed', error: '缺少列',
+      result: { columns: [], rows: [], row_count: 0, truncated: false, diagnostics: [{ code: 'scope_missing' }] } } as AnalysisRun;
+    render(<RunPanel {...props} runs={[failed]} />);
+    const only = Array.from(document.querySelectorAll('.analysis-result .analysis-technical'));
+    expect(only).toHaveLength(1);
+    expect(only[0].textContent).toContain('scope_missing');
+  });
+
+  it('closes the comparison and the evidence panel when another version is picked', () => {
+    const other: AnalysisRevision = { ...analysis, id: '9'.repeat(32), question: '另一版分析' };
+    const first = pnl({ id: '1'.repeat(32) });
+    const second = pnl({ id: '2'.repeat(32), analysis_id: other.id, created_at: '2026-09-08T00:00:00Z' });
+    const view = render(<RunPanel {...props} analyses={[analysis, other]} runs={[first, second]} />);
+    fireEvent.click(screen.getByRole('button', { name: '比较版本' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看本次计算依据' }));
+    expect(screen.getByRole('region', { name: '版本比较' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '本次计算依据' })).toBeTruthy();
+    view.rerender(<RunPanel {...props} analysis={other} analyses={[analysis, other]} runs={[first, second]} />);
+    expect(screen.queryByRole('region', { name: '版本比较' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '本次计算依据' })).toBeNull();
+  });
+
+  it('keeps the stored periods on a bridge whose two sides read alike in words', () => {
+    render(<RunPanel {...props} runs={[varianceRun([bridgeRow('profit', '-5')], { comparison: {
+      actual_scenario: 'actual', baseline_scenario: 'budget', actual_filters: { period: '2026-08' }, baseline_filters: { period: '2026-08:2026-08' },
+    } })]} />);
+    expect(screen.getByRole('region', { name: '结论' }).textContent).toContain('实际（2026-08）与预算（2026-08:2026-08）相比');
   });
 });

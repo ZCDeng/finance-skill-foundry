@@ -322,6 +322,31 @@ describe('where the warning colour is drawn', () => {
     expect(classes.some((name) => /bg-primary|--fnd-selected|--fnd-gold/.test(name))).toBe(false);
   });
 
+  it('keeps a selected chip selected under the pointer: each outline hover is outranked by the same chain behind aria-*', async () => {
+    const { buttonVariants } = await import('../src/components/ui/button.js');
+    const outline = buttonVariants({ variant: 'outline' }).split(' ');
+    const chip = buttonVariants({ variant: 'outline', size: 'chip' }).split(' ');
+    // An outline hover such as enabled:hover:not-focus-visible:border-[…] compiles to .x:enabled:hover:not(:focus-visible);
+    // the bare aria-selected:border-[…] is .x[aria-selected=true] and loses to it. The override has to carry the
+    // whole chain plus the attribute, for the same property, and paint the selected colours.
+    const hovers = outline.filter((name) => name.split(':').includes('hover'));
+    expect(hovers.length).toBeGreaterThan(0);
+    for (const state of ['aria-selected', 'aria-pressed']) {
+      for (const hover of hovers) {
+        const chain = hover.slice(0, hover.lastIndexOf(':'));
+        const property = hover.slice(hover.lastIndexOf(':') + 1).replace(/\[.*$/, '');
+        const override = chip.find((name) => name.startsWith(`${state}:${chain}:${property}`));
+        expect(override, `${state} over ${hover}`).toBeDefined();
+        expect(override).toMatch(/var\(--fnd-(ink|selection-surface)\)/);
+      }
+    }
+  });
+
+  it('stands the chip focus ring off the edge so the ink edge still shows while focused', async () => {
+    const { buttonVariants } = await import('../src/components/ui/button.js');
+    expect(buttonVariants({ variant: 'outline', size: 'chip' }).split(' ')).toContain('focus-visible:outline-offset-1');
+  });
+
   it('gives the destructive badge the warning edge, fill and text', async () => {
     const { badgeVariants } = await import('../src/components/ui/badge.js');
     const classes = badgeVariants({ variant: 'destructive' });
