@@ -84,6 +84,19 @@ describe('RunPanel structured aggregate results', () => {
     expect(rows[1].textContent).toContain('第 1 次计算');
   });
 
+  it('draws the history as a timeline: calculations under their version question, the one on screen marked', () => {
+    const first = structuredRun();
+    const second = structuredRun({ id: '1'.repeat(32) });
+    render(<RunPanel {...props} runs={[first, second]} />);
+    const history = screen.getByText(/^计算历史/).closest('details')!;
+    const group = within(history).getByRole('group', { name: analysis.question });
+    expect(group.querySelector('.analysis-history-group__question')!.textContent).toBe(analysis.question);
+    const rows = within(group).getAllByRole('button');
+    expect(rows.map((row) => row.querySelector('.analysis-history-row__title')!.textContent)).toEqual(['第 2 次计算', '第 1 次计算']);
+    expect(rows.filter((row) => row.getAttribute('aria-current') === 'true')).toHaveLength(1);
+    expect(group.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+  });
+
   it('renders a manager-readable structured result with traceable sources and raw technical fields collapsed', async () => {
     render(<RunPanel {...props} runs={[structuredRun()]} onDrilldown={vi.fn(async () => ({ run_id: baseRun.id, row: 0, rows: [], total: 0, offset: 0, has_more: false, message: '无来源' }))} />);
     await screen.findByText('来源可追溯：执行器已核对来源映射；这不代表业务判断已经通过。');

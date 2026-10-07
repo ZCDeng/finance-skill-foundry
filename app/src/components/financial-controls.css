@@ -527,4 +527,34 @@
   outline-offset: -1px;
 }
 
+/*
+ * ElasticSlider (ElasticSlider.tsx): a 36px track as tall as the field it sits under, label inside at the
+ * left, value at the right in the figure face. Neutral throughout: gold is for position and focus only.
+ * Ticks and the handle show on hover, focus and drag. Past either end the track grows by up to 8px and
+ * springs back on release; with reduced motion --fnd-duration is 0 and the component never stretches.
+ */
+.fnd-slider-pair { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fnd-elastic { position: relative; display: flex; align-items: center; width: 100%; height: var(--fnd-button-height); touch-action: none; user-select: none; cursor: pointer; }
+.fnd-elastic[data-disabled] { cursor: default; opacity: .55; }
+.fnd-elastic__track {
+  position: relative; flex: none; width: calc(100% + var(--fnd-elastic-grow, 0px)); height: 100%; overflow: hidden;
+  border-radius: var(--fnd-radius-control); background: var(--fnd-surface-strong);
+  transform: translateX(var(--fnd-elastic-shift, 0px));
+  transition: width var(--fnd-duration) cubic-bezier(.34, 1.56, .64, 1), transform var(--fnd-duration) cubic-bezier(.34, 1.56, .64, 1);
+}
+.fnd-elastic[data-dragging='true'] .fnd-elastic__track { transition: none; }
+.fnd-elastic__fill { position: absolute; inset-block: 0; background: color-mix(in srgb, var(--fnd-muted) 14%, transparent); transition: background-color var(--fnd-transition); }
+.fnd-elastic:hover .fnd-elastic__fill, .fnd-elastic[data-dragging='true'] .fnd-elastic__fill, .fnd-elastic:focus-within .fnd-elastic__fill { background: color-mix(in srgb, var(--fnd-muted) 24%, transparent); }
+.fnd-elastic__ticks { position: absolute; inset: 0; pointer-events: none; }
+.fnd-elastic__ticks > span { position: absolute; top: 50%; width: 1px; height: 8px; border-radius: 1px; background: transparent; transform: translate(-50%, -50%); transition: background-color var(--fnd-transition); }
+.fnd-elastic:hover .fnd-elastic__ticks > span, .fnd-elastic[data-dragging='true'] .fnd-elastic__ticks > span, .fnd-elastic:focus-within .fnd-elastic__ticks > span { background: color-mix(in srgb, var(--fnd-muted) 40%, transparent); }
+.fnd-elastic__label, .fnd-elastic__value { position: absolute; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: var(--fnd-size-small); line-height: 1; font-weight: 500; color: var(--fnd-muted); white-space: nowrap; }
+.fnd-elastic__label { left: 12px; }
+.fnd-elastic__value { right: 12px; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; transition: color var(--fnd-transition); }
+.fnd-elastic:hover .fnd-elastic__value, .fnd-elastic[data-dragging='true'] .fnd-elastic__value, .fnd-elastic:focus-within .fnd-elastic__value { color: var(--fnd-ink); }
+.fnd-elastic__thumb { display: block; width: 4px; height: 20px; border-radius: 2px; background: var(--fnd-ink); opacity: 0; transition: opacity var(--fnd-transition); }
+.fnd-elastic:hover .fnd-elastic__thumb { opacity: .5; }
+.fnd-elastic[data-dragging='true'] .fnd-elastic__thumb { opacity: .8; }
+.fnd-elastic__thumb:focus-visible { opacity: .8; outline: 1px solid var(--fnd-focus); outline-offset: 3px; }
+.fnd-elastic[data-over-text='true']:hover .fnd-elastic__thumb, .fnd-elastic[data-over-text='true'][data-dragging='true'] .fnd-elastic__thumb { opacity: .15; }
 }

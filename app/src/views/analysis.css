@@ -151,6 +151,22 @@
 .analysis-history-row--static:hover { background: transparent; }
 .analysis-definition .analysis-history-row--static { grid-template-columns: minmax(0, 1fr); }
 .analysis-history-steps { margin: 4px 8px 0; }
+/* 计算历史 as a timeline (RunPanel HistoryRows): a version's question, then its calculations on a 1px line with a
+   dot each, gold for the one on screen. The line stops at the last dot. */
+.analysis-history-timeline { gap: 16px; padding-top: 8px; }
+.analysis-history-group { display: flex; flex-direction: column; }
+.analysis-history-group__question { margin: 0 0 4px; padding-left: 28px; font-size: var(--fnd-size-body); font-weight: 500; line-height: 22px; color: var(--fnd-ink); overflow-wrap: anywhere; }
+.analysis-history-timeline .analysis-history-row { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 8px 28px; border-bottom: 0; border-radius: var(--fnd-radius-control); }
+.analysis-history-timeline .analysis-history-row::before { content: ''; position: absolute; left: 11px; top: 0; bottom: 0; width: 1px; background: var(--fnd-line); }
+.analysis-history-timeline .analysis-history-row:first-of-type::before { top: 16px; }
+.analysis-history-timeline .analysis-history-row:last-child::before { bottom: calc(100% - 16px); }
+.analysis-history-timeline .analysis-history-row:only-of-type::before { content: none; }
+.analysis-history-timeline .analysis-history-row::after { content: ''; position: absolute; left: 8px; top: 13px; width: 7px; height: 7px; border: 1px solid var(--fnd-line-hover); border-radius: 50%; background: var(--fnd-bg); }
+.analysis-history-timeline .analysis-history-row[aria-current='true']::after { border-color: var(--fnd-selected); background: var(--fnd-selected); }
+.analysis-history-timeline .analysis-history-row span.analysis-history-row__title { color: var(--fnd-ink); font-family: var(--fnd-font-prose); }
+.analysis-history-timeline .analysis-history-row span.analysis-history-row__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; grid-column: auto; font-family: var(--fnd-font-prose); font-size: 12px; line-height: 18px; color: var(--fnd-muted); }
+.analysis-history-timeline .analysis-history-row__meta > span { color: inherit; font-size: inherit; grid-column: auto; }
+.analysis-history-row__meta > * + *::before { content: ''; display: inline-block; width: 1px; height: 10px; margin-right: 8px; vertical-align: -1px; background: var(--fnd-line); }
 .analysis-technical-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 8px 0 0; font-size: 12px; color: var(--fnd-muted); }
 .analysis-technical-list > div { display: contents; }
 .analysis-technical-list dt { font-weight: 500; }

@@ -3,6 +3,7 @@ import type { AnalysisRun } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { DecimalInput, FieldShell, SearchableSelect, type SelectOption } from '../../components/FinancialControls.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { ElasticSlider } from '../../components/ElasticSlider.js';
 
 type MaterialityDenominator = 'baseline_abs' | 'actual_abs' | 'max_abs';
 type MaterialityNegativePolicy = 'absolute' | 'signed';
@@ -77,8 +78,13 @@ export function MaterialityFields({ value, scopeText, error, disabled, onChange 
       <DecimalInput label="重要性绝对金额" value={value.absolute} onChange={(absolute) => set({ absolute })} placeholder="0"
         disabled={disabled} help="只填阈值，不做单位换算。" />
       <FieldShell label="阈值单位"><p className="analysis-note">{scopeText}</p></FieldShell>
-      <DecimalInput label="相对重要性阈值" value={value.relative} onChange={(relative) => set({ relative })} placeholder="0.1" unit="比例"
-        disabled={disabled} help={error || '可选；0.1 = 10%，留空则只使用绝对金额。'} />
+      <div className="fnd-slider-pair">
+        <DecimalInput label="相对重要性阈值" value={value.relative} onChange={(relative) => set({ relative })} placeholder="0.1" unit="比例"
+          disabled={disabled} help={error || '可选；0.1 = 10%，留空则只使用绝对金额。滑块覆盖 0–30%，更大的值直接填写。'} />
+        <ElasticSlider label="相对阈值" ariaLabel="相对重要性阈值，拖动选择" value={value.relative.trim() ? Number(value.relative) : null}
+          min={0} max={0.3} step={0.005} format={(ratio) => `${(ratio * 100).toFixed(1)}%`} disabled={disabled}
+          onChange={(ratio) => set({ relative: String(Number(ratio.toFixed(3))) })} />
+      </div>
       <SearchableSelect label="相对分母" value={value.denominator} options={denominatorOptions} onChange={(denominator) => set({ denominator: validDenominator(denominator) })}
         disabled={disabled} />
       <SearchableSelect label="负数比较规则" value={value.negativePolicy} options={negativePolicyOptions} onChange={(negativePolicy) => set({ negativePolicy: validNegativePolicy(negativePolicy) })}
