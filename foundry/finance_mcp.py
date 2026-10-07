@@ -521,6 +521,17 @@ def _tools() -> list[dict[str, Any]]:
             "drivers": {"type": "array", "items": {"type": "object"}},
             "values": {"type": "object"},
             "manager_assumptions": {"type": "object"},
+            "entities": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "collection_health only: [{name, values: {input: {alias, match: {column: text} | source_row, column, scale?: percent|fraction, unit?}}, sensitivity?}]. Inputs: revenue, cost or gross_profit, period_expense, gross_margin and expense_ratio (when the pack reports the ratio itself), collection_rate_current (本年账单收缴率), collection_rate_total (综合收缴率), revenue_py (上年同期累计), revenue_py_full (上年全年), revenue_ttm, ar_end, ar_begin, contract_assets_end, contract_assets_begin, impairment, cash_from_sales, ar_gross, provision, ar_over_1y, related_ar, related_provision, ar_collected, ar_gross_begin, ar_new; append _py for the prior-year period. A bare number is a manual input and is marked so on every metric that reads it.",
+            },
+            "entity_tables": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "collection_health only: one entity per row of a detail table, [{alias, name_column, columns: {input: column | {column, scale}}, exclude?: [names such as 合计], name_prefix?}]. Rows with a blank name are headings and are passed over.",
+            },
+            "params": {"type": "object", "description": "collection_health only: vat_factor (default 1.06) and screening thresholds."},
         },
         "additionalProperties": True,
     }
@@ -628,13 +639,13 @@ def _tools() -> list[dict[str, Any]]:
         {
             "name": "save_scenario",
             "title": "Save finance scenario",
-            "description": "Save receivables aging, 13-week cash, or driver-model scenarios without payment or posting capability. Aging inputs support invoices_alias, activity_alias, as_of, buckets and status_filter {field, include, exclude, mapping}. Mapping follows source/manager status semantics; rows, detail_rows and excluded_detail_rows retain stable keys, as_of, balances and source evidence. Current status does not prove historical status.",
+            "description": "Save receivables aging, 13-week cash, driver-model or collection_health scenarios without payment or posting capability. collection_health reads named cells of the bound table snapshots and computes, per entity, gross margin, expense ratio, the break-even collection rate (1 - gross margin + expense ratio) and the gap to it, trailing-twelve-month revenue, DSO, AR build-up, the implied collection rate, cash collection ratio, impairment to gross profit and provision structure, each with its formula, screening level, estimate flag and source cells; a metric missing an input is skipped and listed, never guessed. Aging inputs support invoices_alias, activity_alias, as_of, buckets and status_filter {field, include, exclude, mapping}. Mapping follows source/manager status semantics; rows, detail_rows and excluded_detail_rows retain stable keys, as_of, balances and source evidence. Current status does not prove historical status.",
             "inputSchema": {
                 "type": "object",
                 "required": ["label"],
                 "properties": {
                     "context_id": context_id,
-                    "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model"]},
+                    "kind": {"type": "string", "enum": ["receivables_aging", "cash_13_weeks", "driver_model", "collection_health"]},
                     "inputs": scenario_inputs_schema,
                     "label": text,
                     "parent_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
