@@ -3,6 +3,7 @@ import { Play } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState, type WaitKind } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { WaitLoop } from '../../components/WaitLoop.js';
+import { ElasticSlider } from '../../components/ElasticSlider.js';
 import { AccountMapEditor } from './AccountMapEditor.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, FieldShell, MultiSelect, SearchableSelect, TextField, type SelectOption } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
@@ -429,7 +430,11 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
           <DateInput label="实际收支截止日" value={scenarioCutoff} onChange={setScenarioCutoff}
             help="到这一天为止用实际收支；这不是预测的结束日。" />
         </>}
-        {scenarioKind === 'cash_13_weeks' && <DecimalInput label="回款延迟天数" value={delayDays} onChange={setDelayDays} unit="天" />}
+        {scenarioKind === 'cash_13_weeks' && <div className="fnd-slider-pair">
+          <DecimalInput label="回款延迟天数" value={delayDays} onChange={setDelayDays} unit="天" help="滑块覆盖 0–90 天，更长的延迟直接填写。" />
+          <ElasticSlider label="回款延迟" ariaLabel="回款延迟天数，拖动选择" value={delayDays.trim() ? Number(delayDays) : null}
+            min={0} max={90} step={1} format={(days) => `${days} 天`} onChange={(days) => setDelayDays(String(days))} />
+        </div>}
       </div></fieldset>
       <div className="analysis-actions">
         <Button variant="outline" type="button" disabled={locked || !contextId || !scenarioPrimary || (scenarioKind === 'cash_13_weeks' && (!openingCash || !scenarioStart || !scenarioCutoff))} onClick={() => void runScenario(false)}><Play size={14} aria-hidden />计算基准情景</Button>

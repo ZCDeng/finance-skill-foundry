@@ -5,7 +5,9 @@ used under the MIT License:
   from mobius-loop-icon;
 - the scroll fade (components.css .fnd-scroll-fade), from scroll-fade-effect;
 - the appearance switch (ThemeSwitch.tsx, components.css .fnd-theme), from theme-switcher;
-- the draft minimap and current-section tracking (views/analysis/ReportMinimap.tsx), from toc-minimap.
+- the draft minimap and current-section tracking (views/analysis/ReportMinimap.tsx), from toc-minimap;
+- the calculation-history timeline layout (views/analysis.css .analysis-history-timeline), from work-experience;
+- the bounded number slider (ElasticSlider.tsx, financial-controls.css .fnd-elastic), from elastic-slider.
 
 MIT License
 

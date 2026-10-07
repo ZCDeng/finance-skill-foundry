@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RunPanel } from '../src/views/analysis/RunPanel.js';
+import { RunPanel, historyGroups } from '../src/views/analysis/RunPanel.js';
 import type { AnalysisDraft, AnalysisRevision, AnalysisRun, DatasetSnapshot, FinanceDrilldown, ResultContractWarning } from '../src/bridge.js';
 
 const taskId = 'a'.repeat(32);
@@ -82,6 +82,29 @@ describe('RunPanel structured aggregate results', () => {
     const rows = Array.from(history.querySelectorAll('.analysis-history-row'));
     expect(rows[0].textContent).toContain('第 2 次计算');
     expect(rows[1].textContent).toContain('第 1 次计算');
+  });
+
+  it('draws the history as a timeline: calculations under their version question, the one on screen marked', () => {
+    const first = structuredRun();
+    const second = structuredRun({ id: '1'.repeat(32) });
+    render(<RunPanel {...props} runs={[first, second]} />);
+    const history = screen.getByText(/^计算历史/).closest('details')!;
+    const group = within(history).getByRole('group', { name: analysis.question });
+    expect(group.querySelector('.analysis-history-group__question')!.textContent).toBe(analysis.question);
+    const rows = within(group).getAllByRole('button');
+    expect(rows.map((row) => row.querySelector('.analysis-history-row__title')!.textContent)).toEqual(['第 2 次计算', '第 1 次计算']);
+    expect(rows.filter((row) => row.getAttribute('aria-current') === 'true')).toHaveLength(1);
+    expect(group.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+  });
+
+  it('keeps one group per version when an older version is rerun after a newer one', () => {
+    const a1 = structuredRun({ id: 'a1'.padEnd(32, '0') });
+    const b1 = structuredRun({ id: 'b1'.padEnd(32, '0'), analysis_id: 'c'.repeat(32) });
+    const a2 = structuredRun({ id: 'a2'.padEnd(32, '0') });
+    expect(historyGroups([a2, b1, a1]).map((group) => [group.analysisId, group.rows.map((row) => row.id)])).toEqual([
+      [a2.analysis_id, [a2.id, a1.id]],
+      ['c'.repeat(32), [b1.id]],
+    ]);
   });
 
   it('renders a manager-readable structured result with traceable sources and raw technical fields collapsed', async () => {

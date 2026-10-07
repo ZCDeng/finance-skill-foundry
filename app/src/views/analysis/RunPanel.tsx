@@ -138,11 +138,38 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   </div>;
 }
 
+/**
+ * The calculation history as a timeline (after chanhdai.com's work-experience, MIT; components/chanhdai.LICENSE.txt):
+ * the calculations of one analysis version sit under its question, joined by a thin line, one dot per
+ * calculation and the one on screen in gold. Only the layout is borrowed; each row stays a button that opens it.
+ */
+/**
+ * One group per analysis version, in the order its newest calculation appears; rerunning an older version after a
+ * newer one still adds to that version's group rather than starting a second one.
+ */
+export function historyGroups(rows: AnalysisRun[]): { analysisId: string; rows: AnalysisRun[] }[] {
+  const groups = new Map<string, AnalysisRun[]>();
+  for (const row of rows) {
+    const group = groups.get(row.analysis_id);
+    if (group) group.push(row);
+    else groups.set(row.analysis_id, [row]);
+  }
+  return [...groups].map(([analysisId, items]) => ({ analysisId, rows: items }));
+}
+
 function HistoryRows({ rows, runs, analyses, current, onPick }: {
   rows: AnalysisRun[]; runs: AnalysisRun[]; analyses: AnalysisRevision[]; current: AnalysisRun | undefined; onPick(run: AnalysisRun): void;
 }) {
-  return <div className="analysis-history-list">{rows.map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === current?.id ? 'true' : undefined} onClick={() => onPick(row)}>
-    <span>{analyses.find((item) => item.id === row.analysis_id)?.question ?? '分析'}</span><span>{runRoleLabel(row)}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time><span>第 {revisionLabel(row, runs)} 次计算</span></button>)}</div>;
+  return <div className="analysis-history-list analysis-history-timeline">{historyGroups(rows).map((group) => {
+    const question = analyses.find((item) => item.id === group.analysisId)?.question ?? '分析';
+    return <div key={group.analysisId} className="analysis-history-group" role="group" aria-label={question}>
+      <p className="analysis-history-group__question">{question}</p>
+      {group.rows.map((row) => <button key={row.id} type="button" className="analysis-history-row" aria-current={row.id === current?.id ? 'true' : undefined} onClick={() => onPick(row)}>
+        <span className="analysis-history-row__title">第 {revisionLabel(row, runs)} 次计算</span>
+        <span className="analysis-history-row__meta"><span>{runRoleLabel(row)}</span><span>{STATUS[row.execution_status] ?? row.execution_status}</span><time>{when(row.created_at)}</time></span>
+      </button>)}
+    </div>;
+  })}</div>;
 }
 
 /** A scope in the words the settings use, one field per phrase. */
