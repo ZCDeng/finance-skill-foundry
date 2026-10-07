@@ -8,20 +8,21 @@ Chinese text and units keep Noto Sans SC.
 
 ## Official source and license
 
-- Repository: [google/fonts](https://github.com/google/fonts/tree/5e8a3ba899557829a76cfdac30fa512bda91d7ca/ofl/ibmplexmono)
-  at pinned commit `5e8a3ba899557829a76cfdac30fa512bda91d7ca`. This is the
-  Google Fonts release the request named (font version 2.3).
+- Publisher package: npm [`@ibm/plex-mono@2.5.0`](https://registry.npmjs.org/@ibm/plex-mono/-/plex-mono-2.5.0.tgz)
+  from [IBM/plex](https://github.com/IBM/plex) (font version 2.005). Tarball SHA-256
+  `55b5ffcfcd5e9db36ef2070b2b07a573434ca02c6f3be2b921c0b88fff29acad`.
 - Three static weights only: Regular 400 (detail rows), SemiBold 600 (subtotals,
   headers, KPI values) and Bold 700 (totals). That is the three-weight table rule.
-- License: [SIL Open Font License 1.1](OFL.txt), with the Reserved Font Name
-  "Plex". The faces are format conversions (TTF → WOFF2 with untransformed
-  tables). Glyphs, names and outlines are unchanged, so no Modified Version is
-  shipped under the reserved name. The OFL is also embedded in a preserved
-  `/*! ... */` comment in `styles/fonts.css`. The official `METADATA.pb` is
-  included unchanged.
+- License: [SIL Open Font License 1.1](OFL.txt), the package's own `LICENSE.txt`,
+  with the Reserved Font Name "Plex". The OFL counts even a format change as a
+  Modified Version, and a Modified Version may not use the reserved name. So the
+  WOFF2 files are IBM's own, copied byte for byte from
+  `package/fonts/complete/woff2/`, and are never converted, subset or renamed. The
+  OFL is also embedded in a preserved `/*! ... */` comment in `styles/fonts.css`,
+  and it ships beside the app in `fonts/ibm-plex-mono/OFL.txt`.
 
-`manifest.json` records the source and output SHA-256, byte counts, and the
-measured equal advance of every figure character.
+`manifest.json` records each face's SHA-256 and byte count, and the measured equal
+advance of every figure character.
 
 ## Loading contract
 
@@ -44,5 +45,5 @@ installs dependencies and is not required at application runtime.
 
 ```sh
 python3 app/scripts/build-figure-font.py --check   # offline, bundled files only
-python3 app/scripts/build-figure-font.py           # download pinned sources and rebuild
+python3 app/scripts/build-figure-font.py           # download the pinned package and copy the faces
 ```

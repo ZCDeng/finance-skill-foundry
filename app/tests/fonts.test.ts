@@ -42,8 +42,13 @@ function tables(path = FONT): Map<string, Buffer> {
     const flags = bytes[cursor++];
     const index = flags & 63;
     const tag = index === 63 ? bytes.toString('ascii', cursor, cursor += 4) : KNOWN_TAGS[index];
-    expect(flags >> 6, `${tag} must retain its raw SFNT table`).toBe(tag === 'glyf' || tag === 'loca' ? 3 : 0);
-    directory.push({ tag, size: uint128() });
+    const outlines = tag === 'glyf' || tag === 'loca';
+    // The converted Noto face keeps every table raw; a publisher's WOFF2 (IBM Plex Mono) may transform its outlines,
+    // whose bytes these tests never read.
+    if (path === FONT) expect(flags >> 6, `${tag} must retain its raw SFNT table`).toBe(outlines ? 3 : 0);
+    const transformed = outlines ? flags >> 6 !== 3 : flags >> 6 !== 0;
+    const original = uint128();
+    directory.push({ tag, size: transformed ? uint128() : original });
   }
   const stream = brotliDecompressSync(bytes.subarray(cursor, cursor + bytes.readUInt32BE(20)));
   expect(stream.length).toBe(directory.reduce((sum, row) => sum + row.size, 0));
@@ -231,11 +236,12 @@ describe('IBM Plex Mono figures', () => {
     expect(plexFaces('FND Figures').map((face) => face.url)).toEqual(plexFaces('IBM Plex Mono').map((face) => face.url));
   });
 
-  it('ships the pinned Google Fonts release unmodified apart from the WOFF2 container', () => {
+  it("ships the publisher's own WOFF2 files byte for byte, so the reserved name stays on an unmodified font", () => {
     const manifest = record();
-    expect(manifest.source.repository).toBe('https://github.com/google/fonts');
-    expect(manifest.source.commit).toMatch(/^[a-f0-9]{40}$/);
-    expect(manifest.build.subset).toBe(false);
+    expect(manifest.source.package).toBe('@ibm/plex-mono');
+    expect(manifest.source.tarball).toMatch(/^https:\/\/registry\.npmjs\.org\/@ibm\/plex-mono\/-\/plex-mono-\d+\.\d+\.\d+\.tgz$/);
+    expect(manifest.source.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.build).toEqual({ copied_unmodified: true, subset: false, converted: false });
     expect(manifest.license.reserved_font_name).toBe('Plex');
     expect(createHash('sha256').update(readFileSync(resolve(PLEX, 'OFL.txt'))).digest('hex')).toBe(manifest.license.sha256);
     expect(manifest.faces.map((face: { weight: number }) => face.weight)).toEqual([400, 600, 700]);

@@ -1,84 +1,70 @@
 {
   "source": {
-    "repository": "https://github.com/google/fonts",
-    "commit": "5e8a3ba899557829a76cfdac30fa512bda91d7ca",
-    "directory": "ofl/ibmplexmono"
+    "package": "@ibm/plex-mono",
+    "version": "2.5.0",
+    "tarball": "https://registry.npmjs.org/@ibm/plex-mono/-/plex-mono-2.5.0.tgz",
+    "sha256": "55b5ffcfcd5e9db36ef2070b2b07a573434ca02c6f3be2b921c0b88fff29acad",
+    "repository": "https://github.com/IBM/plex"
   },
   "license": {
     "name": "SIL Open Font License 1.1",
     "reserved_font_name": "Plex",
-    "url": "https://raw.githubusercontent.com/google/fonts/5e8a3ba899557829a76cfdac30fa512bda91d7ca/ofl/ibmplexmono/OFL.txt",
+    "file": "OFL.txt",
     "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
   },
   "build": {
-    "fonttools": "4.66.1",
+    "copied_unmodified": true,
     "subset": false,
-    "woff2_transformed_tables": [],
-    "recalc_timestamp": false
+    "converted": false
   },
   "figure_characters": "0123456789,.-+()%− ",
   "faces": [
     {
       "weight": 400,
       "file": "IBMPlexMono-Regular.woff2",
-      "sha256": "d4dbb96b63aabc385f46643d2768e1fa7a2d7d2bac3e17957a8cc7a89d1be98b",
-      "bytes": 46428,
-      "source": {
-        "path": "ofl/ibmplexmono/IBMPlexMono-Regular.ttf",
-        "url": "https://raw.githubusercontent.com/google/fonts/5e8a3ba899557829a76cfdac30fa512bda91d7ca/ofl/ibmplexmono/IBMPlexMono-Regular.ttf",
-        "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46",
-        "bytes": 135580
-      },
+      "sha256": "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350",
+      "bytes": 49248,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-Regular.woff2",
       "measured": {
         "family": "IBM Plex Mono",
-        "version": "Version 2.3",
+        "version": "Version 2.005",
         "weight_class": 400,
         "fs_type": 0,
         "units_per_em": 1000,
         "figure_advance": 600,
-        "codepoints": 930
+        "codepoints": 1049
       }
     },
     {
       "weight": 600,
       "file": "IBMPlexMono-SemiBold.woff2",
-      "sha256": "9a61a96fd5c8e3b9a217c8c91605bcbf06aab0d0dcf089f3387c398faf9382ba",
-      "bytes": 48236,
-      "source": {
-        "path": "ofl/ibmplexmono/IBMPlexMono-SemiBold.ttf",
-        "url": "https://raw.githubusercontent.com/google/fonts/5e8a3ba899557829a76cfdac30fa512bda91d7ca/ofl/ibmplexmono/IBMPlexMono-SemiBold.ttf",
-        "sha256": "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46",
-        "bytes": 140216
-      },
+      "sha256": "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3",
+      "bytes": 50600,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-SemiBold.woff2",
       "measured": {
-        "family": "IBM Plex Mono SemiBold",
-        "version": "Version 2.3",
+        "family": "IBM Plex Mono SmBld",
+        "version": "Version 2.005",
         "weight_class": 600,
         "fs_type": 0,
         "units_per_em": 1000,
         "figure_advance": 600,
-        "codepoints": 930
+        "codepoints": 1049
       }
     },
     {
       "weight": 700,
       "file": "IBMPlexMono-Bold.woff2",
-      "sha256": "cc7420e91cbbaf896f70241a96484974f073de75f1816702492b553821142d75",
-      "bytes": 47604,
-      "source": {
-        "path": "ofl/ibmplexmono/IBMPlexMono-Bold.ttf",
-        "url": "https://raw.githubusercontent.com/google/fonts/5e8a3ba899557829a76cfdac30fa512bda91d7ca/ofl/ibmplexmono/IBMPlexMono-Bold.ttf",
-        "sha256": "ac27abd6450a64dd94467580a02fe6235156d5b92f2926ebbc8e7489df64e0be",
-        "bytes": 137784
-      },
+      "sha256": "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d",
+      "bytes": 50380,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-Bold.woff2",
       "measured": {
         "family": "IBM Plex Mono",
-        "version": "Version 2.3",
+        "version": "Version 2.005",
         "weight_class": 700,
         "fs_type": 0,
         "units_per_em": 1000,
         "figure_advance": 600,
-        "codepoints": 930
+        "codepoints": 1049
       }
     }
   ]

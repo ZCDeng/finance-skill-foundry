@@ -1,37 +1,36 @@
 #!/usr/bin/env python3
-"""Rebuild or verify FA Foundry's pinned, offline IBM Plex Mono figure faces.
+"""Fetch or verify FA Foundry's pinned, offline IBM Plex Mono figure faces.
 
 Uses already installed fontTools + Brotli; never installs dependencies.
 --check reads only bundled files and makes no network requests.
 
-The faces are format conversions only: no glyph subsetting, renaming or outline
-changes, so the Reserved Font Name "Plex" stays with the unmodified font. CSS
-unicode-range decides which characters the app draws with them.
+The faces are IBM's own WOFF2 files from the publisher's npm package, copied byte
+for byte. Nothing is converted, subset or renamed: under the OFL a format change
+is already a Modified Version, which may not carry the Reserved Font Name "Plex".
+CSS unicode-range decides which characters the app draws with them.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 from pathlib import Path
-import tempfile
+import tarfile
 from urllib.request import urlopen
 
-from fontTools import __version__ as fonttools_version
 from fontTools.ttLib import TTFont
-from fontTools.ttLib.woff2 import WOFF2FlavorData
 
-COMMIT = "5e8a3ba899557829a76cfdac30fa512bda91d7ca"
-BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/ibmplexmono/"
+PACKAGE = "@ibm/plex-mono"
+VERSION = "2.5.0"
+TARBALL = f"https://registry.npmjs.org/{PACKAGE}/-/plex-mono-{VERSION}.tgz"
+TARBALL_SHA256 = "55b5ffcfcd5e9db36ef2070b2b07a573434ca02c6f3be2b921c0b88fff29acad"
 FACES = {
-    400: ("IBMPlexMono-Regular.ttf", "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46"),
-    600: ("IBMPlexMono-SemiBold.ttf", "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46"),
-    700: ("IBMPlexMono-Bold.ttf", "ac27abd6450a64dd94467580a02fe6235156d5b92f2926ebbc8e7489df64e0be"),
+    400: ("IBMPlexMono-Regular.woff2", "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350"),
+    600: ("IBMPlexMono-SemiBold.woff2", "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3"),
+    700: ("IBMPlexMono-Bold.woff2", "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d"),
 }
-EXTRA = {
-    "OFL.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
-    "METADATA.pb": "006b605a8a45174a3f8ad9456006233ff8f13cf3cae7fe7602904334dc323c7c",
-}
+LICENSE = ("LICENSE.txt", "OFL.txt", "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da")
 # Every character a figure is written with: digits, grouping, sign, accounting parentheses, percent and the space
 # that holds a positive figure's closing-parenthesis column.
 FIGURE_CHARACTERS = "0123456789,.-+()%\u2212 "
@@ -40,10 +39,6 @@ DEST = Path(__file__).resolve().parents[1] / "src/assets/fonts/ibm-plex-mono"
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def woff2_name(ttf: str) -> str:
-    return ttf.removesuffix(".ttf") + ".woff2"
 
 
 def inspect_font(path: Path) -> dict:
@@ -68,52 +63,45 @@ def inspect_font(path: Path) -> dict:
 
 def check() -> None:
     manifest = json.loads((DEST / "manifest.json").read_text())
-    for filename, expected in EXTRA.items():
-        if digest((DEST / filename).read_bytes()) != expected:
-            raise ValueError(f"bundled file hash mismatch: {filename}")
+    if digest((DEST / LICENSE[1]).read_bytes()) != LICENSE[2]:
+        raise ValueError("bundled license hash mismatch")
     for row in manifest["faces"]:
         path = DEST / row["file"]
-        if digest(path.read_bytes()) != row["sha256"]:
-            raise ValueError(f"bundled face hash mismatch: {row['file']}")
+        if digest(path.read_bytes()) != row["sha256"] or row["sha256"] != FACES[row["weight"]][1]:
+            raise ValueError(f"bundled face is not the publisher's file: {row['file']}")
         if inspect_font(path) != row["measured"]:
             raise ValueError(f"face metadata or figure widths differ from manifest: {row['file']}")
     print(json.dumps({"verified": [row["file"] for row in manifest["faces"]]}))
 
 
-def build(source_dir: Path) -> None:
-    source_dir.mkdir(parents=True, exist_ok=True)
-    sources = {name: expected for name, expected in FACES.values()} | EXTRA
-    for filename, expected in sources.items():
-        path = source_dir / filename
-        if not path.exists():
-            path.write_bytes(urlopen(BASE + filename, timeout=60).read())
-        if digest(path.read_bytes()) != expected:
-            raise ValueError(f"official source hash mismatch: {filename}")
+def build() -> None:
+    data = urlopen(TARBALL, timeout=60).read()
+    if digest(data) != TARBALL_SHA256:
+        raise ValueError("npm tarball hash mismatch")
     DEST.mkdir(parents=True, exist_ok=True)
-    faces = []
-    for weight, (filename, expected) in FACES.items():
-        source = source_dir / filename
-        output = DEST / woff2_name(filename)
-        with TTFont(source, recalcTimestamp=False) as font:
-            font.flavor = "woff2"
-            # Raw tables keep the face readable by the Node font tests' Brotli decoder.
-            font.flavorData = WOFF2FlavorData(transformedTables=set())
-            font.save(output)
-        measured = inspect_font(output)
-        if measured != inspect_font(source) or measured["weight_class"] != weight:
-            raise ValueError(f"WOFF2 conversion changed measured font content: {filename}")
-        data = output.read_bytes()
-        faces.append({
-            "weight": weight, "file": output.name, "sha256": digest(data), "bytes": len(data),
-            "source": {"path": f"ofl/ibmplexmono/{filename}", "url": BASE + filename, "sha256": expected, "bytes": source.stat().st_size},
-            "measured": measured,
-        })
-    for name in EXTRA:
-        (DEST / name).write_bytes((source_dir / name).read_bytes())
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        def member(path: str) -> bytes:
+            return archive.extractfile(f"package/{path}").read()
+        faces = []
+        for weight, (filename, expected) in FACES.items():
+            face = member(f"fonts/complete/woff2/{filename}")
+            if digest(face) != expected:
+                raise ValueError(f"publisher face hash mismatch: {filename}")
+            (DEST / filename).write_bytes(face)
+            measured = inspect_font(DEST / filename)
+            if measured["weight_class"] != weight:
+                raise ValueError(f"unexpected weight class: {filename}")
+            faces.append({"weight": weight, "file": filename, "sha256": expected, "bytes": len(face),
+                          "source": f"package/fonts/complete/woff2/{filename}", "measured": measured})
+        license_text = member(LICENSE[0])
+        if digest(license_text) != LICENSE[2]:
+            raise ValueError("publisher license hash mismatch")
+        (DEST / LICENSE[1]).write_bytes(license_text)
     manifest = {
-        "source": {"repository": "https://github.com/google/fonts", "commit": COMMIT, "directory": "ofl/ibmplexmono"},
-        "license": {"name": "SIL Open Font License 1.1", "reserved_font_name": "Plex", "url": BASE + "OFL.txt", "sha256": EXTRA["OFL.txt"]},
-        "build": {"fonttools": fonttools_version, "subset": False, "woff2_transformed_tables": [], "recalc_timestamp": False},
+        "source": {"package": PACKAGE, "version": VERSION, "tarball": TARBALL, "sha256": TARBALL_SHA256,
+                   "repository": "https://github.com/IBM/plex"},
+        "license": {"name": "SIL Open Font License 1.1", "reserved_font_name": "Plex", "file": LICENSE[1], "sha256": LICENSE[2]},
+        "build": {"copied_unmodified": True, "subset": False, "converted": False},
         "figure_characters": FIGURE_CHARACTERS,
         "faces": faces,
     }
@@ -124,15 +112,11 @@ def build(source_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--source-dir", type=Path)
     args = parser.parse_args()
     if args.check:
         check()
-    elif args.source_dir:
-        build(args.source_dir)
     else:
-        with tempfile.TemporaryDirectory(prefix="foundry-plex-build-") as directory:
-            build(Path(directory))
+        build()
 
 
 if __name__ == "__main__":
