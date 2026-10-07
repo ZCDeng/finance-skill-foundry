@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { AnalysisParameterMetadata, AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 
@@ -37,22 +37,93 @@ export function assumptionSummary(assumptions?: unknown[]): string {
   // Each item may end on its own 。 or ；; joined with ； that reads 。；, so all but the last lose it. ASCII full stops stay.
   return parts.map((part, index) => index < parts.length - 1 ? part.trimEnd().replace(/[。；;]+$/, '') : part).join('；') || '—';
 }
-export function Table({ columns, rows, caption }: {
-  columns: { name: string; type?: string }[];
+type TableColumn = {
+  name: string;
+  type?: string;
+  /** How a cell shows; without one the cell is its text. */
+  render?: (value: unknown, row: Record<string, unknown>) => ReactNode;
+};
+type TableGroup = { name: string; continued: boolean; rows: Record<string, unknown>[] };
+
+const pageSize = 100;
+
+/** A group's name; a missing one (empty, or the missing-value dash a formatted row carries) reads as the fallback. */
+function groupName(value: unknown, fallback: string): string {
+  return value == null || value === '' || value === '—' ? fallback : String(value);
+}
+
+/**
+ * Rows grouped by one column, in the order each group first appears and each group's rows in their own order, then
+ * cut into pages. A page's groups each become one tbody; a group carried over from the page before says （续）.
+ */
+function groupedPages(rows: Record<string, unknown>[], groupBy: string, fallback: string): TableGroup[][] {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of rows) {
+    const name = groupName(row[groupBy], fallback);
+    groups.set(name, [...(groups.get(name) ?? []), row]);
+  }
+  const ordered = [...groups].flatMap(([name, members]) => members.map((row) => ({ name, row })));
+  const pages: TableGroup[][] = [];
+  for (let start = 0; start < ordered.length; start += pageSize) {
+    const page: TableGroup[] = [];
+    for (const [index, { name, row }] of ordered.slice(start, start + pageSize).entries()) {
+      const last = page.at(-1);
+      if (last?.name === name) last.rows.push(row);
+      else page.push({ name, continued: index === 0 && start > 0 && ordered[start - 1].name === name, rows: [row] });
+    }
+    pages.push(page);
+  }
+  return pages;
+}
+
+/** Whether the table is wider than its scroll area. Without ResizeObserver (jsdom) it never says so. */
+function useOverflow(enabled: boolean): [(node: HTMLDivElement | null) => void, boolean] {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    if (!enabled || !node || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setOverflowing(node.scrollWidth > node.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    const table = node.querySelector('table');
+    if (table) observer.observe(table);
+    measure();
+    return () => observer.disconnect();
+  }, [enabled, node]);
+  return [setNode, enabled && overflowing];
+}
+
+export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false }: {
+  columns: TableColumn[];
   rows: Record<string, unknown>[];
   caption: string;
+  /** A column whose value groups the rows under one rowgroup heading each; that column is not among columns. */
+  groupBy?: string;
+  /** The heading of rows that have no value in groupBy. */
+  groupFallback?: string;
+  /** Say below the table, in words, that more columns sit to the right when it is wider than its area. */
+  scrollHint?: boolean;
 }) {
   const [page, setPage] = useState(0);
-  const pages = Math.max(1, Math.ceil(rows.length / 100));
+  const [measured, overflowing] = useOverflow(scrollHint);
+  const hintId = useId();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const current = Math.min(page, pages - 1);
-  const visible = rows.slice(current * 100, (current + 1) * 100);
   const numeric = (type?: string) => /^(DECIMAL|NUMERIC|HUGEINT|UHUGEINT|UBIGINT|BIGINT|UINTEGER|INTEGER|USMALLINT|SMALLINT|UTINYINT|TINYINT|FLOAT|DOUBLE|REAL|INT\d*)\b/i.test(type ?? '');
-  return <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label={caption}>
+  const row = (item: Record<string, unknown>, index: number) => <tr key={index}>{columns.map((column) =>
+    <td className={numeric(column.type) ? 'analysis-number' : undefined} key={column.name}>{column.render ? column.render(item[column.name], item) : textValue(item[column.name])}</td>)}</tr>;
+  const body = groupBy == null
+    ? <tbody>{rows.slice(current * pageSize, (current + 1) * pageSize).map(row)}</tbody>
+    : (groupedPages(rows, groupBy, groupFallback)[current] ?? []).map((group, index) => <tbody key={`${index}:${group.name}`}>
+      <tr><th scope="rowgroup" colSpan={columns.length}><span>{group.continued ? `${group.name}（续）` : group.name}</span></th></tr>
+      {group.rows.map(row)}
+    </tbody>);
+  return <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label={caption} ref={measured} aria-describedby={overflowing ? hintId : undefined}>
     <table className="fnd-table analysis-table"><caption>{caption}</caption>
       <thead><tr>{columns.map((column) => <th className={numeric(column.type) ? 'analysis-number' : undefined} scope="col" key={column.name}>{column.name}</th>)}</tr></thead>
-      <tbody>{visible.map((row, index) => <tr key={index}>{columns.map((column) =>
-        <td className={numeric(column.type) ? 'analysis-number' : undefined} key={column.name}>{textValue(row[column.name])}</td>)}</tr>)}</tbody>
+      {body}
     </table>
+    {overflowing && <p className="analysis-note analysis-table-scroll-hint" id={hintId}>右侧还有列，可横向滚动查看</p>}
     {rows.length === 0 && <p className="analysis-note">没有符合当前范围的行。</p>}
     {pages > 1 && <div className="analysis-actions"><Button variant="outline" type="button" disabled={current === 0}
       onClick={() => setPage(current - 1)}>上一页</Button><span className="analysis-note">第 {current + 1} / {pages} 页 · 共 {rows.length} 行</span>

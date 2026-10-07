@@ -192,7 +192,16 @@
   border-bottom-color: var(--fnd-line-hover);
 }
 
-.fnd-table tbody tr:last-child td {
+/* A group's name heads its rows (one tbody per group); its rule is the column headers' line. */
+.fnd-table th[scope='rowgroup'] {
+  color: var(--fnd-ink);
+  font-size: var(--fnd-size-body);
+  white-space: normal;
+  padding-top: 20px;
+}
+
+/* Only the table's last row drops its line; each group before it keeps one. */
+.fnd-table tbody:last-of-type tr:last-child td {
   border-bottom: 0;
 }
 

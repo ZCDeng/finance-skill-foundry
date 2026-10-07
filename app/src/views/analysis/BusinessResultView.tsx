@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
-import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.js';
+import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, formatDisplayRows, groupingColumn, labelCollisions, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, sourceFields, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
@@ -9,6 +11,12 @@ import { formatPeriod } from '../../lib/period.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
+
+/** A source in 其他结果 longer than this shows its first reference and a count, and opens to the rest. */
+const inlineSourceChars = 24;
+
+// Vite sets DEV; narrowed here so the app's tsconfig need not carry Vite's client types.
+const devBuild = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
 
 type Kpi = { title: string; period: string; periodLabel: string; unit: string; basis: string; estimated: boolean; estimatedBudget: string; actualLabel: string; budgetLabel: string; actual: string; budget: string; difference: string; rate: string; rateLabel: string; notes: string[] };
 
@@ -115,6 +123,35 @@ function periodConclusions(run: AnalysisRun, period: string): ScriptConclusion[]
     .flatMap((pair) => (pair.conclusion ? [pair.conclusion] : []));
 }
 
+/**
+ * One 其他结果 source: as written when short, else its first reference and how many there are, opening to the list.
+ * The main table's sources are not split this way: there one source line can carry several figures' labels.
+ */
+function SourceRefs({ text, metric }: { text: unknown; metric: string }) {
+  const full = textValue(text);
+  if (text == null || text === '' || full === '—' || Array.from(full).length <= inlineSourceChars) return <>{full}</>;
+  const parts = Array.from(new Set(full.split(/[；;]\s*/).map((part) => part.trim()).filter(Boolean)));
+  return <Popover>
+    <PopoverTrigger asChild>
+      <button type="button" className="fnd-linkish analysis-source-refs" title={full}>
+        <span className="analysis-source-refs__first">{parts[0] ?? full}</span>
+        {parts.length > 1 ? <span className="analysis-source-refs__count">等 {parts.length} 条</span> : null}
+        <ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" />
+      </button>
+    </PopoverTrigger>
+    <PopoverContent className="analysis-source-refs__panel" aria-label={`${metric}的来源单元格引用`}>
+      <ol>{parts.map((part) => <li key={part}>{part}</li>)}</ol>
+    </PopoverContent>
+  </Popover>;
+}
+
+/** Tells the developer, never the manager, that a script wrote one name for two metrics. */
+function warnCollisions(rows: Record<string, unknown>[]) {
+  for (const collision of labelCollisions(rows)) {
+    console.warn(`结果行重名：组织「${collision.organization || '未声明组织'}」期间「${collision.period || '未声明期间'}」的指标名「${collision.label}」对应 ${collision.keys.length} 个指标键（${collision.keys.join('、')}），页面已在名字后补键区分；请在 metric_label 写出对象。`);
+  }
+}
+
 function ConclusionLine({ conclusion }: { conclusion: ScriptConclusion }) {
   return <div className="analysis-headline-line">
     <p className="analysis-headline-text">{conclusion.text}</p>
@@ -140,23 +177,32 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
   const columns = useMemo(() => displayColumns(run), [run]);
   const sourceRows = useMemo(() => businessRows(run), [run]);
   const filteredRows = useMemo(() => (period ? sourceRows.filter((row) => String(rowPeriod(row) ?? '') === period) : sourceRows), [period, sourceRows]);
-  const rows = useMemo(() => filteredRows.map((row) => {
-    const output: Record<string, string> = {};
-    for (const column of columns) {
-      output[column.label] = column.name === '__basis' ? rowBasisLabel(row) : formatBusinessCell(row[column.name], column, row);
-    }
-    return output;
-  }), [columns, filteredRows]);
+  const rows = useMemo(() => formatDisplayRows(filteredRows, columns), [columns, filteredRows]);
   const kpis = useMemo(() => kpiRows(filteredRows).map((row) => kpiFor(row, columns)), [columns, filteredRows]);
   const conclusions = useMemo(() => periodConclusions(run, period), [run, period]);
   const otherRows = useMemo(() => otherLongRows(run), [run]);
   const otherColumns = useMemo(() => longRowColumns(run, otherRows), [run, otherRows]);
   // A row without a period belongs to every period tab rather than to none.
-  const others = useMemo(() => otherRows.filter((row) => { const value = rowPeriod(row); return !period || value == null || value === '' || String(value) === period; }).map((row) => {
-    const output: Record<string, string> = {};
-    for (const column of otherColumns) output[column.label] = formatBusinessCell(row[column.name], column, row);
-    return output;
-  }), [otherColumns, otherRows, period]);
+  const visibleOthers = useMemo(() => otherRows.filter((row) => { const value = rowPeriod(row); return !period || value == null || value === '' || String(value) === period; }), [otherRows, period]);
+  const others = useMemo(() => formatDisplayRows(visibleOthers, otherColumns), [otherColumns, visibleOthers]);
+  // 其他结果 groups by organization: its name heads each group once instead of filling a column.
+  const otherGroup = useMemo(() => groupingColumn(otherColumns), [otherColumns]);
+  useEffect(() => {
+    if (!devBuild) return;
+    warnCollisions(sourceRows);
+    warnCollisions(otherRows);
+  }, [sourceRows, otherRows]);
+  const tableColumn = (column: DisplayColumn, sources = false) => {
+    const metricLabel = column.name.toLowerCase() === 'metric_label';
+    const source = sources && sourceFields.includes(column.name.toLowerCase());
+    const metricColumn = otherColumns.find((item) => item.name.toLowerCase() === 'metric_label') ?? otherColumns[0];
+    return {
+      name: column.label,
+      type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL',
+      ...(metricLabel ? { render: (value: unknown, row: Record<string, unknown>) => <span title={row.__metricKey ? `指标键 ${String(row.__metricKey)}` : undefined}>{textValue(value)}</span> } : {}),
+      ...(source ? { render: (value: unknown, row: Record<string, unknown>) => <SourceRefs text={value} metric={metricColumn ? textValue(row[metricColumn.label]) : ''} /> } : {}),
+    };
+  };
   return <section className="analysis-business-result" aria-label="业务结果">
     {periods.length > 1 ? <div className="analysis-period-tabs" role="tablist" aria-label="结果期间">
       {periods.map((item) => <Button key={item} variant="outline" size="chip" type="button" role="tab" aria-selected={item === period}
@@ -190,10 +236,10 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     {/* The run's own caveats stand next to the numbers they qualify, whatever words they use. */}
     {kpis.length > 0 && Boolean(run.assumptions?.length) && <p className="analysis-note" aria-label="本次计算的假设">本次计算的假设：{assumptionSummary(run.assumptions)}</p>}
     <div className="analysis-business-table">
-      {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
-        rows={rows} caption="业务结果" /> : null}
-      {others.length > 0 && <Table key={`${run.id}:${period || 'all'}:others`} columns={otherColumns.map((column) => ({ name: column.label, type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL' }))}
-        rows={others} caption="其他结果" />}
+      {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => tableColumn(column))}
+        rows={rows} caption="业务结果" scrollHint /> : null}
+      {others.length > 0 && <Table key={`${run.id}:${period || 'all'}:others`} columns={otherColumns.filter((column) => column !== otherGroup).map((column) => tableColumn(column, true))}
+        rows={others} caption="其他结果" groupBy={otherGroup?.label} groupFallback="未声明组织" scrollHint />}
     </div>
     {kpis.length === 0 && actions}
     {onSources ? <div className="analysis-actions"><Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button></div> : null}

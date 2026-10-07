@@ -570,6 +570,15 @@ describe('business result components', () => {
     // pct is a percent by the unit table (KTD9), in 其他结果 as on a card.
     expect(within(others).getByRole('cell', { name: '3.30%' })).toBeTruthy();
     expect(within(others).queryByRole('columnheader', { name: /metric_key|scenario|value/ })).toBeNull();
+    // Only 人民币 in the table, keys on hover, and each organization named once as its group's heading.
+    const otherHeaders = within(others).getAllByRole('columnheader').map((header) => header.textContent);
+    for (const gone of ['币种', '指标键', '组织']) expect(otherHeaders).not.toContain(gone);
+    expect(within(others).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['集团合并', '华东区域']);
+    // A ratio or percent row's unit says %; its value is unchanged.
+    for (const value of ['61.68%', '3.30%', '-6.85%']) {
+      expect(within(within(others).getByRole('cell', { name: value }).closest('tr')!).getByRole('cell', { name: '%' }), value).toBeTruthy();
+    }
+    expect(within(within(others).getByRole('cell', { name: '41,400.00' }).closest('tr')!).getByRole('cell', { name: '万元' })).toBeTruthy();
     expect(within(others).queryByRole('cell', { name: '营业收入 1-8 月实际' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: '2026 年' }));
     expect(screen.queryByRole('article')).toBeNull();
@@ -604,11 +613,13 @@ describe('business result components', () => {
     expect(within(table).getByRole('columnheader', { name: '数值' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '收缴率实际' })).toBeTruthy();
     expect(within(table).getByRole('cell', { name: '90.20%' })).toBeTruthy();
-    // The label leads; the key stays last, because a unique label need not name its metric.
+    // The label leads and the key column goes: the key is the name's hover and stays in 技术信息's raw table.
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
     expect(headers[0]).toBe('指标');
-    expect(headers).toContain('指标键');
-    expect(within(table).getByRole('cell', { name: 'receivable_balance' })).toBeTruthy();
+    expect(headers).not.toContain('指标键');
+    expect(within(table).queryByRole('cell', { name: 'receivable_balance' })).toBeNull();
+    expect(within(table).getByText('收缴率实际').getAttribute('title')).toBe('指标键 collection_actual');
+    expect(within(screen.getByRole('region', { name: '原始计算结果' })).getByRole('cell', { name: 'receivable_balance' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: '其他结果' })).toBeNull();
   });
 
@@ -677,7 +688,8 @@ describe('business result components', () => {
       expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '-10.50' })).toBeTruthy();
     });
 
-    it('keeps the key and scenario when one label covers two rows, and shows rows without a period on every tab', () => {
+    it('keeps the scenario when one label and key cover two rows, adds the key where only the key differs, and shows rows without a period on every tab', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       render(<BusinessResultView run={longRun([
         ...pair({}),
         { metric_key: 'revenue_prior', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_py_1_8', value: '80', unit: '万元', metric_label: '营业收入' },
@@ -691,24 +703,135 @@ describe('business result components', () => {
       const others = screen.getByRole('table', { name: '其他结果' });
       expect(within(others).getByRole('columnheader', { name: '情景' })).toBeTruthy();
       expect(within(others).getByRole('cell', { name: 'actual_py_1_8' })).toBeTruthy();
-      expect(within(others).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
+      expect(within(others).getByRole('cell', { name: '1-8 月实际÷全年 BUD（revenue_completion_ratio）' })).toBeTruthy();
+      expect(within(others).getByRole('cell', { name: '1-8 月实际÷全年 BUD（ratio）' })).toBeTruthy();
       expect(within(others).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
+      // This year and last year under one key are told apart by their scenario: no warning for them.
+      expect(warn.mock.calls.some(([message]) => String(message).includes('营业收入'))).toBe(false);
+      warn.mockRestore();
       fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
       expect(within(screen.getByRole('table', { name: '其他结果' })).getByRole('cell', { name: '41,400.00' })).toBeTruthy();
     });
 
-    it('lets two ratios sharing a label keep their keys but drop the scenario when the keys tell them apart', () => {
+    it('tells apart two metrics one organization and period wrote under one name, and warns the developer', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       render(<BusinessResultView run={longRun([
         { metric_key: 'ratio', organization: '集团合并', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '0.48', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
         { metric_key: 'revenue_completion_ratio', organization: '集团合并', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '0.62', unit: '比率', metric_label: '1-8 月实际÷全年 BUD' },
       ], ['metric_label'])} />);
       const table = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
-      expect(within(table).getByRole('cell', { name: 'revenue_completion_ratio' })).toBeTruthy();
-      expect(within(table).queryByRole('columnheader', { name: '情景' })).toBeNull();
+      const rowOf = (name: string) => within(table).getByRole('cell', { name }).closest('tr')!;
+      expect(within(rowOf('1-8 月实际÷全年 BUD（ratio）')).getByRole('cell', { name: '48.00%' })).toBeTruthy();
+      expect(within(rowOf('1-8 月实际÷全年 BUD（revenue_completion_ratio）')).getByRole('cell', { name: '62.00%' })).toBeTruthy();
       const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent);
       expect(headers[0]).toBe('指标');
-      expect(headers).toContain('指标键');
-      expect(within(table).getByRole('cell', { name: '62.00%' })).toBeTruthy();
+      expect(headers).not.toContain('指标键');
+      expect(headers).not.toContain('情景');
+      const messages = warn.mock.calls.map(([message]) => String(message));
+      expect(messages.some((message) => ['集团合并', '2026-01:2026-08', 'ratio', 'revenue_completion_ratio', '请在 metric_label 写出对象'].every((part) => message.includes(part)))).toBe(true);
+      warn.mockRestore();
+    });
+
+    // A pair keeps 其他结果 on screen; the rows after it are the ones it shows.
+    const unpaired = (organization: unknown, metric_key: string, value: string, extra: Record<string, unknown> = {}) =>
+      ({ metric_key, organization, period: '2026-01:2026-08', scenario: 'actual_1_8', value, unit: '万元', metric_label: `${metric_key} 余额`, ...extra });
+    const othersOf = () => screen.getByRole('region', { name: '其他结果' });
+
+    it('groups 其他结果 by organization in the order each first appears, keeping each group\'s own row order', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('集团', 'a', '1'), unpaired('华东', 'b', '2'), unpaired('集团', 'c', '3'), unpaired('华南', 'd', '4'),
+      ], ['metric_label'])} />);
+      const others = othersOf();
+      expect(within(others).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['集团', '华东', '华南']);
+      const groups = others.querySelectorAll('tbody');
+      expect(groups).toHaveLength(3);
+      expect(Array.from(groups[0].querySelectorAll('td:first-child')).map((cell) => cell.textContent)).toEqual(['a 余额', 'c 余额']);
+      const heading = within(others).getByRole('rowheader', { name: '集团' });
+      expect(heading.getAttribute('scope')).toBe('rowgroup');
+      expect(heading.getAttribute('colspan')).toBe(String(within(others).getAllByRole('columnheader').length));
+    });
+
+    it('names rows without an organization 未声明组织', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('华东区域', 'a', '1'), unpaired(null, 'b', '2'), unpaired('', 'c', '3'),
+      ], ['metric_label'])} />);
+      expect(within(othersOf()).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['华东区域', '未声明组织']);
+    });
+
+    it('does not group 其他结果 that names no organization', () => {
+      const columns = ['metric_key', 'period', 'scenario', 'value', 'unit', 'metric_label'];
+      const rows = [
+        { metric_key: 'revenue', period: '2026-08', scenario: 'actual_1_8', value: '90', unit: '万元', metric_label: '收入实际' },
+        { metric_key: 'revenue', period: '2026-08', scenario: 'budget_1_8', value: '100', unit: '万元', metric_label: '收入预算' },
+        { metric_key: 'receivable', period: '2026-08', scenario: 'actual_1_8', value: '7', unit: '万元', metric_label: '应收余额' },
+      ];
+      render(<BusinessResultView run={{ ...run([]), result: { columns: columns.map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })), rows, row_count: rows.length, truncated: false } }} />);
+      const others = othersOf();
+      expect(within(others).queryAllByRole('rowheader')).toHaveLength(0);
+      expect(others.querySelectorAll('tbody')).toHaveLength(1);
+    });
+
+    const longSource = '预算工作簿 09·预算执行分析 G5；预算工作簿 09·预算执行分析 G20；mth/04 C33';
+    it('folds a long 其他结果 source into its first reference and a count that opens to every reference', async () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('华东区域', 'receivable', '7', { source: longSource }),
+        unpaired('华东区域', 'collection', '8', { source: '预算工作簿 09·预算执行分析 G5；预算工作簿 09·预算执行分析 G5；mth/04 C33' }),
+      ], ['metric_label', 'source'])} />);
+      const others = othersOf();
+      const trigger = within(others).getByRole('button', { name: /^预算工作簿 09·预算执行分析 G5\s*等 3 条$/ });
+      expect(trigger.classList.contains('fnd-linkish')).toBe(true);
+      expect(trigger.getAttribute('title')).toBe(longSource);
+      // A reference listed twice counts once.
+      expect(within(others).getByRole('button', { name: /等 2 条$/ })).toBeTruthy();
+      fireEvent.click(trigger);
+      const dialog = await screen.findByRole('dialog', { name: 'receivable 余额的来源单元格引用' });
+      expect(within(dialog).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['预算工作簿 09·预算执行分析 G5', '预算工作簿 09·预算执行分析 G20', 'mth/04 C33']);
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('keeps a short 其他结果 source and every main-table source as plain text', () => {
+      const current = longRun([
+        ...pair({ metric_label: '营业利润 1-8 月预算', source: longSource }, { metric_label: '营业利润 1-8 月实际（剔除其他收益类）' }),
+        unpaired('华东区域', 'receivable', '7', { source: '04表B5/B33' }),
+      ], ['metric_label', 'source']);
+      render(<BusinessResultView run={current} />);
+      expect(within(othersOf()).getByRole('cell', { name: '04表B5/B33' })).toBeTruthy();
+      const main = screen.getAllByRole('region', { name: '业务结果' }).at(-1)!;
+      expect(within(main).queryByRole('button')).toBeNull();
+      expect(within(main).getByRole('cell', { name: new RegExp(longSource) })).toBeTruthy();
+      expect(within(main).getByRole('cell', { name: /营业利润 1-8 月实际（剔除其他收益类）/ })).toBeTruthy();
+    });
+
+    it.each([
+      [['HKD'], true],
+      [['CNY'], false],
+      [['人民币'], false],
+      [['CNY', 'HKD'], true],
+    ])('shows the currency column for %j: %s', (currencies, shown) => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        ...currencies.map((currency, index) => unpaired('华东区域', `m${index}`, '7', { currency })),
+      ], ['metric_label', 'currency'])} />);
+      const others = othersOf();
+      expect(within(others).queryByRole('columnheader', { name: '币种' }) !== null).toBe(shown);
+      if (shown) expect(within(others).getByRole('cell', { name: currencies.at(-1)! })).toBeTruthy();
+    });
+
+    it('does not add a key to one name used by two organizations, nor warn', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('集团合并', 'ratio', '0.48', { metric_label: '1-8 月实际÷全年 BUD', unit: '比率' }),
+        unpaired('华东区域', 'revenue_completion_ratio', '0.62', { metric_label: '1-8 月实际÷全年 BUD', unit: '比率' }),
+      ], ['metric_label'])} />);
+      expect(within(othersOf()).getAllByRole('cell', { name: '1-8 月实际÷全年 BUD' })).toHaveLength(2);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
 
     it.each([
