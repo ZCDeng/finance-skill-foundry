@@ -156,7 +156,7 @@
   },
   "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   "row_declarations": {
-    "rules_version": "4.1.1",
+    "rules_version": "5.2.1",
     "requirements_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     "requirements_fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "complete": true,
@@ -529,7 +529,7 @@
           11
         ],
         "row_count": 2,
-        "message": "2 行没有标明单位：单位写成「-」，或比率行没有写单位表里的单位。这些行不参与金额配对，结果区原样显示并注明「未标单位」。比率写「比率」或 ratio（小数，0.945 即 94.5%），百分数写 %、pct 或「百分比」，金额写实际单位。"
+        "message": "2 行没有标明单位：单位写成「-」，或比率行没有写单位表里的单位。这些行不参与金额配对，结果区原样显示并注明「未标单位」。比率写「比率」或 ratio（小数，0.945 即 94.5%），百分数写 %、pct 或「百分比」，两个比率之差写「百分点」，金额写实际单位。"
       },
       {
         "severity": "warning",

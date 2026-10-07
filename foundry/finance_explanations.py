@@ -1085,6 +1085,12 @@ def _fact_unit(row: dict, column: str, column_defs: dict[str, dict], run: dict |
 
 
 def _display_value(exact: str, column: str, unit: Any) -> str:
+    # A difference of two percentages (result_semantics.POINT_UNITS) reads as written, never ×100: 3.30 个百分点.
+    if column == "value" and str(unit or "").strip() == "百分点":
+        try:
+            return f"{Decimal(exact).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)} 个百分点"
+        except InvalidOperation:
+            return exact
     if _is_ratio_column(column):
         try:
             percent = (

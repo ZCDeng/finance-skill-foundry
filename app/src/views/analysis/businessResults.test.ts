@@ -91,7 +91,7 @@ describe('business result presentation', () => {
   it('formats amounts, ratios and percentage-point deltas without losing decimal text', () => {
     expect(formatBusinessValue('-18843.0552', 'amount')).toBe('-18,843.06');
     expect(formatBusinessValue('0.945301', 'ratio')).toBe('94.53%');
-    expect(formatBusinessValue('-0.006532', 'ratio_delta')).toBe('-0.65个百分点');
+    expect(formatBusinessValue('-0.006532', 'ratio_delta')).toBe('-0.65 个百分点');
   });
 
   it('labels a wide P&L result by its metrics in Chinese', () => {
@@ -498,6 +498,32 @@ describe('business result presentation', () => {
     expect(rows.map((row) => row['数值'])).toEqual(['94.50%', '94.50%', '0.945（未标单位）', '41,400.00']);
   });
 
+  it('shows a 百分点 row as written in 个百分点 and never pairs it', () => {
+    const current = run({
+      result: {
+        columns: ['metric_key', 'organization', 'period', 'scenario', 'value', 'unit', 'metric_label'].map((name) => ({ name, type: name === 'value' ? 'DECIMAL' : 'VARCHAR' })),
+        rows: [
+          { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '90', unit: '万元', metric_label: '营业收入 1-8 月实际' },
+          { metric_key: 'revenue', organization: '华东区域', period: '2026-01:2026-08', scenario: 'budget_1_8', value: '100', unit: '万元', metric_label: '营业收入 1-8 月预算' },
+          // A 达成率 written in 百分点 is a difference, not the comparison's 达成率.
+          { metric_key: 'revenue_achievement_ratio', organization: '华东区域', period: '2026-01:2026-08', scenario: 'achievement_ratio', value: '3.3', unit: '百分点', metric_label: '营业收入达成率变动' },
+          { metric_key: 'collection_rate_gap', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '3.3000', unit: '百分点', metric_label: '收缴率缺口' },
+          { metric_key: 'collection_rate_gap_prior', organization: '华东区域', period: '2026-01:2026-08', scenario: 'actual_1_8', value: '', unit: '百分点', metric_label: '上年收缴率缺口' },
+        ],
+        row_count: 5,
+        truncated: false,
+      },
+    });
+    expect(businessRows(current)).toEqual([expect.objectContaining({ metric: '收入', actual: '90', same_period_budget: '100', attainment_rate: undefined })]);
+    const others = otherLongRows(current);
+    const shown = formatDisplayRows(others, longRowColumns(current, others));
+    expect(shown.map((row) => [row['指标'], row['数值'], row['单位']])).toEqual([
+      ['营业收入达成率变动', '3.30 个百分点', '个百分点'],
+      ['收缴率缺口', '3.30 个百分点', '个百分点'],
+      ['上年收缴率缺口', '—', '百分点'],
+    ]);
+  });
+
   it('never pairs a row whose unit is - as a budget amount', () => {
     const current = run({
       result: {
@@ -624,6 +650,8 @@ describe('business result presentation', () => {
     ['万元', '41400', '万元'],
     ['-', '0.9', '-'],
     ['比率', '', '比率'],
+    ['百分点', '3.3000', '个百分点'],
+    ['百分点', '', '百分点'],
   ])('writes the unit %s of a row valued %j as %s', (unit, value, shown) => {
     const column: DisplayColumn = { name: 'unit', type: 'VARCHAR', label: '单位', semantics: 'text' };
     expect(formatBusinessCell(unit, column, { unit, value })).toBe(shown);

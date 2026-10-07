@@ -1053,6 +1053,40 @@ def test_generic_value_column_uses_row_unit_without_relaxing_ratio_or_count(serv
     assert checked["status"] == "pass", checked["issues"]
 
 
+def test_a_value_in_百分点_reads_as_points_and_the_body_may_quote_it(service):
+    from foundry.finance_explanations import prepare_explanation
+
+    store, _ = service
+    run = _write_synthetic_run(store.analysis, {
+        "id": "99999999999999999999999999999998",
+        "bindings": {},
+        "execution_status": "succeeded",
+        "output_hash": "fixed",
+        "result": {
+            "columns": [
+                {"name": "metric_key", "type": "VARCHAR"},
+                {"name": "value", "type": "DECIMAL(18,4)"},
+                {"name": "unit", "type": "VARCHAR"},
+                {"name": "metric_label", "type": "VARCHAR"},
+            ],
+            "rows": [{"metric_key": "collection_rate_gap", "value": "3.3000", "unit": "百分点",
+                      "metric_label": "收缴率缺口"}],
+        },
+    })
+    fact = next(fact for fact in prepare_explanation(store.analysis, [run])["facts"] if fact["column"] == "value")
+
+    # Written as it is, never ×100 and never a percentage.
+    assert (fact["display_value"], fact["unit"], fact["value"]) == ("3.30 个百分点", "百分点", "3.3000")
+
+    checked = store.validate_explanation({
+        "body": "收缴率缺口 3.30 个百分点。",
+        "run_ids": [run["id"]],
+        "fact_ids": [fact["id"]],
+    })
+    codes = {issue["code"] for issue in checked["issues"]}
+    assert not codes & {"uncited_number", "fact_unit_mismatch"}, checked["issues"]
+
+
 def test_chinese_wide_result_reads_row_unit_and_keeps_ratio_percent(service):
     from foundry.finance_explanations import prepare_explanation
 

@@ -466,7 +466,7 @@ export interface RowDeclaration {
   /** ytd or month when the scenario names that period class. */
   span: 'ytd' | 'month' | null;
   unit: string | null;
-  unit_kind: 'amount' | 'decimal' | 'percent' | 'unmarked' | null;
+  unit_kind: 'amount' | 'decimal' | 'percent' | 'unmarked' | 'points' | null;
   /** The row's value as written (a Decimal string), for rows with a role. */
   value: unknown;
   scope_label: string | null;
@@ -519,12 +519,13 @@ export interface DeclaredPair {
 /** One kind of result-row contract break, in the backend's diagnostic shape with a Chinese message. */
 export interface ResultContractWarning {
   severity: 'warning';
-  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing' | 'variance_mismatch';
+  code: 'unit_unmarked' | 'scenario_undeclared' | 'metric_undeclared' | 'estimate_basis_missing' | 'variance_mismatch' | 'label_ambiguous';
   message: string;
   /** Zero-based rows of the full result file, at most 20; row_count counts every row it concerns. */
   rows: number[];
   row_count: number;
-  /** The scenario or metric names it concerns, or the comparisons a variance_mismatch names. */
+  /** The scenario or metric names it concerns, the comparisons a variance_mismatch names, or the shared names a
+   * label_ambiguous names. */
   names?: string[];
 }
 export interface AnalysisDraft extends AnalysisObject {

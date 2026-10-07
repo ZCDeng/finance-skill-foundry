@@ -445,6 +445,7 @@ def test_backend_vocabulary_agrees_with_the_frontend_inference_lists():
     assert set(_ts_strings(ratio)) == result_semantics.PERCENT_UNITS
     if re.search(r'const unmarkedUnits\b', source):
         assert set(_ts_strings(_ts_declaration(source, 'unmarkedUnits'))) == result_semantics.UNMARKED_UNITS
+    assert set(_ts_strings(_ts_declaration(source, 'pointUnits'))) == result_semantics.POINT_UNITS
 
     assert _ts_regex(_ts_declaration(source, 'estimateWords')) == result_semantics.ESTIMATE_WORDS.pattern
     assert tuple(_ts_strings(_ts_declaration(source, 'negations'))) == result_semantics.NEGATIONS
@@ -591,6 +592,100 @@ def test_a_compared_metric_outside_the_vocabulary_warns_only_without_a_label():
     assert set(warnings_by_code(declare([detail], columns=CONFORMING_COLUMNS))) == {'unit_unmarked'}
     listed = {'id': 'a' * 32, 'items': [{'id': 'adj', 'metric': 'op_adj'}]}
     assert declare([unnamed], listed, columns=CONFORMING_COLUMNS)['warnings'] == []
+
+
+# label_ambiguous: rows the result area shows under one name in one organization and period, under different metric
+# keys. The result area (businessResults.ts labelCollisions) and this check read the same contract; the shared sample
+# holds both to it.
+LABEL_COLLISIONS = Path(__file__).resolve().parents[1] / 'app' / 'tests' / 'fixtures' / 'label-collisions.json'
+
+
+def collisions(declaration, rows):
+    return [{key: group[key] for key in ('organization', 'period', 'label', 'keys')}
+            for group in result_semantics.label_collisions(rows, declaration['rows'], declaration['pairs'])]
+
+
+def test_the_shared_collision_sample_reports_the_groups_the_result_area_finds():
+    sample = json.loads(LABEL_COLLISIONS.read_text(encoding='utf-8'))
+    declaration = declare(sample['rows'], columns=sample['columns'])
+
+    assert declaration['pairs'] == []
+    assert collisions(declaration, sample['rows']) == sample['label_collisions']
+    warning = warnings_by_code(declaration)['label_ambiguous']
+    members = sorted(index for group in result_semantics.label_collisions(sample['rows'], declaration['rows'])
+                     for index in group['rows'])
+    assert (warning['severity'], warning['rows'], warning['row_count']) == ('warning', members, len(members))
+    assert warning['names'] == [group['label'] for group in sample['label_collisions']]
+    assert '1-8 月实际÷全年 BUD' in warning['message'] and 'metric_label' in warning['message']
+    assert_chinese(warning['message'])
+
+
+def ratio_row(metric, **update):
+    return {**BASE, 'metric_key': metric, 'organization': '集团合并', 'scenario': 'budget_bud_fy', 'value': '0.6168',
+            'unit': '比率', 'metric_label': '1-8 月实际÷全年 BUD', **update}
+
+
+def test_two_metrics_under_one_label_in_one_organization_and_period_warn():
+    rows = [HUACHEN_ROWS[0], ratio_row('revenue_completion_ratio'), ratio_row('ratio', value='0.4847')]
+    warning = warnings_by_code(declare(rows))['label_ambiguous']
+    assert (warning['rows'], warning['row_count'], warning['names']) == ([1, 2], 2, ['1-8 月实际÷全年 BUD'])
+
+
+@pytest.mark.parametrize('second', [
+    # One key under one name (this year and last year) is told apart by its scenario.
+    ratio_row('revenue_completion_ratio', scenario='actual_py_1_8'),
+    ratio_row('ratio', organization='华东区域'),
+    ratio_row('ratio', period='2026'),
+    ratio_row('ratio', metric_label=None),
+    ratio_row('ratio', metric_label='  '),
+    # Shown as 「1-8 月实际÷全年 BUD（估算）」, a different name.
+    ratio_row('ratio', basis='estimate'),
+])
+def test_rows_the_result_area_tells_apart_do_not_warn(second):
+    rows = [ratio_row('revenue_completion_ratio'), second]
+    assert 'label_ambiguous' not in warnings_by_code(declare(rows, columns=CONFORMING_COLUMNS))
+
+
+def test_names_compare_as_the_result_area_shows_them():
+    # A metric code reads as its Chinese name; a trimmed label is the same name.
+    rows = [ratio_row('profit', metric_label='营业利润'), ratio_row('operating_profit', metric_label=' operating_profit ')]
+    assert collisions(declare(rows), rows) == [
+        {'organization': '集团合并', 'period': '2026-01:2026-08', 'label': '营业利润', 'keys': ['profit', 'operating_profit']}]
+    # The organization falls back to region, and the key is the row's own, never the base metric a pair reads.
+    rows = [ratio_row('revenue_variance', organization=None, region='华北区域', scenario='variance'),
+            ratio_row('revenue', organization=None, region='华北区域', scenario='variance_bud_le')]
+    assert [group['keys'] for group in collisions(declare(rows), rows)] == [['revenue_variance', 'revenue']]
+
+
+def test_paired_rows_take_no_part_unless_their_actual_is_empty():
+    actual = {**HUACHEN_ROWS[0], 'metric_label': '营业收入'}
+    variance = {**HUACHEN_ROWS[2], 'metric_label': '营业收入'}
+    paired = declare([actual, variance])
+    assert len(paired['pairs']) == 1 and 'label_ambiguous' not in warnings_by_code(paired)
+    # The result area pairs no comparison without an actual figure, so both rows stay on screen under one name.
+    rows = [{**actual, 'value': ''}, variance]
+    unpaired = declare(rows)
+    assert warnings_by_code(unpaired)['label_ambiguous']['rows'] == [0, 1]
+    assert collisions(unpaired, rows)[0]['keys'] == ['revenue', 'revenue_variance']
+
+
+def test_a_wide_table_does_not_warn():
+    rows = [{'metric_key': key, 'organization': '集团合并', 'value': '1', 'metric_label': '同名'}
+            for key in ('revenue', 'profit')]
+    assert declare(rows, columns=['metric_key', 'organization', 'value', 'metric_label'])['warnings'] == []
+
+
+def test_a_difference_of_percentages_in_百分点_reads_as_points_and_pairs_with_nothing():
+    gap = {**BASE, 'metric_key': 'collection_rate_gap', 'organization': '集团合并', 'scenario': 'actual_1_8',
+           'value': '3.3000', 'unit': '百分点', 'metric_label': '收缴率缺口'}
+    ratio = {**HUACHEN_ROWS[3], 'unit': '百分点', 'value': '3.30'}
+    achievement = {**HUACHEN_ROWS[3], 'metric_key': 'revenue', 'scenario': 'achievement_ratio', 'unit': '百分点',
+                   'metric_label': '营业收入达成率变动'}
+    declaration = declare([*HUACHEN_ROWS[:3], gap, ratio, achievement])
+    entries = declaration['rows']
+    assert [(entry['role'], entry['unit_kind'], entry['value']) for entry in entries[3:]] == [(None, 'points', None)] * 3
+    assert [sorted(pair['members']) for pair in declaration['pairs']] == [['actual', 'budget', 'variance']]
+    assert declaration['warnings'] == []
 
 
 # Pairs and conclusion sentences (R6, KTD7): the declaration pairs its rows as the result area does, and says in one
