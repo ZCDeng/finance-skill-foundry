@@ -46,6 +46,12 @@ DEFAULT_PARAMS: dict[str, str] = {
     "cash_ratio_drop_red": "0.05",
     "buildup_rise_yellow": "0.02",
     "buildup_rise_red": "0.05",
+    # A latest estimate this far from the seasonal one (either way) is worth a second look.
+    "le_gap_flag": "0.10",
+    # Last year booked less than this share of its impairment by the same point: the rest comes late.
+    "impairment_progress_flag": "0.5",
+    # Last year's same-period share of its full year below this makes the pace meaningless.
+    "seasonal_share_min": "0.1",
     # Break-even sensitivity grid.
     "matrix_margin_from": "0.10",
     "matrix_margin_to": "0.30",
@@ -57,6 +63,12 @@ DEFAULT_PARAMS: dict[str, str] = {
 
 INPUT_LABELS: dict[str, str] = {
     "revenue": "营业收入（本期）",
+    "revenue_le": "营业收入最新预估（LE）",
+    "net_profit": "净利润（本期）",
+    "net_profit_py_full": "上年全年净利润",
+    "net_profit_le": "净利润最新预估（LE）",
+    "impairment_py_full": "上年全年减值损失",
+    "months_elapsed": "已过月数",
     "cost": "营业成本（本期）",
     "gross_profit": "毛利（本期）",
     "period_expense": "期间费用（本期）",
@@ -83,6 +95,7 @@ INPUT_LABELS: dict[str, str] = {
 }
 """Every input a metric may read. A name ending in _py is the same input for the prior-year period."""
 
+COUNT_INPUTS = frozenset({"months_elapsed"})
 RATE_INPUTS = frozenset({"collection_rate_current", "collection_rate_total", "gross_margin", "expense_ratio"})
 
 LEVEL_LABELS = {"red": "红", "yellow": "黄", "green": "绿", "unknown": "无法判断"}
@@ -182,6 +195,8 @@ def _input_name(name: Any) -> str:
     base = name[:-3] if name.endswith("_py") else name
     if base not in INPUT_LABELS:
         raise FoundryError(f"unknown collection_health input: {name}")
+    if name.endswith("_py") and base in COUNT_INPUTS:
+        raise FoundryError(f"{name}: {base} has no prior-year counterpart")
     return name
 
 
@@ -267,9 +282,12 @@ def resolve_entities(
                 raise FoundryError(f"{where} column {column} is not in {alias}")
             values[key] = _parse_cell(row[column], limit=limit, scale=ref.get("scale"), where=where)
             sources[key] = {**row["source"], "column": column}
-            if not rate:
+            if not rate and key not in COUNT_INPUTS:
                 unit = ref.get("unit") or row.get("unit") or units_by_alias.get(alias)
                 units[key] = _unit(unit)
+        months = values.get("months_elapsed")
+        if months is not None and not (1 <= months <= 12 and months == months.to_integral_value()):
+            raise FoundryError(f"{name}.months_elapsed must be a whole number of months from 1 to 12")
         distinct = sorted({unit for unit in units.values() if unit})
         if len(distinct) > 1:
             raise FoundryError(
@@ -539,6 +557,44 @@ def _share(numerator: str, denominator: str) -> Callable[[dict, dict], Computed]
     return compute
 
 
+def _seasonal(base: str) -> Callable[[dict, dict], Computed]:
+    """Year to date divided by the share of last year's full year booked by the same point."""
+    def compute(v, p) -> Computed:
+        names = (base, f"{base}_py", f"{base}_py_full")
+        if not _need(v, *names) or v[f"{base}_py_full"] == 0:
+            return None
+        share = v[f"{base}_py"] / v[f"{base}_py_full"]
+        value = _div(v[base], share)
+        return None if value is None else (value, list(names), True)
+
+    return compute
+
+
+def _linear(base: str) -> Callable[[dict, dict], Computed]:
+    def compute(v, p) -> Computed:
+        if not _need(v, base, "months_elapsed"):
+            return None
+        return v[base] * 12 / v["months_elapsed"], [base, "months_elapsed"], True
+
+    return compute
+
+
+def _le_gap(base: str) -> Callable[[dict, dict], Computed]:
+    def compute(v, p) -> Computed:
+        seasonal = _seasonal(base)(v, p)
+        if seasonal is None or f"{base}_le" not in v or seasonal[0] == 0:
+            return None
+        return (v[f"{base}_le"] - seasonal[0]) / abs(seasonal[0]), sorted({*seasonal[1], f"{base}_le"}), True
+
+    return compute
+
+
+def _m_impairment_progress(v, p) -> Computed:
+    if not _need(v, "impairment_py", "impairment_py_full") or v["impairment_py_full"] == 0:
+        return None
+    return abs(v["impairment_py"]) / abs(v["impairment_py_full"]), ["impairment_py", "impairment_py_full"], False
+
+
 METRICS: list[dict[str, Any]] = [
     {"key": "gross_margin", "label": "毛利率", "kind": "ratio", "fn": _m_gross_margin,
      "formula": "毛利 ÷ 营业收入"},
@@ -576,6 +632,20 @@ METRICS: list[dict[str, Any]] = [
      "fn": _share("related_ar", "ar_gross"), "formula": "关联方应收余额 ÷ 应收账款账面余额"},
     {"key": "related_party_provision_ratio", "label": "关联方拨备率", "kind": "ratio",
      "fn": _share("related_provision", "related_ar"), "formula": "关联方坏账准备 ÷ 关联方应收余额"},
+    {"key": "revenue_full_year_seasonal", "label": "全年营业收入（按去年节奏）", "kind": "amount",
+     "fn": _seasonal("revenue"), "formula": "本年累计 ÷（上年同期累计 ÷ 上年全年）"},
+    {"key": "revenue_full_year_linear", "label": "全年营业收入（线性外推，仅对照）", "kind": "amount",
+     "fn": _linear("revenue"), "formula": "本年累计 × 12 ÷ 已过月数"},
+    {"key": "revenue_le_gap", "label": "收入 LE 与按去年节奏之差", "kind": "ratio", "fn": _le_gap("revenue"),
+     "formula": "（LE − 按去年节奏的全年数）÷ 按去年节奏的全年数"},
+    {"key": "net_profit_full_year_seasonal", "label": "全年净利润（按去年节奏）", "kind": "amount",
+     "fn": _seasonal("net_profit"), "formula": "本年累计 ÷（上年同期累计 ÷ 上年全年）"},
+    {"key": "net_profit_full_year_linear", "label": "全年净利润（线性外推，仅对照）", "kind": "amount",
+     "fn": _linear("net_profit"), "formula": "本年累计 × 12 ÷ 已过月数"},
+    {"key": "net_profit_le_gap", "label": "净利润 LE 与按去年节奏之差", "kind": "ratio", "fn": _le_gap("net_profit"),
+     "formula": "（LE − 按去年节奏的全年数）÷ 按去年节奏的全年数"},
+    {"key": "impairment_progress_py", "label": "去年同期减值占全年比重", "kind": "ratio",
+     "fn": _m_impairment_progress, "formula": "上年同期减值 ÷ 上年全年减值（均按绝对值）"},
 ]
 METRIC_KEYS = tuple(metric["key"] for metric in METRICS)
 
@@ -599,6 +669,13 @@ _METRIC_INPUTS = {
     "provision_ratio": ("provision", "ar_gross"),
     "aging_over_1y_share": ("ar_over_1y", "ar_gross"),
     "related_party_share": ("related_ar", "ar_gross"),
+    "revenue_full_year_seasonal": ("revenue", "revenue_py", "revenue_py_full"),
+    "revenue_full_year_linear": ("revenue", "months_elapsed"),
+    "revenue_le_gap": ("revenue", "revenue_py", "revenue_py_full", "revenue_le"),
+    "net_profit_full_year_seasonal": ("net_profit", "net_profit_py", "net_profit_py_full"),
+    "net_profit_full_year_linear": ("net_profit", "months_elapsed"),
+    "net_profit_le_gap": ("net_profit", "net_profit_py", "net_profit_py_full", "net_profit_le"),
+    "impairment_progress_py": ("impairment_py", "impairment_py_full"),
     "related_party_provision_ratio": ("related_provision", "related_ar"),
 }
 
@@ -612,6 +689,18 @@ def _bump(level: str | None) -> str | None:
 
 def _level(key: str, value: Decimal, change: Decimal | None, p: dict) -> tuple[str | None, str]:
     """A screening light and the reason for it. None means the metric carries no threshold."""
+    if key in {"revenue_le_gap", "net_profit_le_gap"}:
+        if value > p["le_gap_flag"]:
+            return "yellow", "LE 比按去年节奏的全年数高，偏乐观"
+        if value < -p["le_gap_flag"]:
+            return "yellow", "LE 比按去年节奏的全年数低，偏保守"
+        return "green", ""
+    if key == "impairment_progress_py":
+        if value < p["impairment_progress_flag"]:
+            return "yellow", "去年减值大半在后几个月确认，今年剩余月份还会有减值"
+        return "green", ""
+    if key in {"revenue_full_year_linear", "net_profit_full_year_linear"}:
+        return None, "线性外推只作对照，不进结论"
     if key in {"collection_gap", "collection_gap_total"}:
         if value < p["gap_severe_below"]:
             return "red", "严重低于生死线，每收100元倒贴现金"
@@ -679,6 +768,17 @@ def _prior(values: dict[str, Decimal]) -> dict[str, Decimal]:
 
 def _judged_out(key: str, values: dict, computed: dict, params: dict) -> str | None:
     """Why a value is not judged although it was computed, or None."""
+    if key.endswith("_full_year_seasonal") or key.endswith("_le_gap"):
+        base = key.split("_full_year")[0].removesuffix("_le_gap")
+        if values.get(f"{base}_py_full", Decimal(1)) <= 0 or values.get(f"{base}_py", Decimal(1)) <= 0:
+            return "上年同期或全年不为正，去年节奏没有意义，不作判断"
+        if values.get(base, Decimal(1)) <= 0:
+            return "本年累计不为正，按去年节奏放大没有意义，不作判断"
+        if f"{base}_py" in values and f"{base}_py_full" in values and \
+                values[f"{base}_py"] / values[f"{base}_py_full"] < params["seasonal_share_min"]:
+            return "上年同期只占全年很小一部分，按去年节奏放大没有意义，不作判断"
+    if key == "impairment_progress_py" and values["impairment_py"] * values["impairment_py_full"] < 0:
+        return "上年同期减值与全年方向相反（有转回），进度没有意义，不作判断"
     if key == "dso" and computed.get("ttm_revenue", Decimal(1)) <= 0:
         return "近12个月收入不为正，天数没有意义，不作判断"
     if key == "impairment_to_gross_profit":
