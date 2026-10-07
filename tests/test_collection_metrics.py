@@ -563,3 +563,42 @@ def test_only_collection_health_results_carry_the_kind_and_table_rows_their_orig
         "drivers": [{"name": "x", "direct_assumption": True}], "manager_assumptions": {"x": {"value": "1"}}}})
     # Older runs of the other kinds keep their output hash: nothing new is stamped on them.
     assert "scenario_kind" not in service.run_scenario({"scenario_id": driver["id"]})["result"]
+
+
+def test_full_year_is_estimated_at_last_years_pace_and_le_is_read_against_it():
+    rows = _all(
+        {
+            "revenue": "325644",
+            "revenue_py": "331613",
+            "revenue_py_full": "500000",
+            "revenue_le": "500000",
+            "net_profit": "15374",
+            "net_profit_py": "20274",
+            "net_profit_py_full": "23698",
+            "net_profit_le": "23698",
+            "impairment_py": "-4000",
+            "impairment_py_full": "-11000",
+            "months_elapsed": "8",
+        }
+    )
+    seasonal = rows[("net_profit_full_year_seasonal", "本期")]
+    assert Decimal(seasonal["value"]) == Decimal("15374") / (Decimal("20274") / Decimal("23698"))
+    assert seasonal["estimate"] is True and "估算" in seasonal["note"]
+    linear = rows[("net_profit_full_year_linear", "本期")]
+    assert Decimal(linear["value"]) == Decimal("15374") * 12 / 8
+    assert linear["level"] is None and "不进结论" in linear["note"]
+    # LE 23,698 against 17,970 at last year's pace.
+    gap = rows[("net_profit_le_gap", "本期")]
+    assert gap["level"] == "yellow" and "偏乐观" in gap["note"]
+    assert rows[("revenue_le_gap", "本期")]["level"] == "green"
+    progress = rows[("impairment_progress_py", "本期")]
+    assert Decimal(progress["value"]) == Decimal("4000") / Decimal("11000") * 100
+    assert progress["level"] == "yellow" and "后几个月" in progress["note"]
+
+
+def test_full_year_at_last_years_pace_is_not_judged_on_a_loss_year_and_months_are_checked():
+    rows, _ = _rows({"net_profit": "100", "net_profit_py": "-50", "net_profit_py_full": "200", "net_profit_le": "300"})
+    assert rows["net_profit_full_year_seasonal"]["level"] == "unknown"
+    assert rows["net_profit_le_gap"]["level"] == "unknown"
+    with pytest.raises(FoundryError, match="months_elapsed"):
+        _rows({"net_profit": "100", "months_elapsed": "13"})
