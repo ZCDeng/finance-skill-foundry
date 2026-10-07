@@ -430,9 +430,16 @@ def test_backend_vocabulary_agrees_with_the_frontend_inference_lists():
     """The frontend keeps its copy only to infer runs saved without declarations; the two must not drift."""
     source = FRONTEND_RESULTS.read_text(encoding='utf-8')
     measure = source[source.index('function longScenarioMeasure'):source.index('function longScenarioEntry')]
-    lists = {name: tuple(_ts_strings(names)) for names, name in
-             re.findall(r"if \(\[([^\]]*)\]\.includes\(scenario\)\) return \{ measure: '(\w+)'", measure)}
+    # A list is written inline or named by a module constant (budgetScenarios, shared with isBudgetAlias).
+    lists = {name: tuple(_ts_strings(names if names.startswith('[') else _ts_declaration(source, names))) for names, name in
+             re.findall(r"if \((\[[^\]]*\]|\w+)\.includes\(scenario\)\) return \{ measure: '(\w+)'", measure)}
     assert lists == result_semantics.LONG_SCENARIO_MEASURES
+    # isBudgetAlias (the settings panel's main calculation) reads every measure the backend gives the budget role.
+    budget_alias = source[source.index('export function isBudgetAlias'):source.index('function longScenarioMeasure')]
+    named = {'budget': 'budgetScenarios', 'estimated_budget': 'estimatedBudgetScenarios'}
+    assert {measure for measure, role in result_semantics.ROLES.items() if role == 'budget'} == set(named)
+    for constant in named.values():
+        assert f'{constant}.includes(word)' in budget_alias
     assert _ts_regex(_ts_declaration(source, 'scenarioWithPeriod')) == result_semantics.SCENARIO_WITH_PERIOD.pattern
     entry = source[source.index('function longScenarioEntry'):source.index('function scenarioDetailLabel')]
     assert _ts_regex(entry[entry.index('const rate ='):]) == result_semantics.RATE_METRIC.pattern

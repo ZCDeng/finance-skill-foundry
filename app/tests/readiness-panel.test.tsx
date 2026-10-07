@@ -58,6 +58,15 @@ describe('readiness panel', () => {
     expect(ledger.textContent).toContain('期间 2026-08');
   });
 
+  it('sits on the page as a section with a rule under it, not as a clickable card', async () => {
+    mount(report);
+    render(<ReadinessPanel taskId="t" />);
+    const heading = await screen.findByText('这批资料能算什么');
+    const section = heading.closest('section')!;
+    expect(section.className).toBe('analysis-readiness');
+    expect(section.classList.contains('fnd-card')).toBe(false);
+  });
+
   it('says the numbers came from these files and nothing else', async () => {
     mount(report);
     render(<ReadinessPanel taskId="t" />);

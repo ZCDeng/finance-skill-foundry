@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Play } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type AnalysisRun, type DatasetSnapshot, type FinanceContext, type FinanceContextState, type WaitKind } from '../../bridge.js';
 import { textValue } from './presentation.js';
@@ -51,11 +51,42 @@ const PRIMARY_FIELDS: readonly ScopeKey[] = ['period', 'organization', 'unit'];
 const MORE_FIELDS: readonly ScopeKey[] = ['currency', 'scenario', 'ledger'];
 
 export type ScopeRequest = { count: number; contextId?: string };
+type Calculation = 'pnl' | 'bridge';
+const CALCULATION_NAMES: Record<Calculation, string> = { pnl: '计算损益表', bridge: '计算预算差异' };
+const RERUN_NAMES: Record<Calculation, string> = { pnl: '按已保存范围重算损益表', bridge: '按已保存范围计算预算差异' };
+
+/**
+ * Which calculation is the main action: the analysis decides, never the form. Choosing
+ * a budget file or a saved scope does not swap the buttons under her pointer.
+ */
+export function leadingCalculation({ comparesBudget }: { comparesBudget: boolean }): Calculation {
+  return comparesBudget ? 'bridge' : 'pnl';
+}
+
+/**
+ * The first reason that keeps a calculation closed, in the words the manager acts on;
+ * '' when nothing does. Reading or saving the scope is a pause, not a reason, and is
+ * not written here.
+ */
+export function calculationBlocker(kind: Calculation, state: {
+  conflicts: boolean; scopeError: boolean; actual: string; periodPending: boolean; budget: string;
+}): string {
+  // The conflict and its 清空 button live on the 资料 page; the fields here are locked.
+  if (state.conflicts) return '先到资料页「分析范围」处理冲突。';
+  if (state.scopeError) return '分析范围没有读出来，见下方提示。';
+  if (!state.actual) return '先选实际资料。';
+  // PeriodPending above names the months; the line does not repeat them.
+  if (state.periodPending) return '先确认任务期间，资料写的期间见上方提示。';
+  if (kind === 'bridge' && !state.budget) return '先选预算资料。';
+  return '';
+}
 /** How the last finance operation ended: its name, the sentence shown for it, and when. */
 export type FinanceOutcome = { label: string; result: 'ok' | 'error'; message: string; at: string };
 
-export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysisScope, openRequest = { count: 0 }, running = '', outcome, onRunning, onOutcome, onRefresh, children }: {
+export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysisScope, comparesBudget = false, openRequest = { count: 0 }, running = '', outcome, onRunning, onOutcome, onRefresh, children }: {
   taskId: string; datasets: DatasetSnapshot[]; runs: AnalysisRun[]; busy: boolean;
+  /** The analysis compares against a budget (a variance, or a budget file bound): 计算预算差异 leads. */
+  comparesBudget?: boolean;
   /** The task's one scope; the fields here edit the same record as the 资料 page. */
   scope: AnalysisScope;
   /** Bumped by 调整范围 on a result; each new count opens the settings on that result's scope. */
@@ -309,8 +340,39 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   const closeSetup = settings.close;
   const locked = busy || Boolean(running) || analysisScope.loading || analysisScope.saving || analysisScope.conflicts.length > 0 || Boolean(analysisScope.error);
   const disabled = locked || !actual;
+  const transient = busy || Boolean(running) || analysisScope.loading || analysisScope.saving;
+  const lead = leadingCalculation({ comparesBudget });
+  const second: Calculation = lead === 'bridge' ? 'pnl' : 'bridge';
   // A file that names its month must not be calculated across every month it holds.
-  const calculateDisabled = disabled || pendingPeriods(analysisScope).length > 0;
+  const blockers: Record<Calculation, string> = Object.fromEntries((['pnl', 'bridge'] as const).map((kind) => [kind, calculationBlocker(kind, {
+    conflicts: analysisScope.conflicts.length > 0, scopeError: Boolean(analysisScope.error), actual,
+    periodPending: pendingPeriods(analysisScope).length > 0, budget,
+  })])) as Record<Calculation, string>;
+  // The saved-scope reruns need no form, only a readable scope without conflicts.
+  const rerunBlocker = analysisScope.conflicts.length > 0 ? '先到资料页「分析范围」处理冲突。'
+    : analysisScope.error ? '分析范围没有读出来，见下方提示。' : '';
+  const reasonId = useId();
+  // Every closed button says why. A reason several buttons share is one line; a profit task that only lacks a
+  // budget file keeps that to screen readers rather than a standing line under the main action.
+  const gates: { key: string; name: string; reason: string; quiet?: boolean }[] = [
+    ...([lead, second] as const).map((kind) => ({ key: kind, name: CALCULATION_NAMES[kind], reason: blockers[kind],
+      quiet: kind === 'bridge' && lead === 'pnl' && !blockers.pnl })),
+    ...(contextId ? (['pnl', 'bridge'] as const).map((kind) => ({ key: `rerun-${kind}`, name: RERUN_NAMES[kind], reason: rerunBlocker })) : []),
+  ].filter((gate) => gate.reason);
+  const reasonLines: { id: string; text: string; keys: string[]; quiet?: boolean }[] = [];
+  for (const gate of gates) {
+    if (gate.quiet) { reasonLines.push({ id: `${reasonId}-${gate.key}`, text: `${gate.name}：${gate.reason}`, keys: [gate.key], quiet: true }); continue; }
+    const line = reasonLines.find((item) => !item.quiet && item.text === gate.reason);
+    if (line) line.keys.push(gate.key);
+    else reasonLines.push({ id: `${reasonId}-${gate.key}`, text: gate.reason, keys: [gate.key] });
+  }
+  // A line one button owns names it.
+  for (const line of reasonLines) if (!line.quiet && line.keys.length === 1) line.text = `${gates.find((gate) => gate.key === line.keys[0])!.name}：${line.text}`;
+  const describedBy = (key: string) => reasonLines.find((line) => line.keys.includes(key))?.id;
+  const calculate = (kind: Calculation, variant: 'default' | 'outline') => <Button key={kind} variant={variant} type="button"
+    disabled={transient || Boolean(blockers[kind])} aria-describedby={describedBy(kind)} onClick={() => void saveContext(kind)}>{CALCULATION_NAMES[kind]}</Button>;
+  const rerun = (kind: Calculation) => <Button key={kind} variant="outline" type="button" disabled={locked} aria-describedby={describedBy(`rerun-${kind}`)}
+    onClick={() => void runExisting(kind)}>{RERUN_NAMES[kind]}</Button>;
   const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
@@ -333,13 +395,16 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
     <details className="analysis-details"><DisclosureSummary>更多范围{moreScopeSummary ? ` · ${moreScopeSummary}` : ''}</DisclosureSummary>
       <ScopeFields fields={MORE_FIELDS} scope={scope} candidates={analysisScope.candidates} sources={analysisScope.candidateSources} disabled={locked} onField={analysisScope.setField} />
     </details></fieldset>
-    <div className="analysis-actions">
+    {/* One main action, at the right; which one is the analysis's choice, so nothing moves while she fills the form in. */}
+    <div className="analysis-actions analysis-actions--end">
       <Button variant="outline" type="button" disabled={disabled} onClick={() => void saveContext()}>保存范围</Button>
-      <Button type="button" disabled={calculateDisabled} onClick={() => void saveContext('pnl')}>计算损益表</Button>
-      <Button variant="outline" type="button" disabled={calculateDisabled || !budget} onClick={() => void saveContext('bridge')}>计算预算差异</Button>
-      {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('pnl')}>按已保存范围重算损益表</Button>}
-      {contextId && <Button variant="outline" type="button" disabled={locked} onClick={() => void runExisting('bridge')}>按已保存范围计算预算差异</Button>}
+      {calculate(second, 'outline')}
+      {calculate(lead, 'default')}
     </div>
+    {contextId && <div className="analysis-actions analysis-actions--end">{rerun(lead)}{rerun(second)}</div>}
+    {reasonLines.some((line) => !line.quiet) ? <div className="analysis-actions-reasons">
+      {reasonLines.filter((line) => !line.quiet).map((line) => <p key={line.id} id={line.id}>{line.text}</p>)}</div> : null}
+    {reasonLines.filter((line) => line.quiet).map((line) => <span key={line.id} id={line.id} className="sr-only">{line.text}</span>)}
     {analysisScope.error ? <p className="analysis-message analysis-message--error">{analysisScope.error}</p> : null}
     {advancedChildren ? <section className="analysis-finance-definition" aria-label="计算定义">{advancedChildren}</section> : null}
     {contextId && <details className="analysis-details analysis-scenario-panel"><DisclosureSummary>情景测算</DisclosureSummary>

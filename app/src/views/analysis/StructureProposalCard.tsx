@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, FileSpreadsheet, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, Check, RotateCcw, X } from 'lucide-react';
 import { bridge } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
@@ -189,6 +189,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
 
+  // Only another proposal or a new revision of it starts the form over. The page reads
+  // the task back every 5 seconds and may hand over an equal proposal as a new object;
+  // that must not wipe what the manager has changed but not yet confirmed.
   useEffect(() => {
     setSheets(proposal.sheets);
     const next: Record<string, boolean> = {};
@@ -196,7 +199,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
       if (sheet.decision === 'table') next[sheet.sheet] = true;
     }
     setChosen(next);
-  }, [proposal]);
+  }, [proposal.id, proposal.revision]);
 
   const tables = sheets.filter((sheet) => sheet.decision === 'table');
   const setAside = sheets.filter((sheet) => sheet.decision !== 'table');
@@ -225,10 +228,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
   if (proposal.structure_state === 'no_table' && tables.length === 0) {
     return (
-      <section className="fnd-card analysis-structure-card">
-        <div className="analysis-section-heading">
-          <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
-        </div>
+      <section className="analysis-structure-card">
+        {/* Opened under the file's own row, which already names it: the heading is for screen readers. */}
+        <h4 className="sr-only">{datasetName}</h4>
         <p className="analysis-note">这份文件里没有可以计算的表。每张表的判断如下。</p>
         <ul className="analysis-structure-reasons">
           {setAside.map((sheet) => (
@@ -248,9 +250,9 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
   }
 
   return (
-    <section className="fnd-card analysis-structure-card">
+    <section className="analysis-structure-card">
       <div className="analysis-section-heading">
-        <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
+        <h4 className="sr-only">{datasetName}</h4>
         <span className="analysis-note">确认表结构后才能计算</span>
       </div>
       {tables.map((sheet) => (
@@ -507,9 +509,9 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
   }
 
   return (
-    <section className="fnd-card analysis-structure-card">
+    <section className="analysis-structure-card">
       <div className="analysis-section-heading">
-        <h4><FileSpreadsheet size={15} strokeWidth={1.5} aria-hidden /> {datasetName}</h4>
+        <h4 className="sr-only">{datasetName}</h4>
         <span className="analysis-note">待经理追认</span>
       </div>
       <p className="analysis-note">

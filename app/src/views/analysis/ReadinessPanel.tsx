@@ -129,7 +129,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
   };
 
   return (
-    <section className="fnd-card analysis-readiness-card">
+    <section className="analysis-readiness">
       <div className="analysis-section-heading">
         <h4><ClipboardList size={15} strokeWidth={1.5} aria-hidden /> 这批资料能算什么</h4>
         <Button variant="outline" type="button" disabled={working} onClick={() => void load()}>

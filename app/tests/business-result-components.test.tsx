@@ -144,6 +144,24 @@ describe('business result components', () => {
     expect(screen.getByRole('button', { name: '分析范围单位' }).textContent).toContain('万元');
   });
 
+  it('draws the values the files declare as chips and keeps 保存范围 as the card\'s one main action, at the right', async () => {
+    const financeCall = vi.fn(async (_task: string, command: string) => {
+      if (command === 'analysis-requirements-list') return ok({ current: null });
+      if (command === 'finance-readiness') return ok({ proposed_scope: { organization: '华东' }, datasets: [] });
+      return ok({});
+    });
+    (globalThis as { foundry?: Partial<Bridge> }).foundry = { financeCall };
+    render(<ScopeCard question="八月经营情况" datasets={[dataset]} />);
+    const candidate = await screen.findByRole('button', { name: '采用资料里的组织 华东' });
+    expect(candidate.getAttribute('data-size')).toBe('chip');
+    const card = screen.getByRole('region', { name: '分析范围' });
+    const mains = within(card).getAllByRole('button').filter((button) => button.getAttribute('data-variant') === 'default');
+    expect(mains.map((button) => button.textContent)).toEqual(['保存范围']);
+    const row = mains[0].parentElement!;
+    expect(row.className).toBe('analysis-actions analysis-actions--end');
+    expect(row.lastElementChild).toBe(mains[0]);
+  });
+
   it('resolves a legacy shared-period conflict explicitly while preserving item periods and bindings', async () => {
     const items = [{ id: 'monthly_profit', metric: 'operating_profit', periods: ['2026-01', '2026-08'], dimensions: {}, requires_drilldown: true }];
     const current = {

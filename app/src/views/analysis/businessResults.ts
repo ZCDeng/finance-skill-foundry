@@ -404,6 +404,16 @@ function canonicalBasis(row: Record<string, unknown>): string {
 // is a different comparison and is left unpaired. A bare year (actual_2026) is
 // left unpaired too: it cannot tell year-to-date from the full year.
 const scenarioWithPeriod = /^(actual|budget|variance)_(\d{1,2}_\d{1,2}|\d{4}_\d{2})$/;
+// The scenario words that fill the budget side (result_semantics.LONG_SCENARIO_MEASURES budget and estimated_budget,
+// both ROLES 'budget'); test_result_semantics keeps them in step with the backend.
+const budgetScenarios = ['budget', 'budget_ytd', 'budget_month', 'same_period_budget', 'baseline'];
+const estimatedBudgetScenarios = ['estimated_budget', 'estimated_budget_ytd', 'estimated_budget_month'];
+
+/** Whether a scenario word or a binding alias names the budget side of a comparison, approved or estimated. */
+export function isBudgetAlias(name: string): boolean {
+  const word = name.trim().toLowerCase();
+  return budgetScenarios.includes(word) || estimatedBudgetScenarios.includes(word);
+}
 // The unit table (KTD9, result_semantics.py FRACTION_UNITS / PERCENT_UNITS / UNMARKED_UNITS / POINT_UNITS). 比率 and
 // ratio hold a fraction (0.945 = 94.5%); %, pct and 百分比 a percent; 「-」 says no unit was marked; 百分点 a
 // difference of two percentages as written (3.3 = 3.3 个百分点, never ×100). Only the unit converts a value; a name
@@ -430,8 +440,8 @@ function longScenarioMeasure(row: Record<string, unknown>): { measure: Canonical
   // A ytd or month ending is a period class: a year-to-date actual never pairs with a monthly budget.
   const span = scenario.endsWith('_ytd') ? 'ytd' : scenario.endsWith('_month') ? 'month' : '';
   if (['actual', 'actual_ytd', 'actual_month', 'actual_period'].includes(scenario)) return { measure: 'actual', suffix: '', span };
-  if (['budget', 'budget_ytd', 'budget_month', 'same_period_budget', 'baseline'].includes(scenario)) return { measure: 'budget', suffix: '', span };
-  if (['estimated_budget', 'estimated_budget_ytd', 'estimated_budget_month'].includes(scenario)) return { measure: 'estimated_budget', suffix: '', span };
+  if (budgetScenarios.includes(scenario)) return { measure: 'budget', suffix: '', span };
+  if (estimatedBudgetScenarios.includes(scenario)) return { measure: 'estimated_budget', suffix: '', span };
   // variance_favorable is signed by effect on profit, not actual minus budget; it stays unpaired.
   if (['variance', 'budget_variance', 'difference', 'amount_change', 'profit_impact', 'contribution'].includes(scenario)) return { measure: 'variance', suffix: '' };
   if (['achievement_ratio', 'attainment_rate', 'attainment_ratio', 'completion_rate', 'actual_budget_ratio', 'actual_to_budget', 'ratio'].includes(scenario)) return { measure: 'rate', suffix: '' };

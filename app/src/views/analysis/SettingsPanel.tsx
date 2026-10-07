@@ -69,7 +69,7 @@ export function SettingsPanel({ state, summary, note, scrollIntoView = false, ch
       onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
       <div className="analysis-finance-setup-head analysis-section-heading"><div><h3>设置与高级</h3><p className="analysis-note">{note}</p></div>
         <Button variant="outline" type="button" aria-label="关闭设置与高级" onClick={close}>关闭</Button></div>
-      <div className="analysis-finance-setup-scroll">{children}</div>
+      <div className="analysis-finance-setup-body">{children}</div>
     </CollapsibleContent> : null}
   </Collapsible>;
 }

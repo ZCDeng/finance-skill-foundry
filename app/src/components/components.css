@@ -949,8 +949,10 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
   color: var(--fnd-line-hover);
 }
 
-/* Workspace has its own independently scrolling panes. */
-.fnd-shell[data-screen='analysis'] .fnd-column, .fnd-shell[data-screen='workbench'] .fnd-column { display: flex; flex: 1; flex-direction: column; padding: 0; max-width: none; min-height: 0; overflow: hidden; }
+/* Workspace has its own independently scrolling panes. clip, not hidden: a hidden box can still be scrolled, and a
+   scrollIntoView deep in the results pane (a jump to a file row, the settings panel) slid the whole column 32px up
+   under the app bar. */
+.fnd-shell[data-screen='analysis'] .fnd-column, .fnd-shell[data-screen='workbench'] .fnd-column { display: flex; flex: 1; flex-direction: column; padding: 0; max-width: none; min-height: 0; overflow: clip; }
 .workspace-mount { flex: 1; min-height: 0; height: 100%; }
 .fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }
 

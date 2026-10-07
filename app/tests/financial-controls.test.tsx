@@ -32,6 +32,20 @@ describe('financial web controls', () => {
     expect(screen.getByRole('button', { name: '期间设为上期' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('draws the period shortcuts as the shared chip, pressed only through aria-pressed', () => {
+    const now = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    render(<AccountingPeriodInput label="期间" value={now} onChange={() => {}} />);
+    for (const name of ['期间设为上期', '期间设为上年同期', '期间设为本期']) {
+      const chip = screen.getByRole('button', { name });
+      expect(chip.getAttribute('data-slot')).toBe('button');
+      expect(chip.getAttribute('data-variant')).toBe('outline');
+      expect(chip.getAttribute('data-size')).toBe('chip');
+      expect(chip.classList.contains('fnd-control-icon')).toBe(false);
+    }
+    // The pressed and unpressed chips carry the same classes; only the attribute differs.
+    expect(screen.getByRole('button', { name: '期间设为本期' }).className).toBe(screen.getByRole('button', { name: '期间设为上期' }).className);
+  });
+
   it('validates calendar dates without converting them to timestamps', () => {
     const onChange = vi.fn();
     render(<DateInput label="截止日期" value="2026-08-31" onChange={onChange} />);

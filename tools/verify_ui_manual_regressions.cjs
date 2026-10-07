@@ -340,10 +340,10 @@ function round(value) { return Math.round(value * 1000) / 1000; }
     const resultsFocus = page.getByRole('button', { name: '成果专注' });
     if (await resultsFocus.isVisible()) await resultsFocus.click();
     await page.getByRole('tabpanel').filter({ hasText: '多工作表预算' }).waitFor({ timeout: 45000 });
-    await page.getByText('待确认表结构', { exact: false }).first().waitFor({ timeout: 30000 });
-    const todo = page.locator('details').filter({ hasText: '待确认表结构' }).filter({ hasText: '多工作表预算' }).first();
-    await todo.waitFor({ timeout: 30000 });
-    if (!(await todo.evaluate((node) => node.hasAttribute('open')))) await todo.locator(':scope > summary').click();
+    // The file's row on the 资料 page opens its structure card in place (aria-expanded button, not a details).
+    const confirm = page.getByRole('button', { name: /^去确认表结构：.*多工作表预算/ }).first();
+    await confirm.waitFor({ timeout: 30000 });
+    if ((await confirm.getAttribute('aria-expanded')) !== 'true') await confirm.click();
     await page.locator('.analysis-structure-card').filter({ hasText: '多工作表预算' }).first().waitFor({ timeout: 30000 });
     await page.locator('.analysis-structure-preview tr.is-header td').first().waitFor({ timeout: 30000 });
     await page.evaluate(() => document.fonts.ready);

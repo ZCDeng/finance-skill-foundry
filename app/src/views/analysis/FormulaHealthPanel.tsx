@@ -5,7 +5,6 @@ import { Button } from '../../components/ui/button.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
 import { errorText, unwrap } from './shared.js';
-import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** What each hint means for the manager, and why it may matter at close. */
 const HINTS: Record<string, { title: string; why: string; unit?: string }> = {
@@ -38,12 +37,13 @@ const HINTS: Record<string, { title: string; why: string; unit?: string }> = {
 };
 const SHEET_STATES: Record<string, string> = { hidden: '隐藏', veryHidden: '深度隐藏' };
 
-type Opened = { datasetId: string; sheet: string; cell: string; range: string };
-type Row = { dataset: DatasetSnapshot; health: WorkbookHealth | null; onDemand: boolean };
+type Opened = { sheet: string; cell: string; range: string };
+/** A workbook's health as the file row shows it: the record, and whether it was checked just now rather than at import. */
+export type HealthEntry = { health: WorkbookHealth | null; onDemand: boolean };
 
 const isXlsxUpload = (dataset: DatasetSnapshot) => dataset.source_file === 'source.xlsx'
   && !dataset.metadata?.derived_from && !(dataset.transformation as { structure?: unknown } | undefined)?.structure;
-const issuesOf = (health: WorkbookHealth) => (Array.isArray(health.issues) ? health.issues : [])
+export const issuesOf = (health: WorkbookHealth) => (Array.isArray(health.issues) ? health.issues : [])
   .filter((issue) => issue && typeof issue.code === 'string' && (issue.count ?? 0) > 0);
 
 /**
@@ -52,11 +52,10 @@ const issuesOf = (health: WorkbookHealth) => (Array.isArray(health.issues) ? hea
  * change the workbook is the manager's call. A workbook filed before the check
  * existed can be checked on demand; that result is shown, not stored.
  */
-export function FormulaHealthPanel({ taskId, datasets }: { taskId: string; datasets: DatasetSnapshot[] }) {
+export function useFormulaHealth(taskId: string) {
   const [checked, setChecked] = useState<Record<string, WorkbookHealth>>({});
   const [working, setWorking] = useState('');
   const [error, setError] = useState('');
-  const [opened, setOpened] = useState<Opened | null>(null);
   const canCheck = Boolean(bridge()?.financeCall);
   // A check started on one task must not land on the next one.
   const currentTask = useRef(taskId);
@@ -65,73 +64,60 @@ export function FormulaHealthPanel({ taskId, datasets }: { taskId: string; datas
   useEffect(() => {
     if (mountedTask.current === taskId) return;
     mountedTask.current = taskId;
-    setChecked({}); setWorking(''); setError(''); setOpened(null);
+    setChecked({}); setWorking(''); setError('');
   }, [taskId]);
 
-  const rows = datasets.flatMap((dataset): Row[] => {
+  /** The file's health, null when the check does not apply to it (a CSV, a derived table, a file without its workbook). */
+  function entryOf(dataset: DatasetSnapshot): HealthEntry | null {
     const health = dataset.workbook_health ?? checked[dataset.id];
-    if (health && typeof health === 'object') return [{ dataset, health, onDemand: !dataset.workbook_health }];
-    return isXlsxUpload(dataset) && canCheck ? [{ dataset, health: null, onDemand: true }] : [];
-  });
-  const shown = rows.filter(({ health, onDemand }) => !health || health.status !== 'checked' || issuesOf(health).length > 0 || onDemand);
-  if (!shown.length && !error) return null;
+    if (health && typeof health === 'object') return { health, onDemand: !dataset.workbook_health };
+    return isXlsxUpload(dataset) && canCheck ? { health: null, onDemand: true } : null;
+  }
 
-  async function check(dataset: DatasetSnapshot) {
-    const api = bridge(); if (!api?.financeCall) return;
+  /** Checks one workbook now; the result, or null when it failed or the manager has moved on. */
+  async function check(dataset: DatasetSnapshot): Promise<WorkbookHealth | null> {
+    const api = bridge(); if (!api?.financeCall) return null;
     const forTask = taskId;
     setWorking(dataset.id); setError('');
     try {
       const result = unwrap(await api.financeCall(forTask, 'workbook-health', { dataset_id: dataset.id }) as Answer<Record<string, unknown>>);
-      if (currentTask.current !== forTask) return;
-      setChecked((current) => ({ ...current, [dataset.id]: result as unknown as WorkbookHealth }));
+      if (currentTask.current !== forTask) return null;
+      const health = result as unknown as WorkbookHealth;
+      setChecked((current) => ({ ...current, [dataset.id]: health }));
+      return health;
     } catch (failure) {
       if (currentTask.current === forTask) setError(errorText(failure));
+      return null;
     } finally {
       if (currentTask.current === forTask) setWorking('');
     }
   }
 
+  return { entryOf, check, working, error };
+}
+
+/** One workbook's hints, opened under its row on the 资料 page. */
+export function FormulaHealthDetails({ taskId, dataset, health }: { taskId: string; dataset: DatasetSnapshot; health: WorkbookHealth }) {
+  const [opened, setOpened] = useState<Opened | null>(null);
+  const issues = issuesOf(health);
   return (
-    <section className="analysis-formula-health" aria-label="公式体检">
-      {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
-      {shown.map(({ dataset, health, onDemand }) => {
-        if (!health) {
-          return <p key={dataset.id} className="analysis-formula-health-line">
-            <span>{dataset.name} · 导入时还没有做公式体检。</span>
-            <Button type="button" variant="outline" disabled={Boolean(working)} aria-label={`体检这本工作簿：${dataset.name}`}
-              onClick={() => void check(dataset)}>{working === dataset.id ? '正在体检…' : '体检这本工作簿'}</Button>
-            <HelpLink article="formula-health" label="工作簿公式体检" />
-          </p>;
-        }
-        if (health.status !== 'checked') {
-          return <p key={dataset.id} className="analysis-formula-health-line">{dataset.name}：这本工作簿未能完成公式体检（不影响使用）。</p>;
-        }
-        const issues = issuesOf(health);
-        if (!issues.length) {
-          return <p key={dataset.id} className="analysis-formula-health-line">{dataset.name}：公式体检没有发现需要提示的地方。</p>;
-        }
-        return <details key={dataset.id} className="analysis-details analysis-formula-health-book" open={onDemand || undefined}>
-          <DisclosureSummary>公式体检 · {dataset.name} · {issues.length} 类提示</DisclosureSummary>
-          <div className="analysis-formula-health-body">
-            <ul className="analysis-formula-health-list">
-              {[...issues].sort((a, b) => Number(a.severity !== 'warning') - Number(b.severity !== 'warning')).map((issue) => (
-                <Hint key={issue.code} issue={issue} onOpen={(sample) => setOpened({ datasetId: dataset.id, sheet: sample.sheet,
-                  cell: sample.cell!, range: sample.range ?? sample.cell! })} />
-              ))}
-            </ul>
-            {health.truncated && <p className="analysis-note">公式较多，只检查了前 {health.checked_formula_cells ?? 0} 个公式单元格。</p>}
-            {opened?.datasetId === dataset.id && <div className="analysis-formula-health-view">
-              <p className="analysis-note">正在查看 {opened.sheet}!{opened.cell} 及周围区域。</p>
-              <WorkbookBrowser key={`${opened.datasetId}:${opened.sheet}:${opened.range}`} taskId={taskId} datasetId={opened.datasetId}
-                initialSheet={opened.sheet} initialRange={opened.range} showSheetPicker={false} />
-            </div>}
-            <p className="analysis-note analysis-formula-health-close">
-              这些是提示，不影响导入和计算；是否需要修改由你判断。<HelpLink article="formula-health" label="工作簿公式体检" />
-            </p>
-          </div>
-        </details>;
-      })}
-    </section>
+    <div className="analysis-formula-health-body" aria-label={`公式体检：${dataset.name}`} role="group">
+      <ul className="analysis-formula-health-list">
+        {[...issues].sort((a, b) => Number(a.severity !== 'warning') - Number(b.severity !== 'warning')).map((issue) => (
+          <Hint key={issue.code} issue={issue} onOpen={(sample) => setOpened({ sheet: sample.sheet,
+            cell: sample.cell!, range: sample.range ?? sample.cell! })} />
+        ))}
+      </ul>
+      {health.truncated && <p className="analysis-note">公式较多，只检查了前 {health.checked_formula_cells ?? 0} 个公式单元格。</p>}
+      {opened && <div className="analysis-formula-health-view">
+        <p className="analysis-note">正在查看 {opened.sheet}!{opened.cell} 及周围区域。</p>
+        <WorkbookBrowser key={`${dataset.id}:${opened.sheet}:${opened.range}`} taskId={taskId} datasetId={dataset.id}
+          initialSheet={opened.sheet} initialRange={opened.range} showSheetPicker={false} />
+      </div>}
+      <p className="analysis-note analysis-formula-health-close">
+        这些是提示，不影响导入和计算；是否需要修改由你判断。<HelpLink article="formula-health" label="工作簿公式体检" />
+      </p>
+    </div>
   );
 }
 
@@ -144,7 +130,7 @@ function Hint({ issue, onOpen }: { issue: WorkbookHealthIssue; onOpen(sample: Wo
     <li className={`analysis-formula-health-item${warning ? ' analysis-formula-health-item--warning' : ''}`}>
       <div className="analysis-formula-health-head">
         <span className="analysis-formula-health-severity">
-          {warning ? <TriangleAlert size={13} strokeWidth={1.75} aria-hidden /> : <Info size={13} strokeWidth={1.75} aria-hidden />}
+          {warning ? <TriangleAlert size={13} strokeWidth={1.5} aria-hidden /> : <Info size={13} strokeWidth={1.5} aria-hidden />}
           {warning ? '需留意' : '提示'}
         </span>
         <span>{known.title}</span>

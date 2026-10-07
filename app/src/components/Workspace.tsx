@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Archive, BookOpen, Check, Columns2, Ellipsis, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { Archive, BookOpen, Check, Columns2, Ellipsis, FileClock, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Sheet, Trash2, X } from 'lucide-react';
 import type { TaskLifecycleFilter, TaskRow } from '../bridge.js';
 import './workspace.css';
 import { Button } from './ui/button.js';
@@ -219,9 +219,9 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" aria-label="任务工具菜单">
-              <DropdownMenuItem onSelect={() => openMethods()}>方法库</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onData()}>数据台</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onHistory()}>任务记录与旧版流程</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openMethods()}><BookOpen size={15} strokeWidth={1.5} aria-hidden />方法库</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onData()}><Sheet size={15} strokeWidth={1.5} aria-hidden />数据台</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onHistory()}><FileClock size={15} strokeWidth={1.5} aria-hidden />任务记录与旧版流程</DropdownMenuItem>
               {task && lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} aria-hidden />归档任务</DropdownMenuItem> : null}
               {task && lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} aria-hidden />恢复任务</DropdownMenuItem> : null}
               {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} aria-hidden />移入回收站</DropdownMenuItem> : null}
