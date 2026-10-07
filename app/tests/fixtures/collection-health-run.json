@@ -1,0 +1,2115 @@
+{
+ "id": "b123fd9f8da847f6aa19f419a71e9e78",
+ "task_id": "8220d66860984dfcb40dcdc9c98c36c4",
+ "analysis_id": "b2421bc1be034051b05093194eb25d13",
+ "schema_version": 1,
+ "created_at": "2026-10-07T21:52:17Z",
+ "execution_status": "succeeded",
+ "reproducibility_status": "unverified",
+ "review_status": "unreviewed",
+ "publication_status": "draft",
+ "input_hashes": {
+  "city": "8fc9332f562e0d2fe6e7c7f9568250cbf919caecade56056b7967292774349f7",
+  "kpi": "020b20aebf82d293e1f6896f1fcbed1f37de9234f3c07302aa773fe02048c1d3"
+ },
+ "engine": "finance",
+ "result": {
+  "columns": [
+   {
+    "name": "entity",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "metric_key",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "metric_label",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "scenario",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "value",
+    "type": "DECIMAL"
+   },
+   {
+    "name": "unit",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "display_value",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "level",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "level_label",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "estimate",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "formula",
+    "type": "VARCHAR"
+   },
+   {
+    "name": "note",
+    "type": "VARCHAR"
+   }
+  ],
+  "rows": [
+   {
+    "entity": "集团",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "18.0533036076205900",
+    "unit": "%",
+    "display_value": "18.05%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "集团",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "9.19593175369421800",
+    "unit": "%",
+    "display_value": "9.20%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "集团",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "91.14262814607362800",
+    "unit": "%",
+    "display_value": "91.14%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "集团",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "-3.22412814607362800",
+    "unit": "百分点",
+    "display_value": "-3.22 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "集团",
+    "metric_key": "collection_gap_total",
+    "metric_label": "距生死线（综合收缴率，含清欠）",
+    "scenario": "本期",
+    "value": "-8.74262814607362800",
+    "unit": "百分点",
+    "display_value": "-8.74 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "综合收缴率 − 生死线收缴率",
+    "note": "严重低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "上海城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "23.373022132300284173693510014194200039947882052875456423865301505859852163124331",
+    "unit": "%",
+    "display_value": "23.37%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "上海城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728268088468588507919864459465713047781990041850197522146822059817682263697470",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "上海城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "83.799804676546574677098476431752371264830316951309563328349380700121916063245416",
+    "unit": "%",
+    "display_value": "83.80%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "上海城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "8.1562728520808353229015235682476287351696830486904366716506192998780839367545840",
+    "unit": "百分点",
+    "display_value": "+8.16 个百分点",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": ""
+   },
+   {
+    "entity": "上海城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "11.470396753101355761808425011077919890704345557767531144651385225132589924415108",
+    "unit": "%",
+    "display_value": "11.47%",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "20.573021794026132642657689605342324669497106753452025790896204158753548211018494",
+    "unit": "%",
+    "display_value": "20.57%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728264156583432740312885787094678467313889019411147578982983966551332195141473",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "86.599804621632210631373598973367143177234282148489088967002094237901585008495653",
+    "unit": "%",
+    "display_value": "86.60%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "3.0562729069951993686264010266328568227657178515109110329979057620984149915043470",
+    "unit": "百分点",
+    "display_value": "+3.06 个百分点",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": ""
+   },
+   {
+    "entity": "合肥城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "13.031524673094940774948936088488890256421270093863430185601907790274407992134578",
+    "unit": "%",
+    "display_value": "13.03%",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "广州城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "22.673022173116893313335240984516476463450782302633971595591201084289394544579058",
+    "unit": "%",
+    "display_value": "22.67%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "广州城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728266527231981393758711888583541617305220294284192284953217484394879939470711",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "广州城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "84.499804479606304826040630204341877698279739726794447632904120664150093449368013",
+    "unit": "%",
+    "display_value": "84.50%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "广州城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "5.8562730490211051739593697956581223017202602732055523670958793358499065506319870",
+    "unit": "百分点",
+    "display_value": "+5.86 个百分点",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": ""
+   },
+   {
+    "entity": "广州城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "12.955458677677548967643529442135107981511644434378641379047331296774383150042822",
+    "unit": "%",
+    "display_value": "12.96%",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "中山城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "19.873022593392455891975918069241103688633228780115895861729292735218813053251321",
+    "unit": "%",
+    "display_value": "19.87%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "中山城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728275342338642519860533284846181525740015899580078958444078873307134228284331",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "中山城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "87.299804940841408360010135259243514463940772809842112034115115152111900369577112",
+    "unit": "%",
+    "display_value": "87.30%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "中山城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "0.75627258778600163998986474075648553605922719015788796588488484788809963042288800",
+    "unit": "百分点",
+    "display_value": "+0.76 个百分点",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "贴近生死线"
+   },
+   {
+    "entity": "中山城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "14.780811300876163006345421638822913310542444017737301618634506945935869084440333",
+    "unit": "%",
+    "display_value": "14.78%",
+    "level": "green",
+    "level_label": "绿",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "北京城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "21.073021829109865680919418016602943624316186381140553009233722056468388481777335",
+    "unit": "%",
+    "display_value": "21.07%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "北京城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728268364014659974792801176959450597820639018766424231065775997671431611697149",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "北京城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "86.099805007291600316559862101093001435465877520736089413872855543298754679392380",
+    "unit": "%",
+    "display_value": "86.10%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "北京城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "2.7562725213358096834401378989069985645341224792639105861271444567012453206076200",
+    "unit": "百分点",
+    "display_value": "+2.76 个百分点",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "贴近生死线"
+   },
+   {
+    "entity": "北京城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "16.564032084173456149731830664054841117318362425414403619584622606357538660142681",
+    "unit": "%",
+    "display_value": "16.56%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "大连城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "18.273022627759325546462494771161009797696805312613133308979380660645229980816566",
+    "unit": "%",
+    "display_value": "18.27%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "大连城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728270479720726752902703955174594327820326443292550251384721544560821920392554",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "大连城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "88.899804420212747128827775624356449635085227331716121716159091493810852211222689",
+    "unit": "%",
+    "display_value": "88.90%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "大连城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "-2.3437268915853371288277756243564496350852273317161217161590914938108522112226890",
+    "unit": "百分点",
+    "display_value": "-2.34 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "大连城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "19.102158994026398647146711986876647805130600427127972380183287984985804607242042",
+    "unit": "%",
+    "display_value": "19.10%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "武汉城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "20.173021876983857257541970841710530770306759607741147157955124902800015641225968",
+    "unit": "%",
+    "display_value": "20.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "武汉城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728264020341345733695127190844093052051549265652717666040001526977713211177404",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "武汉城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "86.999804525050277315827541877373878534898395318824124608648875249897755679891772",
+    "unit": "%",
+    "display_value": "87.00%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "武汉城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "0.15627300357713268417245812262612146510160468117587539135112475010224432010822800",
+    "unit": "百分点",
+    "display_value": "+0.16 个百分点",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "贴近生死线"
+   },
+   {
+    "entity": "武汉城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "18.321012118703360134303899699580485445632453853674216073987630867821167704799612",
+    "unit": "%",
+    "display_value": "18.32%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "宜昌城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "17.373021848097719522793433668831338275827493981990007339244971767391888386207134",
+    "unit": "%",
+    "display_value": "17.37%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "宜昌城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728268646201422301430379172154781725238453874962930831945976949755106793149909",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "宜昌城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "89.799805016522422707349604248384139896696351405506285743949625927583622293107857",
+    "unit": "%",
+    "display_value": "89.80%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "宜昌城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "-4.9437274878950227073496042483841398966963514055062857439496259275836222931078570",
+    "unit": "百分点",
+    "display_value": "-4.94 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "宜昌城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "21.273798739772531666853864256713692030500136576703270995428169626271642090613824",
+    "unit": "%",
+    "display_value": "21.27%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "成都城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "19.373022298206557637712266351282460465862475826169397615740848333571353990609986",
+    "unit": "%",
+    "display_value": "19.37%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "成都城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728261764759581971929602633702370160187142868383143446923717432447626113809843",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "成都城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "87.799803878269400559480693912087776550156238460668916728951523409673408620770998",
+    "unit": "%",
+    "display_value": "87.80%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "成都城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "-1.8437263496419905594806939120877765501562384606689167289515234096734086207709980",
+    "unit": "百分点",
+    "display_value": "-1.84 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "成都城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "25.427938940060008674819407885555108468173041007182286307302498103363327216634327",
+    "unit": "%",
+    "display_value": "25.43%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   },
+   {
+    "entity": "兰州城市公司",
+    "metric_key": "gross_margin",
+    "metric_label": "毛利率",
+    "scenario": "本期",
+    "value": "16.573021984355404357199582837656800327574815229198639562304111987607035463560030",
+    "unit": "%",
+    "display_value": "16.57%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "毛利 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "兰州城市公司",
+    "metric_key": "expense_ratio",
+    "metric_label": "期间费用率",
+    "scenario": "本期",
+    "value": "7.1728264694795829919502930307957648660303311120978017799144414782331323938597167",
+    "unit": "%",
+    "display_value": "7.17%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "期间费用 ÷ 营业收入",
+    "note": ""
+   },
+   {
+    "entity": "兰州城市公司",
+    "metric_key": "break_even_collection",
+    "metric_label": "生死线收缴率",
+    "scenario": "本期",
+    "value": "90.599804485124178634750710193138964538455515882899162217610329490626096930299687",
+    "unit": "%",
+    "display_value": "90.60%",
+    "level": null,
+    "level_label": null,
+    "estimate": false,
+    "formula": "1 − 毛利率 + 期间费用率",
+    "note": ""
+   },
+   {
+    "entity": "兰州城市公司",
+    "metric_key": "collection_gap",
+    "metric_label": "距生死线（本年账单收缴率）",
+    "scenario": "本期",
+    "value": "-6.9437269564967786347507101931389645384555158828991622176103294906260969302996870",
+    "unit": "百分点",
+    "display_value": "-6.94 个百分点",
+    "level": "red",
+    "level_label": "红",
+    "estimate": false,
+    "formula": "本年账单收缴率 − 生死线收缴率，等于现金经营利润率",
+    "note": "严重低于生死线，每收100元倒贴现金"
+   },
+   {
+    "entity": "兰州城市公司",
+    "metric_key": "impairment_to_gross_profit",
+    "metric_label": "减值占毛利",
+    "scenario": "本期",
+    "value": "29.723971384999330063259222324011602172062820146413154496219103492540637062661836",
+    "unit": "%",
+    "display_value": "29.72%",
+    "level": "yellow",
+    "level_label": "黄",
+    "estimate": false,
+    "formula": "减值损失（绝对值）÷ 毛利",
+    "note": ""
+   }
+  ],
+  "row_count": 55,
+  "truncated": false,
+  "diagnostics": [
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "集团 有 12 项指标缺输入，未计算",
+    "entity": "集团",
+    "skipped": [
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "impairment_to_gross_profit",
+      "needs": [
+       "impairment",
+       "gross_profit|revenue+cost"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "上海城市公司 有 12 项指标缺输入，未计算",
+    "entity": "上海城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "合肥城市公司 有 12 项指标缺输入，未计算",
+    "entity": "合肥城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "广州城市公司 有 12 项指标缺输入，未计算",
+    "entity": "广州城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "中山城市公司 有 12 项指标缺输入，未计算",
+    "entity": "中山城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "北京城市公司 有 12 项指标缺输入，未计算",
+    "entity": "北京城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "大连城市公司 有 12 项指标缺输入，未计算",
+    "entity": "大连城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "武汉城市公司 有 12 项指标缺输入，未计算",
+    "entity": "武汉城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "宜昌城市公司 有 12 项指标缺输入，未计算",
+    "entity": "宜昌城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "成都城市公司 有 12 项指标缺输入，未计算",
+    "entity": "成都城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   },
+   {
+    "severity": "info",
+    "code": "collection_metric_skipped",
+    "message": "兰州城市公司 有 12 项指标缺输入，未计算",
+    "entity": "兰州城市公司",
+    "skipped": [
+     {
+      "metric_key": "collection_gap_total",
+      "needs": [
+       "gross_margin|revenue+cost|revenue+gross_profit",
+       "expense_ratio|period_expense+revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "ttm_revenue",
+      "needs": [
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "dso",
+      "needs": [
+       "ar_end",
+       "revenue_ttm|revenue_py_full+revenue_py+revenue"
+      ]
+     },
+     {
+      "metric_key": "ar_buildup",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_collection",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "implied_vs_reported",
+      "needs": [
+       "ar_end",
+       "ar_begin",
+       "impairment",
+       "revenue",
+       "collection_rate_total"
+      ]
+     },
+     {
+      "metric_key": "rollforward_collection",
+      "needs": [
+       "ar_collected",
+       "ar_gross_begin",
+       "ar_new"
+      ]
+     },
+     {
+      "metric_key": "cash_collection_ratio",
+      "needs": [
+       "cash_from_sales",
+       "revenue"
+      ]
+     },
+     {
+      "metric_key": "provision_ratio",
+      "needs": [
+       "provision",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "aging_over_1y_share",
+      "needs": [
+       "ar_over_1y",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_share",
+      "needs": [
+       "related_ar",
+       "ar_gross"
+      ]
+     },
+     {
+      "metric_key": "related_party_provision_ratio",
+      "needs": [
+       "related_provision",
+       "related_ar"
+      ]
+     }
+    ]
+   }
+  ],
+  "sensitivity": [
+   {
+    "entity": "集团",
+    "expense_ratio": "0.09195931753694218",
+    "gross_margins": [
+     "0.10",
+     "0.12",
+     "0.14",
+     "0.16",
+     "0.18",
+     "0.20",
+     "0.22",
+     "0.24",
+     "0.26",
+     "0.28",
+     "0.30"
+    ],
+    "collection_rates": [
+     "0.75",
+     "0.775",
+     "0.800",
+     "0.825",
+     "0.850",
+     "0.875",
+     "0.900",
+     "0.925",
+     "0.950",
+     "0.975",
+     "1.000"
+    ],
+    "cells": [
+     [
+      "-0.24195931753694218",
+      "-0.21695931753694218",
+      "-0.19195931753694218",
+      "-0.16695931753694218",
+      "-0.14195931753694218",
+      "-0.11695931753694218",
+      "-0.09195931753694218",
+      "-0.06695931753694218",
+      "-0.04195931753694218",
+      "-0.01695931753694218",
+      "0.00804068246305782"
+     ],
+     [
+      "-0.22195931753694218",
+      "-0.19695931753694218",
+      "-0.17195931753694218",
+      "-0.14695931753694218",
+      "-0.12195931753694218",
+      "-0.09695931753694218",
+      "-0.07195931753694218",
+      "-0.04695931753694218",
+      "-0.02195931753694218",
+      "0.00304068246305782",
+      "0.02804068246305782"
+     ],
+     [
+      "-0.20195931753694218",
+      "-0.17695931753694218",
+      "-0.15195931753694218",
+      "-0.12695931753694218",
+      "-0.10195931753694218",
+      "-0.07695931753694218",
+      "-0.05195931753694218",
+      "-0.02695931753694218",
+      "-0.00195931753694218",
+      "0.02304068246305782",
+      "0.04804068246305782"
+     ],
+     [
+      "-0.18195931753694218",
+      "-0.15695931753694218",
+      "-0.13195931753694218",
+      "-0.10695931753694218",
+      "-0.08195931753694218",
+      "-0.05695931753694218",
+      "-0.03195931753694218",
+      "-0.00695931753694218",
+      "0.01804068246305782",
+      "0.04304068246305782",
+      "0.06804068246305782"
+     ],
+     [
+      "-0.16195931753694218",
+      "-0.13695931753694218",
+      "-0.11195931753694218",
+      "-0.08695931753694218",
+      "-0.06195931753694218",
+      "-0.03695931753694218",
+      "-0.01195931753694218",
+      "0.01304068246305782",
+      "0.03804068246305782",
+      "0.06304068246305782",
+      "0.08804068246305782"
+     ],
+     [
+      "-0.14195931753694218",
+      "-0.11695931753694218",
+      "-0.09195931753694218",
+      "-0.06695931753694218",
+      "-0.04195931753694218",
+      "-0.01695931753694218",
+      "0.00804068246305782",
+      "0.03304068246305782",
+      "0.05804068246305782",
+      "0.08304068246305782",
+      "0.10804068246305782"
+     ],
+     [
+      "-0.12195931753694218",
+      "-0.09695931753694218",
+      "-0.07195931753694218",
+      "-0.04695931753694218",
+      "-0.02195931753694218",
+      "0.00304068246305782",
+      "0.02804068246305782",
+      "0.05304068246305782",
+      "0.07804068246305782",
+      "0.10304068246305782",
+      "0.12804068246305782"
+     ],
+     [
+      "-0.10195931753694218",
+      "-0.07695931753694218",
+      "-0.05195931753694218",
+      "-0.02695931753694218",
+      "-0.00195931753694218",
+      "0.02304068246305782",
+      "0.04804068246305782",
+      "0.07304068246305782",
+      "0.09804068246305782",
+      "0.12304068246305782",
+      "0.14804068246305782"
+     ],
+     [
+      "-0.08195931753694218",
+      "-0.05695931753694218",
+      "-0.03195931753694218",
+      "-0.00695931753694218",
+      "0.01804068246305782",
+      "0.04304068246305782",
+      "0.06804068246305782",
+      "0.09304068246305782",
+      "0.11804068246305782",
+      "0.14304068246305782",
+      "0.16804068246305782"
+     ],
+     [
+      "-0.06195931753694218",
+      "-0.03695931753694218",
+      "-0.01195931753694218",
+      "0.01304068246305782",
+      "0.03804068246305782",
+      "0.06304068246305782",
+      "0.08804068246305782",
+      "0.11304068246305782",
+      "0.13804068246305782",
+      "0.16304068246305782",
+      "0.18804068246305782"
+     ],
+     [
+      "-0.04195931753694218",
+      "-0.01695931753694218",
+      "0.00804068246305782",
+      "0.03304068246305782",
+      "0.05804068246305782",
+      "0.08304068246305782",
+      "0.10804068246305782",
+      "0.13304068246305782",
+      "0.15804068246305782",
+      "0.18304068246305782",
+      "0.20804068246305782"
+     ]
+    ],
+    "current": {
+     "gross_margin": "0.1805330360762059",
+     "collection_rate": "0.879185"
+    },
+    "formula": "现金经营利润率 = 收缴率 − （1 − 毛利率）− 期间费用率"
+   }
+  ],
+  "scenario_kind": "collection_health"
+ }
+}
