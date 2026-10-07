@@ -37,11 +37,11 @@ WRITING_GUIDANCE = {
     ),
     "rules": [
         "每段只写一个主题，开头用一到两个短段说明结论和重大财务影响。",
-        "把 {{fact:FACT_ID}} 保留在对应数字、公式或表格位置；它是数值占位符，不是引用编号。",
+        "把金额的 {{fact:FACT_ID}} 保留在对应金额、公式或表格位置；它是数值占位符，不是引用编号。",
         "多个驱动、条件或不确定性使用条列或比较表，条件贴近相关判断。",
         "完整公式、桥接计算和口径说明独立成段或小表，不塞进长句。",
         "来源定位使用章节末附注 [^n]；不得补造原因、行动、空值或未授权来源。",
-        "数字照三条写：手写的金额和数量加千分位（325,644.00 万元）；金额行用 {{fact:FACT_ID}} 占位符并原样保留，不因渲染出的小数位或缺千分位改成手写；比率行和 %、pct、「百分比」行不用占位符，正文手写百分数，对应 claim 写全 basis=calculation、run_id、row、column、value、fact_id 和 presentation（decimal_places，rounding 为 half_up；比率行 scale 用 percent，%、pct、「百分比」行 scale 用 identity），由服务复核；其他手写的舍入数同样带 presentation（scale 用 identity）。",
+        "数字照三条写：手写的金额和数量加千分位（325,644.00 万元）；金额行用 {{fact:FACT_ID}} 占位符并原样保留，不因渲染出的小数位或缺千分位改成手写；比率行和 %、pct、「百分比」行不用占位符，正文手写百分数，对应 claim 写全 basis=calculation、run_id、row、column、value、fact_id 和 presentation（decimal_places，rounding 为 half_up；比率行 scale 用 percent，%、pct、「百分比」行 scale 用 identity），由服务复核；其他手写的舍入数同样带 presentation（scale 用 identity）；手写数等于事实原值或展示值时不需要 presentation；负值直接写负号（-6.85%）。",
         "结果行里「比率」或 ratio 是小数，正文写成百分数（94.53%）；单位为 %、pct 或「百分比」的行本身已是百分数，正文写展示值加 %（3.30%），不乘 100；单位为「百分点」的差值行写「3.30 个百分点」。不写「比率以小数表示」这类格式说明。正文、运行说明和假设里不写内部字段名（metric_key、scenario、currency/unit），改写成指标、情景、币种和单位。",
     ],
 }
@@ -156,7 +156,7 @@ def render_fact_template(body: str, facts: list[dict]) -> tuple[str, list[str]]:
         if unit and display.endswith(f" {unit}") and _unit_follows(body, match.end(), unit):
             return display[: -len(unit)].rstrip()
         # 「缺口 {{fact:…}} 个百分点」 or 「… 百分点」: the prose says the unit, so 「3.30 个百分点」 drops its own.
-        if display.endswith(POINTS_SUFFIX) and re.match(r"\s*个?百分点", body[match.end():]):
+        if display.endswith(POINTS_SUFFIX) and re.match(r"\s*个?\s*百分点", body[match.end():]):
             return display[: -len(POINTS_SUFFIX)]
         return display
 
@@ -1882,8 +1882,8 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
         alternatives = []
         for fact in labelled:
             found = []
-            unit_match = re.match(r"\s*(亿元|万元|元/件|元|%|条|件)", body[end:])
-            if unit_match and unit_match[1] != fact.get('unit'):
+            unit_match = re.match(r"\s*(亿元|万元|元/件|元|[%％]|个?\s*百分点|条|件)", body[end:])
+            if unit_match and not _body_unit_fits_fact(unit_match[1], fact):
                 found.append({'code': 'fact_unit_mismatch', 'severity': 'warning', 'message': '正文单位与引用事实单位不一致。'})
             semantic = fact['semantics']
             if semantic.get('role') == 'profit_impact' or fact['column'] in {'amount_change', 'total_variance', 'quantity_contribution', 'price_contribution', 'interaction'}:
@@ -1899,6 +1899,17 @@ def _fact_context_issues(body: str, facts: list[dict], evidence_groups: list[dic
         # Another fact with the same value and matching label may be the correct reference.
         issues.extend(min(alternatives, key=len) if alternatives else [])
     return issues
+
+
+def _body_unit_fits_fact(written: str, fact: dict) -> bool:
+    """Whether the unit written after a number fits the fact: 个百分点 only a 百分点 fact, % any percentage unit
+    (%, ％, pct, 百分比; a ratio column's facts read % too), anything else the fact's own unit."""
+    unit = re.sub(r"\s+", "", str(fact.get("unit") or "")).lower()
+    if "百分点" in written:
+        return unit == POINTS_UNIT
+    if written in {"%", "％"}:
+        return unit in PERCENT_UNITS
+    return written == str(fact.get("unit") or "")
 
 
 def _body_closure_check(body: str, facts: list[dict], evidence_groups: list[dict]) -> dict:
@@ -2110,7 +2121,9 @@ def _presentation_number(claim: dict, fact: dict | None) -> tuple[dict | None, d
         return None, {**base_issue, "reason": "presentation_rounding_failed"}
     rendered = format(rounded, f".{decimal_places}f")
     # A %/pct row is already a percentage: identity rounds it and writes it with %, as a ratio's percent scale does.
-    percent_row = scale == "identity" and _fact_has_percent_unit(fact)
+    column = str(fact.get("column") or "")
+    # A *_pct ratio column also holds a percentage (3.3 is 3.3%), so identity writes it with % as well.
+    percent_row = scale == "identity" and (_fact_has_percent_unit(fact) or (_is_ratio_column(column) and column.endswith("_pct")))
     unit = "%" if scale == "percent" else PERCENT_ROW_UNIT if percent_row else str(fact.get("unit") or "").strip()
     if scale == "percent" or percent_row:
         rendered += "%"
@@ -2760,7 +2773,7 @@ def _normalize_number(text: str) -> str:
     text = str(text).strip().replace(",", "").replace("％", "%")
     if text.endswith("%"):
         try:
-            return format(Decimal(text[:-1]) / Decimal(100), "f")
+            return format((Decimal(text[:-1]) / Decimal(100)).normalize(), "f")
         except InvalidOperation:
             return text
     try:

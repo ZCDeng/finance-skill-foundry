@@ -1,0 +1,1824 @@
+{
+ "about": "Number check matrix for validate_explanation (PR F review rounds 1-3). Each case is one fact, one body and an optional claim presentation; expect is what the writing rules (WRITING_GUIDANCE) say the check must answer. Facts are long-table rows (column value, unit from the row) or wide-table columns.",
+ "facts": {
+  "wan": {
+   "column": "value",
+   "value": "3.3",
+   "unit": "万元",
+   "metric_key": "m"
+  },
+  "yuan": {
+   "column": "value",
+   "value": "1234567.5",
+   "unit": "元",
+   "metric_key": "m"
+  },
+  "bilv": {
+   "column": "value",
+   "value": "0.945301",
+   "unit": "比率",
+   "metric_key": "m"
+  },
+  "ratio_u": {
+   "column": "value",
+   "value": "0.9453",
+   "unit": "ratio",
+   "metric_key": "m"
+  },
+  "bilv_neg": {
+   "column": "value",
+   "value": "-0.068519",
+   "unit": "比率",
+   "metric_key": "m"
+  },
+  "bilv_zero": {
+   "column": "value",
+   "value": "0",
+   "unit": "比率",
+   "metric_key": "m"
+  },
+  "pct_sym": {
+   "column": "value",
+   "value": "3.3",
+   "unit": "%",
+   "metric_key": "m"
+  },
+  "pct_ach": {
+   "column": "value",
+   "value": "94.5301",
+   "unit": "%",
+   "metric_key": "revenue_achievement_ratio"
+  },
+  "pct_full": {
+   "column": "value",
+   "value": "3.3",
+   "unit": "％",
+   "metric_key": "m"
+  },
+  "pct_word": {
+   "column": "value",
+   "value": "3.2547",
+   "unit": "pct",
+   "metric_key": "m"
+  },
+  "pct_cn": {
+   "column": "value",
+   "value": "3.3",
+   "unit": "百分比",
+   "metric_key": "m"
+  },
+  "pct_neg": {
+   "column": "value",
+   "value": "-3.3",
+   "unit": "pct",
+   "metric_key": "m"
+  },
+  "pct_zero": {
+   "column": "value",
+   "value": "0",
+   "unit": "%",
+   "metric_key": "m"
+  },
+  "pct_big": {
+   "column": "value",
+   "value": "1234.5",
+   "unit": "%",
+   "metric_key": "m"
+  },
+  "pts": {
+   "column": "value",
+   "value": "3.3",
+   "unit": "百分点",
+   "metric_key": "m"
+  },
+  "pts_round": {
+   "column": "value",
+   "value": "3.256",
+   "unit": "百分点",
+   "metric_key": "m"
+  },
+  "pts_neg": {
+   "column": "value",
+   "value": "-3.3",
+   "unit": "百分点",
+   "metric_key": "m"
+  },
+  "pts_zero": {
+   "column": "value",
+   "value": "0",
+   "unit": "百分点",
+   "metric_key": "m"
+  },
+  "day": {
+   "column": "value",
+   "value": "45",
+   "unit": "天",
+   "metric_key": "m"
+  },
+  "nounit": {
+   "column": "value",
+   "value": "3.3",
+   "unit": null,
+   "metric_key": "m"
+  },
+  "gap_pct": {
+   "column": "gap_pct",
+   "value": "3.3",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "gap_pct_neg": {
+   "column": "gap_pct",
+   "value": "-3.3",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "gm_pct": {
+   "column": "gross_margin_pct",
+   "value": "33.5",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "ach_pct": {
+   "column": "achievement_pct",
+   "value": "94.5301",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "ach_ratio": {
+   "column": "achievement_ratio",
+   "value": "0.945301",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "ratio_col": {
+   "column": "ratio",
+   "value": "0.9453",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "ratio_one": {
+   "column": "ratio",
+   "value": "1",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "rate_cn": {
+   "column": "收缴率",
+   "value": "0.9453",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "cost_pct": {
+   "column": "cost_rate_pct",
+   "value": "62.25",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  },
+  "ach_pct2": {
+   "column": "achievement_pct",
+   "value": "94.53",
+   "unit": null,
+   "metric_key": "collection",
+   "wide": true
+  }
+ },
+ "cases": [
+  {
+   "fact": "wan",
+   "body": "其他收益 3.3 万元。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3.30 万元。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值补零"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 330 万元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100+%"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3.3%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "原值+%"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3.3％。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "原值+全角%"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 0.033 万元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "÷100"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3.30 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "金额行写成「个百分点」：单位与事实不符（fact_unit_mismatch）"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3 万元。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity0"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity0+%"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 x100%"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 330%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent on amount"
+  },
+  {
+   "fact": "wan",
+   "body": "其他收益 3.3 元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "单位错(fact_unit_mismatch)"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 1,234,567.5 元。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "千分位"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 1,234,567.50 元。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "千分位补零"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 1234567.5 元。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "无千分位(格式规则不由数字核对管)"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 123,456,750 元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 12,345.675 元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "÷100"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 123,456,750%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100%"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 1,234,568 元。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity0 千分位"
+  },
+  {
+   "fact": "yuan",
+   "body": "费用 1,234,568%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity0 %"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53％。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2 全角"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.5301%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值x100 精确"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "舍入无 presentation"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.5%。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent1"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 95%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent0"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100 again"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 0.9453%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "÷100 %"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "裸 x100 无%"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 0.9453。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "比率行 percent presentation 仍放行裸小数，既有宽松，规则不要求改"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 0.945301。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "手写数等于事实原值，不需要 presentation"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53 个百分点。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "写成个百分点"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 0.95。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2 小数"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 95%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2 写%（数值正确）"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 0.95%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 ÷100"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 9,453.01%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "千分位 x100"
+  },
+  {
+   "fact": "ratio_u",
+   "body": "达成率 94.53%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值x100"
+  },
+  {
+   "fact": "ratio_u",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2"
+  },
+  {
+   "fact": "ratio_u",
+   "body": "达成率 9453%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "bilv_neg",
+   "body": "差异率 -6.85%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "负 percent2"
+  },
+  {
+   "fact": "bilv_neg",
+   "body": "差异率 -685.19%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "负 x100"
+  },
+  {
+   "fact": "bilv_neg",
+   "body": "差异率 -0.0685%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "负 ÷100"
+  },
+  {
+   "fact": "bilv_neg",
+   "body": "差异率下降 6.85%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "负值要写负号（-6.85%），方向词加绝对值不放行"
+  },
+  {
+   "fact": "bilv_zero",
+   "body": "差异率 0.00%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "零 percent2"
+  },
+  {
+   "fact": "bilv_zero",
+   "body": "差异率 0%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "零原值"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.3%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "展示值+%"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.30%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "展示值补零+%"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.30％。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "全角"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent scale on % row"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 0.033%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "÷100 %"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 0.033。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "裸分数"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 0.033。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "裸分数无 presentation"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.3。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "等于事实原值；漏写 % 是写法问题，数字核对不管（同缺千分位）"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.30 个百分点。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "% 行写成「个百分点」：单位与事实不符"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity0"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "舍入无 presentation"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.3000%。",
+   "presentation": {
+    "decimal_places": 4,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity4"
+  },
+  {
+   "fact": "pct_sym",
+   "body": "缺口 3.3 %。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "% 前有空格仍是百分数单位，与 % 行相符"
+  },
+  {
+   "fact": "pct_ach",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2"
+  },
+  {
+   "fact": "pct_ach",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "pct_ach",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent scale"
+  },
+  {
+   "fact": "pct_ach",
+   "body": "达成率 0.9453。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "裸÷100"
+  },
+  {
+   "fact": "pct_ach",
+   "body": "达成率 0.945301。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "裸÷100 原值"
+  },
+  {
+   "fact": "pct_full",
+   "body": "缺口 3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "全角单位行 identity"
+  },
+  {
+   "fact": "pct_full",
+   "body": "缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "pct_full",
+   "body": "缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent scale"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 3.25%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "pct identity2"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 3.25%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "pct 舍入无 presentation"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 3.2547%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "pct 原值+%"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 325.47%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "pct x100"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 325%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "pct percent scale"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 0.0325。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "pct 裸÷100"
+  },
+  {
+   "fact": "pct_cn",
+   "body": "缺口 3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "百分比 identity"
+  },
+  {
+   "fact": "pct_cn",
+   "body": "缺口 330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "百分比 x100"
+  },
+  {
+   "fact": "pct_neg",
+   "body": "缺口 -3.30%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "负 原值"
+  },
+  {
+   "fact": "pct_neg",
+   "body": "缺口 -3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "负 identity"
+  },
+  {
+   "fact": "pct_neg",
+   "body": "缺口 -330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "负 x100"
+  },
+  {
+   "fact": "pct_neg",
+   "body": "缺口下降 3.30%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "负值要写负号（-3.30%），方向词加绝对值不放行"
+  },
+  {
+   "fact": "pct_zero",
+   "body": "缺口 0.00%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "零 identity"
+  },
+  {
+   "fact": "pct_zero",
+   "body": "缺口 0%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "零"
+  },
+  {
+   "fact": "pct_big",
+   "body": "比率 1,234.50%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "千分位 identity"
+  },
+  {
+   "fact": "pct_big",
+   "body": "比率 1,234.5%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "千分位 原值"
+  },
+  {
+   "fact": "pct_big",
+   "body": "比率 123,450%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "千分位 x100"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 3.30 个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "个百分点"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 3.3个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "无空格"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 3.30 百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "百分点"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100%"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 330 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100 个百分点"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 0.033 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "÷100"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 3.30%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "写成%（单位语义错）"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity 写%"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent scale"
+  },
+  {
+   "fact": "pts",
+   "body": "收缴率缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity x100%"
+  },
+  {
+   "fact": "pts_round",
+   "body": "缺口 3.26 个百分点。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2 舍入"
+  },
+  {
+   "fact": "pts_round",
+   "body": "缺口 3.26 个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "等于事实展示值「3.26 个百分点」，不需要 presentation"
+  },
+  {
+   "fact": "pts_round",
+   "body": "缺口 3.256 个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值"
+  },
+  {
+   "fact": "pts_round",
+   "body": "缺口 326 个百分点。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100 identity0"
+  },
+  {
+   "fact": "pts_neg",
+   "body": "缺口 -3.30 个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "负"
+  },
+  {
+   "fact": "pts_neg",
+   "body": "缺口 -330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "负 x100%"
+  },
+  {
+   "fact": "pts_zero",
+   "body": "缺口 0.00 个百分点。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "零"
+  },
+  {
+   "fact": "day",
+   "body": "周转 45 天。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "天"
+  },
+  {
+   "fact": "day",
+   "body": "周转 45%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "天写%"
+  },
+  {
+   "fact": "day",
+   "body": "周转 4500%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "天 x100%"
+  },
+  {
+   "fact": "day",
+   "body": "周转 4,500 天。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "天 x100"
+  },
+  {
+   "fact": "nounit",
+   "body": "数值 3.3。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "无单位"
+  },
+  {
+   "fact": "nounit",
+   "body": "数值 330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "无单位 x100%"
+  },
+  {
+   "fact": "nounit",
+   "body": "数值 3.3%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "无单位 +%"
+  },
+  {
+   "fact": "nounit",
+   "body": "数值 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "无单位 identity x100%"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.3%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值+%"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.30%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "展示值"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.3%。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent1"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.30%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 330%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent x100"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity x100"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 330.00%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity x100 两位"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 0.033%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "÷100 %"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 0.033。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "*_pct 列存百分数，裸小数等于其比率值，沿用比率的既有宽松"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.3。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "*_pct 列按百分数写「3.3%」，裸「3.3」读作 330%"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.30 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "*_pct 列写成「个百分点」：百分数不是两比率之差"
+  },
+  {
+   "fact": "gap_pct_neg",
+   "body": "收缴率缺口 -3.30%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "负"
+  },
+  {
+   "fact": "gap_pct_neg",
+   "body": "收缴率缺口 -330%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "负 identity x100"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 33.5%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值+%"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 33.50%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 3,350%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 3,350%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity0 x100"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 3,350.00%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 x100"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent x100"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity x100"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 9453.01%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 94.5301%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值+%"
+  },
+  {
+   "fact": "ach_ratio",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent2"
+  },
+  {
+   "fact": "ach_ratio",
+   "body": "达成率 9453.01%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "ach_ratio",
+   "body": "达成率 0.9453。",
+   "presentation": {
+    "decimal_places": 4,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity4"
+  },
+  {
+   "fact": "ach_ratio",
+   "body": "达成率 0.9453%。",
+   "presentation": {
+    "decimal_places": 4,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity4 ÷100%"
+  },
+  {
+   "fact": "ach_ratio",
+   "body": "达成率 9,453.01%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "千分位 x100"
+  },
+  {
+   "fact": "ratio_col",
+   "body": "比率 94.53%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值x100"
+  },
+  {
+   "fact": "ratio_col",
+   "body": "比率 9,453%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "ratio_one",
+   "body": "比率 100%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "100%"
+  },
+  {
+   "fact": "ratio_one",
+   "body": "比率 100.00%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "展示值"
+  },
+  {
+   "fact": "ratio_one",
+   "body": "比率 100.0%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "100.0% 与 100% 同值（尾零归一）"
+  },
+  {
+   "fact": "ratio_one",
+   "body": "比率 100.0%。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "percent1"
+  },
+  {
+   "fact": "ratio_one",
+   "body": "比率 10,000%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "x100"
+  },
+  {
+   "fact": "rate_cn",
+   "body": "收缴率 94.53%。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "中文率列"
+  },
+  {
+   "fact": "rate_cn",
+   "body": "收缴率 9,453%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "中文率列 x100"
+  },
+  {
+   "fact": "ach_pct",
+   "body": "达成率 9453%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 x100 无小数"
+  },
+  {
+   "fact": "ach_pct2",
+   "body": "达成率 9,453%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 x100"
+  },
+  {
+   "fact": "ach_pct2",
+   "body": "达成率 9453%。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "无 presentation x100"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 3,350%。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity1 x100"
+  },
+  {
+   "fact": "gm_pct",
+   "body": "毛利率 3,400%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity0 x100(34)"
+  },
+  {
+   "fact": "cost_pct",
+   "body": "成本率 6,225%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity2 x100"
+  },
+  {
+   "fact": "cost_pct",
+   "body": "成本率 62.25%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "pass",
+   "why": "identity2"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 330％。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "identity1 x100 全角"
+  },
+  {
+   "fact": "gap_pct",
+   "body": "收缴率缺口 3.3。",
+   "presentation": {
+    "decimal_places": 1,
+    "scale": "identity",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "百分数行的 identity presentation 只放行带 % 的写法"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 3.3 %。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "pct 行舍入后（3.2547→3.3）没有 presentation"
+  },
+  {
+   "fact": "pct_word",
+   "body": "缺口 3.2547 %。",
+   "presentation": null,
+   "expect": "pass",
+   "why": "原值加 %，% 前有空格仍相符"
+  },
+  {
+   "fact": "pts",
+   "body": "缺口 3.30 万元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "百分点写万元"
+  },
+  {
+   "fact": "wan",
+   "body": "收益 3.30 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "万元写个百分点"
+  },
+  {
+   "fact": "pct_cn",
+   "body": "缺口 3.30 个百分点。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "百分比行写个百分点"
+  },
+  {
+   "fact": "day",
+   "body": "周转 45 万元。",
+   "presentation": null,
+   "expect": "fail",
+   "why": "天写万元"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 7,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "dp7"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "ratio",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "scale ratio"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_even"
+   },
+   "expect": "fail",
+   "why": "half_even"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": 2,
+    "scale": "percent",
+    "rounding": "half_up",
+    "unit": "%"
+   },
+   "expect": "fail",
+   "why": "extra field"
+  },
+  {
+   "fact": "bilv",
+   "body": "达成率 94.53%。",
+   "presentation": {
+    "decimal_places": true,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "bool dp"
+  },
+  {
+   "fact": "day",
+   "body": "周转 4,500%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent on 天"
+  },
+  {
+   "fact": "nounit",
+   "body": "数值 330%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent on 无单位"
+  },
+  {
+   "fact": "pts",
+   "body": "缺口 330%。",
+   "presentation": {
+    "decimal_places": 0,
+    "scale": "percent",
+    "rounding": "half_up"
+   },
+   "expect": "fail",
+   "why": "percent on 百分点"
+  }
+ ],
+ "render": [
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}} 个百分点。",
+   "expect": "缺口 3.30 个百分点。"
+  },
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}}个百分点。",
+   "expect": "缺口 3.30个百分点。"
+  },
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}} 百分点。",
+   "expect": "缺口 3.30 百分点。"
+  },
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}}百分点。",
+   "expect": "缺口 3.30百分点。"
+  },
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}} 个 百分点。",
+   "expect": "缺口 3.30 个 百分点。"
+  },
+  {
+   "fact": "pts",
+   "prose": "缺口 {{fact}}。",
+   "expect": "缺口 3.30 个百分点。"
+  },
+  {
+   "fact": "wan",
+   "prose": "收益 {{fact}} 万元。",
+   "expect": "收益 3.3 万元。"
+  },
+  {
+   "fact": "wan",
+   "prose": "收益 {{fact}}万元。",
+   "expect": "收益 3.3万元。"
+  },
+  {
+   "fact": "wan",
+   "prose": "收益 {{fact}}。",
+   "expect": "收益 3.3 万元。"
+  }
+ ]
+}

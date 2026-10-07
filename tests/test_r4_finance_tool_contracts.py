@@ -233,6 +233,9 @@ def test_dsh_and_method_r4_contracts_are_mirrored_into_resources():
     assert "excluded_detail_rows" in foundry_note
     assert "completion.repair_allowed" in foundry_note
     assert "thousands separators" in foundry_note
+    assert "needs no presentation" in foundry_note and "minus sign" in foundry_note
+    assert "A wide-table `*_pct` column is written as a percentage" in foundry_note
+    assert "需要 presentation" in persona and "负值直接写负号" in persona
 
 
 def test_script_tool_descriptions_carry_the_result_row_contract_in_both_shipped_copies(tmp_path: Path):

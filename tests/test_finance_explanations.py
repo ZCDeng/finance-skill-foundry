@@ -1930,6 +1930,8 @@ def test_writing_guidance_states_the_three_number_rules_without_forcing_two_deci
     assert "比率行和 %、pct、「百分比」行不用占位符" in rules
     assert "basis=calculation、run_id、row、column、value、fact_id 和 presentation" in rules
     assert "比率行 scale 用 percent，%、pct、「百分比」行 scale 用 identity" in rules
+    assert "把金额的 {{fact:FACT_ID}} 保留在对应金额" in rules
+    assert "手写数等于事实原值或展示值时不需要 presentation" in rules and "负值直接写负号" in rules
 
 
 def test_hand_typed_amount_and_ratio_pass_with_presentation_and_fail_without(service):
