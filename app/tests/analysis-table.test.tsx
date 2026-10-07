@@ -64,6 +64,18 @@ describe('result Table', () => {
     else expect(region.hasAttribute('aria-describedby')).toBe(false);
   });
 
+  it('drops the hint once the table is scrolled to its right end', () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+    render(<Table columns={columns} rows={[{ 指标: 'a', 数值: '1' }]} caption="业务结果" scrollHint />);
+    const region = screen.getByRole('region', { name: '业务结果' });
+    expect(screen.getByText('右侧还有列，可横向滚动查看')).toBeTruthy();
+    region.scrollLeft = 400;
+    fireEvent.scroll(region);
+    expect(screen.queryByText('右侧还有列，可横向滚动查看')).toBeNull();
+    expect(region.hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('never measures without scrollHint', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);

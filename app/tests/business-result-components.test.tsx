@@ -760,6 +760,14 @@ describe('business result components', () => {
       expect(within(othersOf()).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['华东区域', '未声明组织']);
     });
 
+    it('groups by the organization as stored, so one written 「—」 is its own group and not 未声明组织', () => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('—', 'a', '1'), unpaired(null, 'b', '2'),
+      ], ['metric_label'])} />);
+      expect(within(othersOf()).getAllByRole('rowheader').map((header) => header.textContent)).toEqual(['—', '未声明组织']);
+    });
+
     it('does not group 其他结果 that names no organization', () => {
       const columns = ['metric_key', 'period', 'scenario', 'value', 'unit', 'metric_label'];
       const rows = [
@@ -792,6 +800,29 @@ describe('business result components', () => {
       fireEvent.keyDown(dialog, { key: 'Escape' });
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
       expect(document.activeElement).toBe(trigger);
+    });
+
+    it('folds a source at 25 characters but not at 24', () => {
+      const at24 = '预算09表G5；mth04表C33合并利润表本月';
+      const at25 = `${at24}列`;
+      expect([Array.from(at24).length, Array.from(at25).length]).toEqual([24, 25]);
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('华东区域', 'a', '1', { source: at24 }), unpaired('华东区域', 'b', '2', { source: at25 }),
+      ], ['metric_label', 'source'])} />);
+      const others = othersOf();
+      expect(within(others).getByRole('cell', { name: at24 }).querySelector('button')).toBeNull();
+      expect(within(others).getAllByRole('button', { name: /等 2 条$/ })).toHaveLength(1);
+    });
+
+    it.each(['口径与来源', 'source_note'])('keeps a long %s whole: it explains a figure rather than listing cells', (field) => {
+      render(<BusinessResultView run={longRun([
+        ...pair({ metric_label: '收入预算' }, { metric_label: '收入实际' }),
+        unpaired('华东区域', 'a', '1', { [field]: longSource }),
+      ], ['metric_label', field])} />);
+      const others = othersOf();
+      expect(within(others).queryByRole('button')).toBeNull();
+      expect(within(others).getByRole('cell', { name: longSource })).toBeTruthy();
     });
 
     it('keeps a short 其他结果 source and every main-table source as plain text', () => {

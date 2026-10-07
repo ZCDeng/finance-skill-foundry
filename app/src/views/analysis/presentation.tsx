@@ -47,9 +47,9 @@ type TableGroup = { name: string; continued: boolean; rows: Record<string, unkno
 
 const pageSize = 100;
 
-/** A group's name; a missing one (empty, or the missing-value dash a formatted row carries) reads as the fallback. */
+/** A group's name; a missing one (null or empty) reads as the fallback. */
 function groupName(value: unknown, fallback: string): string {
-  return value == null || value === '' || value === '—' ? fallback : String(value);
+  return value == null || value === '' ? fallback : String(value);
 }
 
 /**
@@ -76,19 +76,23 @@ function groupedPages(rows: Record<string, unknown>[], groupBy: string, fallback
   return pages;
 }
 
-/** Whether the table is wider than its scroll area. Without ResizeObserver (jsdom) it never says so. */
+/**
+ * Whether columns sit to the right of what the scroll area shows: the table is wider than its area and the area is
+ * not scrolled to its right end. Without ResizeObserver it never says so.
+ */
 function useOverflow(enabled: boolean): [(node: HTMLDivElement | null) => void, boolean] {
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   const [overflowing, setOverflowing] = useState(false);
   useEffect(() => {
     if (!enabled || !node || typeof ResizeObserver === 'undefined') return;
-    const measure = () => setOverflowing(node.scrollWidth > node.clientWidth);
+    const measure = () => setOverflowing(node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     const table = node.querySelector('table');
     if (table) observer.observe(table);
+    node.addEventListener('scroll', measure, { passive: true });
     measure();
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); node.removeEventListener('scroll', measure); };
   }, [enabled, node]);
   return [setNode, enabled && overflowing];
 }

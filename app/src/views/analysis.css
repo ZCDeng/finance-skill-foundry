@@ -66,7 +66,7 @@
 .analysis-edit-grid > .fnd-control:has(.fnd-period-field) { grid-column: 1 / -1; }
 .analysis-logic { font-size: var(--fnd-size-small); }
 .analysis-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.fnd-tablewrap > table + .analysis-actions { margin-top: 12px; }
+.fnd-tablewrap > .analysis-actions { margin-top: 12px; }
 .analysis-code { line-height: 1.8; padding: 12px; resize: vertical; }
 .analysis-code { font-family: ui-monospace, monospace; }
 .analysis-draft textarea { line-height: 1.8; padding: 12px; resize: vertical; }

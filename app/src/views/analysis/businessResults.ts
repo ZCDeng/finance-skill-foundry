@@ -287,12 +287,8 @@ function rowUnitKind(row: Record<string, unknown>): UnitKind | null {
   return declaredUnitField in row ? row[declaredUnitField] as UnitKind | null : unitKind(unitColumn(row));
 }
 
-/** The fields a row's source may sit in, in the order they are read. */
-export const sourceFields = ['source', 'source_note', '来源', '口径与来源'];
-
 function sourceColumn(row: Record<string, unknown>): unknown {
-  const field = sourceFields.find((name) => row[name] != null);
-  return field ? row[field] : undefined;
+  return row.source ?? row.source_note ?? row['来源'] ?? row['口径与来源'];
 }
 
 function unitColumn(row: Record<string, unknown>): unknown {
@@ -811,6 +807,11 @@ export function longRowColumns(run: AnalysisRun, rows: Record<string, unknown>[]
   const distinct = (parts: (row: Record<string, unknown>) => unknown[]) => new Set(rows.map((row) => JSON.stringify(parts(row)))).size === rows.length;
   const labelled = names.has('metric_label') && rows.every((row) => typeof row.metric_label === 'string' && row.metric_label.trim() !== '');
   const hideScenario = labelled && distinct((row) => [row.metric_label, rowMetric(row), regionColumn(row), rowPeriod(row)]);
+  // The key columns go only when every one of them says what rowMetric reads. A metric_key beside a different metric
+  // would otherwise vanish while the collision check, which reads rowMetric alone, could not tell its rows apart.
+  const keyColumns = columns.filter((column) => longKeyFields.includes(column.name.toLowerCase()));
+  const keysAgree = keyColumns.every((column) => rows.every((row) => !nonEmpty(row[column.name]) || String(row[column.name]) === String(rowMetric(row) ?? '')));
+  const hideKeys = labelled && keysAgree;
   const currencies = new Set(rows.map(currencyColumn).filter(nonEmpty).map((value) => String(value).trim().toUpperCase()));
   const hideCurrency = currencies.size === 1 && renminbi.has([...currencies][0]);
   const labelIndex = columns.findIndex((column) => column.name.toLowerCase() === 'metric_label');
@@ -821,7 +822,8 @@ export function longRowColumns(run: AnalysisRun, rows: Record<string, unknown>[]
   return uniqueColumns(columns.flatMap((column): DisplayColumn[] => {
     const key = column.name.toLowerCase();
     if (hideScenario && key === 'scenario') return [];
-    if (labelled && longKeyFields.includes(key)) return [];
+    if (hideKeys && longKeyFields.includes(key)) return [];
+    if (labelled && longKeyFields.includes(key)) return [{ name: column.name, type: 'VARCHAR', label: keyColumns.length > 1 ? `指标键（${column.name}）` : '指标键', semantics: 'text' }];
     if (hideCurrency && (key === 'currency' || key === '币种')) return [];
     if (key === 'metric_label' && labelled) return [{ name: column.name, type: 'VARCHAR', label: '指标', semantics: 'text' }];
     return [{ name: column.name, type: column.type, label: businessColumnLabel(column.name), semantics: key === 'value' ? 'amount' : columnSemantics(column.name, column.type) }];
@@ -945,11 +947,26 @@ export function rowBasisLabel(row: Record<string, unknown>): string {
 }
 
 /**
- * Rows of one organization and period that share a metric_label but not a metric key: the label alone cannot tell
- * them apart. Rows sharing both label and key (this year and last year of one metric) are told apart by their
- * scenario and are not collisions. The backend's label_ambiguous check must group the same way.
+ * Rows of one organization and period whose names read alike but whose metric keys differ: on screen, without the
+ * key columns, nothing tells them apart. This is the contract the backend's label_ambiguous check (C') must keep,
+ * field for field, and app/tests/fixtures/label-collisions.json is the sample both sides assert:
+ * - Rows: long-form rows in no pair (其他结果 when the run pairs, every row of the main table when it does not).
+ *   Paired rows carry no metric_label and never take part.
+ * - Organization: the first of organization, region, 区域 that is not null, as a string ('' counts as a value);
+ *   '' when all are null. organization_id is not read.
+ * - Period: the stored period, else 期间, as written and not formatted; '' when null.
+ * - Label: rows whose metric_label is not a string with text after trim take no part. The trimmed label reads as
+ *   the table shows it: with 「（估算）」 after it when the row is an estimate (declared so, or by declaresEstimate's
+ *   own signals) and the label does not already say so; otherwise a label that is a metricLabels key reads as its
+ *   Chinese name. Labels compare after a final trim.
+ * - Key: the first of METRIC_FIELDS (rowMetric's order) that is not null, as a string; the row's own key, never
+ *   the base metric a pair reads it as (revenue_variance stays revenue_variance).
+ * - A group with two or more distinct keys is a collision; one key under one name (this year and last year of one
+ *   metric) is told apart by its scenario and is not. Groups and their keys keep first-appearance order.
  */
 export type LabelCollision = { organization: string; period: string; label: string; keys: string[]; rows: Record<string, unknown>[] };
+
+const labelDisplayColumn: DisplayColumn = { name: 'metric_label', type: 'VARCHAR', label: '指标', semantics: 'text' };
 
 export function labelCollisions(rows: Record<string, unknown>[]): LabelCollision[] {
   const groups = new Map<string, LabelCollision>();
@@ -957,7 +974,7 @@ export function labelCollisions(rows: Record<string, unknown>[]): LabelCollision
     if (typeof row.metric_label !== 'string' || !row.metric_label.trim()) continue;
     const organization = String(regionColumn(row) ?? '');
     const period = String(rowPeriod(row) ?? '');
-    const label = row.metric_label.trim();
+    const label = formatBusinessCell(row.metric_label.trim(), labelDisplayColumn, row).trim();
     const id = JSON.stringify([organization, period, label]);
     const group = groups.get(id) ?? { organization, period, label, keys: [], rows: [] };
     const key = String(rowMetric(row) ?? '');
@@ -977,8 +994,8 @@ function collisionSuffixes(collision: LabelCollision): Map<string, string> {
 
 /**
  * Rows as a result table shows them, keyed by column label. Where the key columns are not shown, a name that two
- * rows of one organization and period share gets what tells them apart after it. Each row also carries
- * __metricKey, which no column shows, for the hover over its name.
+ * rows of one organization and period share gets what tells them apart after it. Each row also carries fields no
+ * column shows: __metricKey for the hover over its name, and __group, its organization as stored.
  */
 export function formatDisplayRows(rows: Record<string, unknown>[], columns: DisplayColumn[]): Record<string, string>[] {
   const names = new Set(columns.map((column) => column.name.toLowerCase()));
@@ -998,6 +1015,8 @@ export function formatDisplayRows(rows: Record<string, unknown>[], columns: Disp
     const suffix = suffixes.get(row);
     if (labelColumn && suffix) output[labelColumn.label] = `${output[labelColumn.label]}（${suffix}）`;
     output.__metricKey = String(rowMetric(row) ?? '');
+    // The organization as stored, for grouping: a formatted cell would turn a missing one into 「—」.
+    output.__group = String(regionColumn(row) ?? '');
     return output;
   });
 }

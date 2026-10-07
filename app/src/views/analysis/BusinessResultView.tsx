@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.js';
-import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, formatDisplayRows, groupingColumn, labelCollisions, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, sourceFields, type DisplayColumn } from './businessResults.js';
+import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, formatDisplayRows, groupingColumn, labelCollisions, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
@@ -14,6 +14,8 @@ const shownConclusions = 3;
 
 /** A source in 其他结果 longer than this shows its first reference and a count, and opens to the rest. */
 const inlineSourceChars = 24;
+/** The source columns that list cell references; source_note and 口径与来源 explain a figure and stay whole. */
+const referenceSourceFields = ['source', '来源'];
 
 // Vite sets DEV; narrowed here so the app's tsconfig need not carry Vite's client types.
 const devBuild = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
@@ -145,10 +147,13 @@ function SourceRefs({ text, metric }: { text: unknown; metric: string }) {
   </Popover>;
 }
 
-/** Tells the developer, never the manager, that a script wrote one name for two metrics. */
+/**
+ * Tells the developer, never the manager, that a script wrote one name for two metrics. It warns whether or not the
+ * table shows the keys, as the backend check will; the page adds the key only where it hides them.
+ */
 function warnCollisions(rows: Record<string, unknown>[]) {
   for (const collision of labelCollisions(rows)) {
-    console.warn(`结果行重名：组织「${collision.organization || '未声明组织'}」期间「${collision.period || '未声明期间'}」的指标名「${collision.label}」对应 ${collision.keys.length} 个指标键（${collision.keys.join('、')}），页面已在名字后补键区分；请在 metric_label 写出对象。`);
+    console.warn(`结果行名字重复：组织「${collision.organization || '未声明组织'}」期间「${collision.period || '未声明期间'}」的指标名「${collision.label}」对应 ${collision.keys.length} 个指标键（${collision.keys.join('、')}）；请在 metric_label 写出对象。`);
   }
 }
 
@@ -194,8 +199,9 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
   }, [sourceRows, otherRows]);
   const tableColumn = (column: DisplayColumn, sources = false) => {
     const metricLabel = column.name.toLowerCase() === 'metric_label';
-    const source = sources && sourceFields.includes(column.name.toLowerCase());
-    const metricColumn = otherColumns.find((item) => item.name.toLowerCase() === 'metric_label') ?? otherColumns[0];
+    const source = sources && referenceSourceFields.includes(column.name.toLowerCase());
+    const shown = otherColumns.filter((item) => item !== otherGroup);
+    const metricColumn = shown.find((item) => item.name.toLowerCase() === 'metric_label') ?? shown[0];
     return {
       name: column.label,
       type: column.semantics === 'text' ? 'VARCHAR' : 'DECIMAL',
@@ -239,7 +245,7 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
       {rows.length > 0 || !others.length ? <Table key={`${run.id}:${period || 'all'}`} columns={columns.map((column) => tableColumn(column))}
         rows={rows} caption="业务结果" scrollHint /> : null}
       {others.length > 0 && <Table key={`${run.id}:${period || 'all'}:others`} columns={otherColumns.filter((column) => column !== otherGroup).map((column) => tableColumn(column, true))}
-        rows={others} caption="其他结果" groupBy={otherGroup?.label} groupFallback="未声明组织" scrollHint />}
+        rows={others} caption="其他结果" groupBy={otherGroup ? '__group' : undefined} groupFallback="未声明组织" scrollHint />}
     </div>
     {kpis.length === 0 && actions}
     {onSources ? <div className="analysis-actions"><Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button></div> : null}
