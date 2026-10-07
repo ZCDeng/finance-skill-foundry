@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { datasetOptions, runOptions, unwrap, errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 const fileDatasets = (datasets: DatasetSnapshot[]) => datasets.filter((source) =>
   String(source.source_name ?? source.filename ?? '').toLowerCase().endsWith('.xlsx')
@@ -152,7 +153,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       <SearchableSelect label="校验计算（可选）" value={runId} options={runOptions(runs)} onChange={setRunId}
         placeholder="搜索计算时间" allowEmptyLabel="经理直接写入" />
     </div>
-    <details className="analysis-details"><summary>高级：字段与写入 JSON</summary><div className="analysis-edit-grid">
+    <details className="analysis-details"><DisclosureSummary>高级：字段与写入 JSON</DisclosureSummary><div className="analysis-edit-grid">
       <label>字段数组<Textarea className="analysis-code" rows={4} value={fields} onChange={(event) => setFields(event.target.value)} /></label>
       <label>写入数组<Textarea className="analysis-code" rows={4} value={writes} onChange={(event) => setWrites(event.target.value)} /></label>
     </div></details></fieldset>
@@ -166,7 +167,7 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
       <Button type="button" disabled={locked || !preview?.patch_id} onClick={() => track('正在生成工作簿…', applyPatch)}>生成工作簿</Button>
       {running && <span role="status" className="analysis-note"><WaitOrb state="working" />{running}</span>}
     </div>
-    {inspection && <details className="analysis-details" open><summary>工作簿结构</summary>
+    {inspection && <details className="analysis-details" open><DisclosureSummary>工作簿结构</DisclosureSummary>
       <p>工作表：{sheetNames.join('、') || '未读取'}</p><p>表格：{tables.join('、') || '无'}</p><p>命名区域：{names.join('、') || '无'}</p>
       {Array.isArray(inspection.unsupported_features) && inspection.unsupported_features.length > 0 && <p>需生成独立结果工作簿：{inspection.unsupported_features.map(textValue).join('、')}</p>}
     </details>}

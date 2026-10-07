@@ -479,3 +479,67 @@ describe('the title bar gold', () => {
     }
   });
 });
+
+/*
+ * DESIGN.md 折叠段落. One summary line for every in-place disclosure: body
+ * text, a neutral hover, a chevron that turns a quarter, the shared focus ring.
+ */
+describe('the disclosure summary', () => {
+  const COMPONENTS = readFileSync(fileURLToPath(new URL('../src/components/components.css', import.meta.url)), 'utf8');
+  const BASE = readFileSync(fileURLToPath(new URL('../src/styles/base.css', import.meta.url)), 'utf8');
+  const SUMMARY = '.fnd-disclosure-summary';
+  const ICON = '.fnd-disclosure-summary__icon';
+
+  it('reads as body text with a neutral hover and no gold, warning or fixed colour', () => {
+    expect(declarations(COMPONENTS, SUMMARY)).toMatchObject({
+      color: 'var(--fnd-ink)',
+      'font-size': 'var(--fnd-size-body)',
+      'font-weight': '400',
+      'list-style': 'none',
+    });
+    expect(declarations(COMPONENTS, `${SUMMARY}:hover`).background).toBe('var(--fnd-selection-surface)');
+    const flat = COMPONENTS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const bodies = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors]) => selectors.includes(SUMMARY));
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const [, selectors, body] of bodies) {
+      expect(body, selectors.trim()).not.toMatch(/--fnd-selected|--fnd-warning|#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
+  it('steps technical folds down to the label size in the secondary text colour, same left edge', () => {
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet']`)).toMatchObject({
+      color: 'var(--fnd-muted)',
+      'font-size': 'var(--fnd-size-label)',
+      'line-height': '18px',
+    });
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet']`)).not.toHaveProperty('padding-left');
+    expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`)).toMatchObject({ width: '14px', height: '14px' });
+  });
+
+  it('pulls the row 8px left so the chevron box starts on the content edge', () => {
+    expect(declarations(COMPONENTS, SUMMARY)).toMatchObject({
+      'margin-inline-start': '-8px',
+      'max-width': 'calc(100% + 8px)',
+      padding: '5px 8px 5px 32px',
+    });
+    expect(declarations(COMPONENTS, ICON).left).toBe('8px');
+  });
+
+  it('turns the chevron a quarter when open, on the shared transition', () => {
+    expect(declarations(COMPONENTS, `details[open] > ${SUMMARY} > ${ICON}`).transform).toBe('rotate(90deg)');
+    expect(declarations(COMPONENTS, ICON).transition).toBe('transform var(--fnd-transition)');
+    // Reduced motion zeroes the shared duration, so the turn is instant there.
+    expect(TOKENS).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*:root \{ --fnd-duration: 0ms; \}/);
+  });
+
+  it('takes the 1px focus ring from base, which now names summary', () => {
+    const flat = BASE.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(
+      ([, selector]) => selector.trim().startsWith(':where(') && selector.trim().endsWith(':focus-visible'),
+    );
+    expect(rule, 'base :focus-visible rule').toBeDefined();
+    const elements = /:where\(([^)]*)\)/.exec(rule![1])![1].split(',').map((name) => name.trim());
+    expect(elements).toContain('summary');
+    expect(rule![2].replace(/\s+/g, ' ')).toContain('outline: 1px solid var(--fnd-focus);');
+  });
+});

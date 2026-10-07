@@ -5,6 +5,7 @@ import {
   countSummary, evidenceLabelText, postureText, PROBLEM_LABELS, reasonText,
   type EvidenceLabelEntry, type EvidencePosture,
 } from './evidenceLabels.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 const BASIS_WORDS: Record<string, string> = {
   calculation: '计算', source_fact: '来源事实', external_reference: '外部资料',
@@ -88,7 +89,7 @@ export function EvidencePostureSummary({ posture, labels, stale = false, listed 
       {drivers.slice(0, 5).map((driver) => <li key={driver.code}>{driver.text}</li>)}
     </ul>}
     {summary && <p className="analysis-note" aria-label="依据分类计数">{summary}</p>}
-    {rows.length > 0 && <details className="analysis-details"><summary>依据分类 · {rows.length} 项</summary>
+    {rows.length > 0 && <details className="analysis-details"><DisclosureSummary>依据分类 · {rows.length} 项</DisclosureSummary>
       <ul className="analysis-evidence-list">
         {rows.map((entry, index) => <li key={`${entry.key?.kind ?? 'entry'}-${index}`}>
           <span>{evidenceSubject(entry, index)}</span>

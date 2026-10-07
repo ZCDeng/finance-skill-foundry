@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
 import { errorText, unwrap } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** What each hint means for the manager, and why it may matter at close. */
 const HINTS: Record<string, { title: string; why: string; unit?: string }> = {
@@ -110,7 +111,7 @@ export function FormulaHealthPanel({ taskId, datasets }: { taskId: string; datas
           return <p key={dataset.id} className="analysis-formula-health-line">{dataset.name}：公式体检没有发现需要提示的地方。</p>;
         }
         return <details key={dataset.id} className="analysis-details analysis-formula-health-book" open={onDemand || undefined}>
-          <summary>公式体检 · {dataset.name} · {issues.length} 类提示</summary>
+          <DisclosureSummary>公式体检 · {dataset.name} · {issues.length} 类提示</DisclosureSummary>
           <div className="analysis-formula-health-body">
             <ul className="analysis-formula-health-list">
               {[...issues].sort((a, b) => Number(a.severity !== 'warning') - Number(b.severity !== 'warning')).map((issue) => (

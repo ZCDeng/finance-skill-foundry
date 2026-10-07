@@ -60,3 +60,96 @@ describe('stylesheet cascade', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/** Every innermost rule as [one selector, its body]; commas inside :where()/:not() stay with their selector. */
+function rules(css: string): [string, string][] {
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const found: [string, string][] = [];
+  for (const [, selectors, body] of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    let depth = 0;
+    let current = '';
+    for (const char of selectors) {
+      if (char === '(') depth += 1;
+      if (char === ')') depth -= 1;
+      if (char === ',' && depth === 0) {
+        found.push([current.trim().replace(/\s+/g, ' '), body]);
+        current = '';
+      } else current += char;
+    }
+    found.push([current.trim().replace(/\s+/g, ' '), body]);
+  }
+  return found;
+}
+
+describe('disclosures (DESIGN.md 折叠段落)', () => {
+  it('no longer has --fnd-disclosure', () => {
+    const compact = fileURLToPath(new URL('../harness-client/compact.css', import.meta.url));
+    const holders = [...sheets(SRC), compact].filter((path) => readFileSync(path, 'utf8').includes('--fnd-disclosure'));
+    expect(holders).toEqual([]);
+  });
+
+  /*
+   * Outside components.css (which owns .fnd-disclosure-summary), a rule that names a summary
+   * anywhere in its selector, or the shared summary classes, may only space the disclosure.
+   * The exceptions are listed by file and selector, each with the reason it may draw.
+   */
+  const MAY_DRAW: Record<string, string> = {
+    'styles/base.css :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible': 'the shared 1px focus ring',
+    'views/analysis.css .analysis-source-refresh > summary .analysis-note': 'the description line inside the 更新 ERP 来源 summary',
+    'views/analysis.css .analysis-source-refresh:not([open]) > summary .analysis-note::after': 'the 点击展开刷新 suffix (PR E)',
+    // The reading view injects exported report HTML (electron/reports/format.ts); its chart-data
+    // <summary> is not React, so report.css redraws the quiet disclosure for it.
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary:hover': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data > summary::before': 'exported HTML chart-data summary',
+    'views/analysis/report.css .analysis-draft-main .report-visual-data[open] > summary::before': 'exported HTML chart-data summary',
+  };
+
+  /** The rule offenders and the exceptions it used, for one sheet's text. */
+  function summaryRules(name: string, css: string): { offenders: string[]; excepted: string[] } {
+    const offenders: string[] = [];
+    const excepted: string[] = [];
+    for (const [selector, body] of rules(css)) {
+      const touches = /(^|[\s>+~(,])summary(?![\w-])/.test(selector) || selector.includes('.fnd-disclosure-summary');
+      if (!touches) continue;
+      const key = `${name} ${selector}`;
+      if (key in MAY_DRAW) {
+        excepted.push(key);
+        continue;
+      }
+      const properties = body.split(';').map((part) => part.split(':')[0].trim()).filter(Boolean);
+      const drawn = properties.filter((property) => !property.startsWith('margin'));
+      if (drawn.length) offenders.push(`${key} { ${drawn.join(', ')} }`);
+    }
+    return { offenders, excepted };
+  }
+
+  it('lets rules outside components.css only space a summary', () => {
+    const offenders: string[] = [];
+    const excepted: string[] = [];
+    for (const path of sheets(SRC)) {
+      const name = path.slice(SRC.length + 1);
+      if (name === 'components/components.css') continue;
+      const found = summaryRules(name, readFileSync(path, 'utf8'));
+      offenders.push(...found.offenders);
+      excepted.push(...found.excepted);
+    }
+    expect(offenders).toEqual([]);
+    // Every exception still names a live rule, so the list cannot rot into blanket permission.
+    expect(excepted.sort()).toEqual(Object.keys(MAY_DRAW).sort());
+  });
+
+  it('catches a summary restyled through a descendant, a class or the icon', () => {
+    const probe = [
+      '.x details > summary span { color: red; }',
+      '.x .fnd-disclosure-summary { font-weight: 600; }',
+      '.x .fnd-disclosure-summary__icon { transform: none; }',
+      '.x[open] > summary { margin-bottom: 4px; }',
+    ].join('\n');
+    expect(summaryRules('probe.css', probe).offenders).toEqual([
+      'probe.css .x details > summary span { color }',
+      'probe.css .x .fnd-disclosure-summary { font-weight }',
+      'probe.css .x .fnd-disclosure-summary__icon { transform }',
+    ]);
+  });
+});

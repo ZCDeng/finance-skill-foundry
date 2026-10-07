@@ -13,7 +13,6 @@ import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import {
   Bold,
   ChartNoAxesCombined,
-  BookOpen,
   Code,
   Columns2,
   Download,
@@ -76,6 +75,7 @@ import { ReportReviewAction } from './ReportReviewPanel.js';
 import { REPORT_VISUAL_EDIT_EVENT, ReportVisualNode } from './ReportVisualNode.js';
 import { normalizeReportVisual, type ReportVisual } from '../../../electron/reports/visuals.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type ReportMode = "read" | "edit" | "print";
 type ExportFormat = ReportExportFormat;
@@ -1094,7 +1094,7 @@ export function ReportEditor({
         </div>
         <aside className="report-outline" aria-label="文稿目录">
           <details className="report-outline__sections">
-            <summary><BookOpen size={15} aria-hidden /><span>目录</span></summary>
+            <DisclosureSummary>目录</DisclosureSummary>
             {headings.length ? (
               <nav>
                 {headings.map((item) => (
@@ -1165,7 +1165,7 @@ export function ReportEditor({
                 />
               </label>
               <details className="report-info-fields">
-                <summary>报告信息</summary>
+                <DisclosureSummary>报告信息</DisclosureSummary>
                 <div>
                   <label>
                     账套
@@ -1732,7 +1732,7 @@ function ReportReading({
       />
       {appendix && (appendixFolded ?? appendixResult.folded) && (
         <details className="analysis-details analysis-appendix-fold">
-          <summary>系统生成计算依据附录</summary>
+          <DisclosureSummary>系统生成计算依据附录</DisclosureSummary>
           <div dangerouslySetInnerHTML={{ __html: appendixHtml }} />
           <pre className="analysis-source-text">{appendix}</pre>
         </details>

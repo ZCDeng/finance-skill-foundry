@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { bridge, type Answer, type DatasetSnapshot } from '../../bridge.js';
 import { StructurePendingStrip, StructureProposalCard, type StructureProposal } from './StructureProposalCard.js';
 import { unwrap, errorText } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /**
  * Every file in this task that is waiting on the manager: one waiting for her to
@@ -35,7 +36,7 @@ export function StructurePanel({ taskId, datasets, busy, onRefresh }: {
       {/* A to-do line per file; the confirmation form is long and opens on demand. */}
       {waiting.map((proposal) => (
         <details key={proposal.id} className="analysis-details analysis-structure-todo">
-          <summary>待确认表结构 · {named(proposal.dataset_id)}{proposal.structure_state === 'no_table' ? ' · 没有识别出数据表' : ` · ${proposal.sheets.length} 张工作表`}</summary>
+          <DisclosureSummary>待确认表结构 · {named(proposal.dataset_id)}{proposal.structure_state === 'no_table' ? ' · 没有识别出数据表' : ` · ${proposal.sheets.length} 张工作表`}</DisclosureSummary>
           <StructureProposalCard taskId={taskId} datasetName={named(proposal.dataset_id)}
             proposal={proposal} busy={busy} onSettled={settle} />
         </details>

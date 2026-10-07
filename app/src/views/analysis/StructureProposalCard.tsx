@@ -8,6 +8,7 @@ import { scenarioLabel } from './glossary.js';
 import { errorText, unwrap } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** One column of a sheet, as the engine read it. */
 export interface ProposedColumn {
@@ -398,7 +399,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
           {sheet.excluded_rows.length > 0 && (
             <details className="analysis-structure-excluded">
-              <summary>不计入的行 {sheet.excluded_rows.length} 条</summary>
+              <DisclosureSummary>不计入的行 {sheet.excluded_rows.length} 条</DisclosureSummary>
               <ul>
                 {sheet.excluded_rows.map((row) => (
                   <li key={row.row}>
@@ -442,7 +443,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
       {setAside.length > 0 && (
         <details className="analysis-structure-excluded">
-          <summary>不能确认的工作表 {setAside.length} 张</summary>
+          <DisclosureSummary>不能确认的工作表 {setAside.length} 张</DisclosureSummary>
           <ul>
             {setAside.map((sheet) => (
               <li key={sheet.sheet}>

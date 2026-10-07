@@ -3,6 +3,7 @@ import { bridge, type Answer, type AnalysisRun } from '../../bridge.js';
 import { textValue } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type FinanceChart = {
   id: string;
@@ -52,7 +53,7 @@ export function FinanceChartPanel({ taskId, runs, busy, onRefresh }: {
   const rows = opened?.series?.rows ?? [];
   const columns = rows[0] ? Object.keys(rows[0]) : [];
   return <aside className="analysis-chart-panel" aria-label="归档图"><details className="analysis-details">
-    <summary><div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">{charts.length ? `${charts.length} 张 · ` : ''}归档当前结果，不重新计算。</span></div></summary>
+    <DisclosureSummary><div className="analysis-section-heading"><h3>归档图</h3><span className="analysis-note">{charts.length ? `${charts.length} 张 · ` : ''}归档当前结果，不重新计算。</span></div></DisclosureSummary>
     <Button type="button" disabled={busy || pending || !latest} onClick={() => void archive()}>{pending ? '归档中…' : '归档当前结果图'}</Button>
     {charts.length ? <ul className="analysis-history-list">{charts.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
       <span>{row.label || row.id}</span>

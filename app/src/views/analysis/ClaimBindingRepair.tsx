@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { when, type AnalysisRun } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { SearchableSelect } from '../../components/FinancialControls.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 /** Only selects real result cells. The backend still validates the complete draft. */
 export function ClaimBindingRepair({ claims, runs, disabled, onChange }: {
@@ -18,7 +19,7 @@ export function ClaimBindingRepair({ claims, runs, disabled, onChange }: {
     && (value as Record<string, unknown>).basis === 'calculation' ? [{ claim: value as Record<string, unknown>, index }] : []);
   if (!calculated.length) return null;
   return <details className="analysis-details" open>
-    <summary>修正计算引用 · {calculated.length} 条</summary>
+    <DisclosureSummary>修正计算引用 · {calculated.length} 条</DisclosureSummary>
     <p className="analysis-note">选择真实计算结果后采用对应数字。正文保留原文，仍需同步核对；保存时会再次检查。</p>
     {calculated.map(({ claim, index }) => {
       const selected = selections[index] ?? JSON.stringify([claim.run_id, claim.row, claim.column]);

@@ -3,6 +3,7 @@ import { textValue } from './presentation.js';
 import { Button } from '../../components/ui/button.js';
 import { TechnicalInfo } from './TechnicalInfo.js';
 import { errorText } from './glossary.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export interface FinanceCompletionRecovery {
   operation_id: string; status: string; revision?: number; title?: string; body?: string; limitations?: string[] | string; run_ids?: string[]; fact_ids?: string[];
@@ -40,7 +41,7 @@ export function CompletionRecoveriesPanel({ recoveries, error, disabled, onRetry
 }) {
   if (!recoveries.length && !error) return null;
   return <details className="analysis-details analysis-recovery-panel">
-    <summary>可恢复的未保存文稿 · {recoveries.length} 条</summary>
+    <DisclosureSummary>可恢复的未保存文稿 · {recoveries.length} 条</DisclosureSummary>
     <p className="analysis-note">这些内容来自已终止但尚未落成文稿版本的操作。载入后只是可编辑副本，需要你检查并保存。</p>
     {error && <p role="alert" className="analysis-message analysis-message--error">恢复稿读取失败：{errorText(error)} <Button variant="outline" type="button" onClick={onRetry}>重试</Button></p>}
     <div className="analysis-history-list">{recoveries.map((item) => <div className="analysis-history-row analysis-history-row--static" key={item.operation_id}>

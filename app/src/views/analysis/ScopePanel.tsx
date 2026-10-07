@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { CURRENCY_OPTIONS, SCENARIO_OPTIONS, UNIT_OPTIONS, scenarioLabel } from './glossary.js';
 import { SCOPE_LABELS, type AnalysisScope, type ScopeCandidateSources, type ScopeCandidates, type ScopeKey, type ScopeValues } from './scope.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 const validPeriod = (value: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 
@@ -99,7 +100,7 @@ export function ScopePanel({ scope: state, datasetCount, disabled, onSaved }: {
     {state.loading ? <p role="status" className="analysis-note">正在读取已保存范围…</p> : null}
     <PeriodPending scope={state} />
     <ScopeFields fields={PRIMARY_FIELDS} scope={state.scope} candidates={state.candidates} sources={state.candidateSources} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
-    <details className="analysis-details"><summary>更多范围{more ? ` · ${more}` : ''}</summary>
+    <details className="analysis-details"><DisclosureSummary>更多范围{more ? ` · ${more}` : ''}</DisclosureSummary>
       <ScopeFields fields={MORE_FIELDS} scope={state.scope} candidates={state.candidates} sources={state.candidateSources} disabled={blocked} onField={state.setField} ariaPrefix="分析范围" />
     </details>
     {state.conflicts.map(({ field, label }) => <p key={field} role="alert" className="analysis-message analysis-message--error">

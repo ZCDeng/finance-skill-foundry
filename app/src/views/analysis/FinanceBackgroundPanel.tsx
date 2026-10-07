@@ -7,6 +7,7 @@ import { Textarea } from '../../components/ui/textarea.js';
 import { CURRENCY_OPTIONS, UNIT_OPTIONS } from './glossary.js';
 import { datasetOptions, scopeSummary } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export interface FinanceBackground {
   id?: string; label?: string; text?: string; paragraph?: string; basis?: string; scope?: Record<string, unknown>; effective_from?: string; effective_to?: string; dataset_id?: string; created_at?: string;
@@ -23,7 +24,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
   onBackground(next: { label: string; text: string; basis: string; effective_from: string; effective_to: string; dataset_id: string; paragraph: string; source: string; retrieved_at: string }): void;
   onScope(next: Record<string, string>): void; onScopeJson(next: string): void; onSave(): void; onList(): void;
 }) {
-  return <details className="analysis-details analysis-background-panel"><summary>财务背景与经理判断</summary>
+  return <details className="analysis-details analysis-background-panel"><DisclosureSummary>财务背景与经理判断</DisclosureSummary>
     <p className="analysis-note">保存业务原因、经理判断或资料来源解释。背景按范围和有效期复用，经理可改适用范围。</p>
     <fieldset className="analysis-fieldset" disabled={busy}><div className="analysis-edit-grid">
       <label>标题<Input className="min-w-0 flex-1" value={background.label} onChange={(event) => onBackground({ ...background, label: event.target.value })}  /></label>
@@ -38,7 +39,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
       {(background.basis === 'external_reference') && <><TextField label="外部来源" ariaLabel="背景外部来源" value={background.source} onChange={(value) => onBackground({ ...background, source: value })} />
         <DateInput label="查询日期" ariaLabel="背景查询日期" value={background.retrieved_at} onChange={(value) => onBackground({ ...background, retrieved_at: value })} /></>}
     </div><label>背景正文<Textarea className="analysis-code" rows={3} value={background.text} onChange={(event) => onBackground({ ...background, text: event.target.value })} /></label>
-    <details className="analysis-details"><summary>适用范围 · {scopeSummary(scope)}</summary>
+    <details className="analysis-details"><DisclosureSummary>适用范围 · {scopeSummary(scope)}</DisclosureSummary>
       <p className="analysis-note">默认沿用这次计算的范围；只在这项背景另有适用范围时修改。</p>
       <div className="analysis-edit-grid">
         <AccountingPeriodInput label="期间" ariaLabel="背景期间" value={scope.period ?? ''} onChange={(value) => onScope({ ...scope, period: value })} />
@@ -49,7 +50,7 @@ export function FinanceBackgroundPanel({ background, scope, scopeJson, backgroun
           onChange={(value) => onScope({ ...scope, currency: value })} allowEmptyLabel="待确认" clearable placeholder="选择币种" />
         <TextField label="账簿" ariaLabel="背景账簿" value={scope.ledger ?? ''} onChange={(value) => onScope({ ...scope, ledger: value })} />
       </div>
-      <details className="analysis-details"><summary>高级：补充范围 JSON</summary><Textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details>
+      <details className="analysis-details"><DisclosureSummary>高级：补充范围 JSON</DisclosureSummary><Textarea aria-label="补充范围 JSON" className="analysis-code" rows={4} value={scopeJson} onChange={(event) => onScopeJson(event.target.value)} /></details>
     </details></fieldset>
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || !background.text.trim()} onClick={onSave}>保存背景</Button>
       <Button variant="outline" type="button" disabled={busy} onClick={onList}>刷新适用背景</Button></div>

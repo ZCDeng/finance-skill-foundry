@@ -1,6 +1,7 @@
 import './components.css';
 
 import { Marks } from './Chip.js';
+import { DisclosureSummary } from './Disclosure.js';
 
 /**
  * A deliverable, read as the document it is.
@@ -184,10 +185,10 @@ export function Reader({ source }: { source: string }) {
         if (block.kind === 'locks') {
           return (
             <details key={key} className="fnd-doc__locks">
-              <summary>
+              <DisclosureSummary>
                 {block.label}
                 <span className="fnd-muted">{` ${block.entries.length} 张表`}</span>
-              </summary>
+              </DisclosureSummary>
               <dl className="fnd-doc__meta">
                 {block.entries.map(([name, sha]) => (
                   <div key={name} className="fnd-doc__pair">

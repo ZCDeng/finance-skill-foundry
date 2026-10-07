@@ -9,6 +9,7 @@ import { metricLabel, scopeSummary } from './shared.js';
 import { HelpLink } from '../guide/GuideHub.js';
 import { EvidenceLabelChip, EvidencePostureSummary } from './EvidencePosture.js';
 import type { DatasetFreshness, EvidenceLabelEntry, EvidencePosture } from './evidenceLabels.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export interface ExplanationFact {
   id: string; run_id: string; row?: number; column?: string; value?: unknown; display_value?: unknown; label?: string; unit?: string; scope?: Record<string, unknown>; semantics?: Record<string, unknown>;
@@ -79,7 +80,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     <p className="analysis-note">计算成功和引用值一致分别记录；源数据核验只覆盖已声明的核验区域。专业判断仍需复核。</p>
     <EvidencePostureSummary posture={quality?.evidence_posture} labels={labels} stale={stale}
       listed={(entry) => !(entry.key?.kind === 'fact' && entry.key.fact_id && shownOnCard.has(entry.key.fact_id))} />
-    <details className="analysis-details"><summary>核对明细 · {itemCount} 项</summary>
+    <details className="analysis-details"><DisclosureSummary>核对明细 · {itemCount} 项</DisclosureSummary>
       {quality?.checks && <dl className="analysis-check-summary" aria-label="分项核对状态">
         {qualityChecks.map(([key, label]) => {
           const result = quality.checks?.[key]?.status;
@@ -96,7 +97,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
     </section> : null}
     <EvidenceQuality key={taskId} taskId={taskId} dimensions={quality?.status_dimensions} issues={quality?.issues ?? []} stale={stale} showDimensions={false} />
     {!(quality?.issues?.length) && <p className="analysis-note">{state === 'passed' ? '当前文稿数字、单位和引用未发现问题。' : '检查只提示风险，不会阻止你保存经理判断。'}</p>}
-    {facts.length > 0 && <details className="analysis-details"><summary>可引用事实 · {facts.length} 条</summary>
+    {facts.length > 0 && <details className="analysis-details"><DisclosureSummary>可引用事实 · {facts.length} 条</DisclosureSummary>
       <div className="analysis-fact-list">{facts.map((fact) => <article key={fact.id} className="analysis-fact-card" aria-label={`事实 ${fact.id}`}>
         <p><strong>{factLabel(fact)}</strong>{citedFactIds.includes(fact.id) ? <span className="analysis-note"> · 已引用</span> : null}</p>
         <EvidenceLabelChip entry={evidenceFor(fact.id)} />
@@ -107,7 +108,7 @@ export function ExplanationQualityPanel({ taskId, quality, state, facts, citedFa
         {locatorPdf?.factId === fact.id ? <PdfComparison dataUrl={locatorPdf.dataUrl} page={locatorPdf.page} /> : null}
         {factDetails[fact.id] && <FactDrilldown detail={factDetails[fact.id]} />}
       </article>)}</div></details>}
-    {Boolean(quality?.coverage) && <details className="analysis-details"><summary>高级：检查覆盖明细</summary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
+    {Boolean(quality?.coverage) && <details className="analysis-details"><DisclosureSummary>高级：检查覆盖明细</DisclosureSummary><pre className="analysis-source-text">{JSON.stringify(quality?.coverage, null, 2)}</pre></details>}
   </section>;
 }
 
@@ -115,7 +116,7 @@ function FactDrilldown({ detail }: { detail: FinanceDrilldown }) {
   const columns = Array.from(new Set(detail.rows.flatMap((row) => Object.keys(row.data ?? {})))).map((name) => ({ name, type: 'VARCHAR' }));
   return <div className="analysis-drilldown-result"><p className="analysis-note">来源：{detail.message} · {detail.total} 行{detail.has_more ? ' · 仍有更多' : ''}</p>
     {columns.length > 0 && <Table columns={columns} rows={detail.rows.map((row) => row.data)} caption="事实来源行" />}
-    {detail.rows.map((row, index) => <details className="analysis-details" key={index}><summary>来源 {index + 1} · {textValue(row.source)}</summary>
+    {detail.rows.map((row, index) => <details className="analysis-details" key={index}><DisclosureSummary>来源 {index + 1} · {textValue(row.source)}</DisclosureSummary>
       <p>凭证明细：{row.voucher_detail_available ? '可用' : '不可用'}</p>
       <pre className="analysis-source-text">{JSON.stringify(row.data, null, 2)}</pre>
       <TechnicalInfo rows={[['来源摘要', row.source_hash]]} /></details>)}

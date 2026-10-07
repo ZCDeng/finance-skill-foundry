@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/button.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type EvidenceDimension = { status?: string; message?: string; [key: string]: unknown };
 export type EvidenceDimensions = Partial<Record<'execution' | 'numeric_citation' | 'source_validation' | 'professional_review', EvidenceDimension>>;
@@ -83,13 +84,13 @@ export function EvidenceQuality({ taskId, dimensions: values, issues, stale = fa
   return <div className="analysis-evidence-quality">
     {showDimensions && <EvidenceDimensionList dimensions={values} stale={stale} />}
     {[...groups].sort(([, a], [, b]) => priority(a.issues[0]) - priority(b.issues[0])).map(([key, group]) => <details className="analysis-details" key={key}>
-      <summary>{group.title ? `${group.title}：` : ''}{group.issues[0].origin === 'claim_binding' ? '引用绑定 · ' : group.issues[0].origin === 'generated_appendix' ? '自动附表 · ' : ''}{group.issues[0].severity === 'error' ? '需修正 · ' : ''}{group.message} · {group.issues.length} 条原始问题</summary>
+      <DisclosureSummary>{group.title ? `${group.title}：` : ''}{group.issues[0].origin === 'claim_binding' ? '引用绑定 · ' : group.issues[0].origin === 'generated_appendix' ? '自动附表 · ' : ''}{group.issues[0].severity === 'error' ? '需修正 · ' : ''}{group.message} · {group.issues.length} 条原始问题</DisclosureSummary>
       <p className="analysis-note">{group.sources.size ? '先核对来源区域，再修正计算或引用并重检。' : '核对当前计算和引用；原始问题保留在下方，便于逐项处理。'}</p>
       {group.issues[0].old_value != null && group.issues[0].new_value != null && <p>原值 {String(group.issues[0].old_value)} → 新值 {String(group.issues[0].new_value)}</p>}
       {[...group.sources].map(([sourceKey, source]) => <Button variant="outline" key={sourceKey} type="button" onClick={() => setSelected(source)}>
         查看源区域 {source.sheet}!{source.range}
       </Button>)}
-      {group.issues.map((issue, index) => <details className="analysis-details" key={index}><summary>原始问题 {index + 1}</summary>
+      {group.issues.map((issue, index) => <details className="analysis-details" key={index}><DisclosureSummary>原始问题 {index + 1}</DisclosureSummary>
         {issue.original_text && <blockquote>{issue.original_text}</blockquote>}
         {issue.excerpt && <p>对应片段：{issue.excerpt}</p>}
         <pre className="analysis-source-text">{JSON.stringify(issue, null, 2)}</pre>

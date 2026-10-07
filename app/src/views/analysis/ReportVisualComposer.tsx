@@ -7,6 +7,7 @@ import { normalizeReportVisual, renderReportVisualSvg, type ReportVisual } from 
 import { errorText, unwrap } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type ChartSeries = { columns: unknown[]; rows: Record<string, unknown>[] };
 type ChartRecord = { id: string; label?: string; run_id?: string; snapshot_hash?: string; series?: ChartSeries; report_series?: ChartSeries };
@@ -128,7 +129,7 @@ export function ReportVisualComposer({ taskId, runs, initial, onApply, onCancel 
     {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
     {readyForValidation && preview.error && <p role="alert" className="analysis-message analysis-message--error">{preview.error}</p>}
     <div className="report-visual-preview" aria-label="图表预览">{preview.svg ? <div dangerouslySetInnerHTML={{ __html: preview.svg }} /> : <p className="analysis-note">填好图题、{kind === 'flow' ? '步骤' : '列和单位'}后显示完整预览。</p>}</div>
-    {kind !== 'flow' && opened?.series && <details className="report-visual-data"><summary>核对原始数据 · {opened.series.rows.length} 行</summary><div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="图表原始数据"><table className="fnd-table"><thead><tr>{columns.map((name) => <th key={name} scope="col">{name}</th>)}</tr></thead><tbody>{opened.series.rows.map((row, index) => <tr key={index}>{columns.map((name) => <td key={name}>{row[name] == null ? '缺失' : String(row[name])}</td>)}</tr>)}</tbody></table></div></details>}
+    {kind !== 'flow' && opened?.series && <details className="report-visual-data"><DisclosureSummary tone="quiet">核对原始数据 · {opened.series.rows.length} 行</DisclosureSummary><div className="fnd-tablewrap" tabIndex={0} role="region" aria-label="图表原始数据"><table className="fnd-table"><thead><tr>{columns.map((name) => <th key={name} scope="col">{name}</th>)}</tr></thead><tbody>{opened.series.rows.map((row, index) => <tr key={index}>{columns.map((name) => <td key={name}>{row[name] == null ? '缺失' : String(row[name])}</td>)}</tr>)}</tbody></table></div></details>}
     <div className="report-visual-composer__actions"><Button type="button" disabled={!preview.visual || (kind !== 'flow' && loadingSource)} onClick={() => { if (preview.visual) onApply(preview.visual); }}>{initial ? '更新图表' : '插入文稿'}</Button></div>
   </section>;
 }

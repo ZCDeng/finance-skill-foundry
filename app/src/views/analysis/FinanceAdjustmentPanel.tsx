@@ -4,6 +4,7 @@ import { WaitOrb } from '../../components/WaitOrb.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 type FinanceAdjustment = {
   id: string;
@@ -74,7 +75,7 @@ export function FinanceAdjustmentPanel({ taskId, contextId, busy, onRefresh }: {
   }
   if (!contextId) return null;
   return <aside className="analysis-adjustment-panel" aria-label="考核调整"><details className="analysis-details">
-    <summary><div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">{pending.length ? `${pending.length} 条待确认 · ` : ''}确认后才会进入下一次管理损益。</span></div></summary>
+    <DisclosureSummary><div className="analysis-section-heading"><h3>考核调整</h3><span className="analysis-note">{pending.length ? `${pending.length} 条待确认 · ` : ''}确认后才会进入下一次管理损益。</span></div></DisclosureSummary>
     {pending.length ? <ul className="analysis-history-list">{pending.map((row) => <li key={row.id} className="analysis-history-row analysis-history-row--static">
       <span>{row.label || '调整'} · 待确认</span>
       <Button type="button" disabled={locked} onClick={() => void confirm(row.id)}>{pendingId === row.id ? '确认中…' : '确认纳入'}</Button>

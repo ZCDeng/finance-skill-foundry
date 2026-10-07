@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { bridge, timeWait, when, type Answer, type FinanceSourceBatch } from '../../bridge.js';
 import { WaitOrb } from '../../components/WaitOrb.js';
 import { AccountingPeriodInput, FieldShell, TextField } from '../../components/FinancialControls.js';
 import { Button } from '../../components/ui/button.js';
 import { unwrap, errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 // The engine refreshes a whole period or only what changed since the last refresh; it takes nothing else.
 type SourceRefreshMode = 'full_period' | 'incremental';
@@ -56,9 +57,8 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
   const ready = scope.source_id.trim() && scope.tenant_id.trim() && scope.ledger_id.trim()
     && scope.organization_id.trim() && scope.period.trim() && scope.currency.trim() && scope.cutoff_at.trim();
   return <details className="analysis-source-refresh" aria-label="刷新财务来源">
-    <summary><span><span className="analysis-source-refresh-title">更新 ERP 来源</span>
-      <span className="analysis-note">来源系统重新导出后，在这里生成新的资料版本；已完成的计算仍按当时的资料保留。</span></span>
-      <ChevronDown size={16} aria-hidden /></summary>
+    <DisclosureSummary><span className="analysis-source-refresh-title">更新 ERP 来源</span>
+      <span className="analysis-note">来源系统重新导出后，在这里生成新的资料版本；已完成的计算仍按当时的资料保留。</span></DisclosureSummary>
     <fieldset className="analysis-fieldset" disabled={busy || refreshing}><div className="analysis-edit-grid">
       <TextField label="来源编号" value={scope.source_id} onChange={(value) => setScope({ ...scope, source_id: value })} />
       <TextField label="账套" value={scope.tenant_id} onChange={(value) => setScope({ ...scope, tenant_id: value })} />
@@ -69,7 +69,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
       <TextField label="币种" value={scope.currency} onChange={(value) => setScope({ ...scope, currency: value })} />
       <TextField label="来源系统" value={product} onChange={setProduct} />
     </div>
-    <details className="analysis-details"><summary>高级：来源识别与刷新方式</summary><div className="analysis-edit-grid">
+    <details className="analysis-details"><DisclosureSummary>高级：来源识别与刷新方式</DisclosureSummary><div className="analysis-edit-grid">
       <TextField label="版本" value={version} onChange={setVersion} />
       <TextField label="资料名称" value={name} onChange={setName} />
       <TextField label="日历" value={scope.calendar} onChange={(value) => setScope({ ...scope, calendar: value })} />
@@ -82,7 +82,7 @@ export function SourceRefreshPanel({ taskId, busy, onRefresh }: { taskId: string
     <div className="analysis-actions"><Button variant="outline" type="button" disabled={busy || refreshing || !ready} onClick={() => void refreshSource()}>
       <RefreshCw size={14} aria-hidden />选择文件并刷新</Button>
       {refreshing && <span role="status" className="analysis-note"><WaitOrb state="working" />正在选择文件并刷新来源…</span>}</div>
-    {batches.length > 0 && <details className="analysis-details"><summary>来源刷新批次 · {batches.length} 个</summary>
+    {batches.length > 0 && <details className="analysis-details"><DisclosureSummary>来源刷新批次 · {batches.length} 个</DisclosureSummary>
       <div className="analysis-history-list">{[...batches].reverse().slice(0, 8).map((batch) => <div key={batch.id} className="analysis-history-row analysis-history-row--static">
         <span>{batch.source_name ?? batch.product ?? '来源文件'}</span><span>{batch.publication_status ?? 'recorded'} · {batch.row_count ?? 0} 行</span>
         <time>{when(batch.created_at)}</time><span>{batch.dataset_id ? '生成了新快照' : batch.effective_dataset_id || batch.prior_snapshot_id ? '内容未变，沿用原快照' : '已记录'}</span>

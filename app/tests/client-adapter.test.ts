@@ -41,8 +41,11 @@ describe('checked native compact adapter', () => {
     expect(adapted).toContain('\"data-foundry-session-help\": true');
     expect(adapted).toContain('查看当前对话与分析方式，必要时导出排查日志。');
     const compactCss = readFileSync(resolve('harness-client/compact.css'), 'utf8');
-    expect(compactCss).toContain('--foundry-session-disclosure:var(--fnd-disclosure, #426786)');
-    expect(compactCss).toContain('--foundry-session-disclosure:var(--fnd-disclosure, #a4bfd5)');
+    // 对话工具 opens a popover, so it keeps its own down chevron, in body text colour (DESIGN.md 折叠段落).
+    expect(compactCss).not.toContain('--fnd-disclosure');
+    expect(compactCss).not.toContain('--foundry-session-disclosure');
+    const sessionSummary = /\[data-foundry-session-details\] > summary \{([^}]*)\}/.exec(compactCss);
+    expect(sessionSummary?.[1]).toContain('color:var(--dsw-alias-label-primary)');
     expect(compactCss).not.toContain('::before { content');
   });
 

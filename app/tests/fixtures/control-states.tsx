@@ -11,6 +11,7 @@ import { Input } from '../../src/components/ui/input.js';
 import { Textarea } from '../../src/components/ui/textarea.js';
 import { Tabs, TabsList, TabsTrigger } from '../../src/components/ui/tabs.js';
 import { AccountingPeriodInput, DateInput, DecimalInput, TextField } from '../../src/components/FinancialControls.js';
+import { DisclosureSummary } from '../../src/components/Disclosure.js';
 
 function ControlStatesFixture() {
   return (
@@ -63,6 +64,26 @@ function ControlStatesFixture() {
               <TabsTrigger value="drafts">文稿 <span>1</span></TabsTrigger>
             </TabsList>
           </Tabs>
+        </section>
+        <section aria-label="disclosures">
+          <details className="analysis-details">
+            <DisclosureSummary>核对明细 · 3 项</DisclosureSummary>
+            <p>收起时只显示摘要行。</p>
+          </details>
+          <details className="analysis-details" open>
+            <DisclosureSummary>来源明细 · 12 行</DisclosureSummary>
+            <p>展开后箭头转向下方；这段正文的左缘和箭头的左缘对齐。</p>
+          </details>
+          <details className="analysis-details analysis-technical">
+            <DisclosureSummary tone="quiet">技术信息 · 诊断 2 项</DisclosureSummary>
+            <p>辅助折叠用较轻的一档。</p>
+          </details>
+          <details className="analysis-details">
+            <DisclosureSummary>
+              待确认表结构 · 华辰集团2026年9月管理报表合并底稿（含各事业部收入成本明细与内部往来抵销）· 共 14 张工作表，其中 3 张没有识别出数据表，需要人工确认表头所在行
+            </DisclosureSummary>
+            <p>长摘要换行时，第二行与第一行文字左对齐。</p>
+          </details>
         </section>
       </main>
     </StrictMode>

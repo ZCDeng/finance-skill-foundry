@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/ta
 import { HelpLink } from '../guide/GuideHub.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
 import { errorText, unwrap } from './shared.js';
+import { DisclosureSummary } from '../../components/Disclosure.js';
 
 export type ReportReviewStatus = 'match' | 'match_rounded' | 'match_scaled' | 'mismatch' | 'needs_review';
 export interface ReportReviewCandidate {
@@ -183,7 +184,7 @@ export function ReportReviewPanel({ taskId, review, pdf }: { taskId: string; rev
               {item.status === 'mismatch' && item.difference != null && <p className="analysis-report-review-difference">
                 {differenceWords(item)}</p>}
               {item.note && <p className="analysis-note">{item.note}</p>}
-              {(item.candidates?.length ?? 0) > 1 && <details className="analysis-details"><summary>其他候选来源 · {item.candidates!.length - 1} 个</summary>
+              {(item.candidates?.length ?? 0) > 1 && <details className="analysis-details"><DisclosureSummary>其他候选来源 · {item.candidates!.length - 1} 个</DisclosureSummary>
                 <ul>{item.candidates!.slice(1).map((candidate, index) => <li key={index}>{candidateWords(candidate)}</li>)}</ul></details>}
               {(range || canOpenPage) && <div className="analysis-actions">
                 {range && <Button variant="outline" type="button" onClick={() => setSource(range)}>查看源区域 {range.sheet}!{range.range}</Button>}
