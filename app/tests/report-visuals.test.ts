@@ -54,6 +54,11 @@ describe('report visual evidence and validation', () => {
     expect(label('120.00')?.getAttribute('fill')).not.toBe('#94463d');
     expect(label('华东')?.getAttribute('font-family')).toBeNull();
     for (const tick of svg.querySelectorAll('[data-report-axis-tick] text')) expect(tick.getAttribute('font-family')).toMatch(/^'IBM Plex Mono'/);
+    // A negative last value on a line keeps the series colour on its name and reads in the muted red itself.
+    const line = parseHTML(renderReportVisualSvg(chart({ kind: 'line', series: { columns: chart().series.columns, rows: [{ 区域: '一月', 利润: '12.00' }, { 区域: '二月', 利润: '-1234.50' }] } }))).document;
+    const last = Array.from(line.querySelectorAll('tspan tspan')).find((node) => node.textContent === '-1,234.50');
+    expect(last?.getAttribute('fill')).toBe('#94463d');
+    expect(last?.parentElement?.closest('text')?.getAttribute('fill')).not.toBe('#94463d');
   });
 
   it.each([true, false, '', ' ', 'NaN', 'Infinity', Infinity, NaN, '-Infinity', '1e999', '1e-999', '0x10', '1,000', {}, undefined])('rejects invalid selected numeric value %s', (value) => {

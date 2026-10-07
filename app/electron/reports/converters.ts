@@ -22,7 +22,7 @@ import {
   WidthType,
 } from 'docx';
 import type { ReportDocument, ReportFormat, ReportImportResult, ReportNode, ReportSource } from './model.js';
-import { createReportDocument, documentFromMarkdown, documentToMarkdown, renderReportHtml, safeHref, safeImageSrc, textContent } from './format.js';
+import { createReportDocument, documentFromMarkdown, documentToMarkdown, isNumericCell, renderReportHtml, safeHref, safeImageSrc, textContent } from './format.js';
 import { reportVisualEvidence } from './visual-evidence.js';
 
 type ImportResources = Record<string, string>;
@@ -668,9 +668,11 @@ function rowToDocx(row: ReportNode, header: boolean, noteIds: Set<string>): Tabl
     cantSplit: true,
     children: (row.content ?? []).map((cell, index) => {
       const text = textContent(cell).trim();
-      const right = cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(text);
+      // A figure as the HTML export reads one (isNumericCell): units such as 万元 and 个百分点 included, a bare year not.
+      const numeric = isNumericCell(cell);
+      const right = numeric || cell.attrs?.textAlign === 'right' || NUMERIC_TEXT.test(text);
       const headerCell = header || cell.type === 'tableHeader';
-      const figure = right && index > 0 && !headerCell;
+      const figure = numeric && index > 0 && !headerCell;
       return new TableCell({
         columnSpan: numberOrUndefined(cell.attrs?.colspan),
         rowSpan: numberOrUndefined(cell.attrs?.rowspan),
@@ -751,7 +753,7 @@ function inlineToDocxRuns(nodes: ReportNode[], defaults: RunDefaults = {}, noteI
         font: marks.some((mark) => mark.type === 'code') ? 'Menlo' : defaults.figure ? FIGURE_RUN_FONT : 'Noto Sans SC',
         ...(defaults.color ? { color: defaults.color } : {}),
       });
-      if (link) return [new ExternalHyperlink({ link: String(link.attrs?.href), children: [run] })];
+      if (link) return [new ExternalHyperlink({ link: String(link.attrs?.href), children: marks.some((mark) => mark.type === 'code') ? [run] : runs })];
       if (marks.some((mark) => mark.type === 'code')) return [run];
       return runs;
     }

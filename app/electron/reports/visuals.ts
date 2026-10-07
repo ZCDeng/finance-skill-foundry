@@ -397,7 +397,15 @@ function renderLines(visual: ReportDataVisual, top: number): { svg: string; bott
       const endpoint = last as { x: number; y: number };
       shapes.push(`<path d="M ${point(endpoint.x)} ${point(endpoint.y)} H 672 V ${point(labelY - 5)} H 680" fill="none" stroke="${COLORS[seriesIndex]}" stroke-width="1"/>`);
     }
-    shapes.push(label(lastLabel, 688, labelY, 18, COLORS[seriesIndex], 600));
+    // The series name keeps its colour; a negative last value itself reads in the muted negative red.
+    const lastValue = numberValue(value, column);
+    const figure = escapeXml(exactFigure(value));
+    let lastText = label(lastLabel, 688, labelY, 18, COLORS[seriesIndex], 600);
+    if (lastValue !== null && lastValue < 0) {
+      const at = lastText.lastIndexOf(`${figure}</tspan>`);
+      if (at >= 0) lastText = `${lastText.slice(0, at)}<tspan fill="${NEGATIVE}" font-family="${FIGURE_FONT}">${figure}</tspan>${lastText.slice(at + figure.length)}`;
+    }
+    shapes.push(lastText);
     labelY += Math.max(76, lastLabel.length * 27 + 24);
   });
   rows.forEach((_row, index) => shapes.push(label([String(index + 1)], x(index), chartBottom + 28, 16, MUTED, 400, 'middle', true)));

@@ -636,7 +636,7 @@ function rowWeightClass(row: ReportNode): string {
   return '';
 }
 
-function isNumericCell(cell: ReportNode): boolean {
+export function isNumericCell(cell: ReportNode): boolean {
   const text = textContent(cell).trim();
   if (BARE_YEAR.test(text)) return false;
   const number = NUMERIC_CELL.test(text) && (text.match(/[(（]/g) ?? []).length === (text.match(/[)）]/g) ?? []).length;

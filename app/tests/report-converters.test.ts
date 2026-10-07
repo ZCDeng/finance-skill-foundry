@@ -351,6 +351,10 @@ describe('report document converters', () => {
       '| 成本 | -98,765.43 |',
       '| 小计 | 1,151,234.57 |',
       '| 合计 | 1,151,234.57 |',
+      '| 差异 | −3.30 个百分点 |',
+      '| 年份 | 2026 |',
+      '',
+      '详见[2026 年预算](https://example.com/b)。',
     ].join('\n'));
     const plex = new Uint8Array(readFileSync(fileURLToPath(new URL('../src/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf', import.meta.url))));
     const zip = await JSZip.loadAsync(await exportDocx(doc, '数字', undefined, {}, plex));
@@ -368,6 +372,12 @@ describe('report document converters', () => {
     // Prose keeps its words and separators in Noto Sans SC; only the digit runs take Plex Mono.
     expect(run('营业利润 ')).toContain('w:ascii="Noto Sans SC"');
     expect(run('250')).toContain('w:ascii="IBM Plex Mono"');
+    // A figure with a unit is a figure, as in the HTML export: one Plex Mono run, in the negative red.
+    expect(run('−3.30 个百分点')).toContain('w:ascii="IBM Plex Mono"');
+    expect(run('−3.30 个百分点')).toContain('w:val="94463D"');
+    // Linked prose keeps its digit runs.
+    const hyperlink = documentXml.match(/<w:hyperlink[\s\S]*?<\/w:hyperlink>/)?.[0] ?? '';
+    expect(hyperlink).toMatch(/w:ascii="IBM Plex Mono"[\s\S]*?>2026<\/w:t>/);
     // 小计 and 合计 rows are bold; the 合计 row also sits under a rule.
     const rows = documentXml.match(/<w:tr>[\s\S]*?<\/w:tr>/g) ?? [];
     const row = (name: string) => rows.find((xml) => xml.includes(`>${name}</w:t>`)) ?? '';
