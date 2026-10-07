@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { GUIDE_ARTICLES, searchArticles } from '../src/views/guide/articles.js';
+import { GUIDE_ARTICLES, GUIDE_SECTIONS, searchArticles } from '../src/views/guide/articles.js';
 import { GUIDE_EVENT, GuideHub, HelpLink } from '../src/views/guide/GuideHub.js';
 
 afterEach(cleanup);
@@ -83,4 +83,33 @@ it('uses the quality words the 文稿质量检查 panel shows', () => {
   render(<GuideHub article="statuses" onOpen={vi.fn()} onClose={vi.fn()} />);
   const legend = document.querySelector('.fnd-guide-legend')!;
   expect(legend.textContent).toBe('计算成功≠不等于引用值一致≠不等于源数据核验通过≠不等于已专业复核');
+});
+
+it('lists every article in one drop-down at the top, grouped by section', () => {
+  render(<GuideHub onOpen={vi.fn()} onClose={vi.fn()} />);
+  const contents = screen.getByRole('combobox', { name: '指南目录' });
+  expect(within(contents).getAllByRole('option')).toHaveLength(GUIDE_ARTICLES.length);
+  const sections = [...contents.querySelectorAll('optgroup')].map((group) => group.label);
+  expect(sections).toEqual(GUIDE_SECTIONS.filter((section) => GUIDE_ARTICLES.some((row) => row.section === section)));
+  expect(screen.queryByRole('navigation', { name: '指南目录' })).toBeNull();
+});
+
+it('changes the article from the drop-down and leaves focus on it', () => {
+  render(<GuideHub onOpen={vi.fn()} onClose={vi.fn()} />);
+  const contents = screen.getByRole('combobox', { name: '指南目录' }) as HTMLSelectElement;
+  contents.focus();
+  fireEvent.change(contents, { target: { value: 'export' } });
+  expect(screen.getByRole('heading', { level: 3, name: '文稿与导出' })).toBeTruthy();
+  expect(document.activeElement).toBe(contents);
+  expect(screen.getByRole('status').textContent).toBe('已显示「文稿与导出」');
+});
+
+it('lists search hits above the article and moves to the one picked', async () => {
+  render(<GuideHub onOpen={vi.fn()} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('搜索使用指南'), { target: { value: '归档' } });
+  const hits = screen.getByRole('navigation', { name: '搜索结果' });
+  fireEvent.click(within(hits).getByRole('button', { name: /无法继续时怎么办/ }));
+  const title = screen.getByRole('heading', { level: 3, name: /无法继续时怎么办/ });
+  await waitFor(() => expect(document.activeElement).toBe(title));
+  expect((screen.getByRole('combobox', { name: '指南目录' }) as HTMLSelectElement).value).toBe('troubleshooting');
 });

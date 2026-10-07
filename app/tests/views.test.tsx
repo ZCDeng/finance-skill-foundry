@@ -120,8 +120,12 @@ describe('the deliverable gallery', () => {
     // question changed it.
     render(<Deliverables rows={[oldRow(ROW)]} {...GALLERY} />);
     expect(screen.getByText('query-locked:followup-1')).toBeTruthy();
-    expect(screen.getByText('底稿')).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: '期间' })).toBeTruthy();
+    // The kind is visible text, not only part of a button's name.
+    expect(screen.getByText('底稿 第 3 版')).toBeTruthy();
+    // The period heads the task's group once, in words, rather than repeating in a column.
+    expect(screen.queryByRole('columnheader', { name: '期间' })).toBeNull();
+    const group = document.querySelector("th[scope='rowgroup']")!;
+    expect(group.querySelector('.fnd-muted')!.textContent).toBe(' · 2026 年 8 月');
     // Size, digest and session place a version for an audit, not for choosing one.
     expect(screen.queryByText('8.2 KB')).toBeNull();
     expect(screen.queryByText('cccccccccccc')).toBeNull();
@@ -330,7 +334,7 @@ describe('the shell', () => {
     const current = [...container.querySelectorAll(".fnd-head .fnd-head__tab[aria-current='page']")];
     expect(current.map((n) => n.textContent)).toEqual(['成果库']);
     const reused = [...container.querySelectorAll('.fnd-head__tab')].filter((n) => !n.closest('.fnd-head'));
-    expect(reused.map((n) => n.textContent?.trim())).toEqual(expect.arrayContaining(['起 Data Formulator', '交付物']));
+    expect(reused.map((n) => n.textContent?.trim())).toEqual(expect.arrayContaining(['起 Data Formulator', '返回成果库']));
     for (const node of reused) expect(node.hasAttribute('aria-current')).toBe(false);
   });
 
@@ -765,7 +769,7 @@ describe('a workbook version', () => {
 
   it('is listed as a spreadsheet rather than as a document', () => {
     render(<Deliverables rows={[oldRow(BOOK)]} {...GALLERY} />);
-    expect(screen.getByText('表格')).toBeTruthy();
+    expect(screen.getByText(/^表格 第 \d+ 版$/)).toBeTruthy();
   });
 
   it('offers the handoff instead of pushing it through the reader', () => {
@@ -878,10 +882,10 @@ describe('finding the export at all', () => {
    * only export action lived on the task screen, below 输入归档 -- which on a
    * real close is twenty-odd rows each carrying a full source path. Its button
    * sat 1344px below the fold of an 828px viewport, and the screen actually
-   * named 交付物 had no export at all. An action nobody can scroll to is an
+   * named 成果库 had no export at all. An action nobody can scroll to is an
    * action that does not exist.
    */
-  it('offers it on the screen named 交付物, while reading a document', () => {
+  it('offers it on the screen named 成果库, while reading a document', () => {
     const asked: string[] = [];
     render(
       <Deliverables
@@ -994,7 +998,7 @@ describe('looking at a workbook without leaving the window', () => {
     sha256: 'd'.repeat(64),
   };
 
-  it('offers the look beside the handoff on the screen named 交付物', () => {
+  it('offers the look beside the handoff on the screen named 成果库', () => {
     const asked: string[] = [];
     render(
       <Deliverables

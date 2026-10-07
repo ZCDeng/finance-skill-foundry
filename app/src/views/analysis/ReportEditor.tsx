@@ -108,6 +108,8 @@ export type ReportDraftEdit = {
   importedSource?: ReportSource;
 };
 
+/** The export menu's formats, in its order. 成果库 lists a revision's exports the same way. */
+export const EXPORT_MENU_FORMATS: ExportFormat[] = ["docx", "pdf", "html", "md", "xlsx"];
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
 
@@ -1072,9 +1074,7 @@ export function ReportEditor({
                     审计版
                     <DropdownMenuShortcut>{exportMode === "audit" ? "已选" : ""}</DropdownMenuShortcut>
                   </DropdownMenuItem>
-                  {(
-                    ["docx", "pdf", "html", "md", "xlsx"] as ExportFormat[]
-                  ).map((format) => (
+                  {EXPORT_MENU_FORMATS.map((format) => (
                     <DropdownMenuItem
                       key={format}
                       disabled={busy}

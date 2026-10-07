@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, BookOpen, CircleHelp, Search, X } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
+import { NativeSelect, NativeSelectOption } from '../../components/ui/native-select.js';
 import { GUIDE_ARTICLES, GUIDE_SECTIONS, searchArticles, type GuideArticle, type GuideTarget } from './articles.js';
 import { QuickStartChecklist } from './QuickStartChecklist.js';
 
@@ -27,7 +28,8 @@ export function StatusLegend() {
 }
 
 /**
- * 使用指南: topics on the left, the article on the right, a search over both.
+ * 使用指南 in one column: the contents as a drop-down at the top, grouped by section, then a search, then the
+ * article, which is the column's only scroll area. Search hits list above the article.
  *
  * It sits where the conversation sits, so the workspace it explains stays visible beside
  * it. Opening a place from an article moves the workspace there and never runs anything.
@@ -49,14 +51,24 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
   const [query, setQuery] = useState('');
+  // What the drop-down just put up, said through the status line since focus stays on the drop-down.
+  const [shown, setShown] = useState('');
   const [current, setCurrent] = useState(() => GUIDE_ARTICLES.find((row) => row.id === requested)?.id ?? GUIDE_ARTICLES[0].id);
   const heading = useRef<HTMLHeadingElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   useEffect(() => { if (requested && GUIDE_ARTICLES.some((row) => row.id === requested)) setCurrent(requested); }, [requested, request]);
   // Opening the guide moves focus into it, so a keyboard or screen-reader user knows the column changed.
   useEffect(() => { heading.current?.focus(); }, [requested, request]);
   const found = useMemo(() => searchArticles(query), [query]);
   const article = GUIDE_ARTICLES.find((row) => row.id === current) ?? GUIDE_ARTICLES[0];
   const pick = (id: string) => { setCurrent(id); requestAnimationFrame(() => heading.current?.focus()); };
+  // Focus stays on the drop-down, so arrow keys can keep changing it (Windows changes the value per key press).
+  // Escape while the platform's own list is open is meant to close only the list; not yet checked on a machine.
+  const choose = (id: string) => {
+    setCurrent(id);
+    setShown(`已显示「${GUIDE_ARTICLES.find((row) => row.id === id)?.title ?? ''}」`);
+    if (body.current) body.current.scrollTop = 0;
+  };
   return (
     <div className="fnd-guide-hub" role="region" aria-label="使用指南"
       onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }}>
@@ -64,22 +76,25 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
         <h2><BookOpen size={16} strokeWidth={1.5} aria-hidden /> 使用指南</h2>
         <Button variant="ghost" size="icon" type="button" aria-label="关闭使用指南" onClick={onClose}><X size={16} strokeWidth={1.5} aria-hidden /></Button>
       </div>
+      <NativeSelect aria-label="指南目录" value={current} onChange={(event) => choose(event.target.value)}>
+        {GUIDE_SECTIONS.map((section) => {
+          const rows = GUIDE_ARTICLES.filter((row) => row.section === section);
+          return rows.length ? <optgroup key={section} label={section}>
+            {rows.map((row) => <NativeSelectOption key={row.id} value={row.id}>{row.title}</NativeSelectOption>)}
+          </optgroup> : null;
+        })}
+      </NativeSelect>
       <label className="fnd-guide-hub__search">
         <Search size={14} strokeWidth={1.5} aria-hidden />
-        <Input aria-label="搜索使用指南" placeholder="搜索，例如：收缴率、期间、损坏 Excel、未阅" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Input aria-label="搜索使用指南" placeholder="搜索，例如：收缴率、期间、损坏 Excel、未阅" value={query} onChange={(event) => { setQuery(event.target.value); setShown(''); }} />
       </label>
-      <div className="fnd-guide-hub__body">
+      <div className="fnd-guide-hub__body" ref={body}>
         {/* Present from the start so a change is announced, not inserted with its words. */}
-        <span className="sr-only" role="status">{query.trim() ? found.length ? `找到 ${found.length} 篇` : `没有找到「${query.trim()}」相关的说明。` : ''}</span>
-        <nav aria-label="指南目录" className="fnd-guide-hub__toc">
-          {query.trim()
-            ? found.length ? <ul>{found.map((row) => <TocItem key={row.id} row={row} current={current} onPick={pick} />)}</ul>
-              : <p className="analysis-note">没有找到「{query.trim()}」相关的说明。</p>
-            : GUIDE_SECTIONS.map((section) => {
-              const rows = GUIDE_ARTICLES.filter((row) => row.section === section);
-              return rows.length ? <div key={section}><h3>{section}</h3><ul>{rows.map((row) => <TocItem key={row.id} row={row} current={current} onPick={pick} />)}</ul></div> : null;
-            })}
-        </nav>
+        <span className="sr-only" role="status">{query.trim() ? found.length ? `找到 ${found.length} 篇` : `没有找到「${query.trim()}」相关的说明。` : shown}</span>
+        {query.trim() ? <nav aria-label="搜索结果" className="fnd-guide-hub__results">
+          {found.length ? <ul>{found.map((row) => <GuideHit key={row.id} row={row} current={current} onPick={pick} />)}</ul>
+            : <p className="analysis-note">没有找到「{query.trim()}」相关的说明。</p>}
+        </nav> : null}
         <article className="fnd-guide-hub__article" aria-labelledby="fnd-guide-article-title">
           <h3 id="fnd-guide-article-title" ref={heading} tabIndex={-1}>{article.title}</h3>
           <p className="analysis-note">适用于：{article.appliesTo}</p>
@@ -109,6 +124,6 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   );
 }
 
-function TocItem({ row, current, onPick }: { row: GuideArticle; current: string; onPick(id: string): void }) {
-  return <li><button type="button" className="fnd-guide-hub__toc-item" aria-current={row.id === current ? 'page' : undefined} onClick={() => onPick(row.id)}>{row.title}</button></li>;
+function GuideHit({ row, current, onPick }: { row: GuideArticle; current: string; onPick(id: string): void }) {
+  return <li><button type="button" className="fnd-guide-hub__hit" aria-current={row.id === current ? 'page' : undefined} onClick={() => onPick(row.id)}>{row.title}</button></li>;
 }

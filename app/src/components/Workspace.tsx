@@ -224,7 +224,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
               <DropdownMenuItem onSelect={() => onHistory()}><FileClock size={15} strokeWidth={1.5} aria-hidden />任务记录与旧版流程</DropdownMenuItem>
               {task && lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} aria-hidden />归档任务</DropdownMenuItem> : null}
               {task && lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} aria-hidden />恢复任务</DropdownMenuItem> : null}
-              {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} aria-hidden />移入回收站</DropdownMenuItem> : null}
+              {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} aria-hidden />移入回收站</DropdownMenuItem> : null}
               {lifecycleError ? <p role="alert" className="max-w-72 px-2 py-1 text-sm break-words">{lifecycleError}</p> : null}
             </DropdownMenuContent>
           </DropdownMenu>

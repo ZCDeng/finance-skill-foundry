@@ -68,6 +68,16 @@ describe('one task workspace', () => {
     }
   });
 
+  it('moves a task to the trash from a plain menu item, since it can be restored', async () => {
+    const onTrash = vi.fn();
+    render(<Workspace {...props} onArchive={vi.fn()} onTrash={onTrash} />);
+    press(screen.getByRole('button', { name: '任务工具' }));
+    const trash = await screen.findByRole('menuitem', { name: '移入回收站' });
+    expect(trash.getAttribute('data-variant')).toBe('default');
+    fireEvent.click(trash);
+    await waitFor(() => expect(onTrash).toHaveBeenCalledWith(tasks[0].id));
+  });
+
   it('filters lifecycle buckets and exposes recoverable task actions', async () => {
     render(<Workspace {...props} onArchive={vi.fn()} onTrash={vi.fn()} onRestore={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));

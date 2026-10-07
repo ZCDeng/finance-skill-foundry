@@ -19,7 +19,7 @@
 /*
  * The title bar's own tabs (R14, KTD13). Gold marks where the reader is: the
  * current tab, a hover. At rest they keep the neutral rule above. Written under
- * `.fnd-head` because `.fnd-head__tab` is also the back button on 交付物 and
+ * `.fnd-head` because `.fnd-head__tab` is also the back button on 成果库 and
  * 任务 and the Formulator start and stop button, and those stay neutral.
  * Focus keeps whichever state the tab is in and adds its own ring.
  */
@@ -436,6 +436,11 @@ textarea.fnd-field {
 
 .fnd-field::placeholder {
   color: var(--fnd-muted);
+}
+
+/* A search field clears like any field; the platform's blue clear mark is not one of our colours. */
+.fnd-field[type='search']::-webkit-search-cancel-button {
+  appearance: none;
 }
 
 .fnd-field:hover:not(:disabled):not(:focus-visible):not([aria-invalid='true']) {
@@ -938,6 +943,7 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
   background: transparent;
   padding: 0;
   font: inherit;
+  text-align: left;
   color: var(--fnd-ink);
   cursor: pointer;
   text-decoration: underline;
@@ -945,9 +951,24 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
   text-underline-offset: 3px;
 }
 
+/* The text stays body ink; the underline darkens to it. */
 .fnd-linkish:hover {
-  color: var(--fnd-line-hover);
+  color: var(--fnd-ink);
+  text-decoration-color: currentColor;
 }
+
+/* -- 成果库 ----------------------------------------------------------------- */
+
+.fnd-library__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.fnd-library__title { margin: 0; font-size: 20px; line-height: 28px; }
+.fnd-library__search { display: flex; align-items: center; gap: 8px; width: min(100%, 320px); color: var(--fnd-muted); }
+/* One row per version kind: its label in the first column, its chips in the second, wrapping under each other
+   rather than under the label. The minimum keeps a row of the five formats on one line. */
+.fnd-library__exports { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 6px 8px; min-width: 360px; }
+.fnd-library__mode { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 28px; white-space: nowrap; }
+.fnd-library__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fnd-library__marker { margin: 6px 0 0; color: var(--fnd-muted); font-size: var(--fnd-size-label); }
+.fnd-library__state, .fnd-library__when { white-space: nowrap; }
 
 /* Workspace has its own independently scrolling panes. clip, not hidden: a hidden box can still be scrolled, and a
    scrollIntoView deep in the results pane (a jump to a file row, the settings panel) slid the whole column 32px up
@@ -957,22 +978,21 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
 .fnd-table td.fnd-num, .fnd-table th.fnd-num { text-align: right; }
 
 .fnd-help-link { width: 22px; height: 22px; color: var(--fnd-muted); }
-.fnd-guide-hub { display: grid; grid-template-rows: auto auto 1fr; gap: 12px; height: 100%; min-height: 0; padding: 16px; overflow: hidden; }
+.fnd-guide-hub { display: grid; grid-template-rows: auto auto auto 1fr; gap: 12px; height: 100%; min-height: 0; padding: 16px; overflow: hidden; }
 .fnd-guide-hub__head { display: flex; align-items: center; justify-content: space-between; }
 .fnd-guide-hub__head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__search { display: flex; align-items: center; gap: 8px; color: var(--fnd-muted); }
-.fnd-guide-hub__body { display: grid; grid-template-columns: minmax(140px, 32%) 1fr; gap: 16px; min-height: 0; }
-.fnd-guide-hub__toc { overflow: auto; min-height: 0; }
-.fnd-guide-hub__toc h3 { margin: 12px 0 4px; font-size: var(--fnd-size-small); color: var(--fnd-muted); font-weight: 500; }
-.fnd-guide-hub__toc ul { margin: 0; padding: 0; list-style: none; }
-.fnd-guide-hub__toc-item { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
-.fnd-guide-hub__toc-item[aria-current='page'] { background: var(--fnd-surface-strong, rgba(0,0,0,.05)); color: var(--fnd-selected); }
-.fnd-guide-hub__article { overflow: auto; min-height: 0; display: grid; gap: 10px; align-content: start; font-size: var(--fnd-size-body); line-height: 1.7; }
+/* The one scroll area of the column: search hits, then the article. It reaches 8px into the column's padding,
+   so the scrollbar sits there rather than over the text. */
+.fnd-guide-hub__body { min-height: 0; overflow: auto; display: grid; gap: 16px; align-content: start; padding-bottom: 16px; margin-right: -8px; padding-right: 8px; }
+.fnd-guide-hub__results ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.fnd-guide-hub__hit { display: block; width: 100%; text-align: left; padding: 4px 6px; border-radius: 4px; font-size: var(--fnd-size-body); background: none; border: 0; color: inherit; cursor: pointer; }
+.fnd-guide-hub__hit[aria-current='page'] { background: var(--fnd-surface-strong); color: var(--fnd-selected); }
+.fnd-guide-hub__article { display: grid; gap: 10px; align-content: start; font-size: var(--fnd-size-body); line-height: 1.7; }
 .fnd-guide-hub__article h3 { margin: 0; font-size: var(--fnd-size-h3); line-height: 24px; }
 .fnd-guide-hub__article ol, .fnd-guide-hub__article ul { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
 .fnd-guide-legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-weight: 500; }
 .fnd-guide-legend__ne { margin-right: 6px; color: var(--fnd-muted); }
-@media (max-width: 720px) { .fnd-guide-hub__body { grid-template-columns: 1fr; } }
 .fnd-with-help { display: inline-flex; align-items: center; gap: 4px; }
 .fnd-with-help > h3, .fnd-with-help > h4 { margin: 0; }
 .fnd-guide-hub__open { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
