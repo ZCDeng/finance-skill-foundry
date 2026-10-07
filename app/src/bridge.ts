@@ -112,8 +112,9 @@ export interface AnalysisExportRow {
 }
 
 /**
- * One row of 成果库: an old-flow version, the newest draft of a revision chain,
- * or a filed export. `key` is the kind and that kind's own id.
+ * One source record of 成果库: an old-flow version, the newest draft of a
+ * revision chain, or a filed export. `key` is the kind and that kind's own id.
+ * The list groups them by task and folds each revision's draft and exports into one row.
  */
 export type GalleryRow =
   | { type: 'deliverable'; key: string; at: string; task: TaskRow; row: DeliverableRow }

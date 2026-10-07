@@ -420,7 +420,7 @@ describe('where the warning colour is drawn', () => {
 /*
  * R14, KTD13. The title bar says where the reader is, so it carries the gold:
  * the wordmark, the current tab and a hover. Its buttons stay neutral at rest.
- * `.fnd-head__tab` is also the back button on 交付物 and 任务 and the
+ * `.fnd-head__tab` is also the back button on 成果库 and 任务 and the
  * Formulator start and stop button, so every gold title-bar rule is written
  * under `.fnd-head` and those reuses keep their own colours.
  */

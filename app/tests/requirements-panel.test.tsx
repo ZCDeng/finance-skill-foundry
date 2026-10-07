@@ -148,7 +148,10 @@ describe('requirements panel', () => {
     await screen.findByDisplayValue('解释本期利润差异并下钻利润');
 
     const profit = screen.getByLabelText('必答指标 1');
-    fireEvent.click(within(profit).getByRole('button', { name: /删除要求/ }));
+    const remove = within(profit).getByRole('button', { name: /删除要求/ });
+    // A removal is saved as a new version with its reason, so it can be undone: a plain secondary action, not the warning red.
+    expect(remove.getAttribute('data-variant')).toBe('outline');
+    fireEvent.click(remove);
     const save = screen.getByRole('button', { name: /保存要求新版/ });
     expect((save as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('删要求必须写明变更原因。')).toBeTruthy();
