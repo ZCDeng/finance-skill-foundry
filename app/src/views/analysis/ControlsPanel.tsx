@@ -15,6 +15,7 @@ import { errorText, unwrap } from './shared.js';
 import { TieOutForm } from './TieOutForm.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
 import { Switch } from '../../components/ui/switch.js';
+import { groupDigits } from '../../lib/figures.js';
 
 type Decision = Disposition['decision'];
 
@@ -142,7 +143,7 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
               <Checkbox checked={Boolean(picked[index])} onCheckedChange={(state) => setPicked((current) => ({ ...current, [index]: state === true }))} />
               <span>{row.control.label}</span>
               <span className={`analysis-controls-status analysis-controls-status--${row.preview.status}`}>{STATUS_LABELS[row.preview.status]}</span>
-              {row.preview.status === 'break' ? <span className="analysis-note">差额 {row.preview.difference} · {where(row.control.left)} 对 {where(row.control.right)}</span> : null}
+              {row.preview.status === 'break' ? <span className="analysis-note">差额 {groupDigits(row.preview.difference)} · {where(row.control.left)} 对 {where(row.control.right)}</span> : null}
             </label>
           </li>)}
         </ul>
@@ -209,8 +210,8 @@ function IssueRow({ row, locked, requireReview, onDecide, onReview, onRetire, on
       {decidedType ? <Badge><span className="sr-only">问题类型：</span>{decidedType}</Badge> : null}
     </div>
     {result?.left ? <p className="analysis-note">
-      {where(result.left)} 合计 {result.left.value ?? '—'}；{where(result.right)} 合计 {result.right?.value ?? '—'}
-      {result.difference ? `；差额 ${result.difference}` : ''}{result.within_rounding ? '（可能是显示舍入）' : ''}
+      {where(result.left)} 合计 {groupDigits(result.left.value)}；{where(result.right)} 合计 {groupDigits(result.right?.value)}
+      {result.difference ? `；差额 ${groupDigits(result.difference)}` : ''}{result.within_rounding ? '（可能是显示舍入）' : ''}
     </p> : null}
     {result?.reason ? <p className="analysis-note">{result.reason}</p> : null}
     {issue.state === 'stale' ? <div className="analysis-controls-decide">

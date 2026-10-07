@@ -1,6 +1,9 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { AnalysisParameterMetadata, AnalysisRun } from '../../bridge.js';
+import { Figure } from '../../components/Figure.js';
 import { Button } from '../../components/ui/button.js';
+import { hasParenthesizedNegative, isFigureText, isMissingText } from '../../lib/figures.js';
+import { formatRawFigure } from './businessResults.js';
 
 export const STATUS: Record<string, string> = {
   pending: '未计算', running: '计算中', succeeded: '计算成功', success: '计算成功', failed: '计算失败',
@@ -46,6 +49,52 @@ type TableColumn = {
 type TableGroup = { name: string; continued: boolean; rows: Record<string, unknown>[] };
 
 const pageSize = 100;
+const numericType = (type?: string) => /^(DECIMAL|NUMERIC|HUGEINT|UHUGEINT|UBIGINT|BIGINT|UINTEGER|INTEGER|USMALLINT|SMALLINT|UTINYINT|TINYINT|FLOAT|DOUBLE|REAL|INT\d*)\b/i.test(type ?? '');
+
+type ShownCell = { node: ReactNode; text: string | null; raw?: string };
+
+const plainDecimal = (value: unknown) => (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && /^[+-]?\d+(?:\.\d+)?$/.test(value.trim()));
+
+/**
+ * Whether a column's raw values are quantities to format (6B): an engine number type, or text that is a plain decimal
+ * in every row that has a value, as a script's 数值 column often is. A text column mixing words and digits stays.
+ */
+function rawFigureColumn(column: TableColumn, rows: Record<string, unknown>[]): number | null {
+  if (column.render) return null;
+  const present = rows.map((row) => row[column.name]).filter((value) => value != null && value !== '');
+  if (!numericType(column.type) && !(present.length > 0 && present.every(plainDecimal))) return null;
+  // The column's most places, so a whole number beside decimals is padded to line up.
+  return Math.max(0, ...present.filter(plainDecimal).map((value) => String(value).trim().split('.')[1]?.length ?? 0));
+}
+
+/** One cell before layout: a render's own node, else the value with a raw figure formatted (6B) and its original kept. */
+function shownCell(column: TableColumn, row: Record<string, unknown>, columnPlaces: number | null): ShownCell {
+  const value = row[column.name];
+  if (column.render) {
+    const node = column.render(value, row);
+    return { node, text: typeof node === 'string' ? node : null };
+  }
+  const formatted = columnPlaces == null ? null : formatRawFigure(value, column.name, columnPlaces);
+  const text = formatted ?? textValue(value);
+  return { node: text, text, raw: formatted != null && formatted !== String(value) ? String(value) : undefined };
+}
+
+/** A column of figures: its engine type says so, or every value it shows is a figure (差异率, a script's 数值). */
+function figureColumn(column: TableColumn, cells: ShownCell[]): boolean {
+  if (numericType(column.type)) return true;
+  const texts = cells.map((cell) => cell.text);
+  if (texts.some((text) => text == null)) return false;
+  const present = (texts as string[]).filter((text) => !isMissingText(text));
+  return present.length > 0 && present.every(isFigureText);
+}
+
+/** 合计/总计 rows at the total weight, 小计 at the subtotal weight, by the row's first cell: three weights per table. */
+function rowWeight(first: ShownCell | undefined): string | undefined {
+  const text = first?.text?.trim() ?? '';
+  if (/^(?:合计|总计|总额|total\b)/i.test(text)) return 'analysis-row--total';
+  if (/^(?:小计|subtotal\b)/i.test(text)) return 'analysis-row--subtotal';
+  return undefined;
+}
 
 /** A group's name; a missing one (null or empty) reads as the fallback. */
 function groupName(value: unknown, fallback: string): string {
@@ -97,7 +146,7 @@ function useOverflow(enabled: boolean): [(node: HTMLDivElement | null) => void, 
   return [setNode, enabled && overflowing];
 }
 
-export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false }: {
+export function Table({ columns, rows, caption, groupBy, groupFallback = '', scrollHint = false, exact = false }: {
   columns: TableColumn[];
   rows: Record<string, unknown>[];
   caption: string;
@@ -107,15 +156,27 @@ export function Table({ columns, rows, caption, groupBy, groupFallback = '', scr
   groupFallback?: string;
   /** Say below the table, in words, that more columns sit to the right when it is wider than its area. */
   scrollHint?: boolean;
+  /** Values that are, or will be, cell contents as written (a workbook read, a write-back preview): set as figures
+   * but never reformatted, rounded or put in parentheses. */
+  exact?: boolean;
 }) {
   const [page, setPage] = useState(0);
   const [measured, overflowing] = useOverflow(scrollHint);
   const hintId = useId();
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const current = Math.min(page, pages - 1);
-  const numeric = (type?: string) => /^(DECIMAL|NUMERIC|HUGEINT|UHUGEINT|UBIGINT|BIGINT|UINTEGER|INTEGER|USMALLINT|SMALLINT|UTINYINT|TINYINT|FLOAT|DOUBLE|REAL|INT\d*)\b/i.test(type ?? '');
-  const row = (item: Record<string, unknown>, index: number) => <tr key={index}>{columns.map((column) =>
-    <td className={numeric(column.type) ? 'analysis-number' : undefined} key={column.name}>{column.render ? column.render(item[column.name], item) : textValue(item[column.name])}</td>)}</tr>;
+  const formatRaw = columns.map((column) => exact ? null : rawFigureColumn(column, rows));
+  const shown = new Map(rows.map((item) => [item, columns.map((column, index) => shownCell(column, item, formatRaw[index]))]));
+  const figures = columns.map((column, index) => figureColumn(column, rows.map((item) => shown.get(item)![index])));
+  const hangs = columns.map((_, index) => !exact && figures[index] && hasParenthesizedNegative(rows.flatMap((item) => shown.get(item)![index].text ?? [])));
+  const row = (item: Record<string, unknown>, index: number) => {
+    const cells = shown.get(item)!;
+    return <tr key={index} className={rowWeight(cells[0])}>{columns.map((column, at) => {
+      const cell = cells[at];
+      return <td className={figures[at] ? 'analysis-number' : undefined} key={column.name} title={cell.raw}>
+        {figures[at] && cell.text != null ? <Figure text={cell.text} hang={hangs[at]} exact={exact} /> : cell.node}</td>;
+    })}</tr>;
+  };
   const body = groupBy == null
     ? <tbody>{rows.slice(current * pageSize, (current + 1) * pageSize).map(row)}</tbody>
     : (groupedPages(rows, groupBy, groupFallback)[current] ?? []).map((group, index) => <tbody key={`${index}:${group.name}`}>
@@ -124,7 +185,7 @@ export function Table({ columns, rows, caption, groupBy, groupFallback = '', scr
     </tbody>);
   return <div className="fnd-tablewrap" tabIndex={0} role="region" aria-label={caption} ref={measured} aria-describedby={overflowing ? hintId : undefined}>
     <table className="fnd-table analysis-table"><caption>{caption}</caption>
-      <thead><tr>{columns.map((column) => <th className={numeric(column.type) ? 'analysis-number' : undefined} scope="col" key={column.name}>{column.name}</th>)}</tr></thead>
+      <thead><tr>{columns.map((column, index) => <th className={figures[index] ? 'analysis-number' : undefined} scope="col" key={column.name}>{column.name}</th>)}</tr></thead>
       {body}
     </table>
     {overflowing && <p className="analysis-note analysis-table-scroll-hint" id={hintId}>右侧还有列，可横向滚动查看</p>}

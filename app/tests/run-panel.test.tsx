@@ -296,7 +296,7 @@ describe('RunPanel finance conclusion', () => {
     fireEvent.click(summary);
     expect(technical.open).toBe(true);
     expect(within(technical).getByText(/missing_baseline/).textContent).toContain(dataset.id);
-    expect(within(technical).getByRole('table', { name: '原始计算结果' }).textContent).toContain('-900719925474099.99');
+    expect(within(technical).getByRole('table', { name: '原始计算结果' }).textContent).toContain('(900,719,925,474,099.99)');
     expect(screen.queryByText('技术信息 · 诊断 1 项')).toBeNull();
   });
 
@@ -328,7 +328,7 @@ describe('RunPanel finance conclusion', () => {
     ]);
     render(<RunPanel {...props} runs={[run]} />);
     const conclusion = screen.getByRole('region', { name: '结论' });
-    expect(within(conclusion).getByText('实际与预算相比，利润减少 900719925474099.99 万元')).toBeTruthy();
+    expect(within(conclusion).getByText('实际与预算相比，利润减少 900,719,925,474,099.99 万元')).toBeTruthy();
     expect(within(conclusion).getByText('收入持平')).toBeTruthy();
     expect(within(conclusion).getByText('这一组有一侧没有数据，已按 0 计入，差异等于另一侧的全额。')).toBeTruthy();
   });

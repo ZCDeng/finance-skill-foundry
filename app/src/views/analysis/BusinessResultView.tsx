@@ -8,6 +8,8 @@ import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
 import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { formatPeriod } from '../../lib/period.js';
+import { Figure } from '../../components/Figure.js';
+import { hasParenthesizedNegative } from '../../lib/figures.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
 const shownConclusions = 3;
@@ -224,16 +226,22 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     {kpis.length ? <div className="analysis-kpi-grid" aria-label="关键指标">
       {kpis.map((kpi, index) => <article key={`${kpi.title}:${kpi.period}:${index}`} className="analysis-kpi-card">
         <span className="analysis-kpi-title" title={kpi.title}>{kpi.title}</span>
-        <strong aria-label={`${kpi.title}实际`}>{kpi.actual}</strong>
+        <strong aria-label={`${kpi.title}实际`}><Figure text={kpi.actual} /></strong>
         {kpi.actualLabel ? <small className="analysis-kpi-source">{kpi.actualLabel}</small> : null}
         {/* Each part stays whole; the line breaks only at a separator. */}
         <small className="analysis-kpi-meta">{[kpi.periodLabel, kpi.unit, `依据：${kpi.basis}`].map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? ' · ' : ''}<span>{part}</span></Fragment>)}
           {kpi.notes.map((note) => <Fragment key={note}>{' · '}<span className="analysis-kpi-note">{note}</span></Fragment>)}</small>
         <dl className="analysis-kpi-list" aria-label={`${kpi.title}指标明细`}>
-          <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd>{kpi.budget}</dd></div>
-          {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd>{kpi.estimatedBudget}</dd></div> : null}
-          <div><dt>差异</dt><dd>{kpi.difference}</dd></div>
-          <div><dt>{kpi.rateLabel}</dt><dd>{kpi.rate}</dd></div>
+          {(() => {
+            // One right-aligned column: beside a parenthesized negative, bare figures hang one place in.
+            const hang = hasParenthesizedNegative([kpi.budget, kpi.estimatedBudget ?? '', kpi.difference, kpi.rate]);
+            return <>
+              <div><dt>{kpi.estimated ? '预算（估算）' : '预算'}</dt><dd><Figure text={kpi.budget} hang={hang} /></dd></div>
+              {kpi.estimatedBudget ? <div><dt>预算（估算）</dt><dd><Figure text={kpi.estimatedBudget} hang={hang} /></dd></div> : null}
+              <div><dt>差异</dt><dd><Figure text={kpi.difference} hang={hang} /></dd></div>
+              <div><dt>{kpi.rateLabel}</dt><dd><Figure text={kpi.rate} hang={hang} /></dd></div>
+            </>;
+          })()}
         </dl>
         {kpi.budgetLabel ? <small className="analysis-kpi-source">预算：{kpi.budgetLabel}</small> : null}
       </article>)}

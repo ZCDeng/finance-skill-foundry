@@ -216,6 +216,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A negative figure: the muted dark red beside its parentheses or sign, never the warning red. */
+.fnd-figure--negative {
+  color: var(--fnd-negative);
+}
+
+/* A bare figure beside a parenthesized negative ends one figure-width in, so digits stay in one column. */
+.fnd-figure--hang {
+  padding-right: 1ch;
+}
+
 .fnd-num {
   text-align: right;
   font-family: var(--fnd-font-figure);
