@@ -101,13 +101,8 @@
 .analysis-table th { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 .analysis-result-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; position: relative; container-type: inline-size; isolation: isolate; }
-/* Conclusion first: the version's question reads as the result's label, the answer below it is the largest line. The four states sit under it at every width. */
+/* Conclusion first: the page header already names the task, so the heading is for screen readers and the script's own sentence (or the date and states) leads. The four states sit under the date at every width. */
 .analysis-result-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.analysis-result-head h3 { font-size: var(--fnd-size-h3); line-height: 24px; max-width: 42em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-/* With no conclusion to lead, the question stays the result's heading. */
-.analysis-result:not(:has(.analysis-headline)) .analysis-result-head h3 { font-size: 20px; line-height: 28px; }
-/* …unless it only repeats the task name the page already shows: kept for screen readers, the date and states lead. */
-.analysis-result:not(:has(.analysis-headline)) .analysis-result-head h3[data-repeats-task] { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* The version picker heads the result; 比较版本 sits beside it and opens below. */
 .analysis-version { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .analysis-version-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }

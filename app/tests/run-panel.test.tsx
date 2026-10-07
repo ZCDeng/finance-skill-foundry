@@ -543,28 +543,28 @@ describe('RunPanel result head and next steps', () => {
 
   afterEach(() => sessionStorage.clear());
 
-  it('titles the result with the version question, falling back to the task name', () => {
+  it('names the result for screen readers by the task and keeps the version question in 技术信息 only', () => {
     render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
-    const heading = screen.getByRole('heading', { level: 3, name: analysis.question });
-    expect(heading.getAttribute('title')).toBe(analysis.question);
-    // A question of its own is drawn, with or without a conclusion.
-    expect(heading.hasAttribute('data-repeats-task')).toBe(false);
-    cleanup();
-    render(<RunPanel {...props} analysis={{ ...analysis, question: '' }} question="华东经营分析" runs={[pnl()]} />);
-    expect(screen.getByRole('heading', { level: 3, name: '华东经营分析' }).hasAttribute('data-repeats-task')).toBe(true);
-  });
-
-  it('keeps a title that only repeats the task name for screen readers when no conclusion leads', () => {
-    render(<RunPanel {...props} analysis={{ ...analysis, question: '华东经营分析' }} question="华东经营分析" runs={[pnl()]} />);
-    // Still the result's heading for assistive technology; analysis.css hides it only while there is no .analysis-headline.
     const heading = screen.getByRole('heading', { level: 3, name: '华东经营分析' });
-    expect(heading.getAttribute('data-repeats-task')).toBe('true');
-    expect(document.querySelector('.analysis-headline')).toBeNull();
+    // The page header shows the task name; the result heading is there for assistive technology only.
+    expect(heading.className).toBe('sr-only');
+    const article = heading.closest('article') as HTMLElement;
+    const technical = Array.from(article.querySelectorAll('.analysis-technical'));
+    expect(technical).toHaveLength(1);
+    expect(within(technical[0] as HTMLElement).getByText('版本问题').nextElementSibling?.textContent).toBe(analysis.question);
+    // Nowhere visible: neither in a heading nor in the result outside 技术信息.
+    expect(screen.queryByRole('heading', { name: analysis.question })).toBeNull();
+    const outside = article.cloneNode(true) as HTMLElement;
+    outside.querySelectorAll('.analysis-technical, .sr-only').forEach((node) => node.remove());
+    expect(outside.textContent).not.toContain(analysis.question);
+    cleanup();
+    render(<RunPanel {...props} runs={[pnl()]} />);
+    expect(screen.getByRole('heading', { level: 3, name: analysis.question }).className).toBe('sr-only');
   });
 
   it('puts the title, the date line and the four states in one header, in that order', () => {
     render(<RunPanel {...props} question="华东经营分析" runs={[pnl()]} />);
-    const head = screen.getByRole('heading', { level: 3, name: analysis.question }).parentElement as HTMLElement;
+    const head = screen.getByRole('heading', { level: 3, name: '华东经营分析' }).parentElement as HTMLElement;
     expect(head.tagName).toBe('HEADER');
     expect(head.classList.contains('analysis-result-head')).toBe(true);
     const children = Array.from(head.children);

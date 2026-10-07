@@ -37,17 +37,11 @@ describe('the result page layout (DESIGN.md 结果区)', () => {
     expect(ANALYSIS).toMatch(/@container analysis-result \(max-width: 480px\) \{ \.analysis-kpi-grid \{ grid-template-columns: minmax\(0, 1fr\); \} \}/);
   });
 
-  it('stacks the title, date and states, and holds the title to two lines', () => {
+  it('stacks the date and states, and leaves the screen-reader heading undrawn', () => {
     expect(declarations('.analysis-result-head')).toMatchObject({ display: 'flex', 'flex-direction': 'column' });
-    expect(declarations('.analysis-result-head h3')).toMatchObject({ '-webkit-line-clamp': '2', overflow: 'hidden' });
+    // The heading is sr-only in the markup; no page rule may draw it back.
+    expect(ANALYSIS).not.toMatch(/\.analysis-result-head h3/);
     expect(declarations('.analysis-kpi-title')).toMatchObject({ '-webkit-line-clamp': '2', overflow: 'hidden' });
-  });
-
-  it('hides a title that only repeats the task name, for sighted readers only and only without a conclusion', () => {
-    const hidden = declarations('.analysis-result:not(:has(.analysis-headline)) .analysis-result-head h3[data-repeats-task]');
-    expect(hidden).toMatchObject({ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', 'clip-path': 'inset(50%)', 'white-space': 'nowrap' });
-    expect(hidden).not.toHaveProperty('display');
-    expect(hidden).not.toHaveProperty('visibility');
   });
 
   it('keeps each KPI meta part whole and drops the fixed title height', () => {

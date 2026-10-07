@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
-import { TechnicalInfo } from './TechnicalInfo.js';
+import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { formatPeriod } from '../../lib/period.js';
 
 /** How many sentences stand above the cards before the rest fold away. */
@@ -122,10 +122,12 @@ function ConclusionLine({ conclusion }: { conclusion: ScriptConclusion }) {
   </div>;
 }
 
-export function BusinessResultView({ run, onSources, actions, diagnostics = [] }: {
+export function BusinessResultView({ run, onSources, actions, technicalRows, diagnostics = [] }: {
   run: AnalysisRun; onSources?(): void;
   /** The run's next steps (整理成文稿 first). They follow the cards, or the tables when there are no cards. */
   actions?: ReactNode;
+  /** Identifiers shown above the raw fields in 技术信息, such as the version's question. */
+  technicalRows?: TechnicalRow[];
   /** The engine's own diagnostics, kept in the one 技术信息 fold with the raw fields. */
   diagnostics?: unknown[];
 }) {
@@ -195,7 +197,7 @@ export function BusinessResultView({ run, onSources, actions, diagnostics = [] }
     </div>
     {kpis.length === 0 && actions}
     {onSources ? <div className="analysis-actions"><Button variant="outline" type="button" onClick={onSources}>查看来源与范围</Button></div> : null}
-    <TechnicalInfo>
+    <TechnicalInfo rows={technicalRows}>
       <p className="analysis-note">原始字段 · {run.result?.columns.length ?? 0} 列</p>
       <Table key={`${run.id}:raw-business`} columns={run.result?.columns ?? []} rows={run.result?.rows ?? []} caption="原始计算结果" />
       {diagnostics.length > 0 && <><h4>原始诊断细节 · {diagnostics.length} 项</h4>

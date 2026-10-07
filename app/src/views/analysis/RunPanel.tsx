@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { BusinessResultView } from './BusinessResultView.js';
 import { RevisionDiff } from './RevisionDiff.js';
-import { TechnicalInfo } from './TechnicalInfo.js';
+import { TechnicalInfo, type TechnicalRow } from './TechnicalInfo.js';
 import { businessColumnLabel, runPresentationRole, selectBusinessResult } from './businessResults.js';
 import { errorText } from './shared.js';
 import { RUN_ROLE_LABELS, scenarioLabel } from './glossary.js';
@@ -22,7 +22,7 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
   onDrilldown?(run: AnalysisRun, row: number, column?: string, section?: SourceDrilldownSection): Promise<FinanceDrilldown>;
   /** Opens the finance scope settings, which sit below the result, on the scope this run used. */
   onAdjustScope?(run: AnalysisRun): void;
-  /** The task's own name. The result is titled by the version's question; one that only repeats this name stays for screen readers. */
+  /** The task's own name: the result's heading for screen readers, since the page header already shows it. */
   question?: string;
   /** The 分析版本 picker, drawn above the result with 比较版本 beside it. */
   versionPicker?: ReactNode;
@@ -50,9 +50,10 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
     setSelected(next.id); writeCopy(`${analysis.task_id}:run`, next.id); onPick(next.analysis_id);
     setEvidence(false); setComparing(false);
   };
-  const heading = analysis.question?.trim() || question?.trim() || '';
-  // The task name already heads the page; without a conclusion to label, a title that only repeats it is not drawn.
-  const repeatsTask = !analysis.question?.trim() || analysis.question.trim() === question?.trim();
+  // The page header shows the task name in full, so the result's heading is there for screen readers only.
+  const heading = question?.trim() || analysis.question;
+  // The version's own question is written for the assistant; it stays reachable under 技术信息.
+  const technical: TechnicalRow[] = [['版本问题', analysis.question]];
   const compareButton = run && runs.length > 1 ? <Button variant="outline" type="button" aria-expanded={comparing} onClick={() => setComparing(!comparing)}>比较版本</Button> : null;
   // Only the run the latest draft cites is that run; once another is picked the sentence no longer holds.
   const draftReference = Boolean(run && selection.reason === 'draft_reference' && run.id === selection.primary?.id);
@@ -86,13 +87,13 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
               : <p className="analysis-note">{row.error ? errorText(row.error) : '这次计算没有表格结果。'}</p>}</div>;
         })}</div></>}
       </section>}
-      <header className="analysis-result-head"><h3 title={heading} data-repeats-task={repeatsTask || undefined}>{heading}</h3>
+      <header className="analysis-result-head"><h3 className="sr-only">{heading}</h3>
         <p className="analysis-note" title={run.id}>{when(run.created_at)} · 第 {revisionLabel(run, runs)} 次计算 · {runRoleLabel(run)}</p><RunStatus run={run} /></header>
       {run.error && <p role="alert" className="analysis-message analysis-message--error">{errorText(run.error)}</p>}
       {isFinanceVarianceRun(run) && <FinanceVarianceHeadline run={run} />}
       {Boolean(run.row_declarations?.warnings?.length) && <ContractWarnings warnings={run.row_declarations!.warnings!} />}
-      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} />
-        : <>{resultActions}{run.result?.diagnostics?.length ? <TechnicalInfo><RawDiagnostics items={run.result.diagnostics} /></TechnicalInfo> : null}</>}
+      {run.result && run.result.columns.length > 0 ? <RunResultTable run={run} actions={resultActions} technical={technical} />
+        : <>{resultActions}<TechnicalInfo rows={technical}>{run.result?.diagnostics?.length ? <RawDiagnostics items={run.result.diagnostics} /> : null}</TechnicalInfo></>}
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
@@ -186,15 +187,15 @@ function rendersBusinessView(run: AnalysisRun): boolean {
 }
 
 /** The result, with the run's next steps right after what a manager reads first and one 技术信息 fold. */
-function RunResultTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
-  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} />;
-  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} />;
-  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} />;
-  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} diagnostics={run.result?.diagnostics ?? []} />;
+function RunResultTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
+  if (isFinanceVarianceRun(run)) return <FinanceVarianceTable run={run} actions={actions} technical={technical} />;
+  if (isStructuredAggregateRun(run)) return <StructuredAggregateTable run={run} actions={actions} technical={technical} />;
+  if (isScriptSummaryRun(run)) return <ScriptSummaryTable run={run} actions={actions} technical={technical} />;
+  if (rendersBusinessView(run)) return <BusinessResultView run={run} actions={actions} technicalRows={technical} diagnostics={run.result?.diagnostics ?? []} />;
   const diagnostics = run.result!.diagnostics ?? [];
   return <><Table key={run.id} columns={run.result!.columns} rows={run.result!.rows} caption="计算结果" />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
-    {actions}{diagnostics.length > 0 && <TechnicalInfo><RawDiagnostics items={diagnostics} /></TechnicalInfo>}</>;
+    {actions}<TechnicalInfo rows={technical}>{diagnostics.length > 0 ? <RawDiagnostics items={diagnostics} /> : null}</TechnicalInfo></>;
 }
 
 /** The engine's diagnostics as recorded, for the one 技术信息 fold of a result. */
@@ -233,7 +234,7 @@ function isScriptSummaryRun(run: AnalysisRun): boolean {
   return scriptSummaryKeys.every((name) => set.has(name));
 }
 
-function ScriptSummaryTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
+function ScriptSummaryTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const result = run.result!;
   const columns = scriptSummaryKeys.map((name) => ({ name: scriptSummaryLabels[name], type: columnType(run, name) }));
   const rows = result.rows.map((row) => Object.fromEntries(scriptSummaryKeys.map((name) => [scriptSummaryLabels[name], row[name]])));
@@ -244,6 +245,7 @@ function ScriptSummaryTable({ run, actions }: { run: AnalysisRun; actions: React
     <details className="analysis-details"><DisclosureSummary>完整明细 · {result.columns.length} 列</DisclosureSummary>
       <Table key={`${run.id}:full`} columns={result.columns} rows={result.rows} caption="完整明细" />
     </details>
+    <TechnicalInfo rows={technical} />
   </section>;
 }
 
@@ -294,17 +296,17 @@ function structuredDiagnosticText(value: unknown): string {
   return message || `结构化汇总诊断：${textValue(value)}`;
 }
 
-function RawResultDetails({ run }: { run: AnalysisRun }) {
+function RawResultDetails({ run, rows }: { run: AnalysisRun; rows: TechnicalRow[] }) {
   const result = run.result!;
   const diagnostics = result.diagnostics ?? [];
-  return <TechnicalInfo>
+  return <TechnicalInfo rows={rows}>
     {diagnostics.length > 0 && <RawDiagnostics items={diagnostics} />}
     <h4>原始结果字段 · {result.columns.length} 列</h4>
     <Table key={`${run.id}:raw`} columns={result.columns} rows={result.rows} caption="原始计算结果" />
   </TechnicalInfo>;
 }
 
-function StructuredAggregateTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
+function StructuredAggregateTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const result = run.result!;
   const detailRows = result.detail_rows ?? [];
   const excludedRows = result.excluded_detail_rows ?? [];
@@ -324,7 +326,7 @@ function StructuredAggregateTable({ run, actions }: { run: AnalysisRun; actions:
     {excludedRows.length > 0 && <details className="analysis-details"><DisclosureSummary>剔除明细 · {excludedRows.length} 行</DisclosureSummary>
       <Table key={`${run.id}:excluded`} columns={structuredAggregateColumns(run, excludedRows)} rows={structuredAggregateRows(excludedRows)} caption="剔除明细" />
     </details>}
-    <RawResultDetails run={run} />
+    <RawResultDetails run={run} rows={technical} />
   </section>;
 }
 
@@ -443,7 +445,7 @@ function financeVarianceCopy(run: AnalysisRun): { caption: string; baselineLabel
   };
 }
 
-function FinanceVarianceTable({ run, actions }: { run: AnalysisRun; actions: ReactNode }) {
+function FinanceVarianceTable({ run, actions, technical }: { run: AnalysisRun; actions: ReactNode; technical: TechnicalRow[] }) {
   const dimensions = financeVarianceDimensionColumns(run);
   const copy = financeVarianceCopy(run);
   const hasAmountChange = new Set(run.result?.columns.map((column) => column.name) ?? []).has('amount_change');
@@ -465,7 +467,7 @@ function FinanceVarianceTable({ run, actions }: { run: AnalysisRun; actions: Rea
       ...(hasAmountChange ? [{ name: '科目增减', type: 'DECIMAL' }] : []), { name: '差异贡献', type: 'DECIMAL' }, { name: '差异率', type: 'VARCHAR' },
     ]} rows={rows} caption={copy.caption} />
     <p className="analysis-note">{run.result!.row_count} 行{run.result!.truncated ? ' · 当前为截断预览' : ''}</p>
-    <RawResultDetails run={run} />
+    <RawResultDetails run={run} rows={technical} />
   </section>;
 }
 
