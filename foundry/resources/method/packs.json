@@ -21,9 +21,9 @@
     {
       "id": "cash",
       "entry": "cash",
-      "uses": ["finance_scenario_save", "finance_scenario_run"],
-      "capabilities": ["receivables_aging", "cash_13_weeks"],
-      "output": "aging-or-13-week-cash"
+      "uses": ["finance_scenario_save", "finance_scenario_run", "finance_controls_save"],
+      "capabilities": ["receivables_aging", "cash_13_weeks", "collection_health"],
+      "output": "aging-13-week-cash-or-collection-health"
     }
   ]
 }
