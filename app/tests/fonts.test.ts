@@ -17,13 +17,14 @@ const FACES = [...CSS.matchAll(/@font-face\s*\{([^}]*)\}/g)].map(([, body]) => (
   url: /url\('([^']+)'\)/.exec(body)?.[1],
 }));
 const KNOWN_TAGS = ['cmap', 'head', 'hhea', 'hmtx', 'maxp', 'name', 'OS/2', 'post', 'cvt ', 'fpgm', 'glyf', 'loca', 'prep', 'CFF ', 'VORG', 'EBDT', 'EBLC', 'gasp', 'hdmx', 'kern', 'LTSH', 'PCLT', 'VDMX', 'vhea', 'vmtx', 'BASE', 'GDEF', 'GPOS', 'GSUB', 'EBSC', 'JSTF', 'MATH', 'CBDT', 'CBLC', 'COLR', 'CPAL', 'SVG ', 'sbix', 'acnt', 'avar', 'bdat', 'bloc', 'bsln', 'cvar', 'fdsc', 'feat', 'fmtx', 'fvar', 'gvar', 'hsty', 'just', 'lcar', 'mort', 'morx', 'opbd', 'prop', 'trak', 'Zapf', 'Silf', 'Glat', 'Gloc', 'Feat', 'Sill'];
-let cachedTables: Map<string, Buffer> | undefined;
+const cachedTables = new Map<string, Map<string, Buffer>>();
 
 /** The vendored WOFF2 retains raw SFNT tables, so Node can verify the font
  * directly with its built-in Brotli decoder and no font/package dependency. */
-function tables(): Map<string, Buffer> {
-  if (cachedTables) return cachedTables;
-  const bytes = readFileSync(FONT);
+function tables(path = FONT): Map<string, Buffer> {
+  const cached = cachedTables.get(path);
+  if (cached) return cached;
+  const bytes = readFileSync(path);
   expect(bytes.toString('ascii', 0, 4)).toBe('wOF2');
   expect(bytes.readUInt32BE(8)).toBe(bytes.length);
   let cursor = 48;
@@ -41,22 +42,28 @@ function tables(): Map<string, Buffer> {
     const flags = bytes[cursor++];
     const index = flags & 63;
     const tag = index === 63 ? bytes.toString('ascii', cursor, cursor += 4) : KNOWN_TAGS[index];
-    expect(flags >> 6, `${tag} must retain its raw SFNT table`).toBe(tag === 'glyf' || tag === 'loca' ? 3 : 0);
-    directory.push({ tag, size: uint128() });
+    const outlines = tag === 'glyf' || tag === 'loca';
+    // The converted Noto face keeps every table raw; a publisher's WOFF2 (IBM Plex Mono) may transform its outlines,
+    // whose bytes these tests never read.
+    if (path === FONT) expect(flags >> 6, `${tag} must retain its raw SFNT table`).toBe(outlines ? 3 : 0);
+    const transformed = outlines ? flags >> 6 !== 3 : flags >> 6 !== 0;
+    const original = uint128();
+    directory.push({ tag, size: transformed ? uint128() : original });
   }
   const stream = brotliDecompressSync(bytes.subarray(cursor, cursor + bytes.readUInt32BE(20)));
   expect(stream.length).toBe(directory.reduce((sum, row) => sum + row.size, 0));
   let offset = 0;
-  cachedTables = new Map(directory.map(({ tag, size }) => [tag, stream.subarray(offset, offset += size)]));
-  return cachedTables;
+  const read = new Map(directory.map(({ tag, size }) => [tag, stream.subarray(offset, offset += size)]));
+  cachedTables.set(path, read);
+  return read;
 }
-function table(tag: string) {
-  const found = tables().get(tag);
+function table(tag: string, path = FONT) {
+  const found = tables(path).get(tag);
   if (!found) throw new Error(`font missing ${tag}`);
   return found;
 }
-function cmap(): Map<number, number> {
-  const data = table('cmap');
+function cmap(path = FONT): Map<number, number> {
+  const data = table('cmap', path);
   for (let i = 0; i < data.readUInt16BE(2); i++) {
     const record = 4 + i * 8;
     const platform = data.readUInt16BE(record);
@@ -71,10 +78,31 @@ function cmap(): Map<number, number> {
     }
     return out;
   }
-  throw new Error('font missing Unicode cmap format 12');
+  return bmpCmap(data);
 }
-function names(): Map<number, string[]> {
-  const data = table('name'), storage = data.readUInt16BE(4), out = new Map<number, string[]>();
+/** A BMP-only face (IBM Plex Mono) carries format 4 alone. */
+function bmpCmap(data: Buffer): Map<number, number> {
+  for (let i = 0; i < data.readUInt16BE(2); i++) {
+    const record = 4 + i * 8;
+    const at = data.readUInt32BE(record + 4);
+    if (!(data.readUInt16BE(record) === 3 && data.readUInt16BE(record + 2) === 1) || data.readUInt16BE(at) !== 4) continue;
+    const segments = data.readUInt16BE(at + 6) / 2, ends = at + 14, starts = ends + segments * 2 + 2;
+    const deltas = starts + segments * 2, offsets = deltas + segments * 2, out = new Map<number, number>();
+    for (let segment = 0; segment < segments; segment++) {
+      const end = data.readUInt16BE(ends + segment * 2), start = data.readUInt16BE(starts + segment * 2);
+      const delta = data.readInt16BE(deltas + segment * 2), rangeAt = offsets + segment * 2, range = data.readUInt16BE(rangeAt);
+      for (let code = start; code <= end && code !== 0xffff; code++) {
+        const raw = range ? data.readUInt16BE(rangeAt + range + (code - start) * 2) : code;
+        const glyph = raw && (raw + delta) & 0xffff;
+        if (glyph) out.set(code, glyph);
+      }
+    }
+    return out;
+  }
+  throw new Error('font missing a Unicode cmap (format 12 or 4)');
+}
+function names(path = FONT): Map<number, string[]> {
+  const data = table('name', path), storage = data.readUInt16BE(4), out = new Map<number, string[]>();
   for (let i = 0; i < data.readUInt16BE(2); i++) {
     const at = 6 + i * 12;
     if (data.readUInt16BE(at) !== 3) continue;
@@ -116,7 +144,7 @@ describe('offline font resources', () => {
       expect(face.url).not.toMatch(/^(?:https?:|data:|\/)/);
       expect(existsSync(resolve(STYLES, face.url!)), face.url).toBe(true);
     }
-    for (const family of ['asap-sharp', 'noto-sans-sc']) {
+    for (const family of ['asap-sharp', 'noto-sans-sc', 'ibm-plex-mono']) {
       const license = readFileSync(resolve(ASSETS, family, 'OFL.txt'), 'utf8');
       expect(license).toContain('SIL OPEN FONT LICENSE');
       expect(CSS).toContain(license.split('\n').map((line) => line.trimEnd()).join('\n'));
@@ -125,7 +153,7 @@ describe('offline font resources', () => {
     const reportFont = reportFontManifest();
     expect(reportFont.source_sha256).toBe(createHash('sha256').update(readFileSync(FONT)).digest('hex'));
     expect(createHash('sha256').update(readFileSync(resolve(ASSETS, 'noto-sans-sc', reportFont.file))).digest('hex')).toBe(reportFont.sha256);
-    for (const family of ['asap-sharp', 'noto-sans-sc']) for (const name of readdirSync(resolve(ASSETS, family))) {
+    for (const family of ['asap-sharp', 'noto-sans-sc', 'ibm-plex-mono']) for (const name of readdirSync(resolve(ASSETS, family))) {
       if (/\.(woff2?|ttf|otf)$/.test(name) && name !== reportFont.file) expect(named.has(resolve(ASSETS, family, name)), name).toBe(true);
     }
   });
@@ -189,6 +217,51 @@ describe('actual Simplified Chinese glyphs and variable weights', () => {
     for (const sample of Object.values(measured.weights) as { digit_advances: number[] }[]) {
       expect(sample.digit_advances).toHaveLength(10);
       expect(new Set(sample.digit_advances).size).toBe(1);
+    }
+  });
+});
+
+describe('IBM Plex Mono figures', () => {
+  const PLEX = resolve(ASSETS, 'ibm-plex-mono');
+  const record = () => JSON.parse(readFileSync(resolve(PLEX, 'manifest.json'), 'utf8'));
+  const plexFaces = (family: string) => FACES.filter((face) => face.family === family);
+
+  it('registers the three table weights twice: whole figure runs, and digits inside sentences', () => {
+    for (const family of ['IBM Plex Mono', 'FND Figures']) {
+      expect(plexFaces(family).map((face) => face.weight)).toEqual(['400', '600', '700']);
+    }
+    for (const face of plexFaces('IBM Plex Mono')) expect(face.body).toContain('unicode-range: U+0020-007E, U+00A0-00FF, U+2030, U+2212;');
+    // Only digits and % in prose: commas, points and every Chinese character stay in the sentence's face.
+    for (const face of plexFaces('FND Figures')) expect(face.body).toContain('unicode-range: U+0025, U+0030-0039;');
+    expect(plexFaces('FND Figures').map((face) => face.url)).toEqual(plexFaces('IBM Plex Mono').map((face) => face.url));
+  });
+
+  it("ships the publisher's own WOFF2 files byte for byte, so the reserved name stays on an unmodified font", () => {
+    const manifest = record();
+    expect(manifest.source.package).toBe('@ibm/plex-mono');
+    expect(manifest.source.tarball).toMatch(/^https:\/\/registry\.npmjs\.org\/@ibm\/plex-mono\/-\/plex-mono-\d+\.\d+\.\d+\.tgz$/);
+    expect(manifest.source.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.build).toEqual({ copied_unmodified: true, subset: false, converted: false });
+    expect(manifest.license.reserved_font_name).toBe('Plex');
+    expect(createHash('sha256').update(readFileSync(resolve(PLEX, 'OFL.txt'))).digest('hex')).toBe(manifest.license.sha256);
+    expect(manifest.faces.map((face: { weight: number }) => face.weight)).toEqual([400, 600, 700]);
+    for (const face of manifest.faces as { file: string; sha256: string; weight: number }[]) {
+      const path = resolve(PLEX, face.file);
+      expect(createHash('sha256').update(readFileSync(path)).digest('hex')).toBe(face.sha256);
+      expect(names(path).get(1)?.[0]).toMatch(/^IBM Plex Mono\b/);
+      expect(table('OS/2', path).readUInt16BE(4), face.file).toBe(face.weight);
+    }
+  });
+
+  it('gives every character a figure is written with one width at every weight', () => {
+    const characters = record().figure_characters as string;
+    expect(characters).toContain('()');
+    expect(characters).toContain('\u2212');
+    for (const face of record().faces as { file: string }[]) {
+      const path = resolve(PLEX, face.file);
+      const mapping = cmap(path), metrics = table('hmtx', path), count = table('hhea', path).readUInt16BE(34);
+      const widths = [...characters].map((char) => metrics.readUInt16BE(Math.min(mapping.get(char.codePointAt(0)!)!, count - 1) * 4));
+      expect(new Set(widths), face.file).toEqual(new Set([600]));
     }
   });
 });

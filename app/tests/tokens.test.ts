@@ -115,6 +115,28 @@ describe('the token table', () => {
     expect(values['--fnd-font-sans']).not.toContain('LXGW');
   });
 
+  it('draws figures in IBM Plex Mono and leaves Chinese to the interface face', () => {
+    const values = block(TOKENS, ':root');
+    const fallback = values['--fnd-font-sans'];
+    expect(values['--fnd-font-figure']).toBe(`'IBM Plex Mono', ${fallback}`);
+    expect(values['--fnd-font-prose']).toBe(`'FND Figures', ${fallback}`);
+  });
+
+  it('marks a negative figure in a muted dark red that is not the warning colour', () => {
+    // Deng's rule 3: a soft dark red beside the sign or parentheses, never a saturated pure red.
+    const saturation = (hex: string) => {
+      const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(1 + at, 3 + at), 16) / 255);
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), lightness = (max + min) / 2;
+      return max === min ? 0 : (max - min) / (1 - Math.abs(2 * lightness - 1));
+    };
+    for (const table of [block(TOKENS, ':root'), block(TOKENS, ":root[data-theme='dark']")]) {
+      expect(table['--fnd-negative']).not.toBe(table['--fnd-warning']);
+      expect(saturation(table['--fnd-negative'])).toBeLessThan(saturation(table['--fnd-warning']));
+      expect(saturation(table['--fnd-negative'])).toBeLessThan(0.5);
+      expect(hue(table['--fnd-negative'])).toBeLessThan(20);
+    }
+  });
+
   it('resolves in all three theme states', () => {
     // The viewer has three, not two: an explicit choice stamps the root, and the
     // default stamps nothing at all. A colour defined only behind a stamp never
@@ -153,7 +175,7 @@ describe('the five words are legible in both themes', () => {
       ['dark', dark, ['#1f1f1f', '#161616']],
     ];
     for (const [theme, table, grounds] of cases) {
-      for (const token of ['--fnd-ink', '--fnd-muted', '--fnd-mark-outside', '--fnd-mark-absent']) {
+      for (const token of ['--fnd-ink', '--fnd-muted', '--fnd-mark-outside', '--fnd-mark-absent', '--fnd-negative']) {
         for (const ground of grounds) {
           const ratio = contrast(table[token], ground);
           expect(ratio, `${theme} ${token} on ${ground} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);

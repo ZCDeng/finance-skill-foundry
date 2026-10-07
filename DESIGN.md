@@ -1,7 +1,7 @@
 ---
 name: FA Foundry
 description: 以任务、持续对话与真实成果组织的财务经理工作台。
-colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-warning: '#a3372b', fnd-warning-line: '#c96a5c', fnd-warning-fill: '#c96a5c1f', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f', fnd-warning-dark: '#eb9a8c', fnd-warning-line-dark: '#eb9a8c', fnd-warning-fill-dark: '#eb9a8c1f'}
+colors: {fnd-bg: '#ffffff', fnd-surface: '#ffffff', fnd-surface-strong: '#f7f7f7', fnd-ink: '#000000e0', fnd-muted: '#00000099', fnd-line: '#1f1f1f24', fnd-accent: '#1f1f1f', fnd-on-accent: '#f9fafb', fnd-selection-surface: '#efefed', fnd-line-hover: '#1f1f1f66', fnd-focus: '#8a6729', fnd-selected: '#8a6729', fnd-on-selected: '#f9fafb', fnd-warning: '#a3372b', fnd-warning-line: '#c96a5c', fnd-warning-fill: '#c96a5c1f', fnd-negative: '#94463d', fnd-bg-dark: '#111111', fnd-surface-dark: '#1f1f1f', fnd-surface-strong-dark: '#161616', fnd-ink-dark: '#f9fafb', fnd-muted-dark: '#a6a6a6', fnd-line-dark: '#ffffff24', fnd-accent-dark: '#f9fafb', fnd-on-accent-dark: '#1f1f1f', fnd-selection-surface-dark: '#292929', fnd-line-hover-dark: '#ffffff59', fnd-focus-dark: '#bfa36c', fnd-selected-dark: '#e2c180', fnd-on-selected-dark: '#1f1f1f', fnd-warning-dark: '#eb9a8c', fnd-warning-line-dark: '#eb9a8c', fnd-warning-fill-dark: '#eb9a8c1f', fnd-negative-dark: '#d9a097'}
 typography:
   headline: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 24px, fontWeight: 600, lineHeight: 32px}
   task-title: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 20px, fontWeight: 600, lineHeight: 28px}
@@ -15,6 +15,7 @@ typography:
   document-section: {fontFamily: '''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 18px, fontWeight: 700, lineHeight: 28px}
   composer: {fontFamily: '''Noto Sans SC'', sans-serif', fontSize: 16px, lineHeight: 28px}
   brand: {fontFamily: '''Asap Sharp'', ''Noto Sans SC'', sans-serif', fontSize: 22px, fontWeight: 700, lineHeight: 1}
+  figure: {fontFamily: '''IBM Plex Mono'', ''Noto Sans SC'', ''PingFang SC'', system-ui, sans-serif', fontSize: 14px, fontWeight: 400, lineHeight: 22px}
 rounded: {control: 8px, container: 12px, chip: 30px, mark: 6px, menu: 10px}
 spacing: {control-gap: 8px, compact: 8px, small: 12px, grid-gap: 20px, workspace-gap: 20px, gutter: 24px, section-gap: 32px}
 components:
@@ -41,7 +42,7 @@ components:
 
 **Key Characteristics:**
 
-- FA 图形与 Asap Sharp 品牌字；离线 Noto Sans SC 中文工作界面。
+- FA 图形与 Asap Sharp 品牌字；离线 Noto Sans SC 中文工作界面；离线 IBM Plex Mono 财务数字。
 - 中性平面、细分隔线、有限容器与金色交互定位。
 - 持续对话与成果并排，空间不足时使用同任务专注视图。
 - 按真实参数、来源、版本和状态呈现结果与文稿。
@@ -59,6 +60,8 @@ components:
 ## Typography
 
 Noto Sans SC 用于中文正文、标题、输入和控件，完整 WOFF2 随壳和原生客户端离线打包，真实变量字重 100–900，关闭合成字重；不依赖 localhost 或远程字体。Asap Sharp 仅用于品牌字。见[字体来源与许可](app/src/assets/fonts/noto-sans-sc/README.md)。
+
+财务数字用 IBM Plex Mono（IBM 官方 npm 包 @ibm/plex-mono 2.5.0 的 WOFF2 原文件，OFL，不转换、不裁字、不改名），只打包 Regular、SemiBold、Bold 三个字重，随包离线，不在线加载。等宽字体里数字、千分位逗号、小数点、负号、括号、百分号和空格同宽，数字列在末位对齐。`--fnd-font-figure` 用于整格数字：表格数字格（`.analysis-number`、`.fnd-num`、`.fnd-figure`）、KPI 数值与明细、报告复核的数字、金额输入；万元、个百分点这类中文单位回落到 Noto Sans SC。`--fnd-font-prose` 用于结果区句子：结论、KPI 卡的说明行、勾稽结果、报告复核说明和计算历史。它只让 0–9 和 % 走 Plex Mono，文字、逗号、小数点仍用 Noto，不拆文本。标题栏、按钮、菜单、表单标签不换。负数色 `fnd-negative` 是柔和暗红（浅色 #94463d，白底 6.56:1；深色 #d9a097，#1f1f1f 上 7.40:1），饱和度低于警示砖红，只给负数，和警告、错误分开；负号或括号始终保留，颜色不单独表意。见[数字字体来源与许可](app/src/assets/fonts/ibm-plex-mono/README.md)。
 
 任务标题 20px，窄窗为 18px；结果页结论优先，首句脚本结论 22px/32px、其余 18px/28px，结果区不画可见标题：顶栏已完整显示任务名，结果的 h3 用任务名（为空时用版本问题）并只留给读屏。有脚本结论时 22px 结论直接领起，没有时日期和四项状态领起。分析版本的问题是助手写的版本说明，放在「技术信息」的「版本问题」一行，版本选择器、比较下拉和计算历史里仍用它区分版本。文稿标题 28px/40px（字重 750）、章 22px/32px（720）、节 18px/28px、小节 16px/26px（700），编辑器、阅读视图与导出 HTML 共用 `--fnd-doc-*` token（h4 至 h6 同用小节字号），由 `document-headings.test.ts` 保持一致。壳与原生对话共用 14px/22px 控件字号，标签 13px、元信息 12px；文稿正文、原生消息和输入共用 16px/28px。应用内阅读与编辑共用一列居中、最大 56rem（896px）的正文；目录由文稿工具栏的「目录」打开，居中的正文列左侧留得下 200px 目录列和 32px 间距时放在正文列外侧，否则以浮层抽屉打开；开合时工具栏和正文都不移动，抽屉在焦点移出、点外面或按 Escape 时关闭，焦点回到「目录」；导出 HTML 正文最大 42em。段后 18px、章前 32px；Markdown 的最浅标题深度映射到正文一级章节，保留相对层级。代码使用 `ui-monospace`。全局启用 `tabular-nums`，结果数值列按真实列类型右对齐；文稿表格按单元格内容判断，数字格（含带单位的数）右对齐且不换行，文字格左对齐，以数字为主的列表头和列里的「—」「不适用」等说明格随列右对齐，文字格和数字列表头至少 4em、首列不在字间断开，首列和不带单位的年份不按数字排，放不下时表格横向滚动，阅读视图与导出 HTML 共用同一份 num/text 标记。
 

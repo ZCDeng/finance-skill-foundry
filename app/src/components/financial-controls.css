@@ -123,6 +123,7 @@
 .fnd-decimal-field .fnd-field {
   padding-right: 64px;
   text-align: right;
+  font-family: var(--fnd-font-figure);
   font-variant-numeric: tabular-nums;
 }
 

@@ -36,6 +36,11 @@ extraResources:
       - 'NotoSansSC-report.ttf'
       - 'report-font.json'
       - 'OFL.txt'
+  # The figure font's license travels with the app (OFL §2); the WOFF2 faces ride in the renderer bundle.
+  - from: src/assets/fonts/ibm-plex-mono
+    to: fonts/ibm-plex-mono
+    filter:
+      - 'OFL.txt'
   # `node_modules` is named on its own line. electron-builder skips a directory
   # by that name inside extraResources unless it is asked for explicitly, and the
   # failure is quiet: the bundle builds, `dsh/` arrives holding only the pin

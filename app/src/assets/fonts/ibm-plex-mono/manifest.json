@@ -1,0 +1,71 @@
+{
+  "source": {
+    "package": "@ibm/plex-mono",
+    "version": "2.5.0",
+    "tarball": "https://registry.npmjs.org/@ibm/plex-mono/-/plex-mono-2.5.0.tgz",
+    "sha256": "55b5ffcfcd5e9db36ef2070b2b07a573434ca02c6f3be2b921c0b88fff29acad",
+    "repository": "https://github.com/IBM/plex"
+  },
+  "license": {
+    "name": "SIL Open Font License 1.1",
+    "reserved_font_name": "Plex",
+    "file": "OFL.txt",
+    "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+  },
+  "build": {
+    "copied_unmodified": true,
+    "subset": false,
+    "converted": false
+  },
+  "figure_characters": "0123456789,.-+()%− ",
+  "faces": [
+    {
+      "weight": 400,
+      "file": "IBMPlexMono-Regular.woff2",
+      "sha256": "ba204497f16b6d334cee9d1e963a831b73e3a56e1d6300a8489d18df7214b350",
+      "bytes": 49248,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-Regular.woff2",
+      "measured": {
+        "family": "IBM Plex Mono",
+        "version": "Version 2.005",
+        "weight_class": 400,
+        "fs_type": 0,
+        "units_per_em": 1000,
+        "figure_advance": 600,
+        "codepoints": 1049
+      }
+    },
+    {
+      "weight": 600,
+      "file": "IBMPlexMono-SemiBold.woff2",
+      "sha256": "6a825b4824c01cbb401e829e5a066a1818411bcb3538b5a5792c5ca9b82343c3",
+      "bytes": 50600,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-SemiBold.woff2",
+      "measured": {
+        "family": "IBM Plex Mono SmBld",
+        "version": "Version 2.005",
+        "weight_class": 600,
+        "fs_type": 0,
+        "units_per_em": 1000,
+        "figure_advance": 600,
+        "codepoints": 1049
+      }
+    },
+    {
+      "weight": 700,
+      "file": "IBMPlexMono-Bold.woff2",
+      "sha256": "ea576f38d05cc44cca48c45314984beb8cc1d2b886f58e1dce99f15dc344eb1d",
+      "bytes": 50380,
+      "source": "package/fonts/complete/woff2/IBMPlexMono-Bold.woff2",
+      "measured": {
+        "family": "IBM Plex Mono",
+        "version": "Version 2.005",
+        "weight_class": 700,
+        "fs_type": 0,
+        "units_per_em": 1000,
+        "figure_advance": 600,
+        "codepoints": 1049
+      }
+    }
+  ]
+}

@@ -115,7 +115,7 @@
 .analysis-draft-fields { gap: 18px; }
 .analysis-prepublish { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; border-top: 1px solid var(--fnd-line); }
 .analysis-prepublish > .analysis-section-heading h3 { font-size: var(--fnd-size-reading); }
-.analysis-number { text-align: right !important; font-variant-numeric: tabular-nums; }
+.analysis-number { text-align: right !important; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
 .analysis-table th:not([scope='rowgroup']) { position: sticky; top: 0; background: var(--fnd-bg); }
 .analysis-workspace ::selection { background: var(--fnd-selection-surface); color: var(--fnd-ink); }
 .analysis-result-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; position: relative; container-type: inline-size; isolation: isolate; }
@@ -139,7 +139,7 @@
 .analysis-history-list { display: flex; flex-direction: column; }
 .analysis-history-row { display: grid; grid-template-columns: minmax(100px, 1fr) auto auto; gap: 8px 16px; width: 100%; color: var(--fnd-muted); background: transparent; border: 0; border-bottom: 1px solid var(--fnd-line); text-align: left; padding: 12px 8px; cursor: pointer; font: inherit; font-size: 13px; }
 .analysis-history-row span:first-child { color: var(--fnd-ink); overflow-wrap: anywhere; }
-.analysis-history-row span:last-child { grid-column: 1 / -1; font-variant-numeric: tabular-nums; font-size: 12px; }
+.analysis-history-row span:last-child { grid-column: 1 / -1; font-family: var(--fnd-font-prose); font-variant-numeric: tabular-nums; font-size: 12px; }
 .analysis-history-row[aria-current='true'], .analysis-history-row:hover { background: var(--fnd-selection-surface); }
 .analysis-history-row--static { cursor: default; }
 .analysis-history-row--static:hover { background: transparent; }
@@ -218,17 +218,17 @@
 .analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 @container analysis-result (max-width: 900px) { .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container analysis-result (max-width: 480px) { .analysis-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
-.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; }
+.analysis-kpi-card { border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); padding: 16px; display: flex; flex-direction: column; gap: 6px; background: var(--fnd-surface); min-width: 0; font-family: var(--fnd-font-prose); }
 .analysis-kpi-card span, .analysis-kpi-card small { color: var(--fnd-muted); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .analysis-kpi-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 20px; }
-.analysis-kpi-card strong { font-size: 20px; line-height: 28px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-kpi-card strong { font-size: 20px; line-height: 28px; font-weight: var(--fnd-weight-strong); font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .analysis-kpi-meta > span { white-space: nowrap; }
 .analysis-kpi-card .analysis-kpi-source { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 1.5; }
 .analysis-kpi-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; padding-top: 8px; border-top: 1px solid var(--fnd-line); }
 .analysis-kpi-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
 .analysis-kpi-list dt { color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-.analysis-kpi-list dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.analysis-headline { display: grid; gap: 10px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); }
+.analysis-kpi-list dd { margin: 0; text-align: right; font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-headline { display: grid; gap: 10px; padding-left: 12px; border-left: 1px solid var(--fnd-line-hover); font-family: var(--fnd-font-prose); }
 .analysis-headline-line { display: grid; gap: 2px; }
 .analysis-headline-text { margin: 0; font-size: 22px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 /* The first conclusion leads; the ones after it stay above body text but no longer compete with it. */
@@ -331,7 +331,7 @@
 .analysis-tieout-place { display: grid; gap: 8px; align-content: start; }
 .analysis-tieout-place h5 { margin: 0; font-size: var(--fnd-size-body); }
 .analysis-tieout-place label, .analysis-tieout-label { display: grid; gap: 4px; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
-.analysis-tieout-result { display: grid; gap: 2px; padding: 10px 12px; border-left: 2px solid var(--fnd-line-hover); font-variant-numeric: tabular-nums; }
+.analysis-tieout-result { display: grid; gap: 2px; padding: 10px 12px; border-left: 2px solid var(--fnd-line-hover); font-family: var(--fnd-font-prose); font-variant-numeric: tabular-nums; }
 .analysis-tieout-result p { margin: 0; }
 .analysis-tieout-difference { font-size: var(--fnd-size-reading); font-weight: var(--fnd-weight-strong); }
 .analysis-controls-decide label, .analysis-controls-setting { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fnd-size-body); }
@@ -449,18 +449,18 @@
 .analysis-report-review-headline--attention { color: var(--fnd-warning); }
 .analysis-report-review-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .analysis-report-review-count { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); font-size: var(--fnd-size-body); }
-.analysis-report-review-count strong { font-variant-numeric: tabular-nums; }
+.analysis-report-review-count strong { font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
 .analysis-report-review-count--attention { color: var(--fnd-warning); border-color: var(--fnd-warning-line); background: var(--fnd-warning-fill); }
 .analysis-report-review-tabs { flex-wrap: wrap; }
 .analysis-report-review-items { display: grid; margin: 0; padding: 0; list-style: none; }
 .analysis-report-review-item { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--fnd-line); }
 .analysis-report-review-item-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.analysis-report-review-number { font-size: var(--fnd-size-reading); font-variant-numeric: tabular-nums; }
+.analysis-report-review-number { font-size: var(--fnd-size-reading); font-family: var(--fnd-font-figure); font-variant-numeric: tabular-nums; }
 .analysis-report-review-status { font-size: var(--fnd-size-small); padding: 0 6px; border: 1px solid var(--fnd-line); border-radius: 4px; }
 .analysis-report-review-item--mismatch .analysis-report-review-status,
 .analysis-report-review-item--match_scaled .analysis-report-review-status { color: var(--fnd-warning); border-color: var(--fnd-warning-line); }
 .analysis-report-review-excerpt { margin: 0; padding-left: 10px; border-left: 2px solid var(--fnd-line-hover); color: var(--fnd-muted); font-size: var(--fnd-size-body); overflow-wrap: anywhere; }
-.analysis-report-review-candidate, .analysis-report-review-difference { margin: 0; font-size: var(--fnd-size-body); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.analysis-report-review-candidate, .analysis-report-review-difference { margin: 0; font-size: var(--fnd-size-body); font-family: var(--fnd-font-prose); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .analysis-report-review-difference { color: var(--fnd-warning); }
 .analysis-report-review-closing { margin: 0; padding-top: 10px; border-top: 1px solid var(--fnd-line); color: var(--fnd-ink); font-size: var(--fnd-size-small); }
 }

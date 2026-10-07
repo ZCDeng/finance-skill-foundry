@@ -29,6 +29,9 @@
   --fnd-font-sans: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
   --fnd-font-display: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
   --fnd-font-brand: 'Asap Sharp', 'Noto Sans SC', sans-serif;
+  /* Figures: a figure cell's whole Latin run in Plex Mono; prose keeps its words and draws only digits and % in it. */
+  --fnd-font-figure: 'IBM Plex Mono', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --fnd-font-prose: 'FND Figures', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
   --fnd-size-label: 12px;
   --fnd-size-small: 13px;
   --fnd-size-body: 14px;
@@ -68,6 +71,8 @@
   --fnd-warning: #a3372b;
   --fnd-warning-line: #c96a5c;
   --fnd-warning-fill: #c96a5c1f;
+  /* A negative figure: a muted dark red apart from the warning's brick red; the sign or parentheses still say it. */
+  --fnd-negative: #94463d;
   --fnd-mark-absent: #6b6b6b;
   --fnd-mark-external: #3a6b8a;
   --fnd-duration: 180ms;
@@ -99,6 +104,7 @@
     --fnd-warning: #eb9a8c;
     --fnd-warning-line: #eb9a8c;
     --fnd-warning-fill: #eb9a8c1f;
+    --fnd-negative: #d9a097;
     --fnd-mark-absent: #9a9a9a;
     --fnd-mark-external: #96bcd2;
   }
@@ -127,6 +133,7 @@
   --fnd-warning: #eb9a8c;
   --fnd-warning-line: #eb9a8c;
   --fnd-warning-fill: #eb9a8c1f;
+  --fnd-negative: #d9a097;
   --fnd-mark-absent: #9a9a9a;
   --fnd-mark-external: #96bcd2;
 }
