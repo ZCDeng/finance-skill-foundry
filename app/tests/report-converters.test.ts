@@ -396,17 +396,17 @@ describe('report document converters', () => {
       expect(html).toContain('<figure class="financial-table" aria-label="表 2-1 区域营业利润">');
       expect(html).not.toContain('tabindex');
       expect(html).not.toContain('role="region"');
-      expect(html).toContain('<th class="text"><p>区域</p></th><th class="num"><p>1 至 8 月实际</p></th><th class="num"><p>差异率</p></th>');
+      expect(html).toContain('<th class="text" data-first-column=""><p>区域</p></th><th class="num"><p>1 至 8 月实际</p></th><th class="num"><p>差异率</p></th>');
       expect(html).toContain('<td class="num"><p>325,644.00 万元</p></td>');
       expect(html).toContain('<td class="num"><p>-18,843.06 万元</p></td>');
       expect(html).toContain('<td class="num"><p>117814.5625 万元（估算）</p></td>');
       expect(html).toContain('<td class="num note"><p>预算为负，不作比率</p></td>');
-      expect(html).toContain('<td class="text"><p>华东区域</p></td>');
+      expect(html).toContain('<td class="text" data-first-column=""><p>华东区域</p></td>');
       // Seven columns split into two groups; each group judges its own columns and names itself a continuation.
       const groups = html.match(/<div class="wide-table-group"[\s\S]*?<\/div>/)?.[0] ?? '';
-      expect(groups).toContain('<th class="text"><p>项目</p></th><th class="text"><p>说明</p></th><th class="num"><p>一月</p></th>');
+      expect(groups).toContain('<th class="text" data-first-column=""><p>项目</p></th><th class="text"><p>说明</p></th><th class="num"><p>一月</p></th>');
       expect(groups).toContain('aria-label="财务表格（续表）"');
-      expect(groups).toContain('<th class="text"><p>项目</p></th><th class="num"><p>五月</p></th>');
+      expect(groups).toContain('<th class="text" data-first-column=""><p>项目</p></th><th class="num"><p>五月</p></th>');
     }
 
     const spanned: ReportDocument = { schema_version: 1, template_version: 'annual-v1', metadata: { company: '', period: '', currency: '', unit: '' }, content: [
@@ -416,7 +416,10 @@ describe('report document converters', () => {
         { type: 'tableRow', content: [cell('tableCell', '2,000.00')] },
       ] },
     ] };
-    expect(renderReportHtml(spanned, '合并单元格')).toContain('<th class="text"><p>区域</p></th><th class="text"><p>实际</p></th>');
+    const spannedHtml = renderReportHtml(spanned, '合并单元格');
+    expect(spannedHtml).toContain('<th class="text" data-first-column=""><p>区域</p></th><th class="text"><p>实际</p></th>');
+    // The row under a row span starts in the second column: its cell is not the first column.
+    expect(spannedHtml).toContain('<tr><td class="num"><p>2,000.00</p></td></tr>');
   });
 
   it('reads signed numbers with area and count units, and leaves broken brackets and loose commas as text', () => {
@@ -435,6 +438,9 @@ describe('report document converters', () => {
       '| 半括号 | (123 |',
       '| 编号 | 1,2,3 |',
       '| 缺值 | — |',
+      '| 暂缺 | 暂无数据 |',
+      '| 全角 | 12.5％ |',
+      '| 年份 | 2026 |',
     ].join('\n'));
     const html = renderReportHtml(doc, '单位');
     for (const text of ['−3.30 个百分点', '+1,200.00 万元', '12,500 平方米', '300 ㎡', '35 户', '120 人', '8 笔', '3.5 亿', '120 万']) {
@@ -443,6 +449,20 @@ describe('report document converters', () => {
     expect(html).toContain('<td class="text"><p>(123</p></td>');
     expect(html).toContain('<td class="text"><p>1,2,3</p></td>');
     expect(html).toContain('<td class="num note"><p>—</p></td>');
+    expect(html).toContain('<td class="num note"><p>暂无数据</p></td>');
+    expect(html).toContain('<td class="num"><p>12.5％</p></td>');
+    expect(html).toContain('<td class="text"><p>2026</p></td>');
+  });
+
+  it('keeps a column of years and the first column as text, with their headers on the left', () => {
+    const html = renderReportHtml(documentFromMarkdown([
+      '| 年度 | 收入 |',
+      '| --- | --- |',
+      '| 2025 | 1,000.00 |',
+      '| 2026 | 1,200.00 |',
+    ].join('\n')), '年度');
+    expect(html).toContain('<th class="text" data-first-column=""><p>年度</p></th><th class="num"><p>收入</p></th>');
+    expect(html).toContain('<td class="text" data-first-column=""><p>2025</p></td><td class="num"><p>1,000.00</p></td>');
   });
 
   it('exports merged cells, captions and PNG images to DOCX without silently segmenting the merge', async () => {

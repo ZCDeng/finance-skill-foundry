@@ -502,28 +502,46 @@ export function ReportEditor({
     setOutlineOpen(false);
     if (returnFocus) outlineToggleRef.current?.focus();
   };
-  const outlineFloating = () => Boolean(outlineRef.current && getComputedStyle(outlineRef.current).position === "absolute");
+  // Whether the open outline is the drawer or the column beside the text is the stylesheet's call (report.css
+  // --report-outline-mode); it is read whenever an event needs it, so a resize across the breakpoint is followed.
+  const outlineFloating = () => Boolean(outlineRef.current
+    && getComputedStyle(outlineRef.current).getPropertyValue("--report-outline-mode").trim() !== "column");
   useEffect(() => {
     if (!outlineOpen) return;
     const aside = outlineRef.current;
     const openedByToggle = outlineOpenedByToggle.current;
     outlineOpenedByToggle.current = false;
-    if (!aside || !outlineFloating()) return;
+    if (!aside) return;
     // A drawer takes the focus while it is open and gives it back to 目录 when it closes.
-    if (openedByToggle) (aside.querySelector<HTMLElement>("a") ?? aside).focus();
+    if (openedByToggle && outlineFloating()) (aside.querySelector<HTMLElement>("a") ?? aside).focus();
+    const page = aside.ownerDocument;
+    const toggle = () => outlineToggleRef.current;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeOutline(true);
+      if (event.key !== "Escape" || !outlineFloating()) return;
+      const active = page.activeElement;
+      if (aside.contains(active) || active === toggle()) closeOutline(true);
     };
     const onPointer = (event: PointerEvent) => {
-      const target = event.target as globalThis.Node | null;
-      if (!aside.contains(target) && !outlineToggleRef.current?.contains(target)) closeOutline(false);
+      if (!outlineFloating()) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (aside.contains(target) || toggle()?.contains(target)) return;
+      const focusable = target?.closest("a[href], button, input, select, textarea, summary, [contenteditable='true'], [tabindex]:not([tabindex='-1'])");
+      closeOutline(false);
+      // A click on something that takes no focus would leave it nowhere; 目录 takes it back.
+      if (!focusable) setTimeout(() => toggle()?.focus(), 0);
     };
-    const page = aside.ownerDocument;
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget instanceof globalThis.Node ? event.relatedTarget : null;
+      if (!next || aside.contains(next) || next === toggle() || !outlineFloating()) return;
+      closeOutline(false);
+    };
     page.addEventListener("keydown", onKey);
     page.addEventListener("pointerdown", onPointer);
+    aside.addEventListener("focusout", onFocusOut);
     return () => {
       page.removeEventListener("keydown", onKey);
       page.removeEventListener("pointerdown", onPointer);
+      aside.removeEventListener("focusout", onFocusOut);
     };
   }, [outlineOpen]);
   const editor = useEditor({
@@ -1162,6 +1180,7 @@ export function ReportEditor({
               closeOutline(true);
             }}
             onClick={(event) => {
+              // Following a heading link closes the drawer without pulling the focus back up to 目录.
               if ((event.target as Element).closest("a") && outlineFloating()) closeOutline(false);
             }}
           >

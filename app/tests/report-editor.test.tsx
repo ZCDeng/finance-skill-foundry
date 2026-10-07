@@ -171,6 +171,50 @@ describe('report editor workspace', () => {
     expect(window.document.activeElement).toBe(toggle);
   });
 
+  it('decides drawer or column when each event comes, across a breakpoint, and keeps the focus with 目录', async () => {
+    let mode = 'column';
+    const original = window.getComputedStyle.bind(window);
+    const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation(((element: Element, pseudo?: string | null) =>
+      element.classList.contains('report-outline')
+        ? ({ getPropertyValue: (name: string) => (name === '--report-outline-mode' ? mode : '') } as unknown as CSSStyleDeclaration)
+        : original(element, pseudo)) as typeof window.getComputedStyle);
+    const document = documentFromMarkdown('## 管理摘要\n正文\n\n## 附录\n用户附录。');
+    mount({ initialMode: 'read', document, body: documentToMarkdown(document) });
+    const toggle = within(screen.getByRole('group', { name: '文稿工具栏' })).getByRole('button', { name: '目录' });
+    const page = window.document;
+
+    // Opened as a column: the focus stays on 目录.
+    fireEvent.click(toggle);
+    toggle.focus();
+    expect(screen.getByRole('complementary', { name: '文稿目录' })).toBeTruthy();
+    // The workspace narrows while it is open: Escape on 目录 now closes the drawer.
+    mode = 'drawer';
+    fireEvent.keyDown(page, { key: 'Escape' });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    expect(page.activeElement).toBe(toggle);
+
+    // Opened as a drawer: the focus moves in, and a click on plain text outside closes it and gives the focus back.
+    fireEvent.click(toggle);
+    expect(page.activeElement).toBe(screen.getByRole('link', { name: '管理摘要' }));
+    fireEvent.pointerDown(screen.getByRole('article', { name: '文稿阅读' }));
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    await waitFor(() => expect(page.activeElement).toBe(toggle));
+
+    // Escape with the focus neither in the drawer nor on 目录 leaves it open.
+    mode = 'column';
+    fireEvent.click(toggle);
+    const importButton = screen.getByRole('button', { name: '导入' });
+    importButton.focus();
+    mode = 'drawer';
+    fireEvent.keyDown(page, { key: 'Escape' });
+    const outline = screen.getByRole('complementary', { name: '文稿目录' });
+    // Moving the focus out of the drawer closes it.
+    screen.getByRole('link', { name: '管理摘要' }).focus();
+    fireEvent.focusOut(outline, { relatedTarget: importButton });
+    expect(screen.queryByRole('complementary', { name: '文稿目录' })).toBeNull();
+    styles.mockRestore();
+  });
+
   it('marks reading-table cells by what they say and makes only an overflowing table a named region', () => {
     const body = [
       '## 二、区域经营',

@@ -7,11 +7,11 @@
 .report-status { color: var(--fnd-muted); font-size: var(--fnd-size-small); line-height: 22px; }
 .report-assistant-action { display: inline-flex; padding-left: 10px; border-left: 1px solid var(--fnd-line); }
 /* Open, the outline is a drawer over the start of the text; the text column does not move. */
-.report-outline { position: absolute; grid-row: 2; grid-column: 1; top: 0; left: 0; z-index: 5; width: min(280px, 100%); max-height: min(70vh, 560px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-bg); box-shadow: var(--fnd-shadow-menu); color: var(--fnd-muted); font-size: var(--fnd-size-small); outline: none; }
+.report-outline { --report-outline-mode: drawer; position: absolute; grid-row: 2; grid-column: 1; top: 0; left: 0; z-index: 5; width: min(280px, 100%); max-height: min(70vh, 560px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-container); background: var(--fnd-bg); box-shadow: var(--fnd-shadow-menu); color: var(--fnd-muted); font-size: var(--fnd-size-small); outline: none; }
 .report-outline nav { display: flex; flex-direction: column; gap: 2px; }
 .report-outline a { color: var(--fnd-muted); text-decoration: none; line-height: 1.55; padding: 5px 6px; border-radius: 6px; overflow-wrap: anywhere; }
 .report-outline a:hover, .report-outline a:focus-visible { color: var(--fnd-ink); background: var(--fnd-selection-surface); outline: none; }
-.report-main { grid-column: -2 / -1; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.report-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .report-topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .report-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .report-modes { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
@@ -115,8 +115,8 @@
 .report-reading :is(td, th).num { text-align: right; }
 .report-reading td.num:not(.note), .report-reading td.num:not(.note) p { white-space: nowrap; overflow-wrap: normal; }
 /* A word column keeps a few characters together, and the first column keeps its names whole, so a narrow column scrolls the table instead of breaking every character. */
-.report-reading :is(td, th).text { min-width: 4em; }
-.report-reading :is(td, th):first-child { word-break: keep-all; }
+.report-reading :is(td, th).text, .report-reading th.num { min-width: 4em; }
+.report-reading :is(td, th)[data-first-column] { word-break: keep-all; }
 .report-reading p[data-located='true'] { background: var(--fnd-selection-surface); border-radius: var(--fnd-radius-mark); box-shadow: 0 0 0 6px var(--fnd-selection-surface); }
 .report-reading .report-page-break { display: none; }
 .report-print-frame { display: flex; justify-content: center; padding: 24px; border: 1px solid var(--fnd-line); border-radius: 8px; background: color-mix(in srgb, var(--fnd-surface) 90%, #fff 10%); overflow: auto; }
@@ -128,10 +128,10 @@
 .report-pdf-compare { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
 .report-pdf-compare h4 { margin: 0; font-size: 15px; }
 .report-pdf-compare canvas { max-width: 100%; align-self: center; background: white; }
-/* With room for a 200px column and the 56rem text column (896px + 232px), the open outline sits at the left instead. */
-@container report-workspace (min-width: 1128px) {
-  .report-shell[data-outline-expanded='true'] { grid-template-columns: 200px minmax(0, 1fr); max-width: calc(200px + 32px + 56rem); }
-  .report-shell[data-outline-expanded='true'] > .report-outline { position: sticky; top: 16px; z-index: auto; width: auto; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+/* When the centred 56rem column leaves 232px on its left (896px + 2 × 232px of workspace), the open outline sits there,
+   outside the column: neither the toolbar nor the text moves. ReportEditor reads --report-outline-mode. */
+@container report-workspace (min-width: 1360px) {
+  .report-shell[data-outline-expanded='true'] > .report-outline { --report-outline-mode: column; left: auto; right: calc(100% + 32px); z-index: auto; width: 200px; max-height: none; overflow: visible; padding: 14px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 }
 @container report-workspace (max-width: 960px) {
   .report-import-sheet { grid-template-columns: minmax(0, 1fr); }
