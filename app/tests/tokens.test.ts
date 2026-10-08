@@ -613,6 +613,30 @@ describe('the disclosure summary', () => {
     expect(TOKENS).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*:root \{ --fnd-duration: 0ms; \}/);
   });
 
+  it('grows and shrinks the opened content on the shared transition, as the Accordion does', () => {
+    const FOLD = 'details:has(> .fnd-disclosure-summary)';
+    expect(declarations(COMPONENTS, FOLD)['interpolate-size']).toBe('allow-keywords');
+    expect(declarations(COMPONENTS, `${FOLD}::details-content`)).toMatchObject({
+      'block-size': '0',
+      overflow: 'clip',
+      transition: 'block-size var(--fnd-transition), content-visibility var(--fnd-transition) allow-discrete',
+    });
+    expect(declarations(COMPONENTS, `details[open]:has(> .fnd-disclosure-summary)::details-content`)['block-size']).toBe('auto');
+  });
+
+  it('steps a nested fold under its parent words and rules its content, a third level not again', () => {
+    const FOLD = 'details:has(> .fnd-disclosure-summary)';
+    expect(declarations(COMPONENTS, `${FOLD} ${FOLD}`)['margin-inline-start']).toBe('24px');
+    expect(declarations(COMPONENTS, `${FOLD} ${FOLD} ${FOLD}`)['margin-inline-start']).toBe('0');
+    // 7px + 1px rule + 16px puts the content under the nested summary's words (24px).
+    expect(declarations(COMPONENTS, `${FOLD} ${FOLD}::details-content`)).toMatchObject({
+      'margin-inline-start': '7px',
+      'padding-inline-start': '16px',
+      'border-inline-start': '1px solid var(--fnd-line)',
+    });
+    expect(declarations(COMPONENTS, `${FOLD} + ${FOLD}`)['border-top']).toBe('1px solid var(--fnd-line)');
+  });
+
   it('takes the 1px focus ring from base, which now names summary', () => {
     const flat = BASE.replace(/\/\*[\s\S]*?\*\//g, '');
     const rule = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(

@@ -1170,6 +1170,63 @@ details[open] > .fnd-disclosure-summary > .fnd-disclosure-summary__icon {
   height: 14px;
 }
 
+/*
+ * What the disclosure borrows from shadcn's Accordion, kept on native <details>
+ * so find-in-page still opens a fold. The content grows and shrinks on the
+ * shell transition (none with reduced motion); the clip margin keeps rings
+ * and the summary's 8px gutter visible while it does.
+ */
+details:has(> .fnd-disclosure-summary) {
+  interpolate-size: allow-keywords;
+}
+
+details:has(> .fnd-disclosure-summary)::details-content {
+  block-size: 0;
+  overflow: clip;
+  overflow-clip-margin: 8px;
+  transition: block-size var(--fnd-transition), content-visibility var(--fnd-transition) allow-discrete;
+}
+
+details[open]:has(> .fnd-disclosure-summary)::details-content {
+  block-size: auto;
+}
+
+/* One spacing for what a fold opens: 8px under the summary, 12px between blocks. */
+details[open] > .fnd-disclosure-summary + * {
+  margin-top: 8px;
+}
+
+details:has(> .fnd-disclosure-summary) > :not(summary) + :not(summary) {
+  margin-top: 12px;
+}
+
+/* Folds side by side read as one list, as the Accordion's items do: a thin rule between them. */
+details:has(> .fnd-disclosure-summary) + details:has(> .fnd-disclosure-summary) {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--fnd-line);
+}
+
+/*
+ * Levels. A fold inside another fold's content steps in 24px, so its chevron
+ * sits under the parent's words; its own content keeps a 1px rule under that
+ * chevron and starts under its words. A third level is already under the
+ * second's words, so it does not step again.
+ */
+details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) {
+  margin-inline-start: 24px;
+}
+
+details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary) {
+  margin-inline-start: 0;
+}
+
+details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::details-content {
+  margin-inline-start: 7px;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--fnd-line);
+}
+
 /* A row that opens something says so before it is clicked. */
 .fnd-table__open:hover {
   background: var(--fnd-surface-strong);

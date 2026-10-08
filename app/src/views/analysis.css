@@ -75,8 +75,6 @@
 .analysis-status span + span { border-left: 1px solid var(--fnd-line); padding-left: 12px; }
 .analysis-details { font-size: var(--fnd-size-small); line-height: 1.7; overflow-wrap: anywhere; }
 .analysis-details[open] > summary { margin-bottom: 0; }
-.analysis-details[open] > summary + * { margin-top: 14px; }
-.analysis-details > :not(summary) + :not(summary) { margin-top: 12px; }
 .analysis-details > [data-slot="button"] { margin-top: 12px; }
 .analysis-details .analysis-note { margin-top: 8px; }
 .analysis-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 20px; }
