@@ -14,7 +14,7 @@ python3 tests/fixtures/demo_pack/build_demo.py ~/Desktop/物业集团月结财�
 
 | 变量 | 作用 |
 |---|---|
-| `HUACHEN_DEMO=1` | 保留 F-01、F-02 两处差异；2025 年全年收入取 57 亿；看板页改名「01·核心经营指标」并多一列「上年全年」 |
+| `HUACHEN_DEMO=1` | 保留 F-01、F-02 两处差异；2025 年全年收入取 57 亿；看板页多一列「上年全年」（看板页默认不当数据表，演示时在表结构确认里点「当作数据表」） |
 | `HUACHEN_PERIOD_M` | 结账月份，默认 8，演示版另出一本 9 月 |
 | `HUACHEN_OUT_DIR` | 输出目录 |
 

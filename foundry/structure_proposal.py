@@ -46,7 +46,25 @@ ROLE_ALIASES: dict[str, tuple[str, ...]] = {
     "unit": ("单位", "金额单位", "unit"),
     "organization": ("组织", "机构", "公司", "organization"),
     "ledger": ("账套", "ledger"),
+    # Detail tables the scenarios read: invoices and their collections, cash events,
+    # price/quantity rows. Named here so a confirmed table carries the field names
+    # receivables_aging, cash_13_weeks and the price/quantity bridge look for.
+    "invoice_id": ("发票号", "发票号码", "账单号", "账单编号", "invoice_id"),
+    "due_date": ("到期日", "到期日期", "应收日期", "due_date"),
+    "issue_date": ("开票日期", "账单日期", "issue_date", "invoice_date"),
+    "effective_date": ("回款日期", "收款日期", "核销日期", "effective_date"),
+    "product": ("业态", "产品", "product"),
+    "quantity": ("数量", "计费面积", "quantity"),
+    "price": ("单价", "price"),
+    "posting_status": ("过账状态", "posting_status"),
+    "status": ("状态", "status"),
+    "scenario": ("情景", "scenario"),
+    "kind": ("收付类型", "回款类型", "kind"),
+    "event_id": ("流水号", "id", "activity_id", "event_id"),
 }
+# Aliases that name a column only when they are the whole header. `id` at the end
+# of ledger_id or 单据ID is not a cash event's id, and `kind` ends many words.
+EXACT_ONLY_ALIASES = frozenset({"id", "kind"})
 # A ledger carries 借方/贷方 once per balance column group, so these roles repeat
 # by design; every other role names one column.
 REPEATABLE_ROLES = frozenset({"debit", "credit"})
@@ -98,20 +116,19 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
     grid = _read_grid(sheet)
     if not grid:
         return _excluded(name, "empty_sheet")
-    if _is_presentation_sheet(name, grid):
-        return _excluded(name, "presentation_sheet")
+    presentation = _is_presentation_sheet(name, grid)
     candidates = _header_candidates(grid)
     if not candidates:
-        return _excluded(name, "no_header")
+        return _excluded(name, "presentation_sheet" if presentation else "no_header")
     blocks = _table_blocks(grid, candidates)
     if not blocks:
-        return _excluded(name, "no_header")
+        return _excluded(name, "presentation_sheet" if presentation else "no_header")
     selected = max(blocks, key=lambda block: (block["score"], -block["header_row"]))
     header_row = selected["header_row"]
     columns = selected["columns"]
     pairs = selected["amount_pairs"]
     title_rows = [number for number in sorted(grid) if number < selected["start_row"]]
-    return {
+    table = {
         "sheet": name,
         "decision": "table",
         "reason": None,
@@ -138,6 +155,13 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         # a checkbox that throws when ticked would be worse.
         "blocked_reason": None if _carries_data(columns, pairs) else "unreadable_columns",
     }
+    if presentation:
+        # A cover, KPI board or benchmark page is set aside by default, but a KPI board
+        # is often the only place a pack states its headline figures. What was read off
+        # it stays on the proposal so the manager can adopt it as a table herself.
+        return {**table, "decision": "excluded", "reason": "presentation_sheet",
+                "blocked_reason": "presentation_sheet", "adoptable": table["blocked_reason"] is None}
+    return table
 
 
 def _custom_table(name: str, grid: dict[int, dict[str, Any]], reason: str) -> dict[str, Any]:
@@ -491,7 +515,8 @@ def _role_for(header: str) -> str:
     # column named period, which reads as data rather than as a bad guess.
     tail = TRAILING_QUALIFIER.sub("", header).strip().casefold()
     for role, aliases in ROLE_ALIASES.items():
-        if any(tail.endswith(alias.casefold()) for alias in aliases if len(alias) > 1):
+        if any(tail.endswith(alias.casefold()) for alias in aliases
+               if len(alias) > 1 and alias not in EXACT_ONLY_ALIASES):
             return role
     return "unknown"
 

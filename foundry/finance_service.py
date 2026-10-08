@@ -2212,10 +2212,11 @@ class FinanceStore:
             ]
         if not isinstance(sheets, list):
             raise FoundryError("structure confirmation sheets must be a list")
-        known = {sheet["sheet"] for sheet in latest["sheets"]}
+        known = {sheet["sheet"]: sheet for sheet in latest["sheets"]}
         unknown = [item.get("sheet") for item in sheets if item.get("sheet") not in known]
         if unknown:
             raise FoundryError(f"sheet is not in the proposal: {unknown[0]}")
+        sheets = [self._adopted_sheet(item, known[item["sheet"]]) for item in sheets]
         assert_confirmable(sheets)
         record = self._confirm_declaration(
             latest, sheets, source=self.actor, triggered_by=self.actor
@@ -2232,6 +2233,15 @@ class FinanceStore:
                 ],
             }
         return record
+
+    @staticmethod
+    def _adopted_sheet(item, proposed):
+        """A sheet the proposal set aside may come back as a table only if it was a presentation page with a table on it."""
+        if item.get("decision") != "table" or proposed.get("decision") == "table":
+            return item
+        if proposed.get("reason") == "presentation_sheet" and proposed.get("adoptable"):
+            return {**item, "reason": "adopted_presentation_sheet", "blocked_reason": None}
+        raise FoundryError(f"sheet {item['sheet']} was set aside ({proposed.get('reason')}) and cannot be confirmed as a table")
 
     def _confirm_declaration(self, proposal, sheets, *, source, triggered_by):
         from foundry.locking import exclusive

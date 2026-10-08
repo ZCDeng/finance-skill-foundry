@@ -294,7 +294,10 @@ def apply_matching_templates(
     prepared: list[dict[str, Any]] = []
     matches: list[dict[str, Any]] = []
     for sheet in sheets:
-        if sheet.get("decision") != "table":
+        # A presentation page the manager adopted last month is remembered like any table;
+        # this month's copy of it is set aside again until a shape matches it exactly.
+        adoptable = sheet.get("reason") == "presentation_sheet" and sheet.get("adoptable")
+        if sheet.get("decision") != "table" and not adoptable:
             prepared.append(sheet)
             continue
         scored = sorted(
@@ -307,6 +310,11 @@ def apply_matching_templates(
             prepared.append(sheet)
             continue
         gaps = differences(sheet, template)
+        if adoptable:
+            if gaps:
+                prepared.append(sheet)
+                continue
+            sheet = {**sheet, "decision": "table", "reason": "adopted_presentation_sheet", "blocked_reason": None}
         filled = dict(sheet)
         if gaps:
             # A remembered shape that does not fit exactly is a starting point,
