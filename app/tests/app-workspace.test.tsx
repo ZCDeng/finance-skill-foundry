@@ -57,7 +57,7 @@ describe('unified application session lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '成果库' }));
     await screen.findByRole('button', { name: /结论稿/ });
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /移入回收站/ }));
     await screen.findByText('已将「西南回款」移入回收站');
     fireEvent.click(screen.getByRole('button', { name: '成果库' }));
@@ -74,7 +74,7 @@ describe('unified application session lifecycle', () => {
         : archived ? [a] : [a, b])),
     });
     await screen.findByText('本地成果：西南回款');
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
     await screen.findByText('已归档「西南回款」');
     expect(screen.getByText('从问题开始')).toBeTruthy();
@@ -122,7 +122,7 @@ describe('unified application session lifecycle', () => {
     fireEvent.click(await screen.findByRole('button', { name: '展开任务列表' }));
     fireEvent.click(await screen.findByRole('button', { name: '回收站' }));
     fireEvent.click(await screen.findByRole('button', { name: '西南回款' }));
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '永久删除' }));
     expect((await screen.findByRole('alertdialog')).textContent).toContain('永久删除「西南回款」？');
     fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
@@ -194,7 +194,7 @@ describe('unified application session lifecycle', () => {
       tasks: vi.fn(async (view?: string) => ok(view === 'archived' ? [{ ...b, lifecycle_status: 'archived' as const }] : [a, b])),
     });
     await screen.findByText('本地成果：西南回款');
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /归档任务/ }));
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));
@@ -226,7 +226,7 @@ describe('unified application session lifecycle', () => {
         : Promise.resolve(ok(view === 'archived' ? [{ ...b, lifecycle_status: 'archived' as const }] : [a, b]))),
     });
     await screen.findByText('本地成果：西南回款');
-    press(screen.getByRole('button', { name: '任务工具' }));
+    press(screen.getByRole('button', { name: '这个任务' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /归档任务/ }));
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: '展开任务列表' }));

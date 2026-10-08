@@ -401,9 +401,9 @@ async function main() {
 
     await page.getByRole('button', { name: '工作区' }).click();
     await page.locator('.workspace-header').waitFor({ timeout: 10000 });
-    const taskMenu = page.getByRole('button', { name: '任务工具' });
-    await taskMenu.click();
-    await page.getByRole('menuitem', { name: '任务记录与旧版流程' }).click();
+    const tools = page.getByRole('navigation', { name: '更多工具' });
+    if (!(await tools.isVisible())) await page.getByRole('button', { name: '展开任务列表' }).click();
+    await tools.getByRole('button', { name: '任务记录与旧版流程' }).click();
     await page.getByRole('heading', { name: title }).waitFor({ timeout: 15000 });
     await page.getByText('窗口链').waitFor({ timeout: 10000 });
     await page.getByText('交付物版本').waitFor({ timeout: 10000 });

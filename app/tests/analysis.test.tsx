@@ -293,6 +293,21 @@ describe('analysis workbench', () => {
   });
 
 
+  it('picks 管理版 or 审计版 as a radio setting apart from the export formats, and exports in the picked version', async () => {
+    const analysisExport = vi.fn(async () => success({ path: '/tmp/report.md' }));
+    mountBridge({ analysisExport });
+    render(<Analysis {...props} />); await screen.findByText('本月实际');
+    openDraftEditor();
+    press(screen.getByRole('button', { name: '导出' }));
+    const management = await screen.findByRole('menuitemradio', { name: '管理版' });
+    expect(management.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '审计版' }));
+    expect(screen.getByRole('menuitemradio', { name: '审计版' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getAllByRole('separator').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('menuitem', { name: /导出文稿/ }));
+    await waitFor(() => expect(analysisExport).toHaveBeenCalledWith(task.id, draft.id, 'md', 'audit'));
+  });
+
   it('retains run references when revising a draft, resets review, and exports only saved text', async () => {
     const analysisDraft = vi.fn(async () => success({ ...draft, id: '3'.repeat(32), body: '这是我的专业判断。', publication_status: 'draft', review_status: 'unreviewed' }));
     const analysisExport = vi.fn(async () => success({ path: '/tmp/report.md' }));

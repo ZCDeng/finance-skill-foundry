@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Answer, Bridge, TaskDetail, TaskRow } from '../src/bridge.js';
 import { App } from '../src/App.js';
-import { press } from './press.js';
 
 // Keep task selection, history, document reading and the data strip real.
 vi.mock('../src/views/Analysis.js', () => ({ Analysis: () => null }));
@@ -44,9 +43,11 @@ function mount(overrides: Partial<Bridge> = {}) {
   render(<App />);
   return api;
 }
+/** The task list's footer: places to go, apart from the 这个任务 menu. */
 async function openTool(name: '任务记录与旧版流程' | '数据台') {
-  press(await screen.findByRole('button', { name: '任务工具' }));
-  fireEvent.click(await screen.findByRole('menuitem', { name }));
+  const tools = screen.queryByRole('navigation', { name: '更多工具' });
+  if (!tools || tools.closest('[hidden]')) fireEvent.click(await screen.findByRole('button', { name: '展开任务列表' }));
+  fireEvent.click(within(await screen.findByRole('navigation', { name: '更多工具' })).getByRole('button', { name }));
 }
 async function selectTask(row: TaskRow) {
   fireEvent.click(screen.getByRole('button', { name: '工作区' }));

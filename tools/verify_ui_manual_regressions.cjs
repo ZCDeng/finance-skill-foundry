@@ -139,7 +139,7 @@ function round(value) { return Math.round(value * 1000) / 1000; }
     pass(checkName, { title, expected });
   };
   const chooseTaskTool = async (label) => {
-    await page.getByRole('button', { name: '任务工具' }).click();
+    await page.getByRole('button', { name: '这个任务' }).click();
     const item = page.getByRole('menuitem', { name: new RegExp(label) }).first();
     await item.waitFor({ timeout: 30000 });
     await item.click();
