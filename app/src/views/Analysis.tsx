@@ -30,6 +30,7 @@ import { Methods } from './analysis/Methods.js';
 import { unwrap, errorText } from './analysis/shared.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty.js';
 import { DisclosureSummary } from '../components/Disclosure.js';
+import { Loading, SkeletonCards, SkeletonRows } from '../components/Loading.js';
 
 type Tab = 'datasets' | 'results' | 'drafts' | 'close' | 'methods';
 type Selection = { analysis?: string; draft?: string };
@@ -396,7 +397,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         <RefreshCw size={13} aria-hidden />刷新</Button></div></Tabs>
       <section role="tabpanel" id={`analysis-panel-${tab}`} aria-labelledby={embedded && tab === 'methods' ? undefined : `analysis-tab-${tab}`}
         aria-label={embedded && tab === 'methods' ? '方法库' : undefined} className="analysis-content">
-        {loading && <p role="status" className="analysis-note">正在读取任务资料与成果…</p>}
+        {/* The first read draws the shape of the tab; a refresh over what is already shown keeps the quiet line. */}
+        {loading && (view ? <p role="status" className="analysis-note">正在读取任务资料与成果…</p>
+          : <Loading label="正在读取任务资料与成果…">{tab === 'results' ? <SkeletonCards /> : <SkeletonRows />}</Loading>)}
         {view && tab === 'datasets' && <>
           <div className="analysis-section-heading"><span className="fnd-with-help"><h3>任务资料</h3><HelpLink article="data-safety" label="资料快照与原文件" /></span>{embedded && view.datasets.length > 0
             ? <Button variant="outline" type="button" disabled={busy} onClick={() => void perform(addFiles)}><FilePlus2 size={15} aria-hidden />添加资料</Button> : null}</div>

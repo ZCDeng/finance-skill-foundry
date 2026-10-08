@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import type { CloseStatus } from '../analysis/MonthCloseControlCenter.js';
 import { errorText } from '../analysis/shared.js';
 import type { GuideTarget } from './articles.js';
+import { Loading, SkeletonRows } from '../../components/Loading.js';
 
 type StepState = 'done' | 'todo' | 'not_started';
 type Step = { label: string; state: StepState; detail: string; target: GuideTarget };
@@ -67,7 +68,7 @@ export function QuickStartChecklist({ taskId, canOpen, onOpen }: { taskId?: stri
   }, [taskId, version]);
   if (!taskId) return <p className="analysis-note">打开或新建一个任务后，这里按任务的实际状态显示六步进度。</p>;
   if (error) return <p className="analysis-message analysis-message--error" role="alert">{error}</p>;
-  if (!status) return <p className="analysis-note">正在读取这个任务的进度…</p>;
+  if (!status) return <Loading label="正在读取这个任务的进度…"><SkeletonRows rows={6} meta={false} /></Loading>;
   return <ol className="fnd-checklist" aria-label="快速开始清单">
     {stepsFrom(status).map((step, index) => <li key={step.label} className={`fnd-checklist__step fnd-checklist__step--${step.state}`}>
       <span className="fnd-checklist__label">{index + 1} {step.label}</span>

@@ -8,6 +8,7 @@ import { errorText } from './shared.js';
 import { formatPeriod } from '../../lib/period.js';
 import { joinParts } from '../../components/PeriodWords.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Loading, SkeletonCards } from '../../components/Loading.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
 type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
@@ -85,7 +86,7 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
   if (!bridge()?.financeCall) return <p className="analysis-note">此版本暂不支持月结控制中心。</p>;
   return (
     <div className="analysis-close" aria-busy={loading}>
-      {/* Only the headline is announced; the button and the loading line are not news. */}
+      {/* The headline is announced, and the first read through Loading; the button is not news. */}
       <span className="sr-only" role="status">{status ? [status.headline.text, status.headline.detail].filter(Boolean).join('。') : ''}</span>
       <div className="analysis-close-headline">
         <div className="analysis-close-headline-text">
@@ -98,6 +99,7 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>
+      {loading && !status ? <Loading label="正在检查月结状态…"><SkeletonCards cards={4} headline={false} /></Loading> : null}
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {status && !['ready_for_review', 'archived'].includes(status.headline.state) && status.blocking.length
         ? <p className="analysis-note">下一步：{status.blocking[0]}</p> : null}

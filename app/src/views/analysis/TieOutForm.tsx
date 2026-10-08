@@ -6,6 +6,7 @@ import { STATUS_LABELS, where, type ControlResult, type ControlSpec } from './co
 import { errorText } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { groupDigits } from '../../lib/figures.js';
+import { Loading, SkeletonRows } from '../../components/Loading.js';
 
 export type ControlSource = { dataset_id: string; source_hash: string; name: string; sheets: string[] };
 type Place = { dataset_id: string; sheet: string; range: string; unit: string };
@@ -92,7 +93,7 @@ export function TieOutForm({ call, locked, refreshKey, onBusy, onSaved, onCancel
   return <section className="analysis-tieout" aria-label="添加两处取数对比"><fieldset className="analysis-fieldset analysis-tieout-fields" disabled={busy}>
     <legend><Scale size={15} strokeWidth={1.5} aria-hidden /> 添加两处取数对比</legend>
     <p className="analysis-note">选两处应当相等的数字，可以跨表、跨工作簿。系统加总两处并给出差额，不替你判断哪一处对。</p>
-    {sources === null && !error ? <p className="analysis-note" role="status">正在读取工作簿…</p> : null}
+    {sources === null && !error ? <Loading label="正在读取工作簿…"><SkeletonRows rows={2} /></Loading> : null}
     {sources && !sources.length ? <p className="analysis-note">这个任务还没有 Excel 工作簿。</p> : null}
     {sources?.length ? <div className="analysis-tieout-places">
       <PlaceFields title="第一处" place={left} sources={sources} onChange={setLeft} />
