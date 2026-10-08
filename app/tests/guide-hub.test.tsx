@@ -11,10 +11,15 @@ const WORDS = [
   '期间', '收缴率', '损坏', '未阅', '范围', '单位', '万元', '币种', '组织', '快照', '原文件', '表头', '合计行', '明细',
   '勾稽', '差异', '确认单', '编制方', '接受差异', '复核', '月结', '可提交', '导出', 'PDF', 'Word', 'Excel', '下钻',
   '版本', '模型未配置', '归档', '快捷键', '来源核验', '数值引用', '执行成功', '舍入', '1-8月', '对不上',
+  // Places the guide did not cover before, and what the assistant can do.
+  '助手', '技能', '凭证', '对账', '预算差异', '价量分解', '13 周现金', '计算历史', '版本比较', '科目映射', '考核调整',
+  '回款延迟', '重要性阈值', '插入图表', '写回', '更新 ERP 来源', '截止时间', '回收站', '成果库', '恢复', '深色', '对话专注',
+  // Words people type that the screens say differently.
+  '关账', 'DSO', 'BVA', '利润表', '分录', '现金流', '主题', '删除', '上传', '系统刷新',
 ];
 
 it('finds something for every word on the list', () => {
-  expect(WORDS.length).toBeGreaterThanOrEqual(30);
+  expect(WORDS.length).toBeGreaterThanOrEqual(60);
   const missing = WORDS.filter((word) => searchArticles(word).length === 0);
   // 收缴率 was the one business word the guide did not explain; 回款与现金 explains it now.
   expect(missing).toEqual([]);
@@ -22,8 +27,28 @@ it('finds something for every word on the list', () => {
 
 it('matches every word typed, not any', () => {
   expect(searchArticles('期间 累计').map((row) => row.id)).toEqual(['collection-health', 'scope']);
-  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['collection-health']);
+  expect(searchArticles('收缴率 风险雷达').map((row) => row.id)).toEqual(['assistant-skills', 'collection-health']);
   expect(searchArticles('期间 不存在的词')).toEqual([]);
+});
+
+it('finds the screen\'s word for what people type', () => {
+  expect(searchArticles('关账').map((row) => row.id)).toContain('month-close');
+  expect(searchArticles('DSO').map((row) => row.id)).toContain('collection-health');
+  expect(searchArticles('暗色').map((row) => row.id)).toEqual(['layout']);
+  expect(searchArticles('系统刷新').map((row) => row.id)).toContain('source-refresh');
+  // A synonym widens one word; every typed word still has to be found.
+  expect(searchArticles('关账 不存在的词')).toEqual([]);
+});
+
+it('says what the assistant can and cannot do in every one of its six areas', () => {
+  const article = GUIDE_ARTICLES.find((row) => row.id === 'assistant-skills')!;
+  const list = article.body.find((block) => block.kind === 'list');
+  expect(list && list.kind === 'list' ? list.items.map((item) => item.split('：')[0]) : [])
+    .toEqual(['开始与资料体检', '月结与管理报表', '预算与差异分析', '对账', '凭证草稿', '回款与现金']);
+  const text = JSON.stringify(article.body);
+  expect(text).toContain('不能确认控制、处置差异、过账或付款');
+  // English skill ids are for the model, not for the reader.
+  expect(text).not.toMatch(/\b(setup|close|bva|cash|reconciliation|journal-entry|financial-statements|variance-analysis)\b/);
 });
 
 it('opens at the article a 「?」 asked for and shows where it applies', () => {
