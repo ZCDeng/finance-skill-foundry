@@ -48,6 +48,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
@@ -1131,24 +1135,14 @@ export function ReportEditor({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" collisionPadding={16}>
-                  <DropdownMenuItem
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setExportMode("management");
-                    }}
-                  >
-                    管理版
-                    <DropdownMenuShortcut>{exportMode === "management" ? "已选" : ""}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setExportMode("audit");
-                    }}
-                  >
-                    审计版
-                    <DropdownMenuShortcut>{exportMode === "audit" ? "已选" : ""}</DropdownMenuShortcut>
-                  </DropdownMenuItem>
+                  {/* A setting first, as a radio group, then the export actions under a rule. */}
+                  <DropdownMenuLabel>版本</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={exportMode} onValueChange={(value) => setExportMode(value === "audit" ? "audit" : "management")}>
+                    <DropdownMenuRadioItem value="management" onSelect={(event) => event.preventDefault()}>管理版</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="audit" onSelect={(event) => event.preventDefault()}>审计版</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>导出格式</DropdownMenuLabel>
                   {EXPORT_MENU_FORMATS.map((format) => (
                     <DropdownMenuItem
                       key={format}
