@@ -140,3 +140,12 @@ it('lists search hits above the article and moves to the one picked', async () =
   await waitFor(() => expect(document.activeElement).toBe(title));
   expect((screen.getByRole('combobox', { name: '指南目录' }) as HTMLSelectElement).value).toBe('troubleshooting');
 });
+
+it('has a map of the workspace and one article per page, found by the words people use when lost', () => {
+  for (const id of ['workspace-map', 'page-datasets', 'page-results', 'page-drafts', 'page-close']) {
+    expect(GUIDE_ARTICLES.some((row) => row.id === id), id).toBe(true);
+  }
+  expect(searchArticles('三个点').map((row) => row.id)).toContain('workspace-map');
+  expect(searchArticles('归档 菜单').map((row) => row.id)).toEqual(expect.arrayContaining(['workspace-map', 'tasks-library']));
+  expect(searchArticles('考核调整').map((row) => row.id)).toContain('page-results');
+});

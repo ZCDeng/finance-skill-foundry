@@ -19,6 +19,7 @@
 .analysis-composer-actions [data-variant="default"] { margin-left: auto; }
 .analysis-examples { display: flex; gap: 8px; flex-wrap: wrap; }
 .analysis-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--fnd-line); }
+.analysis-tabbar-tools { display: flex; align-items: center; gap: 8px; }
 .analysis-tabs { display: flex; gap: 22px; min-width: 0; }
 .analysis-content { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .analysis-empty { padding: 28px 0; }
@@ -104,7 +105,7 @@
   .analysis-formats { flex-basis: 100%; order: 3; }
   .analysis-tabs { gap: 14px; }
   .analysis-tabbar { gap: 8px; }
-  .analysis-tabbar > [data-slot="button"] { padding: 0 10px; }
+  .analysis-tabbar-tools > [data-slot="button"]:not(.fnd-help-link) { padding: 0 10px; }
   .analysis-source-preview, .analysis-result, .analysis-definition, .analysis-method { padding: 16px; }
 }
 
