@@ -1287,6 +1287,27 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
   border-inline-start: 1px solid var(--fnd-line);
 }
 
+/*
+ * Inside a bordered card with less than a 24px gutter, a hanging chevron would
+ * cross the border, so there the fold keeps its chevron inside: the words start
+ * 24px in, as a list item in the card, and a nested fold's rule still falls
+ * under its chevron. Full-page panes keep the hanging chevron above.
+ */
+:is(.analysis-close-block, .analysis-composer, .analysis-evidence-posture, .analysis-fact-card, .analysis-quality,
+  .analysis-report-review, .analysis-report-review-status, .analysis-structure-sheet, .analysis-tieout, .analysis-workbook-conflicts,
+  .report-outline, .report-inline-popover, .report-pdf-compare, .report-reflow-preview, .report-source-preview,
+  .report-source-recovery, .report-visual-composer) .fnd-disclosure-summary {
+  margin-inline-start: 0;
+  max-width: 100%;
+}
+
+:is(.analysis-close-block, .analysis-composer, .analysis-evidence-posture, .analysis-fact-card, .analysis-quality,
+  .analysis-report-review, .analysis-report-review-status, .analysis-structure-sheet, .analysis-tieout, .analysis-workbook-conflicts,
+  .report-outline, .report-inline-popover, .report-pdf-compare, .report-reflow-preview, .report-source-preview,
+  .report-source-recovery, .report-visual-composer) details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::details-content {
+  margin-inline-start: 12px;
+}
+
 /* A row that opens something says so before it is clicked. */
 .fnd-table__open:hover {
   background: var(--fnd-surface-strong);

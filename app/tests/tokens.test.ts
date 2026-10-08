@@ -608,6 +608,10 @@ describe('the disclosure summary', () => {
     expect(declarations(COMPONENTS, `${SUMMARY}[data-tone='quiet'] > ${ICON}`).left).toBe('6px');
     // In the taskbar the fold is a control in a row, so it keeps the chevron inside.
     expect(declarations(COMPONENTS, `.fnd-taskbar__technical ${SUMMARY}`)['margin-inline-start']).toBe('0');
+    // In a bordered card with a narrower gutter the chevron stays inside rather than crossing the border.
+    const flat = COMPONENTS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const inset = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) => selector.includes('.analysis-structure-sheet') && selector.trim().endsWith(SUMMARY));
+    expect(inset?.[2]).toMatch(/margin-inline-start:\s*0/);
   });
 
   it('turns the chevron a quarter when open, on the shared transition', () => {
