@@ -1,8 +1,8 @@
 @layer components {
 /* Application identity stays compact; the task itself owns the workspace header. */
 .fnd-shell { display: flex; flex-direction: column; min-height: 100vh; background: var(--fnd-bg); }
-.fnd-head { display: flex; align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
-.fnd-head__brand { flex: 1 0 0; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.fnd-head { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 24px; height: var(--fnd-header-height); padding: 0 20px; border-bottom: 1px solid var(--fnd-line); background: var(--fnd-surface); flex-shrink: 0; }
+.fnd-head__brand { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* The artwork keeps its glow inside a wide transparent margin; the box is drawn larger and the margin
    given back, so the ring itself reads at about 36px without pushing the name. */
 .fnd-head__logo { width: 48px; height: 48px; margin: 0 -4px; flex: 0 0 auto; background: url('../assets/logo-animated.webp') center / contain no-repeat; }
@@ -13,7 +13,7 @@
   .fnd-head__logo { background-image: url('../assets/logo.svg'); }
 }
 .fnd-head__mark { font-family: var(--fnd-font-brand); font-size: 22px; line-height: 1; font-weight: 700; white-space: nowrap; color: var(--fnd-selected); }
-.fnd-head__nav { flex: 0 0 auto; display: flex; gap: 4px; }
+.fnd-head__nav { align-self: stretch; display: flex; gap: 4px; }
 .fnd-head__tab { border: 0; background: transparent; border-radius: 8px; padding: 0 16px; height: var(--fnd-button-height); font-size: var(--fnd-size-body); font-weight: 500; color: var(--fnd-muted); cursor: pointer; transition: color var(--fnd-transition), background var(--fnd-transition); }
 .fnd-head__tab:hover {
   color: var(--fnd-ink);
@@ -26,40 +26,106 @@
 
 /*
  * The title bar's own tabs (R14, KTD13). Gold marks where the reader is: the
- * current tab, a hover. At rest they keep the neutral rule above. Written under
- * `.fnd-head` because `.fnd-head__tab` is also the back button on 成果库 and
- * 任务 and the Formulator start and stop button, and those stay neutral.
- * Focus keeps whichever state the tab is in and adds its own ring.
+ * current tab, a hover. Written under `.fnd-head` because `.fnd-head__tab` is
+ * also the back button on 成果库 and 任务 and the Formulator start and stop
+ * button, and those keep the neutral rule above. No pill: a tab is its words
+ * at the strong weight, as tall as the bar, with a 2px gold line on the bar's
+ * bottom edge. The current tab holds the line; a hover grows it from the
+ * middle and takes it back on leave. Focus keeps whichever state the tab is
+ * in and adds its own ring.
  */
+.fnd-head .fnd-head__tab {
+  position: relative;
+  align-self: stretch;
+  height: auto;
+  padding: 0 14px;
+  border-radius: 0;
+  font-weight: var(--fnd-weight-strong);
+}
+
+.fnd-head .fnd-head__tab::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--fnd-selected);
+  transform: scaleX(0);
+  transition: transform var(--fnd-transition);
+}
+
 .fnd-head .fnd-head__tab:hover:not(:disabled):not([aria-current='page']) {
   color: var(--fnd-selected);
   background: transparent;
 }
 
+.fnd-head .fnd-head__tab:hover:not(:disabled)::after,
+.fnd-head .fnd-head__tab[aria-current='page']::after {
+  transform: scaleX(1);
+}
+
 .fnd-head .fnd-head__tab:active:not(:disabled):not([aria-current='page']) {
-  background: var(--fnd-selection-surface);
+  background: transparent;
 }
 
 .fnd-head .fnd-head__tab[aria-current='page'] {
-  position: relative;
   color: var(--fnd-selected);
-  background: var(--fnd-selection-surface);
-}
-
-/* The mark that does not depend on colour: the result tabs' 1px gold underline, under the label. */
-.fnd-head .fnd-head__tab[aria-current='page']::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 0;
-  height: 1px;
-  background: var(--fnd-selected);
+  background: transparent;
 }
 
 .fnd-head .fnd-head__tab:focus-visible {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
+}
+
+/*
+ * Page tabs (ui/tabs.tsx, line variant): words on one rule, the current one in
+ * body colour at the strong weight. The gold line under it is one element per
+ * list, Base UI's Tabs.Indicator drawn with anchor positioning: it follows the
+ * active trigger and slides there on the shell transition, then stops; nothing
+ * repaints while the tabs sit still. Without anchor positioning the active
+ * trigger draws its own line.
+ */
+[data-slot='tabs-list'][data-variant='line'] {
+  position: relative;
+  anchor-scope: --fnd-tab;
+}
+
+[data-slot='tabs-list'][data-variant='line'] > [data-slot='tabs-trigger'] {
+  padding: 12px 0;
+  border-radius: 0;
+}
+
+[data-slot='tabs-list'][data-variant='line'] > [data-slot='tabs-trigger'][data-state='active'] {
+  anchor-name: --fnd-tab;
+  font-weight: var(--fnd-weight-strong);
+}
+
+[data-slot='tabs-indicator'] {
+  display: none;
+}
+
+@supports (anchor-name: --fnd-tab) and (anchor-scope: --fnd-tab) {
+  [data-slot='tabs-indicator'] {
+    display: block;
+    position: absolute;
+    position-anchor: --fnd-tab;
+    position-visibility: anchors-valid;
+    left: anchor(left);
+    right: anchor(right);
+    bottom: anchor(bottom);
+    height: 2px;
+    background: var(--fnd-selected);
+    pointer-events: none;
+    transition: left var(--fnd-transition), right var(--fnd-transition), bottom var(--fnd-transition);
+  }
+}
+
+@supports not ((anchor-name: --fnd-tab) and (anchor-scope: --fnd-tab)) {
+  [data-slot='tabs-list'][data-variant='line'] > [data-slot='tabs-trigger'][data-state='active'] {
+    box-shadow: inset 0 -2px 0 var(--fnd-selected);
+  }
 }
 .fnd-column { width: 100%; max-width: var(--fnd-container); margin: 0 auto; padding: 24px 24px 64px; }
 
@@ -527,7 +593,6 @@ textarea.fnd-field {
  * control that reads as a tab would be a tab that never stays selected.
  */
 .fnd-head__end {
-  flex: 1 0 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -626,6 +691,31 @@ textarea.fnd-field {
 .fnd-head__help:focus-visible {
   outline: 1px solid var(--fnd-focus);
   outline-offset: -1px;
+}
+
+/*
+ * The tabs stay on the window's centre line: the bar is three columns, the two
+ * sides always equal. When zoom leaves too little room, the sides give way
+ * first: the name goes (still read out), then 使用指南 keeps only its icon.
+ */
+@media (max-width: 760px) {
+  .fnd-head__mark {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@media (max-width: 620px) {
+  .fnd-head__help-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }
 
 /* -- the task bar's own controls ------------------------------------------ */

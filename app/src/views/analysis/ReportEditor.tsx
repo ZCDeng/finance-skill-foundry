@@ -41,6 +41,7 @@ import type { AnalysisRun, Answer } from "../../bridge.js";
 import { bridge } from "../../bridge.js";
 import { WaitLoop } from "../../components/WaitLoop.js";
 import { Button } from "../../components/ui/button.js";
+import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs.js";
 import { Input } from "../../components/ui/input.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import {
@@ -1077,25 +1078,21 @@ export function ReportEditor({
               <ListTree size={14} strokeWidth={1.5} aria-hidden />
               目录
             </Button>
-            <div className="report-modes" role="tablist" aria-label="文稿模式">
-              {(
-                [
-                  ["read", "阅读"],
-                  ["edit", "编辑"],
-                  ["print", "打印预览"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === value}
-                  onClick={() => changeMode(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Tabs value={mode} onValueChange={(value) => changeMode(value as ReportMode)}>
+              <TabsList className="report-modes" aria-label="文稿模式">
+                {(
+                  [
+                    ["read", "阅读"],
+                    ["edit", "编辑"],
+                    ["print", "打印预览"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <TabsTrigger key={value} value={value} onClick={() => { if (mode !== value) changeMode(value); }}>
+                    {label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
             </div>
             <div className="report-actions">
               <Button

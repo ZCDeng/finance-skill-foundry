@@ -38,6 +38,7 @@ const tabsListVariants = cva(
 function TabsList({
   className,
   variant = 'line',
+  children,
   ...props
 }: ComponentProps<typeof TabsPrimitive.List> & VariantProps<typeof tabsListVariants>) {
   return (
@@ -46,7 +47,11 @@ function TabsList({
       data-variant={variant}
       className={cn(tabsListVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {children}
+      {/* Base UI's Tabs.Indicator, drawn in CSS: it anchors to the active trigger and slides when that changes (components.css). */}
+      {variant === 'line' ? <span data-slot="tabs-indicator" aria-hidden /> : null}
+    </TabsPrimitive.List>
   );
 }
 
@@ -57,12 +62,10 @@ function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitiv
       className={cn(
         'relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap',
         'border-0 bg-transparent text-[length:var(--fnd-size-body)]',
-        'cursor-pointer text-[var(--fnd-muted)] transition-[color,border-color] duration-(--fnd-duration) ease-(--fnd-easing)',
+        'cursor-pointer text-[var(--fnd-muted)] transition-[color] duration-(--fnd-duration) ease-(--fnd-easing)',
         'enabled:hover:text-foreground',
         'disabled:cursor-default disabled:opacity-55',
-        'group-data-[variant=line]/tabs-list:rounded-none group-data-[variant=line]/tabs-list:px-0 group-data-[variant=line]/tabs-list:py-3',
-        'group-data-[variant=line]/tabs-list:border-b group-data-[variant=line]/tabs-list:border-transparent',
-        'group-data-[variant=line]/tabs-list:data-[state=active]:border-[var(--fnd-selected)] group-data-[variant=line]/tabs-list:data-[state=active]:text-foreground',
+        'data-[state=active]:text-foreground',
         '[&_span]:text-[length:var(--fnd-size-label)] [&_span]:text-[var(--fnd-muted)]',
         className,
       )}
