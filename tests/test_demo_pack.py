@@ -91,11 +91,17 @@ def test_the_formula_sample_carries_its_cache_without_excel(generated: Path) -> 
     ]
 
 
+def _same(value):
+    # Python 3.12 made sum() of floats exact, so the last bits of a generated figure depend on
+    # the interpreter; ten significant digits are what any reader of the pack can see.
+    return float(f"{value:.10g}") if isinstance(value, float) else value
+
+
 def _cells(path: Path) -> dict:
     """Every cell's formula (or value) and its cached value: what a reader of the file sees."""
     formulas, cached = load_workbook(path), load_workbook(path, data_only=True)
     return {
-        (sheet.title, sheet.sheet_state, cell.coordinate): (cell.value, cached[sheet.title][cell.coordinate].value)
+        (sheet.title, sheet.sheet_state, cell.coordinate): (_same(cell.value), _same(cached[sheet.title][cell.coordinate].value))
         for sheet in formulas.worksheets for row in sheet.iter_rows() for cell in row if cell.value is not None
     }
 

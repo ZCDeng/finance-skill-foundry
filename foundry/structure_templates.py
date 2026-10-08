@@ -206,9 +206,9 @@ def _digest(value: Any) -> str:
 def registry_for(store) -> TemplateRegistry:
     """The registry a finance store reads, which belongs to its var root; a practice task reads
     and writes the separate practice shelf."""
-    from foundry.sample_marker import is_sample
+    from foundry.sample_marker import uses_sample_shelf
 
-    return TemplateRegistry(store.task.store.var_root, sample=is_sample(store.task))
+    return TemplateRegistry(store.task.store.var_root, sample=uses_sample_shelf(store.task))
 
 
 

@@ -8,7 +8,7 @@ from foundry.analysis import AnalysisStore
 from foundry.cli import main
 from foundry.errors import FoundryError
 from foundry.finance_service import FinanceStore
-from foundry.sample_marker import marker_path
+from foundry.sample_marker import marker_path, uses_sample_shelf
 from foundry.sample_task import (
     KINDS,
     create_next_month_sample,
@@ -124,3 +124,14 @@ def test_the_cli_prints_the_task_and_marks_practice_tasks_in_the_list(tmp_path, 
     assert listed == {KINDS["practice"]: "practice", "真实任务": None}
     assert main(["--var", var, "task-sample-status"]) == 0
     assert json.loads(capsys.readouterr().out)["outdated"] is False
+
+
+def test_the_older_practice_task_keeps_the_shelf_its_templates_are_on(tmp_path):
+    store = TaskStore(tmp_path / "var")
+    legacy = store.create(title="示例：月结练习（合成数据）")
+    marker_path(legacy).write_text(json.dumps({"sample": True, "dataset": "示例集团_2026年06月_月结套表"}), encoding="utf-8")
+    damaged = store.create(title="示例")
+    marker_path(damaged).write_text("{", encoding="utf-8")
+    assert uses_sample_shelf(legacy) is False
+    assert uses_sample_shelf(damaged) is True
+    assert uses_sample_shelf(store.create(title="真实任务")) is False

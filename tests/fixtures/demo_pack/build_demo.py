@@ -253,22 +253,29 @@ def build_formula_sample(path: Path) -> list[str]:
     letters = "BCDEFGHIJKLMN"
     total = [f"={c}3+{c}4" for c in letters[:12]]
     total[8] = "=J3+J4*1.13"  # 9 月公式与同行其他月份不同，还写死了 1.13
-    ws.append(["营业收入合计"] + total + ["=SUM(B5:M5)+2793.28"])  # 合计里加了一个倒挤数
-    ws.append(["上年同期（外部链接）"] + [f"='[2025年报.xlsx]利润表'!{c}6" for c in letters[:12]] + ["=SUM(B6:M6)"])
-    ws.append(["预算差异"] + [f"={c}5-#REF!" if c == "D" else f"={c}5-{c}7" for c in letters[:12]] + [""])
+    ws.append(["营业收入合计"] + total + ["=SUM(B5:M5)+2793.28"])  # 合计里加了一个倒挤数，和上下行的全年公式不同
+    ws.append(["上年同期（手工录入）"] + [round(v * 1.08, 1) for v in base] + ["=SUM(B6:M6)"])
     ws.append(["编制日期", "=TODAY()"])
+    # 读不到的单元格（外部链接、#REF!）放在另一张表：确认表结构时只选「月度收入」，这张留在外面，
+    # 资料仍能进计算；体检照样把它们报出来
+    compare = wb.create_sheet("上年同期对比")
+    compare.append(["华宸物业 2026 年月度营业收入与上年同期（万元）"])
+    compare.append(["项目"] + [f"{m}月" for m in range(1, 13)] + ["全年"])
+    compare.append(["本年营业收入"] + [f"=月度收入!{c}5" for c in letters[:12]] + ["=SUM(B3:M3)"])
+    compare.append(["上年同期（外部链接）"] + [f"='[2025年报.xlsx]利润表'!{c}6" for c in letters[:12]] + ["=SUM(B4:M4)"])
+    compare.append(["同比差额"] + [f"={c}3-#REF!" if c == "D" else f"={c}3-{c}4" for c in letters[:12]] + [""])
     hidden = wb.create_sheet("口径备注")
     hidden.append(["本表为隐藏表，记录倒挤数 2,793.28 的来源：台账实收与月结区域实收之差"])
     hidden.sheet_state = "hidden"
     wb.save(path)
-    return ["9 月合计公式与同行不同（=J3+J4*1.13）", "全年合计里加了写死的 +2793.28", "外部链接 [2025年报.xlsx]",
-            "#REF! 错误", "TODAY() 易失函数", "隐藏表「口径备注」"]
+    return ["9 月合计公式与同行不同（=J3+J4*1.13）", "全年合计里加了写死的 +2793.28", "「上年同期对比」表里的外部链接 [2025年报.xlsx]",
+            "同一张表的 #REF! 错误（这张表确认表结构时不选）", "TODAY() 易失函数", "隐藏表「口径备注」"]
 
 
 # 「编制日期」=TODAY() 的缓存值固定为这一天，同一份脚本任何一天生成的文件都一样
 CACHE_DATE = dt.date(2026, 9, 5)
 _ERROR = "#REF!"
-_CELL = re.compile(r"\$?([A-Z]{1,3})\$?(\d+)")
+_CELL = re.compile(r"(?:([^\s!'=+\-*/(),]+)!)?\$?([A-Z]{1,3})\$?(\d+)")
 _RANGE_SUM = re.compile(r"SUM\(\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)\)")
 
 
@@ -279,36 +286,38 @@ def _col(letters: str) -> int:
     return number
 
 
-def _formula_values(sheet) -> dict[str, object]:
-    """按 Excel 的结果算出这张表每个公式的值。
+def _formula_values(book) -> dict[str, dict[str, object]]:
+    """按 Excel 的结果算出每张表每个公式的值。
 
-    只覆盖样本里用到的写法：单元格引用、SUM(区域)、加减乘、TODAY()。读别的工作簿、或公式里写着
-    #REF! 的，结果是 #REF!（Excel 打开时不更新链接，找不到来源就是这个值）；错误值向上传递；
-    循环引用里读到自己的那一处按 0 算。
+    只覆盖样本里用到的写法：本表或别的表的单元格引用、SUM(本表区域)、加减乘、TODAY()。读别的
+    工作簿、或公式里写着 #REF! 的，结果是 #REF!（Excel 打开时不更新链接，找不到来源就是这个值）；
+    错误值向上传递；循环引用里读到自己的那一处按 0 算。
     """
-    values: dict[str, object] = {}
-    visiting: set[str] = set()
+    values: dict[tuple[str, str], object] = {}
+    visiting: set[tuple[str, str]] = set()
 
-    def cell(ref: str) -> object:
-        if ref in values:
-            return values[ref]
-        raw = sheet[ref].value
+    def cell(title: str, ref: str) -> object:
+        key = (title, ref)
+        if key in values:
+            return values[key]
+        raw = book[title][ref].value
         if not (isinstance(raw, str) and raw.startswith("=")):
             return raw if raw is not None else 0
-        if ref in visiting:
+        if key in visiting:
             return 0
-        visiting.add(ref)
+        visiting.add(key)
         try:
-            values[ref] = evaluate(raw[1:])
+            values[key] = evaluate(title, raw[1:])
         finally:
-            visiting.discard(ref)
-        return values[ref]
+            visiting.discard(key)
+        return values[key]
 
-    def evaluate(text: str) -> object:
+    def evaluate(title: str, text: str) -> object:
         if "[" in text or _ERROR in text:
             return _ERROR
         if text == "TODAY()":
             return (CACHE_DATE - dt.date(1899, 12, 30)).days
+        sheet = book[title]
         parts: list[object] = []
 
         def total(match: re.Match) -> str:
@@ -316,12 +325,12 @@ def _formula_values(sheet) -> dict[str, object]:
             amount = 0.0
             for row in range(first[1], last[1] + 1):
                 for column in range(first[0], last[0] + 1):
-                    parts.append(cell(sheet.cell(row, column).coordinate))
+                    parts.append(cell(title, sheet.cell(row, column).coordinate))
                     amount += parts[-1] if isinstance(parts[-1], (int, float)) else 0
             return repr(amount)
 
         def one(match: re.Match) -> str:
-            parts.append(cell(match.group(1) + match.group(2)))
+            parts.append(cell(match.group(1) or title, match.group(2) + match.group(3)))
             return repr(parts[-1]) if isinstance(parts[-1], (int, float)) else "0"
 
         expression = _CELL.sub(one, _RANGE_SUM.sub(total, text))
@@ -332,11 +341,15 @@ def _formula_values(sheet) -> dict[str, object]:
         result = eval(expression, {"__builtins__": {}})  # noqa: S307  只剩数字和四则运算
         return round(result, 6)
 
-    for row in sheet.iter_rows():
-        for item in row:
-            if isinstance(item.value, str) and item.value.startswith("="):
-                cell(item.coordinate)
-    return values
+    for sheet in book.worksheets:
+        for row in sheet.iter_rows():
+            for item in row:
+                if isinstance(item.value, str) and item.value.startswith("="):
+                    cell(sheet.title, item.coordinate)
+    cached: dict[str, dict[str, object]] = {}
+    for (title, ref), value in values.items():
+        cached.setdefault(title, {})[ref] = value
+    return cached
 
 
 def write_formula_cache(path: Path) -> int:
@@ -350,14 +363,15 @@ def write_formula_cache(path: Path) -> int:
     link = ExternalLink(externalBook=ExternalBook(sheetNames=ExternalSheetNames(sheetName=["利润表"])))
     link.file_link = Relationship(type="externalLinkPath", Target="2025年报.xlsx", TargetMode="External")
     book._external_links.append(link)
-    values = {sheet.title: _formula_values(sheet) for sheet in book.worksheets}
+    values = _formula_values(book)
     book.save(path)
 
     index = {sheet.title: number for number, sheet in enumerate(book.worksheets, start=1)}
     written = 0
     with zipfile.ZipFile(path) as package:
         parts = {name: package.read(name) for name in package.namelist()}
-    for title, cached in values.items():
+    for title in index:
+        cached = values.get(title, {})
         name = f"xl/worksheets/sheet{index[title]}.xml"
         xml = parts[name].decode("utf-8")
 

@@ -34,3 +34,14 @@ def read_marker(task) -> dict[str, Any] | None:
 
 def is_sample(task) -> bool:
     return read_marker(task) is not None
+
+
+def uses_sample_shelf(task) -> bool:
+    """Whether the task's confirmed structures go to the practice template shelf. The 6 月 practice
+    task from before the bundled pack (its marker names a dataset, not a pack) kept writing to the
+    real shelf, where its templates already are; moving it now would leave those templates live and
+    out of its reach, so it stays where it was until it is removed."""
+    marker = read_marker(task)
+    if marker is None:
+        return False
+    return not ("dataset" in marker and "pack" not in marker)
