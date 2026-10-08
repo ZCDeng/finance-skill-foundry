@@ -45,3 +45,11 @@ it('cannot ask with no editable task open, and says why', () => {
   expect((screen.getByRole('button', { name: '让助手走一遍月结' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText('先打开一个可编辑的任务，才能问助手。')).toBeTruthy();
 });
+
+it('names the workbook it asks about, so the assistant knows which one', () => {
+  const heard = vi.fn();
+  window.addEventListener(ASK_EVENT, (event) => heard((event as CustomEvent).detail));
+  render(<AskLink ask="formula-health" label="让助手解释这些提示" about="物业套表.xlsx" />);
+  fireEvent.click(screen.getByRole('button', { name: '让助手解释这些提示' }));
+  expect(heard).toHaveBeenCalledWith(`关于「物业套表.xlsx」：${ASK_PROMPTS['formula-health']}`);
+});

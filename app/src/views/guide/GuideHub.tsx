@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input.js';
 import { NativeSelect, NativeSelectOption } from '../../components/ui/native-select.js';
 import { GUIDE_ARTICLES, GUIDE_SECTIONS, searchArticles, type GuideArticle, type GuideTarget } from './articles.js';
 import { QuickStartChecklist } from './QuickStartChecklist.js';
-import { ASK_PROMPTS, askAssistant, type AskId } from './ask.js';
+import { askAssistant, askText, type AskId } from './ask.js';
 
 /** Window event that opens the guide at one article, from a 「?」 next to the thing it explains. */
 export const GUIDE_EVENT = 'fnd:guide';
@@ -24,9 +24,9 @@ export function HelpLink({ article, label }: { article: string; label: string })
  * A 「让助手…」 button: puts the question into the conversation for the manager to edit and send.
  * The question is its title, so what lands in the composer is readable before pressing.
  */
-export function AskLink({ ask, label, disabled }: { ask: AskId; label: string; disabled?: boolean }) {
-  return <Button variant="link" size="sm" type="button" className="fnd-ask-link" disabled={disabled} title={ASK_PROMPTS[ask]}
-    onClick={() => askAssistant(ask)}><MessageSquare size={14} strokeWidth={1.5} aria-hidden />{label}</Button>;
+export function AskLink({ ask, label, about, disabled }: { ask: AskId; label: string; about?: string; disabled?: boolean }) {
+  return <Button variant="link" size="sm" type="button" className="fnd-ask-link" disabled={disabled} title={askText(ask, about)}
+    onClick={() => askAssistant(ask, about)}><MessageSquare size={14} strokeWidth={1.5} aria-hidden />{label}</Button>;
 }
 
 /** The four quality words the 文稿质量检查 panel shows, drawn so no step reads as implying the next. */

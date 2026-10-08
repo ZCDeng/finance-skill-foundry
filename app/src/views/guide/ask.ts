@@ -21,7 +21,12 @@ export const ASK_PROMPTS = {
 
 export type AskId = keyof typeof ASK_PROMPTS;
 
+/** The words that go in: the question, led by what it is about when the page knows (a workbook's name, say). */
+export function askText(id: AskId, about?: string) {
+  return about ? `关于「${about}」：${ASK_PROMPTS[id]}` : ASK_PROMPTS[id];
+}
+
 /** Put one of the questions into the open task's conversation. */
-export function askAssistant(id: AskId) {
-  window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: ASK_PROMPTS[id] }));
+export function askAssistant(id: AskId, about?: string) {
+  window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: askText(id, about) }));
 }
