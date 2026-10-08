@@ -479,19 +479,37 @@ describe('the title bar gold', () => {
     });
   });
 
-  it('marks the current tab with gold text, the selection surface and a 1px gold underline', () => {
+  it('draws the title-bar tabs as words, without a pill, at the strong weight', () => {
+    expect(declarations(COMPONENTS, '.fnd-head .fnd-head__tab')).toMatchObject({
+      'border-radius': '0',
+      'font-weight': 'var(--fnd-weight-strong)',
+      position: 'relative',
+    });
+    expect(declarations(COMPONENTS, ".fnd-head .fnd-head__tab:active:not(:disabled):not([aria-current='page'])").background).toBe('transparent');
+  });
+
+  it('marks the current tab with gold text and a 2px gold underline, which a hover grows from the middle', () => {
     expect(declarations(COMPONENTS, CURRENT)).toMatchObject({
       color: 'var(--fnd-selected)',
-      background: 'var(--fnd-selection-surface)',
-      position: 'relative',
+      background: 'transparent',
     });
     // The underline is the mark that does not depend on colour. Drawn by a
     // positioned pseudo-element, so the tab and the header keep their height.
-    expect(declarations(COMPONENTS, `${CURRENT}::after`)).toMatchObject({
+    expect(declarations(COMPONENTS, '.fnd-head .fnd-head__tab::after')).toMatchObject({
       position: 'absolute',
-      bottom: '0',
-      height: '1px',
+      height: '2px',
       background: 'var(--fnd-selected)',
+      transform: 'scaleX(0)',
+      transition: 'transform var(--fnd-transition)',
+    });
+    expect(declarations(COMPONENTS, `${CURRENT}::after`).transform).toBe('scaleX(1)');
+    expect(declarations(COMPONENTS, '.fnd-head .fnd-head__tab:hover:not(:disabled)::after').transform).toBe('scaleX(1)');
+  });
+
+  it('keeps the tabs on the window centre line: two equal sides around them', () => {
+    expect(declarations(COMPONENTS, '.fnd-head')).toMatchObject({
+      display: 'grid',
+      'grid-template-columns': 'minmax(0, 1fr) auto minmax(0, 1fr)',
     });
   });
 

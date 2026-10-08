@@ -236,7 +236,7 @@
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .analysis-finance-variance .analysis-table th, .analysis-finance-variance .analysis-table td { white-space: nowrap; }
 .analysis-business-result, .analysis-scope-card, .analysis-revision-diff { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.analysis-period-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.analysis-period-tabs { flex-wrap: wrap; }
 /* KPI cards (DESIGN.md card-compact): budget, variance and rate one per line, label left, figure right. */
 .analysis-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 @container analysis-result (max-width: 900px) { .analysis-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

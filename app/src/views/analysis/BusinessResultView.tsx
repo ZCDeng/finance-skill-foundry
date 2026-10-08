@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import type { AnalysisRun, ScriptConclusion } from '../../bridge.js';
 import { Button } from '../../components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.js';
+import { Tabs, TabsList, TabsTrigger } from '../../components/ui/tabs.js';
 import { businessColumnLabel, businessRows, cardNotes, columnSemantics, displayColumns, formatBusinessCell, formatBusinessValue, formatDisplayRows, groupingColumn, labelCollisions, longRowColumns, otherLongRows, periodOptions, rowBasisLabel, rowPeriod, type DisplayColumn } from './businessResults.js';
 import { assumptionSummary, Table, textValue } from './presentation.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
@@ -212,10 +213,9 @@ export function BusinessResultView({ run, onSources, actions, technicalRows, dia
     };
   };
   return <section className="analysis-business-result" aria-label="业务结果">
-    {periods.length > 1 ? <div className="analysis-period-tabs" role="tablist" aria-label="结果期间">
-      {periods.map((item) => <Button key={item} variant="outline" size="chip" type="button" role="tab" aria-selected={item === period}
-        onClick={() => setPeriod(item)}>{tabLabels.get(item) ?? item}</Button>)}
-    </div> : null}
+    {periods.length > 1 ? <Tabs value={period} onValueChange={setPeriod}><TabsList className="analysis-period-tabs" aria-label="结果期间">
+      {periods.map((item) => <TabsTrigger key={item} value={item} onClick={() => setPeriod(item)}>{tabLabels.get(item) ?? item}</TabsTrigger>)}
+    </TabsList></Tabs> : null}
     {/* The backend's own sentences, shown as written: the frontend does no arithmetic on them. */}
     {conclusions.length ? <section className="analysis-headline" aria-label="脚本结论">
       {conclusions.slice(0, shownConclusions).map((conclusion, index) => <ConclusionLine key={index} conclusion={conclusion} />)}

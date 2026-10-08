@@ -1435,33 +1435,36 @@ describe('script conclusion sentences', () => {
   });
 
   it('adds only the sentences to a declared run, and says 推断 only where no declaration paired the rows', () => {
-    const inferred = render(<BusinessResultView run={huachen} />).container.innerHTML;
+    // The period tabs carry ids from useId, which differ from one render to the next.
+    const markup = (html: string) => html.replace(/radix-_r_[a-z0-9]+_/g, 'radix-id');
+    const inferred = markup(render(<BusinessResultView run={huachen} />).container.innerHTML);
     expect(screen.queryByRole('region', { name: '脚本结论' })).toBeNull();
     expect(screen.queryByText(/脚本结果/)).toBeNull();
     expect(screen.getAllByText('推断')).toHaveLength(4);
     cleanup();
 
     // An incomplete declaration pairs its rows but concludes nothing: the same cards, without 推断.
-    const before = render(<BusinessResultView run={declared(false)} />).container.innerHTML;
+    const before = markup(render(<BusinessResultView run={declared(false)} />).container.innerHTML);
     expect(before).toBe(inferred.replaceAll(' · <span class="analysis-kpi-note">推断</span>', ''));
     cleanup();
 
     // With conclusions, the sentences are the only addition.
     const { container } = render(<BusinessResultView run={declared(true)} />);
     container.querySelector('[aria-label="脚本结论"]')!.remove();
-    expect(container.innerHTML).toBe(before);
+    expect(markup(container.innerHTML)).toBe(before);
   });
 });
 
 describe('result page reading order', () => {
-  it('names the period tabs in words, as chips, and still filters by the stored value', () => {
+  it('names the period tabs in words, as page tabs, and still filters by the stored value', () => {
     render(<BusinessResultView run={run([
       { period: '2026-01:2026-08', metric_key: 'revenue', actual: '800', budget: '900' },
       { period: '2026-08', metric_key: 'revenue', actual: '100', budget: '110' },
     ])} />);
     const tabs = within(screen.getByRole('tablist', { name: '结果期间' })).getAllByRole('tab');
     expect(tabs.map((tab) => tab.textContent)).toEqual(['2026 年 1–8 月', '2026 年 8 月']);
-    expect(tabs.every((tab) => tab.getAttribute('data-variant') === 'outline' && tab.getAttribute('data-size') === 'chip')).toBe(true);
+    expect(tabs.every((tab) => tab.getAttribute('data-slot') === 'tabs-trigger')).toBe(true);
+    expect(screen.getByRole('tablist', { name: '结果期间' }).getAttribute('data-variant')).toBe('line');
     fireEvent.click(screen.getByRole('tab', { name: '2026 年 8 月' }));
     expect(screen.getByRole('tab', { name: '2026 年 8 月' }).getAttribute('aria-selected')).toBe('true');
     const card = screen.getByRole('article');

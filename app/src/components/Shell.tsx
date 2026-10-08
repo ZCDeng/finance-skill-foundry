@@ -33,11 +33,11 @@ export function Shell({ screen, onScreen, strip, onGuide, covered, children }: S
         </nav>
         <span className="fnd-head__end">
           <ThemeSwitch />
-          {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. */}
+          {/* Neutral at rest, gold on hover (R14); the ghost variant's own hover would win over components.css. Below 620px only the icon stays. */}
           {onGuide ? <Button type="button" variant="ghost" size="sm"
-            className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)]"
+            className="fnd-head__help enabled:hover:bg-transparent enabled:hover:text-[var(--fnd-selected)] max-[620px]:w-(--fnd-button-height) max-[620px]:px-0"
             onClick={onGuide} title="使用指南（⌘/Ctrl + ?）" aria-keyshortcuts="Meta+? Control+?">
-            <BookOpen size={16} strokeWidth={1.5} aria-hidden />使用指南
+            <BookOpen size={16} strokeWidth={1.5} aria-hidden /><span className="fnd-head__help-label">使用指南</span>
           </Button> : null}
         </span>
       </header>

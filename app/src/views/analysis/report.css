@@ -31,9 +31,8 @@
 .report-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .report-topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .report-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.report-modes { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--fnd-line); border-radius: 8px; background: var(--fnd-surface); }
-.report-modes button { border: 0; border-radius: 6px; background: transparent; color: var(--fnd-muted); font: inherit; font-size: var(--fnd-size-small); padding: 7px 12px; cursor: pointer; }
-.report-modes button[aria-selected='true'] { background: var(--fnd-ink); color: var(--fnd-bg); }
+/* 阅读 · 编辑 · 打印预览 are page tabs (ui/tabs.tsx) set to the toolbar's height. */
+.report-modes > [data-slot='tabs-trigger'] { padding-block: 6px; }
 .report-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .report-editor-panel { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .report-editor-panel > label { display: flex; flex-direction: column; gap: 8px; font-size: var(--fnd-size-small); color: var(--fnd-muted); }
