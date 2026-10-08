@@ -162,33 +162,49 @@ function registerController(record, controller) {
   return () => record.controllers.delete(controller);
 }
 
-function toolResultMatches(resultExec, sessionId, callId) {
-  return resultExec?.agent?.id === sessionId && resultExec?.name === SAVE_TOOL && String(resultExec?.callId ?? "") === callId;
-}
-
 function shouldStopCurrentTurn(status) {
   return CANCEL_AFTER_RESULT_STATUSES.has(statusOf(status));
 }
 
-function schedulePostResultCancel(ctx, exec, record, callId, requestKey, status) {
+/*
+ * A draft that ends needs_review (or awaiting_input, timed_out) closes the request's tool
+ * work, but not its reply. The turn used to be cancelled the moment the save result landed,
+ * so the manager saw a save card and no sentence. Now the model gets the result and can say
+ * in a line or two what the draft is waiting on; the first tool call it tries after that,
+ * for the same request, cancels the turn instead of running. A new user message lifts it.
+ */
+function haltAfterResult(halted, record, requestKey, status) {
   if (!shouldStopCurrentTurn(status)) return;
-  if (typeof exec?.agent?.cancel !== "function" || typeof ctx?.on !== "function") return;
-  const sessionId = record.sessionId;
-  let unsubscribe;
-  let fired = false;
-  const handler = (resultExec) => {
-    if (fired || !toolResultMatches(resultExec, sessionId, callId)) return;
-    fired = true;
-    if (typeof unsubscribe === "function") unsubscribe();
-    Promise.resolve().then(() => {
-      if (latestUserRequestKey(exec) !== requestKey) return;
-      exec.agent.cancel(cancelCause(`finance completion ${statusOf(status)}`), { keepInbox: true });
-    }).catch((error) => ctx?.logger?.warn?.(`finance completion post-result cancel failed: ${error.message}`));
-  };
-  unsubscribe = ctx.on("tools/result", handler);
+  halted.set(registryKey(record.sessionId, requestKey), cancelCause(`finance completion ${statusOf(status)}`));
 }
 
-async function timeoutOperation(ctx, invoke, exec, record) {
+/** The cause that stops this request's further tools, or undefined. Prunes halts of older requests. */
+function haltCause(halted, exec) {
+  if (!halted.size || !exec?.agent?.id || !Array.isArray(exec?.agent?.session?.events)) return undefined;
+  const identity = latestUserRequestIdentity(exec);
+  if (!identity) return undefined;
+  const sessionId = String(exec.agent.id);
+  const key = registryKey(sessionId, `${sessionId}:${identity}`);
+  for (const stale of [...halted.keys()]) {
+    if (stale.startsWith(`${sessionId}\n`) && stale !== key) halted.delete(stale);
+  }
+  return halted.get(key);
+}
+
+/** Stop the turn and say why, for a tool called after this request's draft was handed to the manager. */
+function refusalAfterHalt(halted, exec) {
+  const cause = haltCause(halted, exec);
+  if (!cause) return undefined;
+  exec.agent.cancel?.(cause, { keepInbox: true });
+  return `${cause.reason}: this request's draft is waiting on the manager; reply without further tools`;
+}
+
+function refuseIfHalted(halted, exec) {
+  const refusal = refusalAfterHalt(halted, exec);
+  if (refusal) throw new Error(refusal);
+}
+
+async function timeoutOperation(ctx, invoke, exec, record, halted) {
   if (record.closed) return;
   record.closed = true;
   clearTimer(record);
@@ -204,21 +220,17 @@ async function timeoutOperation(ctx, invoke, exec, record) {
   if (!TERMINAL_STATUSES.has(statusOf(status))) {
     await bestEffortStop(ctx, invoke, exec, record.operationId, "timeout");
   }
-  try {
-    if (latestUserRequestKey(exec) === record.requestKey) {
-      exec?.agent?.cancel?.(cancelCause("finance completion timeout"), { keepInbox: true });
-    }
-  } catch (error) {
-    ctx?.logger?.warn?.(`finance completion timeout cancel failed: ${error.message}`);
-  }
+  // Like needs_review: the model may still say where the draft stopped, but no further tool runs
+  // for this request. The halt is checked before every tool, the harness's own included.
+  halted.set(registryKey(record.sessionId, record.requestKey), cancelCause("finance completion timeout"));
 }
 
-function armDeadline(ctx, invoke, exec, operations, record, operation) {
+function armDeadline(ctx, invoke, exec, operations, record, operation, halted) {
   clearTimer(record);
   const deadline = parseDeadline(operation);
   const delay = Math.max(0, deadline - Date.now());
   record.timer = setTimeout(() => {
-    timeoutOperation(ctx, invoke, exec, record).finally(() => operations.delete(registryKey(record.sessionId, record.requestKey)));
+    timeoutOperation(ctx, invoke, exec, record, halted).finally(() => operations.delete(registryKey(record.sessionId, record.requestKey)));
   }, delay);
   // This runtime can keep a harness process alive for minutes; the persisted
   // backend operation is authoritative across restarts, so the JS timer should
@@ -257,10 +269,12 @@ async function stopSupersededForCurrentUser(ctx, invoke, exec, operations) {
 
 export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy = {}) {
   const operations = new Map();
+  const halted = new Map();
   const call = (args, exec) => command(invoke, args, exec);
 
-  return async function completionRuntime(tool, input, exec, run) {
+  const runtime = async function completionRuntime(tool, input, exec, run) {
     if (typeof run !== "function") throw new Error("completion runtime requires a tool runner");
+    refuseIfHalted(halted, exec);
     if (tool !== SAVE_TOOL) {
       await stopSupersededForCurrentUser(ctx, invoke, exec, operations);
       return run(input, exec);
@@ -296,7 +310,7 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
       clearTimer(record);
       operations.delete(key);
     } else {
-      armDeadline(ctx, invoke, exec, operations, record, begin);
+      armDeadline(ctx, invoke, exec, operations, record, begin, halted);
     }
 
     const controller = new AbortController();
@@ -315,7 +329,7 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
         clearTimer(record);
         operations.delete(key);
       }
-      schedulePostResultCancel(ctx, exec, record, callId, requestKey, status);
+      haltAfterResult(halted, record, requestKey, status);
       return raw;
     } catch (error) {
       if (exec?.signal?.aborted) await bestEffortStop(ctx, invoke, exec, operationId, "cancelled");
@@ -325,4 +339,8 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
       releaseController();
     }
   };
+  // The analysis seat's guard asks this before any tool, so skill, web_search, todo_write and the
+  // other harness tools stop too, not only the foundry tools this runtime wraps.
+  runtime.refusalAfterHalt = (exec) => refusalAfterHalt(halted, exec);
+  return runtime;
 }

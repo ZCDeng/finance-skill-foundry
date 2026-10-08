@@ -164,22 +164,39 @@ async function testRequiresTrustedCallIdAndDeadline() {
   await assert.rejects(() => runtime("save_explanation_draft", spec(), execWithFallbackOnly, async () => "{}"), /trusted exec.callId/);
 }
 
-async function testResultObserverUsesRealSignatureAndExactExecIdentity() {
+async function testNeedsReviewLetsTheModelReplyThenRefusesFurtherTools() {
   const cancelLog = [];
   const ctx = makeCtx();
   const runtime = createCompletionRuntime(ctx, makeInvoke({ begin: { id: "op-needs" }, status: { status: "needs_review" } }));
-  const exec = execFor([user(1, "u1")], { callId: "call-needs", agent: { cancel: (cause, options) => cancelLog.push({ cause, options }) } });
+  const events = [user(1, "u1")];
+  const exec = execFor(events, { callId: "call-needs", agent: { cancel: (cause, options) => cancelLog.push({ cause, options }) } });
   const raw = await runtime("save_explanation_draft", spec(), exec, async () => JSON.stringify({ saved: true }));
   assert.equal(raw, JSON.stringify({ saved: true }));
-  assert.equal(cancelLog.length, 0);
-  ctx.emitToolResult({ ...exec, callId: "other" });
-  await flushMicrotasks();
-  assert.equal(cancelLog.length, 0);
+  // The result lands and the turn goes on, so the model can say what the draft is waiting on.
   ctx.emitToolResult(exec);
   await flushMicrotasks();
+  assert.equal(cancelLog.length, 0);
+  // A harness tool the runtime does not wrap is refused by the seat's guard through the same check.
+  assert.match(runtime.refusalAfterHalt({ ...exec, name: "web_search", callId: "search" }), /finance completion needs_review/);
+  assert.equal(cancelLog.length, 1);
+  cancelLog.length = 0;
+  // A further foundry tool for the same request is refused and stops the turn.
+  let ran = false;
+  await assert.rejects(
+    () => runtime("analysis-run", { analysis: "a" }, { ...exec, name: "analysis-run", callId: "after" }, async () => { ran = true; return "{}"; }),
+    /finance completion needs_review/,
+  );
+  assert.equal(ran, false);
   assert.equal(cancelLog.length, 1);
   assert.deepEqual(cancelLog[0].cause, { kind: "hook", reason: "finance completion needs_review" });
   assert.deepEqual(cancelLog[0].options, { keepInbox: true });
+  // An exec without session events is not refused for it.
+  assert.equal(runtime.refusalAfterHalt({ name: "skill", agent: { id: "session-a" } }), undefined);
+  // The manager's next message lifts it.
+  events.push(user(2, "u2"));
+  const output = await runtime("analysis-run", { analysis: "a" }, { ...exec, name: "analysis-run", callId: "next" }, async () => "ok");
+  assert.equal(output, "ok");
+  assert.equal(cancelLog.length, 1);
 }
 
 async function testCompleteAndRepairAvailableDoNotCancelAfterResult() {
@@ -274,6 +291,9 @@ async function testDeadlineTimerStopsWithTimeoutAndCancelsSameUser() {
   const stop = log.find((item) => item.args[0] === "finance-completion-stop");
   assert.equal(JSON.parse(stop.args[2]).reason, "timeout");
   assert.equal(stop.exec.signal, undefined);
+  // The timeout halts the request rather than cutting off a reply: the next tool, any tool, stops the turn.
+  assert.equal(cancelLog.length, 0);
+  assert.match(runtime.refusalAfterHalt({ ...exec, name: "web_search", callId: "after-timeout" }), /finance completion timeout/);
   assert.equal(cancelLog.length, 1);
   assert.deepEqual(cancelLog[0].cause, { kind: "hook", reason: "finance completion timeout" });
   assert.deepEqual(cancelLog[0].options, { keepInbox: true });
@@ -340,7 +360,7 @@ await testSaveStillRequiresHumanUserEvent();
 await testRequestKeyUsesRealDshUserMessageShape();
 await testPolicyComesOnlyFromThirdArgAndTrustedEnv();
 await testRequiresTrustedCallIdAndDeadline();
-await testResultObserverUsesRealSignatureAndExactExecIdentity();
+await testNeedsReviewLetsTheModelReplyThenRefusesFurtherTools();
 await testCompleteAndRepairAvailableDoNotCancelAfterResult();
 await testNewUserOnNonSaveStopsSupersededOldOperation();
 await testBeginTerminalCompleteDoesNotArmTimerOrCancel();

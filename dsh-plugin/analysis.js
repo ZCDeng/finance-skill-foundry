@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { invokeFoundry, toolDefinition } from "./index.js";
 import { createAnalysisRuntime } from "./analysis-runtime.js";
 import { createCompletionRuntime } from "./completion-runtime.js";
+import { hideDeveloperSections } from "./seat-prompt.js";
 import { FINANCE_TOOLS, NUMERIC_PRESENTATION, REPORT_DOCUMENT } from "./finance-tools.js";
 
 const PROFILE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
@@ -421,5 +422,8 @@ export function apply(ctx) {
   if (denied.length) ctx.tools.restrict({ deny: denied });
   const allowed = new Set([...allowlist(), "report"]);
   // Keep late registrations from acquiring execution authority in a live task.
-  ctx.tools.guard((exec) => allowed.has(exec.name) ? undefined : `analysis cannot execute ${exec.name}`);
+  ctx.tools.guard((exec) => allowed.has(exec.name)
+    ? runtime.completion.refusalAfterHalt(exec)
+    : `analysis cannot execute ${exec.name}`);
+  hideDeveloperSections(ctx);
 }

@@ -1,7 +1,8 @@
 # The agent A1 runs a closing period on.
 #
 # Derived from the stock `standard` preset by deletion, so every surviving row
-# keeps the configuration upstream gives it. Deriving by deletion rather than
+# keeps the configuration upstream gives it -- except `skill-filesystem`, which
+# reads only the shipped method directory (see that row). Deriving by deletion rather than
 # writing one from scratch is the lesson from `design-toolkit-app`: a
 # hand-written preset failed to mount there because `persona` requires a `text`
 # it was never given.
@@ -59,6 +60,12 @@
 
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
+  # Only the finance methods this product ships. Personal ~/.agents and project
+  # skill roots outrank bundled ones, so one named `close` would replace ours.
+  # `foundry install-presets` writes the method directory in for the token.
+  config:
+    includeDefaultRoots: false
+    bundledSkillDir: __FOUNDRY_METHOD_SKILL_DIR__
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
