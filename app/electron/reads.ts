@@ -21,6 +21,12 @@ export interface TaskRow {
   trashed_at?: string;
   restored_at?: string;
   windows: number;
+  /** Which example this task is (`legacy` is the 6 月 one from before the pack); null for a real task. */
+  sample?: 'practice' | 'reference' | 'next_month' | 'legacy' | null;
+  /** Made from an older example pack than the one installed. */
+  sample_outdated?: boolean;
+  /** False while the reference is still being built. */
+  sample_ready?: boolean;
 }
 
 /** One archived input, derived by the CLI from the window's own manifest. */

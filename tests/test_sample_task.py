@@ -105,6 +105,10 @@ def test_status_flags_an_older_practice_task_and_remove_trashes_only_practice_ta
     assert sample_status(var)["outdated"] is False
     assert remove_samples(var)["trashed"] == []
 
+    kept = create_sample_task(var)
+    TaskStore(var).get(kept["id"]).set_lifecycle_status("archived")
+    assert remove_samples(var)["trashed"] == []  # archived by the manager, so not on the list the guide counted
+
 
 def test_export_copies_the_files_into_a_new_folder_and_never_overwrites(tmp_path):
     exported = export_pack(tmp_path / "示例资料")
@@ -120,8 +124,8 @@ def test_the_cli_prints_the_task_and_marks_practice_tasks_in_the_list(tmp_path, 
     assert printed["created"] is True and len(printed["id"]) == 32
     TaskStore(tmp_path / "var").create(title="真实任务")
     assert main(["--var", var, "task-list"]) == 0
-    listed = {row["title"]: row["sample"] for row in json.loads(capsys.readouterr().out)}
-    assert listed == {KINDS["practice"]: "practice", "真实任务": None}
+    listed = {row["title"]: (row["sample"], row["sample_outdated"], row["sample_ready"]) for row in json.loads(capsys.readouterr().out)}
+    assert listed == {KINDS["practice"]: ("practice", False, True), "真实任务": (None, False, True)}
     assert main(["--var", var, "task-sample-status"]) == 0
     assert json.loads(capsys.readouterr().out)["outdated"] is False
 

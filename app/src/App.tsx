@@ -4,6 +4,7 @@ import './styles/base.css';
 
 import { Shell, type Screen } from './components/Shell.js';
 import { Workspace, type WorkspaceRect } from './components/Workspace.js';
+import { SampleBanner } from './components/SampleBanner.js';
 import {
   type AnalysisDraftRow,
   type AnalysisExportRow,
@@ -513,20 +514,63 @@ export function App() {
     return result.value.id;
   }, [api, refreshTasks]);
 
-  /** The synthetic practice task, opened on the 资料 tab with the guide's checklist beside it. */
+  /** Bring an example task up under 进行中, on the tab it is meant to be read from. */
+  const showSampleTask = useCallback((id: string, section: 'materials' | 'results') => {
+    setTaskLifecycleView('active');
+    currentRef.current = id;
+    explicitSelection.current = true;
+    setCurrent(id);
+    refreshTasks('active');
+    setSections((held) => ({ ...held, [id]: section }));
+  }, [refreshTasks]);
+
+  /**
+   * The reference task takes most of a minute to build, so it is built in the background and shared:
+   * a second request while one runs waits for the same answer. A failure stays on the banner of the
+   * task that asked, and the list is left as it was so that banner stays on screen.
+   */
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [referenceError, setReferenceError] = useState('');
+  const referenceRun = useRef<Promise<string | null> | null>(null);
+  const buildReference = useCallback((rebuild: boolean): Promise<string | null> => {
+    if (!api?.taskSampleReference) return Promise.resolve(null);
+    if (referenceRun.current) return referenceRun.current;
+    setReferenceBusy(true);
+    setReferenceError('');
+    const run = api.taskSampleReference(rebuild).then((result) => {
+      if (!result.ok) { setReferenceError(result.message); return null; }
+      refreshTasks(taskLifecycleViewRef.current);
+      return result.value.id;
+    }, (failure: unknown) => {
+      setReferenceError(failure instanceof Error ? failure.message : String(failure));
+      return null;
+    }).finally(() => { referenceRun.current = null; setReferenceBusy(false); });
+    referenceRun.current = run;
+    return run;
+  }, [api, refreshTasks]);
+
+  const openReferenceTask = useCallback(async () => {
+    const id = await buildReference(false);
+    if (id) showSampleTask(id, 'results');
+  }, [buildReference, showSampleTask]);
+
+  /** Trash the reference and build it again; the new one opens if the old one was still on screen. */
+  const rebuildReferenceTask = useCallback(async () => {
+    const leaving = currentRef.current;
+    const id = await buildReference(true);
+    if (id && currentRef.current === leaving) showSampleTask(id, 'results');
+  }, [buildReference, showSampleTask]);
+
+  /** The practice task, opened on the 资料 tab with the guide's checklist beside it; the reference is built behind it. */
   const openSampleTask = useCallback(async () => {
     if (!api?.taskSample) throw new Error('这个版本还不能创建示例任务。');
     const result = await api.taskSample();
     if (!result.ok) throw new Error(result.message);
-    setTaskLifecycleView('active');
-    currentRef.current = result.value.id;
-    explicitSelection.current = true;
-    setCurrent(result.value.id);
-    refreshTasks('active');
-    setSections((held) => ({ ...held, [result.value.id]: 'materials' }));
+    showSampleTask(result.value.id, 'materials');
     setGuideArticle('quick-start');
     setGuideRequest((value) => value + 1);
-  }, [api, refreshTasks]);
+    void buildReference(false);
+  }, [api, buildReference, showSampleTask]);
 
   /** Put down the task on screen and show the list it was in, as 新建任务 would. */
   const leaveTask = useCallback(() => {
@@ -579,6 +623,23 @@ export function App() {
     }
     if (screenRef.current === 'deliverables') refreshGallery();
   }, [api, closePreview, leaveTask, refreshGallery, refreshTasks]);
+
+  /** Every example task to the trash; answers how many went. Real tasks are never touched. */
+  const removeSampleTasks = useCallback(async () => {
+    if (!api?.taskSampleRemove) throw new Error('这个版本还不能移除示例任务。');
+    // A reference still being built would finish in the trash, and a replacement would be handed that build.
+    await referenceRun.current;
+    const result = await api.taskSampleRemove();
+    if (!result.ok) throw new Error(result.message);
+    const gone = new Set(result.value.trashed);
+    gallerySequence.current += 1;
+    setGallery((rows) => rows.filter((row) => !gone.has(row.task.id)));
+    setTasks((rows) => rows.filter((row) => !gone.has(row.id)));
+    if (currentRef.current && gone.has(currentRef.current)) leaveTask();
+    refreshTasks(taskLifecycleViewRef.current);
+    if (screenRef.current === 'deliverables') refreshGallery();
+    return gone.size;
+  }, [api, leaveTask, refreshGallery, refreshTasks]);
 
   /** Delete one trashed task, or empty 已归档 or 回收站; answers how many tasks went. */
   const removeTasks = useCallback(async (target: { purge: string } | { empty: 'archived' | 'trashed'; ids: string[] }) => {
@@ -919,9 +980,15 @@ export function App() {
           onPurge={api.taskPurge ? async (id) => { await removeTasks({ purge: id }); } : undefined}
           onEmpty={api.taskEmpty ? (lifecycle, ids) => removeTasks({ empty: lifecycle, ids }) : undefined}
           onLayout={onWorkspaceLayout}
+          banner={bound?.sample ? <SampleBanner task={bound} building={referenceBusy} error={referenceError}
+            onRebuild={api.taskSampleReference && !boundReadOnly ? () => void rebuildReferenceTask() : undefined}
+            onReference={api.taskSampleReference ? () => void openReferenceTask() : undefined} /> : null}
           conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}
               onSample={api.taskSample ? openSampleTask : undefined}
+              samples={taskLifecycleView === 'active' ? { count: tasks.filter((row) => row.sample).length, outdated: tasks.some((row) => row.sample_outdated) } : undefined}
+              onRemoveSamples={api.taskSampleRemove ? removeSampleTasks : undefined}
+              onReplaceSamples={api.taskSampleRemove && api.taskSample ? async () => { await removeSampleTasks(); await openSampleTask(); } : undefined}
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}
               onOpen={(target: GuideTarget) => {
                 setAnalysisSection(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : target === 'close' ? 'close' : 'materials');

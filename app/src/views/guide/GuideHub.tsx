@@ -5,6 +5,9 @@ import { Input } from '../../components/ui/input.js';
 import { NativeSelect, NativeSelectOption } from '../../components/ui/native-select.js';
 import { GUIDE_ARTICLES, GUIDE_SECTIONS, searchArticles, type GuideArticle, type GuideTarget } from './articles.js';
 import { QuickStartChecklist } from './QuickStartChecklist.js';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '../../components/ui/alert-dialog.js';
 import { askAssistant, askText, type AskId } from './ask.js';
 
 /** Window event that opens the guide at one article, from a 「?」 next to the thing it explains. */
@@ -44,7 +47,7 @@ export function StatusLegend() {
  * It sits where the conversation sits, so the workspace it explains stays visible beside
  * it. Opening a place from an article moves the workspace there and never runs anything.
  */
-export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData }: {
+export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData, samples, onRemoveSamples, onReplaceSamples }: {
   article?: string;
   /** Bumped on every request, so asking for the article already shown still moves back to it. */
   request?: number;
@@ -57,9 +60,37 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   onSample?(): Promise<void>;
   /** Start with the reader's own files: close the guide and go to the new-task box. */
   onOwnData?(): void;
+  /** The example tasks on the 进行中 list; absent while another list is shown. */
+  samples?: { count: number; outdated: boolean };
+  /** Every example task to the trash; answers how many went. */
+  onRemoveSamples?(): Promise<number>;
+  /** The old examples to the trash and the current pack's opened in their place. */
+  onReplaceSamples?(): Promise<void>;
 }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
+  const [confirm, setConfirm] = useState<'remove' | 'replace' | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
+  const [removed, setRemoved] = useState('');
+  const confirmed = async () => {
+    if (!confirm || confirmBusy) return;
+    setConfirmBusy(true); setConfirmError('');
+    try {
+      if (confirm === 'remove') {
+        const count = await onRemoveSamples?.() ?? 0;
+        setRemoved(count ? `已把 ${count} 个示例任务移入回收站，在回收站里还能恢复。` : '没有需要移除的示例任务。');
+      } else {
+        await onReplaceSamples?.();
+        setRemoved('');
+      }
+      setConfirm(null);
+    } catch (failure) {
+      setConfirmError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
   const [query, setQuery] = useState('');
   // What the drop-down just put up, said through the status line since focus stays on the drop-down.
   const [shown, setShown] = useState('');
@@ -121,6 +152,15 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
               }}>{starting ? '正在准备示例任务…' : '用示例任务练习（推荐）'}</Button> : null}
               <Button variant="outline" type="button" onClick={() => onOwnData?.()}>使用自己的资料</Button>
               {startError ? <p role="alert" className="analysis-message analysis-message--error">{startError}</p> : null}
+              {samples?.outdated && onReplaceSamples ? <p className="fnd-guide-hub__samples">
+                <span>示例资料有新版本。</span>
+                <Button variant="link" size="sm" type="button" onClick={() => { setConfirmError(''); setConfirm('replace'); }}>换成新版示例</Button>
+              </p> : null}
+              {samples && samples.count > 0 && onRemoveSamples ? <p className="fnd-guide-hub__samples">
+                <span>练完了？示例任务可以一起移走，你自己的任务不受影响。</span>
+                <Button variant="link" size="sm" type="button" onClick={() => { setConfirmError(''); setConfirm('remove'); }}>移除示例任务</Button>
+              </p> : null}
+              {removed ? <p role="status" className="analysis-note">{removed}</p> : null}
             </div>;
             if (block.kind === 'ask') return <span key={index} className="fnd-guide-hub__open">
               <AskLink ask={block.ask} label={block.label} disabled={!canOpen} />
@@ -136,6 +176,24 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
           })}
         </article>
       </div>
+      <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => { if (!open && !confirmBusy) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm === 'replace' ? '换成新版示例？' : `把 ${samples?.count ?? 0} 个示例任务移入回收站？`}</AlertDialogTitle>
+            <AlertDialogDescription>{confirm === 'replace'
+              ? `现有的 ${samples?.count ?? 0} 个示例任务会移入回收站，再用新版资料建练习任务，参考结果在后台重新生成。你自己的任务不受影响。`
+              : '只移动示例任务，你自己的任务不受影响。在回收站里还能恢复，之后也可以随时再建示例任务。'}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {confirmError ? <p role="alert" className="m-0 text-[length:var(--fnd-size-body)] text-[var(--fnd-warning)]">{confirmError}</p> : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmBusy}>取消</AlertDialogCancel>
+            <AlertDialogAction disabled={confirmBusy} aria-busy={confirmBusy || undefined}
+              onClick={(event) => { event.preventDefault(); void confirmed(); }}>
+              {confirm === 'replace' ? '换成新版示例' : '移入回收站'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

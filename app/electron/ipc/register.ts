@@ -19,7 +19,7 @@ import {
 } from '../reads.js';
 import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
-import { changeTaskLifecycle, emptyTasks, newTask, purgeTask, sampleTask } from '../writes.js';
+import { changeTaskLifecycle, emptyTasks, newTask, purgeTask, removeSamples, sampleReference, sampleTask } from '../writes.js';
 import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
 import { type Appearance, appearanceOf, readAppearance, writeAppearance } from '../appearance.js';
@@ -249,6 +249,8 @@ export function registerIpc(
   );
 
   ipcMain.handle(CHANNELS.taskSample, () => answer(() => sampleTask(binding)));
+  ipcMain.handle(CHANNELS.taskSampleReference, (_event, rebuild: unknown) => answer(() => sampleReference(binding, rebuild === true)));
+  ipcMain.handle(CHANNELS.taskSampleRemove, () => answer(() => removeSamples(binding)));
 
   ipcMain.handle(CHANNELS.taskRename, (_event, task: unknown, title: unknown) => answer(async () =>
     JSON.parse(await runFoundry({...binding, task: taskId(task)}, 'task-rename', ['--title', lineOf(title, 'title', 120)])),
