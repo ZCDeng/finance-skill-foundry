@@ -725,18 +725,11 @@ class AnalysisStore:
             return row
         return None
 
-    def add_table_snapshot(
-        self, source_dataset_id: str, declaration: dict, *, name: str
-    ) -> dict:
-        """File the calculable table a confirmed structure declaration describes.
-
-        The original workbook bytes are stored again, so the snapshot answers for
-        its own source and a located figure can still be opened in the file the
-        manager uploaded.
-        """
+    def derive_table_snapshot(self, source_dataset_id: str, declaration: dict) -> dict:
+        """Read the table a declaration describes without filing it, so a confirmation of many
+        sheets can read every one before it files any. Pass the result to add_table_snapshot."""
         from foundry.structure_snapshot import derive_table
 
-        _safe_text(name, "dataset name", required=True, maximum=200)
         if not isinstance(declaration, dict):
             raise FoundryError("structure declaration must be an object")
         shell = self.read_dataset(source_dataset_id)
@@ -745,7 +738,22 @@ class AnalysisStore:
         if _hash_bytes(data) != shell["source_hash"]:
             raise FoundryError("dataset integrity check failed")
         declaration = json_value({**declaration, "derived_from": source_dataset_id})
-        parsed = derive_table(data, declaration)
+        return {"source_dataset_id": source_dataset_id, "shell": shell, "data": data,
+                "declaration": declaration, "parsed": derive_table(data, declaration)}
+
+    def add_table_snapshot(
+        self, source_dataset_id: str, declaration: dict, *, name: str, derived: dict | None = None
+    ) -> dict:
+        """File the calculable table a confirmed structure declaration describes.
+
+        The original workbook bytes are stored again, so the snapshot answers for
+        its own source and a located figure can still be opened in the file the
+        manager uploaded. ``derived`` is derive_table_snapshot's reading of the same declaration.
+        """
+        _safe_text(name, "dataset name", required=True, maximum=200)
+        if derived is None or derived["source_dataset_id"] != source_dataset_id:
+            derived = self.derive_table_snapshot(source_dataset_id, declaration)
+        shell, data, declaration, parsed = derived["shell"], derived["data"], derived["declaration"], derived["parsed"]
         encoded = _bytes(
             {
                 "kind": parsed["kind"],

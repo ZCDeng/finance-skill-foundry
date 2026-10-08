@@ -135,3 +135,24 @@ def test_the_older_practice_task_keeps_the_shelf_its_templates_are_on(tmp_path):
     assert uses_sample_shelf(legacy) is False
     assert uses_sample_shelf(damaged) is True
     assert uses_sample_shelf(store.create(title="真实任务")) is False
+
+
+def test_a_remembered_shape_the_file_cannot_fill_leaves_the_import_standing(tmp_path):
+    # 月度收入 and 上年同期对比 share a shape; the second holds #REF!. Once the first is remembered, the
+    # next import offers the shape for both, cannot read the second, and leaves both to the manager.
+    var = tmp_path / "var"
+    formula = next(name for name in pack_manifest()["practice"] if "公式体检" in name)
+    first = _task(var, create_sample_task(var))
+    manager = FinanceStore(first, actor="manager")
+    dataset = next(row for row in AnalysisStore(first).state()["datasets"] if row["name"] == formula)
+    proposal = manager.structure_proposal_list({"dataset_id": dataset["id"]})["proposals"][0]
+    manager.structure_proposal_confirm({"dataset_id": dataset["id"], "revision": proposal["revision"],
+                                        "sheets": [s for s in proposal["sheets"] if s["sheet"] == "月度收入"]})
+
+    remove_samples(var)
+    second = _task(var, create_sample_task(var))
+    service = FinanceStore(second)
+    names = [row["name"] for row in AnalysisStore(second).state()["datasets"]]
+    assert sorted(names) == sorted(pack_manifest()["practice"])  # nothing filed half-way
+    dataset = next(row for row in AnalysisStore(second).state()["datasets"] if row["name"] == formula)
+    assert service.dataset_structure_state(dataset["id"]) != "confirmed"
