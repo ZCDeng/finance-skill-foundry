@@ -649,7 +649,8 @@ class AnalysisStore:
         suffix = path.suffix.lower()
         if suffix not in SUPPORTED:
             raise FoundryError(
-                f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
+                "unsupported format .xls (the Excel 97-2003 format): save it as .xlsx first" if suffix == ".xls"
+                else f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
             )
         try:
             if not path.exists():

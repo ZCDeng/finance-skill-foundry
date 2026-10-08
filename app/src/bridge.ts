@@ -219,6 +219,8 @@ export interface Bridge {
   taskSampleNext?(): Promise<Answer<{ id: string; created: boolean }>>;
   /** Every practice task to the trash; real tasks are never touched. */
   taskSampleRemove?(): Promise<Answer<{ trashed: string[] }>>;
+  /** The 补充数据模板 into a new folder inside one the manager picks, then that folder opened. */
+  templatesExport?(): Promise<Answer<{ folder: string } | { cancelled: true }>>;
   /** Absent when this build has no harness install to embed. */
   harnessStatus?(): Promise<Answer<HarnessStatus>>;
   harnessOpen?(

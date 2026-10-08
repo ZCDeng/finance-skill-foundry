@@ -25,7 +25,22 @@ export type GuideBlock =
   /** Open the example's reference task at the same page, to compare. */
   | { kind: 'reference'; target: GuideTarget; label: string }
   /** Make the September practice task, for the route's last step. */
-  | { kind: 'next-month' };
+  | { kind: 'next-month' }
+  /**
+   * What each analysis reads. Every column is a name the structure proposal recognises
+   * (ROLE_ALIASES) or an input collection_health binds (INPUT_LABELS); a test holds them to it.
+   */
+  | { kind: 'fields'; rows: FieldRow[] }
+  /** Save the three 补充数据模板 to a folder the manager picks. */
+  | { kind: 'templates' };
+
+export type FieldRow = {
+  analysis: string;
+  /** What kind of file or sheet holds it, in a manager's words. */
+  files: string;
+  columns: string[];
+  optional?: string[];
+};
 
 export type GuideArticle = {
   id: string;
@@ -403,6 +418,43 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '系统不会自动用电脑当前的月份代替任务期间。期间输入框的「本期」按钮填的是电脑当前月份，「上期」「上年同期」在期间为空时也按当前月份推算，用之前请核对。',
       ] },
       { kind: 'open', target: 'scope', label: '打开分析范围' },
+    ],
+  },
+  {
+    id: 'data-checklist', section: '资料与数据安全', title: '导入前的资料准备清单', appliesTo: '资料页',
+    keywords: ['准备', '清单', '模板', '列名', '表头', '缺什么', '导入', '格式', 'xls', 'GBK', '编码', '两行表头', '万元', '面积', '人数', '合同台账'],
+    body: [
+      { kind: 'p', text: '不用先把资料改成固定模板。月结套表、ERP 导出、预算台账都可以原样加入，系统认得封面、标题行和合计行，加入后在「表结构」逐列确认就行。下面写的是每种分析要读到哪些内容；列名写成表里任一种说法，确认表结构时会自动认出，写成别的说法也可以在确认时手工指定。' },
+      { kind: 'fields', rows: [
+        { analysis: '管理利润表', files: '科目余额表或利润表，一张表里同时有收入、成本、费用', columns: ['期间', '币种', '金额', '管理科目'], optional: ['科目代码', '科目名称', '组织', '单位', '方向'] },
+        { analysis: '勾稽控制', files: '带合计行的套表：合计、小计、总计开头的行，上面至少两行明细', columns: ['期间', '币种', '金额'] },
+        { analysis: '应收账龄', files: '发票或账单明细，一行一张', columns: ['发票号', '到期日', '金额'], optional: ['开票日期', '状态'] },
+        { analysis: '应收账龄的回款', files: '回款流水，一行一笔，和发票明细分开放', columns: ['发票号', '流水号', '收付类型', '回款日期', '金额'] },
+        { analysis: '13 周现金', files: '收款计划和付款计划各一张表', columns: ['流水号', '日期', '金额'], optional: ['状态'] },
+        { analysis: '量价分析', files: '实际和预算，每个业态各一行', columns: ['业态', '数量', '单价', '情景', '期间'], optional: ['金额'] },
+        { analysis: '预算差异和利润桥', files: '实际长表和预算长表', columns: ['情景', '管理科目', '金额', '期间', '组织'] },
+        { analysis: '回款健康', files: '套表或核心指标看板上的报数', columns: ['营业收入（本期）', '营业成本（本期）', '期间费用（本期）', '本年账单收缴率', '综合收缴率（含清欠）', '应收账款期末'], optional: ['全年收入预算', '减值损失（本期）', '营业利润（本期）'] },
+        { analysis: '规模、续约和人效', files: '在管面积台账、物业服务合同台账、人数表，每家城市公司一行', columns: ['在管面积年初', '在管面积期末', '在岗人数'], optional: ['低效退场面积', '到期未续约面积', '合同确认收入合计', '12个月内到期及拟退场合同的确认收入'] },
+      ] },
+      { kind: 'list', items: [
+        '金额可以是一列「金额」，也可以是「借方」「贷方」两列，确认表结构时选好哪边记增加。',
+        '整张表期间、币种、单位都一样时，不必每行写一列，写在标题里就行，例如「期间：2026年8月　金额单位：万元　币种：人民币」。「1-8月」这样的区间不算期间，要写到具体月份，或在分析范围里填。',
+        '管理科目也可以用科目代码代替，在「设置与高级」里把科目代码映射到收入、成本、费用。',
+        '风险雷达按城市公司逐家打分，要有每家一行的明细表。',
+      ] },
+      { kind: 'p', text: '这些情况导入前先在 Excel 里处理：' },
+      { kind: 'list', items: [
+        '.xls（Excel 97-2003 格式）：用 Excel 另存为 .xlsx 再加入。',
+        '两行表头，例如上一行「本年」、下一行「预算」「实际」：目前只认一行表头，先合成一行，写成「本年预算」「本年实际」。',
+        '同一列里元和万元混着写：统一成一种单位，单位写在标题或表头里。',
+        '明细行里用合并单元格写组织名，只有第一行有值：取消合并，每行都填上。',
+        '只有看板汇总、没有明细：账龄、量价这类分析要读明细；回款健康可以把看板「当作数据表」采用。',
+      ] },
+      { kind: 'p', text: 'CSV 用 UTF-8 或 GBK 编码都可以直接加入，不用另存。想看好资料长什么样，打开示例任务：华宸套表的「11·城市公司明细表」是每家一行的写法，明细长表的「应收发票」「回款流水」是账龄要的两张明细。' },
+      { kind: 'p', text: '面积台账、合同台账和人数，很多公司的套表里没有现成的表。可以导出下面三个补充模板照着填：第一页是填写说明，第二页是表，表头已经是系统认得的名字，示例行删掉换成自己的数就行。模板不是必须的，已有台账的照原样加入。' },
+      { kind: 'templates' },
+      { kind: 'open', target: 'datasets', label: '打开资料页' },
+      { kind: 'ask', ask: 'data-gaps', label: '让助手看看我的资料还缺什么' },
     ],
   },
   {

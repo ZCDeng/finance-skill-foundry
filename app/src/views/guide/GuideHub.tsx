@@ -47,7 +47,7 @@ export function StatusLegend() {
  * It sits where the conversation sits, so the workspace it explains stays visible beside
  * it. Opening a place from an article moves the workspace there and never runs anything.
  */
-export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData, samples, onRemoveSamples, onReplaceSamples, onReference, onNextMonth }: {
+export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData, samples, onRemoveSamples, onReplaceSamples, onReference, onNextMonth, onExportTemplates }: {
   article?: string;
   /** Bumped on every request, so asking for the article already shown still moves back to it. */
   request?: number;
@@ -70,6 +70,8 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   onReference?(target: GuideTarget): Promise<void>;
   /** Make (or open) the September practice task. */
   onNextMonth?(): Promise<void>;
+  /** Save the 补充数据模板 into a folder the reader picks; answers where they went, or null when the pick was cancelled. */
+  onExportTemplates?(): Promise<string | null>;
 }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
@@ -80,6 +82,7 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   // One button at a time runs: what it is doing, and what went wrong, said next to it.
   const [running, setRunning] = useState('');
   const [runError, setRunError] = useState<{ at: string; text: string } | null>(null);
+  const [exported, setExported] = useState('');
   const run = (at: string, work: () => Promise<void>) => {
     if (running) return;
     setRunning(at); setRunError(null);
@@ -179,6 +182,28 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
               <h4>你应该看到</h4>
               <ul>{block.items.map((item) => <li key={item}>{item}</li>)}</ul>
             </div>;
+            if (block.kind === 'fields') return <table key={index} className="fnd-guide-hub__fields">
+              <thead><tr><th scope="col">分析</th><th scope="col">放在哪</th><th scope="col">要有的列</th><th scope="col">有更好</th></tr></thead>
+              <tbody>{block.rows.map((row) => <tr key={row.analysis}>
+                <th scope="row">{row.analysis}</th><td>{row.files}</td>
+                <td>{row.columns.map((name) => `「${name}」`).join('')}</td>
+                <td>{row.optional?.length ? row.optional.map((name) => `「${name}」`).join('') : '—'}</td>
+              </tr>)}</tbody>
+            </table>;
+            if (block.kind === 'templates') {
+              if (!onExportTemplates) return null;
+              const at = `${article.id}:${index}`;
+              return <span key={index} className="fnd-guide-hub__open">
+                <Button variant="outline" type="button" disabled={Boolean(running)} aria-busy={running === at || undefined}
+                  onClick={() => { setExported(''); run(at, async () => {
+                    const folder = await onExportTemplates();
+                    if (folder) setExported(`已导出到「${folder}」。`);
+                  }); }}>
+                  {running === at ? '正在导出…' : '导出补充模板'}</Button>
+                {exported ? <span role="status" className="analysis-note">{exported}</span> : null}
+                {runError?.at === at ? <span role="alert" className="analysis-message analysis-message--error">{runError.text}</span> : null}
+              </span>;
+            }
             if (block.kind === 'reference' || block.kind === 'next-month') {
               const at = `${article.id}:${index}`;
               const act = block.kind === 'reference' ? onReference && (() => onReference(block.target)) : onNextMonth;

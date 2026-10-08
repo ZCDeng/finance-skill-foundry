@@ -437,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("task-sample-remove", help="move every practice task on the active list into the trash")
     p_sample_export = sub.add_parser("task-sample-export", help="copy the example files into a new or empty folder")
     p_sample_export.add_argument("--dest", required=True)
+    p_templates_export = sub.add_parser("templates-export", help="copy the 补充数据模板 into a new or empty folder")
+    p_templates_export.add_argument("--dest", required=True)
 
     p_task_list = sub.add_parser("task-list")
     p_task_list.add_argument("--lifecycle", choices=(*TASK_LIFECYCLE_STATUSES, "all"), default="active")
@@ -570,6 +572,11 @@ def main(argv: list[str] | None = None) -> int:
                 "task-sample-export": lambda: sample_task.export_pack(Path(args.dest)),
             }[args.cmd]
             print(json.dumps(run(), ensure_ascii=False))
+            return 0
+        if args.cmd == "templates-export":
+            from foundry.data_templates import export_templates
+
+            print(json.dumps(export_templates(Path(args.dest)), ensure_ascii=False))
             return 0
         if args.cmd == "task-list":
             version = _pack_version()

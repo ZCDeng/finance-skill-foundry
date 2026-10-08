@@ -252,6 +252,20 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.taskSampleReference, (_event, rebuild: unknown) => answer(() => sampleReference(binding, rebuild === true)));
   ipcMain.handle(CHANNELS.taskSampleNext, () => answer(() => sampleNextMonth(binding)));
   ipcMain.handle(CHANNELS.taskSampleRemove, () => answer(() => removeSamples(binding)));
+  // The templates go into a new 补充数据模板 folder inside the picked one, never over files already there.
+  ipcMain.handle(CHANNELS.templatesExport, () => answer(async () => {
+    const selected = await dialog.showOpenDialog({
+      title: '选择存放补充模板的位置', buttonLabel: '导出到这里', properties: ['openDirectory', 'createDirectory'],
+    });
+    if (selected.canceled || selected.filePaths.length === 0) return { cancelled: true as const };
+    const { existsSync } = await import('node:fs');
+    let folder = path.join(selected.filePaths[0], '补充数据模板');
+    for (let count = 2; existsSync(folder); count += 1) folder = path.join(selected.filePaths[0], `补充数据模板 ${count}`);
+    await runFoundry({ varRoot: binding.varRoot }, 'templates-export', ['--dest', folder]);
+    const trouble = await shell.openPath(folder);
+    if (trouble) throw new Error(trouble);
+    return { folder };
+  }));
 
   ipcMain.handle(CHANNELS.taskRename, (_event, task: unknown, title: unknown) => answer(async () =>
     JSON.parse(await runFoundry({...binding, task: taskId(task)}, 'task-rename', ['--title', lineOf(title, 'title', 120)])),
@@ -491,7 +505,8 @@ export function registerIpc(
       const task = taskId(rawTask);
       const selected = await chooseFiles('materials.import', {
         title: '加入分析资料', properties: ['openFile', 'multiSelections'],
-        filters: [{ name: '表格与背景资料', extensions: ['csv', 'xlsx', 'json', 'md', 'txt'] }],
+        // .xls is offered so that picking one is answered with how to save it as .xlsx, not hidden.
+        filters: [{ name: '表格与背景资料', extensions: ['csv', 'xlsx', 'xls', 'json', 'md', 'txt'] }],
       });
       if (selected.canceled || selected.filePaths.length === 0) return [];
       const rows = [];

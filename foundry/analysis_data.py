@@ -298,6 +298,32 @@ def _xlsx(
             book.close()
 
 
+def decode_text(data: bytes) -> tuple[str, str]:
+    """Text as the file wrote it, and the encoding it was read in.
+
+    UTF-8 first (with or without a BOM); otherwise GB18030, the superset of GBK and GB2312 that 用友, 金蝶
+    and Excel's 「CSV（逗号分隔）」 on a Chinese system write. Nothing is guessed beyond these two.
+
+    A short GBK file can also be valid UTF-8 (GBK 「目录」 reads as UTF-8 「Ŀ¼」). UTF-8 text with letters
+    beyond ASCII but not one Chinese character, where GB18030 reads Chinese, is taken as GB18030."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("gb18030"), "gb18030"
+    if not text.isascii() and not data.startswith(b"\xef\xbb\xbf") and not _has_chinese(text):
+        try:
+            other = data.decode("gb18030")
+        except UnicodeDecodeError:
+            return text, "utf-8"
+        if _has_chinese(other):
+            return other, "gb18030"
+    return text, "utf-8"
+
+
+def _has_chinese(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
 def parse_source(
     data: bytes,
     suffix: str,
@@ -307,13 +333,14 @@ def parse_source(
 ) -> dict:
     if suffix not in SUPPORTED:
         raise FoundryError(
-            f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
+            "unsupported format .xls (the Excel 97-2003 format): save it as .xlsx first" if suffix == ".xls"
+            else f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
         )
     if len(data) > MAX_SOURCE_BYTES:
         raise FoundryError("source exceeds 32 MiB limit")
     try:
         if suffix in {".md", ".txt"}:
-            text = data.decode("utf-8-sig")
+            text, encoding = decode_text(data)
             paragraphs = []
             for match in re.finditer(r"\S.*?(?=\n\s*\n|\Z)", text, flags=re.S):
                 paragraphs.append(
@@ -331,7 +358,7 @@ def parse_source(
                 "row_count": 0,
                 "transformation": {
                     "format": suffix[1:],
-                    "encoding": "utf-8",
+                    "encoding": encoding,
                     "basis": "source_fact",
                 },
             }
@@ -343,7 +370,10 @@ def parse_source(
         workbook = None
         mode = None
         if suffix == ".csv":
-            reader = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
+            text, encoding = decode_text(data)
+            if encoding != "utf-8":
+                transformation["encoding"] = encoding
+            reader = csv.DictReader(io.StringIO(text))
             headers = reader.fieldnames or []
             rows = []
             for row in reader:

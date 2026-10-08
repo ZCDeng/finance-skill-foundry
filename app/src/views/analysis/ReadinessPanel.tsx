@@ -135,7 +135,8 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
   return (
     <section className="analysis-readiness">
       <div className="analysis-section-heading">
-        <h4><ClipboardList size={15} strokeWidth={1.5} aria-hidden /> 这批资料能算什么</h4>
+        <span className="fnd-with-help"><h4><ClipboardList size={15} strokeWidth={1.5} aria-hidden /> 这批资料能算什么</h4>
+          <HelpLink article="data-checklist" label="导入前的资料准备清单" /></span>
         <Button variant="outline" type="button" disabled={working} onClick={() => void load(true)}>
           <RefreshCw size={15} strokeWidth={1.5} aria-hidden />重新检查
         </Button>

@@ -150,9 +150,11 @@ const RULES: Rule[] = [
   [/report review requires either a draft_id or a document/i, '请先导入一份报告，或打开已保存的文稿，再复核数字。'],
   [/report review requires a draft saved with a structured document/i, '这份文稿没有保存结构化内容，无法逐项复核数字；请重新导入原报告后再复核。'],
   // Data files.
+  [/unsupported format \.xls\b/i, '这是老格式的 Excel（.xls），暂时不能直接读取。请在 Excel 里打开它，「文件 › 另存为」选「Excel 工作簿（.xlsx）」，再加入另存的那份。原文件不用改动。'],
+  [/unsupported format \.(\w+)/i, (match) => `暂不支持 .${match[1]} 文件。可以加入的格式：Excel（.xlsx）、CSV、JSON、Markdown 和纯文本。`],
   [/cannot parse \.xls[xm] source/i, '无法读取这份 Excel：文件可能已损坏，或扩展名与实际格式不符。这次读取没有生成任何数据，已有资料不受影响。请在 Excel 中另存为 .xlsx 后重试。'],
-  [/CSV row has more fields than its header/i, '无法读取这份 CSV：有的行比表头多出字段，通常是分隔符或引号用错了。这次读取没有生成任何数据，已有资料不受影响。请检查分隔符和引号，另存为 UTF-8 编码的 CSV 后重试。'],
-  [/cannot parse \.csv source/i, '无法读取这份 CSV：编码或分隔格式有误。这次读取没有生成任何数据，已有资料不受影响。请另存为 UTF-8 编码的 CSV 后重试。'],
+  [/CSV row has more fields than its header/i, '无法读取这份 CSV：有的行比表头多出字段，通常是分隔符或引号用错了。这次读取没有生成任何数据，已有资料不受影响。请检查分隔符和引号后重试。'],
+  [/cannot parse \.csv source/i, '无法读取这份 CSV：分隔格式有误。这次读取没有生成任何数据，已有资料不受影响。请检查分隔符和引号后重试。'],
   [/cannot parse \.\w+ source/i, '无法读取这份文件：内容与扩展名标示的格式不符。这次读取没有生成任何数据，已有资料不受影响。请检查文件后重试。'],
   [/dataset source workbook integrity check failed/i, '这份 Excel 与登记时的内容不一致，请重新添加这份资料。'],
   [/finance file bindings require an XLSX snapshot/i, '这一步只适用于 Excel（.xlsx）资料，请选择一本 Excel 工作簿。'],
