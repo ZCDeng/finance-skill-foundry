@@ -52,6 +52,15 @@ function proposal(sheets: StructureProposal['sheets'], state = 'pending_confirma
 }
 
 describe('structure confirmation card', () => {
+  it('names a presentation page someone else adopted in the pending strip', () => {
+    render(<StructurePendingStrip taskId="t" datasetName="月结套表" busy={false} onSettled={vi.fn()}
+      confirmation={{ id: 'c1', dataset_id: 'shell-1', source: 'assistant', state: 'pending_acknowledgement', parent_id: null,
+        sheets: [{ sheet: '01·核心指标看板', decision: 'table', reason: 'adopted_presentation_sheet' },
+          { sheet: '02·GL科目余额表', decision: 'table', reason: null }] }} />);
+    expect(screen.getByText(/01·核心指标看板 原本是看板或封面页/)).toBeTruthy();
+    expect(screen.queryByText(/02·GL科目余额表 原本/)).toBeNull();
+  });
+
   it('lets the manager adopt a set-aside KPI board and sends it as a table', async () => {
     const board = ledger({
       sheet: '01·核心指标看板', decision: 'excluded', reason: 'presentation_sheet',

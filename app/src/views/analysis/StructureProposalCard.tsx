@@ -107,6 +107,7 @@ interface Confirmation {
   source: string;
   state: string;
   parent_id: string | null;
+  sheets?: { sheet: string; decision?: string; reason?: string | null }[];
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -253,7 +254,11 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
       <section className="analysis-structure-card">
         {/* Opened under the file's own row, which already names it: the heading is for screen readers. */}
         <h4 className="sr-only">{datasetName}</h4>
-        <p className="analysis-note">这份文件里没有可以计算的表。每张表的判断如下。</p>
+        <p className="analysis-note">
+          {setAside.some((sheet) => sheet.adoptable)
+            ? '这份文件里没有直接可以计算的表；看板页上的表可以点「当作数据表」采用。每张表的判断如下。'
+            : '这份文件里没有可以计算的表。每张表的判断如下。'}
+        </p>
         <ul className="analysis-structure-reasons">
           {setAside.map((sheet) => (
             <li key={sheet.sheet}>
@@ -468,7 +473,7 @@ export function StructureProposalCard({ taskId, datasetName, proposal, busy, onS
 
       {setAside.length > 0 && (
         <details className="analysis-structure-excluded">
-          <DisclosureSummary>不能确认的工作表 {setAside.length} 张</DisclosureSummary>
+          <DisclosureSummary>暂不计算的工作表 {setAside.length} 张</DisclosureSummary>
           <ul>
             {setAside.map((sheet) => (
               <li key={sheet.sheet}>
@@ -518,6 +523,10 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
   const [error, setError] = useState('');
   const locked = busy || Boolean(working);
   const fromTemplate = confirmation.source === 'template';
+  // A presentation page taken into calculation by someone else is the one thing here she must see by name.
+  const adopted = (confirmation.sheets ?? [])
+    .filter((sheet) => sheet.decision === 'table' && sheet.reason === 'adopted_presentation_sheet')
+    .map((sheet) => sheet.sheet);
 
   async function settle(command: 'structure-acknowledge' | 'structure-reject' | 'structure-withdraw') {
     const api = bridge(); if (!api?.financeCall) return;
@@ -542,6 +551,12 @@ export function StructurePendingStrip({ taskId, datasetName, confirmation, busy,
         {fromTemplate ? '这份文件的表结构套用了上次记住的结构，还没有经过你确认。' : '助手代你确认了这份文件的表结构，还没有经过你追认。'}
         表已经可以计算，追认只是把这条记录归到你名下。
       </p>
+      {adopted.length > 0 && (
+        <p role="status" className="analysis-structure-blocked">
+          <AlertTriangle size={14} strokeWidth={1.5} aria-hidden />
+          {adopted.join('、')} 原本是看板或封面页，这次当作数据表计算了；不该算的话请{fromTemplate ? '撤销套用' : '拒绝'}。
+        </p>
+      )}
       {error && <p role="alert" className="analysis-structure-error">{error}</p>}
       {working && <p role="status" className="analysis-note"><WaitLoop />正在保存你的决定…</p>}
       <div className="analysis-structure-actions">

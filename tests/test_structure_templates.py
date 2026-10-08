@@ -472,3 +472,46 @@ def test_detail_tables_name_the_columns_the_scenarios_read() -> None:
     assert names("应收发票") == ["invoice_id", None, "issue_date", "due_date", "amount", "status", None]
     assert names("收款计划") == ["id", "date", "amount", "status"]
     assert names("量价") == ["product", "scenario", "quantity", "price", "amount"]
+
+
+def test_a_shape_remembered_before_the_detail_roles_still_applies_and_keeps_the_new_reading() -> None:
+    """Templates stored before invoice_id, due_date, status... were roles read those columns as
+    unknown or date. The same file next month must still auto-apply, with this month's names."""
+    from foundry.structure_templates import _keep_later_roles, differences, similarity
+
+    def col(letter, header, role):
+        return {"letter": letter, "header": header, "display": header, "role": role}
+
+    sheet = {"sheet": "应收发票", "columns": [col("A", "发票号", "invoice_id"), col("B", "开票日期", "issue_date"),
+                                             col("C", "金额", "amount"), col("D", "状态", "status")]}
+    stored = {"sheet": "应收发票", "columns": [col("A", "发票号", "unknown"), col("B", "开票日期", "date"),
+                                              col("C", "金额", "amount"), col("D", "状态", "unknown")]}
+    template = {"declaration": stored, "sheet_pattern": "应收发票"}
+    assert similarity(sheet, template) == 1.0
+    assert differences(sheet, template) == []
+    kept = _keep_later_roles(stored["columns"], sheet)
+    assert [column["role"] for column in kept] == ["invoice_id", "issue_date", "amount", "status"]
+    # A genuinely different role is still a difference.
+    moved = {**sheet, "columns": [col("A", "发票号", "amount"), *sheet["columns"][1:]]}
+    assert "roles" in differences(moved, template)
+
+
+def test_a_contract_end_date_is_not_a_receivable_due_date() -> None:
+    from foundry.structure_proposal import _role_for
+
+    assert _role_for("到期日") == "due_date"
+    assert _role_for("合同到期日") == "unknown"
+
+
+def test_a_presentation_page_is_adopted_only_against_its_own_template(tmp_path: Path) -> None:
+    from foundry.structure_templates import apply_matching_templates
+
+    store = TaskStore(tmp_path / "var")
+    _task_obj, analysis, service = _task(tmp_path, store=store)
+    august = _add(analysis, tmp_path, fixture.monthly_pack(), "八月")
+    service.structure_propose(august["id"])
+    board = _dashboard(service, august["id"])
+    service.structure_proposal_confirm({"dataset_id": august["id"], "sheets": [{**board, "decision": "table"}]})
+    impostor = {**board, "sheet": "13·行业对标与假设"}
+    prepared, matches = apply_matching_templates(service, [impostor])
+    assert prepared[0]["decision"] == "excluded" and matches == []

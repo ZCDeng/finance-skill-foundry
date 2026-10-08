@@ -63,8 +63,9 @@ ROLE_ALIASES: dict[str, tuple[str, ...]] = {
     "event_id": ("流水号", "id", "activity_id", "event_id"),
 }
 # Aliases that name a column only when they are the whole header. `id` at the end
-# of ledger_id or 单据ID is not a cash event's id, and `kind` ends many words.
-EXACT_ONLY_ALIASES = frozenset({"id", "kind"})
+# of ledger_id or 单据ID is not a cash event's id, and `kind` ends many words; 合同到期日
+# is when a contract ends, not when a receivable falls due.
+EXACT_ONLY_ALIASES = frozenset({"id", "kind", "到期日", "到期日期"})
 # A ledger carries 借方/贷方 once per balance column group, so these roles repeat
 # by design; every other role names one column.
 REPEATABLE_ROLES = frozenset({"debit", "credit"})
@@ -97,6 +98,8 @@ FILL_DOWN_ROLES = ("doc_id", "date", "summary")
 # board and a benchmark page are table-shaped but are not the books; the sheet's
 # own heading is how a manager tells them apart, so it is what we read.
 PRESENTATION_MARKERS = ("封面", "编制说明", "看板", "仪表盘", "对标", "假设", "目录", "填报说明")
+# Of those, the pages that describe the file rather than report on it: never adoptable as a table.
+COVER_MARKERS = ("封面", "编制说明", "目录", "填报说明")
 
 
 def propose_workbook_structure(data: bytes) -> dict[str, Any]:
@@ -117,6 +120,7 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
     if not grid:
         return _excluded(name, "empty_sheet")
     presentation = _is_presentation_sheet(name, grid)
+    cover = presentation and _is_presentation_sheet(name, grid, COVER_MARKERS)
     candidates = _header_candidates(grid)
     if not candidates:
         return _excluded(name, "presentation_sheet" if presentation else "no_header")
@@ -160,7 +164,10 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
         # is often the only place a pack states its headline figures. What was read off
         # it stays on the proposal so the manager can adopt it as a table herself.
         return {**table, "decision": "excluded", "reason": "presentation_sheet",
-                "blocked_reason": "presentation_sheet", "adoptable": table["blocked_reason"] is None}
+                "blocked_reason": "presentation_sheet",
+                # Something to calculate, not just a cover's label-and-text block.
+                "adoptable": not cover and table["blocked_reason"] is None
+                and table["numeric_coverage"].get("numeric_columns_included", 0) > 0}
     return table
 
 
@@ -273,12 +280,14 @@ def _excluded(name: str, reason: str, **read: Any) -> dict[str, Any]:
     }
 
 
-def _is_presentation_sheet(name: str, grid: dict[int, dict[str, Any]]) -> bool:
+def _is_presentation_sheet(
+    name: str, grid: dict[int, dict[str, Any]], markers: tuple[str, ...] = PRESENTATION_MARKERS
+) -> bool:
     heading = ""
     if grid:
         heading = _leading_text(grid[min(grid)])
     for text in (name, heading):
-        if any(marker in normalize_header(text) for marker in PRESENTATION_MARKERS):
+        if any(marker in normalize_header(text) for marker in markers):
             return True
     return False
 
