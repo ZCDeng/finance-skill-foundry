@@ -8,6 +8,7 @@ import { errorText } from './shared.js';
 import { formatPeriod } from '../../lib/period.js';
 import { joinParts } from '../../components/PeriodWords.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { SkeletonCards } from '../../components/Loading.js';
 
 export type CloseTarget = 'scope' | 'datasets' | 'structure' | 'controls' | 'results' | 'drafts';
 type BlockState = 'done' | 'blocked' | 'attention' | 'not_started';
@@ -98,6 +99,7 @@ export function MonthCloseControlCenter({ taskId, refreshKey, busy, onOpen }: {
         <Button variant="outline" type="button" disabled={loading || busy} onClick={() => void load()}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden />重新检查</Button>
       </div>
+      {loading && !status ? <SkeletonCards cards={4} headline={false} /> : null}
       {error ? <p role="alert" className="analysis-message analysis-message--error">{error}</p> : null}
       {status && !['ready_for_review', 'archived'].includes(status.headline.state) && status.blocking.length
         ? <p className="analysis-note">下一步：{status.blocking[0]}</p> : null}

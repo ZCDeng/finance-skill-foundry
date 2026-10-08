@@ -8,6 +8,7 @@ import { errorText, unwrap } from './shared.js';
 import { NativeSelect } from '../../components/ui/native-select.js';
 import { Checkbox } from '../../components/ui/checkbox.js';
 import { DisclosureSummary } from '../../components/Disclosure.js';
+import { Loading, SkeletonRows } from '../../components/Loading.js';
 
 type ChartSeries = { columns: unknown[]; rows: Record<string, unknown>[] };
 type ChartRecord = { id: string; label?: string; run_id?: string; snapshot_hash?: string; series?: ChartSeries; report_series?: ChartSeries };
@@ -110,9 +111,9 @@ export function ReportVisualComposer({ taskId, runs, initial, onApply, onCancel 
           {charts.length > 0 && <optgroup label="已归档图">{charts.map((row, index) => <option key={row.id} value={`chart:${row.id}`}>{row.label || `归档图 ${index + 1}`}</option>)}</optgroup>}
           {successfulRuns.length > 0 && <optgroup label="已完成计算">{successfulRuns.map((run, index) => <option key={run.id} value={`run:${run.id}`}>第 {index + 1} 次计算 · {when(run.created_at)}</option>)}</optgroup>}
         </NativeSelect></label>
-        {loadingList && <p role="status" className="report-visual-composer__wide">正在读取归档图…</p>}
+        {loadingList && <Loading label="正在读取归档图…" className="report-visual-composer__wide"><SkeletonRows rows={1} meta={false} /></Loading>}
         {empty && <p className="report-visual-composer__wide">还没有可用的计算结果。先完成一次计算后可制作数值图，也可以选择流程图解释分析步骤。</p>}
-        {loadingSource && <p role="status" className="report-visual-composer__wide">正在读取结果数据…</p>}
+        {loadingSource && <Loading label="正在读取结果数据…" className="report-visual-composer__wide"><SkeletonRows rows={2} meta={false} /></Loading>}
         {opened && <>
           <label>类别列<NativeSelect aria-label="类别列" value={category} onChange={(event) => { setCategory(event.target.value); setValues((previous) => previous.filter((name) => name !== event.target.value)); }}><option value="">选择类别列</option>{columns.map((name) => <option key={name} value={name}>{name}</option>)}</NativeSelect></label>
           <label>单位<Input aria-label="图表单位" value={unit} maxLength={40} onChange={(event) => setUnit(event.target.value)} placeholder="例如：万元、%、天" /></label>

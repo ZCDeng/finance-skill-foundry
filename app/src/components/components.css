@@ -855,6 +855,73 @@ textarea.fnd-field {
   .fnd-wait-loop path { animation: none; }
 }
 
+/*
+ * Loading placeholders (ui/skeleton.tsx, Loading.tsx): blocks in the strong
+ * surface that breathe while a read is under way. They exist only while it
+ * is; reduced motion holds them still. The words stay for screen readers.
+ */
+.fnd-skeleton {
+  border-radius: var(--fnd-radius-mark);
+  background: var(--fnd-surface-strong);
+  animation: fnd-skeleton 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fnd-skeleton { animation: none; }
+}
+
+.fnd-loading__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.fnd-skeleton-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.fnd-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--fnd-line);
+}
+
+.fnd-skeleton--line {
+  height: 14px;
+}
+
+.fnd-skeleton--meta {
+  height: 10px;
+}
+
+.fnd-skeleton-result {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fnd-skeleton--headline {
+  width: 60%;
+  height: 22px;
+}
+
+.fnd-skeleton-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.fnd-skeleton--card {
+  height: 104px;
+  border-radius: var(--fnd-radius-container);
+}
+
 .fnd-booting .fnd-wait-loop {
   width: 20px;
   height: 20px;
@@ -1320,4 +1387,9 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 @keyframes fnd-fade-bottom {
   from { --fnd-fade-bottom: var(--fnd-fade-size); }
   to { --fnd-fade-bottom: 0px; }
+}
+
+@keyframes fnd-skeleton {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }

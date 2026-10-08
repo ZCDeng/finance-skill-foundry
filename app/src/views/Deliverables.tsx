@@ -19,6 +19,7 @@ import {
 import { draftStateText } from './analysis/presentation.js';
 import { TechnicalInfo } from './analysis/TechnicalInfo.js';
 import { Empty, EmptyDescription } from '../components/ui/empty.js';
+import { Loading, SkeletonRows } from '../components/Loading.js';
 
 const KIND_LABEL: Record<DeliverableRow['kind'], string> = {
   brief: '结论稿',
@@ -273,7 +274,7 @@ export function Deliverables({
             </div>
           </div>
         ) : open.text === null ? (
-          <p className="fnd-muted">正在读取这一版…</p>
+          <Loading label="正在读取这一版…"><SkeletonRows rows={5} meta={false} /></Loading>
         ) : (
           <Reader source={open.text} />
         )}

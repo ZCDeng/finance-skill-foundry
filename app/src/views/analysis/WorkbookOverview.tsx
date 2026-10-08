@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { SearchableSelect } from '../../components/FinancialControls.js';
 import { WorkbookBrowser } from './WorkbookBrowser.js';
+import { Loading, SkeletonRows } from '../../components/Loading.js';
 
 type Sheet = { dataset: DatasetSnapshot; name: string; rows: number; columns: number };
 export function WorkbookOverview({ taskId, datasets }: { taskId: string; datasets: DatasetSnapshot[] }) {
@@ -61,7 +62,8 @@ export function WorkbookOverview({ taskId, datasets }: { taskId: string; dataset
   return <section className="analysis-workbook-overview" aria-label="工作簿总览">
     <h3>工作簿总览 · {workbooks.length} 本 · {sheets.length} 张工作表</h3>
     <p className="analysis-note">原件已归档；可直接查阅单元格。结构确认和分析口径另行保存。</p>
-    {loading && <p role="status">正在读取工作表目录…</p>}
+    {loading && (sheets.length ? <p role="status">正在读取工作表目录…</p>
+      : <Loading label="正在读取工作表目录…"><SkeletonRows rows={5} /></Loading>)}
     {errors.map((error) => <p role="alert" key={error}>{error}</p>)}
     {sheets.length > 0 && <form className="analysis-workbook-overview-jump" onSubmit={jump}>
       <label>快速定位工作表及区域
