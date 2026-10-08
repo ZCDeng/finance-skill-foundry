@@ -70,6 +70,7 @@ export const CHANNELS = {
   taskEmpty: 'foundry:task-empty',
   taskSample: 'foundry:task-sample',
   taskSampleReference: 'foundry:task-sample-reference',
+  taskSampleNext: 'foundry:task-sample-next',
   taskSampleRemove: 'foundry:task-sample-remove',
   harnessStatus: 'harness:status',
   harnessOpen: 'harness:open',

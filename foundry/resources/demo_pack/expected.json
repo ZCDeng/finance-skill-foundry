@@ -1,0 +1,20 @@
+{
+  "pack": "huachen",
+  "version": 1,
+  "note": "What the 跟着做 route tells the reader they should see. The guide prints these figures and the tests compute them, so an engine or pack change that moves one fails a test instead of leaving the guide wrong.",
+  "formula_issues": 9,
+  "controls": {"confirmed": 83, "pass": 79, "breaks": 4},
+  "f01_difference": "11655",
+  "f02_difference": "-2793.28",
+  "ar_rollforward_difference": "1200",
+  "dispositions": {"waived": 2, "pending_external": 2},
+  "break_even_collection": "91.14",
+  "collection_gap": "-3.22",
+  "collection_gap_total": "-8.74",
+  "radar": {"red": 1, "orange": 4, "yellow": 27, "green": 19},
+  "office_price_quantity_gap": "260",
+  "report_operating_cash_flow": "18431.94",
+  "book_operating_cash_flow": "17431.94",
+  "report_operating_cost": "266854.5",
+  "next_month": {"matched": 10, "auto_apply": 9, "differs": "05·合并资产负债表"}
+}

@@ -1376,6 +1376,9 @@ details:has(> .fnd-disclosure-summary) details:has(> .fnd-disclosure-summary)::d
 .fnd-with-help > h3, .fnd-with-help > h4 { margin: 0; }
 .fnd-guide-hub__open { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fnd-guide-hub__start { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fnd-guide-hub__expect { padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); background: var(--fnd-surface); }
+.fnd-guide-hub__expect h4 { margin: 0 0 4px; font-size: var(--fnd-size-small); font-weight: 600; color: var(--fnd-muted); }
+.fnd-guide-hub__expect ul { margin: 0; }
 .fnd-guide-hub__samples { display: flex; flex-wrap: wrap; flex-basis: 100%; align-items: center; gap: 0 4px; margin: 0; color: var(--fnd-muted); font-size: var(--fnd-size-small); }
 .fnd-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; border: 1px solid var(--fnd-line); border-radius: 8px; padding: 10px 12px; }
 .fnd-checklist__step { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: var(--fnd-size-body); }
