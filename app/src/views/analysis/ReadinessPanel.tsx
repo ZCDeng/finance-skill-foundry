@@ -99,9 +99,11 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
 
-  const load = useCallback(async () => {
+  // Only 重新检查 shows the read: the page hands over a new refreshKey on its 5-second re-read, and a button
+  // that greys out and back every few seconds reads as the page shaking.
+  const load = useCallback(async (manual = false) => {
     const api = bridge(); if (!api?.financeCall) return;
-    setWorking(true); setError('');
+    if (manual) { setWorking(true); setError(''); }
     try {
       const answer = await api.financeCall(taskId, 'finance-readiness') as Answer<ReadinessReport> | undefined;
       // A build whose bridge does not know this command answers with nothing;
@@ -109,10 +111,11 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
       if (!answer) return;
       if (!answer.ok) throw new Error(answer.message);
       setReport(answer.value ?? null);
+      setError('');
     } catch (failure) {
       setError(errorText(failure));
     } finally {
-      setWorking(false);
+      if (manual) setWorking(false);
     }
   }, [taskId]);
 
@@ -133,7 +136,7 @@ export function ReadinessPanel({ taskId, refreshKey }: { taskId: string; refresh
     <section className="analysis-readiness">
       <div className="analysis-section-heading">
         <h4><ClipboardList size={15} strokeWidth={1.5} aria-hidden /> 这批资料能算什么</h4>
-        <Button variant="outline" type="button" disabled={working} onClick={() => void load()}>
+        <Button variant="outline" type="button" disabled={working} onClick={() => void load(true)}>
           <RefreshCw size={15} strokeWidth={1.5} aria-hidden />重新检查
         </Button>
       </div>

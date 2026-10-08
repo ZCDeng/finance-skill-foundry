@@ -49,13 +49,25 @@ it('re-reads a scope already on screen in the background, without a loading stat
   const read = deferred(); let reads = 0;
   mount(vi.fn(async (_task, command) => command === 'analysis-requirements-list'
     ? ++reads === 1 ? ok({ current: first }) : read.promise : ok({})));
-  const { result, rerender } = renderHook(({ version }) => useAnalysisScope('task', '问题', [], version), { initialProps: { version: 0 } });
+  const { result, rerender } = renderHook(({ version }) => useAnalysisScope('task', '问题', [], version, version > 0), { initialProps: { version: 0 } });
   await waitFor(() => expect(result.current.current?.id).toBe(first.id));
   rerender({ version: 1 });
   expect(result.current.loading).toBe(false);
   await act(async () => read.resolve(ok({ current: next })));
   expect(result.current.loading).toBe(false);
   expect(result.current.scope.organization).toBe('华南');
+});
+
+it('reads in the open when she asks for the refresh', async () => {
+  const read = deferred(); let reads = 0;
+  mount(vi.fn(async (_task, command) => command === 'analysis-requirements-list'
+    ? ++reads === 1 ? ok({ current: first }) : read.promise : ok({})));
+  const { result, rerender } = renderHook(({ version }) => useAnalysisScope('task', '问题', [], version, false), { initialProps: { version: 0 } });
+  await waitFor(() => expect(result.current.current?.id).toBe(first.id));
+  rerender({ version: 1 });
+  expect(result.current.loading).toBe(true);
+  await act(async () => read.resolve({ ok: false, refused: true, message: '读取失败' }));
+  expect(result.current.error).toBe('读取失败');
 });
 
 it('keeps pending field edits when another editor reads the same saved version', async () => {

@@ -155,7 +155,9 @@ export type AnalysisScope = {
   save(): Promise<ScopeRecord | null>;
 };
 
-export function useAnalysisScope(taskId: string | undefined, question: string, datasets: DatasetSnapshot[], refreshKey: number | string = 0): AnalysisScope {
+export function useAnalysisScope(taskId: string | undefined, question: string, datasets: DatasetSnapshot[], refreshKey: number | string = 0,
+  /** The page's own timed re-read, not something she asked for: a read that changes nothing on screen. */
+  quiet = false): AnalysisScope {
   const [current, setCurrent] = useState<ScopeRecord | null>(null);
   const [scope, setScope] = useState<ScopeValues>(emptyScope);
   const [report, setReport] = useState<ReadinessReport | null>(null);
@@ -174,6 +176,8 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
   const taskRef = useRef<string | undefined>(undefined);
   /** The task whose saved scope has been read once; later reads of it happen in the background. */
   const readTask = useRef<string | undefined>(undefined);
+  const quietRef = useRef(quiet);
+  quietRef.current = quiet;
 
   const writeCurrent = useCallback((record: ScopeRecord | null) => {
     currentRef.current = record;
@@ -225,9 +229,9 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
       setReport(null);
       writeSaving(false);
     }
-    // The page re-reads every few seconds. A re-read of a scope already on screen keeps the fields, the
-    // message and the layout as they are: no 正在读取 line, no disabled fields, unless the record changed.
-    const background = !taskChanged && readTask.current === taskId && !loadingRef.current;
+    // The page re-reads every few seconds. That timed re-read of a scope already on screen keeps the fields,
+    // the message and the layout as they are: no 正在读取 line, no disabled fields. 刷新 still reads in the open.
+    const background = quietRef.current && !taskChanged && readTask.current === taskId && !loadingRef.current;
     if (!background) { setMessage(''); setError(''); }
     if (!api?.financeCall || !taskId) {
       writeLoading(false);
@@ -237,6 +241,8 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
     void api.financeCall(taskId, 'analysis-requirements-list', {}).then((answer) => {
       if (request.current !== seq) return;
       readTask.current = taskId;
+      // A read that went through clears an error left by an earlier read or save, so 保存 can be tried again.
+      if (background) setError('');
       // A build that does not know the record answers with an empty object.
       const payload = (unwrap(answer as Answer<RequirementsList>) ?? {}) as RequirementsList;
       const next = payload.current ?? null;
