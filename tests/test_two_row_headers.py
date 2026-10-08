@@ -105,3 +105,26 @@ def test_a_one_row_header_is_left_as_it_is():
     sheet = _sheet(_book(build))
     assert (sheet["header_row"], sheet["header_band_row"]) == (1, None)
     assert _names(sheet) == ["组织", "业态", "金额"]
+
+
+def test_a_table_above_a_two_row_header_ends_before_the_band():
+    def build(ws):
+        ws.append(["组织", "金额"])
+        ws.append(["城市1", 1])
+        ws.append(["城市2", 2])
+        ws.append(["城市3", 3])
+        ws.append(["城市4", 4])
+        ws.append(["组织", "本月", None, "本年", None])
+        ws.append([None, "实际", "预算", "实际", "预算"])
+        for cells in ("A6:A7", "B6:C6", "D6:E6"):
+            ws.merge_cells(cells)
+        ws.append(["城市1", 1, 2, 3, 4])
+
+    data = _book(build)
+    sheet = _sheet(data)
+    above, below = sheet["table_blocks"]
+    assert (above["start_row"], above["end_row"]) == (1, 5)
+    assert (below["header_row"], below["start_row"]) == (7, 6)
+    assert [column["display"] for column in below["columns"]] == ["组织", "本月实际", "本月预算", "本年实际", "本年预算"]
+    first = {**sheet, **above, "header_row": above["header_row"]}
+    assert len(derive_table(data, first)["rows"]) == 4

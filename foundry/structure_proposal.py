@@ -127,7 +127,7 @@ def _propose_sheet(sheet, name: str) -> dict[str, Any]:
     candidates = _header_candidates(grid)
     if not candidates:
         return _excluded(name, "presentation_sheet" if presentation else "no_header")
-    blocks = _table_blocks(grid, candidates)
+    blocks = _table_blocks(grid, candidates, bands)
     if not blocks:
         return _excluded(name, "presentation_sheet" if presentation else "no_header")
     selected = max(blocks, key=lambda block: (block["score"], -block["header_row"]))
@@ -528,8 +528,16 @@ def _numeric_coverage(
     }
 
 
-def _table_blocks(grid: dict[int, dict[str, Any]], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Explicit block rectangles derived from adjacent candidate headers."""
+def _table_blocks(
+    grid: dict[int, dict[str, Any]], candidates: list[dict[str, Any]], bands: set[int] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Explicit block rectangles derived from adjacent candidate headers.
+
+    A block under a two-row header starts at its band row, so the table above ends before the band:
+    the snapshot reads the workbook itself, where the band row is still there to be taken as data."""
+    def start(header_row: int) -> int:
+        return header_row - 1 if header_row - 1 in bands else header_row
+
     blocks: list[dict[str, Any]] = []
     ordered = sorted(candidates, key=lambda item: item["header_row"])
     max_row = max(grid)
@@ -538,11 +546,11 @@ def _table_blocks(grid: dict[int, dict[str, Any]], candidates: list[dict[str, An
         if not labels:
             continue
         next_header = ordered[index + 1]["header_row"] if index + 1 < len(ordered) else None
-        end_row = (next_header - 1) if next_header is not None else max_row
+        end_row = (start(next_header) - 1) if next_header is not None else max_row
         block = {
             "id": f"block_{len(blocks) + 1}",
             "header_row": candidate["header_row"],
-            "start_row": candidate["header_row"],
+            "start_row": start(candidate["header_row"]),
             "end_row": end_row,
             "start_column": labels[0],
             "end_column": labels[-1],
