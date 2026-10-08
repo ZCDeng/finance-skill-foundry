@@ -126,7 +126,7 @@ export function TieOutForm({ call, locked, refreshKey, onBusy, onSaved, onCancel
 function PlaceFields({ title, place, sources, onChange }: { title: string; place: Place; sources: ControlSource[]; onChange(next: Place): void }) {
   const sheets = sources.find((row) => row.dataset_id === place.dataset_id)?.sheets ?? [];
   return <div className="analysis-tieout-place" role="group" aria-label={title}>
-    <h5>{title}</h5>
+    <h4>{title}</h4>
     <label>工作簿
       <NativeSelect aria-label={`${title}工作簿`} value={place.dataset_id} onChange={(event) => onChange({ ...place, dataset_id: event.target.value, sheet: '' })}>
         <option value="">选择工作簿</option>

@@ -540,15 +540,13 @@ export function RequirementsPanel({ taskId, contextId, draftRequirementsId, anal
 
   if (!taskId) {
     return <section className="analysis-definition" aria-label="本次分析要求">
-      <div className="analysis-section-heading"><div><h3>本次分析要求</h3><p className="analysis-note">先选择一个任务，再登记问题、范围和必答指标。</p></div></div>
+      <p className="analysis-note">先选择一个任务，再登记问题、范围和必答指标。</p>
     </section>;
   }
 
   return <section className="analysis-definition" aria-label="本次分析要求">
-    <div className="analysis-section-heading">
-      <div><h3>本次分析要求</h3><p className="analysis-note">登记用户问题、财务范围和必答指标；保存只生成新版本。</p></div>
-      <span className="analysis-note">{current ? `当前版本 ${shortId(current.id)}` : records.length ? `${records.length} 个历史版本` : '尚未保存'}</span>
-    </div>
+    {/* The fold it opens from carries the title; this line says what it is and where it stands. */}
+    <p className="analysis-note">登记用户问题、财务范围和必答指标；保存只生成新版本。{current ? `当前版本 ${shortId(current.id)}。` : records.length ? `${records.length} 个历史版本。` : '尚未保存。'}</p>
     {loading ? <p role="status" className="analysis-note">正在读取本次分析要求…</p> : null}
     {scopeChangedForDraft ? <p role="status" className="analysis-message"><AlertCircle size={14} aria-hidden />范围已变：当前要求 {shortId(current?.id)}，这份旧稿绑定的是 {shortId(draftRequirementsId)}。</p> : null}
     {!api?.financeCall ? <p role="alert" className="analysis-message analysis-message--error">当前窗口没有可用的财务分析接口。</p> : null}

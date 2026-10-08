@@ -391,7 +391,7 @@ export function DraftEditor({ taskId, draft, drafts, busy, runs, datasets, analy
       evidence={{ affected_claims: affectedClaims, unresolved_issues: quality?.issues ?? [] }} />}
     {/* Everything that decides whether this version can go out, after the text it checks. */}
     <section className="analysis-prepublish" aria-label="发布前检查">
-    <div className="analysis-section-heading"><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
+    <div><h3>发布前检查</h3><p className="analysis-note">质量检查、重要性阈值、引用的计算和经理判断背景。</p></div>
     {(draft || recovery) && <ExplanationQualityPanel taskId={taskId} quality={quality} state={qualityState} facts={facts} citedFactIds={citedFactIds} factDetails={factDetails} locatorNotice={locatorNotice} locatorPdf={locatorPdf} busy={busy} onRecheck={() => void recheck()} onOpenFact={(fact) => void openFact(fact)} onOpenLocator={(fact) => void openLocator(fact)}
       body={body} onLocateParagraph={locateParagraph} paragraphLocateNotice={paragraphLocateNotice} />}
     {draft && importedSources(draft).length > 0 && <section className="analysis-report-review-draft" aria-label="复核外部报告数字">
