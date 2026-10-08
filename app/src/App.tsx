@@ -581,11 +581,11 @@ export function App() {
   }, [api, closePreview, leaveTask, refreshGallery, refreshTasks]);
 
   /** Delete one trashed task, or empty 已归档 or 回收站; answers how many tasks went. */
-  const removeTasks = useCallback(async (target: { purge: string } | { empty: 'archived' | 'trashed' }) => {
+  const removeTasks = useCallback(async (target: { purge: string } | { empty: 'archived' | 'trashed'; ids: string[] }) => {
     if (!api) throw new Error('任务服务暂未连接，请重新打开应用。');
     const result = 'purge' in target
       ? await (api.taskPurge ?? missingRemoval)(target.purge)
-      : await (api.taskEmpty ?? missingRemoval)(target.empty);
+      : await (api.taskEmpty ?? missingRemoval)(target.empty, target.ids);
     if (!result.ok) {
       // An empty can stop part way (数据台 still open on one task): show what is left.
       refreshTasks(taskLifecycleViewRef.current);
@@ -917,7 +917,7 @@ export function App() {
           onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
           onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
           onPurge={api.taskPurge ? async (id) => { await removeTasks({ purge: id }); } : undefined}
-          onEmpty={api.taskEmpty ? (lifecycle) => removeTasks({ empty: lifecycle }) : undefined}
+          onEmpty={api.taskEmpty ? (lifecycle, ids) => removeTasks({ empty: lifecycle, ids }) : undefined}
           onLayout={onWorkspaceLayout}
           conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}

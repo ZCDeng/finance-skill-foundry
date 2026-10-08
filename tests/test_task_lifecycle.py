@@ -141,3 +141,72 @@ def test_empty_archived_moves_to_trash_and_empty_trash_deletes(tmp_path: Path, c
 
     assert main(["--var", str(var), "task-empty", "--lifecycle", "trashed"]) == 0
     assert json.loads(capsys.readouterr().out) == {"task_ids": [], "lifecycle_status": "purged"}
+
+
+def test_empty_touches_only_the_confirmed_tasks(tmp_path: Path, capsys) -> None:
+    var = tmp_path / "var"
+    store = TaskStore(var)
+    seen = store.create(title="确认过")
+    late = store.create(title="确认后才进回收站")
+    seen.set_lifecycle_status("trashed")
+    late.set_lifecycle_status("trashed")
+    capsys.readouterr()
+
+    assert main(["--var", str(var), "task-empty", "--lifecycle", "trashed", "--only", seen.id]) == 0
+    assert json.loads(capsys.readouterr().out)["task_ids"] == [seen.id]
+    assert [task.id for task in store.list("trashed")] == [late.id]
+
+
+def test_purge_waits_for_a_running_analysis_job(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    from foundry.analysis_jobs import JobStore
+
+    var = tmp_path / "var"
+    store = TaskStore(var)
+    task = store.create(title="还在算")
+    task.set_lifecycle_status("trashed")
+    jobs = JobStore(task)
+    jobs.root.mkdir(parents=True)
+    job_id = "c" * 32
+    (jobs.root / f"{job_id}.json").write_text("{}", encoding="utf-8")
+    running = {"id": job_id, "status": "running"}
+    monkeypatch.setattr(JobStore, "refresh", lambda self, job, **_: running)
+
+    assert main(["--var", str(var), "--task", task.id, "task-purge"]) != 0
+    assert task.meta_path.exists()
+
+    running["status"] = "completed"
+    assert main(["--var", str(var), "--task", task.id, "task-purge"]) == 0
+    assert not task.root.exists()
+    assert os.listdir(store.tasks_dir) == []
+
+
+def test_a_purge_that_cannot_finish_says_so_and_the_next_one_sweeps_it(tmp_path: Path, monkeypatch) -> None:
+    import shutil
+
+    import pytest
+
+    from foundry.errors import FoundryError
+
+    store = TaskStore(tmp_path / "var")
+    first = store.create(title="删一半")
+    second = store.create(title="下一次")
+    first.set_lifecycle_status("trashed")
+    second.set_lifecycle_status("trashed")
+    real = shutil.rmtree
+
+    def refuse(path, *args, **kwargs):
+        if not kwargs.get("ignore_errors"):
+            raise PermissionError(path)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", refuse)
+    with pytest.raises(FoundryError):
+        store.purge(first.id)
+    assert [path.name.startswith(".purging-") for path in store.tasks_dir.iterdir()].count(True) == 1
+    assert [task.id for task in store.list("all")] == [second.id]
+
+    monkeypatch.setattr(shutil, "rmtree", real)
+    store.purge(second.id)
+    assert list(store.tasks_dir.iterdir()) == []

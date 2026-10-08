@@ -53,7 +53,7 @@ const api = {
   taskTrash: (task: string) => ipcRenderer.invoke('foundry:task-trash', task),
   taskRestore: (task: string) => ipcRenderer.invoke('foundry:task-restore', task),
   taskPurge: (task: string) => ipcRenderer.invoke('foundry:task-purge', task),
-  taskEmpty: (lifecycle: string) => ipcRenderer.invoke('foundry:task-empty', lifecycle),
+  taskEmpty: (lifecycle: string, ids: string[]) => ipcRenderer.invoke('foundry:task-empty', lifecycle, ids),
   taskSample: () => ipcRenderer.invoke('foundry:task-sample'),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),

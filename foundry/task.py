@@ -155,17 +155,27 @@ class TaskStore:
         for the caller to remove.
         """
         task = self.get(task_id)
+        self.sweep_purged()
         with exclusive(task.lock_path, timeout=TASK_LOCK_TIMEOUT):
             if task.lifecycle_status() != "trashed":
                 raise FoundryError(f"only a task in the trash can be deleted for good: {task.id}")
             windows = [str(row.get("window_id") or "") for row in task.windows()]
             tombstone = self.tasks_dir / f".purging-{task.id}-{uuid.uuid4().hex}"
             task.root.replace(tombstone)
-        shutil.rmtree(tombstone, ignore_errors=True)
+        try:
+            shutil.rmtree(tombstone)
+        except OSError as exc:
+            raise FoundryError("任务已经移出列表，但有文件没删掉；再清空一次回收站会接着删。") from exc
         current = self.current_path.read_text(encoding="utf-8").strip() if self.current_path.exists() else ""
         if current == task.id:
             self.clear_current()
         return [window for window in windows if window]
+
+    def sweep_purged(self) -> None:
+        """Finish deletions an earlier purge renamed out of the list but could not remove."""
+        for path in self.tasks_dir.iterdir():
+            if path.name.startswith(".purging-"):
+                shutil.rmtree(path, ignore_errors=True)
 
     def current(self) -> Task | None:
         if not self.current_path.exists():

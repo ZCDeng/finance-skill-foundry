@@ -89,7 +89,11 @@ export async function purgeTask(binding: Binding, env?: FoundryEnv): Promise<Tas
 export async function emptyTasks(
   binding: Omit<Binding, 'task' | 'session'>,
   lifecycle: 'archived' | 'trashed',
+  ids: string[],
   env?: FoundryEnv,
 ): Promise<TasksEmptied> {
-  return JSON.parse(await runFoundry(binding, WRITES.taskEmpty, ['--lifecycle', lifecycle], env)) as TasksEmptied;
+  // Only the tasks the operator saw in the confirmation: one that reached the list afterwards stays.
+  if (!ids.length) return { task_ids: [], lifecycle_status: lifecycle === 'archived' ? 'trashed' : 'purged' };
+  const only = ids.flatMap((id) => ['--only', id]);
+  return JSON.parse(await runFoundry(binding, WRITES.taskEmpty, ['--lifecycle', lifecycle, ...only], env)) as TasksEmptied;
 }

@@ -565,9 +565,11 @@ describe('embedded workspace IPC', () => {
     registerIpc({varRoot:'/store'});
     expect(await invoke(CHANNELS.taskPurge, task)).toEqual({ok:true,value:{task_ids:[task],lifecycle_status:'purged'}});
     expect(mocks.run).toHaveBeenLastCalledWith({varRoot:'/store',task,actor:'manager'},'task-purge',[],undefined);
-    expect(await invoke(CHANNELS.taskEmpty, 'trashed')).toEqual({ok:true,value:{task_ids:[task],lifecycle_status:'purged'}});
-    expect(mocks.run).toHaveBeenLastCalledWith({varRoot:'/store',actor:'manager'},'task-empty',['--lifecycle','trashed'],undefined);
-    expect((await invoke(CHANNELS.taskEmpty, 'active')).ok).toBe(false);
+    expect(await invoke(CHANNELS.taskEmpty, 'trashed', [task])).toEqual({ok:true,value:{task_ids:[task],lifecycle_status:'purged'}});
+    expect(mocks.run).toHaveBeenLastCalledWith({varRoot:'/store',actor:'manager'},'task-empty',['--lifecycle','trashed','--only',task],undefined);
+    expect((await invoke(CHANNELS.taskEmpty, 'active', [task])).ok).toBe(false);
+    expect((await invoke(CHANNELS.taskEmpty, 'trashed', ['../bad'])).ok).toBe(false);
+    expect(await invoke(CHANNELS.taskEmpty, 'trashed', [])).toEqual({ok:true,value:{task_ids:[],lifecycle_status:'purged'}});
     expect((await invoke(CHANNELS.taskPurge, '../bad')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledTimes(2);
   });

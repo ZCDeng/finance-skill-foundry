@@ -108,7 +108,7 @@ describe('unified application session lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空回收站' }));
     fireEvent.click(await screen.findByRole('button', { name: '永久删除 2 个任务' }));
     await screen.findByText('已永久删除 2 个任务');
-    expect(api.taskEmpty).toHaveBeenCalledWith('trashed');
+    expect(api.taskEmpty).toHaveBeenCalledWith('trashed', [a.id, b.id]);
     await screen.findByText('回收站是空的');
     expect(screen.queryByRole('button', { name: '清空回收站' })).toBeNull();
   });

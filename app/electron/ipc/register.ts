@@ -280,9 +280,10 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.taskPurge, (_event, task: unknown) => answer(async () =>
     dropWorkspaces(await purgeTask({ ...binding, task: taskId(task) })),
   ));
-  ipcMain.handle(CHANNELS.taskEmpty, (_event, lifecycle: unknown) => answer(async () => {
+  ipcMain.handle(CHANNELS.taskEmpty, (_event, lifecycle: unknown, ids: unknown) => answer(async () => {
     if (lifecycle !== 'archived' && lifecycle !== 'trashed') throw new FoundryFailure('lifecycle must be archived or trashed', null);
-    return dropWorkspaces(await emptyTasks(binding, lifecycle));
+    if (!Array.isArray(ids) || ids.length > 5000) throw new FoundryFailure('ids must be a list of task ids', null);
+    return dropWorkspaces(await emptyTasks(binding, lifecycle, ids.map(taskId)));
   }));
 
   // Every analysis operation goes through the same domain CLI as legacy work.

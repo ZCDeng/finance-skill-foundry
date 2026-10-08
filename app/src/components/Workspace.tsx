@@ -44,7 +44,7 @@ interface Props {
   /** Delete one task in the trash for good. */
   onPurge?(id: string): Promise<void>;
   /** 已归档: every one to the trash. 回收站: every one deleted for good. Answers how many went. */
-  onEmpty?(lifecycle: 'archived' | 'trashed'): Promise<number>;
+  onEmpty?(lifecycle: 'archived' | 'trashed', ids: string[]): Promise<number>;
   onLayout(rect: WorkspaceRect | null): void;
   conversation: ReactNode;
   /** The guide is open in the conversation column: show the column even with no task or with results in focus. */
@@ -54,7 +54,7 @@ interface Props {
 type Focus = 'split' | 'conversation' | 'results';
 /** What the list says after a task leaves it, with the way back when there is one. */
 interface Notice { text: string; undo?: { id: string; to: 'active' | 'archived' } }
-type Confirm = { kind: 'purge'; id: string; title: string } | { kind: 'empty'; lifecycle: 'archived' | 'trashed'; count: number };
+type Confirm = { kind: 'purge'; id: string; title: string } | { kind: 'empty'; lifecycle: 'archived' | 'trashed'; count: number; ids: string[] };
 const mediaMatches = (query: string) => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
 
 /** The native conversation gets a measured slot, independent of sidebar or zoom assumptions. */
@@ -214,7 +214,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
         await onPurge?.(confirm.id);
         backToList(`已永久删除「${confirm.title}」`);
       } else {
-        const count = await onEmpty?.(confirm.lifecycle) ?? 0;
+        const count = await onEmpty?.(confirm.lifecycle, confirm.ids) ?? 0;
         backToList(confirm.lifecycle === 'archived' ? `已把 ${count} 个归档任务移入回收站` : `已永久删除 ${count} 个任务`);
       }
       setConfirm(null);
@@ -259,7 +259,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
         <label className="workspace-search"><Search size={15} aria-hidden /><Input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
         {emptyable && onEmpty && tasks.length ? <Button className="workspace-empty-list" size="sm" variant={emptyable === 'trashed' ? 'destructive' : 'ghost'}
-          onClick={() => { setConfirmError(''); setConfirm({ kind: 'empty', lifecycle: emptyable, count: tasks.length }); }}>
+          onClick={() => { setConfirmError(''); setConfirm({ kind: 'empty', lifecycle: emptyable, count: tasks.length, ids: tasks.map((row) => row.id) }); }}>
           {emptyable === 'archived' ? <><Trash2 size={14} aria-hidden />全部移入回收站</> : <><XCircle size={14} aria-hidden />清空回收站</>}
         </Button> : null}
         <div className="workspace-tasklist">

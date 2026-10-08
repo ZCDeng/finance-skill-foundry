@@ -255,6 +255,30 @@ def _refuse_open_formulator(windows: list[Window]) -> None:
             raise FoundryError("数据台还开着这项任务的数据，请先关闭数据台再永久删除。")
 
 
+def _refuse_running_jobs(task: Task) -> None:
+    """A detached analysis worker writes through the task root until it settles; deleting under it would orphan its output."""
+    from foundry.analysis_jobs import TERMINAL, JobStore
+    from foundry.task import TASK_ID_RE
+
+    jobs = JobStore(task)
+    for path in jobs.root.glob("*.json") if jobs.root.is_dir() else ():
+        if not TASK_ID_RE.fullmatch(path.stem):
+            continue
+        try:
+            record = jobs.refresh(path.stem)
+        except FoundryError:
+            continue  # an unreadable record names no live worker
+        if record["status"] not in TERMINAL:
+            raise FoundryError("这项任务还有计算在运行，请等计算结束或取消后再永久删除。")
+
+
+def _refuse_purge(var: Path, task: Task) -> list[Window]:
+    owned = _owned_windows(var, task)
+    _refuse_open_formulator(owned)
+    _refuse_running_jobs(task)
+    return owned
+
+
 def _purge_task(var: Path, task_id: str) -> None:
     """Delete a trashed task and the windows that point back at it.
 
@@ -263,16 +287,18 @@ def _purge_task(var: Path, task_id: str) -> None:
     """
     store = TaskStore(var)
     task = store.get(task_id)
-    owned = _owned_windows(var, task)
-    _refuse_open_formulator(owned)
+    owned = _refuse_purge(var, task)
     store.purge(task.id)
     windows = WindowStore(var)
+    for leftover in windows.windows_dir.iterdir():
+        if leftover.name.startswith(".purging-"):
+            shutil.rmtree(leftover, ignore_errors=True)
     current = windows.current_path.read_text().strip() if windows.current_path.exists() else ""
     for window in owned:
         purge_formulator_home(window)
         tombstone = windows.windows_dir / f".purging-{window.id}-{os.urandom(8).hex()}"
         window.root.replace(tombstone)
-        shutil.rmtree(tombstone, ignore_errors=True)
+        shutil.rmtree(tombstone, ignore_errors=True)  # swept with the task tombstones on the next purge
         if current == window.id:
             windows.current_path.unlink(missing_ok=True)
 
@@ -391,6 +417,10 @@ def main(argv: list[str] | None = None) -> int:
         p_lifecycle.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
     p_task_empty = sub.add_parser("task-empty", help="archived: move every one to the trash; trashed: delete every one for good")
     p_task_empty.add_argument("--lifecycle", choices=("archived", "trashed"), required=True)
+    p_task_empty.add_argument(
+        "--only", action="append", default=None,
+        help="task id the operator confirmed; repeat. Tasks that entered the list after the confirmation are left alone",
+    )
     sub.add_parser("deliverables")
 
     p_text = sub.add_parser("deliverable-text")
@@ -468,19 +498,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "task-empty":
             store = TaskStore(Path(args.var))
-            emptied = []
+            chosen = store.list(args.lifecycle)
+            if args.only is not None:
+                confirmed = set(args.only)
+                chosen = [task for task in chosen if task.id in confirmed]
             if args.lifecycle == "trashed":
                 # Every refusal before the first deletion: emptying the trash goes whole or not at all.
-                for task in store.list("trashed"):
-                    _refuse_open_formulator(_owned_windows(Path(args.var), task))
-            for task in store.list(args.lifecycle):
+                for task in chosen:
+                    _refuse_purge(Path(args.var), task)
+            for task in chosen:
                 if args.lifecycle == "archived":
                     task.set_lifecycle_status("trashed")
                 else:
                     _purge_task(Path(args.var), task.id)
-                emptied.append(task.id)
             status = "trashed" if args.lifecycle == "archived" else "purged"
-            print(json.dumps({"task_ids": emptied, "lifecycle_status": status}, ensure_ascii=False))
+            print(json.dumps({"task_ids": [task.id for task in chosen], "lifecycle_status": status}, ensure_ascii=False))
             return 0
         if finance_mcp.dispatch(args) or analysis_jobs.dispatch(args) or analysis_cli.dispatch(args) or finance_cli.dispatch(args) or excel_bridge.dispatch(args):
             return 0
