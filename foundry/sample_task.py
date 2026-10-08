@@ -7,7 +7,8 @@ Its differences are planted on purpose: every analysis the app offers has someth
 ``create_sample_task`` makes (or reuses) the practice task for August: the files are filed as
 datasets and read exactly as a real import is, so the structure, the controls and everything after
 are still the manager's to confirm. ``create_next_month_sample`` makes the September task the guide
-uses to show a remembered structure applying itself. Nothing here reads or writes any other task, and
+uses to show a remembered structure applying itself. ``create_reference_task`` makes the 参考结果
+task: the same August files taken through every step by the example, to compare against. Nothing here reads or writes any other task, and
 a practice task's confirmed structures go to its own template shelf (see structure_templates).
 
 Each practice task carries a marker (sample_marker) naming the pack, its version and its kind. The
@@ -30,10 +31,10 @@ from foundry.task import TaskStore
 
 KINDS = {
     "practice": "示例 · 华宸物业 8 月月结（跟着做）",
+    "reference": "示例 · 华宸物业 8 月月结（参考结果）",
     "next_month": "示例 · 华宸物业 9 月月结（跟着做）",
 }
-PERIODS = {"practice": "2026-08", "next_month": "2026-09"}
-LOCK_NAME = "sample-task.lock"
+PERIODS = {"practice": "2026-08", "reference": "2026-08", "next_month": "2026-09"}
 
 
 def pack_dir() -> Path:
@@ -54,29 +55,42 @@ def create_sample_task(var: Path) -> dict:
     return _create(Path(var), "practice")
 
 
+def create_reference_task(var: Path, *, rebuild: bool = False) -> dict:
+    """The August task taken through the whole route by the example (sample_reference), computed by
+    this installation. ``rebuild`` moves the current one to the trash and makes it again: the
+    reference is the example's, so whatever was changed in it can always be put back."""
+    return _create(Path(var), "reference", rebuild=rebuild)
+
+
 def create_next_month_sample(var: Path) -> dict:
     """The September practice task, for the guide's 下个月 step."""
     return _create(Path(var), "next_month")
 
 
-def _create(var: Path, kind: str) -> dict:
+def _create(var: Path, kind: str, *, rebuild: bool = False) -> dict:
     manifest = pack_manifest()
-    files = manifest["practice"] if kind == "practice" else manifest["next_month"]
+    files = manifest["next_month"] if kind == "next_month" else manifest["practice"]
     tasks = TaskStore(var)
     var.mkdir(parents=True, exist_ok=True)
-    with exclusive(var / LOCK_NAME):
+    # One lock per kind: the reference takes most of a minute to build and must not hold up the others.
+    with exclusive(var / f"sample-task-{kind}.lock"):
         for task in tasks.list("active"):
             marker = read_marker(task) or {}
             if marker.get("kind") == kind and marker.get("version") == manifest["version"]:
-                if marker.get("ready"):
+                if marker.get("ready") and not rebuild:
                     return {"id": task.id, "created": False}
-                # Left half-made by an earlier attempt: it is not reused, and it is not left looking usable.
+                # Left half-made by an earlier attempt, or being rebuilt: it is not reused, and it is not
+                # left looking usable.
                 task.set_lifecycle_status("trashed")
         task = tasks.create(title=KINDS[kind], period=PERIODS[kind])
         marker = {"sample": True, "pack": manifest["pack"], "version": manifest["version"], "kind": kind, "ready": False}
         _write_marker(task, marker)
         try:
             _file_pack(task, files)
+            if kind == "reference":
+                from foundry.sample_reference import build_reference
+
+                build_reference(task)
         except Exception:
             task.set_lifecycle_status("trashed")
             raise

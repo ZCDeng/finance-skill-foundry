@@ -305,11 +305,12 @@ def _purge_task(var: Path, task_id: str) -> None:
 
 
 def _sample_kind(task) -> str | None:
-    """A practice task's kind (practice, next_month, or legacy for the 6 月 one), None for a real task."""
+    """A practice task's kind (practice, reference, next_month, or legacy for the 6 月 one), None for a real task."""
     from foundry.sample_marker import read_marker
 
     marker = read_marker(task)
     return None if marker is None else str(marker.get("kind") or "legacy")
+
 
 def main(argv: list[str] | None = None) -> int:
     supplied = sys.argv[1:] if argv is None else argv
@@ -414,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("task-sample", help="create or reuse the 华宸物业 August practice task")
     sub.add_parser("task-sample-next", help="create or reuse the 华宸物业 September practice task")
+    p_sample_reference = sub.add_parser("task-sample-reference", help="create or reuse the 华宸物业 August reference task")
+    p_sample_reference.add_argument("--rebuild", action="store_true", help="move the current reference task to the trash and build it again")
     sub.add_parser("task-sample-status", help="list the practice tasks and whether a newer example pack is installed")
     sub.add_parser("task-sample-remove", help="move every practice task into the trash")
     p_sample_export = sub.add_parser("task-sample-export", help="copy the example files into a new or empty folder")
@@ -539,12 +542,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(task.id)
             return 0
-        if args.cmd in {"task-sample", "task-sample-next", "task-sample-status", "task-sample-remove", "task-sample-export"}:
+        if args.cmd in {"task-sample", "task-sample-next", "task-sample-reference", "task-sample-status", "task-sample-remove", "task-sample-export"}:
             from foundry import sample_task
 
             run = {
                 "task-sample": lambda: sample_task.create_sample_task(Path(args.var)),
                 "task-sample-next": lambda: sample_task.create_next_month_sample(Path(args.var)),
+                "task-sample-reference": lambda: sample_task.create_reference_task(Path(args.var), rebuild=args.rebuild),
                 "task-sample-status": lambda: sample_task.sample_status(Path(args.var)),
                 "task-sample-remove": lambda: sample_task.remove_samples(Path(args.var)),
                 "task-sample-export": lambda: sample_task.export_pack(Path(args.dest)),
