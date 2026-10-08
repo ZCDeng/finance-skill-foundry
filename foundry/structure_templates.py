@@ -313,7 +313,17 @@ def differences(sheet: dict[str, Any], template: dict[str, Any]) -> list[str]:
     return found
 
 
+def _learns(store) -> bool:
+    """The reference task neither learns nor applies a shape: each of its structures is the example's
+    own confirmation, and none of them may pre-fill the practice August the manager confirms by hand."""
+    from foundry.sample_marker import is_reference
+
+    return not is_reference(store.task)
+
+
 def live_templates(store) -> list[dict[str, Any]]:
+    if not _learns(store):
+        return []
     return [
         row
         for row in registry_for(store).list()
@@ -381,6 +391,8 @@ def apply_matching_templates(
 
 def remember_declaration(store, sheets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep what the manager settled, one record per shape rather than per month."""
+    if not _learns(store):
+        return []
     shelf = registry_for(store)
     kept: list[dict[str, Any]] = []
     for sheet in sheets:
@@ -420,6 +432,8 @@ def shape_of(sheet: dict[str, Any]) -> dict[str, Any]:
 
 def demote_declaration(store, sheets: list[dict[str, Any]]) -> None:
     """A withdrawn structure is evidence against the shape it came from."""
+    if not _learns(store):
+        return
     shelf = registry_for(store)
     for sheet in sheets:
         signature = signature_for(sheet)

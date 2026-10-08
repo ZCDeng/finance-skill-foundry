@@ -45,3 +45,7 @@ def uses_sample_shelf(task) -> bool:
     if marker is None:
         return False
     return not ("dataset" in marker and "pack" not in marker)
+
+
+def is_reference(task) -> bool:
+    return (read_marker(task) or {}).get("kind") == "reference"
