@@ -185,3 +185,26 @@ def test_the_cli_adds_confirms_and_runs(pack, tmp_path, capsys):
 def test_names_billing_systems_use_are_proposed():
     assert propose_mapping("receipt", ["实收单号", "缴费日期", "账单号", "实收金额"]) == {
         "receipt_id": "实收单号", "date": "缴费日期", "bill_id": "账单号", "amount": "实收金额"}
+
+
+def test_an_overpaid_bill_and_a_property_listed_twice_inflate_nothing(tmp_path):
+    task = TaskStore(tmp_path / "var").create(title="收费明细")
+    manager = BillingDetailStore(task, actor="manager")
+    receivable = _write(tmp_path / "应收.csv", [RECEIVABLE_HEADER, "B1,P1,住宅物业服务费,2026-08,100,0,100,正常",
+                                                "B2,P2,住宅物业服务费,2026-08,100,0,100,正常"], "utf-8")
+    # B1 paid twice over (a receipt exported twice); B2 not paid at all.
+    receipts = _write(tmp_path / "实收.csv", [RECEIPT_HEADER, "R1,2026-08-10,B1,100,微信,当期", "R2,2026-08-10,B1,100,微信,当期"], "utf-8")
+    properties = _write(tmp_path / "房产.csv", ["房产编号,房产类型,产权归属", "P1,洋房,业主", "P2,洋房,业主", "P1,洋房,业主"], "utf-8")
+    ids = {"receivable": manager.add("receivable", [receivable], name="应收")["id"],
+           "receipt": manager.add("receipt", [receipts], name="实收")["id"],
+           "property": manager.add("property", [properties], name="房产")["id"]}
+    for detail in ids.values():
+        manager.confirm(detail)
+    result = manager.collection_run({**ids, "as_of": "2026-08-31"})["result"]
+    figures = result["figures"]
+    assert (figures["receivable"], figures["collected"]) == ("200.00", "100.00")
+    assert figures["collection_rate_total"] == "0.5000"
+    # What B1 was paid beyond what it owed is a credit, not a collection of B2.
+    assert figures["advance_balance"] == "100.00"
+    repeated = next(issue for issue in result["quality"] if issue["code"] == "repeated_properties")
+    assert repeated["lines"] == ["房产.csv 第 4 行"]

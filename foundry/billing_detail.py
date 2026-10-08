@@ -483,10 +483,16 @@ def _prepare(connection, metas: dict, params: dict) -> None:
         col = lambda field: _column(pm, field, "h")  # noqa: E731
         owners = ", ".join("'" + owner.replace("'", "''") + "'" for owner in params["related_owners"])
         connection.execute(f"""
-            CREATE TEMP TABLE properties AS SELECT {_text(col('property_id'))} AS property_id,
+            CREATE TEMP TABLE property_lines AS SELECT h._file AS file, h._line AS line, {_text(col('property_id'))} AS property_id,
                 {_text(col('city'))} AS city, {_text(col('nature'))} AS nature, {_text(col('type'))} AS type,
                 {_text(col('owner'))} AS owner, coalesce({_text(col('owner'))} IN ({owners}), false) AS related
             FROM property.raw AS h""")
+        # A property listed twice would count its bills twice: the first line stands, the rest are reported.
+        connection.execute("""
+            CREATE TEMP TABLE property_rows AS SELECT *, row_number() OVER (PARTITION BY property_id ORDER BY file, line) > 1 AS repeated
+            FROM property_lines WHERE property_id IS NOT NULL""")
+        connection.execute("CREATE TEMP TABLE properties AS SELECT property_id, city, nature, type, owner, related "
+                           "FROM property_rows WHERE NOT repeated")
     else:
         connection.execute("CREATE TEMP TABLE properties AS SELECT NULL::VARCHAR AS property_id, NULL::VARCHAR AS city, "
                            "NULL::VARCHAR AS nature, NULL::VARCHAR AS type, NULL::VARCHAR AS owner, false AS related WHERE false")
@@ -499,54 +505,83 @@ def _prepare(connection, metas: dict, params: dict) -> None:
                  ELSE 'current' END AS place
         FROM receipts AS x LEFT JOIN bills AS b USING (bill_id)
         WHERE x.date IS NOT NULL AND x.amount IS NOT NULL AND x.date <= getvariable('as_of')""")
+    # One row per bill: what it owes, what was paid on it before the year began and within it, and where its
+    # 账期 falls. A bill is never collected beyond what it owes; anything over is a credit carried forward.
+    connection.execute("""
+        CREATE TEMP TABLE ledger AS SELECT b.*, h.city, h.nature, h.type, h.owner, coalesce(h.related, false) AS related,
+            CASE WHEN b.period < getvariable('year_start') THEN 'arrears'
+                 WHEN b.period > getvariable('as_of_month') THEN 'advance' ELSE 'current' END AS place,
+            coalesce(p.before, 0) AS paid_before, coalesce(p.within, 0) AS paid_within
+        FROM bills AS b
+        LEFT JOIN (SELECT bill_id, sum(amount) FILTER (WHERE date < getvariable('year_start')) AS before,
+                          sum(amount) FILTER (WHERE date >= getvariable('year_start')) AS within
+                   FROM placed WHERE place <> 'unmatched' GROUP BY bill_id) AS p USING (bill_id)
+        LEFT JOIN properties AS h USING (property_id)""")
 
 
-def _figures(connection, where_bill: str, where_receipt: str, params: dict) -> dict:
-    """The rates over the bills and receipts the two conditions keep."""
-    one = lambda sql: connection.execute(sql).fetchone()  # noqa: E731
-    current_bills = f"b.period BETWEEN getvariable('year_start') AND getvariable('as_of_month') AND {where_bill}"
-    receivable, gross, waiver, households = one(
-        f"SELECT coalesce(sum(net), 0), sum(gross), coalesce(sum(waiver), 0), count(DISTINCT property_id) "
-        f"FROM bills AS b LEFT JOIN properties AS h USING (property_id) WHERE {current_bills}")
-    month_receivable = one(f"SELECT coalesce(sum(net), 0) FROM bills AS b LEFT JOIN properties AS h USING (property_id) "
-                           f"WHERE b.period = getvariable('as_of_month') AND {where_bill}")[0]
-    arrears_billed = one(f"SELECT coalesce(sum(net), 0) FROM bills AS b LEFT JOIN properties AS h USING (property_id) "
-                         f"WHERE b.period < getvariable('year_start') AND {where_bill}")[0]
-    sums = dict(connection.execute(
-        f"SELECT place || CASE WHEN date < getvariable('year_start') THEN ':before' ELSE ':within' END, sum(amount) "
-        f"FROM placed AS b LEFT JOIN properties AS h USING (property_id) WHERE {where_receipt} GROUP BY 1").fetchall())
-    month_collected = one(f"SELECT coalesce(sum(amount), 0) FROM placed AS b LEFT JOIN properties AS h USING (property_id) "
-                          f"WHERE b.place = 'current' AND b.period = getvariable('as_of_month') AND {where_receipt}")[0]
-    settled = one(f"""
-        WITH owed AS (SELECT property_id, sum(net) AS net FROM bills AS b LEFT JOIN properties AS h USING (property_id)
-                      WHERE {current_bills} GROUP BY property_id HAVING sum(net) > 0),
-             paid AS (SELECT property_id, sum(amount) AS paid FROM placed AS b LEFT JOIN properties AS h USING (property_id)
-                      WHERE b.place = 'current' AND {where_receipt} GROUP BY property_id)
-        SELECT count(*), count(*) FILTER (WHERE coalesce(paid, 0) >= net) FROM owed LEFT JOIN paid USING (property_id)""")
-    got = lambda key: sums.get(key) or Decimal(0)  # noqa: E731
-    collected = got("current:before") + got("current:within")
-    arrears_opening = arrears_billed - got("arrears:before")
-    arrears_collected = got("arrears:within")
-    advance = got("advance:before") + got("advance:within") + got("unmatched:before") + got("unmatched:within")
-    if params["total_method"] == "bounded":
-        total = _rate(collected + arrears_collected, receivable + arrears_opening)
-    else:
-        within = sum((value or Decimal(0)) for key, value in sums.items() if key.endswith(":within"))
-        total = _rate(within, receivable)
-    return {
-        "receivable": _money(receivable), "collected": _money(collected),
-        "collection_rate_current": _rate(collected, receivable),
-        "month_receivable": _money(month_receivable), "month_collected": _money(month_collected),
-        "collection_rate_month": _rate(month_collected, month_receivable),
-        "arrears_opening": _money(arrears_opening), "arrears_collected": _money(arrears_collected),
-        "arrears_recovery_rate": _rate(arrears_collected, arrears_opening),
-        "collection_rate_total": total,
-        "outstanding": _money(receivable - collected + arrears_opening - arrears_collected),
-        "advance_balance": _money(advance),
-        "waiver": _money(waiver), "waiver_rate": _rate(waiver, gross) if gross is not None else None,
-        "households": settled[0], "households_settled": settled[1], "household_rate": _rate(Decimal(settled[1]), Decimal(settled[0])),
-        "properties_billed": households,
-    }
+FIGURE_SQL = """
+    sum(net) FILTER (WHERE place = 'current') AS receivable,
+    sum(gross) FILTER (WHERE place = 'current') AS gross,
+    sum(waiver) FILTER (WHERE place = 'current') AS waiver,
+    sum(least(paid_before + paid_within, greatest(net, 0))) FILTER (WHERE place = 'current') AS collected,
+    sum(net) FILTER (WHERE place = 'current' AND period = getvariable('as_of_month')) AS month_receivable,
+    sum(least(paid_before + paid_within, greatest(net, 0))) FILTER (WHERE place = 'current' AND period = getvariable('as_of_month')) AS month_collected,
+    sum(greatest(net - paid_before, 0)) FILTER (WHERE place = 'arrears') AS arrears_opening,
+    sum(least(paid_within, greatest(net - paid_before, 0))) FILTER (WHERE place = 'arrears') AS arrears_collected,
+    sum(paid_within) AS paid_within,
+    sum(CASE place WHEN 'current' THEN paid_before + paid_within - least(paid_before + paid_within, greatest(net, 0))
+                   WHEN 'arrears' THEN paid_within - least(paid_within, greatest(net - paid_before, 0))
+                   ELSE paid_before + paid_within END) AS credit,
+    count(DISTINCT property_id) FILTER (WHERE place = 'current') AS properties_billed"""
+FIGURE_KEYS = ("receivable", "gross", "waiver", "collected", "month_receivable", "month_collected", "arrears_opening",
+               "arrears_collected", "paid_within", "credit", "properties_billed")
+
+
+def _figures(connection, where: str, params: dict, dims: list[str] = (), unmatched: bool = False) -> dict[tuple, dict]:
+    """The rates over the bills ``where`` keeps, one set per value of ``dims``, from one pass over the ledger.
+
+    ``unmatched`` adds the receipts that name no known bill: prepayments of no group, so only for the whole."""
+    key = ", ".join(dims)
+    select = f"{key}, " if dims else ""
+    group = f"GROUP BY {key}" if dims else ""
+    rows = {tuple(row[:len(dims)]): dict(zip(FIGURE_KEYS, row[len(dims):])) for row in connection.execute(
+        f"SELECT {select}{FIGURE_SQL} FROM ledger WHERE {where} {group}").fetchall()}
+    households = {tuple(row[:len(dims)]): row[len(dims):] for row in connection.execute(f"""
+        SELECT {select}count(*), count(*) FILTER (WHERE paid >= owed) FROM (
+            SELECT {select}property_id, sum(net) AS owed, sum(least(paid_before + paid_within, greatest(net, 0))) AS paid
+            FROM ledger WHERE place = 'current' AND {where} GROUP BY {select}property_id HAVING sum(net) > 0) {group}""").fetchall()}
+    stray = Decimal(0)
+    if unmatched:
+        stray = connection.execute("SELECT coalesce(sum(amount), 0) FROM placed WHERE place = 'unmatched' "
+                                   "AND date >= getvariable('year_start')").fetchone()[0]
+        stray_before = connection.execute("SELECT coalesce(sum(amount), 0) FROM placed WHERE place = 'unmatched' "
+                                          "AND date < getvariable('year_start')").fetchone()[0]
+    result = {}
+    for group_key, sums in rows.items():
+        got = lambda name: sums.get(name) or Decimal(0)  # noqa: E731
+        receivable, collected = got("receivable"), got("collected")
+        opening, recovered = got("arrears_opening"), got("arrears_collected")
+        if params["total_method"] == "bounded":
+            total = _rate(collected + recovered, receivable + opening)
+        else:
+            total = _rate(got("paid_within") + stray, receivable)
+        owing, settled = households.get(group_key, (0, 0))
+        result[group_key] = {
+            "receivable": _money(receivable), "collected": _money(collected),
+            "collection_rate_current": _rate(collected, receivable),
+            "month_receivable": _money(got("month_receivable")), "month_collected": _money(got("month_collected")),
+            "collection_rate_month": _rate(got("month_collected"), got("month_receivable")),
+            "arrears_opening": _money(opening), "arrears_collected": _money(recovered),
+            "arrears_recovery_rate": _rate(recovered, opening),
+            "collection_rate_total": total,
+            "outstanding": _money(receivable - collected + opening - recovered),
+            "advance_balance": _money(got("credit") + (stray + stray_before if unmatched else 0)),
+            "waiver": _money(got("waiver")),
+            "waiver_rate": _rate(got("waiver"), sums["gross"]) if sums.get("gross") is not None else None,
+            "households": owing, "households_settled": settled, "household_rate": _rate(Decimal(settled), Decimal(owing)),
+            "properties_billed": sums.get("properties_billed") or 0,
+        }
+    return result
 
 
 def _money(value: Any) -> str:
@@ -583,8 +618,8 @@ def _compute(connection, metas: dict, params: dict) -> dict:
     connection.execute(f"SET VARIABLE year_start = DATE '{start_year}-{params['year_start_month']:02d}-01'")
     _prepare(connection, metas, params)
     has_property = "property" in metas
-    main_bill = "NOT coalesce(h.related, false)" if params["exclude_related"] else "true"
-    figures = _figures(connection, main_bill, main_bill, params)
+    main = "NOT related" if params["exclude_related"] else "true"
+    figures = _figures(connection, main, params, unmatched=True)[()]
     for key, value in params["reported"].items():
         mine = figures.get(key)
         figures.setdefault("reported", {})[key] = {
@@ -597,19 +632,13 @@ def _compute(connection, metas: dict, params: dict) -> dict:
     }
     if has_property and "owner" in metas["property"]["confirmation"]["mapping"]:
         result["related"] = {"owners": params["related_owners"],
-                             "only": _figures(connection, "coalesce(h.related, false)", "coalesce(h.related, false)", params),
-                             "excluded": _figures(connection, "NOT coalesce(h.related, false)", "NOT coalesce(h.related, false)", params)}
+                             "only": _figures(connection, "related", params)[()],
+                             "excluded": _figures(connection, "NOT related", params, unmatched=True)[()]}
     if params["group_by"]:
-        dims = [f"{'h' if GROUP_FIELDS[field] == 'property' else 'b'}.{field}" for field in params["group_by"]]
-        keys = connection.execute(
-            f"SELECT DISTINCT {', '.join(dims)} FROM bills AS b LEFT JOIN properties AS h USING (property_id) "
-            f"WHERE b.period BETWEEN getvariable('year_start') AND getvariable('as_of_month') ORDER BY ALL").fetchall()
-        groups = []
-        for key in keys:
-            condition = " AND ".join(f"{dim} IS NOT DISTINCT FROM {_literal(value)}" for dim, value in zip(dims, key))
-            groups.append({"key": dict(zip(params["group_by"], key)),
-                           "figures": _figures(connection, f"{main_bill} AND {condition}", f"{main_bill} AND {condition}", params)})
-        result["groups"] = groups
+        # Grouped in the same single pass over the ledger, however many groups there are.
+        grouped = _figures(connection, main, params, params["group_by"])
+        result["groups"] = [{"key": dict(zip(params["group_by"], key)), "figures": grouped[key]}
+                            for key in sorted(grouped, key=lambda key: tuple((value is None, str(value)) for value in key))]
     result["quality"] = [issue for issue in (
         _issue(connection, metas, "receivable", "void_bills", "void", "net", "bill_lines"),
         _issue(connection, metas, "receivable", "red_letter_lines", "red", "net", "bill_lines"),
@@ -620,6 +649,7 @@ def _compute(connection, metas: dict, params: dict) -> dict:
         _issue(connection, metas, "receivable", "bills_without_property",
                "NOT void AND property_id NOT IN (SELECT property_id FROM properties WHERE property_id IS NOT NULL)", "net", "bill_lines")
         if has_property else None,
+        _issue(connection, metas, "property", "repeated_properties", "repeated", "0", "property_rows") if has_property else None,
     ) if issue]
     if "nature" in metas["receipt"]["confirmation"]["mapping"]:
         # What the billing system called a receipt, against where its bill's 账期 puts it.
@@ -628,10 +658,6 @@ def _compute(connection, metas: dict, params: dict) -> dict:
             _issue(connection, metas, "receipt", "arrears_labelled_current", "place = 'arrears' AND date >= getvariable('year_start') AND contains(nature, '当期')", "amount", "placed"),
         ) if issue]
     return result
-
-
-def _literal(value: Any) -> str:
-    return "NULL" if value is None else "'" + str(value).replace("'", "''") + "'"
 
 
 # --- the CLI ----------------------------------------------------------------------------------
