@@ -30,6 +30,7 @@ import { readCopy, writeCopy } from './views/analysis/workingCopy.js';
 import { Booting, WiringTrouble, type OpenSession } from './views/Workbench.js';
 import { Button } from './components/ui/button.js';
 import { GUIDE_EVENT, GuideHub } from './views/guide/GuideHub.js';
+import { ASK_EVENT } from './views/guide/ask.js';
 import type { GuideTarget } from './views/guide/articles.js';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from './components/ui/empty.js';
 
@@ -622,6 +623,18 @@ export function App() {
     conversationQueue.current = operation;
     await operation;
   }, [api]);
+
+  // A 「让助手…」 button puts its question into the open task's conversation, never sends it,
+  // and gives the column back to the conversation so the question is where the manager looks.
+  useEffect(() => {
+    const ask = (event: Event) => {
+      const question = String((event as CustomEvent).detail ?? '').trim();
+      if (!question) return;
+      void chatAnalysis(question).catch((error: unknown) => setProblem(error instanceof Error ? error.message : String(error)));
+    };
+    window.addEventListener(ASK_EVENT, ask);
+    return () => window.removeEventListener(ASK_EVENT, ask);
+  }, [chatAnalysis]);
 
   useEffect(() => {
     if (!inWorkspace || !ready || !current) return;

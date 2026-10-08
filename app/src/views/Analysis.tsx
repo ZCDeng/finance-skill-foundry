@@ -11,7 +11,7 @@ import { useAnalysisScope } from './analysis/scope.js';
 import { WorkbookOverview } from './analysis/WorkbookOverview.js';
 import { ReadinessPanel } from './analysis/ReadinessPanel.js';
 import { MonthCloseControlCenter, type CloseTarget } from './analysis/MonthCloseControlCenter.js';
-import { HelpLink } from './guide/GuideHub.js';
+import { AskLink, HelpLink } from './guide/GuideHub.js';
 import { readCopy, removeCopy, writeCopy } from './analysis/workingCopy.js';
 import { SearchableSelect } from '../components/FinancialControls.js';
 import { Button } from '../components/ui/button.js';
@@ -425,7 +425,11 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
           {!analysis ? <AnalysisEmpty title="从资料到可检查的结果" body="选好资料、确认范围并计算后，结果和依据会出现在这里。"
-            onChat={() => void chat(question.trim() || undefined)} /> : <>
+            onChat={() => void chat(question.trim() || undefined)}
+            asks={view.datasets.length ? <>
+              <AskLink ask="readiness" label="让助手做资料体检" disabled={busy} />
+              <AskLink ask="collection-health" label="让助手做回款健康分析" disabled={busy} />
+            </> : undefined} /> : <>
             <RunPanel key={task.id} analysis={analysis} analyses={view.analyses} runs={view.runs} drafts={view.drafts} datasets={view.datasets} busy={busy}
               question={task.title}
               versionPicker={<SearchableSelect label="分析版本" compact value={analysis.id}
@@ -532,12 +536,13 @@ function definitionCopy(analysis: AnalysisRevision): { note: string; detailSumma
   return { note: '这项分析使用脚本计算。输入资料、代码和实际输出保留在运行记录中。', detailSummary: '高级：查看计算脚本', detail: analysis.code, kind: '脚本' };
 }
 
-function AnalysisEmpty({ title, body, onAddFiles, onChat }: { title: string; body: string; onAddFiles?(): void; onChat(): void }) {
+function AnalysisEmpty({ title, body, onAddFiles, onChat, asks }: { title: string; body: string; onAddFiles?(): void; onChat(): void; asks?: ReactNode }) {
   return <Empty className="analysis-empty"><EmptyHeader><EmptyTitle asChild><h3>{title}</h3></EmptyTitle><EmptyDescription>{body}</EmptyDescription></EmptyHeader>
     <EmptyContent>
       {onAddFiles ? <Button type="button" onClick={onAddFiles}><FilePlus2 size={14} aria-hidden />添加资料</Button> : null}
       <Button variant="outline" type="button" onClick={onChat}>
         <MessageSquare size={14} aria-hidden />与助手讨论</Button>
+      {asks ? <p className="analysis-note analysis-empty-asks">{asks}<span>只填进对话框，改好再发送。</span></p> : null}
     </EmptyContent></Empty>;
 }
 

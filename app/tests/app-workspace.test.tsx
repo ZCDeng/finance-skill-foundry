@@ -86,6 +86,14 @@ describe('unified application session lifecycle', () => {
     expect(screen.queryByRole('button', { name: '对话' })).toBeNull();
   });
 
+  it('a 「让助手…」 question goes into the open task\'s composer without being sent', async () => {
+    const api = mount();
+    await waitFor(() => expect(api.harnessOpen).toHaveBeenCalledOnce());
+    await act(async () => { window.dispatchEvent(new CustomEvent('fnd:ask', { detail: '做一次回款健康分析' })); });
+    await waitFor(() => expect(api.harnessOpen).toHaveBeenCalledTimes(2));
+    expect(api.harnessOpen).toHaveBeenLastCalledWith('analysis', b.id, { verbatim: '做一次回款健康分析', draftId: undefined, submit: undefined, requestId: undefined });
+  });
+
   it('serializes task switches and does not let the old response select its task again', async () => {
     let finish!: (value: Answer<{ sessionId: string; preset: string }>) => void;
     const harnessOpen = vi.fn((_intent: string, id: string) => id === b.id

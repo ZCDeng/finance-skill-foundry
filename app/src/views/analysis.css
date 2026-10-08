@@ -24,6 +24,7 @@
 .analysis-empty { padding: 28px 0; }
 .analysis-empty h3 { font-size: 20px; line-height: 1.4; }
 .analysis-empty p { font-size: var(--fnd-size-small); color: var(--fnd-muted); max-width: 42ch; }
+.analysis-empty-asks { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 12px; }
 .analysis-empty [data-slot='button'] { align-self: flex-start; }
 .analysis-message { padding: 12px 16px; border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); font-size: var(--fnd-size-small); overflow-wrap: anywhere; }
 .analysis-message--error { border-color: var(--fnd-warning-line); color: var(--fnd-warning); }

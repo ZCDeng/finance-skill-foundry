@@ -4,6 +4,8 @@
  * for the reader, and nothing claims a check the software does not run.
  */
 
+import type { AskId } from './ask.js';
+
 export type GuideTarget = 'datasets' | 'scope' | 'structure' | 'results' | 'drafts' | 'close';
 
 export type GuideBlock =
@@ -15,7 +17,9 @@ export type GuideBlock =
   | { kind: 'checklist' }
   /** First run: practise on the synthetic task, or start with your own files. */
   | { kind: 'start' }
-  | { kind: 'open'; target: GuideTarget; label: string };
+  | { kind: 'open'; target: GuideTarget; label: string }
+  /** Put a question into the conversation; it is never sent from here. */
+  | { kind: 'ask'; ask: AskId; label: string };
 
 export type GuideArticle = {
   id: string;
@@ -73,6 +77,9 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
       ] },
       { kind: 'p', text: '不想自己组织问法时，在对话框里输入「/」，最上面是按这六类排好的常用问题，可以接着输入关键词筛选，例如「/回款」「/对账」。选一条只会把问题填进对话框，改好再发送；列表下面英文名的条目是同一批技能的原名，一般不用管。' },
       { kind: 'p', text: '所有结果都保存在「分析结果」，起草的说明在「文稿」，和你自己算的一样要经过来源核验和复核。' },
+      { kind: 'ask', ask: 'readiness', label: '让助手做资料体检' },
+      { kind: 'ask', ask: 'close-walk', label: '让助手走一遍月结' },
+      { kind: 'ask', ask: 'collection-health', label: '让助手做回款健康分析' },
     ],
   },
   {
@@ -125,6 +132,7 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '可以设置「接受差异后需要第二人复核」，此时接受差异要署名，复核人的署名不能与接受人相同。系统只比对署名，分工靠团队自己执行。',
       ] },
       { kind: 'open', target: 'close', label: '打开勾稽控制' },
+      { kind: 'ask', ask: 'formula-controls', label: '让助手起草按公式重算的控制' },
     ],
   },
   {
@@ -142,6 +150,7 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '风险雷达把七项信号加成一个分，列出触发了哪些、哪些读不到。红黄绿和风险雷达都是筛查提示，不是结论，不计入月结。',
         '敏感性矩阵给出不同毛利率和收缴率下的现金经营利润率，框出的格最接近当前位置（按本年账单收缴率），当前位置不在表内时不框。要矩阵时让助手为该主体打开敏感性分析。',
       ] },
+      { kind: 'ask', ask: 'collection-health', label: '让助手做回款健康分析' },
       { kind: 'open', target: 'results', label: '打开分析结果' },
     ],
   },
@@ -239,6 +248,7 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '助手也能看到这些提示，可以提醒你留意、建议核对；提示不是结论，要不要改工作簿、怎么改，由你判断。',
       ] },
       { kind: 'open', target: 'datasets', label: '打开资料页' },
+      { kind: 'ask', ask: 'formula-health', label: '让助手解释这些提示' },
     ],
   },
   {
@@ -485,7 +495,7 @@ export function searchArticles(query: string, articles: GuideArticle[] = GUIDE_A
 function blockText(block: GuideBlock): string[] {
   if (block.kind === 'p') return [block.text];
   if (block.kind === 'steps' || block.kind === 'list') return block.items;
-  if (block.kind === 'open') return [block.label];
+  if (block.kind === 'open' || block.kind === 'ask') return [block.label];
   if (block.kind === 'checklist') return ['添加资料', '确认表结构', '确认分析范围', '运行计算', '核对来源与异常', '保存文稿并复核'];
   if (block.kind === 'start') return ['用示例任务练习', '使用自己的资料'];
   return ['计算成功', '引用值一致', '源数据核验通过', '已专业复核'];

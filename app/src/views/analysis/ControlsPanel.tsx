@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
-import { HelpLink } from '../guide/GuideHub.js';
+import { AskLink, HelpLink } from '../guide/GuideHub.js';
 import {
   DECISION_LABELS, FINDING_TYPES, ISSUE_LABELS, STATUS_LABELS, declaredLeft, isFormulaSide, where,
   type ControlFinding, type ControlList, type ControlRow, type Disposition, type FindingType, type Suggestion,
@@ -113,6 +113,8 @@ export function ControlsPanel({ taskId, refreshKey, busy, onChanged }: { taskId:
         <div>
           <span className="fnd-with-help"><h4 id="analysis-controls-heading" tabIndex={-1}><Scale size={15} strokeWidth={1.5} aria-hidden /> 勾稽控制</h4><HelpLink article="controls" label="勾稽控制与差异处置" /></span>
           <p className="analysis-note">合计是否等于分项、两处取数是否一致。系统只指出差异，不替你选口径。</p>
+          {/* Controls that need a little arithmetic are drafted by the assistant and still wait for the manager. */}
+          <p className="analysis-note">应收滚动、应收天数这类要按公式重算的控制由助手起草，你确认后才计入月结。<AskLink ask="formula-controls" label="让助手起草" disabled={locked} /></p>
         </div>
         <div className="analysis-actions">
           <Button variant="outline" type="button" disabled={locked} onClick={() => void propose()}><SearchCheck size={15} strokeWidth={1.5} aria-hidden />找建议控制</Button>
