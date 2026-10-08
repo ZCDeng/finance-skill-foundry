@@ -20,6 +20,10 @@ export const WRITES = {
   taskArchive: 'task-archive',
   taskTrash: 'task-trash',
   taskRestore: 'task-restore',
+  /** A trashed task, deleted for good. The CLI refuses any other lifecycle. */
+  taskPurge: 'task-purge',
+  /** 已归档 → every one to the trash; 回收站 → every one deleted for good. */
+  taskEmpty: 'task-empty',
   /** The synthetic practice task: its own task, its own generated workbook, never another task's data. */
   taskSample: 'task-sample',
 } as const;
@@ -70,4 +74,22 @@ export async function changeTaskLifecycle(
     task_id: string;
     lifecycle_status: 'active' | 'archived' | 'trashed';
   };
+}
+
+/** What a purge or an empty answers: every task it touched, and where they went. */
+export interface TasksEmptied {
+  task_ids: string[];
+  lifecycle_status: 'trashed' | 'purged';
+}
+
+export async function purgeTask(binding: Binding, env?: FoundryEnv): Promise<TasksEmptied> {
+  return JSON.parse(await runFoundry(binding, WRITES.taskPurge, [], env)) as TasksEmptied;
+}
+
+export async function emptyTasks(
+  binding: Omit<Binding, 'task' | 'session'>,
+  lifecycle: 'archived' | 'trashed',
+  env?: FoundryEnv,
+): Promise<TasksEmptied> {
+  return JSON.parse(await runFoundry(binding, WRITES.taskEmpty, ['--lifecycle', lifecycle], env)) as TasksEmptied;
 }

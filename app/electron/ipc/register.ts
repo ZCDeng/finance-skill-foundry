@@ -4,7 +4,7 @@ import type { Binding } from '../foundry.js';
 import { FoundryFailure, FoundryRefusal, REFUSED, runFoundry } from '../foundry.js';
 import type { FormulatorHost } from '../formulator.js';
 import { ROLE_BY_INTENT, type Intent } from '../harness/boot.js';
-import { ensureTaskWorkspace } from '../harness/workspace.js';
+import { ensureTaskWorkspace, taskWorkspace } from '../harness/workspace.js';
 import { WIRING_CONSEQUENCE, type Wiring } from '../harness/wiring.js';
 import type { HarnessHost } from '../harness/host.js';
 import { followupDraft } from '../harness/handoff.js';
@@ -19,7 +19,7 @@ import {
 } from '../reads.js';
 import { LocatorError, ScratchFences, locatorArgs, locatorHighlight, pathFreePayload, previewFence, taskRoot } from '../source-locator.js';
 import type { UniverPreviewHost } from '../univer.js';
-import { changeTaskLifecycle, newTask, sampleTask } from '../writes.js';
+import { changeTaskLifecycle, emptyTasks, newTask, purgeTask, sampleTask } from '../writes.js';
 import { CHANNELS, type WaitKind } from './contract.js';
 import { appendWait, waitEntry } from '../timing.js';
 import { type Appearance, appearanceOf, readAppearance, writeAppearance } from '../appearance.js';
@@ -263,6 +263,27 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.taskRestore, (_event, task: unknown) => answer(() =>
     changeTaskLifecycle({ ...binding, task: taskId(task) }, 'task-restore'),
   ));
+  /**
+   * A task deleted for good also loses the directory its conversations stood in.
+   * Named by id under this app's own userData, never a path the renderer sent;
+   * the runtime's own conversation log is the runtime's to keep.
+   */
+  const dropWorkspaces = async (emptied: { task_ids: string[]; lifecycle_status: string }) => {
+    const folder = emptied.lifecycle_status === 'purged' ? panes?.userData() : undefined;
+    if (folder) {
+      const { rm } = await import('node:fs/promises');
+      await Promise.all(emptied.task_ids.filter((id) => /^[0-9a-f]{32}$/.test(id))
+        .map((id) => rm(taskWorkspace(folder, id), { recursive: true, force: true }).catch(() => undefined)));
+    }
+    return emptied;
+  };
+  ipcMain.handle(CHANNELS.taskPurge, (_event, task: unknown) => answer(async () =>
+    dropWorkspaces(await purgeTask({ ...binding, task: taskId(task) })),
+  ));
+  ipcMain.handle(CHANNELS.taskEmpty, (_event, lifecycle: unknown) => answer(async () => {
+    if (lifecycle !== 'archived' && lifecycle !== 'trashed') throw new FoundryFailure('lifecycle must be archived or trashed', null);
+    return dropWorkspaces(await emptyTasks(binding, lifecycle));
+  }));
 
   // Every analysis operation goes through the same domain CLI as legacy work.
   const analysisCall = async (rawTask: unknown, command: string, args: string[] = []) =>

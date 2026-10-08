@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 from foundry.brief import emit_brief
 from foundry.context import resolve_context
-from foundry.errors import REFUSED, FoundryError
+from foundry.errors import REFUSED, FoundryError, LockRefused
 from foundry.harness import assert_no_escaping_symlink
 from foundry.launch_formulator import launch_formulator, purge_formulator_home, stop_formulator
 from foundry.host_profile import host_smoke
@@ -233,6 +234,49 @@ def _import_kwargs(args: argparse.Namespace) -> dict:
     }
 
 
+def _owned_windows(var: Path, task: Task) -> list[Window]:
+    """The windows whose own back-pointer names this task; a chain row alone is not ownership."""
+    windows = WindowStore(var)
+    owned: list[Window] = []
+    for row in task.windows():
+        try:
+            window = windows.get(str(row.get("window_id") or ""))
+        except LockRefused:
+            continue
+        if window.task_id == task.id:
+            owned.append(window)
+    return owned
+
+
+def _refuse_open_formulator(windows: list[Window]) -> None:
+    for window in windows:
+        handles = json.loads(window.handles_path.read_text()) if window.handles_path.exists() else []
+        if "formulator" in handles or window.formulator_pid_path.exists():
+            raise FoundryError("数据台还开着这项任务的数据，请先关闭数据台再永久删除。")
+
+
+def _purge_task(var: Path, task_id: str) -> None:
+    """Delete a trashed task and the windows that point back at it.
+
+    Refused while 数据台 still runs on one of its windows, before anything is
+    removed, so a refusal leaves the task whole in the trash.
+    """
+    store = TaskStore(var)
+    task = store.get(task_id)
+    owned = _owned_windows(var, task)
+    _refuse_open_formulator(owned)
+    store.purge(task.id)
+    windows = WindowStore(var)
+    current = windows.current_path.read_text().strip() if windows.current_path.exists() else ""
+    for window in owned:
+        purge_formulator_home(window)
+        tombstone = windows.windows_dir / f".purging-{window.id}-{os.urandom(8).hex()}"
+        window.root.replace(tombstone)
+        shutil.rmtree(tombstone, ignore_errors=True)
+        if current == window.id:
+            windows.current_path.unlink(missing_ok=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     supplied = sys.argv[1:] if argv is None else argv
     if supplied and supplied[0] == "--_foundry-job-worker":
@@ -342,9 +386,11 @@ def main(argv: list[str] | None = None) -> int:
     p_task_rename = sub.add_parser("task-rename")
     p_task_rename.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
     p_task_rename.add_argument("--title", required=True)
-    for name in ("task-archive", "task-trash", "task-restore"):
+    for name in ("task-archive", "task-trash", "task-restore", "task-purge"):
         p_lifecycle = sub.add_parser(name)
         p_lifecycle.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
+    p_task_empty = sub.add_parser("task-empty", help="archived: move every one to the trash; trashed: delete every one for good")
+    p_task_empty.add_argument("--lifecycle", choices=("archived", "trashed"), required=True)
     sub.add_parser("deliverables")
 
     p_text = sub.add_parser("deliverable-text")
@@ -413,6 +459,28 @@ def main(argv: list[str] | None = None) -> int:
             status = {"task-archive": "archived", "task-trash": "trashed", "task-restore": "active"}[args.cmd]
             metadata = task.set_lifecycle_status(status)
             print(json.dumps({"task_id": task.id, "lifecycle_status": metadata["lifecycle_status"]}, ensure_ascii=False))
+            return 0
+        if args.cmd == "task-purge":
+            if not args.task:
+                raise FoundryError("task-purge needs an explicit --task")
+            _purge_task(Path(args.var), args.task)
+            print(json.dumps({"task_ids": [args.task], "lifecycle_status": "purged"}, ensure_ascii=False))
+            return 0
+        if args.cmd == "task-empty":
+            store = TaskStore(Path(args.var))
+            emptied = []
+            if args.lifecycle == "trashed":
+                # Every refusal before the first deletion: emptying the trash goes whole or not at all.
+                for task in store.list("trashed"):
+                    _refuse_open_formulator(_owned_windows(Path(args.var), task))
+            for task in store.list(args.lifecycle):
+                if args.lifecycle == "archived":
+                    task.set_lifecycle_status("trashed")
+                else:
+                    _purge_task(Path(args.var), task.id)
+                emptied.append(task.id)
+            status = "trashed" if args.lifecycle == "archived" else "purged"
+            print(json.dumps({"task_ids": emptied, "lifecycle_status": status}, ensure_ascii=False))
             return 0
         if finance_mcp.dispatch(args) or analysis_jobs.dispatch(args) or analysis_cli.dispatch(args) or finance_cli.dispatch(args) or excel_bridge.dispatch(args):
             return 0

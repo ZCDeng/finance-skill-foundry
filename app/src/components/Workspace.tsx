@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Archive, BookOpen, Check, Columns2, Ellipsis, FileClock, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Sheet, Trash2, X } from 'lucide-react';
+import { Archive, BookOpen, Check, Columns2, Ellipsis, FileClock, FolderOpen, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Sheet, Trash2, X, XCircle } from 'lucide-react';
 import type { TaskLifecycleFilter, TaskRow } from '../bridge.js';
 import './workspace.css';
 import { Button } from './ui/button.js';
@@ -13,6 +13,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog.js';
 
 export interface WorkspaceRect { x: number; y: number; width: number; height: number }
 interface Props {
@@ -31,6 +41,10 @@ interface Props {
   onArchive?(id: string): Promise<void>;
   onTrash?(id: string): Promise<void>;
   onRestore?(id: string): Promise<void>;
+  /** Delete one task in the trash for good. */
+  onPurge?(id: string): Promise<void>;
+  /** 已归档: every one to the trash. 回收站: every one deleted for good. Answers how many went. */
+  onEmpty?(lifecycle: 'archived' | 'trashed'): Promise<number>;
   onLayout(rect: WorkspaceRect | null): void;
   conversation: ReactNode;
   /** The guide is open in the conversation column: show the column even with no task or with results in focus. */
@@ -38,6 +52,9 @@ interface Props {
   children: ReactNode;
 }
 type Focus = 'split' | 'conversation' | 'results';
+/** What the list says after a task leaves it, with the way back when there is one. */
+interface Notice { text: string; undo?: { id: string; to: 'active' | 'archived' } }
+type Confirm = { kind: 'purge'; id: string; title: string } | { kind: 'empty'; lifecycle: 'archived' | 'trashed'; count: number };
 const mediaMatches = (query: string) => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
 
 /** The native conversation gets a measured slot, independent of sidebar or zoom assumptions. */
@@ -48,7 +65,7 @@ const lifecycleLabels: Record<TaskLifecycleFilter, string> = {
   all: '全部',
 };
 
-export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onLayout, conversation, guiding = false, children }: Props) {
+export function Workspace({ active, focusConversationRequest = 0, task, tasks, lifecycleView, onLifecycleView, onPick, onNew, onMethods, onData, onHistory, onRename, onArchive, onTrash, onRestore, onPurge, onEmpty, onLayout, conversation, guiding = false, children }: Props) {
   const [sidebar, setSidebar] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [wide, setWide] = useState(() => mediaMatches('(min-width: 1360px)'));
   const [narrow, setNarrow] = useState(() => mediaMatches('(max-width: 1100px)'));
@@ -67,6 +84,13 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
   const [lifecycleBusy, setLifecycleBusy] = useState('');
   const [lifecycleError, setLifecycleError] = useState('');
   useEffect(() => setLifecycleError(''), [task?.id]);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
+  // The notice speaks about the list the task left; opening another task or another list ends it.
+  useEffect(() => { if (task) setNotice(null); }, [task?.id]);
+  useEffect(() => setNotice(null), [lifecycleView]);
   const renamedTask = useRef(task?.id);
   renamedTask.current = task?.id;
   const slot = useRef<HTMLDivElement>(null);
@@ -109,13 +133,13 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || confirm) return;
       if (toolsOpen) { setToolsOpen(false); return; }
       if (overlay) closeSidebar();
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [overlay, toolsOpen, closeSidebar]);
+  }, [overlay, toolsOpen, confirm, closeSidebar]);
 
   useEffect(() => {
     const cover = (event: Event) => setNativeCovered(Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open));
@@ -124,7 +148,7 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
   }, []);
 
   useLayoutEffect(() => {
-    if (!active || !task || effective === 'results' || overlay || toolsOpen || nativeCovered || dragging) {
+    if (!active || !task || effective === 'results' || overlay || toolsOpen || nativeCovered || dragging || confirm) {
       onLayout(null); return;
     }
     let scheduled = 0;
@@ -139,26 +163,68 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
     window.addEventListener('resize', resize);
     measure();
     return () => { observer?.disconnect(); window.removeEventListener('resize', resize); cancelAnimationFrame(scheduled); };
-  }, [active, task?.id, effective, overlay, toolsOpen, nativeCovered, dragging, sidebar, chatWidth, onLayout]);
+  }, [active, task?.id, effective, overlay, toolsOpen, nativeCovered, dragging, confirm, sidebar, chatWidth, onLayout]);
 
   const openMethods = () => { setFocus(narrow ? 'results' : 'split'); onMethods(); };
   const pick = (id: string) => { onPick(id); if (!wide) closeSidebar(); setToolsOpen(false); };
   const lifecycleStatus = task?.lifecycle_status ?? 'active';
+  /** After a task leaves the list on screen, the list is where the operator lands. */
+  const backToList = (text: string, undo?: Notice['undo']) => {
+    setNotice({ text, undo });
+    setSidebar(true);
+  };
   const lifecycleAction = async (action: 'archive' | 'trash' | 'restore') => {
     if (!task || lifecycleBusy) return;
+    const { id, title: name } = task;
     setLifecycleBusy(action);
     setLifecycleError('');
     try {
-      if (action === 'archive') await onArchive?.(task.id);
-      else if (action === 'trash') await onTrash?.(task.id);
-      else await onRestore?.(task.id);
-      if (renamedTask.current === task.id) setToolsOpen(false);
+      if (action === 'archive') await onArchive?.(id);
+      else if (action === 'trash') await onTrash?.(id);
+      else await onRestore?.(id);
+      if (renamedTask.current === id) setToolsOpen(false);
+      if (action === 'archive') backToList(`已归档「${name}」`, { id, to: 'active' });
+      else if (action === 'trash') backToList(`已将「${name}」移入回收站`, { id, to: lifecycleStatus === 'archived' ? 'archived' : 'active' });
     } catch (error) {
       if (renamedTask.current === task.id) setLifecycleError(error instanceof Error ? error.message : '任务操作未完成，请重试。');
     } finally {
       setLifecycleBusy('');
     }
   };
+  const undo = async () => {
+    const back = notice?.undo;
+    if (!back || lifecycleBusy) return;
+    setLifecycleBusy('undo');
+    try {
+      if (back.to === 'active') await onRestore?.(back.id);
+      else await onArchive?.(back.id);
+      setNotice(null);
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : '撤销未完成，请重试。' });
+    } finally {
+      setLifecycleBusy('');
+    }
+  };
+  const confirmed = async () => {
+    if (!confirm || confirmBusy) return;
+    setConfirmBusy(true);
+    setConfirmError('');
+    try {
+      if (confirm.kind === 'purge') {
+        await onPurge?.(confirm.id);
+        backToList(`已永久删除「${confirm.title}」`);
+      } else {
+        const count = await onEmpty?.(confirm.lifecycle) ?? 0;
+        backToList(confirm.lifecycle === 'archived' ? `已把 ${count} 个归档任务移入回收站` : `已永久删除 ${count} 个任务`);
+      }
+      setConfirm(null);
+    } catch (error) {
+      setConfirmError(error instanceof Error ? error.message : '操作未完成，请重试。');
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
+  const emptyable = lifecycleView === 'archived' || lifecycleView === 'trashed' ? lifecycleView : null;
   const resized = (value: number) => setChatWidth(Math.min(640, Math.max(400, value)));
   const saveTitle = async () => {
     if (!task || !onRename || savingTitle || !title.trim()) return;
@@ -185,12 +251,21 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
           {(['active', 'archived', 'trashed'] as const).map((value) =>
             <button key={value} type="button" aria-pressed={lifecycleView === value} onClick={() => onLifecycleView(value)}>{lifecycleLabels[value]}</button>)}
         </div>
+        {notice ? <div className="workspace-notice" role="status">
+          <span>{notice.text}</span>
+          {notice.undo ? <Button size="sm" variant="link" disabled={Boolean(lifecycleBusy)} onClick={() => void undo()}>撤销</Button> : null}
+          <Button size="icon" variant="ghost" aria-label="关闭提示" onClick={() => setNotice(null)}><X size={14} aria-hidden /></Button>
+        </div> : null}
         <label className="workspace-search"><Search size={15} aria-hidden /><Input ref={search} type="search" aria-label="搜索任务"
           value={query} placeholder="搜索任务" onChange={(event) => setQuery(event.target.value)} /></label>
+        {emptyable && onEmpty && tasks.length ? <Button className="workspace-empty-list" size="sm" variant={emptyable === 'trashed' ? 'destructive' : 'ghost'}
+          onClick={() => { setConfirmError(''); setConfirm({ kind: 'empty', lifecycle: emptyable, count: tasks.length }); }}>
+          {emptyable === 'archived' ? <><Trash2 size={14} aria-hidden />全部移入回收站</> : <><XCircle size={14} aria-hidden />清空回收站</>}
+        </Button> : null}
         <div className="workspace-tasklist">
           {shownTasks.map((row) => <button key={row.id} className="workspace-task" title={row.title} aria-label={row.title} aria-current={task?.id === row.id ? 'true' : undefined}
             onClick={() => pick(row.id)}><span>{row.title}</span><small>{joinParts([row.period ? <PeriodWords value={row.period} /> : null, lifecycleLabels[row.lifecycle_status ?? 'active']])}</small></button>)}
-          {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : '从一个问题开始第一项分析'}</p> : null}
+          {shownTasks.length === 0 ? <p className="fnd-muted">{query ? '没有找到相关任务' : lifecycleView === 'archived' ? '没有已归档的任务' : lifecycleView === 'trashed' ? '回收站是空的' : '从一个问题开始第一项分析'}</p> : null}
         </div>
         <div className="workspace-sidebar-footer">
           <button className="workspace-library" onClick={() => { openMethods(); if (!wide) closeSidebar(); }}><BookOpen size={16} aria-hidden />方法库</button>
@@ -229,6 +304,12 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
               {task && lifecycleStatus === 'active' && onArchive ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('archive'); }}><Archive size={15} strokeWidth={1.5} aria-hidden />归档任务</DropdownMenuItem> : null}
               {task && lifecycleStatus !== 'active' && onRestore ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('restore'); }}><RotateCcw size={15} strokeWidth={1.5} aria-hidden />恢复任务</DropdownMenuItem> : null}
               {task && lifecycleStatus !== 'trashed' && onTrash ? <DropdownMenuItem disabled={Boolean(lifecycleBusy)} onSelect={(event) => { event.preventDefault(); void lifecycleAction('trash'); }}><Trash2 size={15} strokeWidth={1.5} aria-hidden />移入回收站</DropdownMenuItem> : null}
+              {task && lifecycleStatus === 'trashed' && onPurge ? <DropdownMenuItem variant="destructive" disabled={Boolean(lifecycleBusy)} onSelect={() => {
+                const target = { kind: 'purge' as const, id: task.id, title: task.title };
+                setConfirmError('');
+                // Open after the menu has closed, so the menu's focus return does not land on the dialog.
+                setTimeout(() => setConfirm(target), 0);
+              }}><XCircle size={15} strokeWidth={1.5} aria-hidden />永久删除</DropdownMenuItem> : null}
               {lifecycleError ? <p role="alert" className="max-w-72 px-2 py-1 text-sm break-words">{lifecycleError}</p> : null}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -250,6 +331,27 @@ export function Workspace({ active, focusConversationRequest = 0, task, tasks, l
           <section className="workspace-results" ref={canvas} aria-label="分析成果" hidden={Boolean(task) && effective === 'conversation'}>{children}</section>
         </div>
       </section>
+      <AlertDialog open={Boolean(confirm)} onOpenChange={(open) => { if (!open && !confirmBusy) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm?.kind === 'purge' ? `永久删除「${confirm.title}」？`
+              : confirm?.lifecycle === 'archived' ? `把已归档的 ${confirm.count} 个任务移入回收站？`
+              : `永久删除回收站里的 ${confirm?.count ?? 0} 个任务？`}</AlertDialogTitle>
+            <AlertDialogDescription>{confirm?.kind === 'empty' && confirm.lifecycle === 'archived'
+              ? '移入后它们只在回收站里，还可以逐个恢复。'
+              : '任务的资料、分析结果、文稿和导出文件都会一起删除，删除后不能恢复。'}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {confirmError ? <p role="alert" className="m-0 text-[length:var(--fnd-size-body)] text-[var(--fnd-warning)]">{confirmError}</p> : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmBusy}>取消</AlertDialogCancel>
+            <AlertDialogAction variant={confirm?.kind === 'empty' && confirm.lifecycle === 'archived' ? 'default' : 'destructive'} disabled={confirmBusy} aria-busy={confirmBusy || undefined}
+              onClick={(event) => { event.preventDefault(); void confirmed(); }}>
+              {confirm?.kind === 'purge' ? '永久删除'
+                : confirm?.lifecycle === 'archived' ? '全部移入回收站' : `永久删除 ${confirm?.count ?? 0} 个任务`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

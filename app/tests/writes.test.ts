@@ -31,7 +31,7 @@ describe('creating a task', () => {
    * cold install.
    */
   it('is a mutation the window can make, and the only one', () => {
-    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-sample']);
+    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-purge', 'task-empty', 'task-sample']);
   });
 
   it('passes the title through and leaves an empty period off the argv', async () => {

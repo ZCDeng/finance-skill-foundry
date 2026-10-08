@@ -75,3 +75,69 @@ def test_task_list_lifecycle_filters(tmp_path: Path, capsys) -> None:
 
     assert main(["--var", str(var), "task-list", "--lifecycle", "all"]) == 0
     assert {row["id"] for row in json.loads(capsys.readouterr().out)} == {active.id, archived.id, trashed.id}
+
+
+def test_purge_deletes_only_trashed_tasks_and_their_windows(tmp_path: Path, capsys) -> None:
+    import pytest
+
+    from foundry.errors import FoundryError
+    from foundry.window import WindowStore
+
+    var = tmp_path / "var"
+    store = TaskStore(var)
+    kept = store.create(title="保留")
+    gone = store.create(title="删除")
+    windows = WindowStore(var)
+    owned = windows.create()
+    owned.bind_task(gone.id)
+    gone.bind_window(owned.id)
+    other = windows.create(make_current=False)
+    other.bind_task(kept.id)
+    gone.bind_window(other.id)  # a chain row alone is not ownership
+
+    with pytest.raises(FoundryError):
+        store.purge(gone.id)
+    assert main(["--var", str(var), "--task", gone.id, "task-purge"]) != 0
+    assert gone.meta_path.exists()
+
+    gone.set_lifecycle_status("trashed")
+    owned.formulator_pid_path.parent.mkdir(parents=True, exist_ok=True)
+    owned.formulator_pid_path.write_text("1\n", encoding="utf-8")
+    assert main(["--var", str(var), "task-empty", "--lifecycle", "trashed"]) != 0
+    assert gone.meta_path.exists() and owned.root.exists()
+    owned.formulator_pid_path.unlink()
+    capsys.readouterr()
+    assert main(["--var", str(var), "--task", gone.id, "task-purge"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"task_ids": [gone.id], "lifecycle_status": "purged"}
+    assert not gone.root.exists()
+    assert not owned.root.exists()
+    assert other.root.exists()
+    assert not windows.current_path.exists()
+    assert [task.id for task in store.list("all")] == [kept.id]
+    assert [path.name for path in store.tasks_dir.iterdir() if path.name.startswith(".purging")] == []
+
+
+def test_empty_archived_moves_to_trash_and_empty_trash_deletes(tmp_path: Path, capsys) -> None:
+    var = tmp_path / "var"
+    store = TaskStore(var)
+    active = store.create(title="活跃")
+    archived = [store.create(title=f"归档{index}") for index in range(2)]
+    trashed = store.create(title="回收")
+    for task in archived:
+        task.set_lifecycle_status("archived")
+    trashed.set_lifecycle_status("trashed")
+    capsys.readouterr()
+
+    assert main(["--var", str(var), "task-empty", "--lifecycle", "archived"]) == 0
+    moved = json.loads(capsys.readouterr().out)
+    assert moved["lifecycle_status"] == "trashed"
+    assert sorted(moved["task_ids"]) == sorted(task.id for task in archived)
+    assert store.list("archived") == []
+    assert {task.id for task in store.list("trashed")} == {trashed.id, *(task.id for task in archived)}
+
+    assert main(["--var", str(var), "task-empty", "--lifecycle", "trashed"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["task_ids"]) == 3
+    assert [task.id for task in store.list("all")] == [active.id]
+
+    assert main(["--var", str(var), "task-empty", "--lifecycle", "trashed"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"task_ids": [], "lifecycle_status": "purged"}

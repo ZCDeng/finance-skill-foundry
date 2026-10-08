@@ -59,6 +59,9 @@ function Refusal({ message, onDismiss }: { message: string; onDismiss?: () => vo
   );
 }
 
+const missingRemoval = async (): Promise<{ ok: false; message: string }> =>
+  ({ ok: false, message: '当前安装版还没有清空和永久删除接口，请更新后重试。' });
+
 export function App() {
   const api = bridge();
   const [screen, setScreen] = useState<Screen>('analysis');
@@ -525,6 +528,18 @@ export function App() {
     setGuideRequest((value) => value + 1);
   }, [api, refreshTasks]);
 
+  /** Put down the task on screen and show the list it was in, as 新建任务 would. */
+  const leaveTask = useCallback(() => {
+    closePreview();
+    selectionRevision.current += 1;
+    explicitSelection.current = true;
+    currentRef.current = null;
+    setCurrent(null);
+    setDetail(null);
+    setSession(null);
+    setConversationProblem(null);
+  }, [closePreview]);
+
   const changeTaskLifecycle = useCallback(async (id: string, action: 'archive' | 'trash' | 'restore') => {
     if (!api) throw new Error('任务服务暂未连接，请重新打开应用。');
     const call = action === 'archive' ? api.taskArchive : action === 'trash' ? api.taskTrash : api.taskRestore;
@@ -547,20 +562,44 @@ export function App() {
       if (screenRef.current === 'deliverables') refreshGallery();
       return;
     }
-    setTaskLifecycleView(nextView);
-    if (currentRef.current === id) {
-      closePreview();
-      currentRef.current = id;
-      explicitSelection.current = true;
-      setCurrent(id);
-      if (nextView !== 'active') {
-        setConversationProblem(null);
-        setSession(null);
+    if (action === 'restore') {
+      // A restored task comes back to work: show it under 进行中, still open.
+      setTaskLifecycleView(nextView);
+      if (currentRef.current === id) {
+        closePreview();
+        currentRef.current = id;
+        explicitSelection.current = true;
+        setCurrent(id);
       }
+      refreshTasks(nextView);
+    } else {
+      // Archive and trash take the task out of the list on screen; the operator lands back on that list.
+      if (currentRef.current === id) leaveTask();
+      refreshTasks(taskLifecycleViewRef.current);
     }
-    refreshTasks(nextView);
     if (screenRef.current === 'deliverables') refreshGallery();
-  }, [api, closePreview, refreshGallery, refreshTasks]);
+  }, [api, closePreview, leaveTask, refreshGallery, refreshTasks]);
+
+  /** Delete one trashed task, or empty 已归档 or 回收站; answers how many tasks went. */
+  const removeTasks = useCallback(async (target: { purge: string } | { empty: 'archived' | 'trashed' }) => {
+    if (!api) throw new Error('任务服务暂未连接，请重新打开应用。');
+    const result = 'purge' in target
+      ? await (api.taskPurge ?? missingRemoval)(target.purge)
+      : await (api.taskEmpty ?? missingRemoval)(target.empty);
+    if (!result.ok) {
+      // An empty can stop part way (数据台 still open on one task): show what is left.
+      refreshTasks(taskLifecycleViewRef.current);
+      throw new Error(result.message);
+    }
+    const gone = new Set(result.value.task_ids);
+    gallerySequence.current += 1;
+    setGallery((rows) => rows.filter((row) => !gone.has(row.task.id)));
+    setTasks((rows) => rows.filter((row) => !gone.has(row.id)));
+    if (currentRef.current && gone.has(currentRef.current)) leaveTask();
+    refreshTasks(taskLifecycleViewRef.current);
+    if (screenRef.current === 'deliverables') refreshGallery();
+    return gone.size;
+  }, [api, leaveTask, refreshGallery, refreshTasks]);
 
   const chatAnalysis = useCallback(async (question?: string, draftId?: string,
     options?: { submit?: boolean; requestId?: string; targetTaskId?: string }) => {
@@ -877,6 +916,8 @@ export function App() {
           onArchive={api.taskArchive ? (id) => changeTaskLifecycle(id, 'archive') : undefined}
           onTrash={api.taskTrash ? (id) => changeTaskLifecycle(id, 'trash') : undefined}
           onRestore={api.taskRestore ? (id) => changeTaskLifecycle(id, 'restore') : undefined}
+          onPurge={api.taskPurge ? async (id) => { await removeTasks({ purge: id }); } : undefined}
+          onEmpty={api.taskEmpty ? (lifecycle) => removeTasks({ empty: lifecycle }) : undefined}
           onLayout={onWorkspaceLayout}
           conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}

@@ -198,6 +198,10 @@ export interface Bridge {
   taskArchive?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
   taskTrash?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
   taskRestore?(task: string): Promise<Answer<{task_id: string; lifecycle_status: TaskLifecycleStatus}>>;
+  /** Delete one trashed task for good. */
+  taskPurge?(task: string): Promise<Answer<{task_ids: string[]; lifecycle_status: 'purged'}>>;
+  /** 已归档: move every one to the trash. 回收站: delete every one for good. */
+  taskEmpty?(lifecycle: 'archived' | 'trashed'): Promise<Answer<{task_ids: string[]; lifecycle_status: 'trashed' | 'purged'}>>;
   taskNew(title: string, period: string): Promise<Answer<{ id: string }>>;
   /** The synthetic practice task, created once and reused. */
   taskSample?(): Promise<Answer<{ id: string; created: boolean }>>;

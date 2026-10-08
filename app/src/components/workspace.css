@@ -9,6 +9,10 @@
 .workspace-lifecycle button { min-height: var(--fnd-button-height); border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); background: transparent; color: var(--fnd-muted); cursor: pointer; font-size: var(--fnd-size-body); line-height: 22px; }
 .workspace-lifecycle button[aria-pressed='true'] { background: var(--fnd-surface); color: var(--fnd-ink); border-color: var(--fnd-line-hover); }
 .workspace-lifecycle button:focus-visible { outline: 1px solid var(--fnd-focus); outline-offset: 1px; }
+.workspace-notice { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 4px 4px 10px; background: var(--fnd-surface); border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); color: var(--fnd-ink); font-size: var(--fnd-size-small); line-height: 20px; }
+.workspace-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.workspace-notice > button[data-variant='link'] { align-self: center; color: var(--fnd-ink); }
+.workspace-empty-list { align-self: flex-start; margin: -8px 0 -8px -6px; }
 .workspace-search { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; color: var(--fnd-muted); background: var(--fnd-surface); border: 1px solid var(--fnd-line); border-radius: var(--fnd-radius-control); }
 .workspace-search:has(input:focus-visible) { border-color: var(--fnd-focus); }
 .workspace-search input { flex: 1; min-width: 0; height: 34px; padding: 0; border: 0; background: transparent; box-shadow: none; outline: none; }

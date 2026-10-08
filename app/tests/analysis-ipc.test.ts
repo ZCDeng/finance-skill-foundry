@@ -559,6 +559,18 @@ describe('embedded workspace IPC', () => {
     expect((await invoke(CHANNELS.taskTrash, '../bad')).ok).toBe(false);
     expect(mocks.run).toHaveBeenCalledOnce();
   });
+
+  it('purges one trashed task or empties a whole list through the CLI', async () => {
+    mocks.run.mockResolvedValue(JSON.stringify({ task_ids: [task], lifecycle_status: 'purged' }));
+    registerIpc({varRoot:'/store'});
+    expect(await invoke(CHANNELS.taskPurge, task)).toEqual({ok:true,value:{task_ids:[task],lifecycle_status:'purged'}});
+    expect(mocks.run).toHaveBeenLastCalledWith({varRoot:'/store',task,actor:'manager'},'task-purge',[],undefined);
+    expect(await invoke(CHANNELS.taskEmpty, 'trashed')).toEqual({ok:true,value:{task_ids:[task],lifecycle_status:'purged'}});
+    expect(mocks.run).toHaveBeenLastCalledWith({varRoot:'/store',actor:'manager'},'task-empty',['--lifecycle','trashed'],undefined);
+    expect((await invoke(CHANNELS.taskEmpty, 'active')).ok).toBe(false);
+    expect((await invoke(CHANNELS.taskPurge, '../bad')).ok).toBe(false);
+    expect(mocks.run).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('wait timing log', () => {
