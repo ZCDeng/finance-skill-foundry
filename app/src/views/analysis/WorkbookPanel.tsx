@@ -135,8 +135,8 @@ export function WorkbookPanel({ taskId, datasets, runs, busy, contextId }: { tas
   const previewPatchValue = preview?.patch as Record<string, unknown> | undefined;
   const cells = Array.isArray(previewPatchValue?.cells) ? previewPatchValue.cells as Record<string, unknown>[] : [];
   const conflictCells = cells.filter((cell) => cell.conflict === true && cell.cell);
-  return <section className="analysis-workbook-panel" aria-label="Excel 协作">
-    <div className="analysis-section-heading"><div><h3>Excel 协作</h3><p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p></div></div>
+  return <section className="analysis-workbook-panel" aria-label="写回 Excel">
+    <p className="analysis-note">在任务快照上检查表格、绑定区域，预览写回，再生成新的工作簿文件。</p>
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="工作簿资料" value={datasetId} options={datasetOptions(xlsx)} onChange={setDatasetId} placeholder="搜索工作簿名或快照" />
       <TextField label="绑定编号" value={bindingId} onChange={setBindingId} placeholder="读取、预览或应用已有绑定" />

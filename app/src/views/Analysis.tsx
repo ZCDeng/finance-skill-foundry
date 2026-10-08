@@ -23,7 +23,7 @@ import { SourceRefreshPanel } from './analysis/SourceRefreshPanel.js';
 import { WorkbookPanel } from './analysis/WorkbookPanel.js';
 import { RollforwardPanel } from './analysis/RollforwardPanel.js';
 import { FinanceWorkbench, type FinanceOutcome, type ScopeRequest } from './analysis/FinanceWorkbench.js';
-import { SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
+import { SettingsGroup, SettingsPanel, useSettingsPanel } from './analysis/SettingsPanel.js';
 import { AnalysisEditor, type AnalysisEdit } from './analysis/AnalysisEditor.js';
 import { DraftEditor, type DraftEdit } from './analysis/DraftEditor.js';
 import { Methods } from './analysis/Methods.js';
@@ -417,13 +417,16 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
           {bridge()?.financeCall && view.datasets.length > 0 && <ScopePanel scope={analysisScope} datasetCount={view.datasets.length}
             disabled={busy} onSaved={() => void refresh(task.id)} />}
           <WorkbookOverview taskId={task.id} datasets={view.datasets} />
-          <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
-          <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
-            <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
-          </details>
-          <details className="analysis-details"><DisclosureSummary>滚动到下月</DisclosureSummary>
-            <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
-          </details>
+          <section className="analysis-more-actions" aria-labelledby="analysis-more-actions">
+            <div><h3 id="analysis-more-actions">更多操作</h3><p className="analysis-note">换新导出的来源、把结果写回 Excel，或用这个月的数起草下月套表。</p></div>
+            <SourceRefreshPanel taskId={task.id} busy={busy} onRefresh={() => refresh(task.id)} />
+            <details className="analysis-details"><DisclosureSummary>写回 Excel</DisclosureSummary>
+              <WorkbookPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} contextId={[...view.runs].reverse().find((run) => run.finance_context_id)?.finance_context_id} />
+            </details>
+            <details className="analysis-details"><DisclosureSummary>滚动到下月</DisclosureSummary>
+              <RollforwardPanel taskId={task.id} datasets={view.datasets} runs={view.runs} busy={busy} onApplied={() => refresh(task.id)} />
+            </details>
+          </section>
         </>}
         {view && tab === 'results' && <>
           {!analysis && financeWorkbench}
@@ -520,7 +523,9 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
 
 function AnalysisSettingsFallback({ children }: { children(close: () => void): ReactNode }) {
   const settings = useSettingsPanel();
-  return <SettingsPanel state={settings} summary="调整计算定义和高级参数。" note="调整计算定义和高级参数。">{children(settings.close)}</SettingsPanel>;
+  return <SettingsGroup note="自己动手改这次分析的算法：计算定义和高级参数。">
+    <SettingsPanel state={settings} label="计算定义与参数">{children(settings.close)}</SettingsPanel>
+  </SettingsGroup>;
 }
 
 const FINANCE_OPERATION: Record<string, string> = { metric: '损益指标', variance: '差异分析', scenario: '情景测算' };

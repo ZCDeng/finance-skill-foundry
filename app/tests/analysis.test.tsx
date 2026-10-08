@@ -53,16 +53,22 @@ function openDraftEditor() {
 }
 function openAnalysisEditor() {
   fireEvent.click(screen.getByRole('tab', { name: /分析结果/ }));
-  if (screen.queryByRole('dialog', { name: '设置与高级' }) ?? screen.queryByRole('button', { name: '打开设置与高级' })) openFinanceSettings();
+  if (settingsEntryOrDialog()) openFinanceSettings();
   const adjust = screen.queryByText('调整参数、假设与资料');
   if (adjust?.closest('details')) (adjust.closest('details') as HTMLDetailsElement).open = true;
 }
+/** 设置与高级 holds one fold that picks scope and calculates: 范围与计算, or 计算定义与参数 for a non-finance analysis. */
+const SETTINGS = /^(范围与计算|计算定义与参数)$/;
+function settingsSummary() {
+  return document.querySelector<HTMLElement>('details.analysis-finance-setup > summary');
+}
 function settingsButton() {
-  return screen.getByLabelText('打开设置与高级', { selector: 'button.analysis-finance-setup-trigger' }) as HTMLButtonElement;
+  const summary = settingsSummary();
+  if (!summary) throw new Error('no 范围与计算 fold');
+  return summary;
 }
 function settingsEntryOrDialog() {
-  return screen.queryByRole('dialog', { name: '设置与高级' })
-    ?? screen.queryByLabelText('打开设置与高级', { selector: 'button.analysis-finance-setup-trigger' });
+  return screen.queryByRole('region', { name: SETTINGS }) ?? settingsSummary();
 }
 async function waitForSettingsButton() {
   await waitFor(() => expect(settingsButton()).toBeTruthy());
@@ -70,15 +76,21 @@ async function waitForSettingsButton() {
 async function waitForSettingsEntryOrDialog() {
   await waitFor(() => expect(settingsEntryOrDialog()).toBeTruthy());
 }
+/** Opens the fold as a click on its summary would: the native toggle, then React's onToggle. */
+function toggleSettings(open: boolean) {
+  const details = settingsButton().parentElement as HTMLDetailsElement;
+  details.open = open;
+  fireEvent(details, new Event('toggle'));
+}
 function openFinanceSettings() {
-  const existing = screen.queryByRole('dialog', { name: '设置与高级' });
+  const existing = screen.queryByRole('region', { name: SETTINGS });
   if (existing) return existing;
-  fireEvent.click(settingsButton());
-  return screen.getByRole('dialog', { name: '设置与高级' });
+  toggleSettings(true);
+  return screen.getByRole('region', { name: SETTINGS });
 }
 function expectFinanceSettingsClosed() {
-  expect(settingsButton().getAttribute('aria-expanded')).toBe('false');
-  expect(screen.queryByRole('dialog', { name: '设置与高级' })).toBeNull();
+  expect((settingsButton().parentElement as HTMLDetailsElement).open).toBe(false);
+  expect(screen.queryByRole('region', { name: SETTINGS })).toBeNull();
 }
 function exportDraft() {
   press(screen.getByRole('button', { name: '导出' }));
@@ -254,8 +266,8 @@ describe('analysis workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存新版并重跑' }));
     await waitFor(() => expect(analysisRun).toHaveBeenCalledWith(task.id, next.id));
     expect((await screen.findByRole('alert')).textContent).toBe('SQL 除数为零');
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
   });
 
   it('closes the settings drawer when rerunning the current saved version succeeds', async () => {
@@ -276,8 +288,8 @@ describe('analysis workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '重跑当前已保存版本' }));
     await waitFor(() => expect(analysisRun).toHaveBeenCalledWith(task.id, analysis.id));
     expect((await screen.findByRole('alert')).textContent).toBe('计算脚本失败');
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
   });
 
 
@@ -634,7 +646,7 @@ describe('analysis workbench', () => {
     mountBridge({ analysisState: async () => success({ ...initial, analyses: [named] }) });
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
-    const dialog = screen.getByRole('dialog', { name: '设置与高级' });
+    const dialog = screen.getByRole('region', { name: SETTINGS });
     const overhead = screen.getByLabelText('总部费用分摊（万元）') as HTMLInputElement;
     fireEvent.focus(overhead);
     fireEvent.change(overhead, { target: { value: '30.00' } });
@@ -646,13 +658,14 @@ describe('analysis workbench', () => {
     expect(dialog.isConnected).toBe(false);
   });
 
-  it('hides the outer settings entry while the settings drawer is open', async () => {
+  it('keeps the 范围与计算 line in place while the fold is open and hands focus back to it on Escape', async () => {
     mountBridge();
     render(<Analysis {...props} />); await screen.findByText('本月实际');
     openAnalysisEditor();
-    expect(screen.queryByLabelText('打开设置与高级', { selector: 'button.analysis-finance-setup-trigger' })).toBeNull();
-    fireEvent.keyDown(screen.getByRole('dialog', { name: '设置与高级' }), { key: 'Escape' });
-    await waitFor(() => expect(settingsButton()).toBeTruthy());
+    expect(settingsButton()).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '设置与高级' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('region', { name: SETTINGS }), { key: 'Escape' });
+    await waitFor(() => expectFinanceSettingsClosed());
     expect(document.activeElement).toBe(settingsButton());
   });
 
@@ -1129,7 +1142,7 @@ ${canonicalAppendix} 已改写`;
     }));
     expectFinanceSettingsClosed();
     openFinanceSettings();
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
     expect(screen.getByText('情景测算').closest('details')?.open).toBe(false);
     expect(financeCall).toHaveBeenCalledWith(task.id, 'finance-context-save', expect.objectContaining({
       bindings: { actual: source.id, budget: budgetSource.id },
@@ -1418,7 +1431,7 @@ ${canonicalAppendix} 已改写`;
     const empty = screen.getByRole('heading', { name: '从资料到可检查的结果' });
     const setup = openFinanceSettings();
     expect(setup.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy();
     expect(screen.getByLabelText('账簿').closest('details')?.open).toBe(false);
   });
 
@@ -1492,8 +1505,8 @@ ${canonicalAppendix} 已改写`;
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'list-finance-context'));
     expectFinanceSettingsClosed();
     fireEvent.click(screen.getByRole('button', { name: '调整范围' }));
-    await waitFor(() => expect(screen.getByRole('dialog', { name: '设置与高级' })).toBeTruthy());
-    const setup = screen.getByRole('dialog', { name: '设置与高级' });
+    await waitFor(() => expect(screen.getByRole('region', { name: SETTINGS })).toBeTruthy());
+    const setup = screen.getByRole('region', { name: SETTINGS });
     expect(document.activeElement).toBe(setup);
     expect((screen.getByLabelText('期间') as HTMLInputElement).value).toBe('2026-07');
     fireEvent.click(screen.getByRole('button', { name: '按已保存范围重算损益表' }));
@@ -1611,7 +1624,7 @@ ${canonicalAppendix} 已改写`;
     mountBridge({ analysisState: async () => success(state), financeCall });
     render(<Analysis {...props} embedded section="results" />);
     const empty = await screen.findByRole('heading', { name: '从资料到可检查的结果' });
-    expect(screen.getByRole('dialog', { name: '设置与高级' }).compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('region', { name: SETTINGS }).compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: '按已保存范围重算损益表' }));
     await waitFor(() => expect(document.querySelector('.analysis-result')).toBeTruthy());
     expect(document.querySelector('.analysis-result')!.compareDocumentPosition(settingsButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1679,11 +1692,11 @@ ${canonicalAppendix} 已改写`;
         return success({});
       } });
     render(<Analysis {...props} embedded section="results" />);
-    const panel = await screen.findByRole('complementary', { name: '考核调整' });
-    const alert = await within(panel).findByRole('alert');
-    expect(alert.textContent).toBe('调整列表读取失败');
-    expect(panel.querySelector('details')?.open).toBe(false);
-    expect(panel.querySelector('details')?.contains(alert)).toBe(false);
+    const fold = await screen.findByRole('group', { name: '考核调整' }) as HTMLDetailsElement;
+    const alert = await screen.findByText('调整列表读取失败');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(fold.open).toBe(false);
+    expect(fold.contains(alert)).toBe(false);
   });
 
   it('runs a newly saved budget bridge at organization-period grain without account slicing', async () => {
@@ -2505,10 +2518,10 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success(initial), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByRole('heading', { name: '考核调整' });
+    await screen.findByRole('group', { name: '考核调整' });
     expect(await screen.findByText('总部费用调整 · 待确认')).toBeTruthy();
     expect(screen.getByText(/1 条待确认/).closest('summary')).toBeTruthy();
-    expect(screen.getByRole('complementary', { name: '考核调整' }).querySelector('details')?.open).toBe(false);
+    expect((screen.getByRole('group', { name: '考核调整' }) as HTMLDetailsElement).open).toBe(false);
     fireEvent.click(await screen.findByRole('button', { name: '确认纳入' }));
     await waitFor(() => expect((screen.getByRole('button', { name: '确认中…' }) as HTMLButtonElement).disabled).toBe(true));
     expect(financeCall.mock.calls.some(([, command]) => command === 'run-metric')).toBe(false);
@@ -2563,7 +2576,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success(initial), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByRole('heading', { name: '考核调整' });
+    await screen.findByRole('group', { name: '考核调整' });
     expect(await screen.findByRole('checkbox', { name: '总部费用调整' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '确认纳入' })).toBeNull();
   });
@@ -2582,7 +2595,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success(initial), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByRole('heading', { name: '考核调整' });
+    await screen.findByRole('group', { name: '考核调整' });
     expect(await screen.findByRole('checkbox', { name: '总部费用调整（修订）' })).toBeTruthy();
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
     expect(screen.queryByRole('checkbox', { name: '总部费用调整' })).toBeNull();
@@ -2646,7 +2659,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('Excel 协作');
+    await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
     fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });
@@ -2685,10 +2698,10 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook] }), financeCall });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('Excel 协作');
+    await screen.findByText('写回 Excel');
     const inspect = screen.getByRole('button', { name: /检查结构/ });
     fireEvent.click(inspect);
-    const panel = screen.getByRole('region', { name: 'Excel 协作' });
+    const panel = screen.getByRole('region', { name: '写回 Excel' });
     expect((await within(panel).findByRole('status')).textContent).toBe('正在检查工作簿结构…');
     expect((inspect as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(inspect);
@@ -2712,7 +2725,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook, refreshedWorkbook] }), financeCall });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('Excel 协作');
+    await screen.findByText('写回 Excel');
     fireEvent.change(screen.getByLabelText('绑定编号'), { target: { value: 'bind-1' } });
     fireEvent.click(screen.getByRole('button', { name: '预览写回' }));
     chooseSearchable('工作簿资料', /经理刷新/);
@@ -3085,7 +3098,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, runs: [financeRun] }), financeCall });
     render(<Analysis {...props} embedded section="results" />);
-    await screen.findByRole('heading', { name: '归档图' });
+    await screen.findByRole('group', { name: '归档图' });
     fireEvent.click(screen.getByRole('button', { name: '归档当前结果图' }));
     await waitFor(() => expect(financeCall).toHaveBeenCalledWith(task.id, 'chart-deliverable-save', { run_id: financeRun.id }));
     expect(await screen.findByText('已归档当前结果图。')).toBeTruthy();
@@ -3107,7 +3120,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [financeRun] }), financeCall });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('Excel 协作');
+    await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
     fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });
@@ -3136,7 +3149,7 @@ ${canonicalAppendix} 已改写`;
     });
     mountBridge({ analysisState: async () => success({ ...initial, datasets: [source, workbook], runs: [oldRun, financeRun] }), financeCall });
     render(<Analysis {...props} embedded section="materials" />);
-    await screen.findByText('Excel 协作');
+    await screen.findByText('写回 Excel');
     fireEvent.click(screen.getByRole('button', { name: /检查结构/ }));
     await screen.findByText(/工作表：Sheet1/);
     fireEvent.change(screen.getByLabelText('表格名称'), { target: { value: 'OutputTable' } });

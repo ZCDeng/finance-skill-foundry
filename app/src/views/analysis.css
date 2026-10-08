@@ -44,13 +44,9 @@
 .analysis-file-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
 .analysis-file-row-detail { display: grid; gap: 10px; min-width: 0; }
 .analysis-file-row-detail .analysis-source-preview { border-bottom: 0; padding: 0; }
-.analysis-source-preview, .analysis-definition, .analysis-method, .analysis-source-refresh, .analysis-workbook-panel, .analysis-finance-setup, .analysis-finance-run { display: flex; flex-direction: column; gap: 14px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 18px 0; min-width: 0; }
+.analysis-source-preview, .analysis-definition, .analysis-method, .analysis-finance-run { display: flex; flex-direction: column; gap: 14px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 18px 0; min-width: 0; }
 .analysis-result { display: flex; flex-direction: column; gap: 20px; border: 0; border-bottom: 1px solid var(--fnd-line); border-radius: 0; padding: 4px 0 24px; min-width: 0; container: analysis-result / inline-size; }
-.analysis-source-preview h3, .analysis-definition h3, .analysis-method h3, .analysis-source-refresh h3, .analysis-workbook-panel h3, .analysis-finance-setup h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
-.analysis-source-refresh-title { display: block; font-size: var(--fnd-size-body); font-weight: var(--fnd-weight-strong); }
-.analysis-source-refresh > summary .analysis-note { display: block; margin-top: 4px; }
-.analysis-source-refresh:not([open]) { gap: 0; padding-bottom: 12px; }
-.analysis-source-refresh:not([open]) > summary .analysis-note::after { content: ' · 点击展开刷新'; }
+.analysis-source-preview h3, .analysis-definition h3, .analysis-method h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
 .analysis-source-text { font: inherit; font-size: var(--fnd-size-small); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; overscroll-behavior: contain; }
 .analysis-table { font-size: var(--fnd-size-body); line-height: var(--fnd-leading-body); min-width: 100%; border-collapse: collapse; border: 0; }
 .analysis-table caption { text-align: left; color: var(--fnd-muted); padding: 0 0 8px; }
@@ -126,7 +122,6 @@
 .analysis-version { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .analysis-version-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .analysis-version-note { color: var(--fnd-muted); font-size: var(--fnd-size-label); line-height: 18px; border: 0; padding: 0; overflow-wrap: anywhere; }
-.analysis-output-list { display: flex; flex-direction: column; gap: 10px; }
 .analysis-result-area[data-evidence-open='true'] > .analysis-result { margin-right: min(360px, 48%); }
 .analysis-evidence-anchor { position: sticky; top: 12px; grid-column: 1; grid-row: 1; height: 0; width: min(340px, 46%); justify-self: end; align-self: start; z-index: 3; }
 .analysis-result-area > .analysis-result { grid-column: 1; grid-row: 1; }
@@ -216,17 +211,12 @@
   color: var(--fnd-muted);
   font-size: 12px;
 }
-.analysis-finance-setup-trigger { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 0; cursor: pointer; }
-.analysis-finance-setup-trigger .analysis-section-heading { align-items: center; }
-.analysis-finance-setup-trigger[aria-expanded="false"] .analysis-note::after { content: ' · 点击展开设置与高级'; }
-.analysis-finance-setup-trigger:focus-visible { outline: 1px solid var(--fnd-focus); outline-offset: 4px; border-radius: 6px; }
-.analysis-finance-setup-dialog { display: flex; flex-direction: column; gap: 0; margin-top: 20px; min-width: 0; border: 1px solid var(--fnd-line); border-radius: 12px; background: var(--fnd-surface); }
-.analysis-finance-setup-dialog:focus-visible { outline: 1px solid var(--fnd-focus); outline-offset: 4px; border-radius: 12px; }
-/* The panel scrolls with the page; its heading, with 关闭, stays at the top while it does. Sticky
-   offsets count from inside .workspace-results' 24px top padding, so -24px meets the pane's edge. */
-.analysis-finance-setup-head { position: sticky; top: -24px; z-index: 2; flex-direction: row; align-items: flex-start; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--fnd-line); border-radius: 12px 12px 0 0; background: var(--fnd-surface); }
-.analysis-finance-setup-head .analysis-note { margin-top: 2px; }
-.analysis-finance-setup-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; }
+/* 设置与高级 (DESIGN.md 分区与标题层级): a section heading with its note below, then folds drawn as one list. */
+.analysis-settings-group { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--fnd-line); }
+.analysis-settings-group__head .analysis-note { margin-top: 4px; }
+.analysis-settings-group > details + details { margin-top: -8px; }
+.analysis-finance-setup-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding-bottom: 8px; }
+.analysis-finance-setup-body:focus-visible { outline: 1px solid var(--fnd-focus); outline-offset: 4px; border-radius: var(--fnd-radius-mark); }
 .analysis-source-refresh > .analysis-fieldset + .analysis-actions,
 .analysis-finance-setup-body > .analysis-fieldset + .analysis-actions { margin-top: 16px; }
 .analysis-finance-variance { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -283,7 +273,6 @@
 .analysis-check-summary dd { margin: 0; }
 .analysis-period-range { grid-column: 1 / -1; min-width: 0; }
 
-.analysis-adjustment-panel { margin-top: 16px; padding: 12px 8px; }
 .analysis-adjustment-rerun label { display: flex; gap: 8px; align-items: center; color: var(--fnd-ink); }
 
 /* Table structure confirmation: the card a workbook waits behind. */
@@ -436,8 +425,11 @@
 .analysis-evidence-reason { color: var(--fnd-warning); font-size: var(--fnd-size-small); }
 
 /* Roll last month's workbook forward (滚动到下月). */
-.analysis-rollforward { display: flex; flex-direction: column; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--fnd-line); min-width: 0; }
-.analysis-rollforward h3 { font-size: var(--fnd-size-body); line-height: 1.6; }
+.analysis-rollforward, .analysis-workbook-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* 更多操作 (DESIGN.md 分区与标题层级): a section heading with its note below, then three folds drawn as one list. */
+.analysis-more-actions { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding-top: 20px; border-top: 1px solid var(--fnd-line); }
+.analysis-more-actions > div > .analysis-note { margin-top: 4px; }
+.analysis-more-actions > details + details { margin-top: -8px; }
 .analysis-rollforward-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
 .analysis-rollforward-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--fnd-line); }
 .analysis-rollforward-row > .fnd-control { flex: 1 1 180px; min-width: 0; }

@@ -10,7 +10,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { FinanceAdjustmentPanel } from './FinanceAdjustmentPanel.js';
 import { FinanceChartPanel } from './FinanceChartPanel.js';
-import { SettingsPanel, useSettingsPanel } from './SettingsPanel.js';
+import { SettingsGroup, SettingsPanel, useSettingsPanel } from './SettingsPanel.js';
 import { PeriodPending, ScopeFields, pendingPeriods } from './ScopePanel.js';
 import { scenarioLabel as displayScenarioLabel } from './glossary.js';
 import { editableScope, SCOPE_LABELS, type AnalysisScope, type ScopeKey, type ScopeValues } from './scope.js';
@@ -377,7 +377,15 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
   const moreScopeSummary = MORE_FIELDS.map((key) => scope[key] ? `${SCOPE_LABELS[key]} ${key === 'scenario' ? displayScenarioLabel(scope[key]) : scope[key]}` : '').filter(Boolean).join(' · ');
   const advancedChildren = typeof children === 'function' ? children(closeSetup) : children;
   const accountMapName = finance?.account_maps.find((item) => String(item.id ?? '') === accountMapId)?.name;
-  return <><SettingsPanel state={settings} scrollIntoView summary="选好实际资料（和预算资料），确认范围后计算；高级定义也从这里进入。" note="选好范围后计算；高级定义也从这里进入。">
+  const status = <>
+    {/* Between the heading and the folds: a run closes 范围与计算 on success, and the outcome must stay in view. */}
+    {running ? <p role="status" className="analysis-message"><WaitLoop />{running}</p>
+      : outcome?.result === 'ok' ? <p role="status" className="analysis-message">{outcome.message}</p>
+      : message ? <p role="status" className="analysis-message">{message}</p> : null}
+    {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}
+    {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
+  </>;
+  return <SettingsGroup note="自己动手算的地方：选资料和范围后计算，确认考核调整，把结果归档成图。">{status}<SettingsPanel state={settings} scrollIntoView label="范围与计算" summary="选好实际资料（和预算资料），确认范围后计算">
     <fieldset className="analysis-fieldset" disabled={locked}><div className="analysis-edit-grid">
       <SearchableSelect label="实际资料" value={actual} options={datasetOptions(datasets)} onChange={(value) => {
         setActual(value);
@@ -458,13 +466,7 @@ export function FinanceWorkbench({ taskId, datasets, runs, busy, scope: analysis
       <Button variant="outline" type="button" disabled={locked || !mapRows.trim()} onClick={() => void saveMap()}>保存映射</Button>
     </details>
   </SettingsPanel>
-  {/* Outside the settings: a run closes them on success, and the outcome must stay readable. */}
-  {running ? <p role="status" className="analysis-message"><WaitLoop />{running}</p>
-    : outcome?.result === 'ok' ? <p role="status" className="analysis-message">{outcome.message}</p>
-    : message ? <p role="status" className="analysis-message">{message}</p> : null}
-  {outcome?.result === 'error' && <p role="alert" className="analysis-message analysis-message--error">{outcome.message}</p>}
-  {error && <p role="alert" className="analysis-message analysis-message--error">{error}</p>}
   {contextId ? <FinanceAdjustmentPanel taskId={taskId} contextId={contextId} busy={locked} onRefresh={onRefresh} /> : null}
   {contextId ? <FinanceChartPanel taskId={taskId} runs={runs} busy={locked} onRefresh={onRefresh} /> : null}
-  </>;
+  </SettingsGroup>;
 }

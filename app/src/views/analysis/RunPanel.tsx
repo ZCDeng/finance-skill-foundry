@@ -99,9 +99,10 @@ export function RunPanel({ analysis, analyses, runs, drafts = [], datasets, busy
       {(run.engine === 'finance' || isStructuredAggregateRun(run)) && <SourceTraceDetails run={run} busy={busy} onDrilldown={onDrilldown} />}
       {run.stdout && <details className="analysis-details"><DisclosureSummary tone="quiet">脚本输出 · {run.stdout.trimEnd().split('\n').length} 行</DisclosureSummary>
         <pre className="analysis-source-text" aria-label="脚本计算输出">{run.stdout}</pre></details>}
-      {Boolean(run.outputs?.length) && <div className="analysis-output-list"><h4>生成的文件</h4>{run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
+      {Boolean(run.outputs?.length) && <details className="analysis-details analysis-output-list"><DisclosureSummary>生成的文件 · {run.outputs!.length} 个</DisclosureSummary>
+        {run.outputs?.map((output) => <div key={output.path} className="analysis-actions">
         <span>{output.path}</span><Button variant="outline" type="button" disabled={busy} aria-label={`打开文件 ${output.path}`}
-          onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</div>}
+          onClick={() => onOpen(run, output.path)}>打开文件</Button></div>)}</details>}
       {analysis.sql && <details className="analysis-details"><DisclosureSummary>保存这次分析方法</DisclosureSummary><form className="analysis-method-form" onSubmit={(event) => {
         event.preventDefault(); if (methodName.trim()) onSaveMethod(analysis.id, methodName.trim());
       }}><label>方法名称<Input className="min-w-0 flex-1" value={methodName} onChange={(event) => setMethodName(event.target.value)} placeholder={analysis.question} disabled={busy}  /></label>

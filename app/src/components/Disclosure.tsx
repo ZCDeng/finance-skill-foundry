@@ -1,6 +1,6 @@
 import './components.css';
 
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { ChevronRight } from 'lucide-react';
 
 /**
@@ -10,9 +10,9 @@ import { ChevronRight } from 'lucide-react';
  * row: body text, a 16px chevron on the left that turns when the section opens.
  * `quiet` is for technical and diagnostic folds.
  */
-export function DisclosureSummary({ children, tone }: { children: ReactNode; tone?: 'quiet' }) {
+export function DisclosureSummary({ children, tone, ref }: { children: ReactNode; tone?: 'quiet'; ref?: Ref<HTMLElement> }) {
   return (
-    <summary className="fnd-disclosure-summary" data-tone={tone}>
+    <summary ref={ref} className="fnd-disclosure-summary" data-tone={tone}>
       <ChevronRight className="fnd-disclosure-summary__icon" size={16} strokeWidth={1.5} aria-hidden />
       {children}
     </summary>
