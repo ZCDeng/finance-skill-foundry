@@ -172,6 +172,8 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
   const taskRef = useRef<string | undefined>(undefined);
+  /** The task whose saved scope has been read once; later reads of it happen in the background. */
+  const readTask = useRef<string | undefined>(undefined);
 
   const writeCurrent = useCallback((record: ScopeRecord | null) => {
     currentRef.current = record;
@@ -223,14 +225,18 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
       setReport(null);
       writeSaving(false);
     }
-    setMessage(''); setError('');
+    // The page re-reads every few seconds. A re-read of a scope already on screen keeps the fields, the
+    // message and the layout as they are: no 正在读取 line, no disabled fields, unless the record changed.
+    const background = !taskChanged && readTask.current === taskId && !loadingRef.current;
+    if (!background) { setMessage(''); setError(''); }
     if (!api?.financeCall || !taskId) {
       writeLoading(false);
       return;
     }
-    writeLoading(true);
+    if (!background) writeLoading(true);
     void api.financeCall(taskId, 'analysis-requirements-list', {}).then((answer) => {
       if (request.current !== seq) return;
+      readTask.current = taskId;
       // A build that does not know the record answers with an empty object.
       const payload = (unwrap(answer as Answer<RequirementsList>) ?? {}) as RequirementsList;
       const next = payload.current ?? null;
@@ -242,7 +248,7 @@ export function useAnalysisScope(taskId: string | undefined, question: string, d
         writeExtra(carriedScope(next?.scope));
       }
     }).catch((reason: unknown) => {
-      if (request.current === seq) setError(errorText(reason));
+      if (request.current === seq && !background) setError(errorText(reason));
     }).finally(() => {
       if (request.current === seq) writeLoading(false);
     });

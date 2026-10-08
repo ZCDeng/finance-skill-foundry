@@ -407,7 +407,7 @@ export function Analysis({ task, tasks, active: visible = true, embedded = false
             onAddFiles={embedded ? () => void perform(addFiles) : undefined}
             onChat={() => void chat(question.trim() || undefined)} />}
           {/* What these files can answer and what still waits on the manager, then the files, then the settings. */}
-          <ReadinessPanel taskId={task.id} refreshKey={view.datasets} />
+          <ReadinessPanel taskId={task.id} refreshKey={view.datasets.map((row) => `${row.id}:${row.source_hash}`).join(',')} />
           <MaterialsFileList taskId={task.id} datasets={view.datasets} busy={busy} preview={dataset} refreshKey={materialsRefresh}
             onPreview={(source) => void perform(async (taskId) => {
               const api = bridge(); if (!api?.analysisReadDataset) throw new Error('此版本暂不支持资料预览。');

@@ -45,6 +45,19 @@ it('does not let an older refresh replace a record just saved in another panel',
   expect(result.current.scope.organization).toBe('华南');
 });
 
+it('re-reads a scope already on screen in the background, without a loading state', async () => {
+  const read = deferred(); let reads = 0;
+  mount(vi.fn(async (_task, command) => command === 'analysis-requirements-list'
+    ? ++reads === 1 ? ok({ current: first }) : read.promise : ok({})));
+  const { result, rerender } = renderHook(({ version }) => useAnalysisScope('task', '问题', [], version), { initialProps: { version: 0 } });
+  await waitFor(() => expect(result.current.current?.id).toBe(first.id));
+  rerender({ version: 1 });
+  expect(result.current.loading).toBe(false);
+  await act(async () => read.resolve(ok({ current: next })));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.scope.organization).toBe('华南');
+});
+
 it('keeps pending field edits when another editor reads the same saved version', async () => {
   mount(vi.fn(async () => ok({ current: first })));
   const { result } = renderHook(() => useAnalysisScope('task', '问题', []));
