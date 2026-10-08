@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from foundry.analysis import AnalysisStore
-from foundry.analysis_data import parse_source
+from foundry.analysis_data import decode_text, parse_source
 from foundry.errors import FoundryError
 from foundry.task import TaskStore
 
@@ -32,3 +32,12 @@ def test_an_old_xls_is_refused_with_what_to_do(tmp_path):
     analysis = AnalysisStore(TaskStore(tmp_path / "var").create(title="导入"))
     with pytest.raises(FoundryError, match=r"\.xls .*save it as \.xlsx"):
         analysis.add_dataset(source, name=source.name)
+
+
+def test_a_gbk_file_that_also_happens_to_be_valid_utf8_still_reads_as_gbk():
+    data = "目录,一\n".encode("gbk")
+    data.decode("utf-8")  # the trap: these bytes are valid UTF-8 too
+    assert decode_text(data) == ("目录,一\n", "gb18030")
+    # Real UTF-8 with Chinese in it, or with a BOM, is never second-guessed.
+    assert decode_text("目录,Ŀ¼\n".encode("utf-8")) == ("目录,Ŀ¼\n", "utf-8")
+    assert decode_text("\ufeffŀ\n".encode("utf-8")) == ("ŀ\n", "utf-8")

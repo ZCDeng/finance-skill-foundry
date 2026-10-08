@@ -302,11 +302,26 @@ def decode_text(data: bytes) -> tuple[str, str]:
     """Text as the file wrote it, and the encoding it was read in.
 
     UTF-8 first (with or without a BOM); otherwise GB18030, the superset of GBK and GB2312 that 用友, 金蝶
-    and Excel's 「CSV（逗号分隔）」 on a Chinese system write. Nothing is guessed beyond these two."""
+    and Excel's 「CSV（逗号分隔）」 on a Chinese system write. Nothing is guessed beyond these two.
+
+    A short GBK file can also be valid UTF-8 (GBK 「目录」 reads as UTF-8 「Ŀ¼」). UTF-8 text with letters
+    beyond ASCII but not one Chinese character, where GB18030 reads Chinese, is taken as GB18030."""
     try:
-        return data.decode("utf-8-sig"), "utf-8"
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         return data.decode("gb18030"), "gb18030"
+    if not text.isascii() and not data.startswith(b"\xef\xbb\xbf") and not _has_chinese(text):
+        try:
+            other = data.decode("gb18030")
+        except UnicodeDecodeError:
+            return text, "utf-8"
+        if _has_chinese(other):
+            return other, "gb18030"
+    return text, "utf-8"
+
+
+def _has_chinese(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
 def parse_source(
