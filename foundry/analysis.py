@@ -652,6 +652,8 @@ class AnalysisStore:
                 f"unsupported format {suffix}; supported: CSV, XLSX, JSON, Markdown and TXT"
             )
         try:
+            if not path.exists():
+                raise FoundryError(f"dataset source not found: {path.name}")
             if not path.is_file() or path.stat().st_size > MAX_SOURCE_BYTES:
                 raise FoundryError("dataset source must be a file of at most 32 MiB")
             with path.open("rb") as handle:

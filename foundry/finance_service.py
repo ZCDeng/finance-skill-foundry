@@ -49,6 +49,12 @@ from before carry no version and read as 1. The fingerprint's "finance-v1"
 runner string stays, so a rerun still finds those runs; it compares strictly
 only with runs of its own version (see _reproducibility_status).
 """
+# Said to the model and shown on the failed run: what was bound, and the way to a readable table.
+WORKBOOK_SHELL_MESSAGE = (
+    "finance binding '{alias}' is a whole workbook whose table structure is not confirmed, "
+    "so the finance engine has no rows to read; check finance_readiness, confirm the sheet with "
+    "structure_proposal_list and structure_proposal_confirm, then bind the confirmed table"
+)
 SCENARIO_KINDS = frozenset({"receivables_aging", "cash_13_weeks", "driver_model", "collection_health"})
 
 COLLECTIONS = {
@@ -434,8 +440,21 @@ class FinanceStore:
             "control_totals": [],
             "movement_checks": [],
         }
+        from foundry.finance_readiness import _is_workbook_shell
+
         for alias, dataset_id in context["bindings"].items():
             dataset = self.analysis.read_dataset(dataset_id)
+            if _is_workbook_shell(dataset):
+                # A warning, not an error: beside a table the engine reads, the workbook is only
+                # kept for recipes and must not mark that run incomplete. run_revision fails the
+                # run when nothing at all was read.
+                combined["diagnostics"].append({
+                    "severity": "warning",
+                    "code": "workbook_structure_unconfirmed",
+                    "message": WORKBOOK_SHELL_MESSAGE.format(alias=alias),
+                    "alias": alias,
+                })
+                continue
             result = normalize_finance_dataset(
                 dataset,
                 context.get("scopes", {}).get(alias, {}),
@@ -641,6 +660,11 @@ class FinanceStore:
                     calculated = price_quantity_bridge(raw, spec)
                 else:
                     normalized = self._normalize(context)
+                    # Reading nothing because the only rows sit in whole workbooks is not a zero result.
+                    # A workbook bound beside a table the engine reads (kept for recipes) is fine.
+                    unread = [d["message"] for d in normalized["diagnostics"] if d.get("code") == "workbook_structure_unconfirmed"]
+                    if unread and not normalized["rows"]:
+                        raise FoundryError(unread[0])
                     calculated = (
                         explain_variance(normalized, spec)
                         if revision["operation"] == "variance"
@@ -1444,7 +1468,7 @@ class FinanceStore:
             self._authorize({"source": dataset_id})
             dataset = self.analysis.read_dataset(dataset_id)
 
-        fields = normalize_background(spec, parent=parent, dataset=dataset)
+        fields = normalize_background(spec, parent=parent, dataset=dataset, context=context or None)
         context_bindings = self._background_scope_bindings(fields["scope"], context)
         return self._write(
             "backgrounds", **fields,

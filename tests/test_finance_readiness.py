@@ -563,3 +563,35 @@ def test_a_file_name_period_is_offered_but_never_fills_the_scope(tmp_path):
     assert row["scope"]["period"] == ""
     assert "period" in row["missing_fields"]
     assert row["name_scope"]["period"] == "2026-08"
+
+
+def test_finance_run_on_an_unconfirmed_workbook_fails_instead_of_returning_no_rows(tmp_path):
+    """The exported session ran management_pnl four times on a whole workbook and got four
+    identical empty successes. Nothing was read, so the run must say so."""
+    book = Workbook()
+    book.active.title = "封面"
+    ledger = book.create_sheet("02·GL科目余额表")
+    ledger.append(["科目代码", "科目名称", "本期发生额借方", "本期发生额贷方"])
+    ledger.append(["6001.01", "主营业务收入", 100, 100])
+    path = tmp_path / "套表.xlsx"
+    book.save(path)
+    _task_obj, analysis, store = _task(tmp_path)
+    dataset = analysis.add_dataset(path, name="套表")
+    context = store.save_context({
+        "bindings": {"actual": dataset["id"]},
+        "scopes": {"actual": {"period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual"}},
+    })
+    assert any(d["code"] == "workbook_structure_unconfirmed" for d in context["diagnostics"])
+
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    assert run["execution_status"] == "failed"
+    assert "structure_proposal_confirm" in run["error"]
+
+
+def test_dataset_add_names_a_missing_file_as_missing(tmp_path):
+    import pytest
+    from foundry.errors import FoundryError
+
+    _task_obj, analysis, _store = _task(tmp_path)
+    with pytest.raises(FoundryError, match="not found: gone.csv"):
+        analysis.add_dataset(tmp_path / "run_outputs" / "gone.csv", name="gone")

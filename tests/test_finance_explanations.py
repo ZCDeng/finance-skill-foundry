@@ -2679,3 +2679,111 @@ def test_the_unit_is_written_once_even_when_the_manager_writes_it() -> None:
     # And a different unit after the token is left alone.
     mixed, _ = render_fact_template(f"本月期间费用 {token} 万元口径。", facts)
     assert mixed == "本月期间费用 53,262,500 元 万元口径。"
+
+
+def test_background_saved_against_a_context_without_ledger_stays_with_that_scope(tmp_path):
+    """Files from one company often name no ledger or organization. A note saved against
+    their context must not fail for it, and must not reach a scope that does name them."""
+    task = TaskStore(tmp_path / "var").create(title="单一公司")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "actual.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 100}]))
+    dataset = analysis.add_dataset(path, name="actual")["id"]
+    store = FinanceStore(task)
+    blank = store.save_context({
+        "bindings": {"actual": dataset},
+        "scopes": {"actual": {"ledger": "", "organization": "", "period": "2026-08", "currency": "CNY", "unit": "元"}},
+    })
+    named = store.save_context({
+        "bindings": {"actual": dataset},
+        "scopes": {"actual": {"ledger": "L1", "organization": "O1", "period": "2026-08", "currency": "CNY", "unit": "元"}},
+    })
+
+    saved = store.finance_background_save({
+        "context_id": blank["id"],
+        "basis": "user_assumption",
+        "text": "资料币种一律人民币",
+        "effective_from": "2026-08",
+        # what the model sent in the exported session: the context's own blank scope
+        "scope": {"ledger": "", "organization": "", "period": "2026-08", "currency": "CNY", "unit": "元"},
+    })
+    assert saved["scope"]["ledger"] == "" and saved["scope"]["organization"] == ""
+
+    def listed(context):
+        return [row["id"] for row in store.finance_background_list({"context_id": context["id"]})["business_contexts"]]
+
+    assert listed(blank) == [saved["id"]]
+    assert listed(named) == []
+
+    # Without a context to anchor it, a note still has to say which ledger and organization it is for.
+    with pytest.raises(FoundryError, match="requires ledger and organization"):
+        store.finance_background_save({
+            "basis": "user_assumption", "text": "无归属", "effective_from": "2026-08",
+            "scope": {"period": "2026-08"},
+        })
+
+
+def test_background_takes_ledger_from_its_context_when_the_scope_leaves_it_out(service):
+    store, context = service
+    saved = store.finance_background_save({
+        "context_id": context["id"],
+        "basis": "professional_judgment",
+        "text": "9月广告投放提前",
+        "effective_from": "2026-09",
+        "scope": {"period": "2026-09"},
+    })
+    assert (saved["scope"]["ledger"], saved["scope"]["organization"]) == ("L1", "O1")
+
+
+def test_a_context_without_ledger_keys_cannot_reach_a_named_ledger(tmp_path):
+    """Review of the first fix: a scope with no ledger/organization keys at all (not blank
+    strings) left the note with no boundary, and it reached the named-ledger context."""
+    task = TaskStore(tmp_path / "var").create(title="缺键")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "actual.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 100}]))
+    dataset = analysis.add_dataset(path, name="actual")["id"]
+    store = FinanceStore(task)
+    keyless = store.save_context({"bindings": {"a": dataset},
+                                  "scopes": {"a": {"period": "2026-08", "currency": "CNY", "unit": "元"}}})
+    named = store.save_context({"bindings": {"a": dataset},
+                                "scopes": {"a": {"ledger": "L1", "organization": "O1", "period": "2026-08",
+                                                 "currency": "CNY", "unit": "元"}}})
+    note = store.finance_background_save({"context_id": keyless["id"], "basis": "user_assumption",
+                                          "text": "币种人民币", "effective_from": "2026-08"})
+    assert (note["scope"]["ledger"], note["scope"]["organization"]) == ("", "")
+    listed = lambda c: [r["id"] for r in store.finance_background_list({"context_id": c["id"]})["business_contexts"]]
+    assert listed(keyless) == [note["id"]]
+    assert listed(named) == []
+
+    # A stored record without the keys at all is held to the same boundary.
+    from foundry.finance_explanations import background_applies
+    bare = {"scope": {"currency": "CNY"}, "effective_from": "2026-08"}
+    assert not background_applies(bare, scope={"ledger": "L1", "organization": "O1", "currency": "CNY"}, as_of="2026-08")
+
+    # A revision by parent_id alone keeps the parent's blank scope.
+    revised = store.finance_background_save({"parent_id": note["id"], "text": "币种人民币，不做汇率折算"})
+    assert (revised["scope"]["ledger"], revised["scope"]["organization"]) == ("", "")
+
+
+def test_a_workbook_kept_beside_a_readable_table_does_not_mark_the_run_incomplete(tmp_path):
+    from openpyxl import Workbook
+
+    task = TaskStore(tmp_path / "var").create(title="混合")
+    analysis = AnalysisStore(task)
+    path = tmp_path / "gl.json"
+    path.write_text(json.dumps([{"account_code": "6001", "management_account": "revenue", "amount": 100},
+                                {"account_code": "6401", "management_account": "cost", "amount": 60},
+                                {"account_code": "6601", "management_account": "expense", "amount": 10}]))
+    gl = analysis.add_dataset(path, name="gl")["id"]
+    book = Workbook()
+    book.active["A1"] = "预算"
+    book_path = tmp_path / "budget.xlsx"
+    book.save(book_path)
+    shell = analysis.add_dataset(book_path, name="budget")["id"]
+    store = FinanceStore(task)
+    scope = {"ledger": "L1", "organization": "O1", "period": "2026-08", "currency": "CNY", "unit": "元", "scenario": "actual"}
+    context = store.save_context({"bindings": {"gl": gl, "book": shell}, "scopes": {"gl": scope}})
+    run = store.run_metric({"context_id": context["id"], "metric": {"kind": "management_pnl"}})
+    assert run["execution_status"] == "succeeded" and run["result"]["rows"]
+    assert run["completeness"] == "not_reconciled"
