@@ -434,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sample_reference = sub.add_parser("task-sample-reference", help="create or reuse the 华宸物业 August reference task")
     p_sample_reference.add_argument("--rebuild", action="store_true", help="move the current reference task to the trash and build it again")
     sub.add_parser("task-sample-status", help="list the practice tasks and whether a newer example pack is installed")
-    sub.add_parser("task-sample-remove", help="move every practice task into the trash")
+    sub.add_parser("task-sample-remove", help="move every practice task on the active list into the trash")
     p_sample_export = sub.add_parser("task-sample-export", help="copy the example files into a new or empty folder")
     p_sample_export.add_argument("--dest", required=True)
 

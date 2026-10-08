@@ -105,6 +105,10 @@ def test_status_flags_an_older_practice_task_and_remove_trashes_only_practice_ta
     assert sample_status(var)["outdated"] is False
     assert remove_samples(var)["trashed"] == []
 
+    kept = create_sample_task(var)
+    TaskStore(var).get(kept["id"]).set_lifecycle_status("archived")
+    assert remove_samples(var)["trashed"] == []  # archived by the manager, so not on the list the guide counted
+
 
 def test_export_copies_the_files_into_a_new_folder_and_never_overwrites(tmp_path):
     exported = export_pack(tmp_path / "示例资料")

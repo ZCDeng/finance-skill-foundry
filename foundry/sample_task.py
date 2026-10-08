@@ -146,11 +146,12 @@ def sample_status(var: Path) -> dict:
 
 
 def remove_samples(var: Path) -> dict:
-    """Move every practice task that is not already there into the trash. Real tasks are never touched;
-    from the trash they are restored or deleted for good like any other task."""
+    """Move every practice task on the 进行中 list into the trash: the ones the guide counted before asking.
+    One the manager archived stays where they put it. Real tasks are never touched; from the trash they are
+    restored or deleted for good like any other task."""
     moved = []
-    for task in TaskStore(Path(var)).list("all"):
-        if read_marker(task) is None or task.lifecycle_status() == "trashed":
+    for task in TaskStore(Path(var)).list("active"):
+        if read_marker(task) is None:
             continue
         task.set_lifecycle_status("trashed")
         moved.append(task.id)

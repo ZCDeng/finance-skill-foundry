@@ -627,6 +627,8 @@ export function App() {
   /** Every example task to the trash; answers how many went. Real tasks are never touched. */
   const removeSampleTasks = useCallback(async () => {
     if (!api?.taskSampleRemove) throw new Error('这个版本还不能移除示例任务。');
+    // A reference still being built would finish in the trash, and a replacement would be handed that build.
+    await referenceRun.current;
     const result = await api.taskSampleRemove();
     if (!result.ok) throw new Error(result.message);
     const gone = new Set(result.value.trashed);
