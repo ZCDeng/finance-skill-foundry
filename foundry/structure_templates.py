@@ -39,6 +39,10 @@ confirmation must not claim August's preview as its own.
 
 REGISTRY_DIRNAME = "structure_templates"
 REGISTRY_LOCK = "structure_templates.lock"
+# Practice tasks keep their own shelf. A shape confirmed on the 华宸 example must never pre-fill a
+# customer's real pack, and the practice September must still find the practice August.
+SAMPLE_REGISTRY_DIRNAME = "structure_templates_sample"
+SAMPLE_REGISTRY_LOCK = "structure_templates_sample.lock"
 DOMAIN = "foundry.finance.structure_templates.v1"
 TEMPLATE_ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -53,10 +57,10 @@ class TemplateRegistry:
     locator -- is ever stored on it. A template holds a shape and a count.
     """
 
-    def __init__(self, var_root) -> None:
+    def __init__(self, var_root, *, sample: bool = False) -> None:
         self.var_root = Path(var_root)
-        self.root = self.var_root / REGISTRY_DIRNAME
-        self.lock_path = self.var_root / REGISTRY_LOCK
+        self.root = self.var_root / (SAMPLE_REGISTRY_DIRNAME if sample else REGISTRY_DIRNAME)
+        self.lock_path = self.var_root / (SAMPLE_REGISTRY_LOCK if sample else REGISTRY_LOCK)
 
     def _path(self, template_id: str) -> Path:
         if not isinstance(template_id, str) or not TEMPLATE_ID.fullmatch(template_id):
@@ -200,8 +204,11 @@ def _digest(value: Any) -> str:
 
 
 def registry_for(store) -> TemplateRegistry:
-    """The registry a finance store reads, which belongs to its var root."""
-    return TemplateRegistry(store.task.store.var_root)
+    """The registry a finance store reads, which belongs to its var root; a practice task reads
+    and writes the separate practice shelf."""
+    from foundry.sample_marker import is_sample
+
+    return TemplateRegistry(store.task.store.var_root, sample=is_sample(store.task))
 
 
 

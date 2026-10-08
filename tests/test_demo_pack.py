@@ -1,29 +1,41 @@
 """The demo pack generator still plants the differences the demo walks through.
 
 `tests/fixtures/demo_pack/build_demo.py` writes the Huachen demo files; its README lists what each
-planted difference should make FA Foundry report. This runs the generator (without Excel) and checks
-the ones the controls engine reads directly, so a change to the generator cannot quietly remove them.
+planted difference should make FA Foundry report. This runs the generator once and checks the ones the
+controls engine reads directly, so a change to the generator cannot quietly remove them. The app ships
+the same files in `foundry/resources/demo_pack`; the last tests hold the two copies cell for cell, so a
+generator change that is not regenerated into the bundle fails here.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import zipfile
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from foundry.analysis import AnalysisStore
 from foundry.finance_service import FinanceStore
 from foundry.task import TaskStore
+from foundry.workbook_health import check_workbook
 
 GENERATOR = Path(__file__).parent / "fixtures" / "demo_pack" / "build_demo.py"
+BUNDLED = Path(__file__).parents[1] / "foundry" / "resources" / "demo_pack"
 
 
-def test_demo_pack_plants_the_documented_differences(tmp_path: Path) -> None:
-    out = tmp_path / "演示版"
-    subprocess.run([sys.executable, "-I", str(GENERATOR), str(out), "--no-excel"], check=True, capture_output=True)
+@pytest.fixture(scope="module")
+def generated(tmp_path_factory) -> Path:
+    out = tmp_path_factory.mktemp("demo") / "演示版"
+    subprocess.run([sys.executable, "-I", str(GENERATOR), str(out)], check=True, capture_output=True)
+    return out
+
+
+def test_demo_pack_plants_the_documented_differences(generated: Path, tmp_path: Path) -> None:
+    out = generated
     names = sorted(path.name for path in out.iterdir())
     assert any("2026年09月_月结" in name for name in names)
     assert "演示说明.md" in names
@@ -69,3 +81,37 @@ def test_demo_pack_plants_the_documented_differences(tmp_path: Path) -> None:
     assert round(office[9] - office[7] * office[8], 2) == 260
     wrong = list(book["收款计划_含错误行"].iter_rows(min_row=2, values_only=True))
     assert wrong[0][3] == "forecast" and wrong[0][1] <= "2026-09-06"
+
+
+def test_the_formula_sample_carries_its_cache_without_excel(generated: Path) -> None:
+    health = check_workbook(next(generated.glob("*公式体检样本.xlsx")).read_bytes())
+    assert sorted(issue["code"] for issue in health["issues"]) == [
+        "cached_error", "error_in_formula", "external_links", "external_reference", "hardcoded_number",
+        "hidden_sheets", "inconsistent_column_formula", "inconsistent_row_formula", "volatile_function",
+    ]
+
+
+def _cells(path: Path) -> dict:
+    """Every cell's formula (or value) and its cached value: what a reader of the file sees."""
+    formulas, cached = load_workbook(path), load_workbook(path, data_only=True)
+    return {
+        (sheet.title, sheet.sheet_state, cell.coordinate): (cell.value, cached[sheet.title][cell.coordinate].value)
+        for sheet in formulas.worksheets for row in sheet.iter_rows() for cell in row if cell.value is not None
+    }
+
+
+def test_the_bundled_pack_is_what_the_generator_writes(generated: Path) -> None:
+    import json
+
+    manifest = json.loads((BUNDLED / "pack.json").read_text(encoding="utf-8"))
+    listed = {*manifest["practice"], *manifest["next_month"], manifest["report"], manifest["notes"]}
+    assert listed == {path.name for path in generated.iterdir()} == {path.name for path in BUNDLED.iterdir()} - {"pack.json"}
+    for name in sorted(listed):
+        made, shipped = generated / name, BUNDLED / name
+        if name.endswith(".xlsx"):
+            assert _cells(made) == _cells(shipped), f"{name} differs: regenerate foundry/resources/demo_pack"
+        elif name.endswith(".docx"):
+            read = lambda path: zipfile.ZipFile(path).read("word/document.xml")  # noqa: E731
+            assert read(made) == read(shipped), name
+        else:
+            assert made.read_bytes() == shipped.read_bytes(), name

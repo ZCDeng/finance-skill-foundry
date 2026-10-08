@@ -153,14 +153,19 @@ def test_a_control_left_on_the_replaced_file_holds_the_conclusion_until_it_is_re
 def test_tables_read_from_a_replaced_workbook_are_not_listed_as_workbooks(tmp_path):
     from openpyxl import load_workbook
 
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent / "fixtures" / "structure"))
+    from small_close_pack import SAMPLE_DATASET, build_sample_workbook
+
     from foundry.analysis import AnalysisStore
     from foundry.finance_service import FinanceStore
-    from foundry.sample_task import SAMPLE_DATASET, build_sample_workbook, create_sample_task
     from foundry.task import TaskStore
 
-    task = TaskStore(tmp_path / "var").get(create_sample_task(tmp_path / "var")["id"])
+    task = TaskStore(tmp_path / "var").create(title="月结练习")
     analysis, manager = AnalysisStore(task), FinanceStore(task, actor="manager")
-    first = analysis.state()["datasets"][0]["id"]
+    first = analysis.add_dataset(build_sample_workbook(tmp_path / "v1.xlsx"), name=SAMPLE_DATASET)["id"]
+    manager.structure_propose(first, source=manager.actor)
     proposal = manager.structure_proposal_list({"dataset_id": first})["proposals"][0]
     manager.structure_proposal_confirm({"dataset_id": first, "revision": proposal["revision"]})
     # The new version renames a sheet, so the table read from the old one is not replaced by name.

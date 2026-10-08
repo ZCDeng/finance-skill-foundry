@@ -6,7 +6,17 @@
 python3 tests/fixtures/demo_pack/build_demo.py ~/Desktop/物业集团月结财务套表/演示版_YYYYMMDD
 ```
 
-输出目录必须是新的，脚本不覆盖旧套表。加 `--no-excel` 跳过本机 Excel 重算，公式体检样本就没有缓存值，体检会多报一条 formula_without_cache。
+输出目录必须是新的，脚本不覆盖旧套表。不需要 Excel 或 macOS：公式体检样本的外部链接和公式缓存值、经理汇报稿的 Word 文件都由脚本直接写出，在哪台机器上生成内容都一样。
+
+## 随应用打包的一份
+
+应用里「打开华宸物业示例」用的是 `foundry/resources/demo_pack/` 里的同一套文件，`pack.json` 列出哪些文件进练习任务，并带一个版本号。改了生成脚本以后：
+
+```bash
+python3 tests/fixtures/demo_pack/build_demo.py /tmp/huachen && cp /tmp/huachen/* foundry/resources/demo_pack/
+```
+
+再把 `pack.json` 的 `version` 加一，已经建过示例任务的用户会看到「换成新版示例」。`tests/test_demo_pack.py` 逐格比对生成结果和随包文件，忘了重新生成会失败。
 
 ## 文件来源
 
@@ -39,4 +49,4 @@ python3 tests/fixtures/demo_pack/build_demo.py ~/Desktop/物业集团月结财�
 | 11 | 经理汇报稿 | 营业成本写成元，报「疑似单位换算」；经营现金流写成 18,431.94 万，报需人工核对并列出套表 17,431.94 万 |
 | 12 | 公式体检样本 | 外部链接、外部引用、写死的数字、#REF!、缓存错误值、行列公式不一致、易失函数、隐藏表 |
 
-`tests/test_demo_pack.py` 跑一遍生成器，核对 1、2、3、8、9 几处埋点还在。
+`tests/test_demo_pack.py` 跑一遍生成器，核对 1、2、3、8、9、12 几处埋点还在。
