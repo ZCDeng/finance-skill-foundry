@@ -111,7 +111,7 @@ def test_the_bundled_pack_is_what_the_generator_writes(generated: Path) -> None:
 
     manifest = json.loads((BUNDLED / "pack.json").read_text(encoding="utf-8"))
     listed = {*manifest["practice"], *manifest["next_month"], manifest["report"], manifest["notes"]}
-    assert listed == {path.name for path in generated.iterdir()} == {path.name for path in BUNDLED.iterdir()} - {"pack.json"}
+    assert listed == {path.name for path in generated.iterdir()} == {path.name for path in BUNDLED.iterdir()} - {"pack.json", "expected.json"}
     for name in sorted(listed):
         made, shipped = generated / name, BUNDLED / name
         if name.endswith(".xlsx"):
@@ -121,3 +121,25 @@ def test_the_bundled_pack_is_what_the_generator_writes(generated: Path) -> None:
             assert read(made) == read(shipped), name
         else:
             assert made.read_bytes() == shipped.read_bytes(), name
+
+
+def test_what_the_guide_says_the_pack_holds(generated: Path) -> None:
+    """The figures the 跟着做 route quotes from the files themselves (the engine's are in test_sample_reference)."""
+    import json
+    import re
+
+    expected = json.loads((BUNDLED / "expected.json").read_text(encoding="utf-8"))
+    health = check_workbook((BUNDLED / "华宸物业_2026年08月_公式体检样本.xlsx").read_bytes())
+    assert len({issue["code"] for issue in health["issues"]}) == expected["formula_issues"]
+
+    book = load_workbook(BUNDLED / "华宸物业_2026年08月_明细长表.xlsx", data_only=True)
+    office = next(row for row in book["量价实际"].iter_rows(min_row=2, values_only=True) if row[6] == "写字楼")
+    assert Decimal(str(round(office[9] - office[7] * office[8], 2))) == Decimal(expected["office_price_quantity_gap"])
+
+    board = load_workbook(BUNDLED / "华宸物业_2026年08月_月结财务套表_GL-AP-AR-CF.xlsx", data_only=True)["01·核心指标看板"]
+    assert board["A30"].value.startswith("经营活动现金流量净额")
+    assert Decimal(str(board["C30"].value)).quantize(Decimal("0.01")) == Decimal(expected["book_operating_cash_flow"])
+    report = re.sub("<[^>]+>", "", zipfile.ZipFile(BUNDLED / "华宸物业_2026年08月_经理汇报稿.docx").read("word/document.xml").decode())
+    for key in ("report_operating_cash_flow", "report_operating_cost"):
+        assert f"{Decimal(expected[key]):,}" in report, key
+

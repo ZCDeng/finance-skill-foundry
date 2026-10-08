@@ -56,6 +56,7 @@ const api = {
   taskEmpty: (lifecycle: string, ids: string[]) => ipcRenderer.invoke('foundry:task-empty', lifecycle, ids),
   taskSample: () => ipcRenderer.invoke('foundry:task-sample'),
   taskSampleReference: (rebuild?: boolean) => ipcRenderer.invoke('foundry:task-sample-reference', rebuild === true),
+  taskSampleNext: () => ipcRenderer.invoke('foundry:task-sample-next'),
   taskSampleRemove: () => ipcRenderer.invoke('foundry:task-sample-remove'),
   taskNew: (title: string, period: string) =>
     ipcRenderer.invoke('foundry:task-new', title, period),

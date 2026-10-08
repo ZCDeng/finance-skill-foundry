@@ -80,3 +80,51 @@ def test_a_second_request_waits_for_the_reference_being_built(tmp_path, monkeypa
     second = create_reference_task(var)
     builder.join()
     assert second == {"id": first["id"], "created": False}
+
+
+def test_the_figures_the_guide_quotes_are_the_ones_the_reference_computes(built):
+    """跟着做 prints these from expected.json; the reference computes them with the installed engine."""
+    import json
+    from collections import Counter
+    from decimal import Decimal
+
+    from foundry.sample_task import pack_dir
+
+    expected = json.loads((pack_dir() / "expected.json").read_text(encoding="utf-8"))
+    _, task, _ = built
+    controls = FinanceStore(task, actor="manager").finance_controls_list({})["controls"]
+    results = [(row["control"]["label"], (row.get("result") or {})) for row in controls if row.get("state") == "confirmed"]
+    breaks = {label: Decimal(result["difference"]) for label, result in results if result.get("status") != "pass"}
+    assert {"confirmed": len(results), "pass": len(results) - len(breaks), "breaks": len(breaks)} == expected["controls"]
+    assert Decimal(breaks["合同台账本年实收 = 月结区域实收"]).quantize(Decimal("0.01")) == Decimal(expected["f02_difference"])
+    assert breaks["应收滚动：年初 + 新增 − 收回 − 核销 = 期末"] == Decimal(expected["ar_rollforward_difference"])
+    assert abs(breaks["08·AR收缴率与欠费 · 已计提坏账：分项合计 = 合计"]) == Decimal(expected["f01_difference"])
+    decided = Counter((row.get("issue") or {}).get("disposition", {}).get("decision") for row in controls if (row.get("issue") or {}).get("disposition"))
+    assert dict(decided) == expected["dispositions"]
+
+    run = AnalysisStore(task).state()["runs"][-1]["result"]["rows"]
+    group = {row["metric_key"]: Decimal(str(row["value"])) for row in run if row["entity"] == "华宸物业" and row.get("value") is not None}
+    for key in ("break_even_collection", "collection_gap", "collection_gap_total"):
+        assert group[key].quantize(Decimal("0.01")) == Decimal(expected[key]), key
+    assert dict(Counter(row["level"] for row in run if row["metric_key"] == "risk_score")) == expected["radar"]
+
+
+def test_the_next_month_route_adopts_what_the_practice_task_confirmed(tmp_path):
+    """Step 9: confirm the August month-close in the practice task, then make the September one."""
+    import json
+
+    from foundry.sample_reference import MONTH_CLOSE, Reference
+    from foundry.sample_task import create_next_month_sample, pack_dir
+
+    expected = json.loads((pack_dir() / "expected.json").read_text(encoding="utf-8"))["next_month"]
+    var = tmp_path / "var"
+    reference = Reference(TaskStore(var).get(create_sample_task(var)["id"]))
+    reference.datasets = {MONTH_CLOSE: reference.datasets[MONTH_CLOSE]}
+    reference.confirm_structures()
+    september = TaskStore(var).get(create_next_month_sample(var)["id"])
+    dataset = AnalysisStore(september).state()["datasets"][0]
+    matches = FinanceStore(september).structure_proposal_list({"dataset_id": dataset["id"]})["proposals"][0]["template_matches"]
+    assert len(matches) == expected["matched"]
+    assert sum(1 for match in matches if match["auto_apply"]) == expected["auto_apply"]
+    assert [match["sheet"] for match in matches if not match["auto_apply"]] == [expected["differs"]]
+

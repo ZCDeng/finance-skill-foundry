@@ -28,6 +28,8 @@ export const WRITES = {
   taskSample: 'task-sample',
   /** The same files taken through the whole route by the example; `--rebuild` makes it again. */
   taskSampleReference: 'task-sample-reference',
+  /** The September practice task, for the last step of 跟着做. */
+  taskSampleNext: 'task-sample-next',
   /** Every practice task to the trash. Real tasks are never touched. */
   taskSampleRemove: 'task-sample-remove',
 } as const;
@@ -81,6 +83,16 @@ export async function sampleReference(
   const value = JSON.parse(await runFoundry(binding, WRITES.taskSampleReference, rebuild ? ['--rebuild'] : [],
     { ...env, timeoutMs: env?.timeoutMs ?? REFERENCE_TIMEOUT_MS })) as { id?: unknown; created?: unknown };
   if (typeof value.id !== 'string' || !/^[0-9a-f]{32}$/.test(value.id)) throw new Error('task-sample-reference did not print a task id');
+  return { id: value.id, created: value.created === true };
+}
+
+/** Create or reuse the September practice task; hands back its id. */
+export async function sampleNextMonth(
+  binding: Omit<Binding, 'task' | 'session'>,
+  env?: FoundryEnv,
+): Promise<{ id: string; created: boolean }> {
+  const value = JSON.parse(await runFoundry(binding, WRITES.taskSampleNext, [], env)) as { id?: unknown; created?: unknown };
+  if (typeof value.id !== 'string' || !/^[0-9a-f]{32}$/.test(value.id)) throw new Error('task-sample-next did not print a task id');
   return { id: value.id, created: value.created === true };
 }
 

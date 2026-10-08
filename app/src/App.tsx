@@ -515,7 +515,7 @@ export function App() {
   }, [api, refreshTasks]);
 
   /** Bring an example task up under 进行中, on the tab it is meant to be read from. */
-  const showSampleTask = useCallback((id: string, section: 'materials' | 'results') => {
+  const showSampleTask = useCallback((id: string, section: 'materials' | 'results' | 'drafts' | 'close') => {
     setTaskLifecycleView('active');
     currentRef.current = id;
     explicitSelection.current = true;
@@ -532,27 +532,43 @@ export function App() {
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState('');
   const referenceRun = useRef<Promise<string | null> | null>(null);
+  const referenceFailure = useRef('');
   const buildReference = useCallback((rebuild: boolean): Promise<string | null> => {
     if (!api?.taskSampleReference) return Promise.resolve(null);
     if (referenceRun.current) return referenceRun.current;
     setReferenceBusy(true);
     setReferenceError('');
+    referenceFailure.current = '';
     const run = api.taskSampleReference(rebuild).then((result) => {
-      if (!result.ok) { setReferenceError(result.message); return null; }
+      if (!result.ok) { referenceFailure.current = result.message; setReferenceError(result.message); return null; }
       refreshTasks(taskLifecycleViewRef.current);
       return result.value.id;
     }, (failure: unknown) => {
-      setReferenceError(failure instanceof Error ? failure.message : String(failure));
+      referenceFailure.current = failure instanceof Error ? failure.message : String(failure);
+      setReferenceError(referenceFailure.current);
       return null;
     }).finally(() => { referenceRun.current = null; setReferenceBusy(false); });
     referenceRun.current = run;
     return run;
   }, [api, refreshTasks]);
 
-  const openReferenceTask = useCallback(async () => {
+  /** Open the reference at a page, building it first if needed; a failed build is said where it was asked for. */
+  const openReferenceTask = useCallback(async (target: GuideTarget = 'results') => {
     const id = await buildReference(false);
-    if (id) showSampleTask(id, 'results');
+    if (!id) throw new Error(referenceFailure.current || '参考结果没有生成出来，请稍后再试。');
+    showSampleTask(id, guideSection(target));
+    if (target === 'scope' || target === 'structure' || target === 'datasets') {
+      setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
+    }
   }, [buildReference, showSampleTask]);
+
+  /** The September practice task for 跟着做's last step, opened on 资料 where its structures wait. */
+  const openNextMonthTask = useCallback(async () => {
+    if (!api?.taskSampleNext) throw new Error('这个版本还不能创建 9 月练习任务。');
+    const result = await api.taskSampleNext();
+    if (!result.ok) throw new Error(result.message);
+    showSampleTask(result.value.id, 'materials');
+  }, [api, showSampleTask]);
 
   /** Trash the reference and build it again; the new one opens if the old one was still on screen. */
   const rebuildReferenceTask = useCallback(async () => {
@@ -982,16 +998,18 @@ export function App() {
           onLayout={onWorkspaceLayout}
           banner={bound?.sample ? <SampleBanner task={bound} building={referenceBusy} error={referenceError}
             onRebuild={api.taskSampleReference && !boundReadOnly ? () => void rebuildReferenceTask() : undefined}
-            onReference={api.taskSampleReference ? () => void openReferenceTask() : undefined} /> : null}
+            onReference={api.taskSampleReference ? () => void openReferenceTask().catch(() => undefined) : undefined} /> : null}
           conversation={guide ? <GuideHub article={guideArticle} request={guideRequest} canOpen={Boolean(bound) && !boundReadOnly} taskId={bound?.id}
               onClose={closeGuide}
               onSample={api.taskSample ? openSampleTask : undefined}
               samples={taskLifecycleView === 'active' ? { count: tasks.filter((row) => row.sample).length, outdated: tasks.some((row) => row.sample_outdated) } : undefined}
               onRemoveSamples={api.taskSampleRemove ? removeSampleTasks : undefined}
+              onReference={api.taskSampleReference ? openReferenceTask : undefined}
+              onNextMonth={api.taskSampleNext ? openNextMonthTask : undefined}
               onReplaceSamples={api.taskSampleRemove && api.taskSample ? async () => { await removeSampleTasks(); await openSampleTask(); } : undefined}
               onOwnData={() => { closeGuide(); requestAnimationFrame(() => document.getElementById('analysis-question')?.focus()); }}
               onOpen={(target: GuideTarget) => {
-                setAnalysisSection(target === 'results' ? 'results' : target === 'drafts' ? 'drafts' : target === 'close' ? 'close' : 'materials');
+                setAnalysisSection(guideSection(target));
                 if (target === 'scope' || target === 'structure' || target === 'datasets') {
                   setTimeout(() => materialsAnchor(target)?.scrollIntoView?.({ block: 'start' }), 60);
                 }
@@ -1058,4 +1076,9 @@ export function App() {
       ) : null}
     </Shell>
   );
+}
+
+/** The tab a place in the guide is on. */
+function guideSection(target: GuideTarget): 'materials' | 'results' | 'drafts' | 'close' {
+  return target === 'results' || target === 'drafts' || target === 'close' ? target : 'materials';
 }

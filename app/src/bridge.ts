@@ -215,6 +215,8 @@ export interface Bridge {
   taskSample?(): Promise<Answer<{ id: string; created: boolean }>>;
   /** The reference task: reused once built, or (`rebuild`) trashed and built again. Takes most of a minute. */
   taskSampleReference?(rebuild?: boolean): Promise<Answer<{ id: string; created: boolean }>>;
+  /** The September practice task, made once and reused. */
+  taskSampleNext?(): Promise<Answer<{ id: string; created: boolean }>>;
   /** Every practice task to the trash; real tasks are never touched. */
   taskSampleRemove?(): Promise<Answer<{ trashed: string[] }>>;
   /** Absent when this build has no harness install to embed. */

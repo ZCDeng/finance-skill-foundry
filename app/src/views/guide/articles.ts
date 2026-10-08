@@ -19,7 +19,13 @@ export type GuideBlock =
   | { kind: 'start' }
   | { kind: 'open'; target: GuideTarget; label: string }
   /** Put a question into the conversation; it is never sent from here. */
-  | { kind: 'ask'; ask: AskId; label: string };
+  | { kind: 'ask'; ask: AskId; label: string }
+  /** 你应该看到: the figures this step of the example route ends on (held to demo_pack/expected.json by a test). */
+  | { kind: 'expect'; items: string[] }
+  /** Open the example's reference task at the same page, to compare. */
+  | { kind: 'reference'; target: GuideTarget; label: string }
+  /** Make the September practice task, for the route's last step. */
+  | { kind: 'next-month' };
 
 export type GuideArticle = {
   id: string;
@@ -32,7 +38,7 @@ export type GuideArticle = {
   body: GuideBlock[];
 };
 
-export const GUIDE_SECTIONS = ['快速开始', '工作区各页', '助手与技能', '月结工作流', '读懂状态', '资料与数据安全', '结果、依据和版本', '文稿与导出', '任务与成果库', '故障排查', '界面、快捷键与无障碍'] as const;
+export const GUIDE_SECTIONS = ['快速开始', '跟着做：华宸物业 8 月', '工作区各页', '助手与技能', '月结工作流', '读懂状态', '资料与数据安全', '结果、依据和版本', '文稿与导出', '任务与成果库', '故障排查', '界面、快捷键与无障碍'] as const;
 
 export const GUIDE_ARTICLES: GuideArticle[] = [
   {
@@ -42,6 +48,7 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
       { kind: 'p', text: '可以先用示例任务练一遍，再用自己的资料。示例任务是单独的一个任务，里面是虚构的华宸物业 2026 年 8 月资料：月结套表、全面预算与合同台账、明细长表、公式体检样本和经营分析会纪要，不会碰到你的任何资料。同时会在后台生成一个「参考结果」任务，用同一套资料把整个流程做完，方便对照；改乱了可以随时重建。练完后可以在这里一键移除示例任务。' },
       { kind: 'p', text: '这套资料故意埋了几处问题，例如坏账准备分项和合计对不上、合同台账实收比月结少 2,793.28 万元，用来练习勾稽控制和差异处置。示例任务里确认的表结构只给示例用，不会套到你自己的套表上。' },
       { kind: 'start' },
+      { kind: 'p', text: '建好后，在指南目录里打开「跟着做：华宸物业 8 月」，九步走完整条路线，每一步都写着你应该看到什么。' },
       { kind: 'p', text: '系统为资料保存只读快照，原文件不会被改写。随时可以从顶栏的「使用指南」回到这里。' },
     ],
   },
@@ -75,6 +82,125 @@ export const GUIDE_ARTICLES: GuideArticle[] = [
         '每页都按同样的方式排：粗体标题是一块，标题下一行灰字说明这块做什么；带箭头的一行点开才看到内容，箭头挂在左边，文字和内容对齐在同一条左边线上。',
       ] },
       { kind: 'open', target: 'datasets', label: '打开资料页' },
+    ],
+  },
+  // 跟着做：华宸物业 8 月. Every figure under 你应该看到 is held to foundry/resources/demo_pack/expected.json.
+  {
+    id: 'follow-1', section: '跟着做：华宸物业 8 月', title: '1. 打开示例，认识两个任务', appliesTo: '工作区 · 任务列表',
+    keywords: ['跟着做', '示例', '华宸', '参考结果', '练习'],
+    body: [
+      { kind: 'p', text: '在「第一次使用」点「用示例任务练习」。左栏会出现两个带「示例」的任务：「跟着做」只放了资料，下面每一步都由你来做；「参考结果」用同一套资料把整条路线做完，供你对照。' },
+      { kind: 'start' },
+      { kind: 'expect', items: ['左栏有两个带「示例」的任务，标题下方有一条说明。', '参考结果在后台生成，大约需要一分钟；在这之前就可以开始第 2 步。'] },
+      { kind: 'p', text: '参考结果里的确认和处置都标「示例预置」，不是经理的确认。改乱了可以在它的说明条上点「重建参考结果」。' },
+    ],
+  },
+  {
+    id: 'follow-2', section: '跟着做：华宸物业 8 月', title: '2. 看公式体检', appliesTo: '资料页 · 公式体检',
+    keywords: ['跟着做', '公式体检', '外部链接', '写死', '#REF!', '易失函数', '隐藏表'],
+    body: [
+      { kind: 'p', text: '在资料页找到「公式体检样本」那一行，展开「公式体检」。体检只提示，不阻止导入，也不改原文件。' },
+      { kind: 'open', target: 'datasets', label: '打开资料' },
+      { kind: 'ask', ask: 'formula-health', label: '让助手解释这些提示' },
+      { kind: 'expect', items: ['公式体检样本报出 9 类提示，包括：9 月合计公式和同行不一样、全年合计里写死了 +2793.28、「上年同期对比」表引用外部文件 [2025年报.xlsx] 并带 #REF! 错误、用了 TODAY()、有一张隐藏表「口径备注」。'] },
+      { kind: 'reference', target: 'datasets', label: '对照参考结果的资料页' },
+    ],
+  },
+  {
+    id: 'follow-3', section: '跟着做：华宸物业 8 月', title: '3. 确认表结构', appliesTo: '资料页 · 表结构',
+    keywords: ['跟着做', '表结构', '当作数据表', '看板', '封面', '表头', '合计行'],
+    body: [
+      { kind: 'p', text: '每份 Excel 都要确认一次表结构。先自己确认月结套表里的「01·核心指标看板」「07·AR账龄及减值」「08·AR收缴率与欠费」三张，其余按系统的建议逐张确认。' },
+      { kind: 'steps', items: [
+        '封面和「13·行业对标与假设」默认不参与计算，保持不选。',
+        '「01·核心指标看板」在「暂不计算的工作表」里，点「当作数据表」，再逐列确认。第 6 步的回款健康要读它。',
+        '公式体检样本里的「上年同期对比」带 #REF! 错误，不要选。',
+      ] },
+      { kind: 'open', target: 'structure', label: '打开表结构' },
+      { kind: 'expect', items: ['三份 Excel 都显示表结构已确认。', '示例里确认的表结构只给示例用，不会套到你自己的套表上。'] },
+      { kind: 'reference', target: 'structure', label: '对照参考结果的表结构' },
+    ],
+  },
+  {
+    id: 'follow-4', section: '跟着做：华宸物业 8 月', title: '4. 确认分析范围', appliesTo: '资料页 · 分析范围',
+    keywords: ['跟着做', '分析范围', '期间', '币种', '单位', '组织'],
+    body: [
+      { kind: 'p', text: '分析范围决定每一次计算和文稿按什么取数。资料里读到的值列在字段下面，点一下才采用。' },
+      { kind: 'open', target: 'scope', label: '打开分析范围' },
+      { kind: 'expect', items: ['期间 2026-08，组织 华宸物业，单位 万元，币种 人民币（CNY）。', '保存后标题下一行写着范围已保存。'] },
+      { kind: 'reference', target: 'scope', label: '对照参考结果的分析范围' },
+    ],
+  },
+  {
+    id: 'follow-5', section: '跟着做：华宸物业 8 月', title: '5. 勾稽控制和差异处置', appliesTo: '月结页 · 勾稽控制',
+    keywords: ['跟着做', '勾稽', '控制', '差异', '处置', '豁免', '待外部确认', '应收滚动', '合同台账'],
+    body: [
+      { kind: 'p', text: '在月结页确认系统建议的控制，再加两条：合同台账本年实收对月结区域实收（跨两本工作簿），以及应收滚动「年初 + 新增 − 收回 − 核销 = 期末」。运行后逐项处置差异，每项都写理由。' },
+      { kind: 'open', target: 'close', label: '打开月结' },
+      { kind: 'ask', ask: 'formula-controls', label: '让助手起草按公式重算的控制' },
+      { kind: 'expect', items: [
+        '参考结果确认了 83 条控制，79 条相符，4 处差异。',
+        '「08·AR收缴率与欠费」坏账分项合计和总账账龄组合差 11,655 万元（已计提坏账、预计可收回两条各报一次）。',
+        '合同台账本年实收比月结区域实收少 2,793.28 万元，五个区域都少。',
+        '应收滚动比期末多 1,200 万元。',
+        '参考结果的处置：坏账口径两条豁免并写明口径不同，另两处待外部确认（合同管理部、应收会计）。所以月结停在「差异待处理」，这正是多数真实月结等别的部门回复时的样子。',
+      ] },
+      { kind: 'reference', target: 'close', label: '对照参考结果的月结' },
+    ],
+  },
+  {
+    id: 'follow-6', section: '跟着做：华宸物业 8 月', title: '6. 回款与现金', appliesTo: '分析结果 · 回款与现金',
+    keywords: ['跟着做', '回款', '收缴率', '生死线', '风险雷达', '城市公司'],
+    body: [
+      { kind: 'p', text: '让助手对月结套表做回款健康分析：集团数取「01·核心指标看板」，城市公司取「11·城市公司明细表」，合计行不算一家公司。' },
+      { kind: 'ask', ask: 'collection-health', label: '让助手做回款健康分析' },
+      { kind: 'open', target: 'results', label: '打开分析结果' },
+      { kind: 'expect', items: [
+        '收缴率生死线 91.14%（= 1 − 毛利率 + 费用率）。',
+        '本年账单收缴率低于生死线 3.22 个百分点，综合收缴率低 8.74 个百分点，都标红。',
+        '风险雷达：50 家城市公司加集团主体，红 1、橙 4、黄 27、绿 19。红黄绿只是筛查提示，不计入月结。',
+      ] },
+      { kind: 'reference', target: 'results', label: '对照参考结果的分析结果' },
+    ],
+  },
+  {
+    id: 'follow-7', section: '跟着做：华宸物业 8 月', title: '7. 明细分析', appliesTo: '分析结果 · 设置与高级',
+    keywords: ['跟着做', '预算差异', '量价', '13 周现金', '明细长表', '收款计划'],
+    body: [
+      { kind: 'p', text: '用「明细长表」再练三种分析：预算差异、量价分解和 13 周现金。可以直接问助手，也可以在结果页「设置与高级」里自己选资料计算。' },
+      { kind: 'ask', ask: 'budget-bridge', label: '让助手做利润桥' },
+      { kind: 'open', target: 'results', label: '打开分析结果' },
+      { kind: 'expect', items: [
+        '预算差异：西南区域只有预算没有实际，标为不完整；营业外支出只有实际；华中有一行负预算。',
+        '量价分解：写字楼实际金额比「计费面积 × 单价」多 260 万元，系统会指出量价对不上。',
+        '13 周现金：用「收款计划」能正常算出 13 周；换成「收款计划_含错误行」，R01 在实际截止日前却标为预测，系统拒收。',
+      ] },
+    ],
+  },
+  {
+    id: 'follow-8', section: '跟着做：华宸物业 8 月', title: '8. 文稿和汇报稿复核', appliesTo: '文稿',
+    keywords: ['跟着做', '文稿', '汇报稿', '复核', '单位', '经营现金流'],
+    body: [
+      { kind: 'p', text: '先看参考结果里的文稿：每个数都绑着计算记录，毛利率和费用率还能回到看板原格。再把随包的「经理汇报稿」交给助手核对，看它能不能找出写错的数。' },
+      { kind: 'open', target: 'drafts', label: '打开文稿' },
+      { kind: 'expect', items: [
+        '汇报稿把营业成本写成「266,854.5 元」，应为万元，属于疑似单位换算。',
+        '汇报稿写经营现金流 18,431.94 万元，套表看板是 17,431.94 万元，需要人工核对。',
+        '参考结果的文稿质量检查：计算成功、引用值一致、源数据核验通过；「已专业复核」要经理自己点。',
+      ] },
+      { kind: 'reference', target: 'drafts', label: '对照参考结果的文稿' },
+    ],
+  },
+  {
+    id: 'follow-9', section: '跟着做：华宸物业 8 月', title: '9. 下个月怎么办', appliesTo: '资料页 · 表结构',
+    keywords: ['跟着做', '下个月', '9 月', '表结构模板', '自动套用', '滚动'],
+    body: [
+      { kind: 'p', text: '在「跟着做」任务里确认过 8 月月结套表的表结构后，建一个 9 月练习任务。9 月套表和 8 月同形状，系统会认出确认过的结构。' },
+      { kind: 'next-month' },
+      { kind: 'expect', items: [
+        '月结套表里有 10 张表认出了 8 月确认过的结构，其中 9 张直接套用，等经理追认。',
+        '「05·合并资产负债表」的列和 8 月不一样，系统不自动套用，请你看一眼再确认。',
+      ] },
     ],
   },
   {
@@ -567,7 +693,8 @@ export function searchArticles(query: string, articles: GuideArticle[] = GUIDE_A
 function blockText(block: GuideBlock): string[] {
   if (block.kind === 'p') return [block.text];
   if (block.kind === 'steps' || block.kind === 'list') return block.items;
-  if (block.kind === 'open' || block.kind === 'ask') return [block.label];
+  if (block.kind === 'open' || block.kind === 'ask' || block.kind === 'reference') return [block.label];
+  if (block.kind === 'expect') return block.items;
   if (block.kind === 'checklist') return ['添加资料', '确认表结构', '确认分析范围', '运行计算', '核对来源与异常', '保存文稿并复核'];
   if (block.kind === 'start') return ['用示例任务练习', '使用自己的资料'];
   return ['计算成功', '引用值一致', '源数据核验通过', '已专业复核'];

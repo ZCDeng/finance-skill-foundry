@@ -13,7 +13,7 @@ vi.mock('../electron/foundry.js', async (original) => ({
 }));
 
 const { runFoundry } = await import('../electron/foundry.js');
-const { changeTaskLifecycle, newTask, removeSamples, sampleReference, sampleTask } = await import('../electron/writes.js');
+const { changeTaskLifecycle, newTask, removeSamples, sampleNextMonth, sampleReference, sampleTask } = await import('../electron/writes.js');
 const called = runFoundry as unknown as ReturnType<typeof vi.fn>;
 
 afterEach(() => called.mockReset());
@@ -31,7 +31,7 @@ describe('creating a task', () => {
    * cold install.
    */
   it('is a mutation the window can make, and the only one', () => {
-    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-purge', 'task-empty', 'task-sample', 'task-sample-reference', 'task-sample-remove']);
+    expect(Object.values(WRITES)).toEqual(['task-new', 'task-archive', 'task-trash', 'task-restore', 'task-purge', 'task-empty', 'task-sample', 'task-sample-reference', 'task-sample-next', 'task-sample-remove']);
   });
 
   it('passes the title through and leaves an empty period off the argv', async () => {
@@ -151,3 +151,14 @@ describe('removing the examples', () => {
     expect(called).toHaveBeenLastCalledWith({ varRoot: '/v' }, 'task-sample-remove', [], undefined);
   });
 });
+
+describe('the September practice task', () => {
+  it('names no arguments and refuses an answer without a task id', async () => {
+    called.mockResolvedValue(JSON.stringify({ id: ID, created: false }));
+    expect(await sampleNextMonth({ varRoot: '/v' })).toEqual({ id: ID, created: false });
+    expect(called).toHaveBeenLastCalledWith({ varRoot: '/v' }, 'task-sample-next', [], undefined);
+    called.mockResolvedValue('{}');
+    await expect(sampleNextMonth({ varRoot: '/v' })).rejects.toThrow(/task id/);
+  });
+});
+

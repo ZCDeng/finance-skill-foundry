@@ -47,7 +47,7 @@ export function StatusLegend() {
  * It sits where the conversation sits, so the workspace it explains stays visible beside
  * it. Opening a place from an article moves the workspace there and never runs anything.
  */
-export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData, samples, onRemoveSamples, onReplaceSamples }: {
+export function GuideHub({ article: requested, request = 0, canOpen = true, taskId, onOpen, onClose, onSample, onOwnData, samples, onRemoveSamples, onReplaceSamples, onReference, onNextMonth }: {
   article?: string;
   /** Bumped on every request, so asking for the article already shown still moves back to it. */
   request?: number;
@@ -66,6 +66,10 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   onRemoveSamples?(): Promise<number>;
   /** The old examples to the trash and the current pack's opened in their place. */
   onReplaceSamples?(): Promise<void>;
+  /** Open the example's reference task at this place, building it first if it is not there yet. */
+  onReference?(target: GuideTarget): Promise<void>;
+  /** Make (or open) the September practice task. */
+  onNextMonth?(): Promise<void>;
 }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
@@ -73,6 +77,15 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState('');
   const [removed, setRemoved] = useState('');
+  // One button at a time runs: what it is doing, and what went wrong, said next to it.
+  const [running, setRunning] = useState('');
+  const [runError, setRunError] = useState<{ at: string; text: string } | null>(null);
+  const run = (at: string, work: () => Promise<void>) => {
+    if (running) return;
+    setRunning(at); setRunError(null);
+    void work().catch((failure: unknown) => setRunError({ at, text: failure instanceof Error ? failure.message : String(failure) }))
+      .finally(() => setRunning(''));
+  };
   const confirmed = async () => {
     if (!confirm || confirmBusy) return;
     setConfirmBusy(true); setConfirmError('');
@@ -162,6 +175,23 @@ export function GuideHub({ article: requested, request = 0, canOpen = true, task
               </p> : null}
               {removed ? <p role="status" className="analysis-note">{removed}</p> : null}
             </div>;
+            if (block.kind === 'expect') return <div key={index} className="fnd-guide-hub__expect">
+              <h4>你应该看到</h4>
+              <ul>{block.items.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>;
+            if (block.kind === 'reference' || block.kind === 'next-month') {
+              const at = `${article.id}:${index}`;
+              const act = block.kind === 'reference' ? onReference && (() => onReference(block.target)) : onNextMonth;
+              if (!act) return null;
+              return <span key={index} className="fnd-guide-hub__open">
+                <Button variant="outline" type="button" disabled={Boolean(running)} aria-busy={running === at || undefined} onClick={() => run(at, act)}>
+                  {running === at ? (block.kind === 'reference' ? '正在打开参考结果…' : '正在准备 9 月练习任务…')
+                    : block.kind === 'reference' ? block.label : '建 9 月练习任务'}
+                  {running === at ? null : <ArrowRight size={14} strokeWidth={1.5} aria-hidden />}</Button>
+                {block.kind === 'reference' && running === at ? <span className="analysis-note">参考结果还没生成完时要等一会儿，大约一分钟。</span> : null}
+                {runError?.at === at ? <span role="alert" className="analysis-message analysis-message--error">{runError.text}</span> : null}
+              </span>;
+            }
             if (block.kind === 'ask') return <span key={index} className="fnd-guide-hub__open">
               <AskLink ask={block.ask} label={block.label} disabled={!canOpen} />
               {/* Said once, after the last of a run of these buttons. */}
