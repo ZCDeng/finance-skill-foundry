@@ -57,3 +57,26 @@ def test_the_reference_is_reused_rebuilt_on_request_and_never_prefills_the_pract
     rebuilt = create_reference_task(var, rebuild=True)
     assert rebuilt["created"] is True and rebuilt["id"] != made["id"]
     assert task.lifecycle_status() == "trashed"
+
+
+def test_a_second_request_waits_for_the_reference_being_built(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    import foundry.sample_reference as reference
+
+    started, var = threading.Event(), tmp_path / "var"
+
+    def slow(task):
+        started.set()
+        time.sleep(12)  # longer than the ordinary 10-second lock wait
+        return {}
+
+    monkeypatch.setattr(reference, "build_reference", slow)
+    first: dict = {}
+    builder = threading.Thread(target=lambda: first.update(create_reference_task(var)))
+    builder.start()
+    started.wait(30)
+    second = create_reference_task(var)
+    builder.join()
+    assert second == {"id": first["id"], "created": False}

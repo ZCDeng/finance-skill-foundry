@@ -72,8 +72,10 @@ def _create(var: Path, kind: str, *, rebuild: bool = False) -> dict:
     files = manifest["next_month"] if kind == "next_month" else manifest["practice"]
     tasks = TaskStore(var)
     var.mkdir(parents=True, exist_ok=True)
-    # One lock per kind: the reference takes most of a minute to build and must not hold up the others.
-    with exclusive(var / f"sample-task-{kind}.lock"):
+    # One lock per kind: the reference takes most of a minute to build and must not hold up the others,
+    # and a second request for it waits the build out and then reuses what was built.
+    timeout = 300 if kind == "reference" else 10
+    with exclusive(var / f"sample-task-{kind}.lock", timeout=timeout):
         for task in tasks.list("active"):
             marker = read_marker(task) or {}
             if marker.get("kind") == kind and marker.get("version") == manifest["version"]:
