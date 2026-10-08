@@ -48,6 +48,9 @@ export function apply(ctx) {
             name: 'save_explanation_draft',
             arguments: JSON.stringify({spec: {title: '待核对', body: '本次判断仍需资料支持。'}}),
           };
+        } else if (streams === 1) {
+          // Same request, after the needs_review result: a further tool is refused and stops the turn.
+          block = {type: 'tool-call', id: 'tool-after-review', name: 'analysis-state', arguments: '{}'};
         } else {
           block = {type: 'text', text: 'SECOND_USER_CAN_CONTINUE_DONE'};
         }
@@ -195,6 +198,9 @@ def test_completion_runtime_uses_real_dsh_events_and_keeps_inbox(tmp_path: Path)
     assert saved_stdout["completion_operation"]["status"] == "needs_review"
     assert saved_stdout["completion_operation"]["revisions"][0]["call_id"] == "save-call-needs-review"
 
+    after = [row for row in report["toolResults"] if row["callId"] == "tool-after-review"]
+    assert all(row["isError"] for row in after), after
+    assert report["streams"][1]["index"] == 1 and "save-call-needs-review" in json.dumps(report["streams"][1]["messages"])
     assert report["cancels"], report
     assert report["cancels"][0] == {
         "cause": {"kind": "hook", "reason": "finance completion needs_review"},

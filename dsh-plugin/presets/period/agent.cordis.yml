@@ -59,6 +59,12 @@
 
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
+  # Only the finance methods this product ships. Personal ~/.agents and project
+  # skill roots outrank bundled ones, so one named `close` would replace ours.
+  # `foundry install-presets` writes the method directory in for the token.
+  config:
+    includeDefaultRoots: false
+    bundledSkillDir: __FOUNDRY_METHOD_SKILL_DIR__
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'

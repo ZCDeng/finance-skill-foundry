@@ -69,6 +69,10 @@ def preset_ids() -> list[str]:
     return list(load_foundry_dsh()["presets"]["ids"])
 
 
+# Stands in a preset for the shipped method-skill root, filled in at install.
+METHOD_SKILL_DIR_TOKEN = "__FOUNDRY_METHOD_SKILL_DIR__"
+
+
 def install_presets(dsh_home: Path) -> list[Path]:
     """Copy analysis and legacy agent presets where the runtime discovers them.
 
@@ -92,6 +96,14 @@ def install_presets(dsh_home: Path) -> list[Path]:
         target = root / preset_id
         shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(source, target)
+        preset = target / "agent.cordis.yml"
+        text = preset.read_text(encoding="utf-8")
+        if METHOD_SKILL_DIR_TOKEN in text:
+            from foundry.method_skills import method_root
+
+            # JSON quoting is valid YAML and survives the space in "FA Foundry.app".
+            text = text.replace(METHOD_SKILL_DIR_TOKEN, json.dumps(str(method_root())))
+            preset.write_text(text, encoding="utf-8")
         written.append(target)
     return written
 

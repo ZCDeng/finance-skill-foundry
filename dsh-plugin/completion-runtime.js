@@ -162,30 +162,35 @@ function registerController(record, controller) {
   return () => record.controllers.delete(controller);
 }
 
-function toolResultMatches(resultExec, sessionId, callId) {
-  return resultExec?.agent?.id === sessionId && resultExec?.name === SAVE_TOOL && String(resultExec?.callId ?? "") === callId;
-}
-
 function shouldStopCurrentTurn(status) {
   return CANCEL_AFTER_RESULT_STATUSES.has(statusOf(status));
 }
 
-function schedulePostResultCancel(ctx, exec, record, callId, requestKey, status) {
+/*
+ * A draft that ends needs_review (or awaiting_input, timed_out) closes the request's tool
+ * work, but not its reply. The turn used to be cancelled the moment the save result landed,
+ * so the manager saw a save card and no sentence. Now the model gets the result and can say
+ * in a line or two what the draft is waiting on; the first tool call it tries after that,
+ * for the same request, cancels the turn instead of running. A new user message lifts it.
+ */
+function haltAfterResult(halted, record, requestKey, status) {
   if (!shouldStopCurrentTurn(status)) return;
-  if (typeof exec?.agent?.cancel !== "function" || typeof ctx?.on !== "function") return;
-  const sessionId = record.sessionId;
-  let unsubscribe;
-  let fired = false;
-  const handler = (resultExec) => {
-    if (fired || !toolResultMatches(resultExec, sessionId, callId)) return;
-    fired = true;
-    if (typeof unsubscribe === "function") unsubscribe();
-    Promise.resolve().then(() => {
-      if (latestUserRequestKey(exec) !== requestKey) return;
-      exec.agent.cancel(cancelCause(`finance completion ${statusOf(status)}`), { keepInbox: true });
-    }).catch((error) => ctx?.logger?.warn?.(`finance completion post-result cancel failed: ${error.message}`));
-  };
-  unsubscribe = ctx.on("tools/result", handler);
+  halted.set(registryKey(record.sessionId, requestKey), cancelCause(`finance completion ${statusOf(status)}`));
+}
+
+function refuseIfHalted(halted, exec) {
+  if (!halted.size || !exec?.agent?.id) return;
+  const identity = latestUserRequestIdentity(exec);
+  if (!identity) return;
+  const sessionId = String(exec.agent.id);
+  const key = registryKey(sessionId, `${sessionId}:${identity}`);
+  for (const stale of [...halted.keys()]) {
+    if (stale.startsWith(`${sessionId}\n`) && stale !== key) halted.delete(stale);
+  }
+  const cause = halted.get(key);
+  if (!cause) return;
+  exec.agent.cancel?.(cause, { keepInbox: true });
+  throw new Error(`${cause.reason}: this request's draft is waiting on the manager; reply without further tools`);
 }
 
 async function timeoutOperation(ctx, invoke, exec, record) {
@@ -257,10 +262,12 @@ async function stopSupersededForCurrentUser(ctx, invoke, exec, operations) {
 
 export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy = {}) {
   const operations = new Map();
+  const halted = new Map();
   const call = (args, exec) => command(invoke, args, exec);
 
   return async function completionRuntime(tool, input, exec, run) {
     if (typeof run !== "function") throw new Error("completion runtime requires a tool runner");
+    refuseIfHalted(halted, exec);
     if (tool !== SAVE_TOOL) {
       await stopSupersededForCurrentUser(ctx, invoke, exec, operations);
       return run(input, exec);
@@ -315,7 +322,7 @@ export function createCompletionRuntime(ctx = {}, invoke = invokeFoundry, policy
         clearTimer(record);
         operations.delete(key);
       }
-      schedulePostResultCancel(ctx, exec, record, callId, requestKey, status);
+      haltAfterResult(halted, record, requestKey, status);
       return raw;
     } catch (error) {
       if (exec?.signal?.aborted) await bestEffortStop(ctx, invoke, exec, operationId, "cancelled");

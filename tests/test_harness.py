@@ -442,3 +442,22 @@ def test_the_office_companion_names_where_it_can_reach():
     from foundry.harness import office_companion
 
     assert office_companion()["egress"] == ["cdn.jsdelivr.net", "cdn.undraw.co"]
+
+
+def test_finance_seats_load_only_the_shipped_method_skills(tmp_path):
+    """An exported analysis session listed 309 skills, nearly all from the manager's own
+    ~/.agents/skills. Those roots outrank bundled ones, so a personal `close` would have
+    replaced the shipped method. The seats now read the method directory and nothing else."""
+    import yaml
+
+    from foundry.harness import METHOD_SKILL_DIR_TOKEN, install_presets
+    from foundry.method_skills import method_root
+
+    install_presets(tmp_path)
+    for preset_id in ("analysis", "period"):
+        text = (tmp_path / ".agent-presets" / preset_id / "agent.cordis.yml").read_text(encoding="utf-8")
+        assert METHOD_SKILL_DIR_TOKEN not in text
+        rows = yaml.safe_load(text)
+        (row,) = [row for row in rows if row.get("id") == "skill-filesystem"]
+        assert row["config"] == {"includeDefaultRoots": False, "bundledSkillDir": str(method_root())}
+        assert (method_root() / "FOUNDRY.md").is_file()

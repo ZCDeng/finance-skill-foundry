@@ -164,22 +164,33 @@ async function testRequiresTrustedCallIdAndDeadline() {
   await assert.rejects(() => runtime("save_explanation_draft", spec(), execWithFallbackOnly, async () => "{}"), /trusted exec.callId/);
 }
 
-async function testResultObserverUsesRealSignatureAndExactExecIdentity() {
+async function testNeedsReviewLetsTheModelReplyThenRefusesFurtherTools() {
   const cancelLog = [];
   const ctx = makeCtx();
   const runtime = createCompletionRuntime(ctx, makeInvoke({ begin: { id: "op-needs" }, status: { status: "needs_review" } }));
-  const exec = execFor([user(1, "u1")], { callId: "call-needs", agent: { cancel: (cause, options) => cancelLog.push({ cause, options }) } });
+  const events = [user(1, "u1")];
+  const exec = execFor(events, { callId: "call-needs", agent: { cancel: (cause, options) => cancelLog.push({ cause, options }) } });
   const raw = await runtime("save_explanation_draft", spec(), exec, async () => JSON.stringify({ saved: true }));
   assert.equal(raw, JSON.stringify({ saved: true }));
-  assert.equal(cancelLog.length, 0);
-  ctx.emitToolResult({ ...exec, callId: "other" });
-  await flushMicrotasks();
-  assert.equal(cancelLog.length, 0);
+  // The result lands and the turn goes on, so the model can say what the draft is waiting on.
   ctx.emitToolResult(exec);
   await flushMicrotasks();
+  assert.equal(cancelLog.length, 0);
+  // A further tool for the same request is refused and stops the turn.
+  let ran = false;
+  await assert.rejects(
+    () => runtime("analysis-run", { analysis: "a" }, { ...exec, name: "analysis-run", callId: "after" }, async () => { ran = true; return "{}"; }),
+    /finance completion needs_review/,
+  );
+  assert.equal(ran, false);
   assert.equal(cancelLog.length, 1);
   assert.deepEqual(cancelLog[0].cause, { kind: "hook", reason: "finance completion needs_review" });
   assert.deepEqual(cancelLog[0].options, { keepInbox: true });
+  // The manager's next message lifts it.
+  events.push(user(2, "u2"));
+  const output = await runtime("analysis-run", { analysis: "a" }, { ...exec, name: "analysis-run", callId: "next" }, async () => "ok");
+  assert.equal(output, "ok");
+  assert.equal(cancelLog.length, 1);
 }
 
 async function testCompleteAndRepairAvailableDoNotCancelAfterResult() {
@@ -340,7 +351,7 @@ await testSaveStillRequiresHumanUserEvent();
 await testRequestKeyUsesRealDshUserMessageShape();
 await testPolicyComesOnlyFromThirdArgAndTrustedEnv();
 await testRequiresTrustedCallIdAndDeadline();
-await testResultObserverUsesRealSignatureAndExactExecIdentity();
+await testNeedsReviewLetsTheModelReplyThenRefusesFurtherTools();
 await testCompleteAndRepairAvailableDoNotCancelAfterResult();
 await testNewUserOnNonSaveStopsSupersededOldOperation();
 await testBeginTerminalCompleteDoesNotArmTimerOrCancel();

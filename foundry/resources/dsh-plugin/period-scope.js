@@ -1,4 +1,5 @@
 import { officeDenied } from "./index.js";
+import { hideDeveloperSections } from "./seat-prompt.js";
 
 /**
  * Take the office tools away from the close seat.
@@ -56,4 +57,5 @@ export function apply(ctx) {
       ? `period cannot execute ${exec.name}`
       : undefined,
   );
+  hideDeveloperSections(ctx);
 }
