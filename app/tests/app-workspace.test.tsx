@@ -59,10 +59,76 @@ describe('unified application session lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '工作区' }));
     press(screen.getByRole('button', { name: '任务工具' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /移入回收站/ }));
-    await screen.findByText('任务已停用编辑');
+    await screen.findByText('已将「西南回款」移入回收站');
     fireEvent.click(screen.getByRole('button', { name: '成果库' }));
     expect(screen.queryByRole('button', { name: /结论稿/ })).toBeNull();
     await act(async () => nextGallery.resolve(ok([])));
+  });
+
+  it('archiving the open task lands back on 进行中 with the task put down and a way back', async () => {
+    let archived = false;
+    const api = mount({
+      taskArchive: vi.fn(async () => { archived = true; return ok({ task_id: b.id, lifecycle_status: 'archived' as const }); }),
+      taskRestore: vi.fn(async () => { archived = false; return ok({ task_id: b.id, lifecycle_status: 'active' as const }); }),
+      tasks: vi.fn(async (view?: string) => ok(view === 'archived' ? (archived ? [{ ...b, lifecycle_status: 'archived' as const }] : [])
+        : archived ? [a] : [a, b])),
+    });
+    await screen.findByText('本地成果：西南回款');
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '归档任务' }));
+    await screen.findByText('已归档「西南回款」');
+    expect(screen.getByText('从问题开始')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '进行中' }).getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => expect(screen.queryByRole('button', { name: '西南回款' })).toBeNull());
+    expect(screen.getByRole('button', { name: '华东利润' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(api.taskRestore).toHaveBeenCalledWith(b.id));
+    await screen.findByRole('button', { name: '西南回款' });
+    expect(screen.queryByText('已归档「西南回款」')).toBeNull();
+  });
+
+  it('empties the trash only after a confirmation that names how many tasks go', async () => {
+    const trashed = [{ ...a, lifecycle_status: 'trashed' as const }, { ...b, lifecycle_status: 'trashed' as const }];
+    let left = trashed;
+    const api = mount({
+      taskEmpty: vi.fn(async () => { const ids = left.map((row) => row.id); left = []; return ok({ task_ids: ids, lifecycle_status: 'purged' as const }); }),
+      tasks: vi.fn(async (view?: string) => ok(view === 'trashed' ? left : [])),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(await screen.findByRole('button', { name: '回收站' }));
+    fireEvent.click(await screen.findByRole('button', { name: '清空回收站' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.textContent).toContain('永久删除回收站里的 2 个任务？');
+    expect(dialog.textContent).toContain('不能恢复');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(api.taskEmpty).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '清空回收站' }));
+    fireEvent.click(await screen.findByRole('button', { name: '永久删除 2 个任务' }));
+    await screen.findByText('已永久删除 2 个任务');
+    expect(api.taskEmpty).toHaveBeenCalledWith('trashed', [a.id, b.id]);
+    await screen.findByText('回收站是空的');
+    expect(screen.queryByRole('button', { name: '清空回收站' })).toBeNull();
+  });
+
+  it('deletes one trashed task for good from its menu', async () => {
+    let left = [{ ...b, lifecycle_status: 'trashed' as const }];
+    const api = mount({
+      taskPurge: vi.fn(async (id: string) => { left = []; return ok({ task_ids: [id], lifecycle_status: 'purged' as const }); }),
+      tasks: vi.fn(async (view?: string) => ok(view === 'trashed' ? left : [])),
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '展开任务列表' }));
+    fireEvent.click(await screen.findByRole('button', { name: '回收站' }));
+    fireEvent.click(await screen.findByRole('button', { name: '西南回款' }));
+    press(screen.getByRole('button', { name: '任务工具' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '永久删除' }));
+    expect((await screen.findByRole('alertdialog')).textContent).toContain('永久删除「西南回款」？');
+    fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
+    await screen.findByText('已永久删除「西南回款」');
+    expect(api.taskPurge).toHaveBeenCalledWith(b.id);
+    expect(screen.getByText('从问题开始')).toBeTruthy();
   });
 
   it('ignores an older gallery response after a newer read has completed', async () => {

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -142,6 +143,39 @@ class TaskStore:
             if lifecycle == "all" or task.lifecycle_status() == lifecycle:
                 tasks.append(task)
         return sorted(tasks, key=lambda task: str(task.meta().get("created_at") or ""))
+
+    def purge(self, task_id: str) -> list[str]:
+        """Delete a task in the trash for good, and name the windows it held.
+
+        Only a trashed task can go: archive and active are one step further
+        from a deliberate "throw this away", and the caller asked for the
+        trash. The directory is renamed out of the id namespace first, so a
+        concurrent list never sees a half-deleted task, then removed. Window
+        directories are not this store's to lay out; their ids are handed back
+        for the caller to remove.
+        """
+        task = self.get(task_id)
+        self.sweep_purged()
+        with exclusive(task.lock_path, timeout=TASK_LOCK_TIMEOUT):
+            if task.lifecycle_status() != "trashed":
+                raise FoundryError(f"only a task in the trash can be deleted for good: {task.id}")
+            windows = [str(row.get("window_id") or "") for row in task.windows()]
+            tombstone = self.tasks_dir / f".purging-{task.id}-{uuid.uuid4().hex}"
+            task.root.replace(tombstone)
+        try:
+            shutil.rmtree(tombstone)
+        except OSError as exc:
+            raise FoundryError("任务已经移出列表，但有文件没删掉；再清空一次回收站会接着删。") from exc
+        current = self.current_path.read_text(encoding="utf-8").strip() if self.current_path.exists() else ""
+        if current == task.id:
+            self.clear_current()
+        return [window for window in windows if window]
+
+    def sweep_purged(self) -> None:
+        """Finish deletions an earlier purge renamed out of the list but could not remove."""
+        for path in self.tasks_dir.iterdir():
+            if path.name.startswith(".purging-"):
+                shutil.rmtree(path, ignore_errors=True)
 
     def current(self) -> Task | None:
         if not self.current_path.exists():

@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 from foundry.brief import emit_brief
 from foundry.context import resolve_context
-from foundry.errors import REFUSED, FoundryError
+from foundry.errors import REFUSED, FoundryError, LockRefused
 from foundry.harness import assert_no_escaping_symlink
 from foundry.launch_formulator import launch_formulator, purge_formulator_home, stop_formulator
 from foundry.host_profile import host_smoke
@@ -233,6 +234,75 @@ def _import_kwargs(args: argparse.Namespace) -> dict:
     }
 
 
+def _owned_windows(var: Path, task: Task) -> list[Window]:
+    """The windows whose own back-pointer names this task; a chain row alone is not ownership."""
+    windows = WindowStore(var)
+    owned: list[Window] = []
+    for row in task.windows():
+        try:
+            window = windows.get(str(row.get("window_id") or ""))
+        except LockRefused:
+            continue
+        if window.task_id == task.id:
+            owned.append(window)
+    return owned
+
+
+def _refuse_open_formulator(windows: list[Window]) -> None:
+    for window in windows:
+        handles = json.loads(window.handles_path.read_text()) if window.handles_path.exists() else []
+        if "formulator" in handles or window.formulator_pid_path.exists():
+            raise FoundryError("数据台还开着这项任务的数据，请先关闭数据台再永久删除。")
+
+
+def _refuse_running_jobs(task: Task) -> None:
+    """A detached analysis worker writes through the task root until it settles; deleting under it would orphan its output."""
+    from foundry.analysis_jobs import TERMINAL, JobStore
+    from foundry.task import TASK_ID_RE
+
+    jobs = JobStore(task)
+    for path in jobs.root.glob("*.json") if jobs.root.is_dir() else ():
+        if not TASK_ID_RE.fullmatch(path.stem):
+            continue
+        try:
+            record = jobs.refresh(path.stem)
+        except FoundryError:
+            continue  # an unreadable record names no live worker
+        if record["status"] not in TERMINAL:
+            raise FoundryError("这项任务还有计算在运行，请等计算结束或取消后再永久删除。")
+
+
+def _refuse_purge(var: Path, task: Task) -> list[Window]:
+    owned = _owned_windows(var, task)
+    _refuse_open_formulator(owned)
+    _refuse_running_jobs(task)
+    return owned
+
+
+def _purge_task(var: Path, task_id: str) -> None:
+    """Delete a trashed task and the windows that point back at it.
+
+    Refused while 数据台 still runs on one of its windows, before anything is
+    removed, so a refusal leaves the task whole in the trash.
+    """
+    store = TaskStore(var)
+    task = store.get(task_id)
+    owned = _refuse_purge(var, task)
+    store.purge(task.id)
+    windows = WindowStore(var)
+    for leftover in windows.windows_dir.iterdir():
+        if leftover.name.startswith(".purging-"):
+            shutil.rmtree(leftover, ignore_errors=True)
+    current = windows.current_path.read_text().strip() if windows.current_path.exists() else ""
+    for window in owned:
+        purge_formulator_home(window)
+        tombstone = windows.windows_dir / f".purging-{window.id}-{os.urandom(8).hex()}"
+        window.root.replace(tombstone)
+        shutil.rmtree(tombstone, ignore_errors=True)  # swept with the task tombstones on the next purge
+        if current == window.id:
+            windows.current_path.unlink(missing_ok=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     supplied = sys.argv[1:] if argv is None else argv
     if supplied and supplied[0] == "--_foundry-job-worker":
@@ -342,9 +412,15 @@ def main(argv: list[str] | None = None) -> int:
     p_task_rename = sub.add_parser("task-rename")
     p_task_rename.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
     p_task_rename.add_argument("--title", required=True)
-    for name in ("task-archive", "task-trash", "task-restore"):
+    for name in ("task-archive", "task-trash", "task-restore", "task-purge"):
         p_lifecycle = sub.add_parser(name)
         p_lifecycle.add_argument("--task", default=argparse.SUPPRESS, help="explicit task id")
+    p_task_empty = sub.add_parser("task-empty", help="archived: move every one to the trash; trashed: delete every one for good")
+    p_task_empty.add_argument("--lifecycle", choices=("archived", "trashed"), required=True)
+    p_task_empty.add_argument(
+        "--only", action="append", default=None,
+        help="task id the operator confirmed; repeat. Tasks that entered the list after the confirmation are left alone",
+    )
     sub.add_parser("deliverables")
 
     p_text = sub.add_parser("deliverable-text")
@@ -413,6 +489,30 @@ def main(argv: list[str] | None = None) -> int:
             status = {"task-archive": "archived", "task-trash": "trashed", "task-restore": "active"}[args.cmd]
             metadata = task.set_lifecycle_status(status)
             print(json.dumps({"task_id": task.id, "lifecycle_status": metadata["lifecycle_status"]}, ensure_ascii=False))
+            return 0
+        if args.cmd == "task-purge":
+            if not args.task:
+                raise FoundryError("task-purge needs an explicit --task")
+            _purge_task(Path(args.var), args.task)
+            print(json.dumps({"task_ids": [args.task], "lifecycle_status": "purged"}, ensure_ascii=False))
+            return 0
+        if args.cmd == "task-empty":
+            store = TaskStore(Path(args.var))
+            chosen = store.list(args.lifecycle)
+            if args.only is not None:
+                confirmed = set(args.only)
+                chosen = [task for task in chosen if task.id in confirmed]
+            if args.lifecycle == "trashed":
+                # Every refusal before the first deletion: emptying the trash goes whole or not at all.
+                for task in chosen:
+                    _refuse_purge(Path(args.var), task)
+            for task in chosen:
+                if args.lifecycle == "archived":
+                    task.set_lifecycle_status("trashed")
+                else:
+                    _purge_task(Path(args.var), task.id)
+            status = "trashed" if args.lifecycle == "archived" else "purged"
+            print(json.dumps({"task_ids": [task.id for task in chosen], "lifecycle_status": status}, ensure_ascii=False))
             return 0
         if finance_mcp.dispatch(args) or analysis_jobs.dispatch(args) or analysis_cli.dispatch(args) or finance_cli.dispatch(args) or excel_bridge.dispatch(args):
             return 0
